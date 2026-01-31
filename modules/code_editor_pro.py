@@ -246,21 +246,92 @@ class QCodeEditor(QTextEdit):
         self.document().documentLayout().update.connect(lambda: self.line_number_area.update())
         self.verticalScrollBar().valueChanged.connect(lambda: self.line_number_area.update())
         
-        
+        # 初始化一个防抖定时器->检查变量用 防止每次输入都检查
+        self.analyze_timer = QTimer(self)
+        self.analyze_timer.setSingleShot(True) # 只触发一次
+        self.analyze_timer.timeout.connect(self.update_indent_errors)
         
         # 🚀 替换 ExtraSelection：直接绘制 viewport 背景，解决抖动
         self.cursorPositionChanged.connect(self.viewport().update)
-        self.cursorPositionChanged.connect(self.update_indent_errors)
-
+        # self.cursorPositionChanged.connect(self.update_indent_errors)
+        self.textChanged.connect(self.request_analyze)
         
         self.setup_font()
         self.update_font_metrics_cache()    # 更新缓存的度量值
         self.update_line_number_area_width(0)
 
+    def request_analyze(self):
+        # 每次输入都会重置 500ms 倒计时
+        # 只有当用户停止打字 0.5 秒后，才会执行沉重的 Jedi 分析
+        self.analyze_timer.start(200)
+
+
     def update_indent_errors(self):
         self.error_lines.clear()
-        block = self.document().begin()
         
+        # 检查缩进
+        self._check_indentation()
+
+        # 检查变量名
+        self._check_varname()
+            
+        # 刷新显示
+        self.line_number_area.update()
+        self.viewport().update()
+
+    def _check_varname(self):
+        code = self.toPlainText()
+        if not code.strip(): return
+        
+        try:
+            import keyword
+            py_keywords = keyword.kwlist
+            script = jedi.Script(code)
+            
+            # 🚀 方案 1 核心：获取当前光标所在的行号
+            current_line = self.textCursor().blockNumber()
+
+            # 仅扫描可见区域以确保性能
+            first_v = self.cursorForPosition(QPoint(0, 0)).blockNumber()
+            last_v = self.cursorForPosition(QPoint(0, self.viewport().height())).blockNumber()
+
+            identifiers = re.finditer(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b', code)
+            
+            for match in identifiers:
+                name = match.group()
+                if name in py_keywords or name == 'self': continue
+
+                start_pos = match.start()
+                block = self.document().findBlock(start_pos)
+                line_num = block.blockNumber()
+
+                # 🚀 关键过滤：
+                # 1. 不在可见范围的不查
+                # 2. 当前光标所在的行绝对不查 (等用户离开这一行再说)
+                # 3. 已经有缩进错误的行不查
+                if not (first_v <= line_num <= last_v) or \
+                   line_num == current_line or \
+                   line_num in self.error_lines:
+                    continue
+
+                # 上下文过滤：排除 for i in 和 a = 
+                raw_line_text = block.text()
+                after_text = raw_line_text[match.end() - block.position():].lstrip()
+                if after_text.startswith('in ') or after_text.startswith('='):
+                    continue
+
+                line = line_num + 1
+                column = start_pos - block.position()
+                
+                defs = script.goto(line, column)
+                if not defs:
+                    self.error_lines[line_num] = f"名称 '{name}' 未定义"
+                    
+        except Exception:
+            pass
+            
+    def _check_indentation(self):
+        block = self.document().begin()        
         last_valid_indent = 0
         last_valid_text = ""
         # 🚀 核心：深度堆栈，记录未闭合的括号
@@ -307,8 +378,7 @@ class QCodeEditor(QTextEdit):
             last_valid_indent = current_indent
             last_valid_text = stripped_text
             block = block.next()
-            
-        self.line_number_area.update()
+
 
     def paintEvent(self, event):
         painter = QPainter(self.viewport())
