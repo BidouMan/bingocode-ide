@@ -1,0 +1,32 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+  <qresource prefix="/">
+    <file>icons/帮助.svg</file>
+    <file>icons/保存.svg</file>
+    <file>icons/编辑.svg</file>
+    <file>icons/插件.svg</file>
+    <file>icons/文件.svg</file>
+    <file>icons/icon--green-flag.svg</file>
+    <file>icons/icon--play.svg</file>
+    <file>icons/icon--stop-all.svg</file>
+    <file>icons/logo.svg</file>
+    <file>icons/icon--edit.svg</file>
+    <file>icons/help.svg</file>
+    <file>icons/addons.svg</file>
+    <file>icons/cancel.svg</file>
+    <file>icons/icon--file-upload.svg</file>
+    <file>icons/icon--file.svg</file>
+    <file>icons/icon--settings.svg</file>
+    <file>icons/zoom-in.svg</file>
+    <file>icons/zoom-out.svg</file>
+    <file>icons/zoom-reset.svg</file>
+    <file>icons/icon--fullscreen.svg</file>
+    <file>icons/close.svg</file>
+    <file>icons/icon--close-orange.svg</file>
+    <file>icons/关闭_1.svg</file>
+    <file>icons/关闭_3.svg</file>
+    <file>icons/未保存.svg</file>
+    <file>icons/关闭_2.svg</file>
+    <file>icons/关闭_4.svg</file>
+  </qresource>
+</RCC>
