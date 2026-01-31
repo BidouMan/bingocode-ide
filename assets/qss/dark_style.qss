@@ -274,14 +274,7 @@ QLineEdit#tabRenameEdit {
     font-weight: bold;
 }
 
-/* 代码编辑和console */
-/* QPlainTextEdit {
-    background-color: rgb(41, 44, 52);
-    color: rgb(212, 212, 212);
-    border: none;
-    font-family: 'Consolas', 'Monaco', monospace;
-    font-size: 14px;
-} */
+
 #console_output{
     background-color:rgb(32, 36, 43);
     border-radius: 6px;

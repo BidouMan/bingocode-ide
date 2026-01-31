@@ -288,35 +288,36 @@ class QCodeEditor(QTextEdit):
             py_keywords = keyword.kwlist
             script = jedi.Script(code)
             
-            # 🚀 方案 1 核心：获取当前光标所在的行号
-            current_line = self.textCursor().blockNumber()
-
-            # 仅扫描可见区域以确保性能
+            cursor_pos = self.textCursor().position()
             first_v = self.cursorForPosition(QPoint(0, 0)).blockNumber()
             last_v = self.cursorForPosition(QPoint(0, self.viewport().height())).blockNumber()
+            current_line = self.textCursor().blockNumber()
 
-            identifiers = re.finditer(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b', code)
+            # 🚀 核心优化：先用正则把字符串内容替换为空格，但保持长度不变
+            # 这样我们匹配变量时，就不会匹配到字符串内部了
+            # 处理单引号、双引号、三引号字符串
+            clean_code = re.sub(r"('.*?(?<!\\)'|\".*?(?<!\\)\"|'''.*?'''|\"\"\".*?\"\"\")", 
+                    lambda m: " " * len(m.group()), 
+                    code, flags=re.DOTALL)
+
+            # 在“干净”的代码里寻找标识符
+            identifiers = re.finditer(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b', clean_code)
             
             for match in identifiers:
                 name = match.group()
-                if name in py_keywords or name == 'self': continue
-
                 start_pos = match.start()
+                
+                # 方案 1 的光标保护：当前行不查
                 block = self.document().findBlock(start_pos)
                 line_num = block.blockNumber()
+                if line_num == current_line: continue
 
-                # 🚀 关键过滤：
-                # 1. 不在可见范围的不查
-                # 2. 当前光标所在的行绝对不查 (等用户离开这一行再说)
-                # 3. 已经有缩进错误的行不查
-                if not (first_v <= line_num <= last_v) or \
-                   line_num == current_line or \
-                   line_num in self.error_lines:
+                if name in py_keywords or name == 'self': continue
+                if not (first_v <= line_num <= last_v) or line_num in self.error_lines:
                     continue
 
-                # 上下文过滤：排除 for i in 和 a = 
-                raw_line_text = block.text()
-                after_text = raw_line_text[match.end() - block.position():].lstrip()
+                # 上下文过滤：排除定义语句
+                after_text = clean_code[match.end():].lstrip()
                 if after_text.startswith('in ') or after_text.startswith('='):
                     continue
 
@@ -325,56 +326,66 @@ class QCodeEditor(QTextEdit):
                 
                 defs = script.goto(line, column)
                 if not defs:
-                    self.error_lines[line_num] = f"名称 '{name}' 未定义"
+                    self.error_lines[line_num] = f"变量名{name}输入错误!"
                     
         except Exception:
             pass
             
     def _check_indentation(self):
-        block = self.document().begin()        
+        block = self.document().begin()
         last_valid_indent = 0
         last_valid_text = ""
-        # 🚀 核心：深度堆栈，记录未闭合的括号
-        parens_stack = [] 
+        parens_stack = []
+        
+        # 🚀 获取当前光标所在行，用于“换行触发”逻辑
+        current_line_num = self.textCursor().blockNumber()
 
         while block.isValid():
             raw_text = block.text()
-            stripped_text = raw_text.strip()
+            content_before_comment = raw_text.split('#')[0].strip()
+            stripped_text = content_before_comment # 后续判定用这个
             line_num = block.blockNumber()
 
             if not stripped_text:
                 block = block.next()
                 continue
+            
+            # --- 1. 冒号缺失检查 (🚀 新增) ---
+            # 只有当光标不在这一行时，才进行冒号结算，避免输入中途报错
+            if line_num != current_line_num:
+                # 常见的需要冒号的关键字
+                colon_keywords = (
+                    'if', 'else', 'elif', 'for', 'while', 
+                    'def', 'class', 'with', 'try', 'except', 'finally'
+                )
                 
+                # 匹配逻辑：以关键字开头，且结尾不是冒号
+                # 注意：这里用 split() 获取第一个单词更准确
+                first_word = stripped_text.split('(')[0].split()[0] if stripped_text.split() else ""
+                
+                if first_word in colon_keywords and not content_before_comment.endswith(':'):
+                    self.error_lines[line_num] = f"语法错误: '{first_word}' 语句末尾缺少冒号 ':'"
+
+            # --- 2. 原有的缩进检查逻辑 ---
             current_indent = len(raw_text.replace('\t', '    ')) - len(raw_text.lstrip())
             
-            # 1. 基础 4 倍数检查 (处于多行括号内时，通常允许非 4 倍数缩进，这里可以放宽)
             if not parens_stack and current_indent % 4 != 0:
                 self.error_lines[line_num] = f"缩进错误: {current_indent} 个空格"
 
-            # 2. 智能逻辑检查
             if last_valid_text:
-                # 检查是否是由于上一行有冒号引起的缩进增加
                 is_after_colon = last_valid_text.endswith(':')
-                
-                # 🚀 修复点：如果在括号内，或者上一行有反斜杠 \，或者是冒号后，缩进增加是合法的
                 if current_indent > last_valid_indent:
                     if not (is_after_colon or parens_stack or last_valid_text.endswith('\\')):
                         self.error_lines[line_num] = "不合理的缩进"
-                
-                # 冒号后强制缩进
                 if is_after_colon and current_indent <= last_valid_indent:
                     self.error_lines[line_num] = "冒号后需要缩进"
 
-            # 🚀 3. 更新括号堆栈 (解决你提到的所有括号/多行字符串报错)
-            # 简单扫描当前行增加或减少了多少括号深度
+            # 更新括号堆栈
             for char in raw_text:
-                if char in "([{":
-                    parens_stack.append(char)
+                if char in "([{": parens_stack.append(char)
                 elif char in ")]}":
                     if parens_stack: parens_stack.pop()
 
-            # 更新状态供下行使用
             last_valid_indent = current_indent
             last_valid_text = stripped_text
             block = block.next()
@@ -400,7 +411,6 @@ class QCodeEditor(QTextEdit):
 
         self.draw_indent_guides(painter)
         self.draw_indent_errors(painter)
-        # painter.end()
         
         # 绘制文字
         super().paintEvent(event)
@@ -643,12 +653,85 @@ class QCodeEditor(QTextEdit):
             self.insertPlainText(" " * indent)
             return
 
+        cursor = self.textCursor()
+
+        # --- 处理有选中文本的情况 (多行缩进) ---
+        if cursor.hasSelection():
+            if event.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
+                self._handle_block_indent(event.key() == Qt.Key.Key_Backtab)
+                return
+        
+        # --- 处理无选中文本的情况 (单行缩进/反缩进) ---
+        else:
+            if event.key() == Qt.Key.Key_Tab:
+                self.insertPlainText("    ")
+                return
+            
+            if event.key() == Qt.Key.Key_Backtab:
+                # 之前的单行反缩进逻辑
+                current_line_text = cursor.block().text()
+                pos = cursor.positionInBlock()
+                if pos == 0: return # 阻止跳到上一行
+                
+                # 如果前面有 4 个空格则删除，否则删除直到行首的空格
+                if current_line_text[:pos].endswith("    "):
+                    for _ in range(4): cursor.deletePreviousChar()
+                else:
+                    while cursor.positionInBlock() > 0 and cursor.block().text()[cursor.positionInBlock()-1] == ' ':
+                        cursor.deletePreviousChar()
+                return
+
         # 6. 默认输入处理
         super().keyPressEvent(event)
         
         # 7. 触发补全提示
         if char.isalnum() or char == ".":
             self.trigger_completion()
+    
+    def _handle_block_indent(self, is_unindent):
+        """处理选中区域的整体缩进/反缩进"""
+        cursor = self.textCursor()
+        start = cursor.selectionStart()
+        end = cursor.selectionEnd()
+
+        # 获取选区跨越的所有行
+        start_block = self.document().findBlock(start)
+        end_block = self.document().findBlock(end)
+        
+        # 如果选区末尾刚好在行首，且选了不止一行，通常不缩进最后那一行
+        if end_block.position() == end and start_block != end_block:
+            end_block = end_block.previous()
+
+        # 开始编辑块（这样撤销操作 Ctrl+Z 会把整个缩进当一步）
+        cursor.beginEditBlock()
+        
+        current_block = start_block
+        while True:
+            # 定位到该行行首
+            temp_cursor = QTextCursor(current_block)
+            
+            if is_unindent:
+                # 反缩进：检查行首是否有空格并删除
+                text = current_block.text()
+                if text.startswith("    "):
+                    temp_cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor, 4)
+                    temp_cursor.removeSelectedText()
+                elif text.startswith(" "):
+                    # 不足4个空格时，删掉全部前导空格
+                    while temp_cursor.block().text().startswith(" "):
+                        temp_cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor, 1)
+                        temp_cursor.removeSelectedText()
+            else:
+                # 正向缩进：行首直接插入 4 个空格
+                temp_cursor.insertText("    ")
+
+            if current_block == end_block:
+                break
+            current_block = current_block.next()
+
+        cursor.endEditBlock()
+        # 🚀 保持选区状态（VSCode 习惯：缩进后文字依然保持选中）
+        self.setTextCursor(cursor)
 
     # --- 其余保留的功能 (注释、格式化等) ---
     def toggle_comment(self):
@@ -770,7 +853,7 @@ class LineNumberArea(QWidget):
         # 开启鼠标追踪，否则 mouseMoveEvent 只有在按下鼠标时才触发
         self.setMouseTracking(True)
         
-        self.error_icon = QIcon(":/icons/error.svg")
+        self.error_icon = QIcon(":/icons/error_1.svg")
 
         self.blink_timer = QTimer(self)
         # ✅ 修正连接：指向下面定义的 update_blink
@@ -859,7 +942,7 @@ class LineNumberArea(QWidget):
                     global_tip_pos = self.mapToGlobal(local_tip_point)
                     
                     QToolTip.showText(global_tip_pos, 
-                                      f"<div style='min-width: 150px;'><b>❌ 错误:</b><br>{error_msg}</div>", 
+                                      f"<div style='min-width: 150px;'><b>⚠️ 错误:</b><br>{error_msg}</div>", 
                                       self)
                     return 
                 else:
