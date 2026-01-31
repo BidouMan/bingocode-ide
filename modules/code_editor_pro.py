@@ -2,12 +2,15 @@ import sys, os
 import jedi
 import black
 import re
-from PySide6.QtWidgets import (QTextEdit, QWidget, QListView)
+from PySide6.QtWidgets import (QTextEdit, QWidget, QListView,QToolTip)
 from PySide6.QtGui import (QColor, QFont, QSyntaxHighlighter, QTextCharFormat, 
                            QPainter, QStandardItemModel, 
                            QStandardItem, QKeyEvent, QTextCursor, QTextBlockFormat,QPalette,
-                           QFontDatabase, QPen)
-from PySide6.QtCore import Qt, QRect, Property
+                           QFontDatabase, QPen,QIcon)
+from PySide6.QtCore import Qt, QRect, Property,QTimer,QPoint
+# from PySide6.QtSvg import QSvgRenderer  # 🚀 必须导入这个
+# from PySide6.QtCore import QDirIterator
+
 
 # 全局变量
 RAINBOW_COLORS = ["#ffd700", "#da70d6", "#179fff", "#ff5d5d", "#41e1a4"]
@@ -224,6 +227,10 @@ class QCodeEditor(QTextEdit):
         self.file_path = ""
         self.current_font_size = 18
         self.fixed_line_height = 20
+        self.error_lines ={}
+        self.space_width = self.fontMetrics().horizontalAdvance(' ')
+        self.indent_guide_width = self.space_width * 4
+
         self.setAcceptRichText(False)
         self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled)
@@ -243,9 +250,65 @@ class QCodeEditor(QTextEdit):
         
         # 🚀 替换 ExtraSelection：直接绘制 viewport 背景，解决抖动
         self.cursorPositionChanged.connect(self.viewport().update)
+        self.cursorPositionChanged.connect(self.update_indent_errors)
+
         
         self.setup_font()
+        self.update_font_metrics_cache()    # 更新缓存的度量值
         self.update_line_number_area_width(0)
+
+    def update_indent_errors(self):
+        self.error_lines.clear()
+        block = self.document().begin()
+        
+        last_valid_indent = 0
+        last_valid_text = ""
+        # 🚀 核心：深度堆栈，记录未闭合的括号
+        parens_stack = [] 
+
+        while block.isValid():
+            raw_text = block.text()
+            stripped_text = raw_text.strip()
+            line_num = block.blockNumber()
+
+            if not stripped_text:
+                block = block.next()
+                continue
+                
+            current_indent = len(raw_text.replace('\t', '    ')) - len(raw_text.lstrip())
+            
+            # 1. 基础 4 倍数检查 (处于多行括号内时，通常允许非 4 倍数缩进，这里可以放宽)
+            if not parens_stack and current_indent % 4 != 0:
+                self.error_lines[line_num] = f"缩进错误: {current_indent} 个空格"
+
+            # 2. 智能逻辑检查
+            if last_valid_text:
+                # 检查是否是由于上一行有冒号引起的缩进增加
+                is_after_colon = last_valid_text.endswith(':')
+                
+                # 🚀 修复点：如果在括号内，或者上一行有反斜杠 \，或者是冒号后，缩进增加是合法的
+                if current_indent > last_valid_indent:
+                    if not (is_after_colon or parens_stack or last_valid_text.endswith('\\')):
+                        self.error_lines[line_num] = "不合理的缩进"
+                
+                # 冒号后强制缩进
+                if is_after_colon and current_indent <= last_valid_indent:
+                    self.error_lines[line_num] = "冒号后需要缩进"
+
+            # 🚀 3. 更新括号堆栈 (解决你提到的所有括号/多行字符串报错)
+            # 简单扫描当前行增加或减少了多少括号深度
+            for char in raw_text:
+                if char in "([{":
+                    parens_stack.append(char)
+                elif char in ")]}":
+                    if parens_stack: parens_stack.pop()
+
+            # 更新状态供下行使用
+            last_valid_indent = current_indent
+            last_valid_text = stripped_text
+            block = block.next()
+            
+        self.line_number_area.update()
 
     def paintEvent(self, event):
         painter = QPainter(self.viewport())
@@ -267,92 +330,50 @@ class QCodeEditor(QTextEdit):
 
         self.draw_indent_guides(painter)
         self.draw_indent_errors(painter)
-        painter.end()
+        # painter.end()
         
         # 绘制文字
         super().paintEvent(event)
 
-    def mouseMoveEvent(self, event):
-        # 获取鼠标位置对应的光标和行
-        cursor = self.cursorForPosition(event.pos())
-        block = cursor.block()
-        block_number = block.blockNumber() # 获取行号数字
+    def update_font_metrics_cache(self):
+        """专门负责更新缓存的度量值，在初始化和缩放时调用"""
+        metrics = self.fontMetrics()
+        # 1. 单个空格宽度
+        self.space_width = metrics.horizontalAdvance(' ')
+        # 2. 4个空格宽度 (用于 draw_indent_guides)
+        self.indent_guide_width = self.space_width * 4
+        # 3. 记录逻辑行高，给 LineNumberArea 和绘制背景使用
+        # +2 是你代码中原有的微调值
+        self.fixed_line_height = metrics.lineSpacing() + 2
 
-        # 🚀 优化 1：只有行号发生变化时才检测，防止 ToolTip 闪烁
-        if block_number != self.last_hover_block:
-            self.last_hover_block = block_number
-            
-            text = block.text()
-            stripped = text.lstrip()
-            leading_spaces = len(text) - len(stripped)
-            
-            if text.strip() and leading_spaces % 4 != 0:
-                from PySide6.QtWidgets import QToolTip
-                # 🚀 优化 2：使用简易 HTML 放大文字（即便没有 QSS 也会生效）
-                error_msg = (
-                        f"<b>⚠️ 缩进错误</b><br>"
-                        f"当前缩进：{leading_spaces} 个空格<br>"
-                        f"要求：必须是4个空格哦!"
-                    )
-
-                # 🚀 关键改进：调整显示位置
-                pos = event.globalPos()
-                # 向上偏移约 40-60 像素（根据你的字体大小调整）
-                # 这样气泡会出现在鼠标箭头的上方，不会挡住后面的代码
-                custom_pos = pos
-                custom_pos.setY(pos.y() - 50)
-                QToolTip.showText(event.globalPos(), error_msg, self)
-            else:
-                # 如果这一行没错，或者鼠标移到了正确行，隐藏之前的提示
-                from PySide6.QtWidgets import QToolTip
-                QToolTip.hideText()
-
-        # 必须调用父类方法，否则会导致鼠标点击、拖拽失效
-        super().mouseMoveEvent(event)
-
+        
 
     def draw_indent_errors(self, painter):
         error_color = getattr(self, '_indent_error_color', QColor(255, 0, 0, 40))
-        block = self.document().begin()
         layout = self.document().documentLayout()
         scroll_y = self.verticalScrollBar().value()
+        viewport_h = self.viewport().height()
 
-        while block.isValid():
+        # 直接遍历存储好的错误行号
+        for line_num, msg in self.error_lines.items():
+            block = self.document().findBlockByNumber(line_num)
+            if not block.isValid(): continue
+            
             rect = layout.blockBoundingRect(block)
             top = rect.top() - scroll_y
-            if top > self.viewport().height(): break
             
-            if top + rect.height() >= 0:
-                text = block.text()
-                # 检查逻辑：
-                # 1. 如果有缩进，是否是 4 的倍数
-                leading_spaces = len(text) - len(text.lstrip())
-                is_invalid = False
-                
-                if leading_spaces % 4 != 0:
-                    is_invalid = True
-                
-                # 2. 检查上一行的关联（可选：如上一行没冒号但这一行增加了缩进）
-                prev_block = block.previous()
-                if prev_block.isValid():
-                    prev_text = prev_block.text().strip()
-                    prev_indent = len(prev_block.text()) - len(prev_block.text().lstrip())
-                    if not prev_text.endswith(':') and leading_spaces > prev_indent:
-                        is_invalid = True
-
-                if is_invalid and text.strip(): # 仅对非空行报错
-                    painter.fillRect(QRect(0, int(top), self.viewport().width(), int(rect.height())), error_color)
+            # 性能优化：只画可视区域内的
+            if top > viewport_h: continue
+            if top + rect.height() < 0: continue
             
-            block = block.next()
+            painter.fillRect(QRect(0, int(top), self.viewport().width(), int(rect.height())), error_color)
 
     def draw_indent_guides(self, painter):
         color = getattr(self, '_indent_guide_color', QColor("#3b4048"))
         painter.setPen(QPen(color, 1, Qt.PenStyle.SolidLine))
         
-        metrics = self.fontMetrics()
-        # 🚀 准确计算 4 个空格的宽度
-        indent_width = metrics.horizontalAdvance(' ') * 4 
-        # 🚀 这里的 offset 必须和文字的起始物理坐标完全一致
+        # 🚀 直接使用预计算的变量，速度极快
+        indent_width = self.indent_guide_width 
         offset_x = self.document().documentMargin()
         
         scroll_y = self.verticalScrollBar().value()
@@ -376,23 +397,12 @@ class QCodeEditor(QTextEdit):
                 if not stripped_text:
                     indent_levels = last_indent_levels
                 else:
-                    # 计算当前行共有多少个 4-空格 缩进
+                    # 🚀 这里的计算也变快了
                     indent_levels = (len(text) - len(stripped_text)) // 4
                     last_indent_levels = indent_levels
                 
-                # 🚀 重点逻辑：
-                # 假设这一行有 2 层缩进（8个空格），文字在第 8 格。
-                # 我们应该在第 0 格画线，在第 4 格画线。
-                # 这样线就永远在文字的左侧，且不会重叠。
                 for i in range(indent_levels):
-                    # x 计算公式：
-                    # 当 i=0 时，线在最左侧偏移位 (offset_x)
-                    # 当 i=1 时，线在第 4 个空格位
-                    # ...以此类推
                     x = offset_x + (i * indent_width)
-                    
-                    # 只有当这一行有缩进时，我们才画线
-                    # 如果你不想画最左边（第 0 级）那条线，这里可以加 if i > 0:
                     if indent_levels > 0:
                         painter.drawLine(x, top, x, bottom)
             
@@ -410,7 +420,7 @@ class QCodeEditor(QTextEdit):
         
         metrics = self.fontMetrics()
         # 记录逻辑行高，给 LineNumberArea 使用
-        self.fixed_line_height = metrics.lineSpacing() + 2
+        # self.fixed_line_height = metrics.lineSpacing() + 2
         
         # 设置文档属性
         self.document().setDefaultFont(font)
@@ -468,9 +478,10 @@ class QCodeEditor(QTextEdit):
             self.refresh_all_components()
 
     def refresh_all_components(self):
+        """点击缩放或 Ctrl+滚轮时触发"""
         self.setup_font()
+        self.update_font_metrics_cache() # 🚀 必须同步更新缓存
         self.completer.refresh_font()
-        # 🚀 修复点 1：同步行号字体并重新算宽
         self.line_number_area.setFont(self.font())
         self.update_line_number_area_width(0)
         self.line_number_area.update()
@@ -631,7 +642,7 @@ class QCodeEditor(QTextEdit):
 
     def update_line_number_area_width(self, _):
         digits = len(str(max(1, self.document().blockCount())))
-        width = 20 + self.fontMetrics().horizontalAdvance('9') * max(2, digits)
+        width = 20 + self.space_width * max(2, digits)
         self.setViewportMargins(width, 0, 0, 0)
         self.line_number_area.setFixedWidth(width)
 
@@ -686,19 +697,112 @@ class LineNumberArea(QWidget):
     def __init__(self, editor):
         super().__init__(editor)
         self.editor = editor
+        # 开启鼠标追踪，否则 mouseMoveEvent 只有在按下鼠标时才触发
+        self.setMouseTracking(True)
+        
+        self.error_icon = QIcon(":/icons/error.svg")
+
+        self.blink_timer = QTimer(self)
+        # ✅ 修正连接：指向下面定义的 update_blink
+        self.blink_timer.timeout.connect(self.update_blink) 
+        self.blink_timer.start(50) # 提高刷新率让呼吸感更顺滑
+        self.blink_alpha = 255
+        self.blink_dir = -1
+
+
+    def update_blink(self):
+        # 顺滑的呼吸灯逻辑
+        self.blink_alpha += self.blink_dir * 10
+        if self.blink_alpha <= 100: self.blink_dir = 1
+        if self.blink_alpha >= 255: self.blink_dir = -1
+        self.update() # 触发重绘
 
     def paintEvent(self, event):
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
         painter.fillRect(self.rect(), self.editor._line_number_bg)
-        # painter.setPen(QPen(self.editor._line_number_border, 1))
-        # painter.drawLine(self.width()-1, 0, self.width()-1, self.height())
-        layout, val = self.editor.document().documentLayout(), self.editor.verticalScrollBar().value()
+
+        layout = self.editor.document().documentLayout()
+        val = self.editor.verticalScrollBar().value()
         block = self.editor.document().begin()
 
         while block.isValid():
             top = round(layout.blockBoundingRect(block).top()) - val
             if top > event.rect().bottom(): break
+
             if top + self.editor.fixed_line_height >= event.rect().top():
-                painter.setPen(self.editor._line_number_text)
-                painter.drawText(0, top, self.width()-10, self.editor.fixed_line_height, Qt.AlignRight | Qt.AlignVCenter, str(block.blockNumber()+1))
+                line_num = block.blockNumber()
+                line_rect = QRect(0, top, self.width(), self.editor.fixed_line_height)
+
+                if line_num in self.editor.error_lines:
+                    # 🚀 背景闪烁逻辑
+                    flash_color = QColor("#ff5555")
+                    flash_color.setAlpha(int(self.blink_alpha * 0.2)) 
+                    painter.fillRect(line_rect, flash_color)
+
+                    # 🚀 绘制图标逻辑
+                    icon_size = int(self.editor.fixed_line_height * 0.6)
+                    # 图标放在左侧，留 4 像素边距
+                    icon_rect = QRect(4, top + (self.editor.fixed_line_height - icon_size) // 2, 
+                                     icon_size, icon_size)
+                    
+                    if not self.error_icon.isNull():
+                        self.error_icon.paint(painter, icon_rect)
+                    else:
+                        # 兜底绘制
+                        painter.setPen(QColor("#ff5555"))
+                        painter.drawText(icon_rect, Qt.AlignCenter, "!")
+
+                # --- 绘制行号文字 ---
+                text_color = self.editor._line_number_text
+                if line_num in self.editor.error_lines:
+                    text_color = QColor("#ff5555")
+                
+                painter.setPen(text_color)
+                # 右侧留 8 像素间距，确保不和右边框贴太近
+                painter.drawText(0, top, self.width() - 8, self.editor.fixed_line_height, 
+                                 Qt.AlignRight | Qt.AlignVCenter, str(line_num + 1))
+            
             block = block.next()
+
+    def mouseMoveEvent(self, event):
+        pos = event.pos()
+        layout = self.editor.document().documentLayout()
+        scroll_y = self.editor.verticalScrollBar().value()
+        
+        block = self.editor.document().begin()
+        while block.isValid():
+            rect = layout.blockBoundingRect(block)
+            top = rect.top() - scroll_y
+            bottom = top + rect.height()
+
+            if top <= pos.y() <= bottom:
+                line_num = block.blockNumber()
+                if hasattr(self.editor, 'error_lines') and line_num in self.editor.error_lines:
+                    error_msg = self.editor.error_lines[line_num]
+                    
+                    # 🚀 纵向优化：
+                    # 使用 event.pos().y() (鼠标当前高度) 而不是 top (行顶部)
+                    # 然后减去 10 到 15 像素，强行把 Tip 往上提
+                    local_tip_point = QPoint(self.width() + 2, event.pos().y() - 40)
+                    
+                    global_tip_pos = self.mapToGlobal(local_tip_point)
+                    
+                    QToolTip.showText(global_tip_pos, 
+                                      f"<div style='min-width: 150px;'><b>❌ 错误:</b><br>{error_msg}</div>", 
+                                      self)
+                    return 
+                else:
+                    break
+            
+            if top > pos.y(): break
+            block = block.next()
+        
+        QToolTip.hideText()
+        super().mouseMoveEvent(event)
+
+
+    def leaveEvent(self, event):
+        # 鼠标离开行号区，强制关闭提示
+        QToolTip.hideText()
+        super().leaveEvent(event)

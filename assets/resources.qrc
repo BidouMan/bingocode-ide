@@ -28,5 +28,6 @@
     <file>icons/未保存.svg</file>
     <file>icons/关闭_2.svg</file>
     <file>icons/关闭_4.svg</file>
+    <file>icons/error.svg</file>
   </qresource>
 </RCC>
