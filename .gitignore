@@ -35,6 +35,9 @@ MyWorkspace/
 user_workspaces/
 examples/
 notes/
+build/
+dist/
+
 
 
 # ===== 4. 特殊处理：保留图标但屏蔽大图 =====
@@ -45,5 +48,4 @@ notes/
 # !assets/icons/*.png
 
 # ===== 5. 屏蔽 IDE 自动生成的庞大资源文件 =====
-# 如果你使用 pyrcc5 生成了 resources_rc.py，且它变得非常大
-# assets/resources_rc.py
+*.spec

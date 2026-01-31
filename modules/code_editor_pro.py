@@ -15,7 +15,13 @@ from PySide6.QtCore import Qt, QRect, Property,QTimer,QPoint
 # 全局变量
 RAINBOW_COLORS = ["#ffd700", "#da70d6", "#179fff", "#ff5d5d", "#41e1a4"]
 
-
+def get_resource_path(relative_path):
+    """ 处理 PyInstaller 打包后的资源路径 """
+    if hasattr(sys, '_MEIPASS'):
+        # 打包后的路径
+        return os.path.join(sys._MEIPASS, relative_path)
+    # 开发环境路径
+    return os.path.join(os.path.abspath("."), relative_path)
 
 # --- 语法高亮逻辑 (保留原始逻辑) ---
 class PygmentsHighlighter(QSyntaxHighlighter):
@@ -509,7 +515,8 @@ class QCodeEditor(QTextEdit):
     def load_custom_font(self):
         # 1. 获取绝对路径，为打包做准备
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        asset_path = os.path.join(base_dir, "assets", "font")
+        # asset_path = os.path.join(base_dir, "assets", "font")
+        asset_path = get_resource_path(os.path.join("assets", "font"))
         
         # 2. 🚀 跨平台默认回退方案
         if sys.platform == "darwin":      # macOS

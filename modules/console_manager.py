@@ -37,8 +37,19 @@ class ConsoleManager(QObject):
             self.process.kill()
             self.process.waitForFinished(300)
             
-        self.process.start(sys.executable, ["-u", file_path])
-        self.process_started.emit() # 发送开始信号
+        # --- 核心修改开始 ---
+        executable = sys.executable
+        
+        # 如果是打包环境，sys.executable 会指向 IDE 本身
+        # 在 Mac 的 .app 里，我们需要寻找真正的 Python 解释器
+        if hasattr(sys, 'frozen'):
+            # 对于 macOS 打包，通常需要调用系统 Python 或 指定环境
+            # 临时方案：直接使用 "python3" 或者是你打包带进去的解释器
+            executable = "python3" 
+        # --- 核心修改结束 ---
+            
+        self.process.start(executable, ["-u", file_path])
+        self.process_started.emit()
 
     def handle_stdout(self):
         """
