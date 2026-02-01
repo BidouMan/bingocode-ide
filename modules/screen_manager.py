@@ -23,7 +23,7 @@ class ScreenManager(QWidget):
         self._bg_color = self._arcade_bg
         self._border_radius = 6
        
-
+        self.frame_ready = False
         # 2. 渲染时钟
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_frame)
@@ -42,55 +42,67 @@ class ScreenManager(QWidget):
         self.setObjectName("game_screen")
 
     def set_render_mode(self, mode="arcade"):
-        """统一管理不同模式的视觉风格"""
+        # 根据模式选择目标颜色
         if mode == "turtle":
-            # 💡 关键：这里使用 self._turtle_bg (由 QSS 注入)
             target_color = self._turtle_bg
         elif mode == "arcade":
             target_color = self._arcade_bg
         else:
             target_color = self._normal_bg
         
-        # 💡 关键：通过调用 self.bg 的 setter 来触发画布填充和更新
-        self.bg = target_color
+        # 1. 更新内部颜色变量 (直接赋值，避开 setter 的 fill 逻辑或重复判断)
+        self._bg_color = QColor(target_color)
         
-        # self.canvas.fill(self._bg_color)
-        # self.update()
+        # 2. 🚀 关键：既然模式切换了，必须立刻把当前画布刷成对应的底色
+        if hasattr(self, 'canvas') and not self.canvas.isNull():
+            self.canvas.fill(self._bg_color)
+            self.update()
+            # print(f"DEBUG: 模式切换为 {mode}，画布已刷色: {self._bg_color.name()}")
 
     def set_logic_size(self, w, h):
         if self.logic_w == w and self.logic_h == h:
             return
-            
         self.logic_w = w
         self.logic_h = h
         
-        # 🚀 关键：根据新尺寸重新创建画布，防止尺寸缩水
+        # 🚀 重新创建画布时，确保填充的是当前的模式背景色
         self.canvas = QImage(self.logic_w, self.logic_h, QImage.Format_ARGB32)
-        # 初始填充当前背景色，防止出现花屏
-        self.canvas.fill(self._bg_color)
+        self.canvas.fill(self._bg_color) 
         self.update()
 
     def update_frame(self):
+        # 🚀 新增：如果进程还没启动完，绝对不准碰画布
+        if getattr(self, 'is_locked', False):
+            return
         try:
             if not self.shm:
                 try:
+                    # 尝试连接共享内存
                     self.shm = shared_memory.SharedMemory(name="arcade_frame")
+                    # 🚀 关键：连接上的瞬间，先不准画，等下一轮
+                    self.frame_ready = False 
+                    return 
                 except FileNotFoundError:
-                    return # 探测失败，继续 Loading 状态
+                    return 
+
+            # 🚀 只有第二次进入且 shm 已存在时，才认为新进程的数据可能到了
+            if not self.frame_ready:
+                self.frame_ready = True
+                return
 
             w, h = self.logic_w, self.logic_h
-            # 直接映射内存，不进行 copy
             raw_image = QImage(self.shm.buf, w, h, QImage.Format_RGBA8888)
             
             if not raw_image.isNull():
-                # 只有在确信有数据时才覆盖 canvas
-                # mirrored 会产生一个新对象，这在 Qt 渲染中是必要的
+                # 只有拿到有效图像才覆盖
                 self.canvas = raw_image.mirrored(False, True) 
                 self.update()
         except Exception:
             self.shm = None
+            self.frame_ready = False
 
     def paintEvent(self, event):
+        print("DEBUG: 正在执行 paintEvent 重绘屏幕")
         if not hasattr(self, 'canvas') or self.canvas.isNull():
             return
         
@@ -214,6 +226,7 @@ class ScreenManager(QWidget):
             self.update()
 
     def show_status_text(self, text):
+        print(f"DEBUG: show_status_text 开始画字: {text}") # 👈 加这行
         self.canvas.fill(self._bg_color)
         painter = QPainter(self.canvas)
         painter.setRenderHint(QPainter.Antialiasing)
@@ -234,18 +247,22 @@ class ScreenManager(QWidget):
     def reset_session(self):
         self.timer.stop()
         if self.shm:
-            try: self.shm.close()
+            try: 
+                self.shm.close()
+                # self.shm.unlink()
             except: pass
-        self.shm = None
-        self.first_instruction = True # 🚀 重置标记
+            self.shm = None
+        self.first_instruction = True
 
-    # 🚀 优化建议：resizeEvent 其实不需要重新创建 self.canvas
-    # 因为 self.canvas 是 logic 尺寸，它是固定的（如 320x240）。
-    # QWidget 的缩放通过 paintEvent 里的 drawImage(rect, canvas) 自动完成。
+
     def resizeEvent(self, event: QResizeEvent):
         super().resizeEvent(event)
 
     # ---------- QSS 属性接口 ----------
+    @Property(int)
+    def borderRadius(self): return self._border_radius
+    @borderRadius.setter
+    def borderRadius(self, r): self._border_radius = r
 
     @Property(QColor)
     def turtle_bg(self): return self._turtle_bg
@@ -260,12 +277,19 @@ class ScreenManager(QWidget):
         self._arcade_bg = QColor(color)
 
     @Property(QColor)
+    def normal_bg(self): return self._normal_bg
+    @normal_bg.setter
+    def normal_bg(self, color): self._normal_bg = QColor(color)
+
+    @Property(QColor)
     def bg(self): return self._bg_color
     
     @bg.setter
+    @bg.setter
     def bg(self, color):
-        # 无论颜色是否相同，只要 setter 被触发，我们就确保画布同步
-        self._bg_color = QColor(color)
-        if hasattr(self, 'canvas') and not self.canvas.isNull():
-            self.canvas.fill(self._bg_color)
-        self.update()
+        new_color = QColor(color)
+        if self._bg_color != new_color:  # 👈 问题出在这里
+            self._bg_color = new_color
+            if hasattr(self, 'canvas') and not self.canvas.isNull():
+                self.canvas.fill(self._bg_color) 
+            self.update()

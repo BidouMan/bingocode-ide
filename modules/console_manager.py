@@ -119,16 +119,16 @@ class ConsoleManager(QObject):
         if self.anim:
             self.anim.stop()
             
-            try:
-                # 尝试断开所有连接到这个信号的槽
-                self.anim.valueChanged.disconnect()
-            except (TypeError, RuntimeError):
-                pass
+            # try:
+            #     # 尝试断开所有连接到这个信号的槽
+            #     self.anim.valueChanged.disconnect()
+            # except (TypeError, RuntimeError):
+            #     pass
                 
-            try:
-                self.anim.finished.disconnect()
-            except (TypeError, RuntimeError):
-                pass
+            # try:
+            #     self.anim.finished.disconnect()
+            # except (TypeError, RuntimeError):
+            #     pass
 
         if show:
             self.console_container.setMaximumHeight(16777215)
@@ -173,7 +173,7 @@ class ConsoleManager(QObject):
         
         # 2. 🚀 关键改进：无论如何，启动前先彻底杀掉旧进程
         # 这能保证资源释放，并给 UI 留出切换背景的时间
-        self.stop_script()
+        # self.stop_script()
         
         # 3. 🚀 核心黑科技：强制刷新 UI 事件循环
         # 这行代码会告诉 Qt：“先别管后面的代码，把刚才 handle_run_python 里的 show_status_text 给我画出来！”

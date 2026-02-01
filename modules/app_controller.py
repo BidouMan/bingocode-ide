@@ -1,7 +1,7 @@
 import os
 from PySide6.QtCore import Qt, QStandardPaths,QTimer
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (QFileDialog, QMessageBox, QTabBar, QSizePolicy,QVBoxLayout)
+from PySide6.QtWidgets import (QFileDialog, QMessageBox, QTabBar, QSizePolicy,QApplication,QVBoxLayout)
 
 from ui.main_window_ui import Ui_Form
 from modules.file_menu import FileMenu
@@ -132,60 +132,54 @@ class AppController:
             curr_w, curr_h = self.stage_width, self.stage_height
 
             if hasattr(self, 'screen'):
-                self.screen.timer.stop()
+                self.handle_stop_python()
                 self.screen.reset_session()
-                
-                # 2. 🚀 先定尺寸 (这一步会创建新的空白 canvas)
+                QApplication.processEvents()
+
+                # 🚀 先设模式 (确定颜色)
+                mode = 'turtle' if self.is_turtle else 'arcade'
+                self.screen.set_render_mode(mode) 
+
+                # 🚀 再设尺寸 (如果尺寸变了，set_logic_size 内部会用上面的颜色 fill)
                 self.screen.set_logic_size(curr_w, curr_h)
 
-                # 3. 再定背景 (触发 bg.setter，填充纯色)
-                mode = 'turtle' if self.is_turtle else 'arcade'
-                self.screen.set_render_mode(mode)
-
-                # 4. 🚀 最后写字 (覆盖掉 setter 涂的纯色)
+                # 🚀 最后画字
                 if not self.is_turtle:
-                    txt = "🚀 游戏加载中..." if self.is_arcade else "⚙️ 程序运行中..."
-                    self.screen.show_status_text(txt)
-                    # 必须放在所有画布操作的最后
+                    if self.is_arcade:
+                        status_msg = "🚀 游戏加载中..."
+                    else:
+                        status_msg = "⚙️ 程序运行中..."
+
+                    self.screen.show_status_text(status_msg)
                     self.screen.repaint()
 
-                # if self.is_turtle:
-                #     self.screen.set_render_mode('turtle')
-                #     self.screen.clear_to_empty()
-                # elif self.is_arcade:
-                #     self.screen.set_render_mode('arcade')
-                #     # 🚀 使用 repaint 确保文字在进程启动前强制渲染
-                #     self.screen.show_status_text("🚀 游戏加载中...")
-                #     self.screen.repaint() 
-                # else:
-                #     self.screen.set_render_mode('arcade')
-                #     self.screen.show_status_text("⚙️ 程序运行中...")
-                #     self.screen.repaint()
-
-            # 3. 启动进程：传入正确的 w, h
+            # 🚀 5. 启动脚本（内部不要再调 stop）
             self.console.run_script(file_path, curr_w, curr_h)
             
             if self.is_arcade:
-                self.screen.timer.start(16)
+                # 即使设置 5500ms，现在的字也不会消失了
+                QTimer.singleShot(300, self._start_arcade_render)
         else:
             QMessageBox.warning(self.window, "提示", "请先保存文件再运行")
 
+    def _start_arcade_render(self):
+        self.is_preparing = False
+        if self.is_arcade:
+            self.screen.timer.start(16)
+
     def on_run_finished(self):
-        """当程序运行结束时触发"""
+        """修改此函数：增加锁定判断"""
+        # 🚀 如果正在准备启动新进程，直接无视旧进程的结束信号
+        if getattr(self, 'is_preparing', False):
+            return
+
         if hasattr(self, 'screen'):
             self.screen.timer.stop()
+            if getattr(self, 'is_turtle', False): return
             
-            # 🚀 关键逻辑：Turtle 模式直接跳过清理，保留画作
-            if getattr(self, 'is_turtle', False):
-                print("🐢 Turtle 绘图结束，保留画面")
-                return
-
-            # 非 Turtle 模式下，如果没有 Arcade 画面输出，则清空提示文字
             has_arcade_frame = hasattr(self.screen, 'shm') and self.screen.shm is not None
             if not has_arcade_frame:
                 self.screen.clear_to_empty()
-            
-            print("✨ 运行结束，屏幕状态已更新")
 
     def handle_stop_python(self):
         """点击停止按钮后的处理逻辑"""
