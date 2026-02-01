@@ -1,6 +1,7 @@
 import sys,os
 from PySide6.QtCore import QObject, QProcess, QPropertyAnimation, QEasingCurve, QTimer, Signal,QProcessEnvironment
 from PySide6.QtGui import QTextCursor
+from PySide6.QtWidgets import QApplication
 
 class ConsoleManager(QObject):
     # 定义状态信号，供 AppController 监听以改变按钮样式
@@ -117,10 +118,17 @@ class ConsoleManager(QObject):
         """带 Splitter 同步的动画"""
         if self.anim:
             self.anim.stop()
-            try: self.anim.valueChanged.disconnect()
-            except: pass
-            try: self.anim.finished.disconnect()
-            except: pass
+            
+            try:
+                # 尝试断开所有连接到这个信号的槽
+                self.anim.valueChanged.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+                
+            try:
+                self.anim.finished.disconnect()
+            except (TypeError, RuntimeError):
+                pass
 
         if show:
             self.console_container.setMaximumHeight(16777215)
@@ -159,25 +167,37 @@ class ConsoleManager(QObject):
     def run_script(self, file_path, w=480, h=360): # 🚀 修改：接收 w, h 参数
         if not file_path: 
             return
+            
+        # 1. 清理控制台输出
         self.output.clear()
         
-        # 1. 准备环境 (基础配置)
+        # 2. 🚀 关键改进：无论如何，启动前先彻底杀掉旧进程
+        # 这能保证资源释放，并给 UI 留出切换背景的时间
+        self.stop_script()
+        
+        # 3. 🚀 核心黑科技：强制刷新 UI 事件循环
+        # 这行代码会告诉 Qt：“先别管后面的代码，把刚才 handle_run_python 里的 show_status_text 给我画出来！”
+        QApplication.processEvents()
+
+        # 环境准备
         env = QProcessEnvironment.systemEnvironment()
         if sys.platform == "darwin":
             env.insert("ApplePersistenceIgnoreState", "YES")
         self.process.setProcessEnvironment(env)
 
-        # 2. 动画调度逻辑
-        if self.console_container.height() > 50:
-            # 容器已经开了，直接启动，并传入尺寸
-            self._start_process(file_path, w, h) # 🚀 转发尺寸变量
+        # 判断高度，决定是否播动画
+        current_h = self.console_container.height()
+        
+        if current_h > 200:
+            # 🚀 即使不播动画，也加一个极其微小的延迟 (10ms) 
+            # 这样能让用户看到背景切换的瞬间，体验更稳
+            QTimer.singleShot(10, lambda: self._start_process(file_path, w, h))
         else:
-            # 容器没开，先开动画，完成后启动
             self.anim_console(show=True, duration=250)
-            # 🚀 修改：QTimer 回调时也要把变量传给 _start_process
             QTimer.singleShot(100, lambda: self._start_process(file_path, w, h))
 
-    # modules/console_manager.py
+
+
 
     def stop_script(self):
         """立即强杀进程，并清理系统资源"""

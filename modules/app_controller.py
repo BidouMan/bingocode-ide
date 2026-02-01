@@ -95,6 +95,7 @@ class AppController:
         self.tab_bar.currentChanged.connect(self.update_tab_buttons)
 
         self.console.draw_signal.connect(self.screen.draw_instruction)
+        self.console.process_finished.connect(self.on_run_finished)
 
     def handle_open_file(self):
         file_path, _ = QFileDialog.getOpenFileName(self.window, "选择文件", "", "Python Files (*.py);;All Files (*)")
@@ -117,58 +118,74 @@ class AppController:
         """点击运行按钮的核心逻辑：智能识别模式"""
         self.handle_save_file() 
         editor = self.editor_logic.get_current_editor()
-        if not editor: 
-            return
+        if not editor: return
             
         file_path = editor.file_path
         if file_path and os.path.exists(file_path):
-            # --- 🚀 新增：智能模式检测 ---
-            content = editor.toPlainText() # 直接从编辑器获取内容
-            is_turtle = "import turtle" in content or "from turtle" in content
+            content = editor.toPlainText()
+            # 1. 识别模式
+            self.is_turtle = "import turtle" in content or "from turtle" in content
+            self.is_arcade = "import arcade" in content or "from arcade" in content
             
-            # --- 第一步：资源彻底清理与重置 ---
+            # 2. 确定逻辑尺寸 (Turtle 默认 480x360 体验更好，若需统一 320 则手动改回)
+            # curr_w, curr_h = (480, 360) if self.is_turtle else (self.stage_width, self.stage_height)
+            curr_w, curr_h = self.stage_width, self.stage_height
+
             if hasattr(self, 'screen'):
                 self.screen.timer.stop()
                 self.screen.reset_session()
                 
-                # --- 🚀 核心改进：根据模式动态配置 ---
-                if is_turtle:
-                    print("🐢 检测到 Turtle 模式")
-                    # 1. 切换为淡色背景 (这会触发 ScreenManager 的 canvas.fill)
-                    self.screen.bg = QColor("#F5F5F5") 
-                    # 2. Turtle 强制使用 480x360 逻辑尺寸
-                    current_w, current_h = 480, 360
-                else:
-                    print("🕹️ 检测到 Arcade 模式")
-                    # 1. 切换为深色背景
-                    self.screen.bg = QColor("#1E1E1E")
-                    # 2. Arcade 使用预设尺寸 (如 320x240)
-                    current_w, current_h = self.stage_width, self.stage_height
-                
-                # 同步尺寸给 ScreenManager
-                self.screen.set_logic_size(current_w, current_h)
-                self.screen.clear_canvas()
+                # 2. 🚀 先定尺寸 (这一步会创建新的空白 canvas)
+                self.screen.set_logic_size(curr_w, curr_h)
 
-            # --- 第二步：强杀可能残留的旧进程 ---
-            self.console.stop_script()
+                # 3. 再定背景 (触发 bg.setter，填充纯色)
+                mode = 'turtle' if self.is_turtle else 'arcade'
+                self.screen.set_render_mode(mode)
 
-            # --- 第三步：启动新进程 ---
-            # 传入检测后的尺寸，确保环境变量注入正确
-            self.console.run_script(file_path, current_w, current_h)
+                # 4. 🚀 最后写字 (覆盖掉 setter 涂的纯色)
+                if not self.is_turtle:
+                    txt = "🚀 游戏加载中..." if self.is_arcade else "⚙️ 程序运行中..."
+                    self.screen.show_status_text(txt)
+                    # 必须放在所有画布操作的最后
+                    self.screen.repaint()
+
+                # if self.is_turtle:
+                #     self.screen.set_render_mode('turtle')
+                #     self.screen.clear_to_empty()
+                # elif self.is_arcade:
+                #     self.screen.set_render_mode('arcade')
+                #     # 🚀 使用 repaint 确保文字在进程启动前强制渲染
+                #     self.screen.show_status_text("🚀 游戏加载中...")
+                #     self.screen.repaint() 
+                # else:
+                #     self.screen.set_render_mode('arcade')
+                #     self.screen.show_status_text("⚙️ 程序运行中...")
+                #     self.screen.repaint()
+
+            # 3. 启动进程：传入正确的 w, h
+            self.console.run_script(file_path, curr_w, curr_h)
             
-            # --- 第四步：根据模式开启采样 ---
-            if is_turtle:
-                # Turtle 模式不需要读取共享内存，不需要开启 timer 采样
-                # 指令会通过 draw_signal 实时传回
-                pass 
-            else:
-                # Arcade 模式延迟开启画面采样
-                QTimer.singleShot(300, lambda: self.screen.timer.start(16))
-                
+            if self.is_arcade:
+                self.screen.timer.start(16)
         else:
             QMessageBox.warning(self.window, "提示", "请先保存文件再运行")
 
+    def on_run_finished(self):
+        """当程序运行结束时触发"""
+        if hasattr(self, 'screen'):
+            self.screen.timer.stop()
+            
+            # 🚀 关键逻辑：Turtle 模式直接跳过清理，保留画作
+            if getattr(self, 'is_turtle', False):
+                print("🐢 Turtle 绘图结束，保留画面")
+                return
 
+            # 非 Turtle 模式下，如果没有 Arcade 画面输出，则清空提示文字
+            has_arcade_frame = hasattr(self.screen, 'shm') and self.screen.shm is not None
+            if not has_arcade_frame:
+                self.screen.clear_to_empty()
+            
+            print("✨ 运行结束，屏幕状态已更新")
 
     def handle_stop_python(self):
         """点击停止按钮后的处理逻辑"""
