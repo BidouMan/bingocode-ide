@@ -1,34 +1,51 @@
 import os
-from PySide6.QtCore import Qt, QStandardPaths
+from PySide6.QtCore import Qt, QStandardPaths,QTimer
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (QFileDialog, QMessageBox, QTabBar, QSizePolicy)
+from PySide6.QtWidgets import (QFileDialog, QMessageBox, QTabBar, QSizePolicy,QVBoxLayout)
 
 from ui.main_window_ui import Ui_Form
 from modules.file_menu import FileMenu
 from modules.console_manager import ConsoleManager
 from modules.editor_manager import EditorManager
 from modules.console_manager import ConsoleManager
+from modules.screen_manager import ScreenManager
 
 class AppController:
     def __init__(self, main_window: Ui_Form):
         self.window = main_window
-        self.ui: Ui_Form= main_window.ui
+        self.ui: Ui_Form = main_window.ui
         self.last_active_index = -1
+        
+        # 🚀 1. 定义核心状态：逻辑分辨率（在这里修改，全局生效）
+        self.stage_width = 320   # 基准宽度
+        self.stage_height = 240  # 基准高度
 
-        # 1. 初始化路径
+        # 2. 初始化基础环境与布局
         self._init_workspace()
-
-        # 2. 关键：先创建 TabBar 实例
         self.setup_tab_bar()
+        self._setup_screen_layout() # 将复杂的布局逻辑抽离
 
-        # 3. 初始化逻辑经理 (传入真正的 self.tab_bar)
+        # 3. 初始化各模块逻辑（确保 ScreenManager 只创建一次）
         self.editor_logic = EditorManager(self.ui.code_stacked, self.tab_bar, self.root_path)
         self.console = ConsoleManager(self.ui.splitter, self.ui.console_output)
-
-        self.file_menu = FileMenu(main_window)
         
-        # 4. 绑定剩余的 UI 信号
+        # 传入 container，内部会自动根据 stage_width/height 准备画布
+        self.screen = ScreenManager(self.ui.screen_frame)
+        self.screen.setObjectName("game_screen")
+        self.ui.screen_frame.layout().addWidget(self.screen)
+        
+        self.file_menu = FileMenu(main_window)
+
+        # 4. 绑定信号
         self.setup_connections()
+
+    def _setup_screen_layout(self):
+        """专门处理舞台容器的布局初始化"""
+        container = self.ui.screen_frame
+        if not container.layout():
+            layout = QVBoxLayout(container)
+            layout.setContentsMargins(0, 0, 0, 0)
+            container.setLayout(layout)
 
 
     def _init_workspace(self):
@@ -77,6 +94,8 @@ class AppController:
         # 视觉效果：保留 TabBar 的高亮更新
         self.tab_bar.currentChanged.connect(self.update_tab_buttons)
 
+        self.console.draw_signal.connect(self.screen.draw_instruction)
+
     def handle_open_file(self):
         file_path, _ = QFileDialog.getOpenFileName(self.window, "选择文件", "", "Python Files (*.py);;All Files (*)")
         if file_path:
@@ -92,26 +111,83 @@ class AppController:
         self.editor_logic.request_save_as(self.window)
 
 
+    # modules/app_controller.py
+
     def handle_run_python(self):
-        """点击运行按钮时的调度逻辑"""
-        self.handle_save_file() # 先保存
-        
+        """点击运行按钮的核心逻辑：智能识别模式"""
+        self.handle_save_file() 
         editor = self.editor_logic.get_current_editor()
-        if not editor: return
+        if not editor: 
+            return
             
-        editor.format_code() # 自动格式化
-        
-        if editor.file_path and os.path.exists(editor.file_path):
-            # 调度核心：现在这个方法内部会先弹窗，后跑代码
-            self.console.run_script(editor.file_path) 
+        file_path = editor.file_path
+        if file_path and os.path.exists(file_path):
+            # --- 🚀 新增：智能模式检测 ---
+            content = editor.toPlainText() # 直接从编辑器获取内容
+            is_turtle = "import turtle" in content or "from turtle" in content
+            
+            # --- 第一步：资源彻底清理与重置 ---
+            if hasattr(self, 'screen'):
+                self.screen.timer.stop()
+                self.screen.reset_session()
+                
+                # --- 🚀 核心改进：根据模式动态配置 ---
+                if is_turtle:
+                    print("🐢 检测到 Turtle 模式")
+                    # 1. 切换为淡色背景 (这会触发 ScreenManager 的 canvas.fill)
+                    self.screen.bg = QColor("#F5F5F5") 
+                    # 2. Turtle 强制使用 480x360 逻辑尺寸
+                    current_w, current_h = 480, 360
+                else:
+                    print("🕹️ 检测到 Arcade 模式")
+                    # 1. 切换为深色背景
+                    self.screen.bg = QColor("#1E1E1E")
+                    # 2. Arcade 使用预设尺寸 (如 320x240)
+                    current_w, current_h = self.stage_width, self.stage_height
+                
+                # 同步尺寸给 ScreenManager
+                self.screen.set_logic_size(current_w, current_h)
+                self.screen.clear_canvas()
+
+            # --- 第二步：强杀可能残留的旧进程 ---
+            self.console.stop_script()
+
+            # --- 第三步：启动新进程 ---
+            # 传入检测后的尺寸，确保环境变量注入正确
+            self.console.run_script(file_path, current_w, current_h)
+            
+            # --- 第四步：根据模式开启采样 ---
+            if is_turtle:
+                # Turtle 模式不需要读取共享内存，不需要开启 timer 采样
+                # 指令会通过 draw_signal 实时传回
+                pass 
+            else:
+                # Arcade 模式延迟开启画面采样
+                QTimer.singleShot(300, lambda: self.screen.timer.start(16))
+                
         else:
-            print("请先保存文件再运行")
+            QMessageBox.warning(self.window, "提示", "请先保存文件再运行")
+
+
 
     def handle_stop_python(self):
-        """点击停止按钮或需要强制收回控制台时的调度"""
-        # 1. 直接指挥控制台逻辑执行停止任务
-        # console_manager 会处理：停止 QProcess + 执行收回动画
-        self.console.stop_script() 
+        """点击停止按钮后的处理逻辑"""
+        # 1. 停止 ScreenManager 的渲染并断开连接
+        if hasattr(self, 'screen'):
+            # 🚀 建议调用封装好的 reset_session
+            # 它会停止 timer 并安全地关闭 shm 句柄
+            self.screen.reset_session()
+            print("🛑 已断开图形渲染连接并停止时钟")
+                
+        # 2. 强杀子进程并清理系统级共享内存
+        if hasattr(self, 'console'):
+            # 🚀 调用增强后的 stop_script
+            # 确保不仅杀了进程，还通过 Python 脚本 unlink 了共享内存
+            self.console.stop_script() 
+            print("🛑 子进程已强制结束，系统资源已回收")
+        
+        # 3. 视觉反馈：恢复运行按钮状态
+        self._set_run_btn_state(False)
         
     def update_tab_buttons(self, current_index):
         if self.last_active_index != -1 and self.last_active_index != current_index:

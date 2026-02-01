@@ -35,6 +35,13 @@ QWidget{
 #screen_frame{
     border-radius: 6px;
     border: none;
+    
+}
+#game_screen{
+    border: none;
+    background-color:transparent;
+    qproperty-bg:rgb(49, 48, 60);
+    qproperty-borderRadius: 6;
 }
 #editor_frame, #tab_frame, #toolbar_frame,#outline_framet{
     border-top-left-radius: 6px;

@@ -1,11 +1,13 @@
-import sys
-from PySide6.QtCore import QObject, QProcess, QPropertyAnimation, QEasingCurve, QTimer, Signal
+import sys,os
+from PySide6.QtCore import QObject, QProcess, QPropertyAnimation, QEasingCurve, QTimer, Signal,QProcessEnvironment
 from PySide6.QtGui import QTextCursor
 
 class ConsoleManager(QObject):
     # 定义状态信号，供 AppController 监听以改变按钮样式
     process_started = Signal()
     process_finished = Signal()
+    # 新增：定义绘图信号，传递指令字符串
+    draw_signal = Signal(str)
 
     def __init__(self, splitter, console_output):
         super().__init__()
@@ -31,41 +33,85 @@ class ConsoleManager(QObject):
         """进程自然结束或被杀死后的回调"""
         self.process_finished.emit()
 
-    def _start_process(self, file_path):
-        """内部启动逻辑"""
+
+    def _start_process(self, file_path, screen_width=480, screen_height=360):
+        """
+        启动子进程并注入必要的渲染环境变量，兼容 Arcade 与 Turtle 劫持
+        """
+        # 0. 确保旧进程已彻底杀死
         if self.process.state() != QProcess.ProcessState.NotRunning:
             self.process.kill()
-            self.process.waitForFinished(300)
-            
-        # --- 核心修改开始 ---
-        executable = sys.executable
+            self.process.waitForFinished(100)
+
+        # 1. 获取并配置基础环境变量
+        env = QProcessEnvironment.systemEnvironment()
         
-        # 如果是打包环境，sys.executable 会指向 IDE 本身
-        # 在 Mac 的 .app 里，我们需要寻找真正的 Python 解释器
-        if hasattr(sys, 'frozen'):
-            # 对于 macOS 打包，通常需要调用系统 Python 或 指定环境
-            # 临时方案：直接使用 "python3" 或者是你打包带进去的解释器
-            executable = "python3" 
-        # --- 核心修改结束 ---
+        # 注入共享内存的名称和舞台尺寸 (用于 Arcade)
+        env.insert("IDE_SCREEN_WIDTH", str(screen_width))
+        env.insert("IDE_SCREEN_HEIGHT", str(screen_height))
+        env.insert("IDE_SHM_NAME", "arcade_frame")
+
+        # 2. 🚀 关键：注入拦截路径 (PYTHONPATH)
+        # 获取 internal_lib 下各个劫持库的绝对路径
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        
+        # 假设你的目录结构是 internal_lib/turtle.py 和 internal_lib/arcade_override/...
+        # 注意：PYTHONPATH 指向的是【文件夹】，而不是 py 文件本身
+        lib_root = os.path.join(current_dir, "internal_lib") 
+        arcade_override = os.path.join(lib_root, "arcade_override")
+        
+        # 劫持优先级：自定义库 > 原始 PYTHONPATH > 系统库
+        paths_to_inject = [lib_root, arcade_override]
+        
+        existing_pythonpath = env.value("PYTHONPATH")
+        if existing_pythonpath:
+            paths_to_inject.append(existing_pythonpath)
             
-        self.process.start(executable, ["-u", file_path])
+        env.insert("PYTHONPATH", os.pathsep.join(paths_to_inject))
+        
+        # 3. 平台特定适配
+        if sys.platform == "darwin":
+            env.insert("ApplePersistenceIgnoreState", "YES")
+            
+        self.process.setProcessEnvironment(env)
+
+        # 4. 强制清理残留共享内存 (防止 Arcade 启动冲突)
+        cleanup_script = (
+            "from multiprocessing import shared_memory; "
+            "try: "
+            "shm = shared_memory.SharedMemory(name='arcade_frame'); "
+            "shm.close(); shm.unlink(); "
+            "except: pass"
+        )
+        cleanup_proc = QProcess()
+        cleanup_proc.start(sys.executable, ["-c", cleanup_script])
+        cleanup_proc.waitForFinished(500)
+
+        # 5. 正式启动学生脚本
+        # -u 确保 stdout 无缓冲，保证 Turtle 指令实时传回
+        self.process.setProcessEnvironment(env)
+        self.process.start(sys.executable, ["-u", file_path])
         self.process_started.emit()
 
     def handle_stdout(self):
-        """
-        优化后的输出处理：
-        解决卡顿的关键：读取所有可用数据一次性插入，而不是每行插入一次。
-        """
-        # 读取当前缓冲区的所有数据
-        data = self.process.readAllStandardOutput().data().decode("utf-8")
+        # 1. 读取原始字节数据并解码
+        raw_data = self.process.readAllStandardOutput().data().decode("utf-8")
         
-        # 限制文本框最大长度，防止死循环跑太久撑爆内存
-        if self.output.blockCount() > 5000:
-            self.output.clear()
-            
-        # 插入数据并滚动
-        self.output.appendPlainText(data)
-        self.output.moveCursor(QTextCursor.End)
+        # 2. 按行拆分处理，因为指令是以行为单位的
+        lines = raw_data.splitlines()
+        normal_output = []
+
+        for line in lines:
+            if line.startswith("|DRAW|"):
+                # 触发绘图信号
+                self.draw_signal.emit(line)
+            else:
+                normal_output.append(line)
+
+        # 3. 将非指令的普通输出显示到控制台
+        if normal_output:
+            self.output.appendPlainText("\n".join(normal_output))
+            self.output.moveCursor(QTextCursor.End)
 
     def anim_console(self, show=True, duration=250):
         """带 Splitter 同步的动画"""
@@ -110,25 +156,61 @@ class ConsoleManager(QObject):
         total_h = self.splitter.height()
         self.splitter.setSizes([max(0, total_h - h), h])
 
-    def run_script(self, file_path):
-        if not file_path: return
+    def run_script(self, file_path, w=480, h=360): # 🚀 修改：接收 w, h 参数
+        if not file_path: 
+            return
         self.output.clear()
         
+        # 1. 准备环境 (基础配置)
+        env = QProcessEnvironment.systemEnvironment()
+        if sys.platform == "darwin":
+            env.insert("ApplePersistenceIgnoreState", "YES")
+        self.process.setProcessEnvironment(env)
+
+        # 2. 动画调度逻辑
         if self.console_container.height() > 50:
-            self._start_process(file_path)
+            # 容器已经开了，直接启动，并传入尺寸
+            self._start_process(file_path, w, h) # 🚀 转发尺寸变量
         else:
+            # 容器没开，先开动画，完成后启动
             self.anim_console(show=True, duration=250)
-            QTimer.singleShot(80, lambda: self._start_process(file_path))
+            # 🚀 修改：QTimer 回调时也要把变量传给 _start_process
+            QTimer.singleShot(100, lambda: self._start_process(file_path, w, h))
+
+    # modules/console_manager.py
 
     def stop_script(self):
-        """点击停止时，进程结束会自动通过信号重置按钮"""
+        """立即强杀进程，并清理系统资源"""
         if self.process.state() != QProcess.ProcessState.NotRunning:
-            self.process.terminate()
-            if not self.process.waitForFinished(500):
-                self.process.kill()
+            self.process.kill() 
+            self.process.waitForFinished(100)
+        
+        # 🚀 补充：主动触发一次清理脚本
+        # 确保在停止时，系统级的共享内存句柄被真正释放
+        cleanup_script = (
+            "from multiprocessing import shared_memory; "
+            "try: "
+            "shm = shared_memory.SharedMemory(name='arcade_frame'); "
+            "shm.close(); shm.unlink(); "
+            "except: pass"
+        )
+        cleanup_proc = QProcess()
+        cleanup_proc.start(sys.executable, ["-c", cleanup_script])
+        cleanup_proc.waitForFinished(500)
+
         self.anim_console(show=False)
 
     def handle_stderr(self):
         data = self.process.readAllStandardError().data().decode("utf-8")
         self.output.appendPlainText(f"\n❌ Error:\n{data}")
         self.output.moveCursor(QTextCursor.End)
+
+    # 在处理 stdout 的函数里增加判断
+    def handle_output(self, text):
+        if text.startswith("|DRAW|"):
+            # 提取指令并发送给 ScreenManager
+            # 例如: "|DRAW|MOVE|100" -> 发送信号 ("MOVE", 100)
+            self.draw_signal.emit(text)
+        else:
+            # 正常的 print 输出显示到控制台
+            self.append_to_console(text)
