@@ -188,14 +188,14 @@ class AppController:
             # 🚀 建议调用封装好的 reset_session
             # 它会停止 timer 并安全地关闭 shm 句柄
             self.screen.reset_session()
-            print("🛑 已断开图形渲染连接并停止时钟")
+
                 
         # 2. 强杀子进程并清理系统级共享内存
         if hasattr(self, 'console'):
             # 🚀 调用增强后的 stop_script
             # 确保不仅杀了进程，还通过 Python 脚本 unlink 了共享内存
             self.console.stop_script() 
-            print("🛑 子进程已强制结束，系统资源已回收")
+
         
         # 3. 视觉反馈：恢复运行按钮状态
         self._set_run_btn_state(False)
@@ -224,4 +224,13 @@ class AppController:
         # 如果是 Checkable 按钮
         btn.setChecked(active)
     
-    
+
+
+    def cleanup_before_exit(self):
+        """在 IDE 窗口关闭前执行"""
+        if hasattr(self, 'console'):
+            # 停止所有正在运行的脚本
+            self.console.stop_script()
+        if hasattr(self, 'screen'):
+            # 停止渲染时钟
+            self.screen.timer.stop()

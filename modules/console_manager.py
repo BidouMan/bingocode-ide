@@ -119,17 +119,6 @@ class ConsoleManager(QObject):
         if self.anim:
             self.anim.stop()
             
-            # try:
-            #     # 尝试断开所有连接到这个信号的槽
-            #     self.anim.valueChanged.disconnect()
-            # except (TypeError, RuntimeError):
-            #     pass
-                
-            # try:
-            #     self.anim.finished.disconnect()
-            # except (TypeError, RuntimeError):
-            #     pass
-
         if show:
             self.console_container.setMaximumHeight(16777215)
 
@@ -204,6 +193,7 @@ class ConsoleManager(QObject):
         if self.process.state() != QProcess.ProcessState.NotRunning:
             self.process.kill() 
             self.process.waitForFinished(100)
+
         
         # 🚀 补充：主动触发一次清理脚本
         # 确保在停止时，系统级的共享内存句柄被真正释放
@@ -213,6 +203,7 @@ class ConsoleManager(QObject):
             "shm = shared_memory.SharedMemory(name='arcade_frame'); "
             "shm.close(); shm.unlink(); "
             "except: pass"
+            "os._exit(0)"
         )
         cleanup_proc = QProcess()
         cleanup_proc.start(sys.executable, ["-c", cleanup_script])

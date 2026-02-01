@@ -102,7 +102,6 @@ class ScreenManager(QWidget):
             self.frame_ready = False
 
     def paintEvent(self, event):
-        print("DEBUG: 正在执行 paintEvent 重绘屏幕")
         if not hasattr(self, 'canvas') or self.canvas.isNull():
             return
         
@@ -226,7 +225,6 @@ class ScreenManager(QWidget):
             self.update()
 
     def show_status_text(self, text):
-        print(f"DEBUG: show_status_text 开始画字: {text}") # 👈 加这行
         self.canvas.fill(self._bg_color)
         painter = QPainter(self.canvas)
         painter.setRenderHint(QPainter.Antialiasing)
@@ -247,10 +245,20 @@ class ScreenManager(QWidget):
     def reset_session(self):
         self.timer.stop()
         if self.shm:
-            try: 
+            try:
+                # 记录句柄，尝试彻底释放
+                name = self.shm.name
                 self.shm.close()
-                # self.shm.unlink()
-            except: pass
+                # 🚀 尝试 unlink 抹除内存块
+                try:
+                    from multiprocessing import shared_memory
+                    temp_shm = shared_memory.SharedMemory(name=name)
+                    temp_shm.unlink()
+                    temp_shm.close()
+                except FileNotFoundError:
+                    pass # 如果已经被删了，正好
+            except Exception:
+                pass
             self.shm = None
         self.first_instruction = True
 

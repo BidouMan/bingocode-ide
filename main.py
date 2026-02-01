@@ -26,13 +26,18 @@ class BingoIDE(QWidget):
         self.ui.setupUi(self)
         
         # 启动 AppController
-        self.work = AppController(self)
+        self.controller = AppController(self)
 
         # 布局约束设置
         if self.layout():
             self.layout().setSizeConstraint(QLayout.SizeConstraint.SetDefaultConstraint)
             
         self.ui.tab_frame.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+
+    def closeEvent(self, event):
+        self.controller.cleanup_before_exit()
+        event.accept()
 
 # --- 2. 独立的样式加载函数 ---
 def load_stylesheet(file_name):
