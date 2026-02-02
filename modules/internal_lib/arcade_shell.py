@@ -10,9 +10,11 @@ from pyglet import gl as pgl
 
 class MyWindow(real_arcade.Window):
     def __init__(self, width=640, height=480, title="Arcade", **kwargs):
-        kwargs['visible'] = True
+
+        kwargs['visible'] = False # 必须保持可见才能触发渲染
+     
         super().__init__(width, height, title, **kwargs)
-        self.set_location(-2000, -2000)
+
         
         self.phys_w, self.phys_h = self.get_framebuffer_size()
         self.pixel_bytes = self.phys_w * self.phys_h * 4
