@@ -75,72 +75,40 @@ class ScreenManager(QWidget):
         self.update()
 
     def update_frame(self):
-        """主进程：每帧渲染逻辑"""
         if not self.shm:
             try:
                 self.shm = shared_memory.SharedMemory(name="arcade_frame")
-                # 首次连接时，打印内存信息
-                print(f"DEBUG [主进程]: 成功连接共享内存, 物理大小: {self.shm.size}")
-                
-                # 擦除脏数据，防止初次打开花屏
-                self.shm.buf[:self.expected_bytes] = b'\x00' * self.expected_bytes
-                self.first_connect_logged = False # 用于标记是否已经打印过数据采样
+                print("✅ [主进程]: 成功连接到共享内存!")
             except:
-                # 如果没连上，静默退出，不刷屏打印
                 return
 
-        try:
-            # 1. 容错式切片读取
-            view = self.shm.buf[:self.expected_bytes]
-            
-            # 🚀 [核心调试]: 采样检查数据是否有变化
-            # 我们取中间一小段数据计算和，看子进程有没有往里写东西
-            sample_sum = np.frombuffer(view[1000:2000], dtype=np.uint8).sum()
-            
-            # 每 60 帧打印一次主进程观察到的数据情况
-            if not hasattr(self, 'frame_count'): self.frame_count = 0
-            self.frame_count += 1
-            
-            if self.frame_count % 60 == 0:
-                print(f"DEBUG [主进程]: 正在同步第 {self.frame_count} 帧, 采样和: {sample_sum}")
-                if sample_sum == 0:
-                    # 如果子进程说它发了数据，但主进程采样全是 0，说明 shm 映射的不是同一块物理内存
-                    print("⚠️ 警告: 主进程读取到的数据全是 0，请检查共享内存名称是否冲突")
+        # 读取头部尺寸
+        header = np.frombuffer(self.shm.buf[:8], dtype=np.int32)
+        pw, ph = header[0], header[1]
+        
+        if pw <= 0 or ph <= 0: return
 
-            # 2. 包装并转换
-            raw_frame = np.ndarray(
-                (self.logic_h, self.logic_w, 4), 
-                dtype=np.uint8, 
-                buffer=view
-            )
-
-            # 3. 构造 QImage
-            # 如果颜色看起来很怪（比如蓝变红），试着切换 Format_RGBA8888 或 Format_ARGB32
-            img = QImage(raw_frame.data, self.logic_w, self.logic_h, QImage.Format_RGBA8888)
-            
-            # 4. 拷贝并刷新界面
+        # 读取像素数据
+        # 🚀 注意：使用 .copy() 避免内存视图被意外释放导致崩溃
+        img_data = bytes(self.shm.buf[8 : 8 + pw * ph * 4])
+        img = QImage(img_data, pw, ph, QImage.Format_RGBA8888)
+        
+        if not img.isNull():
             self.canvas = img.copy()
-            self.update() # 触发 paintEvent
-        except Exception as e:
-            print(f"❌ [主进程] 渲染解析严重错误: {e}")
-            self.reset_session()
+            self.is_preparing = False # 停止显示“加载中”
+            self.update() # 触发重绘
 
     def paintEvent(self, event):
-        """将 logic 画布缩放到当前 widget 的实际大小"""
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setRenderHint(QPainter.SmoothPixmapTransform) # 开启平滑缩放，解决锯齿
-
-        # 绘制背景
-        painter.setBrush(self._bg_color)
-        painter.setPen(Qt.NoPen)
-        painter.drawRoundedRect(self.rect(), self._border_radius, self._border_radius)
-
-        # 计算等比例缩放后的区域
-        target_rect = self.rect()
-        # 将 logic_w/h 的内容画入当前窗口
-        painter.drawImage(target_rect, self.canvas)
-        painter.end()
+    
+        if self.canvas and not self.canvas.isNull():
+            # 画出真实的 Arcade 画面
+            painter.drawImage(self.rect(), self.canvas)
+        else:
+            # 还没画面时，画个黑色背景占位
+            painter.fillRect(self.rect(), QColor(30, 30, 30))
+            painter.setPen(Qt.white)
+            painter.drawText(self.rect(), Qt.AlignCenter, "等待 Arcade 信号...")
 
     def reset_session(self):
         """重置状态，用于下一次运行"""

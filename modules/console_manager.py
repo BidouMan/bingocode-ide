@@ -36,63 +36,29 @@ class ConsoleManager(QObject):
 
 
     def _start_process(self, file_path, screen_width=480, screen_height=360):
-        """
-        启动子进程并注入必要的渲染环境变量，兼容 Arcade 与 Turtle 劫持
-        """
-        # 0. 确保旧进程已彻底杀死
-        if self.process.state() != QProcess.ProcessState.NotRunning:
-            self.process.kill()
-            self.process.waitForFinished(100)
-
-        # 1. 获取并配置基础环境变量
+        # ... 前面清理进程的代码 ...
         env = QProcessEnvironment.systemEnvironment()
         
-        # 注入共享内存的名称和舞台尺寸 (用于 Arcade)
-        env.insert("IDE_SCREEN_WIDTH", str(screen_width))
-        env.insert("IDE_SCREEN_HEIGHT", str(screen_height))
-        env.insert("IDE_SHM_NAME", "arcade_frame")
-
-        # 2. 🚀 关键：注入拦截路径 (PYTHONPATH)
-        # 获取 internal_lib 下各个劫持库的绝对路径
+        # 获取 internal_lib 的绝对路径
         current_dir = os.path.dirname(os.path.abspath(__file__))
+        lib_path = os.path.join(current_dir, "internal_lib")
         
-        # 假设你的目录结构是 internal_lib/turtle.py 和 internal_lib/arcade_override/...
-        # 注意：PYTHONPATH 指向的是【文件夹】，而不是 py 文件本身
-        lib_root = os.path.join(current_dir, "internal_lib") 
-        arcade_override = os.path.join(lib_root, "arcade_override")
-        
-        # 劫持优先级：自定义库 > 原始 PYTHONPATH > 系统库
-        paths_to_inject = [lib_root, arcade_override]
-        
-        existing_pythonpath = env.value("PYTHONPATH")
-        if existing_pythonpath:
-            paths_to_inject.append(existing_pythonpath)
-            
-        env.insert("PYTHONPATH", os.pathsep.join(paths_to_inject))
-        
-        # 3. 平台特定适配
-        if sys.platform == "darwin":
-            env.insert("ApplePersistenceIgnoreState", "YES")
-            
-        self.process.setProcessEnvironment(env)
+        # 🚀 调试打印：核对这个路径在不在你的访达(Finder)里真实存在
+        print(f"DEBUG [主进程]: 正在尝试注入的目录是: {lib_path}")
+        if not os.path.exists(os.path.join(lib_path, "arcade_shell.py")):
+            print(f"❌ 严重警告: 在 {lib_path} 下没找到 arcade_shell.py!")
 
-        # 4. 强制清理残留共享内存 (防止 Arcade 启动冲突)
-        cleanup_script = (
-            "from multiprocessing import shared_memory; "
-            "try: "
-            "shm = shared_memory.SharedMemory(name='arcade_frame'); "
-            "shm.close(); shm.unlink(); "
-            "except: pass"
-        )
-        cleanup_proc = QProcess()
-        cleanup_proc.start(sys.executable, ["-c", cleanup_script])
-        cleanup_proc.waitForFinished(500)
+        # 强制注入
+        old_pp = env.value("PYTHONPATH", "")
+        env.insert("PYTHONPATH", f"{lib_path}{os.pathsep}{old_pp}" if old_pp else lib_path)
+        
+        # 🚀 绝招：告诉 Python 不要从当前脚本目录先找，确保先走 PYTHONPATH
+        env.insert("PYTHON_PATH_FORCE", "1") 
 
-        # 5. 正式启动学生脚本
-        # -u 确保 stdout 无缓冲，保证 Turtle 指令实时传回
         self.process.setProcessEnvironment(env)
         self.process.start(sys.executable, ["-u", file_path])
-        self.process_started.emit()
+
+
 
     def handle_stdout(self):
         # 1. 读取原始字节数据并解码

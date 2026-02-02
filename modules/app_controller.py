@@ -32,7 +32,9 @@ class AppController:
         # 传入 container，内部会自动根据 stage_width/height 准备画布
         self.screen = ScreenManager(self.ui.screen_frame)
         self.screen.setObjectName("game_screen")
+        # self.screen.setSizePolicy(QSizePolicy.Expanding,QSizePolicy.Expanding,)
         self.ui.screen_frame.layout().addWidget(self.screen)
+        # self.screen.show()
         
         self.file_menu = FileMenu(main_window)
 
@@ -123,46 +125,46 @@ class AppController:
         file_path = editor.file_path
         if file_path and os.path.exists(file_path):
             content = editor.toPlainText()
-            # 1. 识别模式
-            self.is_turtle = "import turtle" in content or "from turtle" in content
-            self.is_arcade = "import arcade" in content or "from arcade" in content
             
-            # 2. 确定逻辑尺寸 (Turtle 默认 480x360 体验更好，若需统一 320 则手动改回)
-            # curr_w, curr_h = (480, 360) if self.is_turtle else (self.stage_width, self.stage_height)
+            # 1. 识别模式 (增加对 shell 的识别) 🚀
+            self.is_turtle = "import turtle" in content or "from turtle" in content
+            self.is_arcade = "import arcade" in content or "from arcade" in content or "arcade_shell" in content
+            
+            # 设置准备状态，防止进程结束信号误干扰
+            self.is_preparing = True 
+
             curr_w, curr_h = self.stage_width, self.stage_height
 
             if hasattr(self, 'screen'):
-                self.handle_stop_python()
+                self.handle_stop_python() # 停止旧的
                 self.screen.reset_session()
                 QApplication.processEvents()
 
-                # 🚀 先设模式 (确定颜色)
                 mode = 'turtle' if self.is_turtle else 'arcade'
                 self.screen.set_render_mode(mode) 
-
-                # 🚀 再设尺寸 (如果尺寸变了，set_logic_size 内部会用上面的颜色 fill)
                 self.screen.set_logic_size(curr_w, curr_h)
 
-                # 🚀 最后画字
-                if not self.is_turtle:
-                    if self.is_arcade:
-                        status_msg = "🚀 游戏加载中..."
-                    else:
-                        status_msg = "⚙️ 程序运行中..."
+                if self.is_arcade:
+                    status_msg = "🚀 游戏加载中..."
+                else:
+                    status_msg = "⚙️ 程序运行中..."
 
-                    self.screen.show_status_text(status_msg)
-                    self.screen.repaint()
+                self.screen.show_status_text(status_msg)
+                self.screen.repaint()
 
-            # 🚀 5. 启动脚本（内部不要再调 stop）
+            # 2. 启动脚本
             self.console.run_script(file_path, curr_w, curr_h)
             
+            # 3. 核心：只有 is_arcade 为 True，这里的 timer 才会启动 🚀
             if self.is_arcade:
-                # 即使设置 5500ms，现在的字也不会消失了
-                QTimer.singleShot(300, self._start_arcade_render)
+                QTimer.singleShot(500, self._start_arcade_render)
         else:
             QMessageBox.warning(self.window, "提示", "请先保存文件再运行")
 
+
+
     def _start_arcade_render(self):
+        print("TIMER STARTED")
         self.is_preparing = False
         if self.is_arcade:
             self.screen.timer.start(16)
