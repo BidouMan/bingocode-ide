@@ -6,6 +6,7 @@ from PySide6.QtGui import QPainter, QImage, QColor, QPen, QResizeEvent, QPainter
 from PySide6.QtCore import Qt, QPointF, QTimer, Property
 import math
 from multiprocessing import shared_memory
+import numpy as np
 
 class ScreenManager(QWidget):
     def __init__(self, parent_frame):
@@ -15,6 +16,7 @@ class ScreenManager(QWidget):
         # 1. 核心属性
         self.logic_w = 480
         self.logic_h = 360
+        self.expected_bytes = self.logic_w*self.logic_h*4 #RGBA站用字节
 
         # 🚀 修正：必须初始化私有变量，否则 QSS 属性接口会报错
         self._turtle_bg = QColor("#FFFFFF")
@@ -23,7 +25,7 @@ class ScreenManager(QWidget):
         self._bg_color = self._arcade_bg
         self._border_radius = 6
        
-        self.frame_ready = False
+        # self.frame_ready = False
         # 2. 渲染时钟
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_frame)
@@ -32,6 +34,8 @@ class ScreenManager(QWidget):
         self.canvas = QImage(self.logic_w, self.logic_h, QImage.Format_ARGB32)
         # self.canvas.fill(self._bg_color)
         
+
+        # --- turtle用 ------
         self.current_pos = QPointF(self.logic_w/2, self.logic_h/2)
         self.current_angle = 0  
         self.pen_is_down = True
@@ -71,68 +75,139 @@ class ScreenManager(QWidget):
         self.update()
 
     def update_frame(self):
-        # 🚀 新增：如果进程还没启动完，绝对不准碰画布
-        if getattr(self, 'is_locked', False):
-            return
-        try:
-            if not self.shm:
-                try:
-                    # 尝试连接共享内存
-                    self.shm = shared_memory.SharedMemory(name="arcade_frame")
-                    # 🚀 关键：连接上的瞬间，先不准画，等下一轮
-                    self.frame_ready = False 
-                    return 
-                except FileNotFoundError:
-                    return 
-
-            # 🚀 只有第二次进入且 shm 已存在时，才认为新进程的数据可能到了
-            if not self.frame_ready:
-                self.frame_ready = True
+        """主进程：每帧渲染逻辑"""
+        if not self.shm:
+            try:
+                self.shm = shared_memory.SharedMemory(name="arcade_frame")
+                # 首次连接时，打印内存信息
+                print(f"DEBUG [主进程]: 成功连接共享内存, 物理大小: {self.shm.size}")
+                
+                # 擦除脏数据，防止初次打开花屏
+                self.shm.buf[:self.expected_bytes] = b'\x00' * self.expected_bytes
+                self.first_connect_logged = False # 用于标记是否已经打印过数据采样
+            except:
+                # 如果没连上，静默退出，不刷屏打印
                 return
 
-            w, h = self.logic_w, self.logic_h
-            raw_image = QImage(self.shm.buf, w, h, QImage.Format_RGBA8888)
+        try:
+            # 1. 容错式切片读取
+            view = self.shm.buf[:self.expected_bytes]
             
-            if not raw_image.isNull():
-                # 只有拿到有效图像才覆盖
-                self.canvas = raw_image.mirrored(False, True) 
-                self.update()
-        except Exception:
-            self.shm = None
-            self.frame_ready = False
+            # 🚀 [核心调试]: 采样检查数据是否有变化
+            # 我们取中间一小段数据计算和，看子进程有没有往里写东西
+            sample_sum = np.frombuffer(view[1000:2000], dtype=np.uint8).sum()
+            
+            # 每 60 帧打印一次主进程观察到的数据情况
+            if not hasattr(self, 'frame_count'): self.frame_count = 0
+            self.frame_count += 1
+            
+            if self.frame_count % 60 == 0:
+                print(f"DEBUG [主进程]: 正在同步第 {self.frame_count} 帧, 采样和: {sample_sum}")
+                if sample_sum == 0:
+                    # 如果子进程说它发了数据，但主进程采样全是 0，说明 shm 映射的不是同一块物理内存
+                    print("⚠️ 警告: 主进程读取到的数据全是 0，请检查共享内存名称是否冲突")
+
+            # 2. 包装并转换
+            raw_frame = np.ndarray(
+                (self.logic_h, self.logic_w, 4), 
+                dtype=np.uint8, 
+                buffer=view
+            )
+
+            # 3. 构造 QImage
+            # 如果颜色看起来很怪（比如蓝变红），试着切换 Format_RGBA8888 或 Format_ARGB32
+            img = QImage(raw_frame.data, self.logic_w, self.logic_h, QImage.Format_RGBA8888)
+            
+            # 4. 拷贝并刷新界面
+            self.canvas = img.copy()
+            self.update() # 触发 paintEvent
+        except Exception as e:
+            print(f"❌ [主进程] 渲染解析严重错误: {e}")
+            self.reset_session()
 
     def paintEvent(self, event):
-        if not hasattr(self, 'canvas') or self.canvas.isNull():
-            return
+        """将 logic 画布缩放到当前 widget 的实际大小"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform) # 开启平滑缩放，解决锯齿
+
+        # 绘制背景
+        painter.setBrush(self._bg_color)
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(self.rect(), self._border_radius, self._border_radius)
+
+        # 计算等比例缩放后的区域
+        target_rect = self.rect()
+        # 将 logic_w/h 的内容画入当前窗口
+        painter.drawImage(target_rect, self.canvas)
+        painter.end()
+
+    def reset_session(self):
+        """重置状态，用于下一次运行"""
+        self.timer.stop()
+        if self.shm:
+            try:
+                self.shm.close()
+            except: pass
+            self.shm = None
+        print("🔄 ScreenManager 会话已重置")
+
+
+
+    def clear_canvas(self):
+        """清空画布并显示启动反馈"""
+        self.canvas = QImage(self.logic_w, self.logic_h, QImage.Format_ARGB32)
+        self.canvas.fill(self._bg_color)
         
-        try:
-            painter = QPainter(self)
-            if not painter.isActive():
-                return
-                
-            painter.setRenderHint(QPainter.Antialiasing)
-            # 🚀 关键：如果物理缩放了，开启平滑缩放
-            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        # 🚀 在画布上绘制 Loading 文字
+        painter = QPainter(self.canvas)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # 自动适配文字颜色：深色背景用灰色，浅色用深灰
+        text_color = QColor("#888888") if self._bg_color.lightness() > 128 else QColor("#AAAAAA")
+        painter.setPen(text_color)
+        
+        font = painter.font()
+        font.setFamily("Microsoft YaHei") # 确保中文字体显示
+        font.setPointSize(12)
+        painter.setFont(font)
+        
+        # 在画布中心绘制
+        painter.drawText(self.canvas.rect(), Qt.AlignCenter, "🚀 程序启动中...")
+        painter.end()
 
-            path = QPainterPath()
-            rect = self.rect()
-            if rect.width() <= 0 or rect.height() <= 0:
-                painter.end()
-                return
+        # 重置 Turtle 状态坐标
+        self.current_pos = QPointF(self.logic_w / 2, self.logic_h / 2)
+        self.current_angle = 0
+        self.update()
 
-            path.addRoundedRect(rect, self._border_radius, self._border_radius)
-            
-            # # 1. 绘制背景
-            # painter.fillPath(path, self._bg_color)
+    def clear_to_empty(self):
+        """还原为纯净背景，不带任何文字"""
+        if hasattr(self, 'canvas') and not self.canvas.isNull():
+            self.canvas.fill(self._bg_color)
+            self.update()
 
-            # 2. 裁切并绘制
-            painter.setClipPath(path)
-            # 🚀 关键点：将 logic 尺寸的 canvas 自动拉伸填充到当前 QWidget 的物理 rect 中
-            painter.drawImage(rect, self.canvas)
-            
-            painter.end()
-        except Exception as e:
-            print(f"⚠️ Render Error: {e}")
+    def show_status_text(self, text):
+        self.canvas.fill(self._bg_color)
+        painter = QPainter(self.canvas)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # 稍微淡一点的灰色，看起来不刺眼
+        painter.setPen(QColor("#666666"))
+        
+        font = painter.font()
+        font.setFamily("HarmonyOS Sans SC")
+        font.setPointSize(14) # 稍微小一点，显得精致
+        font.setWeight(QFont.Medium)
+        painter.setFont(font)
+        
+        painter.drawText(self.canvas.rect(), Qt.AlignCenter, text)
+        painter.end()
+        self.update()
+
+    def resizeEvent(self, event: QResizeEvent):
+        super().resizeEvent(event)
+
 
     # ==========================
     # 🐢 Turtle 模式专属逻辑
@@ -191,81 +266,7 @@ class ScreenManager(QWidget):
             # 这里的 print 建议只在 debug 模式开启，避免阻塞渲染
             pass
 
-    def clear_canvas(self):
-        """清空画布并显示启动反馈"""
-        self.canvas = QImage(self.logic_w, self.logic_h, QImage.Format_ARGB32)
-        self.canvas.fill(self._bg_color)
-        
-        # 🚀 在画布上绘制 Loading 文字
-        painter = QPainter(self.canvas)
-        painter.setRenderHint(QPainter.Antialiasing)
-        
-        # 自动适配文字颜色：深色背景用灰色，浅色用深灰
-        text_color = QColor("#888888") if self._bg_color.lightness() > 128 else QColor("#AAAAAA")
-        painter.setPen(text_color)
-        
-        font = painter.font()
-        font.setFamily("Microsoft YaHei") # 确保中文字体显示
-        font.setPointSize(12)
-        painter.setFont(font)
-        
-        # 在画布中心绘制
-        painter.drawText(self.canvas.rect(), Qt.AlignCenter, "🚀 程序启动中...")
-        painter.end()
-
-        # 重置 Turtle 状态坐标
-        self.current_pos = QPointF(self.logic_w / 2, self.logic_h / 2)
-        self.current_angle = 0
-        self.update()
-
-    def clear_to_empty(self):
-        """还原为纯净背景，不带任何文字"""
-        if hasattr(self, 'canvas') and not self.canvas.isNull():
-            self.canvas.fill(self._bg_color)
-            self.update()
-
-    def show_status_text(self, text):
-        self.canvas.fill(self._bg_color)
-        painter = QPainter(self.canvas)
-        painter.setRenderHint(QPainter.Antialiasing)
-        
-        # 稍微淡一点的灰色，看起来不刺眼
-        painter.setPen(QColor("#666666"))
-        
-        font = painter.font()
-        font.setFamily("HarmonyOS Sans SC")
-        font.setPointSize(14) # 稍微小一点，显得精致
-        font.setWeight(QFont.Medium)
-        painter.setFont(font)
-        
-        painter.drawText(self.canvas.rect(), Qt.AlignCenter, text)
-        painter.end()
-        self.update()
-
-    def reset_session(self):
-        self.timer.stop()
-        if self.shm:
-            try:
-                # 记录句柄，尝试彻底释放
-                name = self.shm.name
-                self.shm.close()
-                # 🚀 尝试 unlink 抹除内存块
-                try:
-                    from multiprocessing import shared_memory
-                    temp_shm = shared_memory.SharedMemory(name=name)
-                    temp_shm.unlink()
-                    temp_shm.close()
-                except FileNotFoundError:
-                    pass # 如果已经被删了，正好
-            except Exception:
-                pass
-            self.shm = None
-        self.first_instruction = True
-
-
-    def resizeEvent(self, event: QResizeEvent):
-        super().resizeEvent(event)
-
+    
     # ---------- QSS 属性接口 ----------
     @Property(int)
     def borderRadius(self): return self._border_radius
