@@ -37,6 +37,13 @@ def build():
         
         f"--add-data=assets{sep}assets",
         f"--add-data=modules{sep}modules",
+
+        "--hidden-import=arcade",
+        "--hidden-import=pyglet",
+        "--hidden-import=PIL",
+        "--hidden-import=PIL.Image",
+        
+  
         "--collect-all=jedi",
         "--collect-all=parso",
     ]

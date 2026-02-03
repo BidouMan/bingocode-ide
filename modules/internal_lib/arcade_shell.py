@@ -8,10 +8,11 @@ import ctypes
 # 🚀 绕过所有 Python 层级的 gl 模块，直接从底层导入
 from pyglet import gl as pgl 
 
+
 class MyWindow(real_arcade.Window):
     def __init__(self, width=640, height=480, title="Arcade", **kwargs):
 
-        kwargs['visible'] = False # 必须保持可见才能触发渲染
+        kwargs['visible'] = False 
      
         super().__init__(width, height, title, **kwargs)
 

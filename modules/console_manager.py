@@ -36,27 +36,28 @@ class ConsoleManager(QObject):
 
 
     def _start_process(self, file_path, screen_width=480, screen_height=360):
-        # ... 前面清理进程的代码 ...
         env = QProcessEnvironment.systemEnvironment()
+        env.insert("IS_CHILD_PROCESS", "TRUE")
         
-        # 获取 internal_lib 的绝对路径
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        lib_path = os.path.join(current_dir, "internal_lib")
+        # 🚀 适配打包后的路径
+        if hasattr(sys, '_MEIPASS'):
+            # 打包环境：modules 在 _MEIPASS 目录下
+            base_dir = sys._MEIPASS
+        else:
+            # 开发环境
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            
+        lib_path = os.path.join(base_dir, "modules", "internal_lib")
         
-        # 🚀 调试打印：核对这个路径在不在你的访达(Finder)里真实存在
-        print(f"DEBUG [主进程]: 正在尝试注入的目录是: {lib_path}")
-        if not os.path.exists(os.path.join(lib_path, "arcade_shell.py")):
-            print(f"❌ 严重警告: 在 {lib_path} 下没找到 arcade_shell.py!")
-
-        # 强制注入
+        # 确保注入
         old_pp = env.value("PYTHONPATH", "")
         env.insert("PYTHONPATH", f"{lib_path}{os.pathsep}{old_pp}" if old_pp else lib_path)
         
-        # 🚀 绝招：告诉 Python 不要从当前脚本目录先找，确保先走 PYTHONPATH
-        env.insert("PYTHON_PATH_FORCE", "1") 
+        # 打印一下，方便你在控制台看到路径是否正确
+        print(f"DEBUG: 子进程库路径: {lib_path}")
 
         self.process.setProcessEnvironment(env)
-        self.process.start(sys.executable, ["-u", file_path])
+        self.process.start(sys.executable, [file_path]) # 去掉 -u，直接传路径
 
 
 
