@@ -85,6 +85,8 @@ class AppController:
 
         # 🚀 核心指令对接：将控制台捕获的 JSON 指令喂给舞台
         self.console.draw_signal.connect(self.stage.handle_instruction)
+        # self.console.draw_signal.connect(lambda data: print(f"DEBUG Controller received: {data}"))
+
 
     def handle_open_file(self):
         file_path, _ = QFileDialog.getOpenFileName(self.window, "选择文件", "", "Python Files (*.py);;All Files (*)")
