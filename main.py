@@ -62,48 +62,33 @@ def run_app():
 if __name__ == "__main__":
     multiprocessing.freeze_support()
     
-    # 🚀 拦截并手动执行
     if os.environ.get("IS_CHILD_PROCESS") == "TRUE":
-        # 🚀 1. 路径补丁：确保能找到打包后的库
+        # 🚀 1. 路径补丁
         if hasattr(sys, '_MEIPASS'):
             if sys._MEIPASS not in sys.path:
                 sys.path.insert(0, sys._MEIPASS)
+            # 也要把 modules/internal_lib 加入，防止找不到 arcade_shell
+            lib_path = os.path.join(sys._MEIPASS, "modules", "internal_lib")
+            if lib_path not in sys.path:
+                sys.path.insert(0, lib_path)
 
-        # 🚀 2. 核心补丁：伪造 arcade 版本号，防止它去磁盘读那个“变文件夹”的 VERSION 文件
+        # 🚀 2. 伪造版本号 (解决 VERSION 报错)
         try:
             import types
-            mock_ver = types.ModuleType("arcade.version")
-            mock_ver.VERSION = "2.6.17" # 手动定义版本字符串
-            sys.modules["arcade.version"] = mock_ver
-            print("DEBUG: 已成功注入伪造的 Arcade 版本号")
-        except Exception as e:
-            print(f"DEBUG: 注入版本号失败: {e}")
+            m = types.ModuleType("arcade.version")
+            m.VERSION = "2.6.17"
+            sys.modules["arcade.version"] = m
+        except: pass
 
-
+        # 🚀 3. 运行脚本
         if len(sys.argv) > 1:
             script_to_run = sys.argv[-1]
             if os.path.exists(script_to_run):
-                # 🚀 确保子进程的 sys.path 包含打包后的库路径
-                if hasattr(sys, '_MEIPASS'):
-                    # 将打包根目录加入路径，这样才能找到内置的 arcade
-                    if sys._MEIPASS not in sys.path:
-                        sys.path.insert(0, sys._MEIPASS)
-                
-                # 修正工作目录，防止脚本读取相对路径资源失败
                 os.chdir(os.path.dirname(os.path.abspath(script_to_run)))
-                
-                sys.argv = [script_to_run]
                 with open(script_to_run, "r", encoding="utf-8") as f:
                     code = f.read()
-                
-                # 运行环境准备
-                global_vars = {
-                    "__name__": "__main__",
-                    "__file__": script_to_run,
-                    "__builtins__": __builtins__
-                }
-                
-                exec(code, global_vars)
+                sys.argv = [script_to_run]
+                exec(code, {"__name__": "__main__", "__file__": script_to_run})
         sys.exit(0) 
     else:
         run_app()

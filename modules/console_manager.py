@@ -41,23 +41,30 @@ class ConsoleManager(QObject):
         
         # 🚀 适配打包后的路径
         if hasattr(sys, '_MEIPASS'):
-            # 打包环境：modules 在 _MEIPASS 目录下
             base_dir = sys._MEIPASS
+            # 路径逻辑正确：BingoCodeIDE.app/Contents/MacOS -> Contents -> Helpers
+            macos_dir = os.path.dirname(sys.executable)
+            contents_dir = os.path.dirname(macos_dir)
+            executable = os.path.join(contents_dir, "Helpers", "ScriptRunner")
         else:
-            # 开发环境
+            # 开发环境下：找到 main.py 所在的根目录
+            # 注意：这里的 dirname 层级取决于 console_manager.py 的深度
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            
+            executable = sys.executable 
+
+        # 🚀 关键改进：必须将 internal_lib 注入到 PYTHONPATH
+        # 否则子进程即便启动了，也无法通过 import arcade_shell 加载劫持层
         lib_path = os.path.join(base_dir, "modules", "internal_lib")
-        
-        # 确保注入
         old_pp = env.value("PYTHONPATH", "")
-        env.insert("PYTHONPATH", f"{lib_path}{os.pathsep}{old_pp}" if old_pp else lib_path)
+        new_pp = f"{lib_path}{os.pathsep}{old_pp}" if old_pp else lib_path
+        env.insert("PYTHONPATH", new_pp)
         
-        # 打印一下，方便你在控制台看到路径是否正确
+        print(f"DEBUG: 启动程序: {executable}")
         print(f"DEBUG: 子进程库路径: {lib_path}")
 
         self.process.setProcessEnvironment(env)
-        self.process.start(sys.executable, [file_path]) # 去掉 -u，直接传路径
+        # 启动 ScriptRunner
+        self.process.start(executable, [file_path])
 
 
 
