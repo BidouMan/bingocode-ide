@@ -15,9 +15,10 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLineEdit,
-    QPlainTextEdit, QPushButton, QSizePolicy, QSpacerItem,
-    QSplitter, QStackedWidget, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QFrame, QGraphicsView, QHBoxLayout,
+    QLineEdit, QPlainTextEdit, QPushButton, QSizePolicy,
+    QSpacerItem, QSplitter, QStackedWidget, QVBoxLayout,
+    QWidget)
 import resources_rc
 
 class Ui_Form(object):
@@ -248,16 +249,14 @@ class Ui_Form(object):
 
         self.verticalLayout_2.addWidget(self.screen_btn_frame)
 
-        self.screen_frame = QFrame(self.sidebar_frame)
-        self.screen_frame.setObjectName(u"screen_frame")
-        sizePolicy1.setHeightForWidth(self.screen_frame.sizePolicy().hasHeightForWidth())
-        self.screen_frame.setSizePolicy(sizePolicy1)
-        self.screen_frame.setMinimumSize(QSize(320, 240))
-        self.screen_frame.setMaximumSize(QSize(320, 240))
-        self.screen_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        self.screen_frame.setFrameShadow(QFrame.Shadow.Raised)
+        self.game_view = QGraphicsView(self.sidebar_frame)
+        self.game_view.setObjectName(u"game_view")
+        sizePolicy1.setHeightForWidth(self.game_view.sizePolicy().hasHeightForWidth())
+        self.game_view.setSizePolicy(sizePolicy1)
+        self.game_view.setMinimumSize(QSize(320, 240))
+        self.game_view.setMaximumSize(QSize(320, 240))
 
-        self.verticalLayout_2.addWidget(self.screen_frame)
+        self.verticalLayout_2.addWidget(self.game_view)
 
         self.outline_menu_frame = QFrame(self.sidebar_frame)
         self.outline_menu_frame.setObjectName(u"outline_menu_frame")
