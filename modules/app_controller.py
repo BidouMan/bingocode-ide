@@ -15,6 +15,7 @@ class AppController:
         self.window = main_window
         self.ui: Ui_Form = main_window.ui
         self.last_active_index = -1
+        self._is_adjusting = False
         
         # 🚀 1. 核心分辨率：统一使用 640x480 (自研引擎黄金比例)
         self.stage_width = 640   
@@ -163,26 +164,20 @@ class AppController:
             self.stage.reset_session()
     
     def enter_fullscreen(self):
-        """切换到全屏预览模式"""
-        # 1. 切换到全屏页面 (Page 1)
+        # 1. 切换页面
         self.ui.change_page.setCurrentIndex(1)
 
         # 2. 搬运 game_view
-        # 将游戏画面从编辑容器移动到全屏专用的 view_frame 中
         if self.ui.fullscreen_view_frame.layout():
-            # 这一步会自动把 game_view 从旧容器中解绑并加入新容器
             self.ui.fullscreen_view_frame.layout().addWidget(self.ui.game_view)
-            # 确保新容器内部没有边距，让画面能贴合边缘
             self.ui.fullscreen_view_frame.layout().setContentsMargins(0, 0, 0, 0)
 
-        # 3. 彻底释放 game_view 的尺寸限制
-        # 在 Page 0 可能设置了 320x240 的 FixedSize，这里必须清空，否则画面大不了
+        # 3. 彻底重置 game_view 的所有人工限制
         self.ui.game_view.setMinimumSize(0, 0)
         self.ui.game_view.setMaximumSize(16777215, 16777215)
-        # 设置为 Expanding 才能跟随父容器 (fullscreen_view_frame) 缩放
         self.ui.game_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        # 4. 触发一次初始比例校准
+        # 4. 执行第一次对齐
         self.adjust_fullscreen_layout()
 
     def exit_fullscreen(self):
@@ -197,23 +192,65 @@ class AppController:
         QTimer.singleShot(50, self.stage.apply_fit)
     
     def adjust_fullscreen_layout(self):
-        # 1. 获取舞台容器目前的物理空间
-        # 此时因为 Designer 设了 Stretch=1，wrapper 已经横向铺满了
-        container_w = self.ui.central_stage_wrapper.width()
-        container_h = self.ui.central_stage_wrapper.height()
+        full_w = self.window.width()
+        full_h = self.window.height()
 
-        if container_h <= 100 or container_w <= 100:
+        # 2. 减去工具栏固定的高度 (假设 30 或动态获取)
+        # 这样 available_h 就变成了一个“死”的上限，不受内部控件影响
+        tool_h = self.ui.fullscreen_tool_bar.height()
+        if tool_h <= 0: tool_h = 30 # 防止初始化时高度为0
+        
+        available_w = full_w - 40 # 留出一点左右边距边差
+        available_h = full_h - tool_h - 20 
+
+        if available_w <= 100 or available_h <= 100:
             return
 
-        # 2. 算 4:3 比例
-        target_w = container_h * (4 / 3)
-        target_h = container_h
+        # 3. 计算 4:3 比例
+        # 算出在当前窗口高度下，最大的 4:3 宽度是多少
+        target_h = available_h
+        target_w = int(target_h * (4 / 3))
 
-        # 如果宽度超标，则以宽度为基准反算
-        if target_w > container_w:
-            target_w = container_w
-            target_h = target_w * (3 / 4)
+        # 如果算出来的宽度超过了窗口宽度，则反过来以宽度为准
+        if target_w > available_w:
+            target_w = available_w
+            target_h = int(target_w * (3 / 4))
 
-        # 3. 🚀 只改这一行：直接设置显示框的大小
-        # 左右弹簧会自动处理剩余空间，完全不抖动
-        self.ui.fullscreen_view_frame.setFixedSize(int(target_w), int(target_h))
+        # 4. 🚀 关键步骤：限制 Wrapper 的最大尺寸，防止它去推挤主窗口
+        # 这一行是“灭火器”，它告诉布局系统：无论里面多大，你这个容器不准超过窗口大小
+        self.ui.central_stage_wrapper.setMaximumSize(full_w, full_h)
+
+        # 5. 执行缩放
+        # 既然 target_w/h 是基于 win.width() 算出来的，它永远不会导致 win 变大
+        if self.ui.fullscreen_view_frame.size() != (target_w, target_h):
+            self.ui.fullscreen_view_frame.setFixedSize(target_w, target_h)
+            print(f"[FIXED] Set Frame to {target_w}x{target_h} | Win was {full_w}")
+        
+        
+    # 🚀 🚀 🚀 [断路器：关键测试] 🚀 🚀 🚀
+    # 我已经把执行代码全部注释了。
+    # pass 
+    # self.ui.fullscreen_view_frame.setFixedSize(target_w, target_h)
+
+    # 🚀 暂时注释掉下面这行执行代码，观察窗口是否还延伸！
+    # self.ui.fullscreen_view_frame.setFixedSize(target_w, target_h)
+        # # 1. 获取舞台容器目前的物理空间
+        # # 此时因为 Designer 设了 Stretch=1，wrapper 已经横向铺满了
+        # container_w = self.ui.central_stage_wrapper.width()
+        # container_h = self.ui.central_stage_wrapper.height()
+
+        # if container_h <= 100 or container_w <= 100:
+        #     return
+
+        # # 2. 算 4:3 比例
+        # target_w = container_h * (4 / 3)
+        # target_h = container_h
+
+        # # 如果宽度超标，则以宽度为基准反算
+        # if target_w > container_w:
+        #     target_w = container_w
+        #     target_h = target_w * (3 / 4)
+
+        # # 3. 🚀 只改这一行：直接设置显示框的大小
+        # # 左右弹簧会自动处理剩余空间，完全不抖动
+        # self.ui.fullscreen_view_frame.setFixedSize(int(target_w), int(target_h))

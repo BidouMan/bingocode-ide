@@ -1165,8 +1165,8 @@
      <widget class="QWidget" name="fullscreen">
       <property name="minimumSize">
        <size>
-        <width>640</width>
-        <height>480</height>
+        <width>0</width>
+        <height>0</height>
        </size>
       </property>
       <layout class="QVBoxLayout" name="verticalLayout_8">
@@ -1188,7 +1188,7 @@
        <item>
         <widget class="QFrame" name="bg_layout">
          <property name="sizePolicy">
-          <sizepolicy hsizetype="Ignored" vsizetype="Expanding">
+          <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
            <horstretch>0</horstretch>
            <verstretch>0</verstretch>
           </sizepolicy>
@@ -1199,7 +1199,7 @@
          <property name="frameShadow">
           <enum>QFrame::Shadow::Raised</enum>
          </property>
-         <layout class="QVBoxLayout" name="verticalLayout_9" stretch="1,0">
+         <layout class="QVBoxLayout" name="verticalLayout_9" stretch="0,1">
           <property name="spacing">
            <number>0</number>
           </property>
@@ -1363,7 +1363,7 @@
           <item>
            <widget class="QFrame" name="central_stage_wrapper">
             <property name="sizePolicy">
-             <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+             <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
               <horstretch>0</horstretch>
               <verstretch>0</verstretch>
              </sizepolicy>
@@ -1413,8 +1413,8 @@
                </property>
                <property name="minimumSize">
                 <size>
-                 <width>320</width>
-                 <height>240</height>
+                 <width>0</width>
+                 <height>0</height>
                 </size>
                </property>
                <property name="frameShape">
