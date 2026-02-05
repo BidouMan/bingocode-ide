@@ -79,13 +79,17 @@ class AppController:
         self.ui.btn_run.clicked.connect(self.handle_run_python)
         if hasattr(self.ui, 'btn_stop'):
             self.ui.btn_stop.clicked.connect(self.handle_stop_python)
+        
+        # page0 上的全屏按钮
+        self.ui.btn_full_screen.clicked.connect(self.enter_fullscreen)
+        # page1 上的退出全屏按钮 (名字请根据你 Designer 里的实际情况修改)
+        self.ui.fullscreen_btn_unfull.clicked.connect(self.exit_fullscreen)
 
         # 视觉效果：TabBar 高亮更新
         self.tab_bar.currentChanged.connect(self.update_tab_buttons)
 
         # 🚀 核心指令对接：将控制台捕获的 JSON 指令喂给舞台
         self.console.draw_signal.connect(self.stage.handle_instruction)
-        # self.console.draw_signal.connect(lambda data: print(f"DEBUG Controller received: {data}"))
 
 
     def handle_open_file(self):
@@ -157,3 +161,59 @@ class AppController:
             self.console.stop_script()
         if hasattr(self, 'stage'):
             self.stage.reset_session()
+    
+    def enter_fullscreen(self):
+        """切换到全屏预览模式"""
+        # 1. 切换到全屏页面 (Page 1)
+        self.ui.change_page.setCurrentIndex(1)
+
+        # 2. 搬运 game_view
+        # 将游戏画面从编辑容器移动到全屏专用的 view_frame 中
+        if self.ui.fullscreen_view_frame.layout():
+            # 这一步会自动把 game_view 从旧容器中解绑并加入新容器
+            self.ui.fullscreen_view_frame.layout().addWidget(self.ui.game_view)
+            # 确保新容器内部没有边距，让画面能贴合边缘
+            self.ui.fullscreen_view_frame.layout().setContentsMargins(0, 0, 0, 0)
+
+        # 3. 彻底释放 game_view 的尺寸限制
+        # 在 Page 0 可能设置了 320x240 的 FixedSize，这里必须清空，否则画面大不了
+        self.ui.game_view.setMinimumSize(0, 0)
+        self.ui.game_view.setMaximumSize(16777215, 16777215)
+        # 设置为 Expanding 才能跟随父容器 (fullscreen_view_frame) 缩放
+        self.ui.game_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        # 4. 触发一次初始比例校准
+        self.adjust_fullscreen_layout()
+
+    def exit_fullscreen(self):
+        self.ui.change_page.setCurrentIndex(0)
+    
+        # 1. 搬回 Page0
+        self.ui.edit_stage_container.layout().addWidget(self.ui.game_view)
+        
+        # 2. 🚀 恢复 Page0 的小尺寸约束
+        self.ui.game_view.setFixedSize(320, 240)
+        
+        QTimer.singleShot(50, self.stage.apply_fit)
+    
+    def adjust_fullscreen_layout(self):
+        # 1. 获取舞台容器目前的物理空间
+        # 此时因为 Designer 设了 Stretch=1，wrapper 已经横向铺满了
+        container_w = self.ui.central_stage_wrapper.width()
+        container_h = self.ui.central_stage_wrapper.height()
+
+        if container_h <= 100 or container_w <= 100:
+            return
+
+        # 2. 算 4:3 比例
+        target_w = container_h * (4 / 3)
+        target_h = container_h
+
+        # 如果宽度超标，则以宽度为基准反算
+        if target_w > container_w:
+            target_w = container_w
+            target_h = target_w * (3 / 4)
+
+        # 3. 🚀 只改这一行：直接设置显示框的大小
+        # 左右弹簧会自动处理剩余空间，完全不抖动
+        self.ui.fullscreen_view_frame.setFixedSize(int(target_w), int(target_h))

@@ -55,6 +55,7 @@ class BingoIDE(QWidget):
             self.layout().setSizeConstraint(QLayout.SizeConstraint.SetDefaultConstraint)
         self.ui.tab_frame.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
 
+
     def closeEvent(self, event):
         """窗口关闭时清理子进程"""
         if hasattr(self, 'controller'):

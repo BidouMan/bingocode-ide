@@ -31,5 +31,6 @@
     <file>icons/error_2.svg</file>
     <file>icons/error_3.svg</file>
     <file>icons/error_1.svg</file>
+    <file>icons/icon--unfullscreen.svg</file>
   </qresource>
 </RCC>

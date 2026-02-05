@@ -3,35 +3,27 @@ from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem
 from PySide6.QtGui import QPainter, QPixmap, QColor, QPen, QBrush
 from PySide6.QtCore import Qt
 
+# modules/stage_manager.py
+
 class StageManager:
     def __init__(self, view_instance):
-        # 🚀 直接接管 Designer 里的 game_view，解决层级覆盖问题
         self.view = view_instance 
-        
-        # 1. 核心舞台：统一使用 640x480 逻辑分辨率
         self.logic_w = 640
         self.logic_h = 480
         self.scene = QGraphicsScene(0, 0, self.logic_w, self.logic_h)
         self.view.setScene(self.scene)
 
-        # 2. 渲染优化
-        self.view.setRenderHint(QPainter.Antialiasing) # 抗锯齿
-        self.view.setRenderHint(QPainter.SmoothPixmapTransform) # 平滑缩放
-        self.view.setFrameShape(QGraphicsView.NoFrame)
+        # 基础配置
+        self.view.setRenderHint(QPainter.Antialiasing)
         self.view.setBackgroundBrush(QColor("#1E1E1E"))
-        
-        # 3. 彻底禁用滚动条，防止缩放时出现黑边
+        self.view.setFrameShape(QGraphicsView.NoFrame)
         self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         
-        # 4. 角色容器
         self.sprites = {}
-
-        # 🚀 初始执行一次缩放对齐
         self.apply_fit()
 
     def apply_fit(self):
-        """让场景等比缩放以填满当前的 view 窗口"""
         self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
 
     def handle_instruction(self, instruction_json):
@@ -45,6 +37,8 @@ class StageManager:
                 self.create_sprite(sprite_id, data)
             elif cmd_type == "UPDATE":
                 self.update_sprite(sprite_id, data)
+            elif cmd_type == "REMOVE": # 🚀 新增：删除角色
+                self.remove_sprite(sprite_id)
             elif cmd_type == "RESET":
                 self.reset_session()
         except Exception as e:
@@ -53,8 +47,6 @@ class StageManager:
     def create_sprite(self, sprite_id, data):
         stype = data.get("type", "image")
         item = None
-        
-        # 🚀 增加：对几何图形的渲染支持
         if stype == "rect":
             item = QGraphicsRectItem(0, 0, data.get("width", 50), data.get("height", 50))
             item.setBrush(QBrush(QColor(data.get("color", "#FF0000"))))
@@ -68,9 +60,12 @@ class StageManager:
             pixmap = QPixmap(data.get("image", ""))
             if not pixmap.isNull():
                 item = QGraphicsPixmapItem(pixmap)
-                item.setTransformOriginPoint(pixmap.width() / 2, pixmap.height() / 2)
+                # 设置旋转中心
+                item.setTransformOriginPoint(pixmap.width()/2, pixmap.height()/2)
 
         if item:
+            # 🚀 允许通过 JSON 传递 z_index 控制层级
+            item.setZValue(data.get("z", 0))
             self.scene.addItem(item)
             self.sprites[sprite_id] = item
             self.update_sprite(sprite_id, data)
@@ -78,15 +73,21 @@ class StageManager:
     def update_sprite(self, sprite_id, data):
         item = self.sprites.get(sprite_id)
         if item:
-            # 自动中心对齐逻辑
             rect = item.boundingRect()
             if "x" in data and "y" in data:
+                # 保持中心对齐逻辑
                 item.setPos(data["x"] - rect.width()/2, data["y"] - rect.height()/2)
             if "angle" in data:
                 item.setRotation(data["angle"])
-            
-            # 🚀 每次更新后确保缩放依然正确（应对窗口拉伸）
-            self.apply_fit()
+            if "z" in data:
+                item.setZValue(data["z"])
+            if "opacity" in data: # 🚀 新增：透明度支持 (0.0 - 1.0)
+                item.setOpacity(data["opacity"])
+
+    def remove_sprite(self, sprite_id):
+        if sprite_id in self.sprites:
+            self.scene.removeItem(self.sprites[sprite_id])
+            del self.sprites[sprite_id]
 
     def reset_session(self):
         self.scene.clear()
