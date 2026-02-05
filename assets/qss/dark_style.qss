@@ -1,7 +1,7 @@
 /* 全局设置 */
 QWidget{
     color:white;
-    background-color:rgb(20, 20, 20);
+    background-color:rgb(30, 30, 30);
     /* font-size: 14px; */
 }
 
@@ -9,7 +9,7 @@ QWidget{
 #menu_frame,#code_frame,#code_stacked,#console,#splitter,
 #screen_btn_frame,#toolbtn_frame,#editor_frame,#sidebar_frame,
 #tab_frame,#toolbar_frame,#outline_menu_frame,#code_frame,
-#code_stacked,#splitter{
+#code_stacked,#splitter,#fullscreen_tool_bar{
     margin: 0px;
     padding: 0px;
     border: none;
@@ -18,7 +18,7 @@ QWidget{
 }
 
 /* 代码编辑颜色 */
-#outline_frame,#console_output{
+#outline_frame,#console_output,#bg_layout{
     margin: 0px;
     padding: 0px;
     border: none;
@@ -26,24 +26,35 @@ QWidget{
     /* background-color: red; */
 }
 
-/* 游戏屏幕颜色 */
-#screen_frame{   
-    background-color: rgb(49, 48, 60);
+/* 1. 外层容器负责：蓝边、圆角、背景 */
+#fullscreen_view_frame {
+    border: 2px solid #3E91FF;
+    border-radius: 12px;         /* 外层圆角稍微大一点点 */
+    background-color: #000000;   /* 这里提供黑色底色 */
+    overflow: hidden;            /* 某些系统下支持这个属性 */
 }
 
-/* 圆角修饰 */
-#screen_frame{
+#fullscreen_view_frame {
+    border: 2px solid #3E91FF;
+    border-radius: 12px;
+    background-color: #000000; /* 这里是你的底色 */
+}
+
+/* 负责裁剪和背景 */
+QGraphicsView#game_view {
+    border: none;
+    background-color: transparent; /* 设为透明则显示父级的黑色，设为红色则用于测试 */
+    border-radius: 10px;
+}
+
+#fullscreen_view_frame{
+    border:1px solid rgb(60,60,60);
     border-radius: 6px;
-    border: none;
-    
-}
-#game_screen{
-    border: none;
-
-    qproperty-turtle_bg:white;
+    background-color: rgb(49, 48, 60);;
+    /* qproperty-turtle_bg:white;
     qproperty-arcade_bg:rgb(49, 48, 60);
     qproperty-borderRadius: 6;
-    qproperty-normal_bg:rgb(49, 48, 60);
+    qproperty-normal_bg:rgb(49, 48, 60); */
 }
 #editor_frame, #tab_frame, #toolbar_frame,#outline_framet{
     border-top-left-radius: 6px;
@@ -67,22 +78,21 @@ QWidget{
     border: none
 }
 
-#screen_btn_frame QPushButton{
+#screen_btn_frame QPushButton,#fullscreen_tool_bar QPushButton{
     background-color:transparent;
-    /* border:1px solid rgb(55, 59, 68); */
     border-radius: 2px;
 }
-#screen_btn_frame QPushButton:hover{
+#screen_btn_frame QPushButton:hover,#fullscreen_tool_bar QPushButton:hover{
     background-color:rgb(50, 29, 27);
     border:1px solid rgb(55, 59, 68);
     border-radius: 2px;
 }
-#screen_btn_frame QPushButton:pressed{
+#screen_btn_frame QPushButton:pressed,#fullscreen_tool_bar QPushButton:pressed{
     background-color:rgb(95, 45, 39);
     border:1px solid rgb(55, 59, 68);
     border-radius: 2px;
 }
-#btn_run:checked{
+#btn_run:checked,#fullscreen_btn_run:checked{
     background-color:rgb(95, 45, 39);
     border:1px solid rgb(55, 59, 68);
     border-radius: 2px;
@@ -389,3 +399,8 @@ QToolTip {
     font-family: "HarmonyOS Sans SC", "Microsoft YaHei";
     border-radius: 4px;
 }
+
+#central_stage_wrapper{
+    background-color:transparent;
+    border: none;
+} 

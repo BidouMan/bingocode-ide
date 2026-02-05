@@ -218,7 +218,8 @@ class AppController:
 
         # 4. 🚀 关键步骤：限制 Wrapper 的最大尺寸，防止它去推挤主窗口
         # 这一行是“灭火器”，它告诉布局系统：无论里面多大，你这个容器不准超过窗口大小
-        self.ui.central_stage_wrapper.setMaximumSize(full_w, full_h)
+        # self.ui.central_stage_wrapper.setMaximumSize(full_w, full_h)
+        self.ui.central_stage_wrapper.setMaximumSize(full_w, target_h + tool_h + 20)
 
         # 5. 执行缩放
         # 既然 target_w/h 是基于 win.width() 算出来的，它永远不会导致 win 变大
