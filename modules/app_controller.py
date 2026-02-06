@@ -14,6 +14,7 @@ from modules.editor_manager import EditorManager
 from modules.render_manager import RenderManager
 from modules.screen_manager import ScreenManager
 from modules.tabbar_manager import TabbarManager
+from modules.file_manager import FileManager
 
 class AppController:
     def __init__(self, main_window: Ui_Form):
@@ -26,106 +27,79 @@ class AppController:
         self.stage_width = 640   
         self.stage_height = 480  
 
-        # 2. 初始化基础环境与布局
-        self._init_workspace()
+        # 首先实例化文件管理器 后续其他管理器需要用到root_path
+        self.file_manager = FileManager(self.window)
         
-
-        self.console = ConsoleManager(self.ui.splitter, self.ui.console_output)
-        
+        # 带整理的模块
+        self.console = ConsoleManager(self.ui.splitter, self.ui.console_output)        
         self.file_menu = FileMenu(main_window)
 
         # 整理过的模块
         self.render_manager = RenderManager(self.ui.game_view)
         self.screen_manager = ScreenManager(self)
         self.tabbar_manager = TabbarManager(self.ui.tab_frame)
-        self.editor_manager = EditorManager(self.ui.code_stacked, self.tabbar_manager, self.root_path)
-
+        self.editor_manager = EditorManager(self.ui.code_stacked, self.tabbar_manager, self.file_manager.root_path)
 
         # 4. 绑定信号 (保持原有业务连接)
         self.setup_connections()
 
-    def _init_workspace(self):
-        doc_path = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
-        self.root_path = os.path.join(doc_path, "BingoIDE_Projects")
-        if not os.path.exists(self.root_path):
-            os.makedirs(self.root_path, exist_ok=True)
+    # def _init_workspace(self):
+    #     doc_path = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+    #     self.root_path = os.path.join(doc_path, "BingoIDE_Projects")
+    #     if not os.path.exists(self.root_path):
+    #         os.makedirs(self.root_path, exist_ok=True)
         
-    # def setup_tab_bar(self):
-    #     """将手动的 TabBar 插入 UI 容器，保留原有的 ID 以匹配 QSS"""
-    #     self.tab_bar = QTabBar()
-    #     self.tab_bar.setDocumentMode(True)
-    #     self.tab_bar.setExpanding(True)
-    #     self.tab_bar.setElideMode(Qt.TextElideMode.ElideRight)        
-    #     self.tab_bar.setObjectName("mainTabBar") # 👈 身份证号绝对不能改，否则样式会乱
-    
-    #     tab_container = self.ui.tab_frame
-    #     tab_container.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
 
-    #     layout = tab_container.layout()
-    #     if layout:
-    #         layout.setContentsMargins(0, 0, 0, 0)
-    #         layout.insertWidget(0, self.tab_bar)
-    #         layout.setStretchFactor(self.tab_bar, 1)
 
     def setup_connections(self):
         """绑定业务信号，完全保留文件和编辑器逻辑"""
-        # 菜单信号
-        self.file_menu.new_file_signal.connect(self.editor_manager.create_untitled_file)
-        self.file_menu.open_file_signal.connect(self.handle_open_file)        
-        self.file_menu.save_file_signal.connect(self.handle_save_file)
-        self.file_menu.save_as_signal.connect(self.handle_save_as)
-
-        # 进程状态监控
-        self.console.process_started.connect(lambda: self._set_run_btn_state(True))
-        self.console.process_finished.connect(lambda: self._set_run_btn_state(False))
-
-        # UI 按钮响应
+        # 主页全局按钮-
         self.ui.btn_file.clicked.connect(lambda: self.file_menu.show_popup_menu(self.ui.btn_file))
+        self.ui.btn_save.clicked.connect(lambda: self.file_manager.save_file(self.editor_manager))
 
-        self.ui.btn_save.clicked.connect(self.handle_save_file)
+    
+        # 菜单栏按钮_>文件管理 
+        self.file_menu.new_file_signal.connect(self.editor_manager.create_untitled_file)
+        self.file_menu.open_file_signal.connect(lambda: self.file_manager.open_file_dialog(self.editor_manager))        
+        self.file_menu.save_file_signal.connect(lambda: self.file_manager.save_file(self.editor_manager))
+        self.file_menu.save_as_signal.connect(lambda: self.file_manager.save_as_file(self.editor_manager))
+
+
+        # 运行程序按钮
         self.ui.btn_run.clicked.connect(self.handle_run_python)
         if hasattr(self.ui, 'btn_stop'):
             self.ui.btn_stop.clicked.connect(self.handle_stop_python)
+
         
+        # 运行console控制台
+        self.console.process_started.connect(lambda: self._set_run_btn_state(True))
+        self.console.process_finished.connect(lambda: self._set_run_btn_state(False))
+
+
         # 切换全屏和编辑模式
         self.ui.btn_full_screen.clicked.connect(self.screen_manager.enter_fullscreen)
         self.ui.fullscreen_btn_unfull.clicked.connect(self.screen_manager.exit_fullscreen)
 
-        # 视觉效果：TabBar 高亮更新
+
+        # 代码编辑标签页功能
         self.tabbar_manager.tab_changed.connect(self.editor_manager.switch_to_page)
         self.ui.btn_add_tab.clicked.connect(self.editor_manager.create_untitled_file)
 
 
-        # 🚀 核心指令对接：将控制台捕获的 JSON 指令喂给舞台
+        # 将捕获的JSON指令喂给render_manager
         self.console.draw_signal.connect(self.render_manager.handle_instruction)
 
 
-    def handle_open_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(self.window, "选择文件", "", "Python Files (*.py);;All Files (*)")
-        if file_path:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            self.editor_manager.create_new_tab(file_path, content)
-
-    def handle_save_file(self):
-        self.editor_manager.request_save_file(self.window)
-
-    def handle_save_as(self):
-        self.editor_manager.request_save_as(self.window)
-
     def handle_run_python(self):
-        self.handle_save_file() 
+        """运行逻辑目前还留在 Controller，因为它涉及保存、重置舞台和运行脚本三个步骤"""
+        self.file_manager.save_file(self.editor_manager) # 先通过经理保存
+        
         editor = self.editor_manager.get_current_editor()
         if not editor: return
             
         file_path = editor.file_path
         if file_path and os.path.exists(file_path):
-            # 1. 重置舞台
-            if hasattr(self, 'stage'):
-                self.stage.reset_session()
-                QApplication.processEvents() 
-
-            # 🚀 修复这里：只传 file_path 即可，去掉后面的 width 和 height
+            self.render_manager.reset_session() # 已经改为 render_manager 了
             self.console.run_script(file_path) 
         else:
             QMessageBox.warning(self.window, "提示", "请先保存文件再运行")
