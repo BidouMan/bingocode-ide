@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt
 
 # modules/stage_manager.py
 
-class StageManager:
+class RenderManager:
     def __init__(self, view_instance):
         self.view = view_instance 
         self.logic_w = 640

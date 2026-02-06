@@ -9,32 +9,48 @@ class EditorManager(QObject):
     file_created_on_disk = Signal()
     file_renamed_on_disk = Signal()
 
-    def __init__(self, stacked_widget, tab_bar, root_path: str):
+    def __init__(self, stacked_widget, tab_manager, root_path: str):
         super().__init__()
         self.stacked = stacked_widget
-        self.tabs = tab_bar
+        self.tab_manager = tab_manager
+        self.tabs = tab_manager.tab_bar
         self.root_path = root_path
         
-        # 1. 深度清理：确保容器初始状态为空
-        if hasattr(self.tabs, 'count'):
-            while self.tabs.count() > 0:
-                self.tabs.removeTab(0)
+        # # 1. 深度清理：确保容器初始状态为空
+        # if hasattr(self.tabs, 'count'):
+        #     while self.tabs.count() > 0:
+        #         self.tabs.removeTab(0)
         
-        while self.stacked.count() > 0:
-            w = self.stacked.widget(0)
-            self.stacked.removeWidget(w)
-            w.deleteLater()
+        # while self.stacked.count() > 0:
+        #     w = self.stacked.widget(0)
+        #     self.stacked.removeWidget(w)
+        #     w.deleteLater()
             
-        # 2. 配置标签栏基础属性
-        self.tabs.setTabsClosable(False) 
-        self.tabs.setMovable(True)
+        # # 2. 配置标签栏基础属性
+        # self.tabs.setTabsClosable(False) 
+        # self.tabs.setMovable(True)
         
+        self._clear_initial_state()
+
         # 3. 内部信号绑定
-        self.tabs.currentChanged.connect(self.stacked.setCurrentIndex)
+        # self.tabs.currentChanged.connect(self.stacked.setCurrentIndex)
         self.tabs.tabBarDoubleClicked.connect(self.on_tab_double_clicked)
 
         # 4. 自动执行启动逻辑
         self.initialize_startup()
+
+    def _clear_initial_state(self):
+        while self.tabs.count() > 0:
+            self.tabs.removeTab(0)
+        while self.stacked.count() > 0:
+            w = self.stacked.widget(0)
+            self.stacked.removeWidget(w)
+            w.deleteLater()
+
+    def switch_to_page(self, index):
+        """只负责切换编辑器页面"""
+        if 0 <= index < self.stacked.count():
+            self.stacked.setCurrentIndex(index)
 
     def initialize_startup(self):
         """启动逻辑：不写磁盘，只创建虚拟 Tab"""

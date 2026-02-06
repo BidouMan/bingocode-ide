@@ -7,8 +7,13 @@ from ui.main_window_ui import Ui_Form
 from modules.file_menu import FileMenu
 from modules.console_manager import ConsoleManager
 from modules.editor_manager import EditorManager
-# 🚀 统一使用 StageManager 替代旧的 ScreenManager
-from modules.stage_manager import StageManager
+
+
+
+# 整合好的模组
+from modules.render_manager import RenderManager
+from modules.screen_manager import ScreenManager
+from modules.tabbar_manager import TabbarManager
 
 class AppController:
     def __init__(self, main_window: Ui_Form):
@@ -23,17 +28,18 @@ class AppController:
 
         # 2. 初始化基础环境与布局
         self._init_workspace()
-        self.setup_tab_bar()
-        # 注意：由于 game_view 已在 Designer 中存在，不再需要动态创建布局
+        
 
-        # 3. 初始化各模块逻辑
-        self.editor_logic = EditorManager(self.ui.code_stacked, self.tab_bar, self.root_path)
         self.console = ConsoleManager(self.ui.splitter, self.ui.console_output)
         
-        # 🚀 关键：直接对接 Designer 中的 game_view (QGraphicsView)
-        self.stage = StageManager(self.ui.game_view)
-        
         self.file_menu = FileMenu(main_window)
+
+        # 整理过的模块
+        self.render_manager = RenderManager(self.ui.game_view)
+        self.screen_manager = ScreenManager(self)
+        self.tabbar_manager = TabbarManager(self.ui.tab_frame)
+        self.editor_manager = EditorManager(self.ui.code_stacked, self.tabbar_manager, self.root_path)
+
 
         # 4. 绑定信号 (保持原有业务连接)
         self.setup_connections()
@@ -44,27 +50,27 @@ class AppController:
         if not os.path.exists(self.root_path):
             os.makedirs(self.root_path, exist_ok=True)
         
-    def setup_tab_bar(self):
-        """将手动的 TabBar 插入 UI 容器，保留原有的 ID 以匹配 QSS"""
-        self.tab_bar = QTabBar()
-        self.tab_bar.setDocumentMode(True)
-        self.tab_bar.setExpanding(True)
-        self.tab_bar.setElideMode(Qt.TextElideMode.ElideRight)        
-        self.tab_bar.setObjectName("mainTabBar") # 👈 身份证号绝对不能改，否则样式会乱
+    # def setup_tab_bar(self):
+    #     """将手动的 TabBar 插入 UI 容器，保留原有的 ID 以匹配 QSS"""
+    #     self.tab_bar = QTabBar()
+    #     self.tab_bar.setDocumentMode(True)
+    #     self.tab_bar.setExpanding(True)
+    #     self.tab_bar.setElideMode(Qt.TextElideMode.ElideRight)        
+    #     self.tab_bar.setObjectName("mainTabBar") # 👈 身份证号绝对不能改，否则样式会乱
     
-        tab_container = self.ui.tab_frame
-        tab_container.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+    #     tab_container = self.ui.tab_frame
+    #     tab_container.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
 
-        layout = tab_container.layout()
-        if layout:
-            layout.setContentsMargins(0, 0, 0, 0)
-            layout.insertWidget(0, self.tab_bar)
-            layout.setStretchFactor(self.tab_bar, 1)
+    #     layout = tab_container.layout()
+    #     if layout:
+    #         layout.setContentsMargins(0, 0, 0, 0)
+    #         layout.insertWidget(0, self.tab_bar)
+    #         layout.setStretchFactor(self.tab_bar, 1)
 
     def setup_connections(self):
         """绑定业务信号，完全保留文件和编辑器逻辑"""
         # 菜单信号
-        self.file_menu.new_file_signal.connect(self.editor_logic.create_untitled_file)
+        self.file_menu.new_file_signal.connect(self.editor_manager.create_untitled_file)
         self.file_menu.open_file_signal.connect(self.handle_open_file)        
         self.file_menu.save_file_signal.connect(self.handle_save_file)
         self.file_menu.save_as_signal.connect(self.handle_save_as)
@@ -75,22 +81,23 @@ class AppController:
 
         # UI 按钮响应
         self.ui.btn_file.clicked.connect(lambda: self.file_menu.show_popup_menu(self.ui.btn_file))
-        self.ui.btn_add_tab.clicked.connect(self.editor_logic.create_untitled_file)
+
         self.ui.btn_save.clicked.connect(self.handle_save_file)
         self.ui.btn_run.clicked.connect(self.handle_run_python)
         if hasattr(self.ui, 'btn_stop'):
             self.ui.btn_stop.clicked.connect(self.handle_stop_python)
         
-        # page0 上的全屏按钮
-        self.ui.btn_full_screen.clicked.connect(self.enter_fullscreen)
-        # page1 上的退出全屏按钮 (名字请根据你 Designer 里的实际情况修改)
-        self.ui.fullscreen_btn_unfull.clicked.connect(self.exit_fullscreen)
+        # 切换全屏和编辑模式
+        self.ui.btn_full_screen.clicked.connect(self.screen_manager.enter_fullscreen)
+        self.ui.fullscreen_btn_unfull.clicked.connect(self.screen_manager.exit_fullscreen)
 
         # 视觉效果：TabBar 高亮更新
-        self.tab_bar.currentChanged.connect(self.update_tab_buttons)
+        self.tabbar_manager.tab_changed.connect(self.editor_manager.switch_to_page)
+        self.ui.btn_add_tab.clicked.connect(self.editor_manager.create_untitled_file)
+
 
         # 🚀 核心指令对接：将控制台捕获的 JSON 指令喂给舞台
-        self.console.draw_signal.connect(self.stage.handle_instruction)
+        self.console.draw_signal.connect(self.render_manager.handle_instruction)
 
 
     def handle_open_file(self):
@@ -98,17 +105,17 @@ class AppController:
         if file_path:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            self.editor_logic.create_new_tab(file_path, content)
+            self.editor_manager.create_new_tab(file_path, content)
 
     def handle_save_file(self):
-        self.editor_logic.request_save_file(self.window)
+        self.editor_manager.request_save_file(self.window)
 
     def handle_save_as(self):
-        self.editor_logic.request_save_as(self.window)
+        self.editor_manager.request_save_as(self.window)
 
     def handle_run_python(self):
         self.handle_save_file() 
-        editor = self.editor_logic.get_current_editor()
+        editor = self.editor_manager.get_current_editor()
         if not editor: return
             
         file_path = editor.file_path
@@ -163,95 +170,3 @@ class AppController:
         if hasattr(self, 'stage'):
             self.stage.reset_session()
     
-    def enter_fullscreen(self):
-        # 1. 切换页面
-        self.ui.change_page.setCurrentIndex(1)
-
-        # 2. 搬运 game_view
-        if self.ui.fullscreen_view_frame.layout():
-            self.ui.fullscreen_view_frame.layout().addWidget(self.ui.game_view)
-            self.ui.fullscreen_view_frame.layout().setContentsMargins(0, 0, 0, 0)
-
-        # 3. 彻底重置 game_view 的所有人工限制
-        self.ui.game_view.setMinimumSize(0, 0)
-        self.ui.game_view.setMaximumSize(16777215, 16777215)
-        self.ui.game_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
-        # 4. 执行第一次对齐
-        self.adjust_fullscreen_layout()
-
-    def exit_fullscreen(self):
-        self.ui.change_page.setCurrentIndex(0)
-    
-        # 1. 搬回 Page0
-        self.ui.edit_stage_container.layout().addWidget(self.ui.game_view)
-        
-        # 2. 🚀 恢复 Page0 的小尺寸约束
-        self.ui.game_view.setFixedSize(320, 240)
-        
-        QTimer.singleShot(50, self.stage.apply_fit)
-    
-    def adjust_fullscreen_layout(self):
-        full_w = self.window.width()
-        full_h = self.window.height()
-
-        # 2. 减去工具栏固定的高度 (假设 30 或动态获取)
-        # 这样 available_h 就变成了一个“死”的上限，不受内部控件影响
-        tool_h = self.ui.fullscreen_tool_bar.height()
-        if tool_h <= 0: tool_h = 30 # 防止初始化时高度为0
-        
-        available_w = full_w - 40 # 留出一点左右边距边差
-        available_h = full_h - tool_h - 20 
-
-        if available_w <= 100 or available_h <= 100:
-            return
-
-        # 3. 计算 4:3 比例
-        # 算出在当前窗口高度下，最大的 4:3 宽度是多少
-        target_h = available_h
-        target_w = int(target_h * (4 / 3))
-
-        # 如果算出来的宽度超过了窗口宽度，则反过来以宽度为准
-        if target_w > available_w:
-            target_w = available_w
-            target_h = int(target_w * (3 / 4))
-
-        # 4. 🚀 关键步骤：限制 Wrapper 的最大尺寸，防止它去推挤主窗口
-        # 这一行是“灭火器”，它告诉布局系统：无论里面多大，你这个容器不准超过窗口大小
-        # self.ui.central_stage_wrapper.setMaximumSize(full_w, full_h)
-        self.ui.central_stage_wrapper.setMaximumSize(full_w, target_h + tool_h + 20)
-
-        # 5. 执行缩放
-        # 既然 target_w/h 是基于 win.width() 算出来的，它永远不会导致 win 变大
-        if self.ui.fullscreen_view_frame.size() != (target_w, target_h):
-            self.ui.fullscreen_view_frame.setFixedSize(target_w, target_h)
-            print(f"[FIXED] Set Frame to {target_w}x{target_h} | Win was {full_w}")
-        
-        
-    # 🚀 🚀 🚀 [断路器：关键测试] 🚀 🚀 🚀
-    # 我已经把执行代码全部注释了。
-    # pass 
-    # self.ui.fullscreen_view_frame.setFixedSize(target_w, target_h)
-
-    # 🚀 暂时注释掉下面这行执行代码，观察窗口是否还延伸！
-    # self.ui.fullscreen_view_frame.setFixedSize(target_w, target_h)
-        # # 1. 获取舞台容器目前的物理空间
-        # # 此时因为 Designer 设了 Stretch=1，wrapper 已经横向铺满了
-        # container_w = self.ui.central_stage_wrapper.width()
-        # container_h = self.ui.central_stage_wrapper.height()
-
-        # if container_h <= 100 or container_w <= 100:
-        #     return
-
-        # # 2. 算 4:3 比例
-        # target_w = container_h * (4 / 3)
-        # target_h = container_h
-
-        # # 如果宽度超标，则以宽度为基准反算
-        # if target_w > container_w:
-        #     target_w = container_w
-        #     target_h = target_w * (3 / 4)
-
-        # # 3. 🚀 只改这一行：直接设置显示框的大小
-        # # 左右弹簧会自动处理剩余空间，完全不抖动
-        # self.ui.fullscreen_view_frame.setFixedSize(int(target_w), int(target_h))
