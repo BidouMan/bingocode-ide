@@ -11,6 +11,7 @@ class ConsoleManager(QObject):
     process_finished = Signal()
     # 指令信号：传递 BINGO: 开头的 JSON 字符串
     draw_signal = Signal(str)
+    instruction_received = Signal(str)
 
     def __init__(self, splitter, console_output):
         super().__init__()
@@ -24,8 +25,10 @@ class ConsoleManager(QObject):
         self.console_container.setMaximumHeight(0)
         self.console_container.setMinimumHeight(0)
 
-        # 初始化进程
-        self.process = QProcess(self)
+        # 🚀 修正核心：先实例化对象，再连接信号
+        self.process = QProcess(self) 
+        
+        # 🚀 关键：只保留这两个核心连接，删除所有其他的重复绑定
         self.process.readyReadStandardOutput.connect(self.handle_stdout)
         self.process.readyReadStandardError.connect(self.handle_stderr)
         self.process.finished.connect(self._on_process_finished)
@@ -51,39 +54,87 @@ class ConsoleManager(QObject):
             self._start_process(file_path)
 
     def _start_process(self, file_path):
-        """真正的进程启动逻辑"""
+        """内部私有方法：负责配置环境并启动进程"""
+        # 1. 动态计算项目根目录和 modules 目录
+        # 假设 ConsoleManager.py 在项目根目录/modules/ 下
+        current_file_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(current_file_dir)
+        modules_dir = os.path.join(project_root, "modules")
+
+        # 2. 配置子进程环境变量
         env = QProcessEnvironment.systemEnvironment()
         
-        # 🚀 注入你的 internal_lib 路径，确保学生代码能 import bingo
-        # 假设你的库放在项目根目录下的 modules/internal_lib
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        lib_path = os.path.join(base_dir, "modules", "internal_lib")
+        # 获取现有的 PYTHONPATH
+        old_pythonpath = env.value("PYTHONPATH", "")
         
-        old_pp = env.value("PYTHONPATH", "")
-        new_pp = f"{lib_path}{os.pathsep}{old_pp}" if old_pp else lib_path
-        env.insert("PYTHONPATH", new_pp)
-        
-        # 解决 macOS 上的某些 UI 警告
-        if sys.platform == "darwin":
-            env.insert("ApplePersistenceIgnoreState", "YES")
+        # 统一变量名为 new_pythonpath，确保包含 modules 目录
+        if old_pythonpath:
+            new_pythonpath = modules_dir + os.pathsep + old_pythonpath
+        else:
+            new_pythonpath = modules_dir
+            
+        # 将合成好的路径插入环境变量
+        env.insert("PYTHONPATH", new_pythonpath)
 
-        self.process.setProcessEnvironment(env)
-        # 直接使用系统 Python 解释器运行
-        self.process.start(sys.executable, [file_path])
-        self.process_started.emit()
+        # 3. 启动进程
+        # 注意：不要在这里重新 new QProcess，也不要在这里绑定 readAll 的 lambda 打印
+        if hasattr(self, 'process') and self.process:
+            # 应用环境变量
+            self.process.setProcessEnvironment(env)
+            
+            # 🚀 关键：启动脚本。使用 -u 参数确保输出不进入缓冲区，实现实时渲染
+            self.process.start(sys.executable, ["-u", file_path])
+        
+        # 4. 状态反馈与信号发送
+        print(f"DEBUG: 进程尝试启动，当前状态: {self.process.state()}")
+        
+        # 发送进程已启动信号，供 UI 改变按钮状态（如变红/禁用）
+        if hasattr(self, 'process_started'):
+            self.process_started.emit()
+
+    def _internal_handle_output(self):
+        """内部处理：负责清洗数据，不让脏数据流向外面"""
+        raw_data = self.process.readAllStandardOutput().data().decode('utf-8')
+        
+        # 仍然可以保留原本打印到 UI 的功能
+        # self.output.append(raw_data) 
+
+        # 🚀 协议解析逻辑搬到这里
+        for line in raw_data.strip().split('\n'):
+            line = line.strip()
+            if line.startswith("BINGO:"):
+                self.instruction_received.emit(line.replace("BINGO:", "", 1))
+            elif line.startswith('{'):
+                self.instruction_received.emit(line)
 
     def handle_stdout(self):
-        """核心：分拣输出信息"""
+        """🚀 全局唯一的读取入口：负责分发数据"""
         raw_data = self.process.readAllStandardOutput().data().decode("utf-8")
-        lines = raw_data.splitlines()
+        if not raw_data: return
+
+        lines = raw_data.strip().split('\n')
         
         for line in lines:
-            # 🚀 识别指令：不再用旧的 |DRAW|，统一使用 BINGO: 开头的 JSON
+            line = line.strip()
+            if not line: continue
+
+            # 🚀 2. 识别并分发指令
+            is_instruction = False
+            json_content = ""
+
             if line.startswith("BINGO:"):
-                # 去掉前缀，发送纯 JSON 字符串
-                self.draw_signal.emit(line[6:].strip())
+                json_content = line.replace("BINGO:", "", 1)
+                is_instruction = True
+            elif line.startswith('{') and line.endswith('}'):
+                json_content = line
+                is_instruction = True
+
+            # 🚀 3. 根据类型分流
+            if is_instruction:
+                # 如果是指令，悄悄发给渲染器，不打印在 UI 上
+                self.instruction_received.emit(json_content)
             else:
-                # 普通 print 输出到控制台
+                # 如果是普通 print，才显示在 IDE 控制台 UI 上
                 self.output.appendPlainText(line)
                 self.output.moveCursor(QTextCursor.End)
 

@@ -1,4 +1,4 @@
-import json
+import json,os
 from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsEllipseItem
 from PySide6.QtGui import QPainter, QPixmap, QColor, QPen, QBrush
 from PySide6.QtCore import Qt
@@ -31,20 +31,32 @@ class RenderManager:
             msg = json.loads(instruction_json)
             cmd_type = msg.get("type")
             sprite_id = str(msg.get("id"))
-            data = msg.get("data", {})
+            
+            # 兼容性处理：如果 JSON 第一层就有坐标，就直接把整个 msg 当作 data
+            # 这样既支持旧的 {"data": {...}} 格式，也支持新的扁平格式
+            data = msg.get("data", msg) 
 
             if cmd_type == "CREATE":
                 self.create_sprite(sprite_id, data)
-            elif cmd_type == "UPDATE":
+            elif cmd_type == "SET_POS" or cmd_type == "UPDATE": # 兼容新旧指令名
                 self.update_sprite(sprite_id, data)
-            elif cmd_type == "REMOVE": # 🚀 新增：删除角色
+            elif cmd_type == "REMOVE":
                 self.remove_sprite(sprite_id)
             elif cmd_type == "RESET":
                 self.reset_session()
         except Exception as e:
-            print(f"Render Error: {e}")
+            # 这里的 print 可以留着调试，如果是学生普通的 print 报错会被这里捕捉
+            pass
 
     def create_sprite(self, sprite_id, data):
+        image_path = data.get("image", "")
+        # 🚀 打印绝对路径，看看它到底在哪个文件夹找 hero.png
+        print(f"DEBUG: 尝试加载图片路径: {os.path.abspath(image_path)}")
+
+        pixmap = QPixmap(image_path)
+        if pixmap.isNull():
+            print(f"DEBUG: 图片加载失败！请检查 {image_path} 是否存在")
+            return
         stype = data.get("type", "image")
         item = None
         if stype == "rect":

@@ -11,7 +11,7 @@ class ScriptRunner:
         self.file_mgr = controller.file_manager
         self.editor_mgr = controller.editor_manager
         self.render_mgr = controller.render_manager
-        self.console_mgr = controller.console
+        self.console_mgr = controller.console_manager
 
     def run_current_script(self):
         """执行脚本流程：保存 -> 重置舞台 -> 运行"""

@@ -1,0 +1,1 @@
+self.process.readyReadStandardOutput.connect(lambda: print("收到原始数据:", self.process.readAllStandardOutput().data()))

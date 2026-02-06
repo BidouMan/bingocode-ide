@@ -32,7 +32,7 @@ class AppController:
         self.file_manager = FileManager(self.window)
         
         # 带整理的模块
-        self.console = ConsoleManager(self.ui.splitter, self.ui.console_output)        
+        self.console_manager = ConsoleManager(self.ui.splitter, self.ui.console_output)        
         self.menu_manager = MenuManager(main_window)
 
         # 整理过的模块
@@ -45,7 +45,8 @@ class AppController:
         # 4. 绑定信号 (保持原有业务连接)
         self.setup_connections()
 
-
+     
+        
 
     def setup_connections(self):
         """绑定业务信号，完全保留文件和编辑器逻辑"""
@@ -68,8 +69,8 @@ class AppController:
 
         
         # 运行console控制台
-        self.console.process_started.connect(lambda: self.script_runner.set_run_btn_visual(True))
-        self.console.process_finished.connect(lambda: self.script_runner.set_run_btn_visual(False))
+        self.console_manager.process_started.connect(lambda: self.script_runner.set_run_btn_visual(True))
+        self.console_manager.process_finished.connect(lambda: self.script_runner.set_run_btn_visual(False))
 
 
         # 切换全屏和编辑模式
@@ -83,9 +84,8 @@ class AppController:
 
 
         # 将捕获的JSON指令喂给render_manager
-        self.console.draw_signal.connect(self.render_manager.handle_instruction)
+        # self.console_manager.draw_signal.connect(self.render_manager.handle_instruction)
+        self.console_manager.instruction_received.connect(self.render_manager.handle_instruction)
 
 
 
-
-    
