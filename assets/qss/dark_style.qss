@@ -27,39 +27,22 @@ QWidget{
 }
 
 /* 1. 外层容器负责：蓝边、圆角、背景 */
-#fullscreen_view_frame {
-    border: 2px solid #3E91FF;
-    border-radius: 12px;         /* 外层圆角稍微大一点点 */
-    background-color: #000000;   /* 这里提供黑色底色 */
-    overflow: hidden;            /* 某些系统下支持这个属性 */
-}
-
-#fullscreen_view_frame {
-    border: 2px solid #3E91FF;
-    border-radius: 12px;
-    background-color: #000000; /* 这里是你的底色 */
+#fullscreen_view_frame,#edit_stage_container{
+    border: 2px solid #4e4e4e;
+    background-color: rgb(50, 50, 61); /* 这里是你的底色 */
 }
 
 /* 负责裁剪和背景 */
 QGraphicsView#game_view {
     border: none;
     background-color: transparent; /* 设为透明则显示父级的黑色，设为红色则用于测试 */
-    border-radius: 10px;
 }
 
-#fullscreen_view_frame{
-    border:1px solid rgb(60,60,60);
-    border-radius: 6px;
-    background-color: rgb(49, 48, 60);;
-    /* qproperty-turtle_bg:white;
-    qproperty-arcade_bg:rgb(49, 48, 60);
-    qproperty-borderRadius: 6;
-    qproperty-normal_bg:rgb(49, 48, 60); */
-}
+
 #editor_frame, #tab_frame, #toolbar_frame,#outline_framet{
     border-top-left-radius: 6px;
 }
-#sidebar_frame, #screen_btn_frame,#outline_frame {
+#sidebar_frame,#outline_frame {
     border-top-right-radius: 6px;
 }
 /* 按键样式 */

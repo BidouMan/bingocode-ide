@@ -440,13 +440,13 @@
             </property>
             <property name="minimumSize">
              <size>
-              <width>0</width>
+              <width>340</width>
               <height>0</height>
              </size>
             </property>
             <property name="maximumSize">
              <size>
-              <width>336</width>
+              <width>340</width>
               <height>16777215</height>
              </size>
             </property>
@@ -482,13 +482,13 @@
                </property>
                <property name="minimumSize">
                 <size>
-                 <width>0</width>
+                 <width>324</width>
                  <height>0</height>
                 </size>
                </property>
                <property name="maximumSize">
                 <size>
-                 <width>16777215</width>
+                 <width>324</width>
                  <height>30</height>
                 </size>
                </property>
@@ -625,6 +625,18 @@
                  <verstretch>0</verstretch>
                 </sizepolicy>
                </property>
+               <property name="minimumSize">
+                <size>
+                 <width>324</width>
+                 <height>244</height>
+                </size>
+               </property>
+               <property name="maximumSize">
+                <size>
+                 <width>324</width>
+                 <height>244</height>
+                </size>
+               </property>
                <property name="frameShape">
                 <enum>QFrame::Shape::StyledPanel</enum>
                </property>
@@ -663,21 +675,39 @@
                   </property>
                   <property name="maximumSize">
                    <size>
-                    <width>16777215</width>
-                    <height>16777215</height>
+                    <width>320</width>
+                    <height>240</height>
                    </size>
                   </property>
                   <property name="styleSheet">
                    <string notr="true"/>
                   </property>
                   <property name="frameShape">
-                   <enum>QFrame::Shape::NoFrame</enum>
+                   <enum>QFrame::Shape::Panel</enum>
                   </property>
                   <property name="frameShadow">
                    <enum>QFrame::Shadow::Plain</enum>
                   </property>
                   <property name="lineWidth">
                    <number>0</number>
+                  </property>
+                  <property name="backgroundBrush">
+                   <brush brushstyle="NoBrush">
+                    <color alpha="255">
+                     <red>0</red>
+                     <green>0</green>
+                     <blue>0</blue>
+                    </color>
+                   </brush>
+                  </property>
+                  <property name="foregroundBrush">
+                   <brush brushstyle="NoBrush">
+                    <color alpha="255">
+                     <red>0</red>
+                     <green>0</green>
+                     <blue>0</blue>
+                    </color>
+                   </brush>
                   </property>
                  </widget>
                 </item>
@@ -694,13 +724,13 @@
                </property>
                <property name="minimumSize">
                 <size>
-                 <width>0</width>
+                 <width>324</width>
                  <height>50</height>
                 </size>
                </property>
                <property name="maximumSize">
                 <size>
-                 <width>16777215</width>
+                 <width>324</width>
                  <height>16777215</height>
                 </size>
                </property>
@@ -813,6 +843,18 @@
              </item>
              <item>
               <widget class="QFrame" name="outline_frame">
+               <property name="minimumSize">
+                <size>
+                 <width>324</width>
+                 <height>0</height>
+                </size>
+               </property>
+               <property name="maximumSize">
+                <size>
+                 <width>324</width>
+                 <height>16777215</height>
+                </size>
+               </property>
                <property name="frameShape">
                 <enum>QFrame::Shape::StyledPanel</enum>
                </property>
@@ -837,6 +879,18 @@
                 </property>
                 <item>
                  <widget class="QStackedWidget" name="outline_stracked">
+                  <property name="minimumSize">
+                   <size>
+                    <width>324</width>
+                    <height>0</height>
+                   </size>
+                  </property>
+                  <property name="maximumSize">
+                   <size>
+                    <width>324</width>
+                    <height>16777215</height>
+                   </size>
+                  </property>
                   <widget class="QWidget" name="page"/>
                   <widget class="QWidget" name="page_2"/>
                  </widget>
@@ -1223,6 +1277,9 @@
            <verstretch>0</verstretch>
           </sizepolicy>
          </property>
+         <property name="styleSheet">
+          <string notr="true"/>
+         </property>
          <property name="frameShape">
           <enum>QFrame::Shape::StyledPanel</enum>
          </property>
@@ -1266,15 +1323,18 @@
               <verstretch>0</verstretch>
              </sizepolicy>
             </property>
+            <property name="styleSheet">
+             <string notr="true"/>
+            </property>
             <property name="frameShape">
              <enum>QFrame::Shape::StyledPanel</enum>
             </property>
             <property name="frameShadow">
              <enum>QFrame::Shadow::Raised</enum>
             </property>
-            <layout class="QVBoxLayout" name="verticalLayout_11">
+            <layout class="QVBoxLayout" name="verticalLayout_11" stretch="0,1">
              <property name="spacing">
-              <number>6</number>
+              <number>4</number>
              </property>
              <property name="leftMargin">
               <number>0</number>
@@ -1343,6 +1403,9 @@
                     <width>24</width>
                     <height>24</height>
                    </size>
+                  </property>
+                  <property name="styleSheet">
+                   <string notr="true"/>
                   </property>
                   <property name="text">
                    <string/>
@@ -1446,6 +1509,9 @@
                  <width>0</width>
                  <height>0</height>
                 </size>
+               </property>
+               <property name="styleSheet">
+                <string notr="true"/>
                </property>
                <property name="frameShape">
                 <enum>QFrame::Shape::StyledPanel</enum>

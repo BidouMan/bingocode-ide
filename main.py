@@ -21,7 +21,7 @@ if ui_path not in sys.path:
 # --- 2. 导入自定义模块 (必须在路径修复之后) ---
 from modules.app_controller import AppController
 from ui.main_window_ui import Ui_Form
-
+ 
 # --- 3. 资源加载助手 ---
 def get_resource_path(relative_path):
     """处理开发环境与 PyInstaller 打包后的路径差异"""
