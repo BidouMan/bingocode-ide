@@ -84,10 +84,7 @@ class ConsoleManager(QObject):
             
             # 🚀 关键：启动脚本。使用 -u 参数确保输出不进入缓冲区，实现实时渲染
             self.process.start(sys.executable, ["-u", file_path])
-        
-        # 4. 状态反馈与信号发送
-        print(f"DEBUG: 进程尝试启动，当前状态: {self.process.state()}")
-        
+                
         # 发送进程已启动信号，供 UI 改变按钮状态（如变红/禁用）
         if hasattr(self, 'process_started'):
             self.process_started.emit()

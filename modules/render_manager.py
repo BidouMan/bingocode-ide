@@ -31,33 +31,25 @@ class RenderManager:
             msg = json.loads(instruction_json)
             cmd_type = msg.get("type")
             sprite_id = str(msg.get("id"))
-            
-            # 兼容性处理：如果 JSON 第一层就有坐标，就直接把整个 msg 当作 data
-            # 这样既支持旧的 {"data": {...}} 格式，也支持新的扁平格式
             data = msg.get("data", msg) 
 
+            # 🚀 只保留核心的分发逻辑
             if cmd_type == "CREATE":
                 self.create_sprite(sprite_id, data)
-            elif cmd_type == "SET_POS" or cmd_type == "UPDATE": # 兼容新旧指令名
+            elif cmd_type == "UPDATE":
                 self.update_sprite(sprite_id, data)
             elif cmd_type == "REMOVE":
                 self.remove_sprite(sprite_id)
             elif cmd_type == "RESET":
                 self.reset_session()
-        except Exception as e:
-            # 这里的 print 可以留着调试，如果是学生普通的 print 报错会被这里捕捉
-            pass
+        except:
+            pass # 渲染层保持安静，解析不了的指令直接丢弃
 
     def create_sprite(self, sprite_id, data):
+        # 🚀 移除 DEBUG 打印，直接加载
         image_path = data.get("image", "")
-        # 🚀 打印绝对路径，看看它到底在哪个文件夹找 hero.png
-        print(f"DEBUG: 尝试加载图片路径: {os.path.abspath(image_path)}")
-
-        pixmap = QPixmap(image_path)
-        if pixmap.isNull():
-            print(f"DEBUG: 图片加载失败！请检查 {image_path} 是否存在")
-            return
         stype = data.get("type", "image")
+        
         item = None
         if stype == "rect":
             item = QGraphicsRectItem(0, 0, data.get("width", 50), data.get("height", 50))
@@ -69,14 +61,12 @@ class RenderManager:
             item.setBrush(QBrush(QColor(data.get("color", "#0000FF"))))
             item.setPen(Qt.NoPen)
         else:
-            pixmap = QPixmap(data.get("image", ""))
+            pixmap = QPixmap(image_path)
             if not pixmap.isNull():
                 item = QGraphicsPixmapItem(pixmap)
-                # 设置旋转中心
                 item.setTransformOriginPoint(pixmap.width()/2, pixmap.height()/2)
 
         if item:
-            # 🚀 允许通过 JSON 传递 z_index 控制层级
             item.setZValue(data.get("z", 0))
             self.scene.addItem(item)
             self.sprites[sprite_id] = item
@@ -104,3 +94,17 @@ class RenderManager:
     def reset_session(self):
         self.scene.clear()
         self.sprites.clear()
+    
+
+    # --- 待实现的详细功能 ---
+    def create_text(self, sprite_id, data):
+        """后续实现：在屏幕上显示文字"""
+        pass
+
+    def handle_audio(self, data):
+        """后续实现：播放声音"""
+        pass
+
+    def handle_camera(self, data):
+        """后续实现：镜头缩放、平移"""
+        pass

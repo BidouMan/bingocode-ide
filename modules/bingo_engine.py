@@ -22,6 +22,7 @@ class Sprite:
             "type": "image"
         })
 
+    # ---------- 运动模块 ----------
     def set_xy(self, x, y):
         """设置坐标"""
         self.x = x
@@ -38,8 +39,10 @@ class Sprite:
             "angle": self.angle
         })
 
+
+    # ----------- 超级核心 -----------
     def _send_command(self, cmd_type, data_dict):
-        """底层发送逻辑：严格匹配 RenderManager 要求的 data 嵌套格式"""
+        """核心:所有指令都是通过它发送出去并执行的"""
         packet = {
             "type": cmd_type,
             "id": self.id,
@@ -52,10 +55,7 @@ def run():
     """驱动游戏循环"""
     # 查找运行脚本中的 loop 函数
     main_module = sys.modules['__main__']
-    
-    # 简单的启动提示
-    # print("Bingo Engine Running...") 
-    
+        
     while True:
         if hasattr(main_module, 'loop'):
             try:
