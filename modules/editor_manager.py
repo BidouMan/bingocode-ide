@@ -3,7 +3,7 @@ from PySide6.QtWidgets import QWidget, QLineEdit, QFileDialog, QPushButton, QTab
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QColor
 # 导入专业的编辑器类
-from modules.code_editor_pro import QCodeEditor
+from modules.python_code_manager import QCodeEditor
 
 class EditorManager(QObject):
     file_created_on_disk = Signal()
@@ -16,24 +16,10 @@ class EditorManager(QObject):
         self.tabs = tab_manager.tab_bar
         self.root_path = root_path
         
-        # # 1. 深度清理：确保容器初始状态为空
-        # if hasattr(self.tabs, 'count'):
-        #     while self.tabs.count() > 0:
-        #         self.tabs.removeTab(0)
-        
-        # while self.stacked.count() > 0:
-        #     w = self.stacked.widget(0)
-        #     self.stacked.removeWidget(w)
-        #     w.deleteLater()
-            
-        # # 2. 配置标签栏基础属性
-        # self.tabs.setTabsClosable(False) 
-        # self.tabs.setMovable(True)
-        
+        # 清理空tab
         self._clear_initial_state()
 
         # 3. 内部信号绑定
-        # self.tabs.currentChanged.connect(self.stacked.setCurrentIndex)
         self.tabs.tabBarDoubleClicked.connect(self.on_tab_double_clicked)
 
         # 4. 自动执行启动逻辑

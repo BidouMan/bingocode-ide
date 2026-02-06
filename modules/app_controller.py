@@ -4,7 +4,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QFileDialog, QMessageBox, QTabBar, QSizePolicy, QApplication, QVBoxLayout)
 
 from ui.main_window_ui import Ui_Form
-from modules.file_menu import FileMenu
+from modules.mune_manager import MenuManager
 from modules.console_manager import ConsoleManager
 from modules.editor_manager import EditorManager
 
@@ -33,7 +33,7 @@ class AppController:
         
         # 带整理的模块
         self.console = ConsoleManager(self.ui.splitter, self.ui.console_output)        
-        self.file_menu = FileMenu(main_window)
+        self.menu_manager = MenuManager(main_window)
 
         # 整理过的模块
         self.render_manager = RenderManager(self.ui.game_view)
@@ -50,15 +50,15 @@ class AppController:
     def setup_connections(self):
         """绑定业务信号，完全保留文件和编辑器逻辑"""
         # 主页全局按钮-
-        self.ui.btn_file.clicked.connect(lambda: self.file_menu.show_popup_menu(self.ui.btn_file))
+        self.ui.btn_file.clicked.connect(lambda: self.menu_manager.show_popup_menu(self.ui.btn_file))
         self.ui.btn_save.clicked.connect(lambda: self.file_manager.save_file(self.editor_manager))
 
     
         # 菜单栏按钮_>文件管理 
-        self.file_menu.new_file_signal.connect(self.editor_manager.create_untitled_file)
-        self.file_menu.open_file_signal.connect(lambda: self.file_manager.open_file_dialog(self.editor_manager))        
-        self.file_menu.save_file_signal.connect(lambda: self.file_manager.save_file(self.editor_manager))
-        self.file_menu.save_as_signal.connect(lambda: self.file_manager.save_as_file(self.editor_manager))
+        self.menu_manager.new_file_signal.connect(self.editor_manager.create_untitled_file)
+        self.menu_manager.open_file_signal.connect(lambda: self.file_manager.open_file_dialog(self.editor_manager))        
+        self.menu_manager.save_file_signal.connect(lambda: self.file_manager.save_file(self.editor_manager))
+        self.menu_manager.save_as_signal.connect(lambda: self.file_manager.save_as_file(self.editor_manager))
 
 
         # 运行程序按钮
