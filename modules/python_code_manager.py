@@ -289,6 +289,12 @@ class QCodeEditor(QTextEdit):
 
 
     def perform_full_check(self):
+        """
+        借鉴 VS Code 逻辑：
+        1. 只要一行没有实质内容(strip后为空)，绝对不报任何错。
+        2. 父级结构(冒号)错误会抑制子级(变量)错误。
+        3. 变量 i 采用“全篇静态预登记”，防止结构损坏导致的误报。
+        """
         raw_code = self.toPlainText()
         self.error_lines = {}
         
@@ -296,86 +302,84 @@ class QCodeEditor(QTextEdit):
             if hasattr(self, 'line_number_area'): self.line_number_area.update()
             return
 
-        current_line_idx = self.textCursor().blockNumber()
         lines = raw_code.split('\n')
+        current_line_idx = self.textCursor().blockNumber()
 
-        # --- 1. 物理缩进与结构检查 ---
+        # --- 第一步：【静态符号预登记】 (Symbol Table) ---
+        # 只要代码里写过 for i，无论在哪一行，i 永远是合法的变量
+        # 这样即使结构坏了，i 也不会报“未定义”
+        import re, keyword
+        protected_names = set(re.findall(r'for\s+([a-zA-Z_]\w*)\s+in', raw_code))
+        protected_names.update(re.findall(r'([a-zA-Z_]\w*)\s*=', raw_code)) # 简单的变量赋值也登记
+        
+        # 基础白名单
+        safe_set = protected_names | set(keyword.kwlist) | set(__builtins__.keys()) | {'self', 'cls'}
+
+        # --- 第二步：【物理与结构校验】 ---
+        # 先扫描全篇，找出结构错误（如冒号、缩进）
+        has_structure_error_on_line = {}
+        
         for i, line in enumerate(lines):
-            code_part = line.split('#')[0]
-            stripped = code_part.strip()
+            stripped = line.strip()
+            # 💡 VS Code 逻辑 1：空行绝对不查
             if not stripped: continue
             
+            # 💡 VS Code 逻辑 2：当前行(正在输入的行)暂不定罪，除非光标移走
+            if i == current_line_idx: continue
+
+            # 物理缩进检查
+            code_part = line.split('#')[0]
             actual_indent = len(code_part) - len(code_part.lstrip())
             
-            # 只有非当前行才报缩进错误
-            if i != current_line_idx:
-                if i > 0 and lines[i-1].split('#')[0].strip().endswith(':'):
-                    prev_line_part = lines[i-1].split('#')[0]
-                    prev_indent = len(prev_line_part) - len(prev_line_part.lstrip())
+            # 检查冒号后的下一行
+            if i > 0:
+                prev_line = lines[i-1].split('#')[0].strip()
+                if prev_line.endswith(':'):
+                    prev_indent = len(lines[i-1].split('#')[0]) - len(lines[i-1].split('#')[0].lstrip())
                     if actual_indent <= prev_indent:
-                        self.error_lines[i] = "缩进错误: 冒号后需要缩进"
+                        self.error_lines[i] = "缩进错误: 此处需要缩进"
+                        has_structure_error_on_line[i] = True
                     elif (actual_indent - prev_indent) % 4 != 0:
-                        self.error_lines[i] = f"缩进不规范: 期望4的倍数(当前{actual_indent})"
+                        self.error_lines[i] = f"缩进不规范: 期望4个空格(当前{actual_indent})"
+                        has_structure_error_on_line[i] = True
 
-        # --- 2. 强力变量保护检查 ---
-        try:
-            import jedi, re, keyword
-            # A. 建立白名单：关键字 + 内置函数
-            safe_set = set(keyword.kwlist) | set(__builtins__.keys()) | {'self', 'cls', 'None', 'True', 'False'}
+        # --- 第三步：【延迟变量校验】 ---
+        # 只有在这一行没有结构错误的情况下，才去揪变量名
+        # 这样就彻底解决了“for i... 报错 i未定义”的问题
+        for i, line in enumerate(lines):
+            # 跳过：1. 正在输入的行 2. 空行 3. 已经报了缩进错误的行
+            if i == current_line_idx or not line.strip() or i in has_structure_error_on_line:
+                continue
             
-            # B. 🚀 正则预扫描：强行抓取所有可能的定义 (防止 Jedi 抽风)
-            for line in lines:
-                # 抓取 for i in...
-                for_vars = re.findall(r'for\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+in', line)
-                # 抓取变量赋值 a = 1
-                assign_vars = re.findall(r'^[\s]*([a-zA-Z_][a-zA-Z0-9_]*)\s*=', line)
-                # 抓取函数定义 def func(a, b)
-                def_vars = re.findall(r'def\s+\w+\s*\((.*?)\)', line)
-                
-                safe_set.update(for_vars)
-                safe_set.update(assign_vars)
-                if def_vars:
-                    params = re.findall(r'[a-zA-Z_][a-zA-Z0-9_]*', def_vars[0])
-                    safe_set.update(params)
+            clean_line = line.split('#')[0]
+            # 过滤字符串内容
+            no_str_line = re.sub(r"('.*?'|\".*?\")", "", clean_line)
+            words = re.findall(r'\b[a-zA-Z_]\w*\b', no_str_line)
+            
+            for word in words:
+                if word not in safe_set:
+                    # 最后尝试让 Jedi 兜底（比如 import 的模块名）
+                    try:
+                        import jedi
+                        script = jedi.Script(raw_code)
+                        jedi_names = {n.name for n in script.get_names(all_scopes=True)}
+                        if word in jedi_names: continue
+                    except: pass
+                    
+                    self.error_lines[i] = f"变量名 '{word}' 可能未定义"
+                    break
 
-            # C. 调用 Jedi 获取高级定义 (类、导入模块等)
-            try:
-                script = jedi.Script(raw_code)
-                jedi_names = {n.name for n in script.get_names(all_scopes=True)}
-                safe_set.update(jedi_names)
-            except: pass
-
-            # D. 逐行扫描变量名
-            for i, line in enumerate(lines):
-                # 🚀 核心逻辑：如果这一行是空行、当前行、或已有缩进错误，直接跳过变量检查
-                clean_line = line.split('#')[0]
-                if not clean_line.strip() or i == current_line_idx or i in self.error_lines:
-                    continue
-                
-                # 排除字符串干扰
-                no_str_line = re.sub(r"('.*?'|\".*?\")", "", clean_line)
-                words = re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b', no_str_line)
-                
-                for word in words:
-                    if word not in safe_set:
-                        # 检查是否为赋值语句的左值 (虽然上面抓了，这里双重保险)
-                        if not re.search(rf'^\s*{word}\s*=', clean_line):
-                            self.error_lines[i] = f"变量名 '{word}' 可能未定义"
-                            break
-        except: pass
-   
-        # --- 3. AST 检查 (补充漏掉的冒号等) ---
+        # --- 第四步：【AST 补位】 (仅查漏掉的冒号) ---
         try:
             import ast
             ast.parse(raw_code)
         except SyntaxError as e:
-            line_idx = e.lineno - 1
-            if line_idx != current_line_idx and line_idx not in self.error_lines:
+            l_idx = e.lineno - 1
+            if l_idx != current_line_idx and l_idx not in self.error_lines:
                 if "expected ':'" in str(e):
-                    self.error_lines[line_idx] = "语法错误: 缺少冒号 ':'"
+                    self.error_lines[l_idx] = "语法错误: 缺少冒号 ':'"
 
-        if hasattr(self, 'line_number_area'):
-            self.line_number_area.update()
+        self.line_number_area.update()
             
     def _check_syntax_structure(self):
         lines = self.toPlainText().split('\n')
