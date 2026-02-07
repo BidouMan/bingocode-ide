@@ -9,7 +9,18 @@ from PySide6.QtGui import (QColor, QFont, QSyntaxHighlighter, QTextCharFormat,
                            QFontDatabase, QPen,QIcon)
 from PySide6.QtCore import Qt, QRect, Property,QTimer,QPoint
 
-
+def get_bingo_apis():
+    try:
+        # 确保 sys.path 已经包含了 modules 目录
+        import bingo_engine
+        # 如果你定义了 __all__，直接用 __all__
+        if hasattr(bingo_engine, "__all__"):
+            return set(bingo_engine.__all__)
+        # 否则获取所有非下划线开头的名称
+        return {name for name in dir(bingo_engine) if not name.startswith('_')}
+    except Exception as e:
+        print(f"警告: 无法预加载 bingo_engine API: {e}")
+        return {"Sprite", "run"} # 兜底方案
 try:
     import bingo_engine
     # 自动获取 bingo_engine 中所有不以 _ 开头的变量和类
@@ -340,6 +351,9 @@ class QCodeEditor(QTextEdit):
         safe_names.update(INTERNAL_LIBS)  # 内部库
         safe_names.add("self")  # 类实例
 
+
+        # 🚀 核心修复：注入 bingo_engine 的公开 API
+        safe_names.update(get_bingo_apis())
         # 提取代码中定义的变量/函数/导入的模块
         defined_names = self._extract_defined_names(raw_code)
         safe_names.update(defined_names)
@@ -368,7 +382,7 @@ class QCodeEditor(QTextEdit):
                 break  # 每行只报一个变量错误
 
     def _extract_defined_names(self, raw_code):
-        """提取代码中定义的变量/函数/导入的模块"""
+        """提取代码中定义的变量/函数/导入的模块（新增：提取for循环迭代变量）"""
         defined_names = set()
         # 1. 提取导入的模块/变量
         import_pattern = re.compile(r'(?:from|import)\s+([\w\.]+)')
@@ -389,11 +403,23 @@ class QCodeEditor(QTextEdit):
         assign_pattern = re.compile(r'\b([a-zA-Z_]\w*)\s*=')
         def_pattern = re.compile(r'def\s+([a-zA-Z_]\w*)')
         class_pattern = re.compile(r'class\s+([a-zA-Z_]\w*)')
+        # 新增：提取for循环迭代变量（匹配 for x in ...: / for x,y in ...: 等场景）
+        for_pattern = re.compile(r'for\s+([\w,\s]+)\s+in\s+')
         for line in raw_code.split('\n'):
             line = line.split('#')[0].strip()
             defined_names.update(assign_pattern.findall(line))
             defined_names.update(def_pattern.findall(line))
             defined_names.update(class_pattern.findall(line))
+            
+            # 处理for循环迭代变量
+            for_match = for_pattern.search(line)
+            if for_match:
+                # 拆分多变量场景（如 for x,y in ...）
+                var_part = for_match.group(1).strip()
+                for var in var_part.split(','):
+                    var = var.strip()
+                    if var and var.isidentifier():  # 确保是合法变量名
+                        defined_names.add(var)
 
         # 3. 补充Jedi分析（增强准确性，兼容复杂场景）
         try:
