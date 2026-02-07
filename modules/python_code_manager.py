@@ -8,23 +8,28 @@ from PySide6.QtGui import (QColor, QFont, QSyntaxHighlighter, QTextCharFormat,
                            QStandardItem, QKeyEvent, QTextCursor, QTextBlockFormat,QPalette,
                            QFontDatabase, QPen,QIcon)
 from PySide6.QtCore import Qt, QRect, Property,QTimer,QPoint
-# from PySide6.QtSvg import QSvgRenderer  # 🚀 必须导入这个
-# from PySide6.QtCore import QDirIterator
 
-
-# 全局变量
-RAINBOW_COLORS = ["#ffd700", "#da70d6", "#179fff", "#ff5d5d", "#41e1a4"]
+# 全局配置：内部库白名单（可根据需要扩展）
+INTERNAL_LIBS = {"bingo_engine", "render_manager", "stage_manager", "script_runner"}
+# 语法关键字（冒号检查）
+COLON_KEYWORDS = ('if', 'else', 'elif', 'for', 'while', 'def', 'class', 'with', 'try', 'except', 'finally')
+# 错误类型枚举（便于管理）
+ERROR_TYPES = {
+    "missing_colon": "语法错误: '{}' 语句末尾缺少冒号 ':'",
+    "indent_error": "缩进错误: 缩进量必须是4个空格的倍数（或Tab）",
+    "undefined_var": "变量名 '{}' 可能未定义"
+}
 
 def get_resource_path(relative_path):
     """ 处理 PyInstaller 打包后的资源路径 """
     if hasattr(sys, '_MEIPASS'):
-        # 打包后的路径
         return os.path.join(sys._MEIPASS, relative_path)
-    # 开发环境路径
     return os.path.join(os.path.abspath("."), relative_path)
 
-# --- 语法高亮逻辑 (保留原始逻辑) ---
+# --- 语法高亮逻辑 (保留) ---
 class PygmentsHighlighter(QSyntaxHighlighter):
+    # 保留你原有的高亮逻辑，无需修改
+    RAINBOW_COLORS = ["#ffd700", "#da70d6", "#179fff", "#ff5d5d", "#41e1a4"]
     def __init__(self, parent, style_name='one-dark'):
         super().__init__(parent)
         from pygments.lexers import get_lexer_by_name
@@ -50,16 +55,12 @@ class PygmentsHighlighter(QSyntaxHighlighter):
         self.highlight_rainbow_brackets(text, level)
 
     def highlight_rainbow_brackets(self, text, level):
-        # 🚀 优化点 1：使用正则直接匹配括号，跳过普通字符
-        # 这个正则会一次性找出所有括号及其位置
         bracket_pattern = re.compile(r"[\(\)\[\]\{\}]")
-        
         for match in bracket_pattern.finditer(text):
             char = match.group()
             index = match.start()
-            
             if char in "([{":
-                color = QColor(RAINBOW_COLORS[level % len(RAINBOW_COLORS)])
+                color = QColor(self.RAINBOW_COLORS[level % len(self.RAINBOW_COLORS)])
                 fmt = QTextCharFormat()
                 fmt.setForeground(color)
                 fmt.setFontWeight(QFont.Bold)
@@ -67,28 +68,25 @@ class PygmentsHighlighter(QSyntaxHighlighter):
                 level += 1
             else:
                 level = max(0, level - 1)
-                color = QColor(RAINBOW_COLORS[level % len(RAINBOW_COLORS)])
+                color = QColor(self.RAINBOW_COLORS[level % len(self.RAINBOW_COLORS)])
                 fmt = QTextCharFormat()
                 fmt.setForeground(color)
                 fmt.setFontWeight(QFont.Bold)
                 self.setFormat(index, 1, fmt)
-        
         self.setCurrentBlockState(level)
 
-# --- 内嵌补全框 ---
+# --- 补全框 (保留) ---
 class CompleterWidget(QListView):
+    # 保留你原有的补全框逻辑，无需修改
     def __init__(self, parent):
         super().__init__(parent)
         self.parent_editor = parent
-
-        # --- QSS 属性变量 (设置默认值) ---
         self._list_bg_color = QColor("#2c313a")
         self._list_text_color = QColor("#abb2bf")
         self._item_selected_bg = QColor("#3e4451")
         self._item_selected_text = QColor("#ffffff")
         self._border_color = QColor("#4b5263")
 
-        # 基础设置 (去重)
         self.setWindowFlags(Qt.SubWindow | Qt.FramelessWindowHint)
         self.setFocusPolicy(Qt.NoFocus) 
         self.setEditTriggers(QListView.EditTrigger.NoEditTriggers)
@@ -101,9 +99,7 @@ class CompleterWidget(QListView):
         self.update_style()
         self.hide()
 
-    
     def update_style(self):
-        """安全地更新样式表，避免死循环"""
         style = f"""
             QListView {{
                 background-color: {self._list_bg_color.name()};
@@ -119,25 +115,17 @@ class CompleterWidget(QListView):
                 border-radius: 2px;
             }}
         """
-        # 只有当新旧样式不同时才应用，双重保险
         if self.styleSheet() != style:
             self.setStyleSheet(style)
-    
 
     def refresh_font(self):
         f = QFont()
-        # 同步编辑器字体族
         f.setFamilies([self.parent_editor.font_family, self.parent_editor.zh_font_family])
-        # 补全字号略小于编辑器字号
         new_size = max(9, self.parent_editor.current_font_size - 2)
         f.setPointSize(new_size)
         self.setFont(f)
-        
-        # 🚀 动态同步补全窗口的宽高
         self.setFixedWidth(self.parent_editor.current_font_size * 18)
         self.setFixedHeight(self.parent_editor.current_font_size * 10)
-
-        # 🚀 动态计算 Item 内边距，防止字号变大后文字重叠
         p = max(2, self.parent_editor.current_font_size // 4)
         style = f"""
             QListView {{
@@ -168,7 +156,6 @@ class CompleterWidget(QListView):
         self.raise_()
 
     def wheelEvent(self, event):
-        """保留：支持在补全框上滚动鼠标来切换选项"""
         if self.model.rowCount() == 0: return
         row = self.currentIndex().row()
         if event.angleDelta().y() > 0:
@@ -179,381 +166,321 @@ class CompleterWidget(QListView):
         event.accept()
     
     def move_selection(self, direction):
-        """处理上下键切换：direction 为 -1 (上) 或 1 (下)"""
         if self.model.rowCount() == 0: return
-        
         current_row = self.currentIndex().row()
         new_row = current_row + direction
-        
-        # 循环滚动逻辑
         if new_row < 0: 
             new_row = self.model.rowCount() - 1
         elif new_row >= self.model.rowCount():
             new_row = 0
-            
         self.setCurrentIndex(self.model.index(new_row, 0))
-    
-    
 
-    # --- QSS 接口属性 ---
     @Property(QColor)
     def listBgColor(self): return self._list_bg_color
     @listBgColor.setter
     def listBgColor(self, c): self._list_bg_color = QColor(c); self.update_style()
-
     @Property(QColor)
     def listTextColor(self): return self._list_text_color
     @listTextColor.setter
     def listTextColor(self, c): self._list_text_color = QColor(c); self.update_style()
-
     @Property(QColor)
     def itemSelectedBg(self): return self._item_selected_bg
     @itemSelectedBg.setter
     def itemSelectedBg(self, c): self._item_selected_bg = QColor(c); self.update_style()
-
     @Property(QColor)
     def itemSelectedText(self): return self._item_selected_text
     @itemSelectedText.setter
     def itemSelectedText(self, c): self._item_selected_text = QColor(c); self.update_style()
-
     @Property(QColor)
     def listBorderColor(self): return self._border_color
     @listBorderColor.setter
     def listBorderColor(self, c): self._border_color = QColor(c); self.update_style()
 
-# --- 核心编辑器类 ---
+# --- 核心编辑器类 (重构错误检查逻辑) ---
 class QCodeEditor(QTextEdit):
     def __init__(self, language='python'):
         super().__init__()
-        # 1. 属性初始化 (对接 QSS)
+        # 基础属性初始化
         self._line_number_bg = QColor("#23272e")
         self._line_number_text = QColor("#4b5263")
         self._line_number_border = QColor("#181a1f")
         self._current_line_color = QColor("#2c313a")
+        self._indent_guide_color = QColor("#3b4048")
+        self._indent_error_color = QColor(255, 0, 0, 40)
 
         self.last_hover_block = -1
         self.file_path = ""
         self.current_font_size = 18
         self.fixed_line_height = 20
-        self.error_lines ={}
+        self.error_lines = {}  # 存储错误行: {行号: 错误信息}
         self.space_width = self.fontMetrics().horizontalAdvance(' ')
         self.indent_guide_width = self.space_width * 4
+        self.last_line_idx = -1
 
+        # 编辑器基础设置
         self.setAcceptRichText(False)
         self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled)
         
-        
+        # 初始化组件
         self.load_custom_font()
         self.highlighter = PygmentsHighlighter(self.document())
         self.completer = CompleterWidget(self)
         self.completer.clicked.connect(self.insert_completion)
-        
         self.line_number_area = LineNumberArea(self)
+
+        # 信号连接
         self.document().blockCountChanged.connect(self.update_line_number_area_width)
         self.document().documentLayout().update.connect(lambda: self.line_number_area.update())
         self.verticalScrollBar().valueChanged.connect(lambda: self.line_number_area.update())
-        
-        # 初始化一个防抖定时器->检查变量用 防止每次输入都检查
-        self.analyze_timer = QTimer(self)
-        self.analyze_timer.setSingleShot(True) # 只触发一次
-        self.analyze_timer.timeout.connect(self.update_indent_errors)
-        
-        # 🚀 替换 ExtraSelection：直接绘制 viewport 背景，解决抖动
         self.cursorPositionChanged.connect(self.viewport().update)
-        # self.cursorPositionChanged.connect(self.update_indent_errors)
+        self.cursorPositionChanged.connect(self.handle_line_validation)
         self.textChanged.connect(self.request_analyze)
-        
+
+        # 防抖定时器（避免实时输入频繁检查）
+        self.analyze_timer = QTimer(self)
+        self.analyze_timer.setSingleShot(True)
+        self.analyze_timer.timeout.connect(self.check_all_errors)
+
+        # 初始化
         self.setup_font()
-        self.update_font_metrics_cache()    # 更新缓存的度量值
+        self.update_font_metrics_cache()
         self.update_line_number_area_width(0)
+        QTimer.singleShot(50, self.init_validation)
+
+    def init_validation(self):
+        """初始化校验"""
+        self.check_all_errors()
 
     def request_analyze(self):
-        # 每次输入都会重置 500ms 倒计时
-        # 只有当用户停止打字 0.5 秒后，才会执行沉重的 Jedi 分析
-        self.analyze_timer.start(200)
+        """触发防抖检查"""
+        self.analyze_timer.start(200)  # 停止输入200ms后检查
 
-
-    def update_indent_errors(self):
+    def check_all_errors(self):
+        """核心：只检查3类指定错误，清空原有错误"""
         self.error_lines.clear()
-        
-        # 检查缩进
-        self._check_indentation()
+        raw_code = self.toPlainText()
+        if not raw_code.strip():
+            self.line_number_area.update()
+            self.viewport().update()
+            return
 
-        # 检查变量名
-        self._check_varname()
-            
+        lines = raw_code.split('\n')
+        current_line = self.textCursor().blockNumber()
+
+        # 1. 检查冒号缺失 + 缩进错误
+        self._check_colon_and_indent(lines, current_line)
+        # 2. 检查未定义变量（排除内部库）
+        self._check_undefined_variable(lines, current_line, raw_code)
+
         # 刷新显示
         self.line_number_area.update()
         self.viewport().update()
 
-
-    def perform_full_check(self):
-        """
-        借鉴 VS Code 逻辑：
-        1. 只要一行没有实质内容(strip后为空)，绝对不报任何错。
-        2. 父级结构(冒号)错误会抑制子级(变量)错误。
-        3. 变量 i 采用“全篇静态预登记”，防止结构损坏导致的误报。
-        """
-        raw_code = self.toPlainText()
-        self.error_lines = {}
-        
-        if not raw_code.strip():
-            if hasattr(self, 'line_number_area'): self.line_number_area.update()
-            return
-
-        lines = raw_code.split('\n')
-        current_line_idx = self.textCursor().blockNumber()
-
-        # --- 第一步：【静态符号预登记】 (Symbol Table) ---
-        # 只要代码里写过 for i，无论在哪一行，i 永远是合法的变量
-        # 这样即使结构坏了，i 也不会报“未定义”
-        import re, keyword
-        protected_names = set(re.findall(r'for\s+([a-zA-Z_]\w*)\s+in', raw_code))
-        protected_names.update(re.findall(r'([a-zA-Z_]\w*)\s*=', raw_code)) # 简单的变量赋值也登记
-        
-        # 基础白名单
-        safe_set = protected_names | set(keyword.kwlist) | set(__builtins__.keys()) | {'self', 'cls'}
-
-        # --- 第二步：【物理与结构校验】 ---
-        # 先扫描全篇，找出结构错误（如冒号、缩进）
-        has_structure_error_on_line = {}
-        
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            # 💡 VS Code 逻辑 1：空行绝对不查
-            if not stripped: continue
-            
-            # 💡 VS Code 逻辑 2：当前行(正在输入的行)暂不定罪，除非光标移走
-            if i == current_line_idx: continue
-
-            # 物理缩进检查
-            code_part = line.split('#')[0]
-            actual_indent = len(code_part) - len(code_part.lstrip())
-            
-            # 检查冒号后的下一行
-            if i > 0:
-                prev_line = lines[i-1].split('#')[0].strip()
-                if prev_line.endswith(':'):
-                    prev_indent = len(lines[i-1].split('#')[0]) - len(lines[i-1].split('#')[0].lstrip())
-                    if actual_indent <= prev_indent:
-                        self.error_lines[i] = "缩进错误: 此处需要缩进"
-                        has_structure_error_on_line[i] = True
-                    elif (actual_indent - prev_indent) % 4 != 0:
-                        self.error_lines[i] = f"缩进不规范: 期望4个空格(当前{actual_indent})"
-                        has_structure_error_on_line[i] = True
-
-        # --- 第三步：【延迟变量校验】 ---
-        # 只有在这一行没有结构错误的情况下，才去揪变量名
-        # 这样就彻底解决了“for i... 报错 i未定义”的问题
-        for i, line in enumerate(lines):
-            # 跳过：1. 正在输入的行 2. 空行 3. 已经报了缩进错误的行
-            if i == current_line_idx or not line.strip() or i in has_structure_error_on_line:
-                continue
-            
-            clean_line = line.split('#')[0]
-            # 过滤字符串内容
-            no_str_line = re.sub(r"('.*?'|\".*?\")", "", clean_line)
-            words = re.findall(r'\b[a-zA-Z_]\w*\b', no_str_line)
-            
-            for word in words:
-                if word not in safe_set:
-                    # 最后尝试让 Jedi 兜底（比如 import 的模块名）
-                    try:
-                        import jedi
-                        script = jedi.Script(raw_code)
-                        jedi_names = {n.name for n in script.get_names(all_scopes=True)}
-                        if word in jedi_names: continue
-                    except: pass
-                    
-                    self.error_lines[i] = f"变量名 '{word}' 可能未定义"
-                    break
-
-        # --- 第四步：【AST 补位】 (仅查漏掉的冒号) ---
-        try:
-            import ast
-            ast.parse(raw_code)
-        except SyntaxError as e:
-            l_idx = e.lineno - 1
-            if l_idx != current_line_idx and l_idx not in self.error_lines:
-                if "expected ':'" in str(e):
-                    self.error_lines[l_idx] = "语法错误: 缺少冒号 ':'"
-
-        self.line_number_area.update()
-            
-    def _check_syntax_structure(self):
-        lines = self.toPlainText().split('\n')
-        current_line_num = self.textCursor().blockNumber()
-        colon_keywords = ('if', 'else', 'elif', 'for', 'while', 'def', 'class')
-        
-        expect_indent = False
-        prev_indent = 0
+    def _check_colon_and_indent(self, lines, current_line):
+        """检查：1.冒号缺失 2.缩进错误（包含缩进量非4倍数）"""
+        expect_indent = False  # 是否期望下一行缩进
+        prev_indent = 0        # 上一行缩进量
 
         for i, line in enumerate(lines):
-            # 排除当前行
-            if i == current_line_num:
+            # 跳过当前编辑行（避免输入中误报）
+            if i == current_line:
                 stripped = line.split('#')[0].strip()
                 if stripped:
+                    # 当前行以冒号结尾，标记下一行需要缩进
                     expect_indent = stripped.endswith(':')
                     prev_indent = len(line) - len(line.lstrip())
                 continue
 
-            code_part = line.split('#')[0]
+            # 剔除注释，只保留代码部分
+            code_part = line.split('#')[0].rstrip()
             stripped = code_part.strip()
-            if not stripped: continue
-            
-            current_indent = len(code_part) - len(code_part.lstrip())
-
-            # 🚀 优先检查缩进
-            if expect_indent and current_indent <= prev_indent:
-                self.error_lines[i] = "缩进错误: 此行需要缩进 (Tab 或 4个空格)"
-                expect_indent = False # 报错后重置，防止连环报错
+            if not stripped:
+                expect_indent = False
                 continue
 
-            # 🚀 检查冒号
-            first_word = re.findall(r'^\w+', stripped)
-            if first_word and first_word[0] in colon_keywords:
-                if not stripped.endswith(':'):
-                    self.error_lines[i] = f"语法错误: '{first_word[0]}' 语句末尾缺少冒号 ':'"
-                    expect_indent = False
-                else:
-                    expect_indent = True
-                    prev_indent = current_indent
-            else:
+            current_indent = len(code_part) - len(code_part.lstrip())
+            
+            # 新增：检查缩进量是否为4的倍数（核心修复点）
+            if current_indent % 4 != 0:
+                self.error_lines[i] = ERROR_TYPES["indent_error"].replace("(Tab 或 4个空格)", "缩进量必须是4个空格的倍数")
                 expect_indent = False
+                continue
+
+            # 原有逻辑：检查上一行要求缩进，但当前行缩进不足
+            if expect_indent and current_indent <= prev_indent:
+                self.error_lines[i] = ERROR_TYPES["indent_error"]
+                expect_indent = False  # 避免连环报错
+                continue
+
+            # 检查2：冒号缺失
+            first_word = stripped.split('(')[0].split(':')[0].split()[0] if stripped.split() else ""
+            if first_word in COLON_KEYWORDS and not stripped.endswith(':'):
+                self.error_lines[i] = ERROR_TYPES["missing_colon"].format(first_word)
+                expect_indent = False
+            else:
+                # 重置缩进期望
+                expect_indent = stripped.endswith(':')
                 prev_indent = current_indent
 
-    def _check_varname(self):
-        raw_code = self.toPlainText()
-        try:
-            import jedi
-            # 使用原始代码保证 jedi 能看到上下文
-            script = jedi.Script(raw_code)
-            
-            # 获取白名单
-            defined_names = {n.name for n in script.get_names(all_scopes=True)}
-            safe_names = defined_names | set(__builtins__.keys()) | {'self'}
+    def _check_undefined_variable(self, lines, current_line, raw_code):
+        """检查：未定义变量（排除内部库/关键字/内置函数）"""
+        import keyword
+        # 构建白名单
+        safe_names = set(keyword.kwlist)  # 关键字
+        safe_names.update(__builtins__.keys())  # 内置函数
+        safe_names.update(INTERNAL_LIBS)  # 内部库
+        safe_names.add("self")  # 类实例
 
-            lines = raw_code.split('\n')
-            for i, line in enumerate(lines):
-                # 🚀 核心修复：如果这一行已经有“缩进”或“冒号”错误了，闭嘴，不准报变量错误
-                if i in self.error_lines:
+        # 提取代码中定义的变量/函数/导入的模块
+        defined_names = self._extract_defined_names(raw_code)
+        safe_names.update(defined_names)
+
+        # 遍历每行检查变量
+        for i, line in enumerate(lines):
+            # 跳过当前行/已有错误的行/空行
+            if i == current_line or i in self.error_lines or not line.strip():
+                continue
+
+            # 剔除注释和字符串（避免误判字符串内的内容）
+            clean_line = self._clean_line_for_var_check(line)
+            # 提取所有可能的变量名
+            words = re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b', clean_line)
+
+            for word in words:
+                # 跳过白名单/定义过的变量/赋值语句中的变量
+                if word in safe_names:
                     continue
-                
-                if i == self.textCursor().blockNumber(): continue
+                # 检查是否是赋值语句（赋值的变量不算未定义）
+                after_word = clean_line.split(word, 1)[-1].lstrip()
+                if after_word.startswith('='):
+                    continue
+                # 最终判定：未定义变量
+                self.error_lines[i] = ERROR_TYPES["undefined_var"].format(word)
+                break  # 每行只报一个变量错误
 
-                clean_line = line.split('#')[0]
-                words = re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b', clean_line)
+    def _extract_defined_names(self, raw_code):
+        """提取代码中定义的变量/函数/导入的模块"""
+        defined_names = set()
+        # 1. 提取导入的模块/变量
+        import_pattern = re.compile(r'(?:from|import)\s+([\w\.]+)')
+        from_import_pattern = re.compile(r'import\s+([\w\s,]+)')
+        for line in raw_code.split('\n'):
+            line = line.split('#')[0].strip()
+            # 提取 import xxx 或 from xxx import xxx 中的模块名
+            import_matches = import_pattern.findall(line)
+            for m in import_matches:
+                defined_names.update(m.split('.'))
+            # 提取 import a, b, c 中的变量名
+            from_matches = from_import_pattern.findall(line)
+            for names in from_matches:
+                for name in names.split(','):
+                    defined_names.add(name.strip())
 
-                for word in words:
-                    import keyword
-                    if word in keyword.kwlist or word in safe_names: continue
-                    
-                    # 排除定义
-                    after = line.split(word, 1)[-1].lstrip()
-                    if after.startswith('='): continue
-                    
-                    # 只有在这里才记录变量错误
-                    self.error_lines[i] = f"变量名 '{word}' 可能未定义"
+        # 2. 提取赋值/函数/类定义的变量名
+        assign_pattern = re.compile(r'^\s*([a-zA-Z_]\w*)\s*=')
+        def_pattern = re.compile(r'def\s+([a-zA-Z_]\w*)')
+        class_pattern = re.compile(r'class\s+([a-zA-Z_]\w*)')
+        for line in raw_code.split('\n'):
+            line = line.split('#')[0].strip()
+            defined_names.update(assign_pattern.findall(line))
+            defined_names.update(def_pattern.findall(line))
+            defined_names.update(class_pattern.findall(line))
+
+        # 3. 补充Jedi分析（增强准确性，兼容复杂场景）
+        try:
+            script = jedi.Script(raw_code, path="main.py")
+            jedi_names = {n.name for n in script.get_names(all_scopes=True)}
+            defined_names.update(jedi_names)
         except:
             pass
 
-    def _check_indentation(self):
-  
-        """专门检查缩进和冒号缺失"""
-        text = self.toPlainText()
-        lines = text.split('\n')
-        current_line_num = self.textCursor().blockNumber()
+        return defined_names
 
-        # 冒号检查关键字
-        colon_keywords = ('if', 'else', 'elif', 'for', 'while', 'def', 'class', 'with', 'try', 'except', 'finally')
+    def _clean_line_for_var_check(self, line):
+        """清理行内容：移除注释、字符串，避免误判"""
+        # 移除注释
+        line = line.split('#')[0]
+        # 移除字符串（单/双引号）
+        line = re.sub(r"(['\"]).*?\1", lambda m: " " * len(m.group()), line)
+        # 移除点调用（如 obj.xxx 中的xxx不检查）
+        line = re.sub(r'\.\w+', lambda m: " " * len(m.group()), line)
+        return line
 
-        for i, line in enumerate(lines):
-            # 1. 剔除注释部分
-            code_part = line.split('#')[0].rstrip()
-            stripped = code_part.strip()
-            
-            if not stripped: continue
-            
-            # 🚀 核心修复：冒号检查
-            # 如果以关键字开头，且当前行不是正在输入的行（避免输入中途报错）
-            if i != current_line_num:
-                # 匹配：行首是关键字，且行尾不是冒号
-                first_word = stripped.split('(')[0].split(':')[0].split()[0] if stripped.split() else ""
-                if first_word in colon_keywords and not stripped.endswith(':'):
-                    # 如果该行还没被变量检查标记错误，则标记冒号错误
-                    if i not in self.error_lines:
-                        self.error_lines[i] = f"语法错误: '{first_word}' 语句末尾缺少冒号 ':'"
+    def handle_line_validation(self):
+        """光标行切换时触发检查"""
+        curr_line = self.textCursor().blockNumber()
+        if curr_line != self.last_line_idx:
+            self.check_all_errors()
+            self.last_line_idx = curr_line
 
+    # --- 保留原有UI/交互逻辑 ---
+    def load_custom_font(self):
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        asset_path = get_resource_path(os.path.join("assets", "font"))
+        if sys.platform == "darwin":
+            self.font_family = "Menlo"
+            self.zh_font_family = "PingFang SC"
+        elif sys.platform == "win32":
+            self.font_family = "Consolas"
+            self.zh_font_family = "Microsoft YaHei"
+        else:
+            self.font_family = "Monospace"
+            self.zh_font_family = "sans-serif"
+
+        font_config = [
+            ("JetBrainsMono-Regular.ttf", "font_family"),
+            ("HarmonyOS_Sans_SC_Regular.ttf", "zh_font_family")
+        ]
+        for f_name, attr in font_config:
+            p = os.path.join(asset_path, f_name)
+            if os.path.exists(p):
+                fid = QFontDatabase.addApplicationFont(p)
+                if fid != -1:
+                    family = QFontDatabase.applicationFontFamilies(fid)[0]
+                    setattr(self, attr, family)
+
+    def setup_font(self):
+        font = QFont()
+        font.setFamilies([self.font_family, self.zh_font_family, "Consolas"])
+        font.setPointSize(self.current_font_size)
+        font.setFixedPitch(True)
+        font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
+        self.setFont(font)
+        self.document().setDefaultFont(font)
+        self.document().setDocumentMargin(0)
+
+    def update_font_metrics_cache(self):
+        metrics = self.fontMetrics()
+        self.space_width = metrics.horizontalAdvance(' ')
+        self.indent_guide_width = self.space_width * 4
+        self.fixed_line_height = metrics.lineSpacing() + 2
 
     def paintEvent(self, event):
         painter = QPainter(self.viewport())
-        
+        # 绘制当前行背景
         if not self.textCursor().hasSelection():
-        # 🚀 方案核心：利用 cursorRect 获取 Layout 引擎计算后的精确物理坐标
             crect = self.cursorRect()
-            
-            # 物理扩容：向上偏 1px，总高度加 2px
-            # 这 2 个像素的冗余量足以覆盖 Win/Mac 下所有缩放产生的舍入误差
             draw_rect = QRect(
                 0, 
                 crect.top() - 1, 
                 self.viewport().width(), 
                 crect.height() + 2
             )
-            
             painter.fillRect(draw_rect, self._current_line_color)
-
+        # 绘制缩进参考线
         self.draw_indent_guides(painter)
+        # 绘制错误行背景
         self.draw_indent_errors(painter)
-        
         # 绘制文字
         super().paintEvent(event)
 
-    def update_font_metrics_cache(self):
-        """专门负责更新缓存的度量值，在初始化和缩放时调用"""
-        metrics = self.fontMetrics()
-        # 1. 单个空格宽度
-        self.space_width = metrics.horizontalAdvance(' ')
-        # 2. 4个空格宽度 (用于 draw_indent_guides)
-        self.indent_guide_width = self.space_width * 4
-        # 3. 记录逻辑行高，给 LineNumberArea 和绘制背景使用
-        # +2 是你代码中原有的微调值
-        self.fixed_line_height = metrics.lineSpacing() + 2
-
-        
-
-    def draw_indent_errors(self, painter):
-        error_color = getattr(self, '_indent_error_color', QColor(255, 0, 0, 40))
-        layout = self.document().documentLayout()
-        scroll_y = self.verticalScrollBar().value()
-        viewport_h = self.viewport().height()
-
-        # 直接遍历存储好的错误行号
-        for line_num, msg in self.error_lines.items():
-            block = self.document().findBlockByNumber(line_num)
-            if not block.isValid(): continue
-            
-            rect = layout.blockBoundingRect(block)
-            top = rect.top() - scroll_y
-            
-            # 性能优化：只画可视区域内的
-            if top > viewport_h: continue
-            if top + rect.height() < 0: continue
-            
-            painter.fillRect(QRect(0, int(top), self.viewport().width(), int(rect.height())), error_color)
-
     def draw_indent_guides(self, painter):
-        color = getattr(self, '_indent_guide_color', QColor("#3b4048"))
-        painter.setPen(QPen(color, 1, Qt.PenStyle.SolidLine))
-        
-        # 🚀 直接使用预计算的变量，速度极快
+        painter.setPen(QPen(self._indent_guide_color, 1, Qt.PenStyle.SolidLine))
         indent_width = self.indent_guide_width 
         offset_x = self.document().documentMargin()
-        
         scroll_y = self.verticalScrollBar().value()
         viewport_rect = self.viewport().rect()
-        
         block = self.document().begin()
         layout = self.document().documentLayout()
         last_indent_levels = 0
@@ -562,80 +489,32 @@ class QCodeEditor(QTextEdit):
             rect = layout.blockBoundingRect(block)
             top = rect.top() - scroll_y
             bottom = top + rect.height()
-
             if top > viewport_rect.bottom(): break
-            
             if bottom >= viewport_rect.top():
                 text = block.text()
                 stripped_text = text.lstrip()
-                
                 if not stripped_text:
                     indent_levels = last_indent_levels
                 else:
-                    # 🚀 这里的计算也变快了
                     indent_levels = (len(text) - len(stripped_text)) // 4
                     last_indent_levels = indent_levels
-                
                 for i in range(indent_levels):
                     x = offset_x + (i * indent_width)
-                    if indent_levels > 0:
-                        painter.drawLine(x, top, x, bottom)
-            
+                    painter.drawLine(x, top, x, bottom)
             block = block.next()
 
-    def setup_font(self):
-        font = QFont()
-        # 🚀 严格顺序：英文在前，中文在后
-        font.setFamilies([self.font_family, self.zh_font_family, "Consolas"])
-        font.setPointSize(self.current_font_size)
-        font.setFixedPitch(True)
-        # 强制开启抗锯齿，这在 Mac Retina 屏上非常重要
-        font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
-        self.setFont(font)
-        
-        metrics = self.fontMetrics()
-        # 记录逻辑行高，给 LineNumberArea 使用
-        # self.fixed_line_height = metrics.lineSpacing() + 2
-        
-        # 设置文档属性
-        self.document().setDefaultFont(font)
-        self.document().setDocumentMargin(0)
+    def draw_indent_errors(self, painter):
+        layout = self.document().documentLayout()
+        scroll_y = self.verticalScrollBar().value()
+        viewport_h = self.viewport().height()
+        for line_num in self.error_lines:
+            block = self.document().findBlockByNumber(line_num)
+            if not block.isValid(): continue
+            rect = layout.blockBoundingRect(block)
+            top = rect.top() - scroll_y
+            if top > viewport_h or top + rect.height() < 0: continue
+            painter.fillRect(QRect(0, int(top), self.viewport().width(), int(rect.height())), self._indent_error_color)
 
-    def load_custom_font(self):
-        # 1. 获取绝对路径，为打包做准备
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        # asset_path = os.path.join(base_dir, "assets", "font")
-        asset_path = get_resource_path(os.path.join("assets", "font"))
-        
-        # 2. 🚀 跨平台默认回退方案
-        if sys.platform == "darwin":      # macOS
-            self.font_family = "Menlo"    # Mac 默认等宽
-            self.zh_font_family = "PingFang SC"
-        elif sys.platform == "win32":     # Windows (包含32/64位)
-            self.font_family = "Consolas" # Win 默认等宽
-            self.zh_font_family = "Microsoft YaHei"
-        else:                             # Linux/其他
-            self.font_family = "Monospace"
-            self.zh_font_family = "sans-serif"
-
-        # 3. 尝试加载你的专属打包字体
-        font_config = [
-            ("JetBrainsMono-Regular.ttf", "font_family"),
-            ("HarmonyOS_Sans_SC_Regular.ttf", "zh_font_family")
-        ]
-
-        for f_name, attr in font_config:
-            p = os.path.join(asset_path, f_name)
-            if os.path.exists(p):
-                fid = QFontDatabase.addApplicationFont(p)
-                if fid != -1:
-                    family = QFontDatabase.applicationFontFamilies(fid)[0]
-                    setattr(self, attr, family)
-                    # print(f"成功激活内置字体: {f_name} -> {family}")
-            else:
-                print(f"注意: 未找到内置字体 {f_name}，已切换至系统默认回退方案")
-
-    # --- 缩放逻辑 (修复行号同步) ---
     def wheelEvent(self, event):
         if event.modifiers() & Qt.ControlModifier:
             if event.angleDelta().y() > 0: self.zoom_in()
@@ -654,20 +533,18 @@ class QCodeEditor(QTextEdit):
             self.refresh_all_components()
 
     def refresh_all_components(self):
-        """点击缩放或 Ctrl+滚轮时触发"""
         self.setup_font()
-        self.update_font_metrics_cache() # 🚀 必须同步更新缓存
+        self.update_font_metrics_cache()
         self.completer.refresh_font()
         self.line_number_area.setFont(self.font())
         self.update_line_number_area_width(0)
         self.line_number_area.update()
 
-    # --- 快捷键与业务逻辑 ---
     def keyPressEvent(self, event: QKeyEvent):
         key, mods = event.key(), event.modifiers()
         char = event.text()
         
-        # 1. 补全框可见时的拦截逻辑
+        # 补全框交互
         if self.completer.isVisible():
             if key == Qt.Key_Up:
                 self.completer.move_selection(-1)
@@ -677,8 +554,7 @@ class QCodeEditor(QTextEdit):
                 return
             if key in (Qt.Key_Enter, Qt.Key_Return, Qt.Key_Tab):
                 self.insert_completion()
-                # 🚀 补全上屏后也触发一次检查
-                QTimer.singleShot(50, self.perform_full_check)
+                QTimer.singleShot(50, self.check_all_errors)
                 return
             if key == Qt.Key_Escape:
                 self.completer.hide()
@@ -686,7 +562,7 @@ class QCodeEditor(QTextEdit):
             if key in (Qt.Key_Space, Qt.Key_Backspace, Qt.Key_Left, Qt.Key_Right):
                 self.completer.hide()
 
-        # 2. 快捷键逻辑 (保持不变)
+        # 快捷键
         if mods & Qt.ControlModifier:
             if key in (Qt.Key_Plus, Qt.Key_Equal):
                 self.current_font_size = min(72, self.current_font_size + 2)
@@ -696,16 +572,22 @@ class QCodeEditor(QTextEdit):
                 self.current_font_size = max(6, self.current_font_size - 2)
                 self.refresh_all_components()
                 return
-            if key == Qt.Key_0: self.current_font_size = 18; self.refresh_all_components(); return
-            if key == Qt.Key_Slash: self.toggle_comment(); return
-            if key == Qt.Key_F and (mods & Qt.ShiftModifier): self.format_code(); return
-            # 🚀 处理 Ctrl+V 粘贴
+            if key == Qt.Key_0: 
+                self.current_font_size = 18
+                self.refresh_all_components()
+                return
+            if key == Qt.Key_Slash: 
+                self.toggle_comment()
+                return
+            if key == Qt.Key_F and (mods & Qt.ShiftModifier): 
+                self.format_code()
+                return
             if key == Qt.Key_V:
                 super().keyPressEvent(event)
-                QTimer.singleShot(50, self.perform_full_check)
+                QTimer.singleShot(50, self.check_all_errors)
                 return
 
-        # 3. 自动补全括号和引号 (保持不变)
+        # 自动补全括号/引号
         bracket_pairs = {'(': ')', '[': ']', '{': '}', '"': '"', "'": "'"}
         if char in bracket_pairs:
             cursor = self.textCursor()
@@ -718,7 +600,7 @@ class QCodeEditor(QTextEdit):
                 self.setTextCursor(cursor)
             return
 
-        # 4. 智能退格
+        # 智能退格
         if key == Qt.Key_Backspace:
             cursor = self.textCursor()
             if not cursor.hasSelection():
@@ -727,95 +609,74 @@ class QCodeEditor(QTextEdit):
                     cursor.beginEditBlock()
                     for _ in range(4): cursor.deletePreviousChar()
                     cursor.endEditBlock()
-                    # 🚀 退格后触发检查
-                    QTimer.singleShot(50, self.perform_full_check)
+                    QTimer.singleShot(50, self.check_all_errors)
                     return
 
-        # 5. 换行逻辑 (保持你的缩进逻辑)
+        # 换行自动缩进
         if key in (Qt.Key_Return, Qt.Key_Enter):
             line_text = self.textCursor().block().text()
             indent = len(line_text) - len(line_text.lstrip())
             if line_text.strip().endswith(':'): 
                 indent += 4
-            
-            super().keyPressEvent(event) # 先执行换行
-            self.insertPlainText(" " * indent) # 再插入缩进
-            
-            # 🚀 稍微多延迟一点点，确保内容完全稳定
-            QTimer.singleShot(200, self.perform_full_check)
+            super().keyPressEvent(event) 
+            self.insertPlainText(" " * indent)
+            self.check_all_errors()
             return
 
-        # 6. 处理缩进
+        # 块缩进/反缩进
         cursor = self.textCursor()
         if cursor.hasSelection():
             if key in (Qt.Key_Tab, Qt.Key_Backtab):
                 self._handle_block_indent(key == Qt.Key_Backtab)
-                QTimer.singleShot(50, self.perform_full_check)
+                QTimer.singleShot(50, self.check_all_errors)
                 return
         else:
             if key == Qt.Key_Tab:
                 self.insertPlainText("    ")
-                QTimer.singleShot(50, self.perform_full_check)
+                QTimer.singleShot(50, self.check_all_errors)
                 return
             if key == Qt.Key_Backtab:
-                # 你的单行反缩进逻辑... (省略)
-                super().keyPressEvent(event) # 这里保持你原来的逻辑即可
-                QTimer.singleShot(50, self.perform_full_check)
+                super().keyPressEvent(event)
+                QTimer.singleShot(50, self.check_all_errors)
                 return
 
-        # 7. 默认处理
+        # 默认处理
         super().keyPressEvent(event)
-        
-        # 8. 触发补全提示
+        self.check_all_errors()
+        # 触发代码补全
         if char.isalnum() or char == ".":
             self.trigger_completion()
-    
+
     def _handle_block_indent(self, is_unindent):
-        """处理选中区域的整体缩进/反缩进"""
         cursor = self.textCursor()
         start = cursor.selectionStart()
         end = cursor.selectionEnd()
-
-        # 获取选区跨越的所有行
         start_block = self.document().findBlock(start)
         end_block = self.document().findBlock(end)
-        
-        # 如果选区末尾刚好在行首，且选了不止一行，通常不缩进最后那一行
         if end_block.position() == end and start_block != end_block:
             end_block = end_block.previous()
 
-        # 开始编辑块（这样撤销操作 Ctrl+Z 会把整个缩进当一步）
         cursor.beginEditBlock()
-        
         current_block = start_block
         while True:
-            # 定位到该行行首
             temp_cursor = QTextCursor(current_block)
-            
             if is_unindent:
-                # 反缩进：检查行首是否有空格并删除
                 text = current_block.text()
                 if text.startswith("    "):
                     temp_cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor, 4)
                     temp_cursor.removeSelectedText()
                 elif text.startswith(" "):
-                    # 不足4个空格时，删掉全部前导空格
                     while temp_cursor.block().text().startswith(" "):
                         temp_cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor, 1)
                         temp_cursor.removeSelectedText()
             else:
-                # 正向缩进：行首直接插入 4 个空格
                 temp_cursor.insertText("    ")
-
             if current_block == end_block:
                 break
             current_block = current_block.next()
-
         cursor.endEditBlock()
-        # 🚀 保持选区状态（VSCode 习惯：缩进后文字依然保持选中）
         self.setTextCursor(cursor)
 
-    # --- 其余保留的功能 (注释、格式化等) ---
     def toggle_comment(self):
         cursor = self.textCursor()
         start, end = cursor.selectionStart(), cursor.selectionEnd()
@@ -850,13 +711,27 @@ class QCodeEditor(QTextEdit):
         except: pass
 
     def trigger_completion(self):
+        """增强补全：支持内部库补全"""
         try:
-            script = jedi.Script(self.toPlainText())
-            comps = script.complete(self.textCursor().blockNumber() + 1, self.textCursor().columnNumber())
-            if comps:
-                self.completer.update_completions(comps[:15])
+            # 扩展Jedi的搜索路径，包含内部库目录
+            script = jedi.Script(
+                self.toPlainText(),
+                path="main.py",
+                sys_path=sys.path  # 确保包含modules/assets/ui目录
+            )
+            comps = script.complete(
+                self.textCursor().blockNumber() + 1,
+                self.textCursor().columnNumber()
+            )
+            # 过滤补全结果，保留内部库相关补全
+            filtered_comps = []
+            for comp in comps[:15]:
+                # 包含内部库名 或 普通补全项
+                if any(lib in comp.name for lib in INTERNAL_LIBS) or comp.type in ("function", "class", "variable"):
+                    filtered_comps.append(comp)
+            if filtered_comps:
+                self.completer.update_completions(filtered_comps)
                 crect = self.cursorRect()
-                # 🚀 改进：让垂直偏移随行高动态变化 (大约是行高的 1/10)
                 vertical_offset = max(2, self.fixed_line_height // 10)
                 self.completer.move(
                     crect.left() + self.line_number_area.width(), 
@@ -885,7 +760,7 @@ class QCodeEditor(QTextEdit):
         super().resizeEvent(event)
         self.line_number_area.setGeometry(0, 0, self.line_number_area.width(), self.viewport().height())
 
-    # --- QSS 接口 ---
+    # --- QSS属性接口 ---
     @Property(QColor)
     def lineNumberBg(self): return self._line_number_bg
     @lineNumberBg.setter
@@ -907,7 +782,6 @@ class QCodeEditor(QTextEdit):
     @selectionBackground.setter
     def selectionBackground(self, c): 
         p = self.palette(); p.setColor(QPalette.ColorRole.Highlight, QColor(c)); self.setPalette(p)
-
     @Property(QColor)
     def selectionColor(self): return self.palette().color(QPalette.ColorRole.HighlightedText)
     @selectionColor.setter
@@ -915,42 +789,33 @@ class QCodeEditor(QTextEdit):
         p = self.palette()
         p.setBrush(QPalette.ColorRole.HighlightedText, Qt.BrushStyle.NoBrush)
         self.setPalette(p)
-    
     @Property(QColor)
-    def indentGuideColor(self): return self._indent_guide_color if hasattr(self, '_indent_guide_color') else QColor("#3b4048")
+    def indentGuideColor(self): return self._indent_guide_color
     @indentGuideColor.setter
     def indentGuideColor(self, c): self._indent_guide_color = QColor(c); self.viewport().update()
-
     @Property(QColor)
-    def indentErrorColor(self): return getattr(self, '_indent_error_color', QColor(255, 0, 0, 50))
+    def indentErrorColor(self): return self._indent_error_color
     @indentErrorColor.setter
     def indentErrorColor(self, c): self._indent_error_color = QColor(c); self.viewport().update()
-    
 
-
+# --- 行号区域 (保留原有逻辑) ---
 class LineNumberArea(QWidget):
     def __init__(self, editor):
         super().__init__(editor)
         self.editor = editor
-        # 开启鼠标追踪，否则 mouseMoveEvent 只有在按下鼠标时才触发
         self.setMouseTracking(True)
-        
         self.error_icon = QIcon(":/icons/error_1.svg")
-
         self.blink_timer = QTimer(self)
-        # ✅ 修正连接：指向下面定义的 update_blink
-        self.blink_timer.timeout.connect(self.update_blink) 
-        self.blink_timer.start(50) # 提高刷新率让呼吸感更顺滑
+        self.blink_timer.timeout.connect(self.update_blink)
+        self.blink_timer.start(50)
         self.blink_alpha = 255
         self.blink_dir = -1
 
-
     def update_blink(self):
-        # 顺滑的呼吸灯逻辑
         self.blink_alpha += self.blink_dir * 10
         if self.blink_alpha <= 100: self.blink_dir = 1
         if self.blink_alpha >= 255: self.blink_dir = -1
-        self.update() # 触发重绘
+        self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -970,34 +835,34 @@ class LineNumberArea(QWidget):
                 line_rect = QRect(0, top, self.width(), self.editor.fixed_line_height)
 
                 if line_num in self.editor.error_lines:
-                    # 🚀 背景闪烁逻辑
+                    # 错误行背景闪烁
                     flash_color = QColor("#ff5555")
                     flash_color.setAlpha(int(self.blink_alpha * 0.2)) 
                     painter.fillRect(line_rect, flash_color)
 
-                    # 🚀 绘制图标逻辑
+                    # 绘制错误图标/提示
                     icon_size = int(self.editor.fixed_line_height * 0.6)
-                    # 图标放在左侧，留 4 像素边距
-                    icon_rect = QRect(4, top + (self.editor.fixed_line_height - icon_size) // 2, 
-                                     icon_size, icon_size)
-                    
+                    icon_rect = QRect(
+                        4, 
+                        top + (self.editor.fixed_line_height - icon_size) // 2, 
+                        icon_size, 
+                        icon_size
+                    )
                     if not self.error_icon.isNull():
                         self.error_icon.paint(painter, icon_rect)
                     else:
-                        # 兜底绘制
                         painter.setPen(QColor("#ff5555"))
                         painter.drawText(icon_rect, Qt.AlignCenter, "!")
 
-                # --- 绘制行号文字 ---
+                # 绘制行号文字
                 text_color = self.editor._line_number_text
                 if line_num in self.editor.error_lines:
                     text_color = QColor("#ff5555")
-                
                 painter.setPen(text_color)
-                # 右侧留 8 像素间距，确保不和右边框贴太近
-                painter.drawText(0, top, self.width() - 8, self.editor.fixed_line_height, 
-                                 Qt.AlignRight | Qt.AlignVCenter, str(line_num + 1))
-            
+                painter.drawText(
+                    0, top, self.width() - 8, self.editor.fixed_line_height, 
+                    Qt.AlignRight | Qt.AlignVCenter, str(line_num + 1)
+                )
             block = block.next()
 
     def mouseMoveEvent(self, event):
@@ -1013,31 +878,24 @@ class LineNumberArea(QWidget):
 
             if top <= pos.y() <= bottom:
                 line_num = block.blockNumber()
-                if hasattr(self.editor, 'error_lines') and line_num in self.editor.error_lines:
+                if line_num in self.editor.error_lines:
                     error_msg = self.editor.error_lines[line_num]
-                    
-                    # 🚀 纵向优化：
-                    # 使用 event.pos().y() (鼠标当前高度) 而不是 top (行顶部)
-                    # 然后减去 10 到 15 像素，强行把 Tip 往上提
                     local_tip_point = QPoint(self.width() + 2, event.pos().y() - 40)
-                    
                     global_tip_pos = self.mapToGlobal(local_tip_point)
-                    
-                    QToolTip.showText(global_tip_pos, 
-                                      f"<div style='min-width: 150px;'><b>⚠️ 错误:</b><br>{error_msg}</div>", 
-                                      self)
+                    QToolTip.showText(
+                        global_tip_pos, 
+                        f"<div style='min-width: 150px;'><b>⚠️ 错误:</b><br>{error_msg}</div>", 
+                        self
+                    )
                     return 
                 else:
                     break
-            
             if top > pos.y(): break
             block = block.next()
         
         QToolTip.hideText()
         super().mouseMoveEvent(event)
 
-
     def leaveEvent(self, event):
-        # 鼠标离开行号区，强制关闭提示
         QToolTip.hideText()
         super().leaveEvent(event)

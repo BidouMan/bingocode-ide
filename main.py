@@ -8,6 +8,11 @@ from PySide6.QtCore import QLoggingCategory
 # 获取当前 main.py 所在的绝对路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
+#让系统能直接识别 modules 文件夹下的库
+modules_path = os.path.join(current_dir, "modules")
+if modules_path not in sys.path:
+    sys.path.insert(0, modules_path)
+
 # 🚀 关键：解决 resources_rc 在 assets 目录下的导入问题
 assets_path = os.path.join(current_dir, "assets")
 if assets_path not in sys.path:
