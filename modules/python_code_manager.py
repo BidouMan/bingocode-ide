@@ -378,7 +378,7 @@ class QCodeEditor(QTextEdit):
                     defined_names.add(name.strip())
 
         # 2. 提取赋值/函数/类定义的变量名
-        assign_pattern = re.compile(r'^\s*([a-zA-Z_]\w*)\s*=')
+        assign_pattern = re.compile(r'\b([a-zA-Z_]\w*)\s*=')
         def_pattern = re.compile(r'def\s+([a-zA-Z_]\w*)')
         class_pattern = re.compile(r'class\s+([a-zA-Z_]\w*)')
         for line in raw_code.split('\n'):
@@ -389,12 +389,19 @@ class QCodeEditor(QTextEdit):
 
         # 3. 补充Jedi分析（增强准确性，兼容复杂场景）
         try:
-            script = jedi.Script(raw_code, path="main.py")
+            import jedi
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            modules_path = os.path.join(current_dir, "modules")
+            
+            project = jedi.Project(current_dir, sys_path=sys.path + [modules_path])
+            script = jedi.Script(raw_code, path="main.py", project=project)
+            
+            # 提取所有可识别的名字
             jedi_names = {n.name for n in script.get_names(all_scopes=True)}
             defined_names.update(jedi_names)
         except:
             pass
-
+            
         return defined_names
 
     def _clean_line_for_var_check(self, line):
@@ -711,35 +718,53 @@ class QCodeEditor(QTextEdit):
         except: pass
 
     def trigger_completion(self):
-        """增强补全：支持内部库补全"""
+        """适配 Jedi 0.19.2：使用 Project 注入路径并触发补全"""
         try:
-            # 扩展Jedi的搜索路径，包含内部库目录
-            script = jedi.Script(
-                self.toPlainText(),
-                path="main.py",
-                sys_path=sys.path  # 确保包含modules/assets/ui目录
+            text = self.toPlainText()
+            cursor = self.textCursor()
+            line = cursor.blockNumber() + 1
+            col = cursor.columnNumber()
+
+            # 1. 获取当前项目根目录和内部库目录
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            modules_path = os.path.join(current_dir, "modules")
+            
+            # 2. 构造 Project 对象 (Jedi 0.18+ 推荐做法)
+            # 显式将 sys.path 和你的自定义路径合并传给 Project
+            import jedi
+            project = jedi.Project(
+                path=current_dir, 
+                sys_path=sys.path + [modules_path, current_dir]
             )
-            comps = script.complete(
-                self.textCursor().blockNumber() + 1,
-                self.textCursor().columnNumber()
-            )
-            # 过滤补全结果，保留内部库相关补全
+            
+            # 3. 初始化 Script 并关联 Project
+            script = jedi.Script(text, path="main.py", project=project)
+            
+            # 4. 获取补全项
+            comps = script.complete(line, col)
+
+            if not comps:
+                self.completer.hide()
+                return
+
+            # 5. 过滤掉私有变量，防止干扰
             filtered_comps = []
-            for comp in comps[:15]:
-                # 包含内部库名 或 普通补全项
-                if any(lib in comp.name for lib in INTERNAL_LIBS) or comp.type in ("function", "class", "variable"):
+            for comp in comps[:20]:
+                if not comp.name.startswith('__'):
                     filtered_comps.append(comp)
+
             if filtered_comps:
                 self.completer.update_completions(filtered_comps)
+                # 定位补全框
                 crect = self.cursorRect()
-                vertical_offset = max(2, self.fixed_line_height // 10)
-                self.completer.move(
-                    crect.left() + self.line_number_area.width(), 
-                    crect.bottom() + vertical_offset
-                )
+                popup_x = crect.left() + self.line_number_area.width()
+                popup_y = crect.bottom() + 2
+                self.completer.move(popup_x, popup_y)
             else:
                 self.completer.hide()
-        except:
+        except Exception as e:
+            # 静默处理或打印调试
+            print(f"Jedi 补全错误: {e}")
             self.completer.hide()
 
     def insert_completion(self, index=None):
