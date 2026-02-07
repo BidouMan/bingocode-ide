@@ -6,10 +6,9 @@ from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import QApplication
 
 class ConsoleManager(QObject):
-    # 状态信号：供 AppController 监听以改变按钮样式
+    # 信号定义
     process_started = Signal()
     process_finished = Signal()
-    # 指令信号：传递 BINGO: 开头的 JSON 字符串
     draw_signal = Signal(str)
     instruction_received = Signal(str)
 
@@ -25,165 +24,180 @@ class ConsoleManager(QObject):
         self.console_container.setMaximumHeight(0)
         self.console_container.setMinimumHeight(0)
 
-        # 🚀 修正核心：先实例化对象，再连接信号
+        # 🚀 实例化 QProcess
         self.process = QProcess(self) 
         
-        # 🚀 关键：只保留这两个核心连接，删除所有其他的重复绑定
-        self.process.readyReadStandardOutput.connect(self.handle_stdout)
+        # 🚀 核心改造：不再连接 readyReadStandardOutput 信号，防止被死循环淹没
+        # 错误输出通常量级较小且重要，保留信号连接或改为统一处理
         self.process.readyReadStandardError.connect(self.handle_stderr)
         self.process.finished.connect(self._on_process_finished)
 
-    def _on_process_finished(self):
-        """进程自然结束或被杀死后的回调"""
-        self.process_finished.emit()
+        # 🚀 防火墙定时器：每 50ms 铲一次缓冲区数据 (20 FPS 刷新率)
+        self.pull_timer = QTimer(self)
+        self.pull_timer.setInterval(50)
+        self.pull_timer.timeout.connect(self._pull_output)
 
-    def run_script(self, file_path):
-        """主入口：启动脚本并显示控制台"""
-        if not file_path: return
-            
+    def run_code_string(self, code):
+        """
+        🚀 优雅启动主入口：
+        通过“延迟加载”消除启动时的瞬间卡顿，确保动画丝滑。
+        """
         self.output.clear()
-        # 强制刷新 UI，确保“启动中”等提示能立刻显示
-        QApplication.processEvents()
+        self.process_started.emit()
 
-        # 如果控制台没打开，先播动画打开它
+        # 1. 检查控制台高度
         current_h = self.console_container.height()
+        
         if current_h < 10:
+            # 🚀 情况 A：控制台尚未打开
+            # 先执行展开动画
             self.anim_console(show=True)
-            QTimer.singleShot(200, lambda: self._start_process(file_path))
+            # 延迟 250ms（等动画基本完成）再启动进程和数据拉取
+            # 这样 UI 线程就不会同时处理“高度计算”和“数据渲染”
+            QTimer.singleShot(250, lambda: self._do_execute_python(code))
         else:
-            self._start_process(file_path)
+            # 🚀 情况 B：控制台已经是打开状态
+            # 直接启动，但依然给一个极短的微秒级延迟，让 UI 响应点击反馈
+            QTimer.singleShot(10, lambda: self._do_execute_python(code))
 
-    def _start_process(self, file_path):
-        """内部私有方法：负责配置环境并启动进程"""
-        # 1. 动态计算项目根目录和 modules 目录
-        # 假设 ConsoleManager.py 在项目根目录/modules/ 下
+    def _do_execute_python(self, code):
+        """核心修复：确保在内存模式下正确加载 bingo_engine"""
+        
+        # 1. 重新计算并确认模块路径
         current_file_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.dirname(current_file_dir)
+        # 确保这是 bingo_engine 文件夹所在的父级目录
         modules_dir = os.path.join(project_root, "modules")
 
-        # 2. 配置子进程环境变量
+        # 2. 深度注入环境变量
         env = QProcessEnvironment.systemEnvironment()
+        old_path = env.value("PYTHONPATH", "")
+        # 将 modules 目录放在最前面
+        new_path = modules_dir + os.pathsep + old_path if old_path else modules_dir
+        env.insert("PYTHONPATH", new_path)
         
-        # 获取现有的 PYTHONPATH
-        old_pythonpath = env.value("PYTHONPATH", "")
+        # 额外保险：设置当前运行目录为项目根目录
+        self.process.setWorkingDirectory(project_root)
+        self.process.setProcessEnvironment(env)
+
+        # 3. 🚀 修正 wrapper_code 语法
+        # 注意：在 exec 模式下，多行代码需要正确处理缩进或使用分号
+        # 我们直接在代码最前端插入 import 语句，并确保 sys.path 包含 modules
+        wrapper_code = (
+            f"import sys; sys.path.insert(0, r'{modules_dir}'); "
+            "import signal, os; "
+            "signal.signal(signal.SIGTERM, lambda s, f: os._exit(0)); "
+            "from bingo_engine import *; "
+            f"\n{code}" # 换行确保用户代码不会跟在 import 后面导致语法错误
+        )
+
+        # 4. 启动并写入
+        self.process.start(sys.executable, ["-u", "-"])
+        self.process.write(wrapper_code.encode("utf-8"))
+        self.process.closeWriteChannel()
         
-        # 统一变量名为 new_pythonpath，确保包含 modules 目录
-        if old_pythonpath:
-            new_pythonpath = modules_dir + os.pathsep + old_pythonpath
-        else:
-            new_pythonpath = modules_dir
-            
-        # 将合成好的路径插入环境变量
-        env.insert("PYTHONPATH", new_pythonpath)
+        if hasattr(self, 'pull_timer'):
+            self.pull_timer.start()
 
-        # 3. 启动进程
-        # 注意：不要在这里重新 new QProcess，也不要在这里绑定 readAll 的 lambda 打印
-        if hasattr(self, 'process') and self.process:
-            self.process.setProcessEnvironment(env)
-            
-            # 🚀 核心修改：不直接运行 file_path，而是运行一段包装代码
-            # 这段包装代码先执行 import，再执行用户的文件内容
-            wrapper_code = (
-                "import sys; "
-                "from bingo_engine import *; "
-                f"exec(open(r'{file_path}', encoding='utf-8').read(), globals())"
-            )
-            
-            # 使用 -c 执行包装命令
-            self.process.start(sys.executable, ["-u", "-c", wrapper_code])
-                
-        # 发送进程已启动信号，供 UI 改变按钮状态（如变红/禁用）
-        if hasattr(self, 'process_started'):
-            self.process_started.emit()
+    def handle_stdout_logic(self, data):
 
-    def _internal_handle_output(self):
-        """内部处理：负责清洗数据，不让脏数据流向外面"""
-        raw_data = self.process.readAllStandardOutput().data().decode('utf-8')
-        
-        # 仍然可以保留原本打印到 UI 的功能
-        # self.output.append(raw_data) 
+        """
+        🔥 修复版：确保绘图指令 100% 触发，不受限流影响
+        """
+        lines = data.splitlines()
+        display_text = []
 
-        # 🚀 协议解析逻辑搬到这里
-        for line in raw_data.strip().split('\n'):
-            line = line.strip()
-            if line.startswith("BINGO:"):
-                self.instruction_received.emit(line.replace("BINGO:", "", 1))
-            elif line.startswith('{'):
-                self.instruction_received.emit(line)
-
-    def handle_stdout(self):
-        """🚀 全局唯一的读取入口：负责分发数据"""
-        raw_data = self.process.readAllStandardOutput().data().decode("utf-8")
-        if not raw_data: return
-
-        lines = raw_data.strip().split('\n')
-        
         for line in lines:
             line = line.strip()
             if not line: continue
-
-            # 🚀 2. 识别并分发指令
-            is_instruction = False
-            json_content = ""
-
+            
+            # 🚀 优先级 1：绘图指令（绝对不能被截断，必须实时发射）
             if line.startswith("BINGO:"):
                 json_content = line.replace("BINGO:", "", 1)
-                is_instruction = True
-            elif line.startswith('{') and line.endswith('}'):
-                json_content = line
-                is_instruction = True
-
-            # 🚀 3. 根据类型分流
-            if is_instruction:
-                # 如果是指令，悄悄发给渲染器，不打印在 UI 上
                 self.instruction_received.emit(json_content)
-            else:
-                # 如果是普通 print，才显示在 IDE 控制台 UI 上
-                self.output.appendPlainText(line)
-                self.output.moveCursor(QTextCursor.End)
+                self.draw_signal.emit(line)
+                continue # 处理完指令直接跳过，不计入文本截断限制
+                
+            elif line.startswith('{') and line.endswith('}'):
+                self.instruction_received.emit(line)
+                continue
 
-    def stop_script(self):
-        """强杀进程，不再需要清理共享内存"""
-        if self.process.state() != QProcess.ProcessState.NotRunning:
-            self.process.kill() 
-            self.process.waitForFinished(300)
-        
-        # 关闭控制台面板
-        self.anim_console(show=False)
+            # 🚀 优先级 2：普通文本（存入列表，稍后进行限流渲染）
+            display_text.append(line)
 
-        
-    def run_code_string(self, code):
-        """🚀 核心新方法：通过标准输入运行代码字符串"""
-        self.output.clear()
-        self.anim_console(show=True)
-        self.process_started.emit()
+        # 🚀 性能限流：只针对普通文本进行截断，保证 UI 不卡顿
+        if len(display_text) > 100:
+            display_text = display_text[-100:]
+            display_text.insert(0, "--- (输出过快，已省略部分文字日志) ---")
 
-        # 配置环境路径，确保能找到 bingo_engine
-        current_file_dir = os.path.dirname(os.path.abspath(__file__))
-        project_root = os.path.dirname(current_file_dir)
-        modules_dir = os.path.join(project_root, "modules")
-
-        env = QProcessEnvironment.systemEnvironment()
-        old_path = env.value("PYTHONPATH", "")
-        env.insert("PYTHONPATH", modules_dir + os.pathsep + old_path if old_path else modules_dir)
-        self.process.setProcessEnvironment(env)
-
-        # 🚀 使用 "-" 告诉 Python 从 stdin 读取代码，不再需要文件路径
-        # -u 保证输出是实时刷新的
-        self.process.start(sys.executable, ["-u", "-"])
-        
-        # 🚀 将代码写入标准输入流
-        self.process.write(code.encode("utf-8"))
-        # 必须关闭写入通道，Python 才会开始执行接收到的代码
-        self.process.closeWriteChannel()
-
-    def handle_stderr(self):
-        data = self.process.readAllStandardError().data().decode("utf-8")
-        if data.strip():
-            self.output.appendPlainText(f"❌ Error:\n{data}")
+        if display_text:
+            self.output.appendPlainText("\n".join(display_text))
             self.output.moveCursor(QTextCursor.End)
 
-    # --- 动画逻辑 (保持不变，用于抽屉式控制台) ---
+    def _pull_output(self):
+        """防火墙核心：主动拉取缓冲区数据"""
+        if self.process.state() == QProcess.ProcessState.NotRunning:
+            self.pull_timer.stop()
+            return
+            
+        # 批量读取本次 50ms 内积压的所有字节
+        out_data = self.process.readAllStandardOutput().data().decode("utf-8", "ignore")
+        if out_data:
+            self.handle_stdout_logic(out_data)
+
+    
+
+    def handle_stderr(self):
+        """处理异常输出"""
+        err_data = self.process.readAllStandardError().data().decode("utf-8", "ignore")
+        if err_data:
+            self.output.appendPlainText(f"❌ Error:\n{err_data}")
+            self.output.moveCursor(QTextCursor.End)
+
+    def stop_script(self):
+        """优化后的停止逻辑：消除断连警告并确保静默退出"""
+        # 1. 🚀 停止拉取定时器
+        if hasattr(self, 'pull_timer'):
+            self.pull_timer.stop()
+        
+        if self.process and self.process.state() != QProcess.ProcessState.NotRunning:
+            # 2. 🚀 仅断开真正连接过的信号，避免 RuntimeWarning
+            try:
+                # readyReadStandardOutput 没连过，所以不需要 disconnect 它
+                self.process.readyReadStandardError.disconnect()
+                self.process.finished.disconnect()
+            except (RuntimeError, TypeError):
+                # 如果信号本身没连接，静默跳过
+                pass
+            
+            # 3. 🚀 强杀并等待系统回收
+            p = self.process
+            p.kill()
+            
+            # 使用较短的等待时间 (100ms 足够系统清理句柄)
+            p.waitForFinished(100)
+            
+            # 4. 🚀 立即刷新 UI 事件循环，确保按钮点击反馈（Hover/Click）不卡顿
+            QApplication.processEvents()
+            
+            # 5. 🚀 彻底剥离旧对象
+            p.setParent(None)
+            p.deleteLater()
+            
+            # 6. 🚀 重建 QProcess 为下次运行准备
+            self.process = QProcess(self)
+            self.process.readyReadStandardError.connect(self.handle_stderr)
+            self.process.finished.connect(self._on_process_finished)
+        
+        self.anim_console(show=False)
+        self.process_finished.emit()
+
+    def _on_process_finished(self):
+        """进程自然结束的回调"""
+        self.pull_timer.stop()
+        self.process_finished.emit()
+
+    # --- 动画逻辑：抽屉式控制台控制 ---
     def anim_console(self, show=True):
         if self.anim: self.anim.stop()
         if show: self.console_container.setMaximumHeight(16777215)
@@ -205,4 +219,5 @@ class ConsoleManager(QObject):
     def _sync_splitter_sizes(self):
         h = self.console_container.maximumHeight()
         total_h = self.splitter.height()
+        # 确保 Splitter 的两个部分比例同步更新
         self.splitter.setSizes([max(0, total_h - h), h])

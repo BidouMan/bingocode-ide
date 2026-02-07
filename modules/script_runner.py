@@ -36,9 +36,14 @@ class ScriptRunner:
 
 
     def stop_script(self):
-        """停止逻辑：杀掉进程并清理画布"""
-        self.console_mgr.stop_script()
+        # 1. 🚀 UI 层面立即宣布胜利：按钮变绿
         self.set_run_btn_visual(False)
+        
+        # 2. 🚀 切断 UI 连接：停止定时器，主线程立刻清静
+        self.console_mgr.pull_timer.stop()
+        
+        # 3. 🚀 执行后台强杀（不阻塞）
+        self.console_mgr.stop_script()
 
     def set_run_btn_visual(self, is_running):
         """控制运行按钮的高亮状态 (QSS 联动)"""
