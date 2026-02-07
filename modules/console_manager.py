@@ -151,6 +151,32 @@ class ConsoleManager(QObject):
         # 关闭控制台面板
         self.anim_console(show=False)
 
+        
+    def run_code_string(self, code):
+        """🚀 核心新方法：通过标准输入运行代码字符串"""
+        self.output.clear()
+        self.anim_console(show=True)
+        self.process_started.emit()
+
+        # 配置环境路径，确保能找到 bingo_engine
+        current_file_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(current_file_dir)
+        modules_dir = os.path.join(project_root, "modules")
+
+        env = QProcessEnvironment.systemEnvironment()
+        old_path = env.value("PYTHONPATH", "")
+        env.insert("PYTHONPATH", modules_dir + os.pathsep + old_path if old_path else modules_dir)
+        self.process.setProcessEnvironment(env)
+
+        # 🚀 使用 "-" 告诉 Python 从 stdin 读取代码，不再需要文件路径
+        # -u 保证输出是实时刷新的
+        self.process.start(sys.executable, ["-u", "-"])
+        
+        # 🚀 将代码写入标准输入流
+        self.process.write(code.encode("utf-8"))
+        # 必须关闭写入通道，Python 才会开始执行接收到的代码
+        self.process.closeWriteChannel()
+
     def handle_stderr(self):
         data = self.process.readAllStandardError().data().decode("utf-8")
         if data.strip():
