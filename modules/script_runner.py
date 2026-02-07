@@ -13,24 +13,36 @@ class ScriptRunner:
         self.render_mgr = controller.render_manager
         self.console_mgr = controller.console_manager
 
+    # script_runner.py
+
     def run_current_script(self):
-        """执行脚本流程：保存 -> 重置舞台 -> 运行"""
-        # 1. 调用文件经理保存当前编辑器内容
-        self.file_mgr.save_file(self.editor_mgr)
-        
-        # 2. 获取当前编辑器
+        """执行脚本流程：物理注入 -> 运行"""
         editor = self.editor_mgr.get_current_editor()
-        if not editor:
-            return
-            
-        file_path = editor.file_path
-        if file_path and os.path.exists(file_path):
-            # 3. 重置渲染引擎画布
-            self.render_mgr.reset_session()
-            # 4. 驱动控制台执行 Python 进程
-            self.console_mgr.run_script(file_path)
+        if not editor: return
+        
+        # 1. 获取代码内容
+        raw_code = editor.toPlainText()
+        
+        # 2. 🚀 物理注入逻辑：如果没写 import，自动补上一行
+        if "from bingo_engine" not in raw_code and "import bingo_engine" not in raw_code:
+            final_code = "from bingo_engine import *\n" + raw_code
         else:
-            QMessageBox.warning(self.window, "提示", "请先保存文件再运行")
+            final_code = raw_code
+
+        # 3. 将注入后的代码写入一个临时文件或覆盖原文件运行
+        # 建议保存到一个隐藏的运行缓存文件，避免破坏用户正在编辑的代码
+        run_file_path = editor.file_path.replace(".py", "_run.py")
+        with open(run_file_path, "w", encoding="utf-8") as f:
+            f.write(final_code)
+
+        if os.path.exists(run_file_path):
+            self.render_mgr.reset_session()
+            # 🚀 关键：运行的是注入后的文件
+            self.console_mgr.run_script(run_file_path)
+            
+            # 运行完后可以考虑删掉这个 _run.py 文件（或者在 stop 时删）
+        else:
+            QMessageBox.warning(self.window, "提示", "运行准备失败")
 
     def stop_script(self):
         """停止逻辑：杀掉进程并清理画布"""
@@ -48,3 +60,4 @@ class ScriptRunner:
             btn.style().unpolish(btn)
             btn.style().polish(btn)
             btn.setChecked(is_running)
+    

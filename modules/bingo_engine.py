@@ -2,9 +2,11 @@ import json
 import sys
 import time
 import os
+__all__ = ['Sprite', 'run']
 
 class Sprite:
     def __init__(self, image_name):
+        
         # 使用内存地址作为唯一ID
         self.id = str(id(self))
         # 🚀 修正路径：确保与你 assets 文件夹名称一致

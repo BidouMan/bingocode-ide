@@ -9,6 +9,14 @@ from PySide6.QtGui import (QColor, QFont, QSyntaxHighlighter, QTextCharFormat,
                            QFontDatabase, QPen,QIcon)
 from PySide6.QtCore import Qt, QRect, Property,QTimer,QPoint
 
+
+try:
+    import bingo_engine
+    # 自动获取 bingo_engine 中所有不以 _ 开头的变量和类
+    HIDDEN_IMPORTS = {name for name in dir(bingo_engine) if not name.startswith('_')}
+except ImportError:
+    HIDDEN_IMPORTS = set()
+
 # 全局配置：内部库白名单（可根据需要扩展）
 INTERNAL_LIBS = {"bingo_engine", "render_manager", "stage_manager", "script_runner"}
 # 语法关键字（冒号检查）
@@ -720,25 +728,21 @@ class QCodeEditor(QTextEdit):
     def trigger_completion(self):
         """适配 Jedi 0.19.2：使用 Project 注入路径并触发补全"""
         try:
-            text = self.toPlainText()
+            user_code = self.toPlainText()
+            # 🚀 核心改进：注入隐式星号导入
+            prefix = "from bingo_engine import *\n"
+            full_code = prefix + user_code
+            
             cursor = self.textCursor()
-            line = cursor.blockNumber() + 1
+            # 💡 别忘了行号补偿：prefix 占了 1 行
+            line = cursor.blockNumber() + 1 + 1 
             col = cursor.columnNumber()
 
-            # 1. 获取当前项目根目录和内部库目录
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            modules_path = os.path.join(current_dir, "modules")
-            
-            # 2. 构造 Project 对象 (Jedi 0.18+ 推荐做法)
-            # 显式将 sys.path 和你的自定义路径合并传给 Project
             import jedi
-            project = jedi.Project(
-                path=current_dir, 
-                sys_path=sys.path + [modules_path, current_dir]
-            )
-            
-            # 3. 初始化 Script 并关联 Project
-            script = jedi.Script(text, path="main.py", project=project)
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            # 确保 Jedi 的搜索路径包含 modules
+            project = jedi.Project(current_dir, sys_path=sys.path + [os.path.join(current_dir, "modules")])
+            script = jedi.Script(full_code, path="main.py", project=project)
             
             # 4. 获取补全项
             comps = script.complete(line, col)

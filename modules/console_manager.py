@@ -79,11 +79,18 @@ class ConsoleManager(QObject):
         # 3. 启动进程
         # 注意：不要在这里重新 new QProcess，也不要在这里绑定 readAll 的 lambda 打印
         if hasattr(self, 'process') and self.process:
-            # 应用环境变量
             self.process.setProcessEnvironment(env)
             
-            # 🚀 关键：启动脚本。使用 -u 参数确保输出不进入缓冲区，实现实时渲染
-            self.process.start(sys.executable, ["-u", file_path])
+            # 🚀 核心修改：不直接运行 file_path，而是运行一段包装代码
+            # 这段包装代码先执行 import，再执行用户的文件内容
+            wrapper_code = (
+                "import sys; "
+                "from bingo_engine import *; "
+                f"exec(open(r'{file_path}', encoding='utf-8').read(), globals())"
+            )
+            
+            # 使用 -c 执行包装命令
+            self.process.start(sys.executable, ["-u", "-c", wrapper_code])
                 
         # 发送进程已启动信号，供 UI 改变按钮状态（如变红/禁用）
         if hasattr(self, 'process_started'):
