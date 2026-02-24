@@ -1,6 +1,6 @@
 import json,os
 from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsEllipseItem
-from PySide6.QtGui import QPainter, QPixmap, QColor, QPen, QBrush
+from PySide6.QtGui import QPainter, QPixmap, QColor, QPen, QBrush,QTransform
 from PySide6.QtCore import Qt
 
 
@@ -75,14 +75,40 @@ class RenderManager:
         item = self.sprites.get(sprite_id)
         if item:
             rect = item.boundingRect()
-            if "x" in data and "y" in data:
-                # 保持中心对齐逻辑
-                item.setPos(data["x"] - rect.width()/2, data["y"] - rect.height()/2)
-            if "angle" in data:
-                item.setRotation(data["angle"])
+            w, h = rect.width(), rect.height()
+
+            # 1. 🚀 获取当前或指令中的状态
+            # 如果 data 里没有，就从 item 身上取当前值，保证状态连贯
+            x = data.get("x", item.x() + w/2)
+            y = data.get("y", item.y() + h/2)
+            angle = data.get("angle", item.rotation())
+            # 这里的 scale_x 我们需要从 data 获取，因为 item 身上不好直接拿矩阵缩放值
+            sx = data.get("scale_x", getattr(item, '_last_sx', 1.0))
+            item._last_sx = sx # 记录一下，方便下次读取
+
+            # 2. 🚀 手动构建变换矩阵 (核心逻辑)
+            transform = QTransform()
+            # A. 先平移到图片的中心点
+            transform.translate(w / 2, h / 2)
+            # B. 在中心点执行缩放（左右翻转）
+            transform.scale(sx, 1.0)
+            # C. 在中心点执行旋转
+            transform.rotate(angle)
+            # D. 平移回左上角，完成“中心变换”
+            transform.translate(-w / 2, -h / 2)
+
+            # 3. 🚀 应用矩阵并设置物理位置
+            item.setTransform(transform)
+            # 既然旋转已经在矩阵里做了，我们就把 item 自身的 rotation 设为 0，防止叠加
+            item.setRotation(0) 
+            
+            # 最终对齐位置：将物体的左上角放在 (x - w/2, y - h/2)
+            item.setPos(x - w / 2, y / 2 if h==0 else y - h / 2)
+
+            # 5. 其他属性
             if "z" in data:
                 item.setZValue(data["z"])
-            if "opacity" in data: # 🚀 新增：透明度支持 (0.0 - 1.0)
+            if "opacity" in data:
                 item.setOpacity(data["opacity"])
 
     def remove_sprite(self, sprite_id):
