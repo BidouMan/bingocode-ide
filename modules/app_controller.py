@@ -45,9 +45,9 @@ class AppController:
         # 4. 绑定信号 (保持原有业务连接)
         self.setup_connections()
 
-     
-        
 
+        
+     
     def setup_connections(self):
         """绑定业务信号，完全保留文件和编辑器逻辑"""
         # 主页全局按钮-
@@ -86,6 +86,5 @@ class AppController:
         # 将捕获的JSON指令喂给render_manager
         # self.console_manager.draw_signal.connect(self.render_manager.handle_instruction)
         self.console_manager.instruction_received.connect(self.render_manager.handle_instruction)
-
 
 

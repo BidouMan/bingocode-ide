@@ -4,7 +4,11 @@ import time
 import os
 import random
 import math
-__all__ = ['Sprite', 'run']
+from pynput import keyboard # 需要 pip install pynput
+
+
+__all__ = ['Sprite', 'run','key_down']
+_PRESSED_KEYS = set()
 
 class Sprite:
     def __init__(self, image_name):        
@@ -108,7 +112,8 @@ class Sprite:
     @x.setter
     def x(self,value):
         self._x = value
-        self._send_command("UPDATE", {"x": self._x,'y':self._y})
+        self._update_transform()
+        # self._send_command("UPDATE", {"x": self._x,'y':self._y})
     
     @property
     def y(self):
@@ -116,7 +121,8 @@ class Sprite:
     @y.setter
     def y(self, value):
         self._y = value
-        self._send_command("UPDATE", {"x": self._x, "y": self._y})
+        self._update_transform()
+        # self._send_command("UPDATE", {"x": self._x, "y": self._y})
 
     @property
     def angle(self):
@@ -163,6 +169,42 @@ class Sprite:
         }
         # 🚀 必须取消注释，且必须 flush=True 保证实时性
         print(json.dumps(packet), flush=True)
+
+# 监听回调：按下
+def _on_press(key):
+    try:
+        k = key.char.lower() # 字母/数字
+    except AttributeError:
+        k = str(key).replace("Key.", "") # space, esc, etc.
+    _PRESSED_KEYS.add(k)
+
+# 监听回调：松开
+def _on_release(key):
+    try:
+        k = key.char.lower()
+    except AttributeError:
+        k = str(key).replace("Key.", "")
+    _PRESSED_KEYS.discard(k)
+
+# 🚀 启动独立监听线程，完全不干扰 IDE，也不占用主循环 CPU
+_listener = keyboard.Listener(on_press=_on_press, on_release=_on_release)
+_listener.daemon = True
+_listener.start()
+
+def key_down(key):
+    """用户极其简单的调用接口"""
+    return str(key).lower() in _PRESSED_KEYS
+def start_input_service():
+    try:
+        from pynput import keyboard
+        _listener = keyboard.Listener(on_press=_on_press, on_release=_on_release)
+        _listener.daemon = True
+        _listener.start()
+    except Exception as e:
+        print(f"Input Service Error: {e}", file=sys.stderr)
+
+# 在 run() 之前调用即可
+start_input_service()
 
 def run():
     """驱动游戏循环"""

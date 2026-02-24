@@ -1,11 +1,13 @@
 import os
 from PySide6.QtWidgets import QMessageBox
+from PySide6.QtCore import QProcess
 
 class ScriptRunner:
     def __init__(self, controller):
         self.controller = controller
         self.ui = controller.ui
         self.window = controller.window
+
         
         # 快捷引用其他经理，保持代码简洁
         self.file_mgr = controller.file_manager
@@ -55,4 +57,6 @@ class ScriptRunner:
             btn.style().unpolish(btn)
             btn.style().polish(btn)
             btn.setChecked(is_running)
+    
+
     
