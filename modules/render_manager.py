@@ -3,7 +3,6 @@ from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem
 from PySide6.QtGui import QPainter, QPixmap, QColor, QPen, QBrush
 from PySide6.QtCore import Qt
 
-# modules/stage_manager.py
 
 class RenderManager:
     def __init__(self, view_instance):
