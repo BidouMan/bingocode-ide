@@ -88,15 +88,8 @@ class AppController:
         # self.console_manager.draw_signal.connect(self.render_manager.handle_instruction)
         self.console_manager.instruction_received.connect(self.render_manager.handle_instruction)
 
-        # 🚀 开启全局按键过滤
-        # QApplication.instance().installEventFilter(self.window)
-        # 给窗口重写按键处理或使用 eventFilter
-        # self.window.keyPressEvent = self._handle_qt_key_press
-        # self.window.keyReleaseEvent = self._handle_qt_key_release
-        # self.window.eventFilter = self._global_event_filter
+
         self.ui.game_view.setFocusPolicy(Qt.StrongFocus) # 确保游戏区域能拿焦点
-        self.ui.game_view.focusInEvent = lambda e: self.ui.game_view.setStyleSheet("border: 2px solid red;")
-        self.ui.game_view.focusOutEvent = lambda e: self.ui.game_view.setStyleSheet("border: 1px solid gray;")
         self.ui.game_view.keyPressEvent = self._handle_qt_key_press
         self.ui.game_view.keyReleaseEvent = self._handle_qt_key_release
         
@@ -105,7 +98,6 @@ class AppController:
     def _handle_qt_key_press(self, event):
         if event.isAutoRepeat(): return 
         key_name = self._map_qt_key(event.key())
-        print(f"✅ IDE 发送: K_DOWN:{key_name}") # 这里必须有打印
         self._send_to_engine(f"K_DOWN:{key_name}")
 
     def _handle_qt_key_release(self, event):

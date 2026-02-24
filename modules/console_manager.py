@@ -32,9 +32,9 @@ class ConsoleManager(QObject):
         self.process.readyReadStandardError.connect(self.handle_stderr)
         self.process.finished.connect(self._on_process_finished)
 
-        # 🚀 防火墙定时器：每 50ms 铲一次缓冲区数据 (20 FPS 刷新率)
+        # 🚀 防火墙定时器：每 16ms 铲一次缓冲区数据 (60 FPS 刷新率)
         self.pull_timer = QTimer(self)
-        self.pull_timer.setInterval(50)
+        self.pull_timer.setInterval(16)
         self.pull_timer.timeout.connect(self._pull_output)
 
 
@@ -168,16 +168,22 @@ class ConsoleManager(QObject):
 
     # modules/console_manager.py
 
+    # modules/console_manager.py
+
     def run_file(self, file_path):
         """统一后的文件运行入口"""
-        if self.process and self.process.state() == QProcess.Running:
-            self.process.terminate()
-            self.process.waitForFinished(500)
+        # 🚀 1. 彻底杀掉旧进程，解决 "already running" 报错
+        if self.process and self.process.state() != QProcess.NotRunning:
+            self.process.kill()  # 强杀
+            self.process.waitForFinished(100) # 等待 100ms 确保资源释放
+
+        # 🚀 2. 弹出控制台 UI (这行是你漏掉的)
+        self.anim_console(show=True)
 
         self.output.clear()
         self.process_started.emit()
 
-        # 🚀 1. 注入与 _do_execute_python 相同的路径逻辑
+        # --- 路径注入逻辑 (保持你之前的代码) ---
         current_file_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.dirname(current_file_dir)
         modules_dir = os.path.join(project_root, "modules")
@@ -187,15 +193,13 @@ class ConsoleManager(QObject):
         new_path = modules_dir + os.pathsep + old_path if old_path else modules_dir
         env.insert("PYTHONPATH", new_path)
         
-        # 🚀 2. 核心：必须设置工作目录，否则 Sprite(image) 找不到 assets 文件夹
         self.process.setWorkingDirectory(project_root)
         self.process.setProcessEnvironment(env)
 
-        # 🚀 3. 启动进程：-u 解决阻塞，file_path 解决 stdin 断开
+        # 🚀 3. 启动新进程
         python_path = sys.executable
         self.process.start(python_path, ["-u", file_path])
         
-        # 🚀 4. 开启数据拉取定时器，否则 handle_stdout_logic 不会运行，角色就不生成
+        # 🚀 4. 开启数据拉取定时器
         if hasattr(self, 'pull_timer'):
             self.pull_timer.start()
-        self.process.start(python_path, ["-u", file_path])

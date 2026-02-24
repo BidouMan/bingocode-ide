@@ -182,8 +182,6 @@ class Sprite:
 
 def _input_sync_listener():
     global _PRESSED_KEYS
-    # 增加启动确认打印
-    print("DEBUG: Engine Sync Thread Active", file=sys.stderr, flush=True)
     
     while True:
         try:

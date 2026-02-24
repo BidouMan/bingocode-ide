@@ -6,11 +6,12 @@ b = Sprite('hero.png')
 
 b.set_rotation_mode('left_right')
 b.angle = 180
+print(11)
 def loop():
 
     
     if key_down('a'):
-        print(11)
+        
         b.angle = 180
         b.move(5)
     elif key_down('d'):
