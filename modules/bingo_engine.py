@@ -20,6 +20,7 @@ class Sprite:
         self._y = 240
         self._angle = 0
         self._rotation_style = "all"
+        self._current_scale_x = 1.0
 
         # 发送创建指令
         self._send_command("CREATE", {
@@ -136,22 +137,31 @@ class Sprite:
     def _update_transform(self):
         """统一处理旋转和镜像逻辑并发送给渲染器"""
         display_angle = self._angle
-        scale_x = 1.0
+        # 默认使用当前记录的缩放值
+        scale_x = self._current_scale_x
         
-        if self._rotation_style == 'none':
-            display_angle = 0
-        elif self._rotation_style == 'left_right':
-            # 🚀 核心逻辑：
-            # 规范化角度到 0-360 之间
+        if self._rotation_style == "left_right":
+            # 1. 规范化角度到 0-360 之间
             norm_angle = self._angle % 360
-            # 如果朝向左边（90~270度），水平镜像
-            if 90 < norm_angle <= 270:
-                scale_x = -1.0
-            else:
-                scale_x = 1.0
-            # 🚀 重点：在左右翻转模式下，图片本身永远不倾斜（角度保持0）
+            
+            # 2. 只有在明确指向“左半圆”或“右半圆”时才更新镜像状态
+            # 90°(下) 和 270°(上) 属于垂直方向，不触发状态改变，从而实现“记忆”
+            if 90 < norm_angle < 270:
+                # 明确向左
+                self._current_scale_x = -1.0
+            elif (0 <= norm_angle < 90) or (270 < norm_angle <= 360):
+                # 明确向右
+                self._current_scale_x = 1.0
+            
+            # 左右模式下，图片本身始终不旋转，只看 scale_x
+            scale_x = self._current_scale_x
             display_angle = 0
             
+        elif self._rotation_style == "none":
+            display_angle = 0
+            scale_x = 1.0
+            
+        # 发送更新指令
         self._send_command("UPDATE", {
             "x": self._x,
             "y": self._y,
