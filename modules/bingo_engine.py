@@ -4,7 +4,7 @@ import time
 import os
 import random
 import math
-from pynput import keyboard # 需要 pip install pynput
+import threading
 
 
 __all__ = ['Sprite', 'run','key_down']
@@ -180,41 +180,38 @@ class Sprite:
         # 🚀 必须取消注释，且必须 flush=True 保证实时性
         print(json.dumps(packet), flush=True)
 
-# 监听回调：按下
-def _on_press(key):
-    try:
-        k = key.char.lower() # 字母/数字
-    except AttributeError:
-        k = str(key).replace("Key.", "") # space, esc, etc.
-    _PRESSED_KEYS.add(k)
+def _input_sync_listener():
+    global _PRESSED_KEYS
+    # 增加启动确认打印
+    print("DEBUG: Engine Sync Thread Active", file=sys.stderr, flush=True)
+    
+    while True:
+        try:
+            # 🚀 确保是阻塞式读取
+            line = sys.stdin.readline()
+            if not line:
+                time.sleep(0.01)
+                continue
+            
+            clean_line = line.strip()
+            # 如果你在 IDE 看到这一行，说明通讯链路彻底通了
+            # print(f"ENGINE_RECV: {clean_line}", file=sys.stderr, flush=True)
+            
+            if clean_line.startswith("K_DOWN:"):
+                key = clean_line.split(":", 1)[1]
+                _PRESSED_KEYS.add(key)
+            elif clean_line.startswith("K_UP:"):
+                key = clean_line.split(":", 1)[1]
+                _PRESSED_KEYS.discard(key)
+        except:
+            time.sleep(0.01)
 
-# 监听回调：松开
-def _on_release(key):
-    try:
-        k = key.char.lower()
-    except AttributeError:
-        k = str(key).replace("Key.", "")
-    _PRESSED_KEYS.discard(k)
-
-# 🚀 启动独立监听线程，完全不干扰 IDE，也不占用主循环 CPU
-_listener = keyboard.Listener(on_press=_on_press, on_release=_on_release)
-_listener.daemon = True
-_listener.start()
+# 确保线程启动 (代码末尾)
+threading.Thread(target=_input_sync_listener, daemon=True).start()
 
 def key_down(key):
-    """用户极其简单的调用接口"""
+    """供用户调用：if key_down('a')"""
     return str(key).lower() in _PRESSED_KEYS
-def start_input_service():
-    try:
-        from pynput import keyboard
-        _listener = keyboard.Listener(on_press=_on_press, on_release=_on_release)
-        _listener.daemon = True
-        _listener.start()
-    except Exception as e:
-        print(f"Input Service Error: {e}", file=sys.stderr)
-
-# 在 run() 之前调用即可
-start_input_service()
 
 def run():
     """驱动游戏循环"""

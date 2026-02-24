@@ -37,67 +37,6 @@ class ConsoleManager(QObject):
         self.pull_timer.setInterval(50)
         self.pull_timer.timeout.connect(self._pull_output)
 
-    def run_code_string(self, code):
-        """
-        🚀 优雅启动主入口：
-        通过“延迟加载”消除启动时的瞬间卡顿，确保动画丝滑。
-        """
-        self.output.clear()
-        self.process_started.emit()
-
-        # 1. 检查控制台高度
-        current_h = self.console_container.height()
-        
-        if current_h < 10:
-            # 🚀 情况 A：控制台尚未打开
-            # 先执行展开动画
-            self.anim_console(show=True)
-            # 延迟 250ms（等动画基本完成）再启动进程和数据拉取
-            # 这样 UI 线程就不会同时处理“高度计算”和“数据渲染”
-            QTimer.singleShot(250, lambda: self._do_execute_python(code))
-        else:
-            # 🚀 情况 B：控制台已经是打开状态
-            # 直接启动，但依然给一个极短的微秒级延迟，让 UI 响应点击反馈
-            QTimer.singleShot(10, lambda: self._do_execute_python(code))
-
-    def _do_execute_python(self, code):
-        """核心修复：确保在内存模式下正确加载 bingo_engine"""
-        
-        # 1. 重新计算并确认模块路径
-        current_file_dir = os.path.dirname(os.path.abspath(__file__))
-        project_root = os.path.dirname(current_file_dir)
-        # 确保这是 bingo_engine 文件夹所在的父级目录
-        modules_dir = os.path.join(project_root, "modules")
-
-        # 2. 深度注入环境变量
-        env = QProcessEnvironment.systemEnvironment()
-        old_path = env.value("PYTHONPATH", "")
-        # 将 modules 目录放在最前面
-        new_path = modules_dir + os.pathsep + old_path if old_path else modules_dir
-        env.insert("PYTHONPATH", new_path)
-        
-        # 额外保险：设置当前运行目录为项目根目录
-        self.process.setWorkingDirectory(project_root)
-        self.process.setProcessEnvironment(env)
-
-        # 3. 🚀 修正 wrapper_code 语法
-        # 注意：在 exec 模式下，多行代码需要正确处理缩进或使用分号
-        # 我们直接在代码最前端插入 import 语句，并确保 sys.path 包含 modules
-        wrapper_code = (
-            f"import sys; sys.path.insert(0, r'{modules_dir}'); "
-            "import signal, os; "
-            "signal.signal(signal.SIGTERM, lambda s, f: os._exit(0)); "
-            "from bingo_engine import *; "
-            f"\n{code}" # 换行确保用户代码不会跟在 import 后面导致语法错误
-        )
-
-        # 4. 启动并写入
-        self.process.start(sys.executable, ["-u", "-"])
-        self.process.write(wrapper_code.encode("utf-8"))
-        self.process.closeWriteChannel()
-        
-        if hasattr(self, 'pull_timer'):
-            self.pull_timer.start()
 
     def handle_stdout_logic(self, data):
 
@@ -162,10 +101,12 @@ class ConsoleManager(QObject):
         
         if self.process and self.process.state() != QProcess.ProcessState.NotRunning:
             # 2. 🚀 仅断开真正连接过的信号，避免 RuntimeWarning
+            p = self.process
             try:
                 # readyReadStandardOutput 没连过，所以不需要 disconnect 它
                 self.process.readyReadStandardError.disconnect()
                 self.process.finished.disconnect()
+                p.closeWriteChannel()
             except (RuntimeError, TypeError):
                 # 如果信号本身没连接，静默跳过
                 pass
@@ -221,3 +162,40 @@ class ConsoleManager(QObject):
         total_h = self.splitter.height()
         # 确保 Splitter 的两个部分比例同步更新
         self.splitter.setSizes([max(0, total_h - h), h])
+    
+
+    # modules/console_manager.py 里的启动逻辑
+
+    # modules/console_manager.py
+
+    def run_file(self, file_path):
+        """统一后的文件运行入口"""
+        if self.process and self.process.state() == QProcess.Running:
+            self.process.terminate()
+            self.process.waitForFinished(500)
+
+        self.output.clear()
+        self.process_started.emit()
+
+        # 🚀 1. 注入与 _do_execute_python 相同的路径逻辑
+        current_file_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(current_file_dir)
+        modules_dir = os.path.join(project_root, "modules")
+
+        env = QProcessEnvironment.systemEnvironment()
+        old_path = env.value("PYTHONPATH", "")
+        new_path = modules_dir + os.pathsep + old_path if old_path else modules_dir
+        env.insert("PYTHONPATH", new_path)
+        
+        # 🚀 2. 核心：必须设置工作目录，否则 Sprite(image) 找不到 assets 文件夹
+        self.process.setWorkingDirectory(project_root)
+        self.process.setProcessEnvironment(env)
+
+        # 🚀 3. 启动进程：-u 解决阻塞，file_path 解决 stdin 断开
+        python_path = sys.executable
+        self.process.start(python_path, ["-u", file_path])
+        
+        # 🚀 4. 开启数据拉取定时器，否则 handle_stdout_logic 不会运行，角色就不生成
+        if hasattr(self, 'pull_timer'):
+            self.pull_timer.start()
+        self.process.start(python_path, ["-u", file_path])

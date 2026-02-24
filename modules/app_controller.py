@@ -1,6 +1,6 @@
 import os
-from PySide6.QtCore import Qt, QStandardPaths, QTimer
-from PySide6.QtGui import QColor
+from PySide6.QtCore import Qt, QStandardPaths, QTimer,QProcess
+from PySide6.QtGui import QColor,QKeySequence
 from PySide6.QtWidgets import (QFileDialog, QMessageBox, QTabBar, QSizePolicy, QApplication, QVBoxLayout)
 
 from ui.main_window_ui import Ui_Form
@@ -45,8 +45,9 @@ class AppController:
         # 4. 绑定信号 (保持原有业务连接)
         self.setup_connections()
 
-
         
+    
+    
      
     def setup_connections(self):
         """绑定业务信号，完全保留文件和编辑器逻辑"""
@@ -87,4 +88,62 @@ class AppController:
         # self.console_manager.draw_signal.connect(self.render_manager.handle_instruction)
         self.console_manager.instruction_received.connect(self.render_manager.handle_instruction)
 
+        # 🚀 开启全局按键过滤
+        # QApplication.instance().installEventFilter(self.window)
+        # 给窗口重写按键处理或使用 eventFilter
+        # self.window.keyPressEvent = self._handle_qt_key_press
+        # self.window.keyReleaseEvent = self._handle_qt_key_release
+        # self.window.eventFilter = self._global_event_filter
+        self.ui.game_view.setFocusPolicy(Qt.StrongFocus) # 确保游戏区域能拿焦点
+        self.ui.game_view.focusInEvent = lambda e: self.ui.game_view.setStyleSheet("border: 2px solid red;")
+        self.ui.game_view.focusOutEvent = lambda e: self.ui.game_view.setStyleSheet("border: 1px solid gray;")
+        self.ui.game_view.keyPressEvent = self._handle_qt_key_press
+        self.ui.game_view.keyReleaseEvent = self._handle_qt_key_release
+        
 
+
+    def _handle_qt_key_press(self, event):
+        if event.isAutoRepeat(): return 
+        key_name = self._map_qt_key(event.key())
+        print(f"✅ IDE 发送: K_DOWN:{key_name}") # 这里必须有打印
+        self._send_to_engine(f"K_DOWN:{key_name}")
+
+    def _handle_qt_key_release(self, event):
+        key_name = self._map_qt_key(event.key())
+        self._send_to_engine(f"K_UP:{key_name}")
+
+    def _send_to_engine(self, msg):
+        process = self.console_manager.process
+        # 🚀 增加 check: 确保 process 存在且通道未关闭
+        if process and process.state() == QProcess.Running:
+            try:
+                full_msg = f"{msg}\n"
+                process.write(full_msg.encode('utf-8'))
+                # 必须 flush，否则数据只在内存里
+                process.waitForBytesWritten(5) 
+            except Exception as e:
+                print(f"❌ 发送失败: {e}")
+
+    def _map_qt_key(self, qt_key):
+        """映射 Qt 键位到用户习惯的字符串"""
+        mapping = {
+        Qt.Key_Up: "up",
+        Qt.Key_Down: "down",
+        Qt.Key_Left: "left",
+        Qt.Key_Right: "right",
+        Qt.Key_Space: "space",
+        Qt.Key_Return: "enter",
+        Qt.Key_Enter: "enter",
+        Qt.Key_Escape: "escape",
+        Qt.Key_Shift: "shift",
+        Qt.Key_Control: "ctrl",
+    }
+    
+        if qt_key in mapping:
+            return mapping[qt_key]
+
+        # 2. 处理普通字符 (A-Z, 0-9 等)
+        # QKeySequence 会把 Key_A 转成 "A"，我们统一转成小写 "a"
+        key_str = QKeySequence(qt_key).toString().lower()
+        
+        return key_str
