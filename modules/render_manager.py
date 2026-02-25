@@ -62,7 +62,7 @@ class RenderManager:
                     self.create_sprite(sprite_id, data)
                 elif cmd_type == "UPDATE":
                     self.update_sprite(sprite_id, data)
-                elif cmd_type == "REMOVE":
+                elif cmd_type == "DELETE" or cmd_type == "REMOVE":
                     self.remove_sprite(sprite_id)
                 elif cmd_type == "RESET":
                     self.reset_session()

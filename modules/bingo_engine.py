@@ -172,7 +172,7 @@ class Sprite:
             # 排除自己
             if other is self: continue
             # 这里的 is_touching 是我们之前写的 Pillow AABB 算法
-            if self.is_touching(other):
+            if self.is_touch(other):
                 return other
         return None
 
