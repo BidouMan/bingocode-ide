@@ -118,6 +118,16 @@ class Sprite:
         self._size = value
         self._update_transform()
 
+    # ---------- 侦测模块 ----------
+    def is_touch(self, other):
+        """判断是否碰到另一个 Sprite"""
+        if not isinstance(other, Sprite): return False
+        r1 = self._get_hitbox_rect()
+        r2 = other._get_hitbox_rect()
+        # AABB 碰撞公式：只要有一个维度不重叠，就没碰到
+        return not (r1[2] < r2[0] or r1[0] > r2[2] or 
+                    r1[3] < r2[1] or r1[1] > r2[3])
+
     def set_rotation_mode(self, style):
         """
         style: 
