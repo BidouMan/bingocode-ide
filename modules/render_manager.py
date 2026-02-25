@@ -11,6 +11,7 @@ class RenderManager:
         self.logic_h = 480
         self.scene = QGraphicsScene(0, 0, self.logic_w, self.logic_h)
         self.view.setScene(self.scene)
+        self.layer_counter = 0  # 🚀 用于自动生成图层的计数器
 
         # 基础配置
         self.view.setRenderHint(QPainter.Antialiasing)
@@ -71,10 +72,13 @@ class RenderManager:
             pass
         
     def create_sprite(self, sprite_id, data):
-        # 🚀 移除 DEBUG 打印，直接加载
+        """
+        最终完美版：处理背景缩放、自动图层递增、手动层级覆盖
+        """
         image_path = data.get("image", "")
         stype = data.get("type", "image")
         
+        # 1. 创建基础实例
         item = None
         if stype == "rect":
             item = QGraphicsRectItem(0, 0, data.get("width", 50), data.get("height", 50))
@@ -89,26 +93,42 @@ class RenderManager:
             pixmap = QPixmap(image_path)
             if not pixmap.isNull():
                 item = QGraphicsPixmapItem(pixmap)
+                # 设置旋转中心为图片中心
                 item.setTransformOriginPoint(pixmap.width()/2, pixmap.height()/2)
 
-        if item:
-            item.setZValue(data.get("z", 0))
-            self.scene.addItem(item)
-            self.sprites[sprite_id] = item
-            self.update_sprite(sprite_id, data)
+        if not item:
+            return
+
+        # 2. 基础登记
+        self.sprites[sprite_id] = item
+        self.scene.addItem(item)
+
+        # 3. 核心层级与类型特殊处理
+        if stype == "background":
+            # --- 背景特殊逻辑 ---
+            item.setZValue(-1000)      # 强制最底层
+            item.setEnabled(False)     # 禁用交互，提升性能
+            
+            # 执行背景自动填充 (Center Crop 逻辑)
+            if isinstance(item, QGraphicsPixmapItem):
+                rect = item.pixmap().rect()
+                if not rect.isEmpty():
+                    sw = 640 / rect.width()
+                    sh = 480 / rect.height()
+                    item.setScale(max(sw, sh)) 
         
-        # 🚀 处理层级
-        z_value = data.get("z_value", 0) # 默认层级是 0
-        item.setZValue(z_value)
-        
-        # 🚀 如果是背景图，可以禁用它的碰撞或交互（可选）
-        if data.get("type") == "background":
-            item.setEnabled(False) # 背景不响应鼠标等交互
-            # render_manager.py 内部
-            rect = item.pixmap().rect()
-            scale_x = 640 / rect.width()
-            scale_y = 480 / rect.height()
-            item.setScale(max(scale_x, scale_y)) # 类似 center crop 的效果
+        else:
+            # --- 普通角色层级逻辑 ---
+            if "layer" in data:
+                # 如果学生代码里写了 b.layer = 10，优先使用手动值
+                item.setZValue(data["layer"])
+            else:
+                # 默认按创建顺序递增，确保后创建的在上面
+                self.layer_counter += 1
+                item.setZValue(self.layer_counter)
+
+        # 4. 最后应用坐标、缩放、旋转等基础属性
+        self.update_sprite(sprite_id, data)
 
     def update_sprite(self, sprite_id, data):
         item = self.sprites.get(sprite_id)
@@ -141,6 +161,11 @@ class RenderManager:
 
             if "visible" in data:
                 item.setVisible(data["visible"])
+
+            # 🚀 2. 允许在运行中动态修改层级
+            if "layer" in data:
+                item.setZValue(data["layer"])
+
             # 5. 其他属性
             if "z" in data:
                 item.setZValue(data["z"])
@@ -161,13 +186,14 @@ class RenderManager:
         
         # 2. 清空字典
         self.sprites.clear()
-        
+        self.layer_counter = 0
+
         # 3. 隐藏 FPS 标签（可选，让新运行的代码自己决定是否显示）
         if self.fps_label:
             self.fps_label.setVisible(False)
             self.fps_label.setPlainText("FPS: 0")
     
-
+        
     # --- 待实现的详细功能 ---
     def set_fps_visibility(self, data):
         """处理 show_fps(True/False)"""

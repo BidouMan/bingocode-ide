@@ -33,7 +33,7 @@ class Sprite:
         self._groups = []
         self._visible = True
         self._is_deleted = False # 增加删除标记
-        
+        self._layer = 0
 
         # 发送创建指令
         self._send_command("CREATE", {
@@ -266,6 +266,15 @@ class Sprite:
     @size.setter
     def size(self,value):
         self.set_size(value)
+
+    @property
+    def layer(self):
+        return self._layer
+    @layer.setter
+    def layer(self, value):
+        """学生可以手动设置层级，例如 hero.layer = 10"""
+        self._layer = value
+        self._send_command("UPDATE", {"id": self.id, "layer": value})
 
     # ---------- 内部调用 ----------
     def _setup_hitbox(self):

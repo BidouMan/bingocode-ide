@@ -8,13 +8,16 @@ b.set_size(30)
 
 b.set_rotation_mode('left_right')
 b.angle = 0
-print(11)
+b.layer = 2
+print(b.layer)
 
 a = Sprite('hero.png')
 a.set_size(40)
 a.x = 500
 a.y = 320
 a.add_to_group('enemy')
+a.layer = 1
+print(a.layer)
 
 def loop():
         
@@ -33,10 +36,10 @@ def loop():
         b.angle = 90
         b.move(5)
 
-    if b.touch_group('enemy'):
-        print('hit')
-        a.delete()
-    if b.is_out_side():
-        print('out')
+#     if b.touch_group('enemy'):
+#         print('hit')
+#         a.delete()
+#     if b.is_out_side():
+#         print('out')
     
 run()
