@@ -5,6 +5,9 @@ import os
 import random
 import math
 import threading
+from PIL import Image
+
+
 sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', buffering=1)
 
 __all__ = ['Sprite', 'run','key_down','show_fps']
@@ -24,6 +27,8 @@ class Sprite:
         self._angle = 0
         self._rotation_style = "all"
         self._current_scale_x = 1.0
+        self.hitbox_scale = 0.8 # 允许微调碰撞精度
+        self._setup_hitbox()    # 创建hitbox
 
         # 发送创建指令
         self._send_command("CREATE", {
@@ -77,6 +82,36 @@ class Sprite:
         """设置旋转角度"""
         self._angle = angle
         self._update_transform()
+    
+    def edge_bounce(self):
+        """基于 Hitbox 的精准反弹"""
+        STAGE_W, STAGE_H = 640, 480
+        rect = self._get_hitbox_rect()
+        hit = False
+
+        # 左右判断
+        if rect[2] > STAGE_W: # 右边出界
+            self._x -= (rect[2] - STAGE_W) # 修正位置，消除穿墙感
+            self._angle = 180 - self._angle
+            hit = True
+        elif rect[0] < 0:     # 左边出界
+            self._x += (0 - rect[0])
+            self._angle = 180 - self._angle
+            hit = True
+
+        # 上下判断
+        if rect[3] > STAGE_H: # 下边出界
+            self._y -= (rect[3] - STAGE_H)
+            self._angle = -self._angle
+            hit = True
+        elif rect[1] < 0:     # 上边出界
+            self._y += (0 - rect[1])
+            self._angle = -self._angle
+            hit = True
+
+        if hit:
+            self._angle %= 360
+            self._update_transform()
 
     # ----------- 外观模块 ----------
     def set_size(self,value):
@@ -102,7 +137,6 @@ class Sprite:
     def x(self,value):
         self.set_x(value)
 
-    
     @property
     def y(self):
         return self._y
@@ -123,6 +157,39 @@ class Sprite:
     @size.setter
     def size(self,value):
         self.set_size(value)
+
+    # ---------- 内部调用 ----------
+    def _setup_hitbox(self):
+        """扫描图片非透明区域，解决 64x64 容器内 32x32 角色问题"""
+        try:
+            with Image.open(self.image) as img:
+                self._orig_w, self._orig_h = img.size
+                # getbbox 会跳过透明区域，返回 (left, top, right, bottom)
+                bbox = img.convert("RGBA").getbbox()
+                if bbox:
+                    l, t, r, b = bbox
+                    self._content_w = r - l
+                    self._content_h = b - t
+                    # 计算视觉中心相对于图片中心点的偏移
+                    self._visual_offset_x = (l + r) / 2.0 - self._orig_w / 2.0
+                    self._visual_offset_y = (t + b) / 2.0 - self._orig_h / 2.0
+                else:
+                    self._content_w, self._content_h = self._orig_w, self._orig_h
+                    self._visual_offset_x = self._visual_offset_y = 0
+        except:
+            self._orig_w = self._orig_h = 50
+            self._content_w = self._content_h = 50
+            self._visual_offset_x = self._visual_offset_y = 0
+
+    def _get_hitbox_rect(self):
+        """获取当前角色在舞台上的真实包围盒 [left, top, right, bottom]"""
+        ratio = (self._size / 100.0) * self.hitbox_scale
+        # 当前视觉中心 = 逻辑中心 + 偏移量 * 缩放
+        cx = self._x + (self._visual_offset_x * (self._size / 100.0))
+        cy = self._y + (self._visual_offset_y * (self._size / 100.0))
+        
+        hw, hh = (self._content_w * ratio) / 2.0, (self._content_h * ratio) / 2.0
+        return [cx - hw, cy - hh, cx + hw, cy + hh]
 
     def _update_transform(self):
         """统一处理旋转、缩放和镜像逻辑"""
@@ -209,6 +276,8 @@ def show_fps(visible=True):
     # 🚀 使用 sys.stdout.write 配合 \n 更加底层稳健
     sys.stdout.write(json.dumps(packet) + "\n")
     sys.stdout.flush()
+
+# ---------- 内部函数 ----------
 
 def _send_fps_to_ide(fps):
     packet = {
