@@ -14,6 +14,7 @@ __all__ = ['Sprite', 'run','key_down','show_fps']
 _PRESSED_KEYS = set()
 _SHOW_FPS = False
 _PERF_STATS = {"last_time": time.time(), "frame_count": 0}
+_GROUPS = {}
 
 class Sprite:
     def __init__(self, image_name):        
@@ -29,6 +30,10 @@ class Sprite:
         self._current_scale_x = 1.0
         self.hitbox_scale = 0.8 # 允许微调碰撞精度
         self._setup_hitbox()    # 创建hitbox
+        self._groups = []
+        self._visible = True
+        self._is_deleted = False # 增加删除标记
+        
 
         # 发送创建指令
         self._send_command("CREATE", {
@@ -118,16 +123,6 @@ class Sprite:
         self._size = value
         self._update_transform()
 
-    # ---------- 侦测模块 ----------
-    def is_touch(self, other):
-        """判断是否碰到另一个 Sprite"""
-        if not isinstance(other, Sprite): return False
-        r1 = self._get_hitbox_rect()
-        r2 = other._get_hitbox_rect()
-        # AABB 碰撞公式：只要有一个维度不重叠，就没碰到
-        return not (r1[2] < r2[0] or r1[0] > r2[2] or 
-                    r1[3] < r2[1] or r1[1] > r2[3])
-
     def set_rotation_mode(self, style):
         """
         style: 
@@ -138,6 +133,66 @@ class Sprite:
         self._rotation_style = style
         # 立即触发一次更新以应用新样式
         self._update_transform()
+
+    def show(self):
+        """显示角色"""
+        if self._is_deleted: return # 已经删除的不能显示
+        self._visible = True
+        self._send_command("UPDATE", {"id": self.id, "visible": True})
+
+    def hide(self):
+        """隐藏角色（仅仅是看不见，物体还在内存里）"""
+        self._visible = False
+        self._send_command("UPDATE", {"id": self.id, "visible": False})
+
+    # ---------- 侦测模块 ----------
+    def is_touch(self, other):
+        """判断是否碰到另一个 Sprite"""
+        if not self._visible or not other._visible: 
+            return False
+        if self._is_deleted or other._is_deleted:
+            return False
+        if not isinstance(other, Sprite): 
+            return False
+        r1 = self._get_hitbox_rect()
+        r2 = other._get_hitbox_rect()
+        # AABB 碰撞公式：只要有一个维度不重叠，就没碰到
+        return not (r1[2] < r2[0] or r1[0] > r2[2] or 
+                    r1[3] < r2[1] or r1[1] > r2[3])
+
+    def touch_group(self, group_name):
+        """
+        判断是否撞到了某个组里的任意成员。
+        如果撞到了，返回那个成员；没撞到返回 None。
+        """
+        if group_name not in _GROUPS:
+            return None
+            
+        for other in _GROUPS[group_name]:
+            # 排除自己
+            if other is self: continue
+            # 这里的 is_touching 是我们之前写的 Pillow AABB 算法
+            if self.is_touching(other):
+                return other
+        return None
+
+    def add_to_group(self, group_name):
+        """将角色归类，比如 'enemies', 'bullets'"""
+        if group_name not in _GROUPS:
+            _GROUPS[group_name] = []
+        if self not in _GROUPS[group_name]:
+            _GROUPS[group_name].append(self)
+            self._groups.append(group_name)
+
+    def delete(self):
+        """彻底删除（视觉移除 + 物理移除 + 内存清理）"""
+        self._is_deleted = True
+        self._send_command("DELETE", {"id": self.id})
+        # 从全局组里彻底踢出去
+        if hasattr(self, '_groups'):
+            for g in self._groups:
+                if self in _GROUPS.get(g, []):
+                    _GROUPS[g].remove(self)
 
     # ----------- 属性赋值 ----------
     @property

@@ -66,6 +66,7 @@ class RenderManager:
                     self.remove_sprite(sprite_id)
                 elif cmd_type == "RESET":
                     self.reset_session()
+                
         except Exception as e:
             pass
         
@@ -125,6 +126,8 @@ class RenderManager:
             # 保持中心点对齐
             item.setPos(x - w / 2, y / 2 if h==0 else y - h / 2)
 
+            if "visible" in data:
+                item.setVisible(data["visible"])
             # 5. 其他属性
             if "z" in data:
                 item.setZValue(data["z"])

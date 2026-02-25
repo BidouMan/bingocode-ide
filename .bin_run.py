@@ -10,12 +10,17 @@ print(11)
 
 a = Sprite('hero.png')
 a.set_size(40)
+a.x = 500
+a.y = 320
 
 def loop():
+    if key_down('1'):
+        a.show()
         
+    if key_down('2'):
+        a.hide()    
     
     if key_down('a'):
-        
         b.angle = 180
         b.move(5)
     elif key_down('d'):
@@ -28,7 +33,7 @@ def loop():
         b.angle = 90
         b.move(5)
 
-    if b.is_touching(a):
+    if b.is_touch(a):
         print('hit')
 
 run()
