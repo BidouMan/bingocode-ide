@@ -21,7 +21,7 @@ a.layer = 1
 print(a.layer)
 
 def loop():
-    b.say('hello 金三胖!')
+    b.say('hello 我是金三胖!')
 #     a.look_at(b)    
 #     a.move(2)
     if key_down('a'):

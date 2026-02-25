@@ -1,6 +1,6 @@
 import json,os
-from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsEllipseItem,QGraphicsSimpleTextItem
-from PySide6.QtGui import QPainter, QPixmap, QColor, QFont, QBrush,QTransform,QPen,QFontDatabase
+from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsEllipseItem,QGraphicsSimpleTextItem,QGraphicsPathItem
+from PySide6.QtGui import QPainter, QPixmap, QColor, QFont, QBrush,QTransform,QPen,QFontDatabase,QPainterPath
 from PySide6.QtCore import Qt
 
 
@@ -230,68 +230,83 @@ class RenderManager:
             self.fps_label.setDefaultTextColor(Qt.red)
 
     def handle_say(self, sprite_id, text):
-        if sprite_id not in self.sprites:
-            return
-        
+        if sprite_id not in self.sprites: return
         parent_item = self.sprites[sprite_id]
+        
+        # 1. 检查或创建气泡
         existing_bubble = getattr(parent_item, "_bubble", None)
         
-        # 如果 text 为空或全是空格，隐藏气泡
         if not text or str(text).strip() == "":
             if existing_bubble: existing_bubble.hide()
             return
 
-        if existing_bubble:
-            # 🚀 确保气泡如果被 removeItem 了，重新加回来
-            if not existing_bubble.scene():
-                self.scene.addItem(existing_bubble)
-            
-            text_item = existing_bubble._text_obj
-            text_item.setText(str(text))
-            existing_bubble.show()
-            self._adjust_bubble_size(existing_bubble, text_item, parent_item)
-        else:
-            # 创建逻辑保持不变，但增加黑色画笔确保可见
-            bubble = QGraphicsRectItem()
+        if not existing_bubble:
+            # 🚀 创建 PathItem
+            bubble = QGraphicsPathItem()
             bubble.setBrush(QBrush(Qt.white))
-            bubble.setPen(QPen(Qt.black, 1))
+            bubble.setPen(QPen(Qt.black, 1.5))
             bubble.setZValue(9999)
             
             text_item = QGraphicsSimpleTextItem(str(text), bubble)
             text_item.setBrush(QBrush(Qt.black))
-            bubble_font = QFont(self.bubble_font_family, 16)
-            text_item.setFont(bubble_font)
+            text_item.setFont(QFont(self.bubble_font_family, 16))
             
             self.scene.addItem(bubble)
             bubble._text_obj = text_item
             parent_item._bubble = bubble
-            
-            self._adjust_bubble_size(bubble, text_item, parent_item)
+            existing_bubble = bubble
+        else:
+            existing_bubble._text_obj.setText(str(text))
+            existing_bubble.show()
+
+        # 2. 强制刷新尺寸和路径
+        self._adjust_bubble_size(existing_bubble, existing_bubble._text_obj, parent_item)
     
     def _adjust_bubble_size(self, bubble, text_item, parent_item):
-        # 1. 自动调整文字和底框大小
+        # 1. 基础尺寸设置
         t_rect = text_item.boundingRect()
-        padding = 8
+        padding = 10
+        radius = 12
+        arrow_h = 10    # 箭头高度
+        arrow_w = 8     # 🚀 箭头宽度（张嘴宽度变小）
+        arrow_x = 12    # 🚀 箭头在底部的起点位置（更靠左）
+
         bw = max(t_rect.width() + padding * 2, 50)
         bh = t_rect.height() + padding * 2
-        bubble.setRect(0, 0, bw, bh)
+        
+        # 2. 构建单轨迹路径
+        path = QPainterPath()
+        
+        # --- 顺时针绘制矩形轮廓 ---
+        path.moveTo(radius, 0)
+        path.lineTo(bw - radius, 0)
+        path.arcTo(bw - radius*2, 0, radius*2, radius*2, 90, -90) # 右上
+        path.lineTo(bw, bh - radius)
+        path.arcTo(bw - radius*2, bh - radius*2, radius*2, radius*2, 0, -90) # 右下
+        
+        # --- 底部连线 + 小尾巴 ---
+        # 此时画笔在右下角弧线终点 (bw - radius, bh)
+        # 连线到箭头的右侧位置
+        path.lineTo(arrow_x + arrow_w, bh) 
+        path.lineTo(arrow_x, bh + arrow_h)   # 🚀 箭头尖端（左侧倾斜效果）
+        path.lineTo(arrow_x, bh)            # 回到底部边线
+        # -----------------------
+        
+        path.lineTo(radius, bh)
+        path.arcTo(0, bh - radius*2, radius*2, radius*2, 270, -90) # 左下
+        path.lineTo(0, radius)
+        path.arcTo(0, 0, radius*2, radius*2, 180, -90) # 左上
+        path.closeSubpath()
+        
+        bubble.setPath(path)
         text_item.setPos(padding, padding)
 
-        # 2. 🚀 计算场景坐标 (对标 Scratch 右上角)
-        # 必须使用 sceneBoundingRect，因为它包含了缩放和旋转后的真实视觉边界
+        # 3. 定位对齐
         p_rect = parent_item.sceneBoundingRect()
-        
-        # 3. 定位算法：
-        # x: 角色的视觉右边缘 - 40像素（稍微内缩）
-        # y: 角色的视觉上边缘 - 气泡总高度 - 15像素（间隙）
-        target_x = p_rect.right() - 40
-        target_y = p_rect.top() - bh +15
-        
-        # 4. 边界保护：防止气泡飞出舞台顶部（可选）
-        if target_y < 0: target_y = 5 
-        
+        # 适当微调 target_x 让气泡整体向左移，让小尾巴更精准地指在角色上方
+        target_x = p_rect.right() - 50 
+        target_y = p_rect.top() - bh - arrow_h + 15
         bubble.setPos(target_x, target_y)
-
     def handle_audio(self, data):
         """后续实现：播放声音"""
         pass
