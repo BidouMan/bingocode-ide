@@ -172,6 +172,13 @@ class Sprite:
         self._visible = False
         self._send_command("UPDATE", {"id": self.id, "visible": False})
 
+    def say(self, text):
+        """
+        让角色说话。由于设定是永久显示，新话会替换旧话。
+        """
+        # 确保 text 是字符串
+        self._send_command("SAY", {"text": str(text)})
+
     # ---------- 侦测模块 ----------
     def is_touch_edge(self):
         """

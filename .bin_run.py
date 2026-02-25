@@ -2,7 +2,7 @@ from bingo_engine import *
 
 show_fps(True)
 
-set_background('森林.png')
+# set_background('森林.png')
 b = Sprite('hero.png')
 b.set_scale(30)
 
@@ -21,6 +21,7 @@ a.layer = 1
 print(a.layer)
 
 def loop():
+    b.say('hello 金三胖!')
 #     a.look_at(b)    
 #     a.move(2)
     if key_down('a'):

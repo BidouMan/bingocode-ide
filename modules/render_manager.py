@@ -1,6 +1,6 @@
 import json,os
-from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsEllipseItem
-from PySide6.QtGui import QPainter, QPixmap, QColor, QFont, QBrush,QTransform
+from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsEllipseItem,QGraphicsSimpleTextItem
+from PySide6.QtGui import QPainter, QPixmap, QColor, QFont, QBrush,QTransform,QPen,QFontDatabase
 from PySide6.QtCore import Qt
 
 
@@ -12,6 +12,18 @@ class RenderManager:
         self.scene = QGraphicsScene(0, 0, self.logic_w, self.logic_h)
         self.view.setScene(self.scene)
         self.layer_counter = 0  # 🚀 用于自动生成图层的计数器
+
+        # 🚀 1. 加载 HarmonyOS 字体文件
+        font_path = os.path.join("assets", "font", "HarmonyOS_Sans_SC_Regular.ttf")
+        self.font_id = QFontDatabase.addApplicationFont(font_path)
+        
+        if self.font_id != -1:
+            # 成功加载，获取字体的 Family Name
+            self.bubble_font_family = QFontDatabase.applicationFontFamilies(self.font_id)[0]
+        else:
+            # 万一加载失败（路径错等），降级使用系统黑体
+            print(f"Warning: Font file not found at {font_path}")
+            self.bubble_font_family = "Microsoft YaHei"
 
         # 基础配置
         self.view.setRenderHint(QPainter.Antialiasing)
@@ -56,6 +68,7 @@ class RenderManager:
                 self.update_fps_display(data)
                 return
 
+
             # 2. 处理角色指令（必须包含 id）
             if "id" in msg:
                 sprite_id = str(msg.get("id"))
@@ -63,6 +76,9 @@ class RenderManager:
                     self.create_sprite(sprite_id, data)
                 elif cmd_type == "UPDATE":
                     self.update_sprite(sprite_id, data)
+                elif cmd_type == "SAY":
+                    text_content = data.get("text", "")
+                    self.handle_say(sprite_id, text_content)
                 elif cmd_type == "DELETE" or cmd_type == "REMOVE":
                     self.remove_sprite(sprite_id)
                 elif cmd_type == "RESET":
@@ -132,45 +148,43 @@ class RenderManager:
 
     def update_sprite(self, sprite_id, data):
         item = self.sprites.get(sprite_id)
-        if item:
-            rect = item.boundingRect()
-            w, h = rect.width(), rect.height()
+        if not item:
+            return
 
-            x = data.get("x", item.x() + w/2)
-            y = data.get("y", item.y() + h/2)
-            angle = data.get("angle", item.rotation())
-            
-            # 🚀 获取两个方向的缩放值，如果没有则默认为 1.0
-            sx = data.get("scale_x", getattr(item, '_last_sx', 1.0))
-            sy = data.get("scale_y", getattr(item, '_last_sy', 1.0))
-            item._last_sx = sx
-            item._last_sy = sy
+        # --- 1. 原有的变换逻辑 (保持不变) ---
+        rect = item.boundingRect()
+        w, h = rect.width(), rect.height()
+        x = data.get("x", item.x() + w/2)
+        y = data.get("y", item.y() + h/2)
+        angle = data.get("angle", item.rotation())
+        sx = data.get("scale_x", getattr(item, '_last_sx', 1.0))
+        sy = data.get("scale_y", getattr(item, '_last_sy', 1.0))
+        item._last_sx = sx
+        item._last_sy = sy
 
-            transform = QTransform()
-            transform.translate(w / 2, h / 2)
-            # 🚀 关键：同时应用 sx 和 sy 实现等比缩放
-            transform.scale(sx, sy) 
-            transform.rotate(angle)
-            transform.translate(-w / 2, -h / 2)
+        transform = QTransform()
+        transform.translate(w / 2, h / 2)
+        transform.scale(sx, sy) 
+        transform.rotate(angle)
+        transform.translate(-w / 2, -h / 2)
 
-            item.setTransform(transform)
-            item.setRotation(0) 
-            
-            # 保持中心点对齐
-            item.setPos(x - w / 2, y / 2 if h==0 else y - h / 2)
+        item.setTransform(transform)
+        item.setRotation(0) 
+        item.setPos(x - w / 2, y - h / 2) # 修正了你代码中 y/2 的潜在小错误
 
-            if "visible" in data:
-                item.setVisible(data["visible"])
+        if "visible" in data:
+            item.setVisible(data["visible"])
+        if "layer" in data:
+            item.setZValue(data["layer"])
+        if "opacity" in data:
+            item.setOpacity(data["opacity"])
 
-            # 🚀 2. 允许在运行中动态修改层级
-            if "layer" in data:
-                item.setZValue(data["layer"])
-
-            # 5. 其他属性
-            if "z" in data:
-                item.setZValue(data["z"])
-            if "opacity" in data:
-                item.setOpacity(data["opacity"])
+        # --- 2. 🚀 关键：在这里同步气泡位置 ---
+        if hasattr(item, "_bubble"):
+            bubble = item._bubble
+            if bubble.scene() and bubble.isVisible():
+                # 只有当气泡在场景中且可见时才更新
+                self._adjust_bubble_size(bubble, bubble._text_obj, item)
 
     def remove_sprite(self, sprite_id):
         if sprite_id in self.sprites:
@@ -215,9 +229,68 @@ class RenderManager:
         else:
             self.fps_label.setDefaultTextColor(Qt.red)
 
-    def create_text(self, sprite_id, data):
-        """后续实现：在屏幕上显示文字"""
-        pass
+    def handle_say(self, sprite_id, text):
+        if sprite_id not in self.sprites:
+            return
+        
+        parent_item = self.sprites[sprite_id]
+        existing_bubble = getattr(parent_item, "_bubble", None)
+        
+        # 如果 text 为空或全是空格，隐藏气泡
+        if not text or str(text).strip() == "":
+            if existing_bubble: existing_bubble.hide()
+            return
+
+        if existing_bubble:
+            # 🚀 确保气泡如果被 removeItem 了，重新加回来
+            if not existing_bubble.scene():
+                self.scene.addItem(existing_bubble)
+            
+            text_item = existing_bubble._text_obj
+            text_item.setText(str(text))
+            existing_bubble.show()
+            self._adjust_bubble_size(existing_bubble, text_item, parent_item)
+        else:
+            # 创建逻辑保持不变，但增加黑色画笔确保可见
+            bubble = QGraphicsRectItem()
+            bubble.setBrush(QBrush(Qt.white))
+            bubble.setPen(QPen(Qt.black, 1))
+            bubble.setZValue(9999)
+            
+            text_item = QGraphicsSimpleTextItem(str(text), bubble)
+            text_item.setBrush(QBrush(Qt.black))
+            bubble_font = QFont(self.bubble_font_family, 16)
+            text_item.setFont(bubble_font)
+            
+            self.scene.addItem(bubble)
+            bubble._text_obj = text_item
+            parent_item._bubble = bubble
+            
+            self._adjust_bubble_size(bubble, text_item, parent_item)
+    
+    def _adjust_bubble_size(self, bubble, text_item, parent_item):
+        # 1. 自动调整文字和底框大小
+        t_rect = text_item.boundingRect()
+        padding = 8
+        bw = max(t_rect.width() + padding * 2, 50)
+        bh = t_rect.height() + padding * 2
+        bubble.setRect(0, 0, bw, bh)
+        text_item.setPos(padding, padding)
+
+        # 2. 🚀 计算场景坐标 (对标 Scratch 右上角)
+        # 必须使用 sceneBoundingRect，因为它包含了缩放和旋转后的真实视觉边界
+        p_rect = parent_item.sceneBoundingRect()
+        
+        # 3. 定位算法：
+        # x: 角色的视觉右边缘 - 40像素（稍微内缩）
+        # y: 角色的视觉上边缘 - 气泡总高度 - 15像素（间隙）
+        target_x = p_rect.right() - 40
+        target_y = p_rect.top() - bh +15
+        
+        # 4. 边界保护：防止气泡飞出舞台顶部（可选）
+        if target_y < 0: target_y = 5 
+        
+        bubble.setPos(target_x, target_y)
 
     def handle_audio(self, data):
         """后续实现：播放声音"""
