@@ -1,6 +1,8 @@
 from bingo_engine import *
 
 show_fps(True)
+
+set_background('森林.png')
 b = Sprite('hero.png')
 b.set_size(30)
 

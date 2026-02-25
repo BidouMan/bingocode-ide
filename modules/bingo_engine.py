@@ -10,7 +10,7 @@ from PIL import Image
 
 sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', buffering=1)
 
-__all__ = ['Sprite', 'run','key_down','show_fps']
+__all__ = ['Sprite', 'run','key_down','show_fps','set_background']
 _PRESSED_KEYS = set()
 _SHOW_FPS = False
 _PERF_STATS = {"last_time": time.time(), "frame_count": 0}
@@ -386,6 +386,29 @@ def show_fps(visible=True):
     sys.stdout.write(json.dumps(packet) + "\n")
     sys.stdout.flush()
 
+def set_background(image_name):
+    """
+    设置舞台背景图
+    """
+    image_path = os.path.join("assets", "images", image_name)
+    # 背景图使用固定的 ID，确保重复调用时是“替换”而不是“叠加”
+    packet = {
+        "type": "CREATE",
+        "id": "STAGE_BACKGROUND", 
+        "data": {
+            "image": image_path,
+            "x": 320,  # 自动居中
+            "y": 240,
+            "angle": 0,
+            "scale_x": 1.0,
+            "scale_y": 1.0,
+            "z_value": -1000, # 🚀 核心：给一个极小的层级，确保在最底层
+            "type": "background"
+        }
+    }
+    print(json.dumps(packet), flush=True)
+
+    
 # ---------- 内部函数 ----------
 
 def _send_fps_to_ide(fps):

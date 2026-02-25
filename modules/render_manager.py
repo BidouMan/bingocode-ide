@@ -96,6 +96,19 @@ class RenderManager:
             self.scene.addItem(item)
             self.sprites[sprite_id] = item
             self.update_sprite(sprite_id, data)
+        
+        # 🚀 处理层级
+        z_value = data.get("z_value", 0) # 默认层级是 0
+        item.setZValue(z_value)
+        
+        # 🚀 如果是背景图，可以禁用它的碰撞或交互（可选）
+        if data.get("type") == "background":
+            item.setEnabled(False) # 背景不响应鼠标等交互
+            # render_manager.py 内部
+            rect = item.pixmap().rect()
+            scale_x = 640 / rect.width()
+            scale_y = 480 / rect.height()
+            item.setScale(max(scale_x, scale_y)) # 类似 center crop 的效果
 
     def update_sprite(self, sprite_id, data):
         item = self.sprites.get(sprite_id)
