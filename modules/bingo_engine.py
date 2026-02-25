@@ -237,7 +237,19 @@ class Sprite:
             for g in self._groups:
                 if self in _GROUPS.get(g, []):
                     _GROUPS[g].remove(self)
-
+    def distance_to(self, other):
+        """
+        计算当前角色中心点到另一个角色中心点的距离
+        """
+        if not isinstance(other, Sprite):
+            # 如果传入的不是 Sprite 对象（比如 None），返回一个很大的距离
+            return 999999
+        
+        # 使用欧几里得距离公式 (勾股定理)
+        dx = self.x - other.x
+        dy = self.y - other.y
+        return math.sqrt(dx**2 + dy**2)
+    
     # ----------- 属性赋值 ----------
     @property
     def x(self):

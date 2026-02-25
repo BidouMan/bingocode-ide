@@ -35,7 +35,9 @@ def loop():
     elif key_down('s'):
         b.angle = 90
         b.move(5)
-
+    
+    dis = a.distance_to(b)
+    print(dis)
 #     if b.touch_group('enemy'):
 #         print('hit')
 #         a.delete()
