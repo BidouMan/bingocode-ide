@@ -7,8 +7,10 @@ import math
 import threading
 
 
-__all__ = ['Sprite', 'run','key_down']
+__all__ = ['Sprite', 'run','key_down','show_fps']
 _PRESSED_KEYS = set()
+_SHOW_FPS = False
+_PERF_STATS = {"last_time": time.time(), "frame_count": 0}
 
 class Sprite:
     def __init__(self, image_name):        
@@ -114,7 +116,7 @@ class Sprite:
     def x(self,value):
         self._x = value
         self._update_transform()
-        # self._send_command("UPDATE", {"x": self._x,'y':self._y})
+
     
     @property
     def y(self):
@@ -192,9 +194,7 @@ def _input_sync_listener():
                 continue
             
             clean_line = line.strip()
-            # 如果你在 IDE 看到这一行，说明通讯链路彻底通了
-            # print(f"ENGINE_RECV: {clean_line}", file=sys.stderr, flush=True)
-            
+                       
             if clean_line.startswith("K_DOWN:"):
                 key = clean_line.split(":", 1)[1]
                 _PRESSED_KEYS.add(key)
@@ -211,17 +211,49 @@ def key_down(key):
     """供用户调用：if key_down('a')"""
     return str(key).lower() in _PRESSED_KEYS
 
+def show_fps(visible=True):
+    global _SHOW_FPS
+    _SHOW_FPS = visible
+    packet = {
+        "type": "UI_COMMAND",
+        "data": {"action": "show_fps", "value": visible}
+    }
+    # 🚀 使用 sys.stdout.write 配合 \n 更加底层稳健
+    sys.stdout.write(json.dumps(packet) + "\n")
+    sys.stdout.flush()
+
+def _send_fps_to_ide(fps):
+    packet = {
+        "type": "FPS_UPDATE",
+        "data": {"fps": round(fps, 1)}
+    }
+    # 🚀 明确发送到标准输出
+    print(json.dumps(packet), flush=True)
+
+
 def run():
-    """驱动游戏循环"""
-    # 查找运行脚本中的 loop 函数
+    global _PERF_STATS
     main_module = sys.modules['__main__']
-        
+    if not hasattr(main_module, 'loop'): return
+
+    _PERF_STATS["last_time"] = time.time()
+    
     while True:
-        if hasattr(main_module, 'loop'):
-            try:
-                main_module.loop()
-            except Exception as e:
-                print(f"Loop Error: {e}", file=sys.stderr)
-                break
-        # 保持约 60FPS
-        time.sleep(0.016)
+        start_frame = time.time()
+        main_module.loop()
+        
+        # FPS 计算
+        _PERF_STATS["frame_count"] += 1
+        now = time.time()
+        duration = now - _PERF_STATS["last_time"]
+        
+        if duration >= 0.5:
+            fps = _PERF_STATS["frame_count"] / duration
+            if _SHOW_FPS:
+                _send_fps_to_ide(fps) # 🚀 使用独立函数发送
+            _PERF_STATS["frame_count"] = 0
+            _PERF_STATS["last_time"] = now
+
+        # 60FPS 控制
+        elapsed = time.time() - start_frame
+        time.sleep(max(0, (1/60) - elapsed))

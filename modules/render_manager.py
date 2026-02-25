@@ -1,6 +1,6 @@
 import json,os
 from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsEllipseItem
-from PySide6.QtGui import QPainter, QPixmap, QColor, QPen, QBrush,QTransform
+from PySide6.QtGui import QPainter, QPixmap, QColor, QFont, QBrush,QTransform
 from PySide6.QtCore import Qt
 
 
@@ -22,6 +22,20 @@ class RenderManager:
         self.sprites = {}
         self.apply_fit()
 
+        # 显示FPS帧数
+        self.fps_label = self.scene.addText("FPS: 0")
+        # 🚀 设置字体大小
+        font = QFont("Arial", 24) # 创建字体对象，16 是字体大小，你可以根据需要调大（如 20 或 24）
+        font.setBold(True)        # 让字体加粗，看得更清楚
+        self.fps_label.setFont(font)
+
+        self.fps_label.setDefaultTextColor(Qt.green)
+        self.fps_label.setZValue(9999) # 确保在最顶层
+        self.fps_label.setVisible(False) # 🚀 暂时改为 True
+  
+        # 固定在左上角
+        self.fps_label.setPos(10, 10)
+
     def apply_fit(self):
         self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
 
@@ -29,21 +43,32 @@ class RenderManager:
         try:
             msg = json.loads(instruction_json)
             cmd_type = msg.get("type")
-            sprite_id = str(msg.get("id"))
-            data = msg.get("data", msg) 
+            data = msg.get("data", {}) # 🚀 统一获取 data 字段
 
-            # 🚀 只保留核心的分发逻辑
-            if cmd_type == "CREATE":
-                self.create_sprite(sprite_id, data)
-            elif cmd_type == "UPDATE":
-                self.update_sprite(sprite_id, data)
-            elif cmd_type == "REMOVE":
-                self.remove_sprite(sprite_id)
-            elif cmd_type == "RESET":
-                self.reset_session()
-        except:
-            pass # 渲染层保持安静，解析不了的指令直接丢弃
+            # 1. 优先处理系统指令
+            if cmd_type == "UI_COMMAND":
+                self.set_fps_visibility(data)
+                return 
+            
+            if cmd_type == "FPS_UPDATE":
+                # 🚀 确保这里被调用
+                self.update_fps_display(data)
+                return
 
+            # 2. 处理角色指令（必须包含 id）
+            if "id" in msg:
+                sprite_id = str(msg.get("id"))
+                if cmd_type == "CREATE":
+                    self.create_sprite(sprite_id, data)
+                elif cmd_type == "UPDATE":
+                    self.update_sprite(sprite_id, data)
+                elif cmd_type == "REMOVE":
+                    self.remove_sprite(sprite_id)
+                elif cmd_type == "RESET":
+                    self.reset_session()
+        except Exception as e:
+            pass
+        
     def create_sprite(self, sprite_id, data):
         # 🚀 移除 DEBUG 打印，直接加载
         image_path = data.get("image", "")
@@ -117,11 +142,42 @@ class RenderManager:
             del self.sprites[sprite_id]
 
     def reset_session(self):
-        self.scene.clear()
+        """重置会话，但不销毁系统级 UI"""
+        # 1. 只移除所有的 Sprite 角色
+        for sprite_item in self.sprites.values():
+            if sprite_item.scene(): # 确保还在场景中
+                self.scene.removeItem(sprite_item)
+        
+        # 2. 清空字典
         self.sprites.clear()
+        
+        # 3. 隐藏 FPS 标签（可选，让新运行的代码自己决定是否显示）
+        if self.fps_label:
+            self.fps_label.setVisible(False)
+            self.fps_label.setPlainText("FPS: 0")
     
 
     # --- 待实现的详细功能 ---
+    def set_fps_visibility(self, data):
+        """处理 show_fps(True/False)"""
+        if data.get("action") == "show_fps":
+            visible = data.get("value", False)
+            self.fps_label.setVisible(visible)
+
+    def update_fps_display(self, data):
+        """更新 FPS 文字内容和颜色"""
+        # 🚀 确保从 data 字典中提取 fps 键
+        fps_val = data.get("fps", 0) 
+        self.fps_label.setPlainText(f"FPS: {fps_val}")
+        
+        # 变色逻辑保持不变
+        if fps_val > 55:
+            self.fps_label.setDefaultTextColor(Qt.green)
+        elif fps_val > 30:
+            self.fps_label.setDefaultTextColor(Qt.yellow)
+        else:
+            self.fps_label.setDefaultTextColor(Qt.red)
+
     def create_text(self, sprite_id, data):
         """后续实现：在屏幕上显示文字"""
         pass

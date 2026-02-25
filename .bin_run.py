@@ -1,6 +1,6 @@
 from bingo_engine import *
 
-
+show_fps(True)
 b = Sprite('hero.png')
 
 
