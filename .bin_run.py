@@ -2,7 +2,7 @@ from bingo_engine import *
 
 show_fps(True)
 b = Sprite('hero.png')
-
+b.set_size(200)
 
 b.set_rotation_mode('left_right')
 b.angle = 180
