@@ -5,7 +5,7 @@ import os
 import random
 import math
 import threading
-
+sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', buffering=1)
 
 __all__ = ['Sprite', 'run','key_down','show_fps']
 _PRESSED_KEYS = set()
@@ -231,29 +231,42 @@ def _send_fps_to_ide(fps):
     print(json.dumps(packet), flush=True)
 
 
+# bingo_engine.py
+
 def run():
     global _PERF_STATS
     main_module = sys.modules['__main__']
     if not hasattr(main_module, 'loop'): return
 
+    target_fps = 60
+    frame_duration = 1.0 / target_fps
     _PERF_STATS["last_time"] = time.time()
     
+    next_frame_time = time.time() # 🚀 记录下一帧应该开始的时间点
+
     while True:
         start_frame = time.time()
+        
+        # 执行用户逻辑
         main_module.loop()
         
-        # FPS 计算
+        # FPS 统计
         _PERF_STATS["frame_count"] += 1
         now = time.time()
         duration = now - _PERF_STATS["last_time"]
-        
         if duration >= 0.5:
             fps = _PERF_STATS["frame_count"] / duration
             if _SHOW_FPS:
-                _send_fps_to_ide(fps) # 🚀 使用独立函数发送
+                _send_fps_to_ide(fps)
             _PERF_STATS["frame_count"] = 0
             _PERF_STATS["last_time"] = now
 
-        # 60FPS 控制
-        elapsed = time.time() - start_frame
-        time.sleep(max(0, (1/60) - elapsed))
+        # 🚀 改进的帧率控制：追踪时间线而不是死等
+        next_frame_time += frame_duration
+        sleep_time = next_frame_time - time.time()
+        
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+        else:
+            # 如果逻辑太重导致掉帧了，重置时间线防止“加速追赶”
+            next_frame_time = time.time()
