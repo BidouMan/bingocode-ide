@@ -146,6 +146,50 @@ class Sprite:
         self._send_command("UPDATE", {"id": self.id, "visible": False})
 
     # ---------- 侦测模块 ----------
+    def is_touch_edge(self):
+        """
+        精准边界检测：判定角色的实际视觉边缘是否越过了 640*480 的舞台
+        """
+        # 1. 获取缩放和偏移后的真实包围盒 [left, top, right, bottom]
+        rect = self._get_hitbox_rect()
+        
+        # 2. 舞台固定尺寸
+        STAGE_W = 640
+        STAGE_H = 480
+        
+        # 3. 只要任何一边超出了舞台，就返回 True
+        if (rect[0] < 0 or         # 左边出界
+            rect[2] > STAGE_W or   # 右边出界
+            rect[1] < 0 or         # 上边出界
+            rect[3] > STAGE_H):    # 下边出界
+            return True
+            
+        return False
+    
+    def is_out_side(self):
+        """
+        完全出界检测：只有当角色整体（所有像素）都离开舞台时才返回 True
+        舞台尺寸固定为 640 * 480
+        """
+        # 获取当前精准包围盒 [left, top, right, bottom]
+        rect = self._get_hitbox_rect()
+        
+        STAGE_W = 640
+        STAGE_H = 480
+        
+        # 逻辑判断：
+        # rect[2] < 0: 右边缘比舞台左边还要小（在左侧完全出界）
+        # rect[0] > STAGE_W: 左边缘比舞台右边还要大（在右侧完全出界）
+        # rect[3] < 0: 下边缘比舞台顶边还要小（在上方完全出界）
+        # rect[1] > STAGE_H: 上边缘比舞台底边还要大（在下方完全出界）
+        if (rect[2] < 0 or 
+            rect[0] > STAGE_W or 
+            rect[3] < 0 or 
+            rect[1] > STAGE_H):
+            return True
+            
+        return False
+
     def is_touch(self, other):
         """判断是否碰到另一个 Sprite"""
         if not self._visible or not other._visible: 

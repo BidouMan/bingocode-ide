@@ -34,4 +34,7 @@ def loop():
     if b.touch_group('enemy'):
         print('hit')
         a.delete()
+    if b.is_out_side():
+        print('out')
+    
 run()
