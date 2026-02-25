@@ -24,7 +24,7 @@ class Sprite:
         self.image = os.path.join("assets", "images", image_name)
         self._x = 320  
         self._y = 240
-        self._size = 100
+        self._scale = 100
         self._angle = 0
         self._rotation_style = "all"
         self._current_scale_x = 1.0
@@ -138,9 +138,17 @@ class Sprite:
             self._update_transform()
 
     # ----------- 外观模块 ----------
-    def set_size(self,value):
-        self._size = value
+    def set_scale(self,value):
+        self._scale = min(max(5.0, float(value)), 1000.0)
         self._update_transform()
+
+    def add_scale(self, value):
+        """
+        在当前缩放比例的基础上增加 value (单位为百分比)
+        例如：add_scale(10) 会让角色变大 10%
+        """
+        # 🚀 直接利用 property 逻辑，简单稳健
+        self.scale += value
 
     def set_rotation_mode(self, style):
         """
@@ -292,11 +300,11 @@ class Sprite:
         self.set_angle(value)
 
     @property
-    def size(self):
-        return self._size
-    @size.setter
-    def size(self,value):
-        self.set_size(value)
+    def scale(self):
+        return self._scale
+    @scale.setter
+    def scale(self,value):
+        self.set_scale(value)
 
     @property
     def layer(self):
@@ -344,7 +352,7 @@ class Sprite:
         """统一处理旋转、缩放和镜像逻辑"""
         display_angle = self._angle
         # 计算基础缩放比例（百分比转为小数）
-        base_scale = self._size / 100.0
+        base_scale = self._scale / 100.0
         
         # 默认情况下，Y轴只受 size 影响
         final_scale_y = base_scale
@@ -365,7 +373,9 @@ class Sprite:
         elif self._rotation_style == "none":
             display_angle = 0
             final_scale_x = base_scale
-            
+
+     
+    
         # 🚀 发送指令：确保携带 scale_y
         self._send_command("UPDATE", {
             "x": self._x,

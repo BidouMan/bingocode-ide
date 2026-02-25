@@ -4,7 +4,7 @@ show_fps(True)
 
 set_background('森林.png')
 b = Sprite('hero.png')
-b.set_size(30)
+b.set_scale(30)
 
 b.set_rotation_mode('left_right')
 b.angle = 0
@@ -13,7 +13,7 @@ print(b.layer)
 
 a = Sprite('hero.png')
 a.set_rotation_mode('left_right')
-a.set_size(40)
+a.set_scale(40)
 a.x = 500
 a.y = 320
 a.add_to_group('enemy')
@@ -21,8 +21,8 @@ a.layer = 1
 print(a.layer)
 
 def loop():
-    a.look_at(b)    
-    a.move(2)
+#     a.look_at(b)    
+#     a.move(2)
     if key_down('a'):
         
         b.angle = 180
@@ -37,8 +37,13 @@ def loop():
         b.angle = 90
         b.move(5)
     
+    if key_down('1'):
+        b.add_scale(10)
+    if key_down('2'):
+        b.add_scale(-10)
+    
     dis = a.distance_to(b)
-    print(dis)
+#     print(dis)
 #     if b.touch_group('enemy'):
 #         print('hit')
 #         a.delete()
