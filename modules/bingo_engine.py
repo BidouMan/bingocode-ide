@@ -88,6 +88,25 @@ class Sprite:
         self._angle = angle
         self._update_transform()
     
+    def look_at(self, other):
+        """
+        让当前角色看向另一个角色 (自动旋转角度)
+        """
+        if not isinstance(other, Sprite):
+            return
+
+        # 计算坐标差
+        dx = other.x - self.x
+        dy = other.y - self.y
+
+        # 使用 atan2 计算弧度，再转换为角度
+        # atan2(y, x) 返回的是从 X 轴正方向到点 (x, y) 的弧度
+        radians = math.atan2(dy, dx)
+        angle = math.degrees(radians)
+
+        # 🚀 归一化角度到 0-360 范围内（可选，但推荐）
+        self.angle = angle % 360
+
     def edge_bounce(self):
         """基于 Hitbox 的精准反弹"""
         STAGE_W, STAGE_H = 640, 480
