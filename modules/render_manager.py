@@ -1,12 +1,14 @@
 import json,os
 from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsEllipseItem,QGraphicsSimpleTextItem,QGraphicsPathItem
 from PySide6.QtGui import QPainter, QPixmap, QColor, QFont, QBrush,QTransform,QPen,QFontDatabase,QPainterPath
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt,QObject, QEvent
 
 
-class RenderManager:
-    def __init__(self, view_instance):
+class RenderManager(QObject):
+    def __init__(self, view_instance,app_controller=None):
+        super().__init__()
         self.view = view_instance 
+        self.app_controller = app_controller
         self.logic_w = 640
         self.logic_h = 480
         self.scene = QGraphicsScene(0, 0, self.logic_w, self.logic_h)
@@ -44,10 +46,15 @@ class RenderManager:
 
         self.fps_label.setDefaultTextColor(Qt.green)
         self.fps_label.setZValue(9999) # 确保在最顶层
-        self.fps_label.setVisible(False) # 🚀 暂时改为 True
-  
+        self.fps_label.setVisible(False) # 🚀 暂时改为 True  
         # 固定在左上角
         self.fps_label.setPos(10, 10)
+
+        # 🚀 新增：启用鼠标追踪
+        self.view.setMouseTracking(True)        
+        # 🚀 新增：安装事件过滤器
+        self.view.viewport().installEventFilter(self)
+
 
     def apply_fit(self):
         self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
@@ -307,6 +314,40 @@ class RenderManager:
         target_x = p_rect.right() - 50 
         target_y = p_rect.top() - bh - arrow_h + 15
         bubble.setPos(target_x, target_y)
+
+    def eventFilter(self, obj, event):
+        """事件过滤器，捕获鼠标事件"""
+        if obj == self.view.viewport():
+            # 鼠标按下
+            if event.type() == event.Type.MouseButtonPress:
+                self.handle_mouse_press(event)
+                return True
+            
+            # 鼠标释放
+            elif event.type() == event.Type.MouseButtonRelease:
+                self.handle_mouse_release(event)
+                return True
+        
+        return super().eventFilter(obj, event)
+    
+    def handle_mouse_press(self, event):
+        """处理鼠标按下"""
+        self.view.setFocus()
+        # 🚀 发送鼠标按下消息给子进程
+        self.send_to_child("M_DOWN:")
+    
+    def handle_mouse_release(self, event):
+        """处理鼠标释放"""
+        # 🚀 发送鼠标释放消息给子进程
+        self.send_to_child("M_UP:")
+    
+    def send_to_child(self, message):
+        """发送消息到子进程"""        
+        # 🚀 使用 AppController 的 _send_to_engine 方法
+        if self.app_controller:
+            self.app_controller._send_to_engine(message)
+
+
     def handle_audio(self, data):
         """后续实现：播放声音"""
         pass

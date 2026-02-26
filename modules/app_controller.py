@@ -36,7 +36,7 @@ class AppController:
         self.menu_manager = MenuManager(main_window)
 
         # 整理过的模块
-        self.render_manager = RenderManager(self.ui.game_view)
+        self.render_manager = RenderManager(self.ui.game_view,app_controller=self)
         self.screen_manager = ScreenManager(self)
         self.tabbar_manager = TabbarManager(self.ui.tab_frame)
         self.editor_manager = EditorManager(self.ui.code_stacked, self.tabbar_manager, self.file_manager.root_path)
@@ -105,6 +105,7 @@ class AppController:
         self._send_to_engine(f"K_UP:{key_name}")
 
     def _send_to_engine(self, msg):
+        """发送消息到子进程"""
         process = self.console_manager.process
         # 🚀 增加 check: 确保 process 存在且通道未关闭
         if process and process.state() == QProcess.Running:
@@ -112,9 +113,12 @@ class AppController:
                 full_msg = f"{msg}\n"
                 process.write(full_msg.encode('utf-8'))
                 # 必须 flush，否则数据只在内存里
-                process.waitForBytesWritten(5) 
+                process.waitForBytesWritten(5)
+                print(f"✅ AppController: 消息 '{msg}' 已发送")
             except Exception as e:
-                print(f"❌ 发送失败: {e}")
+                print(f"❌ AppController: 发送失败 {e}")
+        else:
+            print(f"⚠️ AppController: 进程未运行，无法发送 '{msg}'")
 
     def _map_qt_key(self, qt_key):
         """映射 Qt 键位到用户习惯的字符串"""

@@ -1,4 +1,4 @@
-import os
+import os,sys
 from PySide6.QtWidgets import QMessageBox
 from PySide6.QtCore import QProcess,QTimer
 
@@ -18,6 +18,8 @@ class ScriptRunner:
     # script_runner.py
 
     def run_current_script(self):
+        print(f"子进程 PID: {os.getpid()}")
+        print(f"stdin 是否可读: {not sys.stdin.closed}")
         editor = self.editor_mgr.get_current_editor()
         if not editor: return
         

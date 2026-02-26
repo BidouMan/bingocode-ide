@@ -10,11 +10,12 @@ from PIL import Image
 
 sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', buffering=1)
 
-__all__ = ['Sprite', 'run','key_down','show_fps','set_background']
+__all__ = ['Sprite', 'run','key_down','show_fps','set_background','mouse_down','mouse_pressed']
 _PRESSED_KEYS = set()
 _SHOW_FPS = False
 _PERF_STATS = {"last_time": time.time(), "frame_count": 0}
 _GROUPS = {}
+_MOUSE_STATE = {"down": False,"last_down": False}  # 用字典包装鼠标状态
 
 class Sprite:
     def __init__(self, image_name):        
@@ -404,8 +405,7 @@ class Sprite:
         print(json.dumps(packet), flush=True)
 
 def _input_sync_listener():
-    global _PRESSED_KEYS
-    
+    global _PRESSED_KEYS, _MOUSE_STATE
     while True:
         try:
             # 🚀 确保是阻塞式读取
@@ -422,11 +422,31 @@ def _input_sync_listener():
             elif clean_line.startswith("K_UP:"):
                 key = clean_line.split(":", 1)[1]
                 _PRESSED_KEYS.discard(key)
+
+                # 🚀 新增鼠标事件处理
+            elif clean_line.startswith("M_DOWN:"):
+                old_value = _MOUSE_STATE["down"]
+                _MOUSE_STATE["down"] = True
+                
+            elif clean_line.startswith("M_UP:"):
+                old_value = _MOUSE_STATE["down"]
+                _MOUSE_STATE["down"] = False
         except:
             time.sleep(0.01)
 
 # 确保线程启动 (代码末尾)
 threading.Thread(target=_input_sync_listener, daemon=True).start()
+
+
+def mouse_down():
+    """判断鼠标是否按下"""
+    # 🚀 不需要 global 声明，因为只读取不赋值
+    return _MOUSE_STATE["down"]
+
+def mouse_pressed():
+    """单次检测：只有在按下的那一帧返回 True"""
+    # 如果当前按下，且上一帧没按，说明是刚刚按下的
+    return _MOUSE_STATE["down"] and not _MOUSE_STATE["last_down"]
 
 def key_down(key):
     """供用户调用：if key_down('a')"""
@@ -480,7 +500,8 @@ def _send_fps_to_ide(fps):
 # bingo_engine.py
 
 def run():
-    global _PERF_STATS
+    global _PERF_STATS,_MOUSE_STATE
+    _MOUSE_STATE["down"] = False
     main_module = sys.modules['__main__']
     if not hasattr(main_module, 'loop'): return
 
@@ -496,6 +517,10 @@ def run():
         # 执行用户逻辑
         main_module.loop()
         
+        # 每一帧结束时，记录当前状态供下一帧对比(鼠标持续按下还是单次按下)
+        _MOUSE_STATE["last_down"] = _MOUSE_STATE["down"]
+
+
         # FPS 统计
         _PERF_STATS["frame_count"] += 1
         now = time.time()
