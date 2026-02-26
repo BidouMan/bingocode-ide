@@ -108,24 +108,39 @@ class Sprite:
         self._angle = angle
         self._update_transform()
     
-    def look_at(self, other):
+    def look_at(self, target):
         """
-        让当前角色看向另一个角色 (自动旋转角度)
+        让当前角色看向另一个角色或鼠标 (自动旋转角度)
         """
-        if not isinstance(other, Sprite):
+        if self._is_deleted: return
+
+        # 1. 🚀 获取目标位置 (mx, my)
+        if target is mouse:
+            tx, ty = _MOUSE_STATE["x"], _MOUSE_STATE["y"]
+        elif isinstance(target, Sprite):
+            if target._is_deleted: return
+            # 获取目标的视觉中心
+            t_rect = target._get_hitbox_rect()
+            tx, ty = (t_rect[0] + t_rect[2]) / 2.0, (t_rect[1] + t_rect[3]) / 2.0
+        else:
+            # 如果不是 mouse 也不是 Sprite，不执行旋转
             return
 
-        # 计算坐标差
-        dx = other.x - self.x
-        dy = other.y - self.y
+        # 2. 🚀 获取自身的视觉中心
+        # 必须从视觉中心发出射线，指向才不会歪
+        s_rect = self._get_hitbox_rect()
+        sx, sy = (s_rect[0] + s_rect[2]) / 2.0, (s_rect[1] + s_rect[3]) / 2.0
+
+        # 3. 计算坐标差并求角度
+        dx = tx - sx
+        dy = ty - sy
 
         # 使用 atan2 计算弧度，再转换为角度
-        # atan2(y, x) 返回的是从 X 轴正方向到点 (x, y) 的弧度
         radians = math.atan2(dy, dx)
         angle = math.degrees(radians)
 
-        # 🚀 归一化角度到 0-360 范围内（可选，但推荐）
-        self.angle = angle % 360
+        # 4. 应用角度
+        self.set_angle(angle % 360)
 
     def edge_bounce(self):
         """基于 Hitbox 的精准反弹"""
@@ -309,7 +324,7 @@ class Sprite:
             for g in self._groups:
                 if self in _GROUPS.get(g, []):
                     _GROUPS[g].remove(self)
-                    
+
     def distance_to(self, target):
         """
         计算当前角色视觉中心点到目标（Sprite 或 mouse）的距离

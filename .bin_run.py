@@ -31,11 +31,11 @@ def loop():
 #     a.move(2)
 #     a.edge_bounce()
     
+    a.look_at(b)
+    a.move(5)
+    
     if a.is_touch(mouse):
         print('碰到鼠标了')
-        
-    if b.distance_to(mouse)<100:
-        print('太近了')
     
     if key_down('a'):
         
