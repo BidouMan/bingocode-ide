@@ -327,6 +327,11 @@ class RenderManager(QObject):
             elif event.type() == event.Type.MouseButtonRelease:
                 self.handle_mouse_release(event)
                 return True
+
+            elif event.type() == QEvent.MouseMove:
+                scene_pos = self.view.mapToScene(event.pos())
+                # 格式：M_MOVE:x,y
+                self.send_to_child(f"M_MOVE:{round(scene_pos.x(), 1)},{round(scene_pos.y(), 1)}")
         
         return super().eventFilter(obj, event)
     

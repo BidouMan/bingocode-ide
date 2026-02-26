@@ -6,16 +6,27 @@ import random
 import math
 import threading
 from PIL import Image
-
-
+from PySide6.QtCore import QRectF
 sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', buffering=1)
 
-__all__ = ['Sprite', 'run','key_down','show_fps','set_background','mouse_down','mouse_pressed']
 _PRESSED_KEYS = set()
 _SHOW_FPS = False
 _PERF_STATS = {"last_time": time.time(), "frame_count": 0}
 _GROUPS = {}
-_MOUSE_STATE = {"down": False,"last_down": False}  # 用字典包装鼠标状态
+_MOUSE_STATE = {"down": False,"last_down": False,"x": 0, "y": 0}  # 用字典包装鼠标状态
+
+
+class _MouseType:
+    @property
+    def x(self): return _MOUSE_STATE["x"]
+    @property
+    def y(self): return _MOUSE_STATE["y"]
+    def __repr__(self): return "mouse"
+
+mouse = _MouseType() # 🚀 定义全局变量 mouse
+
+__all__ = ['Sprite', 'run','key_down','show_fps','set_background','mouse_down','mouse_pressed','mouse']
+
 
 class Sprite:
     def __init__(self, image_name):        
@@ -30,11 +41,19 @@ class Sprite:
         self._rotation_style = "all"
         self._current_scale_x = 1.0
         self.hitbox_scale = 0.8 # 允许微调碰撞精度
-        self._setup_hitbox()    # 创建hitbox
         self._groups = []
         self._visible = True
         self._is_deleted = False # 增加删除标记
         self._layer = 0
+
+        # 🚀 预设缓存变量
+        self._cached_image = None
+        self._cached_hitbox = None 
+        self._visual_offset_x = 0
+        self._visual_offset_y = 0
+        
+        # 初始计算一次
+        self._setup_hitbox()
 
         # 发送创建指令
         self._send_command("CREATE", {
@@ -225,17 +244,35 @@ class Sprite:
             
         return False
 
-    def is_touch(self, other):
-        """判断是否碰到另一个 Sprite"""
-        if not self._visible or not other._visible: 
+    def is_touch(self, target):
+        """判断是否碰到另一个 Sprite 或鼠标"""
+        if self._is_deleted or not self._visible: 
             return False
-        if self._is_deleted or other._is_deleted:
-            return False
-        if not isinstance(other, Sprite): 
-            return False
+
+        # 🚀 1. 统一获取当前的精准包围盒 [left, top, right, bottom]
+        # 这个方法已经包含了 _visual_offset 和 scale 的所有校准
         r1 = self._get_hitbox_rect()
-        r2 = other._get_hitbox_rect()
-        # AABB 碰撞公式：只要有一个维度不重叠，就没碰到
+        if not r1: return False
+
+        if target is mouse:
+            mx, my = _MOUSE_STATE["x"], _MOUSE_STATE["y"]
+            
+            # 🚀 2. 判定鼠标点 (mx, my) 是否在内容矩形 r1 内
+            # r1[0]=左, r1[1]=上, r1[2]=右, r1[3]=下
+            return (r1[0] <= mx <= r1[2] and 
+                    r1[1] <= my <= r1[3])
+
+        # 🚀 3. 原有的 Sprite 间碰撞逻辑
+        if target is None or not hasattr(target, '_visible') or not target._visible:
+            return False
+
+        if not isinstance(target, Sprite): 
+            return False
+            
+        r2 = target._get_hitbox_rect()
+        if not r2: return False
+                
+        # AABB 碰撞公式保持不变
         return not (r1[2] < r2[0] or r1[0] > r2[2] or 
                     r1[3] < r2[1] or r1[1] > r2[3])
 
@@ -272,17 +309,35 @@ class Sprite:
             for g in self._groups:
                 if self in _GROUPS.get(g, []):
                     _GROUPS[g].remove(self)
-    def distance_to(self, other):
+                    
+    def distance_to(self, target):
         """
-        计算当前角色中心点到另一个角色中心点的距离
+        计算当前角色视觉中心点到目标（Sprite 或 mouse）的距离
         """
-        if not isinstance(other, Sprite):
-            # 如果传入的不是 Sprite 对象（比如 None），返回一个很大的距离
+        if self._is_deleted: return 999999
+
+        # 🚀 1. 优先处理鼠标，因为它不是 Sprite 实例
+        if target is mouse:
+            # 使用精准的视觉中心点
+            rect = self._get_hitbox_rect()
+            cx, cy = (rect[0] + rect[2]) / 2.0, (rect[1] + rect[3]) / 2.0
+            dx = cx - _MOUSE_STATE["x"]
+            dy = cy - _MOUSE_STATE["y"]
+            return math.sqrt(dx*dx + dy*dy)
+
+        # 🚀 2. 处理其他 Sprite 角色
+        if not isinstance(target, Sprite) or target._is_deleted:
             return 999999
+
+        # 为了保持精准，建议角色间测距也使用视觉中心
+        r1 = self._get_hitbox_rect()
+        r2 = target._get_hitbox_rect()
         
-        # 使用欧几里得距离公式 (勾股定理)
-        dx = self.x - other.x
-        dy = self.y - other.y
+        cx1, cy1 = (r1[0] + r1[2]) / 2.0, (r1[1] + r1[3]) / 2.0
+        cx2, cy2 = (r2[0] + r2[2]) / 2.0, (r2[1] + r2[3]) / 2.0
+        
+        dx = cx1 - cx2
+        dy = cy1 - cy2
         return math.sqrt(dx**2 + dy**2)
     
     # ----------- 属性赋值 ----------
@@ -325,35 +380,60 @@ class Sprite:
 
     # ---------- 内部调用 ----------
     def _setup_hitbox(self):
-        """扫描图片非透明区域，解决 64x64 容器内 32x32 角色问题"""
+        """通用型高性能采样：支持任何尺寸图片，自动定位内容重心"""
+        if (hasattr(self, '_content_w') and self._cached_image == self.image):
+            return self._cached_hitbox
+
         try:
             with Image.open(self.image) as img:
                 self._orig_w, self._orig_h = img.size
-                # getbbox 会跳过透明区域，返回 (left, top, right, bottom)
+                # 转换为 RGBA 确保 getbbox 能正常工作
                 bbox = img.convert("RGBA").getbbox()
+                
                 if bbox:
                     l, t, r, b = bbox
                     self._content_w = r - l
                     self._content_h = b - t
-                    # 计算视觉中心相对于图片中心点的偏移
+                    
+                    # 🚀 算法核心：计算内容的中心点相对于图片物理中心的偏移
+                    # 例如：128x128的图，内容在左上角，offset会是负值
                     self._visual_offset_x = (l + r) / 2.0 - self._orig_w / 2.0
                     self._visual_offset_y = (t + b) / 2.0 - self._orig_h / 2.0
                 else:
+                    # 全透明或无内容图
                     self._content_w, self._content_h = self._orig_w, self._orig_h
                     self._visual_offset_x = self._visual_offset_y = 0
+                    
+                from PySide6.QtCore import QRectF
+                self._cached_hitbox = QRectF(0, 0, self._content_w, self._content_h)
+                self._cached_image = self.image
         except:
-            self._orig_w = self._orig_h = 50
+            # 兜底：防止路径错误导致崩溃
             self._content_w = self._content_h = 50
             self._visual_offset_x = self._visual_offset_y = 0
+            self._cached_hitbox = QRectF(0, 0, 50, 50)
+            self._cached_image = self.image
+
+        return self._cached_hitbox
 
     def _get_hitbox_rect(self):
-        """获取当前角色在舞台上的真实包围盒 [left, top, right, bottom]"""
-        ratio = (self._size / 100.0) * self.hitbox_scale
-        # 当前视觉中心 = 逻辑中心 + 偏移量 * 缩放
-        cx = self._x + (self._visual_offset_x * (self._size / 100.0))
-        cy = self._y + (self._visual_offset_y * (self._size / 100.0))
+        """获取当前角色在舞台上的真实内容包围盒 [left, top, right, bottom]"""
+        self._setup_hitbox() # 确保内容宽高和偏移量已算出
         
-        hw, hh = (self._content_w * ratio) / 2.0, (self._content_h * ratio) / 2.0
+        # 1. 基础缩放比 (例如 1.0)
+        base_scale = self._scale / 100.0
+        
+        # 2. 🚀 计算视觉中心 (考虑镜像对偏移的影响)
+        # 如果图片翻转了，偏移量也要跟着翻转
+        cx = self._x + (self._visual_offset_x * base_scale * self._current_scale_x)
+        cy = self._y + (self._visual_offset_y * base_scale)
+        
+        # 3. 计算内容的大小 (必须使用 abs 保证宽高为正数)
+        # 使用 self.hitbox_scale 允许微调，如果你觉得太严了，可以把 self.hitbox_scale 设为 1.0
+        ratio = base_scale * self.hitbox_scale
+        hw = (self._content_w * ratio) / 2.0
+        hh = (self._content_h * ratio) / 2.0
+    
         return [cx - hw, cy - hh, cx + hw, cy + hh]
 
     def _update_transform(self):
@@ -431,6 +511,13 @@ def _input_sync_listener():
             elif clean_line.startswith("M_UP:"):
                 old_value = _MOUSE_STATE["down"]
                 _MOUSE_STATE["down"] = False
+            
+            elif clean_line.startswith("M_MOVE:"):        
+                # 解析 M_MOVE:320.5,240.0
+                pos_str = clean_line.split(":", 1)[1]
+                mx_s, my_s = pos_str.split(",")
+                _MOUSE_STATE["x"] = float(mx_s)
+                _MOUSE_STATE["y"] = float(my_s)
         except:
             time.sleep(0.01)
 
