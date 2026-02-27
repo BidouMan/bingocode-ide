@@ -892,7 +892,7 @@
                    </size>
                   </property>
                   <property name="currentIndex">
-                   <number>3</number>
+                   <number>0</number>
                   </property>
                   <widget class="QWidget" name="page_2">
                    <layout class="QVBoxLayout" name="verticalLayout_12">
@@ -904,19 +904,30 @@
                       <property name="frameShadow">
                        <enum>QFrame::Shadow::Raised</enum>
                       </property>
-                      <widget class="QLabel" name="label_2">
-                       <property name="geometry">
-                        <rect>
-                         <x>70</x>
-                         <y>40</y>
-                         <width>58</width>
-                         <height>16</height>
-                        </rect>
-                       </property>
-                       <property name="text">
-                        <string>角色页面</string>
-                       </property>
-                      </widget>
+                      <layout class="QVBoxLayout" name="verticalLayout_15">
+                       <item>
+                        <widget class="QListWidget" name="list_sprite">
+                         <property name="iconSize">
+                          <size>
+                           <width>80</width>
+                           <height>80</height>
+                          </size>
+                         </property>
+                         <property name="movement">
+                          <enum>QListView::Movement::Static</enum>
+                         </property>
+                         <property name="resizeMode">
+                          <enum>QListView::ResizeMode::Adjust</enum>
+                         </property>
+                         <property name="spacing">
+                          <number>10</number>
+                         </property>
+                         <property name="viewMode">
+                          <enum>QListView::ViewMode::IconMode</enum>
+                         </property>
+                        </widget>
+                       </item>
+                      </layout>
                      </widget>
                     </item>
                    </layout>

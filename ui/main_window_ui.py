@@ -16,9 +16,10 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
 from PySide6.QtWidgets import (QApplication, QFrame, QGraphicsView, QHBoxLayout,
-    QLabel, QLineEdit, QPlainTextEdit, QPushButton,
-    QSizePolicy, QSpacerItem, QSplitter, QStackedWidget,
-    QVBoxLayout, QWidget)
+    QLabel, QLineEdit, QListView, QListWidget,
+    QListWidgetItem, QPlainTextEdit, QPushButton, QSizePolicy,
+    QSpacerItem, QSplitter, QStackedWidget, QVBoxLayout,
+    QWidget)
 import resources_rc
 
 class Ui_Form(object):
@@ -372,9 +373,18 @@ class Ui_Form(object):
         self.sprite_page_frame.setObjectName(u"sprite_page_frame")
         self.sprite_page_frame.setFrameShape(QFrame.Shape.StyledPanel)
         self.sprite_page_frame.setFrameShadow(QFrame.Shadow.Raised)
-        self.label_2 = QLabel(self.sprite_page_frame)
-        self.label_2.setObjectName(u"label_2")
-        self.label_2.setGeometry(QRect(70, 40, 58, 16))
+        self.verticalLayout_15 = QVBoxLayout(self.sprite_page_frame)
+        self.verticalLayout_15.setObjectName(u"verticalLayout_15")
+        self.list_sprite = QListWidget(self.sprite_page_frame)
+        self.list_sprite.setObjectName(u"list_sprite")
+        self.list_sprite.setIconSize(QSize(80, 80))
+        self.list_sprite.setMovement(QListView.Movement.Static)
+        self.list_sprite.setResizeMode(QListView.ResizeMode.Adjust)
+        self.list_sprite.setSpacing(10)
+        self.list_sprite.setViewMode(QListView.ViewMode.IconMode)
+
+        self.verticalLayout_15.addWidget(self.list_sprite)
+
 
         self.verticalLayout_12.addWidget(self.sprite_page_frame)
 
@@ -723,7 +733,7 @@ class Ui_Form(object):
         self.btn_outline_bg.setDefault(False)
         self.btn_outline_sprite.setDefault(False)
         self.btn_outline_sound.setDefault(False)
-        self.outline_stracked.setCurrentIndex(3)
+        self.outline_stracked.setCurrentIndex(0)
         self.code_stacked.setCurrentIndex(-1)
 
 
@@ -748,7 +758,6 @@ class Ui_Form(object):
         self.btn_outline_sprite.setText(QCoreApplication.translate("Form", u"\u89d2\u8272", None))
         self.btn_outline_code.setText(QCoreApplication.translate("Form", u"\u573a\u666f", None))
         self.btn_outline_sound.setText(QCoreApplication.translate("Form", u"\u58f0\u97f3", None))
-        self.label_2.setText(QCoreApplication.translate("Form", u"\u89d2\u8272\u9875\u9762", None))
         self.label_3.setText(QCoreApplication.translate("Form", u"\u5730\u56fe\u9875\u9762", None))
         self.label_4.setText(QCoreApplication.translate("Form", u"\u58f0\u97f3\u9875\u9762", None))
         self.label.setText(QCoreApplication.translate("Form", u"\u4ee3\u7801\u9875\u9762", None))

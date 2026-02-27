@@ -43,7 +43,7 @@ class AppController:
         self.tabbar_manager = TabbarManager(self.ui.tab_frame)
         self.editor_manager = EditorManager(self.ui.code_stacked, self.tabbar_manager, self.file_manager.root_path)
         self.script_runner = ScriptRunner(self)
-        self.res_manager = ResourceManager(self.ui)
+        self.res_manager = ResourceManager(self.ui,self.window)
 
 
        
@@ -101,9 +101,12 @@ class AppController:
         
         self.res_manager.bind_switch_page()
 
-        # self.upload_menu.ui.btn_sprite.clicked.connect(lambda: print("1 - 角色上传"))
-        # self.upload_menu.ui.btn_bg.clicked.connect(lambda: print("2 - 背景上传"))
-        # self.upload_menu.ui.btn_sound.clicked.connect(lambda: print("3 - 声音上传"))
+        menu_ui = self.res_manager.upload_menu.ui
+        menu_ui.btn_sprite.clicked.connect(self.res_manager.import_sprite_dialog)
+        menu_ui.btn_bg.clicked.connect(lambda: print("点击了上传背景"))
+        menu_ui.btn_sound.clicked.connect(lambda: print("点击了上传声音"))
+        
+        
 
     def _handle_qt_key_press(self, event):
         if event.isAutoRepeat(): return 

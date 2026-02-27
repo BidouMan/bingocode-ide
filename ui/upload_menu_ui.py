@@ -40,7 +40,7 @@ class Ui_upload_menu(object):
         self.menu_frame.setFrameShape(QFrame.Shape.StyledPanel)
         self.menu_frame.setFrameShadow(QFrame.Shadow.Raised)
         self.verticalLayout = QVBoxLayout(self.menu_frame)
-        self.verticalLayout.setSpacing(0)
+        self.verticalLayout.setSpacing(2)
         self.verticalLayout.setObjectName(u"verticalLayout")
         self.verticalLayout.setContentsMargins(0, 0, 0, 0)
         self.btn_sprite = QPushButton(self.menu_frame)

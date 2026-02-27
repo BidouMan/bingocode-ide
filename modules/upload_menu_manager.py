@@ -43,22 +43,33 @@ class UploadMenuManager(QWidget):
         return super().eventFilter(obj, event)
 
     def auto_layout(self):
-        if not self.parentWidget():
+        parent = self.parentWidget()
+        if not parent:
             return
         
-        # 距离右下角的边距
-        margin = 10 
+        # 🚀 关键修正 1：强制刷新父容器布局，确保获取真实宽高
+        parent.layout().activate() 
         
-        # 获取父容器（即 upload_manager_frame）的尺寸
-        pw = self.parentWidget().width()
-        ph = self.parentWidget().height()
+        # 获取组件建议的大小（按钮+菜单的总尺寸）
+        # 如果 sizeHint 不准，可以尝试 self.frameGeometry().size()
+        self.adjustSize() 
+        mysize = self.size()
         
-        # 获取自身（整个垂直布局）建议的大小
-        sw = self.sizeHint().width()
-        sh = self.sizeHint().height()
+        # 边界距离
+        margin = 15
         
-        # 计算坐标：让 btn_upload 刚好落在右下角
-        self.move(pw - sw - margin, ph - sh - margin)
+        # 计算坐标
+        # pw - sw = 右对齐； ph - sh = 下对齐
+        pw = parent.width()
+        ph = parent.height()
+        
+        # 🚀 调试：打印一下，看看父容器是不是太小了
+        # print(f"Parent Size: {pw}x{ph}, My Size: {mysize.width()}x{mysize.height()}")
+        
+        new_x = pw - mysize.width() - margin
+        new_y = ph - mysize.height() - margin
+        
+        self.move(new_x, new_y)
 
     def toggle_menu(self, show):
         """执行向上弹出的高度动画"""
