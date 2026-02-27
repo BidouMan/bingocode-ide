@@ -3,7 +3,7 @@
 ################################################################################
 ## Form generated from reading UI file 'main_window.ui'
 ##
-## Created by: Qt User Interface Compiler version 6.10.1
+## Created by: Qt User Interface Compiler version 6.10.2
 ##
 ## WARNING! All changes made in this file will be lost when recompiling UI file!
 ################################################################################
@@ -16,9 +16,9 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
 from PySide6.QtWidgets import (QApplication, QFrame, QGraphicsView, QHBoxLayout,
-    QLineEdit, QPlainTextEdit, QPushButton, QSizePolicy,
-    QSpacerItem, QSplitter, QStackedWidget, QVBoxLayout,
-    QWidget)
+    QLabel, QLineEdit, QPlainTextEdit, QPushButton,
+    QSizePolicy, QSpacerItem, QSplitter, QStackedWidget,
+    QVBoxLayout, QWidget)
 import resources_rc
 
 class Ui_Form(object):
@@ -311,41 +311,41 @@ class Ui_Form(object):
         self.horizontalLayout_4.setSpacing(0)
         self.horizontalLayout_4.setObjectName(u"horizontalLayout_4")
         self.horizontalLayout_4.setContentsMargins(0, 0, 0, 0)
-        self.pushButton = QPushButton(self.outline_menu_frame)
-        self.pushButton.setObjectName(u"pushButton")
-        self.pushButton.setCheckable(True)
-        self.pushButton.setChecked(True)
-        self.pushButton.setAutoExclusive(True)
-        self.pushButton.setAutoDefault(False)
-        self.pushButton.setFlat(False)
+        self.btn_outline_bg = QPushButton(self.outline_menu_frame)
+        self.btn_outline_bg.setObjectName(u"btn_outline_bg")
+        self.btn_outline_bg.setCheckable(True)
+        self.btn_outline_bg.setChecked(True)
+        self.btn_outline_bg.setAutoExclusive(True)
+        self.btn_outline_bg.setAutoDefault(False)
+        self.btn_outline_bg.setFlat(False)
 
-        self.horizontalLayout_4.addWidget(self.pushButton)
+        self.horizontalLayout_4.addWidget(self.btn_outline_bg)
 
-        self.pushButton_2 = QPushButton(self.outline_menu_frame)
-        self.pushButton_2.setObjectName(u"pushButton_2")
-        self.pushButton_2.setCheckable(True)
-        self.pushButton_2.setChecked(False)
-        self.pushButton_2.setAutoExclusive(True)
-        self.pushButton_2.setAutoDefault(False)
-        self.pushButton_2.setFlat(False)
+        self.btn_outline_sprite = QPushButton(self.outline_menu_frame)
+        self.btn_outline_sprite.setObjectName(u"btn_outline_sprite")
+        self.btn_outline_sprite.setCheckable(True)
+        self.btn_outline_sprite.setChecked(False)
+        self.btn_outline_sprite.setAutoExclusive(True)
+        self.btn_outline_sprite.setAutoDefault(False)
+        self.btn_outline_sprite.setFlat(False)
 
-        self.horizontalLayout_4.addWidget(self.pushButton_2)
+        self.horizontalLayout_4.addWidget(self.btn_outline_sprite)
 
-        self.pushButton_4 = QPushButton(self.outline_menu_frame)
-        self.pushButton_4.setObjectName(u"pushButton_4")
-        self.pushButton_4.setCheckable(True)
-        self.pushButton_4.setAutoExclusive(True)
+        self.btn_outline_code = QPushButton(self.outline_menu_frame)
+        self.btn_outline_code.setObjectName(u"btn_outline_code")
+        self.btn_outline_code.setCheckable(True)
+        self.btn_outline_code.setAutoExclusive(True)
 
-        self.horizontalLayout_4.addWidget(self.pushButton_4)
+        self.horizontalLayout_4.addWidget(self.btn_outline_code)
 
-        self.pushButton_3 = QPushButton(self.outline_menu_frame)
-        self.pushButton_3.setObjectName(u"pushButton_3")
-        self.pushButton_3.setCheckable(True)
-        self.pushButton_3.setAutoExclusive(True)
-        self.pushButton_3.setAutoDefault(False)
-        self.pushButton_3.setFlat(False)
+        self.btn_outline_sound = QPushButton(self.outline_menu_frame)
+        self.btn_outline_sound.setObjectName(u"btn_outline_sound")
+        self.btn_outline_sound.setCheckable(True)
+        self.btn_outline_sound.setAutoExclusive(True)
+        self.btn_outline_sound.setAutoDefault(False)
+        self.btn_outline_sound.setFlat(False)
 
-        self.horizontalLayout_4.addWidget(self.pushButton_3)
+        self.horizontalLayout_4.addWidget(self.btn_outline_sound)
 
 
         self.verticalLayout_2.addWidget(self.outline_menu_frame)
@@ -364,12 +364,66 @@ class Ui_Form(object):
         self.outline_stracked.setObjectName(u"outline_stracked")
         self.outline_stracked.setMinimumSize(QSize(324, 0))
         self.outline_stracked.setMaximumSize(QSize(324, 16777215))
-        self.page = QWidget()
-        self.page.setObjectName(u"page")
-        self.outline_stracked.addWidget(self.page)
         self.page_2 = QWidget()
         self.page_2.setObjectName(u"page_2")
+        self.verticalLayout_12 = QVBoxLayout(self.page_2)
+        self.verticalLayout_12.setObjectName(u"verticalLayout_12")
+        self.sprite_page_frame = QFrame(self.page_2)
+        self.sprite_page_frame.setObjectName(u"sprite_page_frame")
+        self.sprite_page_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self.sprite_page_frame.setFrameShadow(QFrame.Shadow.Raised)
+        self.label_2 = QLabel(self.sprite_page_frame)
+        self.label_2.setObjectName(u"label_2")
+        self.label_2.setGeometry(QRect(70, 40, 58, 16))
+
+        self.verticalLayout_12.addWidget(self.sprite_page_frame)
+
         self.outline_stracked.addWidget(self.page_2)
+        self.page_3 = QWidget()
+        self.page_3.setObjectName(u"page_3")
+        self.verticalLayout_13 = QVBoxLayout(self.page_3)
+        self.verticalLayout_13.setObjectName(u"verticalLayout_13")
+        self.map_page_frame = QFrame(self.page_3)
+        self.map_page_frame.setObjectName(u"map_page_frame")
+        self.map_page_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self.map_page_frame.setFrameShadow(QFrame.Shadow.Raised)
+        self.label_3 = QLabel(self.map_page_frame)
+        self.label_3.setObjectName(u"label_3")
+        self.label_3.setGeometry(QRect(40, 40, 58, 16))
+
+        self.verticalLayout_13.addWidget(self.map_page_frame)
+
+        self.outline_stracked.addWidget(self.page_3)
+        self.page_4 = QWidget()
+        self.page_4.setObjectName(u"page_4")
+        self.verticalLayout_14 = QVBoxLayout(self.page_4)
+        self.verticalLayout_14.setObjectName(u"verticalLayout_14")
+        self.sound_page_frame = QFrame(self.page_4)
+        self.sound_page_frame.setObjectName(u"sound_page_frame")
+        self.sound_page_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self.sound_page_frame.setFrameShadow(QFrame.Shadow.Raised)
+        self.label_4 = QLabel(self.sound_page_frame)
+        self.label_4.setObjectName(u"label_4")
+        self.label_4.setGeometry(QRect(40, 30, 58, 16))
+
+        self.verticalLayout_14.addWidget(self.sound_page_frame)
+
+        self.outline_stracked.addWidget(self.page_4)
+        self.page_1 = QWidget()
+        self.page_1.setObjectName(u"page_1")
+        self.verticalLayout_9 = QVBoxLayout(self.page_1)
+        self.verticalLayout_9.setObjectName(u"verticalLayout_9")
+        self.code_page_frame = QFrame(self.page_1)
+        self.code_page_frame.setObjectName(u"code_page_frame")
+        self.code_page_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self.code_page_frame.setFrameShadow(QFrame.Shadow.Raised)
+        self.label = QLabel(self.code_page_frame)
+        self.label.setObjectName(u"label")
+        self.label.setGeometry(QRect(20, 10, 58, 16))
+
+        self.verticalLayout_9.addWidget(self.code_page_frame)
+
+        self.outline_stracked.addWidget(self.page_1)
 
         self.verticalLayout_6.addWidget(self.outline_stracked)
 
@@ -417,7 +471,7 @@ class Ui_Form(object):
         self.horizontalLayout_6.setContentsMargins(0, 0, 0, 0)
         self.tab = QFrame(self.tab_frame)
         self.tab.setObjectName(u"tab")
-        sizePolicy6 = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        sizePolicy6 = QSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred)
         sizePolicy6.setHorizontalStretch(0)
         sizePolicy6.setVerticalStretch(0)
         sizePolicy6.setHeightForWidth(self.tab.sizePolicy().hasHeightForWidth())
@@ -545,8 +599,11 @@ class Ui_Form(object):
         self.verticalLayout_8.setContentsMargins(0, 0, 0, 0)
         self.bg_layout = QFrame(self.fullscreen)
         self.bg_layout.setObjectName(u"bg_layout")
-        sizePolicy6.setHeightForWidth(self.bg_layout.sizePolicy().hasHeightForWidth())
-        self.bg_layout.setSizePolicy(sizePolicy6)
+        sizePolicy10 = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        sizePolicy10.setHorizontalStretch(0)
+        sizePolicy10.setVerticalStretch(0)
+        sizePolicy10.setHeightForWidth(self.bg_layout.sizePolicy().hasHeightForWidth())
+        self.bg_layout.setSizePolicy(sizePolicy10)
         self.bg_layout.setStyleSheet(u"")
         self.bg_layout.setFrameShape(QFrame.Shape.StyledPanel)
         self.bg_layout.setFrameShadow(QFrame.Shadow.Raised)
@@ -560,11 +617,11 @@ class Ui_Form(object):
 
         self.central_stage_wrapper = QFrame(self.bg_layout)
         self.central_stage_wrapper.setObjectName(u"central_stage_wrapper")
-        sizePolicy10 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
-        sizePolicy10.setHorizontalStretch(0)
-        sizePolicy10.setVerticalStretch(0)
-        sizePolicy10.setHeightForWidth(self.central_stage_wrapper.sizePolicy().hasHeightForWidth())
-        self.central_stage_wrapper.setSizePolicy(sizePolicy10)
+        sizePolicy11 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        sizePolicy11.setHorizontalStretch(0)
+        sizePolicy11.setVerticalStretch(0)
+        sizePolicy11.setHeightForWidth(self.central_stage_wrapper.sizePolicy().hasHeightForWidth())
+        self.central_stage_wrapper.setSizePolicy(sizePolicy11)
         self.central_stage_wrapper.setStyleSheet(u"")
         self.central_stage_wrapper.setFrameShape(QFrame.Shape.StyledPanel)
         self.central_stage_wrapper.setFrameShadow(QFrame.Shadow.Raised)
@@ -625,11 +682,11 @@ class Ui_Form(object):
 
         self.fullscreen_view_frame = QFrame(self.central_stage_wrapper)
         self.fullscreen_view_frame.setObjectName(u"fullscreen_view_frame")
-        sizePolicy11 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
-        sizePolicy11.setHorizontalStretch(0)
-        sizePolicy11.setVerticalStretch(0)
-        sizePolicy11.setHeightForWidth(self.fullscreen_view_frame.sizePolicy().hasHeightForWidth())
-        self.fullscreen_view_frame.setSizePolicy(sizePolicy11)
+        sizePolicy12 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        sizePolicy12.setHorizontalStretch(0)
+        sizePolicy12.setVerticalStretch(0)
+        sizePolicy12.setHeightForWidth(self.fullscreen_view_frame.sizePolicy().hasHeightForWidth())
+        self.fullscreen_view_frame.setSizePolicy(sizePolicy12)
         self.fullscreen_view_frame.setMinimumSize(QSize(0, 0))
         self.fullscreen_view_frame.setStyleSheet(u"")
         self.fullscreen_view_frame.setFrameShape(QFrame.Shape.StyledPanel)
@@ -663,9 +720,10 @@ class Ui_Form(object):
         self.retranslateUi(Form)
 
         self.change_page.setCurrentIndex(0)
-        self.pushButton.setDefault(False)
-        self.pushButton_2.setDefault(False)
-        self.pushButton_3.setDefault(False)
+        self.btn_outline_bg.setDefault(False)
+        self.btn_outline_sprite.setDefault(False)
+        self.btn_outline_sound.setDefault(False)
+        self.outline_stracked.setCurrentIndex(3)
         self.code_stacked.setCurrentIndex(-1)
 
 
@@ -675,7 +733,7 @@ class Ui_Form(object):
     def retranslateUi(self, Form):
         Form.setWindowTitle(QCoreApplication.translate("Form", u"Form", None))
         self.btn_logo.setText("")
-        self.btn_file.setText(QCoreApplication.translate("Form", u"\u6587\u4ef6", None))
+        self.btn_file.setText(QCoreApplication.translate("Form", u"\u6587\u4ef61", None))
         self.btn_edit.setText(QCoreApplication.translate("Form", u"\u7f16\u8f91", None))
         self.btn_tool.setText(QCoreApplication.translate("Form", u"\u63d2\u4ef6", None))
         self.btn_setting.setText(QCoreApplication.translate("Form", u"\u8bbe\u7f6e", None))
@@ -686,10 +744,14 @@ class Ui_Form(object):
         self.btn_run.setText("")
         self.btn_stop.setText("")
         self.btn_full_screen.setText("")
-        self.pushButton.setText(QCoreApplication.translate("Form", u"\u4ee3\u7801", None))
-        self.pushButton_2.setText(QCoreApplication.translate("Form", u"\u89d2\u8272", None))
-        self.pushButton_4.setText(QCoreApplication.translate("Form", u"\u573a\u666f", None))
-        self.pushButton_3.setText(QCoreApplication.translate("Form", u"\u58f0\u97f3", None))
+        self.btn_outline_bg.setText(QCoreApplication.translate("Form", u"\u4ee3\u7801", None))
+        self.btn_outline_sprite.setText(QCoreApplication.translate("Form", u"\u89d2\u8272", None))
+        self.btn_outline_code.setText(QCoreApplication.translate("Form", u"\u573a\u666f", None))
+        self.btn_outline_sound.setText(QCoreApplication.translate("Form", u"\u58f0\u97f3", None))
+        self.label_2.setText(QCoreApplication.translate("Form", u"\u89d2\u8272\u9875\u9762", None))
+        self.label_3.setText(QCoreApplication.translate("Form", u"\u5730\u56fe\u9875\u9762", None))
+        self.label_4.setText(QCoreApplication.translate("Form", u"\u58f0\u97f3\u9875\u9762", None))
+        self.label.setText(QCoreApplication.translate("Form", u"\u4ee3\u7801\u9875\u9762", None))
         self.btn_add_tab.setText(QCoreApplication.translate("Form", u"+", None))
         self.pushButton_5.setText(QCoreApplication.translate("Form", u"\u811a\u672c", None))
         self.pushButton_7.setText(QCoreApplication.translate("Form", u"\u9020\u578b", None))

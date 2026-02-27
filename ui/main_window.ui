@@ -185,7 +185,7 @@
              </size>
             </property>
             <property name="text">
-             <string>文件</string>
+             <string>文件1</string>
             </property>
             <property name="icon">
              <iconset resource="../assets/resources.qrc">
@@ -754,7 +754,7 @@
                  <number>0</number>
                 </property>
                 <item>
-                 <widget class="QPushButton" name="pushButton">
+                 <widget class="QPushButton" name="btn_outline_bg">
                   <property name="text">
                    <string>代码</string>
                   </property>
@@ -779,7 +779,7 @@
                  </widget>
                 </item>
                 <item>
-                 <widget class="QPushButton" name="pushButton_2">
+                 <widget class="QPushButton" name="btn_outline_sprite">
                   <property name="text">
                    <string>角色</string>
                   </property>
@@ -804,7 +804,7 @@
                  </widget>
                 </item>
                 <item>
-                 <widget class="QPushButton" name="pushButton_4">
+                 <widget class="QPushButton" name="btn_outline_code">
                   <property name="text">
                    <string>场景</string>
                   </property>
@@ -817,7 +817,7 @@
                  </widget>
                 </item>
                 <item>
-                 <widget class="QPushButton" name="pushButton_3">
+                 <widget class="QPushButton" name="btn_outline_sound">
                   <property name="text">
                    <string>声音</string>
                   </property>
@@ -891,8 +891,117 @@
                     <height>16777215</height>
                    </size>
                   </property>
-                  <widget class="QWidget" name="page"/>
-                  <widget class="QWidget" name="page_2"/>
+                  <property name="currentIndex">
+                   <number>3</number>
+                  </property>
+                  <widget class="QWidget" name="page_2">
+                   <layout class="QVBoxLayout" name="verticalLayout_12">
+                    <item>
+                     <widget class="QFrame" name="sprite_page_frame">
+                      <property name="frameShape">
+                       <enum>QFrame::Shape::StyledPanel</enum>
+                      </property>
+                      <property name="frameShadow">
+                       <enum>QFrame::Shadow::Raised</enum>
+                      </property>
+                      <widget class="QLabel" name="label_2">
+                       <property name="geometry">
+                        <rect>
+                         <x>70</x>
+                         <y>40</y>
+                         <width>58</width>
+                         <height>16</height>
+                        </rect>
+                       </property>
+                       <property name="text">
+                        <string>角色页面</string>
+                       </property>
+                      </widget>
+                     </widget>
+                    </item>
+                   </layout>
+                  </widget>
+                  <widget class="QWidget" name="page_3">
+                   <layout class="QVBoxLayout" name="verticalLayout_13">
+                    <item>
+                     <widget class="QFrame" name="map_page_frame">
+                      <property name="frameShape">
+                       <enum>QFrame::Shape::StyledPanel</enum>
+                      </property>
+                      <property name="frameShadow">
+                       <enum>QFrame::Shadow::Raised</enum>
+                      </property>
+                      <widget class="QLabel" name="label_3">
+                       <property name="geometry">
+                        <rect>
+                         <x>40</x>
+                         <y>40</y>
+                         <width>58</width>
+                         <height>16</height>
+                        </rect>
+                       </property>
+                       <property name="text">
+                        <string>地图页面</string>
+                       </property>
+                      </widget>
+                     </widget>
+                    </item>
+                   </layout>
+                  </widget>
+                  <widget class="QWidget" name="page_4">
+                   <layout class="QVBoxLayout" name="verticalLayout_14">
+                    <item>
+                     <widget class="QFrame" name="sound_page_frame">
+                      <property name="frameShape">
+                       <enum>QFrame::Shape::StyledPanel</enum>
+                      </property>
+                      <property name="frameShadow">
+                       <enum>QFrame::Shadow::Raised</enum>
+                      </property>
+                      <widget class="QLabel" name="label_4">
+                       <property name="geometry">
+                        <rect>
+                         <x>40</x>
+                         <y>30</y>
+                         <width>58</width>
+                         <height>16</height>
+                        </rect>
+                       </property>
+                       <property name="text">
+                        <string>声音页面</string>
+                       </property>
+                      </widget>
+                     </widget>
+                    </item>
+                   </layout>
+                  </widget>
+                  <widget class="QWidget" name="page_1">
+                   <layout class="QVBoxLayout" name="verticalLayout_9">
+                    <item>
+                     <widget class="QFrame" name="code_page_frame">
+                      <property name="frameShape">
+                       <enum>QFrame::Shape::StyledPanel</enum>
+                      </property>
+                      <property name="frameShadow">
+                       <enum>QFrame::Shadow::Raised</enum>
+                      </property>
+                      <widget class="QLabel" name="label">
+                       <property name="geometry">
+                        <rect>
+                         <x>20</x>
+                         <y>10</y>
+                         <width>58</width>
+                         <height>16</height>
+                        </rect>
+                       </property>
+                       <property name="text">
+                        <string>代码页面</string>
+                       </property>
+                      </widget>
+                     </widget>
+                    </item>
+                   </layout>
+                  </widget>
                  </widget>
                 </item>
                </layout>
@@ -1016,7 +1125,7 @@
                      </property>
                      <property name="minimumSize">
                       <size>
-                       <width>100</width>
+                       <width>0</width>
                        <height>30</height>
                       </size>
                      </property>

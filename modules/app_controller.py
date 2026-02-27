@@ -16,6 +16,8 @@ from modules.screen_manager import ScreenManager
 from modules.tabbar_manager import TabbarManager
 from modules.file_manager import FileManager
 from modules.script_runner import ScriptRunner
+from modules.resource_manager import ResourceManager
+from modules.upload_menu_manager import UploadMenuManager
 
 class AppController:
     def __init__(self, main_window: Ui_Form):
@@ -41,8 +43,12 @@ class AppController:
         self.tabbar_manager = TabbarManager(self.ui.tab_frame)
         self.editor_manager = EditorManager(self.ui.code_stacked, self.tabbar_manager, self.file_manager.root_path)
         self.script_runner = ScriptRunner(self)
+        self.res_manager = ResourceManager(self.ui)
 
-        # 4. 绑定信号 (保持原有业务连接)
+
+       
+     
+        #4. 绑定信号 (保持原有业务连接)
         self.setup_connections()
 
         
@@ -93,7 +99,11 @@ class AppController:
         self.ui.game_view.keyPressEvent = self._handle_qt_key_press
         self.ui.game_view.keyReleaseEvent = self._handle_qt_key_release
         
+        self.res_manager.bind_switch_page()
 
+        # self.upload_menu.ui.btn_sprite.clicked.connect(lambda: print("1 - 角色上传"))
+        # self.upload_menu.ui.btn_bg.clicked.connect(lambda: print("2 - 背景上传"))
+        # self.upload_menu.ui.btn_sound.clicked.connect(lambda: print("3 - 声音上传"))
 
     def _handle_qt_key_press(self, event):
         if event.isAutoRepeat(): return 
