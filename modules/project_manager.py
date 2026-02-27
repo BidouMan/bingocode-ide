@@ -53,7 +53,22 @@ class ProjectManager:
             
         return self.main_script_path, default_code
 
-
+    def new_project(self):
+        """初始化后台数据：生成新的临时目录和 main.py"""
+        import tempfile
+        # 1. 创建新的临时文件夹
+        self.project_root = tempfile.mkdtemp(prefix="BingoProject_")
+        
+        # 2. 定义 main.py 路径
+        self.main_script_path = os.path.join(self.project_root, "main.py")
+        
+        # 3. 写入初始模版代码
+        initial_code = 'print("Hello Bingo!")'
+        with open(self.main_script_path, "w", encoding="utf-8") as f:
+            f.write(initial_code)
+            
+        print(f"📂 后台项目已重置: {self.project_root}")
+    
     def open_project(self, folder_path):
         """
         验证并切换到指定的项目目录

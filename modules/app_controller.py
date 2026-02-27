@@ -109,61 +109,101 @@ class AppController:
 
 
     def handle_new_project(self):
-        """新建项目调度：推倒重来"""
-        # 1. (可选) 检查当前是否有未保存的更改，弹出确认框
-        # res = QMessageBox.question(self.window, "新建项目", "是否放弃当前更改并新建项目？")
-        # if res == QMessageBox.No: return
-
-        # 2. 让管家开辟新战场
-        new_file_path, default_code = self.project_manager.create_new_project_env()
-
-        # 3. 让编辑器同步更新
-        editor = self.editor_manager.get_current_editor()
-        if editor:
-            editor.setPlainText(default_code)
-            editor.file_path = new_file_path # 🚀 极其关键：更新路径，确保下次点保存会触发“另存为”
+        """新建项目：彻底清空并重新加载 main.py"""
+        try:
+            # 1. 重置后台数据
+            self.project_manager.new_project()
             
-        print(f"✨ 已创建全新的临时项目: {self.project_manager.project_root}")
+            # 2. 彻底清理 UI（清空所有 Tab）
+            self.editor_manager._clear_initial_state()
+            
+            # 3. 重置状态管理器索引
+            self.tabbar_manager.active_index = -1 
 
+            # 4. 获取刚创建的 main.py 内容
+            with open(self.project_manager.main_script_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            
+            # 5. 重建第一个标签
+            # 这里的 auto_activate 必须为 True，它会触发 EditorManager 内部的 setCurrentIndex
+            self.editor_manager.create_new_tab(
+                file_path=self.project_manager.main_script_path,
+                content=content,
+                auto_activate=True
+            )
+            
+            # 🚀 6. 【修复报错行】：使用 tabbar_manager 访问 tab_bar
+            # 既然已经 auto_activate 了，其实只需要确保内部索引同步即可
+            if self.tabbar_manager.tab_bar.count() > 0:
+                self.tabbar_manager.tab_bar.setCurrentIndex(0)
+                self.editor_manager.switch_to_page(0)
+                self.tabbar_manager.active_index = 0
+            
+            print("🆕 新项目 UI 已重建，默认加载 main.py")
+            
+        except Exception as e:
+            # 这里的报错会捕捉到具体哪行出了问题
+            QMessageBox.critical(self.window, "错误", f"初始化新项目失败: {e}")
     def handle_open_project(self):
-        target_dir = QFileDialog.getExistingDirectory(self.window, "选择项目文件夹")
+        """打开项目：排序加载并锁定第一个标签"""
+        target_dir = QFileDialog.getExistingDirectory(self.window, "选择工程目录")
         if not target_dir: return
 
-        success, result = self.project_manager.open_project(target_dir)
+        # 1. 切换根目录
+        success, _ = self.project_manager.open_project(target_dir)
 
         if success:
-            # 🚀 改变在这里：
-            # 1. 先关闭所有旧标签页
-            while self.ui.tabWidget.count() > 0:
-                self.ui.tabWidget.removeTab(0)
+            # 2. 清理旧标签
+            self.editor_manager._clear_initial_state()
             
-            # 2. 调用 EditorManager 创建新标签显示 main.py
-            self.editor_manager.add_new_tab(
-                file_path=self.project_manager.main_script_path,
-                content=result,
-                file_name="main.py"
-            )
-            print(f"📂 项目已加载至标签页")
+            # 3. 排序：main.py 始终第一
+            all_files = [f for f in os.listdir(target_dir) if f.endswith(".py")]
+            all_files.sort(key=lambda x: (x != "main.py", x.lower()))
+            
+            # 4. 循环加载 (不自动抢焦点)
+            for file_name in all_files:
+                file_path = os.path.join(target_dir, file_name)
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    
+                    # 🚀 关键：传入 auto_activate=False，这样循环时界面不会乱闪乱跳
+                    self.editor_manager.create_new_tab(
+                        file_path=file_path, 
+                        content=content, 
+                        auto_activate=False
+                    )
+                except Exception as e:
+                    print(f"读取失败 {file_name}: {e}")
+
+            # 🚀 5. 循环结束，一次性强制对齐到第一个标签 (main.py)
+            if self.ui.tab_frame.tab_bar.count() > 0:
+                self.ui.tab_frame.tab_bar.setCurrentIndex(0) # 视觉：Tab 蓝条
+                self.editor_manager.switch_to_page(0)        # 内容：代码页面
+                self.tabbar_manager.active_index = 0         # 逻辑：内部记录
+            
+            print(f"📂 项目加载完毕，当前锁定：main.py")
+        else:
+            QMessageBox.warning(self.window, "打开失败", "未找到 main.py")
     
 
     def handle_save_project(self):
+        """点击保存按钮：保存当前项目所有改动"""
         pm = self.project_manager
         em = self.editor_manager
-        
-        # 1. 如果是临时项目，先执行“另存为/搬家”逻辑
-        if "/T/BingoProject_" in pm.project_root or "Temp" in pm.project_root:
-            self.handle_save_as()
+
+        # 1. 检查是否是从未保存过的“纯临时”项目
+        # 如果路径里包含系统的 Temp 目录，说明用户还没给项目起名
+        if "/T/" in pm.project_root or "Temp" in pm.project_root:
+            self.handle_save_as() # 引导去另存为
             return
 
-        # 2. 如果已经是正式项目，执行“全量静默保存”
-        # 获取当前活动的编辑器（用于确保当前正在写的这页一定被保存）
-        current_editor = em.get_current_editor()
-        
-        # 🚀 改进：调用我们刚刚写的 save_all_opened_files
+        # 2. 如果已经是正式项目（比如在桌面），执行全量保存
+        # 🚀 这一步会把所有新建的 untitled_x.py 都存进项目文件夹
         if em.save_all_opened_files():
-            print("💾 项目中所有打开的标签页已更新")
+            print("✨ 项目所有文件已成功同步到磁盘")
         else:
-            QMessageBox.warning(self.window, "保存提醒", "部分文件保存失败，请检查权限。")
+            QMessageBox.warning(self.window, "保存提醒", "部分新标签页保存失败，请检查权限。")
         
     def handle_save_as(self):
         """另存为：强制弹出起名窗口，并完整搬迁项目（包含所有标签页）"""

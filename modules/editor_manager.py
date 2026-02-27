@@ -25,12 +25,24 @@ class EditorManager(QObject):
         self.initialize_startup()
 
     def _clear_initial_state(self):
+        """彻底清空 UI，防止标签和编辑器残留"""
+        # 1. 禁用信号，防止移除 Tab 时触发 switch_to_page 导致的逻辑混乱
+        self.tabs.blockSignals(True)
+        
+        # 2. 清除所有 Tab
         while self.tabs.count() > 0:
             self.tabs.removeTab(0)
+            
+        # 3. 清除所有编辑器 Widget
         while self.stacked.count() > 0:
-            w = self.stacked.widget(0)
-            self.stacked.removeWidget(w)
-            w.deleteLater()
+            widget = self.stacked.widget(0)
+            self.stacked.removeWidget(widget)
+            if widget:
+                widget.deleteLater()
+        
+        # 4. 恢复信号
+        self.tabs.blockSignals(False)
+
 
     def switch_to_page(self, index):
         """只负责切换编辑器页面"""
@@ -49,15 +61,14 @@ class EditorManager(QObject):
             print(f"启动加载代码失败: {e}")
 
 
-    def create_new_tab(self, file_path, content):
+    def create_new_tab(self, file_path, content, auto_activate=True): # 🚀 唯一改动：增加参数
         """核心方法：创建编辑器。支持延迟物理创建，不破坏原有 UI 功能"""
         editor = QCodeEditor()
         editor.file_path = file_path
         editor.setPlainText(content)
         
         # --- 🚀 延迟创建逻辑标记 ---
-        # 如果 content 为空，标记为临时状态，先不写磁盘
-        editor.is_temp = not bool(content.strip()) 
+        editor.is_temp = not bool(content.strip()) if content is not None else True
         
         file_name = os.path.basename(file_path)
         display_name = os.path.splitext(file_name)[0]
@@ -66,22 +77,24 @@ class EditorManager(QObject):
         new_index = self.tabs.addTab(display_name)
         self.stacked.addWidget(editor)
         
-        # --- 🚀 增强 UI：添加自定义关闭/状态按钮 ---
+        # --- 🚀 增强 UI：添加自定义关闭/状态按钮 (完整保留) ---
         close_btn = QPushButton("")
         close_btn.setObjectName("tabCloseBtn")
         close_btn.setProperty("modified", "false") 
         close_btn.setFixedSize(16, 16)
         self.tabs.setTabButton(new_index, QTabBar.ButtonPosition.RightSide, close_btn)
         
-        # 绑定点击关闭：使用 lambda 实时获取当前编辑器在 stacked 中的索引
+        # 绑定点击关闭 (完整保留)
         close_btn.clicked.connect(lambda: self.close_tab(self.stacked.indexOf(editor)))
 
-        # 监听内容变化：合并小圆点逻辑与延迟创建逻辑
+        # 监听内容变化 (完整保留)
         editor.textChanged.connect(lambda: self._handle_text_changed(editor))
 
-        # 激活当前页
-        self.tabs.setCurrentIndex(new_index)
-        self.stacked.setCurrentIndex(new_index)
+        # --- 🚀 只有需要时才激活焦点 ---
+        if auto_activate:
+            self.tabs.setCurrentIndex(new_index)
+            self.stacked.setCurrentIndex(new_index)
+            
         return editor
 
     def _handle_text_changed(self, editor):
@@ -90,13 +103,23 @@ class EditorManager(QObject):
         self._set_tab_modified(editor, True)   
 
     def _do_physical_save(self, editor):
-        """执行实际的磁盘写入操作"""
+        """执行物理写入磁盘"""
+        path = getattr(editor, 'file_path', None)
+        if not path: return False
+        
         try:
-            with open(editor.file_path, 'w', encoding='utf-8') as f:
-                f.write(editor.toPlainText())
+            # 确保目录存在（防止临时目录被删）
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            
+            content = editor.toPlainText()
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content)
+            
+            # 🚀 写入成功后，它就不再是“内存临时”文件了
+            editor.is_temp = False 
             return True
         except Exception as e:
-            print(f"磁盘写入失败: {e}")
+            print(f"写入磁盘失败: {e}")
             return False
 
     def close_tab(self, index):
@@ -280,17 +303,15 @@ class EditorManager(QObject):
         return self.create_new_tab(file_path=path, content="")
     
     def save_all_opened_files(self):
-        """遍历所有标签页并执行物理写入"""
+        """全量保存：遍历所有标签页并强制写盘"""
         success = True
-        # 遍历 stacked_widget 中所有的编辑器实例
         for i in range(self.stacked.count()):
             editor = self.stacked.widget(i)
             if editor and hasattr(editor, 'file_path'):
-                # 如果是 temp 文件且尚未落户，这里可以决定是跳过还是强制它落户
-                # 目前建议：只针对已经有路径的文件进行静默保存
-                if not getattr(editor, 'is_temp', False):
-                    if not self._do_physical_save(editor):
-                        success = False
-                    else:
-                        self._set_tab_modified(editor, False) # 移除小圆点
+                # 无论是不是新标签，只要有路径就写盘
+                if self._do_physical_save(editor):
+                    # 消除对应标签的小圆点
+                    self._set_tab_modified(editor, False)
+                else:
+                    success = False
         return success
