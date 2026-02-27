@@ -4,13 +4,37 @@ import shutil
 
 class ProjectManager:
     def __init__(self):
-        self.project_root = None
+        self.project_root = ''
         self.sprite_dir = None
         self.sound_dir = None
         # 新增：记录代码文件的路径
-        self.main_script_path = None 
+        self.current_run_target = ""
         
         self.create_temp_project()
+
+    def set_run_target(self, file_path):
+        """动态设置当前的运行目标"""
+        if file_path and os.path.exists(file_path):
+            self.current_run_target = file_path
+
+    def get_run_target(self):
+        """获取运行目标：优先级：手动设置 > 存在性检查 > 自动搜寻"""
+        # 1. 如果当前记录的路径还有效，直接返回
+        if self.current_run_target and os.path.exists(self.current_run_target):
+            return self.current_run_target
+        
+        # 2. 如果失效了（比如文件被删），找项目根目录下第一个 .py
+        if self.project_root and os.path.exists(self.project_root):
+            py_files = [f for f in os.listdir(self.project_root) if f.endswith('.py')]
+            # 排序确保 main.py 优先被选中
+            py_files.sort(key=lambda x: (x != "main.py", x.lower()))
+            
+            if py_files:
+                target = os.path.join(self.project_root, py_files[0])
+                self.current_run_target = target
+                return target
+        
+        return None
 
     def create_temp_project(self):
         """在系统临时目录下创建工作空间"""
@@ -71,32 +95,34 @@ class ProjectManager:
     
     def open_project(self, folder_path):
         """
-        验证并切换到指定的项目目录
-        返回: (success, main_script_content)
+        验证并切换到指定的项目目录。
+        不再强制要求 main.py，只要是文件夹即可打开。
         """
-        main_py = os.path.join(folder_path, "main.py")
-        
-        # 1. 验证合法性
-        if not os.path.exists(main_py):
-            return False, "该文件夹不包含 main.py，不是有效的项目。"
+        if not os.path.isdir(folder_path):
+            return False, "选择的路径不是有效的文件夹。"
 
-        # 2. 身份切换：将当前指针指向这个旧家
+        # 1. 切换身份：将当前指针指向这个目录
         self.project_root = folder_path
-        self.main_script_path = main_py
+        
+        # 2. 自动寻找一个“初始”入口文件
+        py_files = [f for f in os.listdir(folder_path) if f.endswith('.py')]
+        if py_files:
+            # 优先找 main.py，找不到就拿第一个
+            py_files.sort(key=lambda x: (x != "main.py", x.lower()))
+            self.current_run_target = os.path.join(folder_path, py_files[0])
+            self.main_script_path = self.current_run_target # 保持兼容性
+        else:
+            # 如果一个 py 都没有，就预设一个 main.py 路径，但先不创建
+            self.main_script_path = os.path.join(folder_path, "main.py")
+            self.current_run_target = ""
+
+        # 3. 资源目录处理（保持原有逻辑）
         self.sprite_dir = os.path.join(folder_path, "assets", "sprites")
         self.sound_dir = os.path.join(folder_path, "assets", "sounds")
-        
-        # 3. 自动补全可能缺失的素材目录（增强稳健性）
         os.makedirs(self.sprite_dir, exist_ok=True)
         os.makedirs(self.sound_dir, exist_ok=True)
 
-        # 4. 读取代码内容返回给编辑器
-        try:
-            with open(main_py, "r", encoding="utf-8") as f:
-                content = f.read()
-            return True, content
-        except Exception as e:
-            return False, f"读取文件失败: {e}"
+        return True, "项目已加载"
 
     def save_project_to(self, target_path, latest_code):
         """

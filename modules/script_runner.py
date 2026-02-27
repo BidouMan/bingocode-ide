@@ -15,34 +15,35 @@ class ScriptRunner:
         self.render_mgr = controller.render_manager
         self.console_mgr = controller.console_manager
 
-    def run_project(self):
-        print('run')
-        editor_manager = self.controller.editor_manager
-        project_manager = self.controller.project_manager
-        console_manager = self.controller.console_manager
-
-        editor = editor_manager.get_current_editor()
+    def run_script(self, file_path): 
+        print(f"🚀 ScriptRunner 正在处理: {file_path}")
+        
+        # 1. 获取当前的编辑器
+        editor = self.editor_mgr.get_current_editor()
         if not editor: return
 
-        # 🚀 重点：这里需要像 run_current_script 那样做代码处理
         raw_code = editor.toPlainText()
         
-        # 如果你的引擎需要自动 import，就在这里加上
+        # 2. 注入引擎代码 (保持你原有的逻辑)
         if "from bingo_engine import" not in raw_code:
             final_code = "from bingo_engine import *\n\n" + raw_code
         else:
             final_code = raw_code
 
-        # 同步写入临时 main.py
+        # 3. 将注入后的代码写入物理文件
         try:
-            with open(project_manager.main_script_path, "w", encoding="utf-8") as f:
+            with open(file_path, "w", encoding="utf-8") as f:
                 f.write(final_code)
         except Exception as e:
-            print(f"❌ 同步失败: {e}")
+            print(f"❌ 写入运行文件失败: {e}")
             return
 
-        # 启动运行
-        console_manager.run_file(project_manager.main_script_path)
+        # 4. 重置渲染器并启动进程
+        self.render_mgr.reset_session()
+        self.console_mgr.run_file(file_path)
+        
+        # 5. 聚焦到游戏视图
+        QTimer.singleShot(150, lambda: self.ui.game_view.setFocus())
 
     # def run_current_script(self):
     #     print(f"子进程 PID: {os.getpid()}")

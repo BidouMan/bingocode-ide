@@ -45,9 +45,19 @@ class EditorManager(QObject):
 
 
     def switch_to_page(self, index):
-        """只负责切换编辑器页面"""
-        if 0 <= index < self.stacked.count():
-            self.stacked.setCurrentIndex(index)
+        """切换页面时，同步更新运行目标"""
+        if index < 0 or index >= self.stacked.count():
+            return
+            
+        # 1. 执行 UI 切换
+        self.stacked.setCurrentIndex(index)
+        
+        # 2. 🚀 关键修复：同步给项目经理
+        editor = self.stacked.widget(index)
+        if editor and hasattr(editor, 'file_path'):
+            # 只要是 python 文件，就设置为当前的运行目标
+            if editor.file_path.endswith('.py'):
+                self.pm.set_run_target(editor.file_path)
 
     def initialize_startup(self):
         """启动逻辑：不写磁盘，只创建虚拟 Tab"""

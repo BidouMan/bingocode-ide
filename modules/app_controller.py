@@ -70,7 +70,7 @@ class AppController:
 
 
         # 运行程序按钮
-        self.ui.btn_run.clicked.connect(self.script_runner.run_project)
+        self.ui.btn_run.clicked.connect(self.handle_run_script)
         if hasattr(self.ui, 'btn_stop'):
             self.ui.btn_stop.clicked.connect(self.script_runner.stop_script)
 
@@ -107,84 +107,59 @@ class AppController:
         menu_ui.btn_sound.clicked.connect(lambda: print("点击了上传声音"))
     
 
-
     def handle_new_project(self):
-        """新建项目：彻底清空并重新加载 main.py"""
-        try:
-            # 1. 重置后台数据
-            self.project_manager.new_project()
+        """新建项目：重置并初始化运行目标"""
+        self.project_manager.new_project()
+        self.editor_manager._clear_initial_state()
+        
+        path = self.project_manager.main_script_path
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
             
-            # 2. 彻底清理 UI（清空所有 Tab）
-            self.editor_manager._clear_initial_state()
-            
-            # 3. 重置状态管理器索引
-            self.tabbar_manager.active_index = -1 
-
-            # 4. 获取刚创建的 main.py 内容
-            with open(self.project_manager.main_script_path, "r", encoding="utf-8") as f:
-                content = f.read()
-            
-            # 5. 重建第一个标签
-            # 这里的 auto_activate 必须为 True，它会触发 EditorManager 内部的 setCurrentIndex
-            self.editor_manager.create_new_tab(
-                file_path=self.project_manager.main_script_path,
-                content=content,
-                auto_activate=True
-            )
-            
-            # 🚀 6. 【修复报错行】：使用 tabbar_manager 访问 tab_bar
-            # 既然已经 auto_activate 了，其实只需要确保内部索引同步即可
-            if self.tabbar_manager.tab_bar.count() > 0:
-                self.tabbar_manager.tab_bar.setCurrentIndex(0)
-                self.editor_manager.switch_to_page(0)
-                self.tabbar_manager.active_index = 0
-            
-            print("🆕 新项目 UI 已重建，默认加载 main.py")
-            
-        except Exception as e:
-            # 这里的报错会捕捉到具体哪行出了问题
-            QMessageBox.critical(self.window, "错误", f"初始化新项目失败: {e}")
+        self.editor_manager.create_new_tab(path, content, auto_activate=True)
+        
+        # 🚀 显式初始化运行目标，防止第一次运行没反应
+        self.project_manager.set_run_target(path)
+    
     def handle_open_project(self):
-        """打开项目：排序加载并锁定第一个标签"""
+        """打开项目：加载目录下所有脚本"""
         target_dir = QFileDialog.getExistingDirectory(self.window, "选择工程目录")
         if not target_dir: return
 
-        # 1. 切换根目录
+        # 1. 切换根目录（现在它不会因为没 main.py 而返回 False 了）
         success, _ = self.project_manager.open_project(target_dir)
 
         if success:
-            # 2. 清理旧标签
             self.editor_manager._clear_initial_state()
             
-            # 3. 排序：main.py 始终第一
+            # 2. 获取目录下所有 py 文件
             all_files = [f for f in os.listdir(target_dir) if f.endswith(".py")]
+            
+            if not all_files:
+                # 如果是空项目，自动帮学生建一个，免得界面空荡荡
+                self.handle_new_project() 
+                return
+
+            # 3. 排序并加载
             all_files.sort(key=lambda x: (x != "main.py", x.lower()))
             
-            # 4. 循环加载 (不自动抢焦点)
             for file_name in all_files:
                 file_path = os.path.join(target_dir, file_name)
                 try:
                     with open(file_path, "r", encoding="utf-8") as f:
                         content = f.read()
-                    
-                    # 🚀 关键：传入 auto_activate=False，这样循环时界面不会乱闪乱跳
-                    self.editor_manager.create_new_tab(
-                        file_path=file_path, 
-                        content=content, 
-                        auto_activate=False
-                    )
-                except Exception as e:
-                    print(f"读取失败 {file_name}: {e}")
+                    self.editor_manager.create_new_tab(file_path, content, auto_activate=False)
+                except: pass
 
-            # 🚀 5. 循环结束，一次性强制对齐到第一个标签 (main.py)
-            if self.ui.tab_frame.tab_bar.count() > 0:
-                self.ui.tab_frame.tab_bar.setCurrentIndex(0) # 视觉：Tab 蓝条
-                self.editor_manager.switch_to_page(0)        # 内容：代码页面
-                self.tabbar_manager.active_index = 0         # 逻辑：内部记录
+            # 4. 默认激活第一个找到的脚本
+            if self.tabbar_manager.tab_bar.count() > 0:
+                self.tabbar_manager.tab_bar.setCurrentIndex(0)
+                self.editor_manager.switch_to_page(0)
+                self.tabbar_manager.active_index = 0
             
-            print(f"📂 项目加载完毕，当前锁定：main.py")
+            print(f"📂 成功打开项目目录: {target_dir}")
         else:
-            QMessageBox.warning(self.window, "打开失败", "未找到 main.py")
+            QMessageBox.warning(self.window, "打开失败", "无法访问该目录。")
     
 
     def handle_save_project(self):
@@ -255,7 +230,28 @@ class AppController:
                 f"项目已完整另存为至：\n{os.path.basename(target_project_dir)}"
             )
 
+    def handle_run_script(self):
+        """运行脚本：完全动态捕获"""
+        # 1. 运行前全量保存（确保所有标签页的改动都进硬盘了）
+        self.handle_save_project()
         
+        # 2. 获取当前的动态入口
+        run_path = self.project_manager.get_run_target()
+        
+        # 🚀 调试打印：如果没反应，看看控制台打印什么
+        print(f"🔍 准备运行，当前捕获的路径: {run_path}")
+        
+        if run_path and os.path.exists(run_path):
+            print(f"🚀 启动执行: {os.path.basename(run_path)}")
+            self.script_runner.run_script(run_path)
+        else:
+            # 自动补救：如果没设目标，强制设为 main.py 再试一次
+            fallback = os.path.join(self.project_manager.project_root, "main.py")
+            if os.path.exists(fallback):
+                self.project_manager.set_run_target(fallback)
+                self.script_runner.run_script(fallback)
+            else:
+                QMessageBox.warning(self.window, "运行失败", "找不到可运行的 Python 脚本，请确认标签页是否打开。")
 
     def _handle_qt_key_press(self, event):
         if event.isAutoRepeat(): return 
