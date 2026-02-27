@@ -3,14 +3,16 @@ from PySide6.QtCore import Qt, QStandardPaths, QTimer,QProcess
 from PySide6.QtGui import QColor,QKeySequence
 from PySide6.QtWidgets import (QFileDialog, QMessageBox, QTabBar, QSizePolicy, QApplication, QVBoxLayout)
 
-from ui.main_window_ui import Ui_Form
-from modules.mune_manager import MenuManager
-from modules.console_manager import ConsoleManager
-from modules.editor_manager import EditorManager
+
 
 
 
 # 整合好的模组
+from ui.main_window_ui import Ui_Form
+from modules.mune_manager import MenuManager
+from modules.console_manager import ConsoleManager
+from modules.editor_manager import EditorManager
+from modules.project_manager import ProjectManager
 from modules.render_manager import RenderManager
 from modules.screen_manager import ScreenManager
 from modules.tabbar_manager import TabbarManager
@@ -29,19 +31,16 @@ class AppController:
         # 🚀 1. 核心分辨率：统一使用 640x480 (自研引擎黄金比例)
         self.stage_width = 640   
         self.stage_height = 480  
-
-        # 首先实例化文件管理器 后续其他管理器需要用到root_path
-        self.file_manager = FileManager(self.window)
         
-        # 带整理的模块
+        # 整理过的模块
+        self.project_manager = ProjectManager()
+        self.file_manager = FileManager(self.window)
         self.console_manager = ConsoleManager(self.ui.splitter, self.ui.console_output)        
         self.menu_manager = MenuManager(main_window)
-
-        # 整理过的模块
         self.render_manager = RenderManager(self.ui.game_view,app_controller=self)
         self.screen_manager = ScreenManager(self)
         self.tabbar_manager = TabbarManager(self.ui.tab_frame)
-        self.editor_manager = EditorManager(self.ui.code_stacked, self.tabbar_manager, self.file_manager.root_path)
+        self.editor_manager = EditorManager(self.ui.code_stacked, self.tabbar_manager, self.project_manager)
         self.script_runner = ScriptRunner(self)
         self.res_manager = ResourceManager(self.ui,self.window)
 
@@ -59,18 +58,19 @@ class AppController:
         """绑定业务信号，完全保留文件和编辑器逻辑"""
         # 主页全局按钮-
         self.ui.btn_file.clicked.connect(lambda: self.menu_manager.show_popup_menu(self.ui.btn_file))
-        self.ui.btn_save.clicked.connect(lambda: self.file_manager.save_file(self.editor_manager))
+        self.ui.btn_save.clicked.connect(self.handle_save_project)
 
     
         # 菜单栏按钮_>文件管理 
-        self.menu_manager.new_file_signal.connect(self.editor_manager.create_untitled_file)
-        self.menu_manager.open_file_signal.connect(lambda: self.file_manager.open_file_dialog(self.editor_manager))        
-        self.menu_manager.save_file_signal.connect(lambda: self.file_manager.save_file(self.editor_manager))
-        self.menu_manager.save_as_signal.connect(lambda: self.file_manager.save_as_file(self.editor_manager))
+        self.menu_manager.open_file_signal.connect(self.handle_open_project)        
+        self.menu_manager.save_file_signal.connect(self.handle_save_project)
+        self.menu_manager.save_as_signal.connect(self.handle_save_as)
+        self.menu_manager.new_file_signal.connect(self.handle_new_project)
+        self.menu_manager.close_file_signal.connect(self.handle_new_project)
 
 
         # 运行程序按钮
-        self.ui.btn_run.clicked.connect(self.script_runner.run_current_script)
+        self.ui.btn_run.clicked.connect(self.script_runner.run_project)
         if hasattr(self.ui, 'btn_stop'):
             self.ui.btn_stop.clicked.connect(self.script_runner.stop_script)
 
@@ -105,7 +105,116 @@ class AppController:
         menu_ui.btn_sprite.clicked.connect(self.res_manager.import_sprite_dialog)
         menu_ui.btn_bg.clicked.connect(lambda: print("点击了上传背景"))
         menu_ui.btn_sound.clicked.connect(lambda: print("点击了上传声音"))
+    
+
+
+    def handle_new_project(self):
+        """新建项目调度：推倒重来"""
+        # 1. (可选) 检查当前是否有未保存的更改，弹出确认框
+        # res = QMessageBox.question(self.window, "新建项目", "是否放弃当前更改并新建项目？")
+        # if res == QMessageBox.No: return
+
+        # 2. 让管家开辟新战场
+        new_file_path, default_code = self.project_manager.create_new_project_env()
+
+        # 3. 让编辑器同步更新
+        editor = self.editor_manager.get_current_editor()
+        if editor:
+            editor.setPlainText(default_code)
+            editor.file_path = new_file_path # 🚀 极其关键：更新路径，确保下次点保存会触发“另存为”
+            
+        print(f"✨ 已创建全新的临时项目: {self.project_manager.project_root}")
+
+    def handle_open_project(self):
+        target_dir = QFileDialog.getExistingDirectory(self.window, "选择项目文件夹")
+        if not target_dir: return
+
+        success, result = self.project_manager.open_project(target_dir)
+
+        if success:
+            # 🚀 改变在这里：
+            # 1. 先关闭所有旧标签页
+            while self.ui.tabWidget.count() > 0:
+                self.ui.tabWidget.removeTab(0)
+            
+            # 2. 调用 EditorManager 创建新标签显示 main.py
+            self.editor_manager.add_new_tab(
+                file_path=self.project_manager.main_script_path,
+                content=result,
+                file_name="main.py"
+            )
+            print(f"📂 项目已加载至标签页")
+    
+
+    def handle_save_project(self):
+        pm = self.project_manager
+        em = self.editor_manager
         
+        # 1. 如果是临时项目，先执行“另存为/搬家”逻辑
+        if "/T/BingoProject_" in pm.project_root or "Temp" in pm.project_root:
+            self.handle_save_as()
+            return
+
+        # 2. 如果已经是正式项目，执行“全量静默保存”
+        # 获取当前活动的编辑器（用于确保当前正在写的这页一定被保存）
+        current_editor = em.get_current_editor()
+        
+        # 🚀 改进：调用我们刚刚写的 save_all_opened_files
+        if em.save_all_opened_files():
+            print("💾 项目中所有打开的标签页已更新")
+        else:
+            QMessageBox.warning(self.window, "保存提醒", "部分文件保存失败，请检查权限。")
+        
+    def handle_save_as(self):
+        """另存为：强制弹出起名窗口，并完整搬迁项目（包含所有标签页）"""
+        pm = self.project_manager
+        em = self.editor_manager
+        
+        # 1. 基础检查：如果没有打开的编辑器，则无需保存
+        editor = em.get_current_editor()
+        if not editor: return
+
+        # 2. 弹出『起名』对话框
+        full_path, _ = QFileDialog.getSaveFileName(
+            self.window, 
+            "另存为新项目 (请输入项目名称)", 
+            os.path.expanduser("~/Desktop"), 
+            "Bingo Project (*.bingo)"
+        )
+        
+        if not full_path: return
+
+        # 3. 解析目标路径：去掉 .bingo 后缀，作为项目文件夹
+        target_project_dir = os.path.splitext(full_path)[0]
+
+        # 🚀 4. 【核心改动】全量刷盘：
+        # 在搬家前，让 EditorManager 把所有 Tab 里的内存代码写入当前的临时磁盘目录
+        # 这样 shutil.copytree 才能抓取到这些新文件
+        em.save_all_opened_files()
+
+        # 5. 获取当前主编辑器的代码，用于 ProjectManager 的备用写入
+        latest_code = editor.toPlainText()
+
+        # 6. 下令给 ProjectManager 执行物理搬迁
+        # 它会把整个临时文件夹（含 main.py 和所有已经写盘的 untitled_x.py）拷贝到新路径
+        if pm.save_project_to(target_project_dir, latest_code):
+            
+            # 7. 搬家成功后，更新所有打开编辑器的关联路径
+            # 这一步确保后续『静默保存』能写到新家，而不是旧的临时目录
+            for i in range(em.stacked.count()):
+                widget = em.stacked.widget(i)
+                if hasattr(widget, 'file_path'):
+                    old_name = os.path.basename(widget.file_path)
+                    widget.file_path = os.path.join(pm.project_root, old_name)
+                    # 标记为非临时文件，因为已经落户了
+                    widget.is_temp = False
+
+            QMessageBox.information(
+                self.window, 
+                "保存成功", 
+                f"项目已完整另存为至：\n{os.path.basename(target_project_dir)}"
+            )
+
         
 
     def _handle_qt_key_press(self, event):

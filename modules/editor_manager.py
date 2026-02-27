@@ -9,13 +9,12 @@ class EditorManager(QObject):
     file_created_on_disk = Signal()
     file_renamed_on_disk = Signal()
 
-    def __init__(self, stacked_widget, tab_manager, root_path: str):
+    def __init__(self, stacked_widget, tab_manager,project_manager):
         super().__init__()
         self.stacked = stacked_widget
         self.tab_manager = tab_manager
         self.tabs = tab_manager.tab_bar
-        self.root_path = root_path
-        
+        self.pm = project_manager
         # 清理空tab
         self._clear_initial_state()
 
@@ -40,14 +39,15 @@ class EditorManager(QObject):
 
     def initialize_startup(self):
         """启动逻辑：不写磁盘，只创建虚拟 Tab"""
-        file_path = self._generate_unique_name(self.root_path)
-        # 初始 content 为空，触发延迟创建逻辑
-        self.create_new_tab(file_path, "")
+        file_path = self.pm.main_script_path
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            # 创建 Tab，注意这里不再是 temp 状态，因为它已经有物理文件了
+            self.create_new_tab(file_path, content)
+        except Exception as e:
+            print(f"启动加载代码失败: {e}")
 
-    def create_untitled_file(self):
-        """外部调用：手动新建一个未命名标签"""
-        file_path = self._generate_unique_name(self.root_path)
-        self.create_new_tab(file_path, "")
 
     def create_new_tab(self, file_path, content):
         """核心方法：创建编辑器。支持延迟物理创建，不破坏原有 UI 功能"""
@@ -265,10 +265,32 @@ class EditorManager(QObject):
         idx = self.tabs.currentIndex()
         return self.stacked.widget(idx) if idx != -1 else None
 
-    def _generate_unique_name(self, directory):
+    def create_untitled_file(self):
+        """在当前项目目录下创建一个新的临时标签页"""
+        # 1. 确定新文件的物理路径（放在当前项目根目录下）
         i = 1
         while True:
             name = f"untitled_{i}.py"
-            path = os.path.join(directory, name)
-            if not os.path.exists(path): return path
+            path = os.path.join(self.pm.project_root, name)
+            if not os.path.exists(path): break
             i += 1
+        
+        # 2. 调用你现有的核心方法创建 UI
+        # 注意：content 为空，这样它会触发你写好的 is_temp = True 逻辑
+        return self.create_new_tab(file_path=path, content="")
+    
+    def save_all_opened_files(self):
+        """遍历所有标签页并执行物理写入"""
+        success = True
+        # 遍历 stacked_widget 中所有的编辑器实例
+        for i in range(self.stacked.count()):
+            editor = self.stacked.widget(i)
+            if editor and hasattr(editor, 'file_path'):
+                # 如果是 temp 文件且尚未落户，这里可以决定是跳过还是强制它落户
+                # 目前建议：只针对已经有路径的文件进行静默保存
+                if not getattr(editor, 'is_temp', False):
+                    if not self._do_physical_save(editor):
+                        success = False
+                    else:
+                        self._set_tab_modified(editor, False) # 移除小圆点
+        return success
