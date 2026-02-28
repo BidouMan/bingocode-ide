@@ -133,7 +133,9 @@ class AppController:
             self.editor_manager._clear_initial_state()
             
             # 2. 获取目录下所有 py 文件
-            all_files = [f for f in os.listdir(target_dir) if f.endswith(".py")]
+            all_files = [f for f in os.listdir(target_dir) 
+                         if f.endswith(".py") and not f.startswith(".")
+                         ]
             
             if not all_files:
                 # 如果是空项目，自动帮学生建一个，免得界面空荡荡

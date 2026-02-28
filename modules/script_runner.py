@@ -15,35 +15,43 @@ class ScriptRunner:
         self.render_mgr = controller.render_manager
         self.console_mgr = controller.console_manager
 
-    def run_script(self, file_path): 
-        print(f"🚀 ScriptRunner 正在处理: {file_path}")
-        
-        # 1. 获取当前的编辑器
+    def run_script(self, file_path):
+        """主运行逻辑：判定模式 -> 合并/注入 -> 启动"""
         editor = self.editor_mgr.get_current_editor()
         if not editor: return
+        current_code = editor.toPlainText()
 
-        raw_code = editor.toPlainText()
-        
-        # 2. 注入引擎代码 (保持你原有的逻辑)
-        if "from bingo_engine import" not in raw_code:
-            final_code = "from bingo_engine import *\n\n" + raw_code
+        # 🚀 规则 1：判定当前文件是否有 run()
+        has_run = "run()" in current_code
+
+        if has_run:
+            print(f"🎮 游戏模式：正在汇总项目文件并启动...")
+            # 汇总全量代码
+            final_code = self._merge_project_files(file_path, current_code)
         else:
-            final_code = raw_code
+            print(f"📝 练习模式：仅运行当前文件 {os.path.basename(file_path)}")
+            final_code = current_code
 
-        # 3. 将注入后的代码写入物理文件
+        # 🚀 规则 2：自动注入引擎（如果学生没写 import）
+        if "from bingo_engine import" not in final_code:
+            final_code = "from bingo_engine import *\n\n" + final_code
+
+        # 3. 写入隐藏的临时运行文件，避免改动学生的原始文件
+        temp_run_file = os.path.join(self.controller.project_manager.project_root, ".temp_run.py")
         try:
-            with open(file_path, "w", encoding="utf-8") as f:
+            with open(temp_run_file, "w", encoding="utf-8") as f:
                 f.write(final_code)
         except Exception as e:
-            print(f"❌ 写入运行文件失败: {e}")
+            print(f"❌ 准备运行文件失败: {e}")
             return
 
-        # 4. 重置渲染器并启动进程
+        # 4. 启动引擎
         self.render_mgr.reset_session()
-        self.console_mgr.run_file(file_path)
+        self.console_mgr.run_file(temp_run_file)
         
-        # 5. 聚焦到游戏视图
-        QTimer.singleShot(150, lambda: self.ui.game_view.setFocus())
+        # 5. 如果是游戏，自动聚焦
+        if has_run:
+            QTimer.singleShot(150, lambda: self.ui.game_view.setFocus())
 
     # def run_current_script(self):
     #     print(f"子进程 PID: {os.getpid()}")
@@ -108,5 +116,44 @@ class ScriptRunner:
             btn.style().polish(btn)
             btn.setChecked(is_running)
     
+    def _merge_project_files(self, active_path, active_code):
+        """汇总逻辑：仅合并含有游戏特征的邻居文件，并屏蔽它们的 run()"""
+        root = self.controller.project_manager.project_root
+        all_py = [f for f in os.listdir(root) if f.endswith('.py') and not f.startswith('.')]
+        
+        merged_parts = []
+        
+        for f_name in all_py:
+            full_path = os.path.join(root, f_name)
+            # 1. 跳过当前正在运行的文件
+            if full_path == active_path:
+                continue
+                
+            try:
+                with open(full_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                    
+                    # 🚀 【核心修复】：如果这个邻居文件既没有 run() 也没有 Sprite(
+                    # 说明它是一个普通练习文件，不应该被合并到游戏项目中
+                    if not self._is_game_project(content):
+                        continue
+                    
+                    # 2. 屏蔽非活动文件里的 run()
+                    clean_content = content.replace("run()", "# [已在汇总时屏蔽非主文件的 run()]")
+                    # 3. 移除重复的 import
+                    clean_content = clean_content.replace("from bingo_engine import *", "")
+                    
+                    merged_parts.append(f"### 来自文件: {f_name} ###\n" + clean_content)
+            except:
+                continue
+        
+        # 4. 最后加上当前主文件
+        merged_parts.append(f"### 主运行文件: {os.path.basename(active_path)} ###\n" + active_code)
+        
+        return "\n\n".join(merged_parts)
 
-    
+    def _is_game_project(self, code):
+        """判定是否为游戏项目：通过核心函数 run() 识别"""
+        # 匹配 run() 调用。注意：这里可以检查是否独立成行或在行尾
+        # 甚至可以更严谨点，检查是否包含 Sprite( 或 run()
+        return "run()" in code or "Sprite(" in code
