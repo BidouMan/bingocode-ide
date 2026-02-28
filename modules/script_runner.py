@@ -100,40 +100,74 @@ class ScriptRunner:
             btn.setChecked(is_running)
     
     def _merge_project_files(self, active_path, active_code):
-        """汇总同目录下所有符合条件的 .py 文件"""
+        """
+        深度汇总：解决多文件变量引用顺序问题。
+        策略：将所有文件的变量定义、函数、类提取到前面，确保 run() 在最后执行。
+        """
+        import os
         root = os.path.dirname(active_path)
-        # 过滤掉隐藏文件和临时文件
         all_py = [f for f in os.listdir(root) if f.endswith('.py') and not f.startswith('.')]
         
-        merged_parts = []
+        # 建立代码池，存储 (文件名, 内容)
+        code_pool = []
         for f_name in all_py:
             full_path = os.path.join(root, f_name)
-            # 跳过主运行文件（因为它已经作为 active_code 传入了）
             if full_path == active_path:
-                continue
-                
-            try:
-                # 明确指定编码，防止 Windows 下读取失败
-                with open(full_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                    
-                    # 🚀 核心判定：如果邻居文件完全没有游戏特征，不合并
-                    if not self._is_game_project(content):
-                        continue
-                    
-                    # 屏蔽非主文件里的 run()，防止多重循环启动
-                    clean_content = content.replace("run()", "# [已屏蔽非主文件 run()]")
-                    # 移除重复导入，保持代码整洁
-                    clean_content = clean_content.replace("from bingo_engine import *", "")
-                    
-                    merged_parts.append(f"### File: {f_name} ###\n" + clean_content)
-            except:
-                # 读取失败的文件（如权限问题）直接跳过
-                continue
+                content = active_code
+            else:
+                try:
+                    with open(full_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                except: continue
+            
+            # 过滤：只处理有游戏特征的代码
+            if self._is_game_project(content):
+                code_pool.append((f_name, content))
+
+        # 准备合并的三大板块
+        imports_section = []    # 存放 import 语句
+        definitions_section = [] # 存放变量定义、函数、类
         
-        # 将主文件放在最后，确保主逻辑最后加载
-        merged_parts.append(f"### Main: {os.path.basename(active_path)} ###\n" + active_code)
-        return "\n\n".join(merged_parts)
+        for f_name, content in code_pool:
+            lines = content.splitlines()
+            file_body = []
+            
+            for line in lines:
+                stripped = line.strip()
+                
+                # 1. 提取并去重 import
+                if stripped.startswith("import ") or stripped.startswith("from "):
+                    # 排除掉我们稍后会自动统一注入的引擎导入
+                    if "bingo_engine" not in stripped and line not in imports_section:
+                        imports_section.append(line)
+                    continue
+                
+                # 2. 屏蔽所有文件中的 run() 调用
+                # 我们要在最后手动添加一个唯一的 run()
+                if "run()" in stripped and not stripped.startswith("#"):
+                    line = line.replace("run()", "# [已在合并时移至末尾]")
+                
+                file_body.append(line)
+            
+            # 包装每个文件的内容，增加注释方便学生调试查看
+            definitions_section.append(f"### --- File: {f_name} --- ###")
+            definitions_section.extend(file_body)
+            definitions_section.append("\n")
+
+        # 🚀 最终组装顺序：
+        # Layer 1: 引擎导入（确保最优先）
+        # Layer 2: 其他库导入 (math, random 等)
+        # Layer 3: 所有文件的全部代码（变量 a=..., b=..., def loop()...）
+        # Layer 4: 唯一的启动指令 run()
+        
+        final_code_lines = [
+            "from bingo_engine import *",
+            "\n".join(imports_section),
+            "\n".join(definitions_section),
+            "run()"  # 确保整个项目只有一个 run() 在最后
+        ]
+        
+        return "\n\n".join(final_code_lines)
 
     def _is_game_project(self, code):
         """判断代码是否属于 bingo 引擎项目的一部分"""

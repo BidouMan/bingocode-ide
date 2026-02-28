@@ -260,7 +260,7 @@ class AppController:
         self.script_runner.cleanup_temp_files()
         
         # 3. 确保所有项目改动已尝试保存（可选）
-        self.handle_save_project()
+        # self.handle_save_project()
 
 
     def _handle_qt_key_press(self, event):
