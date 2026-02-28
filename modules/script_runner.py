@@ -81,10 +81,9 @@ class ScriptRunner:
 
 
 
-    def stop_script(self):
+    def stop_script(self,is_exiting=False):
         """强制停止并收回控制台"""
-        print("🛑 正在尝试强制停止进程...")
-        
+       
         # 1. 停止数据拉取
         if self.console_mgr.pull_timer.isActive():
             self.console_mgr.pull_timer.stop()
@@ -93,6 +92,9 @@ class ScriptRunner:
         if self.console_mgr.process and self.console_mgr.process.state() != QProcess.NotRunning:
             self.console_mgr.process.kill() 
             self.console_mgr.process.waitForFinished(300)
+        # 🚀 如果是正在退出程序，跳过所有 UI 动画和属性设置
+        if is_exiting:
+            return
             
         # 3. 🚀 【新增】命令控制台执行收回动画
         # 这样点击 stop 后，控制台会自动滑回去
@@ -103,7 +105,23 @@ class ScriptRunner:
 
         # 5. 恢复按钮状态
         self.set_run_btn_visual(False)
-        print("✅ 进程已强行终止并收回 UI")
+
+    def cleanup_temp_files(self):
+        """
+        彻底删除产生的隐藏临时文件
+        """
+        if not self.controller.project_manager.project_root:
+            return
+            
+        temp_run_file = os.path.join(self.controller.project_manager.project_root, ".temp_run.py")
+        
+        if os.path.exists(temp_run_file):
+            try:
+                os.remove(temp_run_file)
+                print(f"✅ 已成功清理临时文件: {temp_run_file}")
+            except Exception as e:
+                print(f"⚠️ 清理临时文件失败: {e}")
+
 
     def set_run_btn_visual(self, is_running):
         """控制运行按钮的高亮状态 (QSS 联动)"""

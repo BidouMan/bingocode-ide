@@ -69,6 +69,7 @@ class BingoIDE(QWidget):
         """窗口关闭时清理子进程"""
         if hasattr(self, 'controller'):
             self.controller.script_runner.stop_script()
+            self.controller.handle_exit_cleanup()
         event.accept()
 
 # --- 5. 程序启动入口 ---

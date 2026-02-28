@@ -255,6 +255,22 @@ class AppController:
             else:
                 QMessageBox.warning(self.window, "运行失败", "找不到可运行的 Python 脚本，请确认标签页是否打开。")
 
+    def handle_exit_cleanup(self):
+        """
+        在退出程序前调用的清理钩子
+        """
+        print("🧹 程序准备退出，正在执行最后清理...")
+        
+        # 1. 强制停止可能正在运行的脚本
+        self.script_runner.stop_script(is_exiting=True)
+        
+        # 2. 清理产生的隐藏运行文件
+        self.script_runner.cleanup_temp_files()
+        
+        # 3. 确保所有项目改动已尝试保存（可选）
+        self.handle_save_project()
+
+
     def _handle_qt_key_press(self, event):
         if event.isAutoRepeat(): return 
         key_name = self._map_qt_key(event.key())
