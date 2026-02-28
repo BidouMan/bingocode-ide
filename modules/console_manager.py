@@ -72,21 +72,33 @@ class ConsoleManager(QObject):
         print(f"🚀 Console: 正在运行 -> {file_path}")
 
     def _pull_output(self):
-        """拉取缓冲区数据的核心逻辑"""
+        """拉取并分流缓冲区数据：区分普通日志与 JSON 指令"""
         if not self.process: return
         
-        # 读取标准输出
-        data_out = self.process.readAllStandardOutput().data()
-        if data_out:
-            text = data_out.decode('utf-8', errors='replace')
-            self.append_text(text)
+        # 1. 读取标准输出
+        if self.process.canReadLine():
+            # 注意：使用 readAll...() 可能会把多行揉在一起，
+            # 我们用更加稳健的循环读取方式
+            while self.process.canReadLine():
+                line_raw = self.process.readLine().data().decode('utf-8', errors='replace')
+                line = line_raw.strip()
+                
+                if not line: continue
 
-        # 读取标准错误
+                # 🚀 核心判定：如果是 JSON 指令
+                if line.startswith('{"type":') and line.endswith('}'):
+                    # 触发调试打印，确认 IDE 接收到了
+                    print(f"🎯 [IDE 拦截指令]: {line}") 
+                    self.instruction_received.emit(line)
+                else:
+                    # 普通日志（比如用户的 print 或 引擎的启动提示）
+                    self.append_text(line_raw)
+
+        # 2. 读取标准错误
         data_err = self.process.readAllStandardError().data()
         if data_err:
-            text = data_err.decode('utf-8', errors='replace')
-            # 🚀 暂时去掉 HTML 标签，直接添加文本
-            self.append_text(f"[ERROR] {text}")
+            err_text = data_err.decode('utf-8', errors='replace')
+            self.append_text(f"[ERROR] {err_text}")
 
     def append_text(self, text):
         """线程安全地将文本添加到 UI (兼容 QPlainTextEdit)"""

@@ -29,11 +29,10 @@ __all__ = ['Sprite', 'run','key_down','show_fps','set_background','mouse_down','
 
 
 class Sprite:
-    def __init__(self, image_name):        
+    def __init__(self, filename):        
         # 使用内存地址作为唯一ID
         self.id = str(id(self))
-        # 🚀 修正路径：确保与你 assets 文件夹名称一致
-        self.image = os.path.join("assets", "images", image_name)
+        self.image = self._resolve_path(filename, "sprites")
         self._x = 320  
         self._y = 240
         self._scale = 100
@@ -57,11 +56,12 @@ class Sprite:
 
         # 发送创建指令
         self._send_command("CREATE", {
-            "image": self.image,
+            # 🚀 关键：将相对路径转为绝对路径发给 IDE 渲染器
+            "image": os.path.abspath(self.image), 
             "x": self._x,
             "y": self._y,
             "angle": self._angle,
-            "scale_x": 1.0, # 初始镜像
+            "scale_x": 1.0, 
             "type": "image"
         })
 
@@ -394,8 +394,21 @@ class Sprite:
         self._send_command("UPDATE", {"id": self.id, "layer": value})
 
     # ---------- 内部调用 ----------
+    def _resolve_path(self, filename, category):
+        """通用路径解析：工程根目录优先，其次是 assets/分类/ """
+        if os.path.exists(filename):
+            return filename
+        
+        # 预留支持：assets/sprites/ 或 assets/sounds/ 等
+        guessed_path = os.path.join("assets", category, filename)
+        if os.path.exists(guessed_path):
+            return guessed_path
+            
+        return filename # 实在找不到就返回原名，让错误显现出来
     def _setup_hitbox(self):
         """通用型高性能采样：支持任何尺寸图片，自动定位内容重心"""
+        from PySide6.QtCore import QRectF
+
         if (hasattr(self, '_content_w') and self._cached_image == self.image):
             return self._cached_hitbox
 
@@ -419,7 +432,6 @@ class Sprite:
                     self._content_w, self._content_h = self._orig_w, self._orig_h
                     self._visual_offset_x = self._visual_offset_y = 0
                     
-                from PySide6.QtCore import QRectF
                 self._cached_hitbox = QRectF(0, 0, self._content_w, self._content_h)
                 self._cached_image = self.image
         except:

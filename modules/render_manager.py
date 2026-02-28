@@ -92,13 +92,21 @@ class RenderManager(QObject):
                     self.reset_session()
                 
         except Exception as e:
-            pass
+            # 🚀 必须打印错误，否则如果里面崩溃了你完全不知道
+            print(f"❌ [IDE 指令解析失败]: {e}") 
+            import traceback
+            traceback.print_exc()
         
     def create_sprite(self, sprite_id, data):
         """
         最终完美版：处理背景缩放、自动图层递增、手动层级覆盖
         """
         image_path = data.get("image", "")
+        print(f"🔍 [渲染器检查] 准备为 ID {sprite_id} 加载图片: {image_path}")
+        # 1. 检查文件在磁盘上是否存在
+        if not os.path.exists(image_path):
+            print(f"❌ [文件不存在] IDE 无法在路径找到文件: {image_path}")
+            return
         stype = data.get("type", "image")
         
         # 1. 创建基础实例
@@ -113,19 +121,23 @@ class RenderManager(QObject):
             item.setBrush(QBrush(QColor(data.get("color", "#0000FF"))))
             item.setPen(Qt.NoPen)
         else:
+            if not os.path.exists(image_path):
+                print(f"❌ [渲染器错误] 文件不存在: {image_path}")
             pixmap = QPixmap(image_path)
             if not pixmap.isNull():
+                print(f"✅ [加载成功] 图片尺寸: {pixmap.width()}x{pixmap.height()}")
                 item = QGraphicsPixmapItem(pixmap)
                 # 设置旋转中心为图片中心
                 item.setTransformOriginPoint(pixmap.width()/2, pixmap.height()/2)
-
+            else:
+                print(f"❌ [渲染器错误] QPixmap 加载失败: {image_path}")
         if not item:
             return
 
         # 2. 基础登记
         self.sprites[sprite_id] = item
         self.scene.addItem(item)
-
+        print(f"🚀 [场景对象] 已添加 Item 到场景，当前场景内对象总数: {len(self.scene.items())}")
         # 3. 核心层级与类型特殊处理
         if stype == "background":
             # --- 背景特殊逻辑 ---
