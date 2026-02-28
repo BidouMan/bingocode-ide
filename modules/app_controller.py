@@ -42,10 +42,7 @@ class AppController:
         self.tabbar_manager = TabbarManager(self.ui.tab_frame)
         self.editor_manager = EditorManager(self.ui.code_stacked, self.tabbar_manager, self.project_manager)
         self.script_runner = ScriptRunner(self)
-        self.res_manager = ResourceManager(self.ui,self.window)
-
-
-       
+        self.res_manager = ResourceManager(self.ui,self.window)       
      
         #4. 绑定信号 (保持原有业务连接)
         self.setup_connections()
@@ -158,8 +155,7 @@ class AppController:
                 self.tabbar_manager.tab_bar.setCurrentIndex(0)
                 self.editor_manager.switch_to_page(0)
                 self.tabbar_manager.active_index = 0
-            
-            print(f"📂 成功打开项目目录: {target_dir}")
+        
         else:
             QMessageBox.warning(self.window, "打开失败", "无法访问该目录。")
     
@@ -178,7 +174,8 @@ class AppController:
         # 2. 如果已经是正式项目（比如在桌面），执行全量保存
         # 🚀 这一步会把所有新建的 untitled_x.py 都存进项目文件夹
         if em.save_all_opened_files():
-            print("✨ 项目所有文件已成功同步到磁盘")
+            # print("✨ 项目所有文件已成功同步到磁盘")
+            pass
         else:
             QMessageBox.warning(self.window, "保存提醒", "部分新标签页保存失败，请检查权限。")
         
@@ -240,11 +237,7 @@ class AppController:
         # 2. 获取当前的动态入口
         run_path = self.project_manager.get_run_target()
         
-        # 🚀 调试打印：如果没反应，看看控制台打印什么
-        print(f"🔍 准备运行，当前捕获的路径: {run_path}")
-        
         if run_path and os.path.exists(run_path):
-            print(f"🚀 启动执行: {os.path.basename(run_path)}")
             self.script_runner.run_script(run_path)
         else:
             # 自动补救：如果没设目标，强制设为 main.py 再试一次
@@ -259,7 +252,6 @@ class AppController:
         """
         在退出程序前调用的清理钩子
         """
-        print("🧹 程序准备退出，正在执行最后清理...")
         
         # 1. 强制停止可能正在运行的脚本
         self.script_runner.stop_script(is_exiting=True)
@@ -290,11 +282,8 @@ class AppController:
                 process.write(full_msg.encode('utf-8'))
                 # 必须 flush，否则数据只在内存里
                 process.waitForBytesWritten(5)
-                print(f"✅ AppController: 消息 '{msg}' 已发送")
             except Exception as e:
-                print(f"❌ AppController: 发送失败 {e}")
-        else:
-            print(f"⚠️ AppController: 进程未运行，无法发送 '{msg}'")
+                pass
 
     def _map_qt_key(self, qt_key):
         """映射 Qt 键位到用户习惯的字符串"""

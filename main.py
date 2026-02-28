@@ -76,12 +76,12 @@ class BingoIDE(QWidget):
 if __name__ == "__main__":
     # 适配多进程打包
     multiprocessing.freeze_support()
+    # 🚀 在创建 QApplication 之前，设置不恢复窗口状态
     
     app = QApplication(sys.argv)
     
     # 屏蔽 Qt 内部不必要的字体警告
-    QLoggingCategory.setFilterRules("qt.qpa.fonts.debug=false")
-    
+    QLoggingCategory.setFilterRules("*.debug=false\nqt.qpa.fonts=false\n*.warning=false")
     # 加载暗色皮肤
     style_data = load_stylesheet(os.path.join('assets', 'qss', 'dark_style.qss'))
     if style_data: 

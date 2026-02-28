@@ -50,8 +50,7 @@ class ProjectManager:
         self.main_script_path = os.path.join(self.project_root, "main.py")
         with open(self.main_script_path, "w", encoding="utf-8") as f:
             f.write("# Welcome to BingoIDE\nprint('Hello Bingo!')")
-        
-        print(f"📁 项目管理器：临时工作区已就绪 -> {self.project_root}")
+
     
     def create_new_project_env(self):
         """核心逻辑：重置管家状态，创建一个全新的临时地盘"""

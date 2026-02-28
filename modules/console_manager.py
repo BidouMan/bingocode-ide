@@ -8,7 +8,6 @@ from PySide6.QtWidgets import QApplication
 class ConsoleManager(QObject):
     process_started = Signal()
     process_finished = Signal()
-    draw_signal = Signal(str)
     instruction_received = Signal(str)
 
     def __init__(self, splitter, console_output):
@@ -69,36 +68,20 @@ class ConsoleManager(QObject):
             QTimer.singleShot(10, self._pull_output)
             QTimer.singleShot(100, self._pull_output)
 
-        print(f"🚀 Console: 正在运行 -> {file_path}")
-
     def _pull_output(self):
-        """拉取并分流缓冲区数据：区分普通日志与 JSON 指令"""
         if not self.process: return
         
-        # 1. 读取标准输出
-        if self.process.canReadLine():
-            # 注意：使用 readAll...() 可能会把多行揉在一起，
-            # 我们用更加稳健的循环读取方式
-            while self.process.canReadLine():
-                line_raw = self.process.readLine().data().decode('utf-8', errors='replace')
-                line = line_raw.strip()
-                
-                if not line: continue
+        # 只处理 Stdout 的分流逻辑
+        while self.process.canReadLine():
+            line_raw = self.process.readLine().data().decode('utf-8', errors='replace')
+            line = line_raw.strip()
+            if not line: continue
 
-                # 🚀 核心判定：如果是 JSON 指令
-                if line.startswith('{"type":') and line.endswith('}'):
-                    # 触发调试打印，确认 IDE 接收到了
-                    print(f"🎯 [IDE 拦截指令]: {line}") 
-                    self.instruction_received.emit(line)
-                else:
-                    # 普通日志（比如用户的 print 或 引擎的启动提示）
-                    self.append_text(line_raw)
-
-        # 2. 读取标准错误
-        data_err = self.process.readAllStandardError().data()
-        if data_err:
-            err_text = data_err.decode('utf-8', errors='replace')
-            self.append_text(f"[ERROR] {err_text}")
+            if line.startswith('{"type":') and line.endswith('}'):
+                # 🚀 删除了 DEBUG 打印，直接发送信号
+                self.instruction_received.emit(line)
+            else:
+                self.append_text(line_raw)
 
     def append_text(self, text):
         """线程安全地将文本添加到 UI (兼容 QPlainTextEdit)"""
@@ -109,15 +92,18 @@ class ConsoleManager(QObject):
         self.output.moveCursor(QTextCursor.End)
         
         # 🚀 兼容性修复：QPlainTextEdit 使用 appendPlainText
-        # 如果你想保持简单的格式，直接用这个
         self.output.appendPlainText(text.strip('\r\n'))
         
         # 确保自动滚动
         self.output.moveCursor(QTextCursor.End)
 
     def handle_stderr(self):
-        """处理实时错误输出"""
-        self._pull_output()
+        """专门处理错误流，避免 Stdout 和 Stderr 混淆"""
+        data_err = self.process.readAllStandardError().data()
+        if data_err:
+            text = data_err.decode('utf-8', errors='replace')
+            # 🚀 保持错误信息在控制台的醒目显示
+            self.append_text(f"❌ [ERROR] {text}")
 
     def _on_process_finished(self):
         if hasattr(self, 'pull_timer'):

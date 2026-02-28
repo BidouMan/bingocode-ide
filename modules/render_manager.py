@@ -4,6 +4,7 @@ from PySide6.QtGui import QPainter, QPixmap, QColor, QFont, QBrush,QTransform,QP
 from PySide6.QtCore import Qt,QObject, QEvent
 
 
+
 class RenderManager(QObject):
     def __init__(self, view_instance,app_controller=None):
         super().__init__()
@@ -16,7 +17,14 @@ class RenderManager(QObject):
         self.layer_counter = 0  # 🚀 用于自动生成图层的计数器
 
         # 🚀 1. 加载 HarmonyOS 字体文件
-        font_path = os.path.join("assets", "font", "HarmonyOS_Sans_SC_Regular.ttf")
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        root_dir = os.path.dirname(current_dir) 
+        
+        font_path = os.path.join(root_dir, "assets", "font", "HarmonyOS_Sans_SC_Regular.ttf")
+        
+        # 调试用（确认后可删除）：打印一下实际探测的路径
+        # print(f"DEBUG: 尝试加载字体路径: {font_path}")
+
         self.font_id = QFontDatabase.addApplicationFont(font_path)
         
         if self.font_id != -1:
@@ -98,18 +106,9 @@ class RenderManager(QObject):
             traceback.print_exc()
         
     def create_sprite(self, sprite_id, data):
-        """
-        最终完美版：处理背景缩放、自动图层递增、手动层级覆盖
-        """
         image_path = data.get("image", "")
-        print(f"🔍 [渲染器检查] 准备为 ID {sprite_id} 加载图片: {image_path}")
-        # 1. 检查文件在磁盘上是否存在
-        if not os.path.exists(image_path):
-            print(f"❌ [文件不存在] IDE 无法在路径找到文件: {image_path}")
-            return
         stype = data.get("type", "image")
         
-        # 1. 创建基础实例
         item = None
         if stype == "rect":
             item = QGraphicsRectItem(0, 0, data.get("width", 50), data.get("height", 50))
@@ -121,76 +120,74 @@ class RenderManager(QObject):
             item.setBrush(QBrush(QColor(data.get("color", "#0000FF"))))
             item.setPen(Qt.NoPen)
         else:
-            if not os.path.exists(image_path):
-                print(f"❌ [渲染器错误] 文件不存在: {image_path}")
             pixmap = QPixmap(image_path)
             if not pixmap.isNull():
-                print(f"✅ [加载成功] 图片尺寸: {pixmap.width()}x{pixmap.height()}")
                 item = QGraphicsPixmapItem(pixmap)
-                # 设置旋转中心为图片中心
                 item.setTransformOriginPoint(pixmap.width()/2, pixmap.height()/2)
-            else:
-                print(f"❌ [渲染器错误] QPixmap 加载失败: {image_path}")
-        if not item:
-            return
 
-        # 2. 基础登记
+        if not item: return
+
         self.sprites[sprite_id] = item
         self.scene.addItem(item)
-        print(f"🚀 [场景对象] 已添加 Item 到场景，当前场景内对象总数: {len(self.scene.items())}")
-        # 3. 核心层级与类型特殊处理
-        if stype == "background":
-            # --- 背景特殊逻辑 ---
-            item.setZValue(-1000)      # 强制最底层
-            item.setEnabled(False)     # 禁用交互，提升性能
-            
-            # 执行背景自动填充 (Center Crop 逻辑)
-            if isinstance(item, QGraphicsPixmapItem):
-                rect = item.pixmap().rect()
-                if not rect.isEmpty():
-                    sw = 640 / rect.width()
-                    sh = 480 / rect.height()
-                    item.setScale(max(sw, sh)) 
-        
-        else:
-            # --- 普通角色层级逻辑 ---
-            if "layer" in data:
-                # 如果学生代码里写了 b.layer = 10，优先使用手动值
-                item.setZValue(data["layer"])
-            else:
-                # 默认按创建顺序递增，确保后创建的在上面
-                self.layer_counter += 1
-                item.setZValue(self.layer_counter)
 
-        # 4. 最后应用坐标、缩放、旋转等基础属性
+        if stype == "background":
+            item.setZValue(-1000)
+            item.setEnabled(False)
+            if isinstance(item, QGraphicsPixmapItem):
+                r = item.pixmap().rect()
+                if not r.isEmpty():
+                    item.setScale(max(640/r.width(), 480/r.height())) 
+        else:
+            self.layer_counter += 1
+            item.setZValue(data.get("layer", self.layer_counter))
+
         self.update_sprite(sprite_id, data)
 
     def update_sprite(self, sprite_id, data):
+        """
+        优化后的更新逻辑：统一变换矩阵，确保旋转、缩放、镜像和气泡同步正常工作
+        """
         item = self.sprites.get(sprite_id)
         if not item:
             return
 
-        # --- 1. 原有的变换逻辑 (保持不变) ---
+        # 1. 基础属性获取 (优先从 data 取，取不到则保持当前状态)
         rect = item.boundingRect()
         w, h = rect.width(), rect.height()
+        
+        # 核心坐标：data 传的是中心点坐标
         x = data.get("x", item.x() + w/2)
         y = data.get("y", item.y() + h/2)
-        angle = data.get("angle", item.rotation())
+        
+        # 旋转与缩放
+        angle = data.get("angle", getattr(item, '_last_angle', 0.0))
+        scale = data.get("scale", getattr(item, '_last_scale', 1.0))
         sx = data.get("scale_x", getattr(item, '_last_sx', 1.0))
         sy = data.get("scale_y", getattr(item, '_last_sy', 1.0))
+
+        # 缓存当前状态以便下次增量更新
+        item._last_angle = angle
+        item._last_scale = scale
         item._last_sx = sx
         item._last_sy = sy
 
+        # 2. 🚀 统一变换矩阵 (处理 旋转 + 缩放 + 镜像)
+        # 我们绕着 boundingRect 的中心进行变换
         transform = QTransform()
-        transform.translate(w / 2, h / 2)
-        transform.scale(sx, sy) 
-        transform.rotate(angle)
-        transform.translate(-w / 2, -h / 2)
+        transform.translate(w / 2, h / 2)      # 移到中心
+        transform.scale(sx * scale, sy * scale) # 应用镜像缩放和整体缩放
+        transform.rotate(angle)                # 应用旋转
+        transform.translate(-w / 2, -h / 2)     # 移回原点
 
         item.setTransform(transform)
+        
+        # 注意：使用了 Transform 后，不要再直接用 setRotation，否则会叠加
         item.setRotation(0) 
-        item.setPos(x - w / 2, y - h / 2) # 修正了你代码中 y/2 的潜在小错误
+        
+        # 设置位置：将逻辑中心点对齐到物理左上角
+        item.setPos(x - w / 2, y - h / 2)
 
+        # 3. 辅助属性更新
         if "visible" in data:
             item.setVisible(data["visible"])
         if "layer" in data:
@@ -198,11 +195,11 @@ class RenderManager(QObject):
         if "opacity" in data:
             item.setOpacity(data["opacity"])
 
-        # --- 2. 🚀 关键：在这里同步气泡位置 ---
+        # 4. 🚀 气泡同步更新
         if hasattr(item, "_bubble"):
             bubble = item._bubble
             if bubble.scene() and bubble.isVisible():
-                # 只有当气泡在场景中且可见时才更新
+                # 调用你现有的气泡调整逻辑
                 self._adjust_bubble_size(bubble, bubble._text_obj, item)
 
     def remove_sprite(self, sprite_id):
