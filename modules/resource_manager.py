@@ -1,6 +1,6 @@
 import os
 from PySide6.QtCore import QObject, Qt, QSize
-from PySide6.QtWidgets import QListWidgetItem, QStyle
+from PySide6.QtWidgets import QListWidgetItem, QStyle,QMenu, QMessageBox
 from PySide6.QtGui import QIcon,QFont,QFontDatabase
 from PySide6.QtSvg import QSvgRenderer
 
@@ -37,6 +37,10 @@ class ResourceManager(QObject):
         """精修：打造传统的单列纵向 Outline 列表"""
         lw = self.ui.list_code
         if not lw: return
+
+        # 🚀 开启右键菜单策略
+        lw.setContextMenuPolicy(Qt.CustomContextMenu)
+        lw.customContextMenuRequested.connect(self.show_context_menu)
 
         # 🚀 关键：切回 ListMode (确保单列自上而下)
         lw.setViewMode(lw.ViewMode.ListMode) 
@@ -167,3 +171,66 @@ class ResourceManager(QObject):
         # 🚀 确认文件存在后，通知 controller 打开文件
         if os.path.exists(full_path):
             self.app_controller.open_file_in_editor(full_path)
+    
+    def show_context_menu(self, pos):
+        """弹出右键菜单"""
+        item = self.ui.list_code.itemAt(pos)
+        if not item:
+            return
+
+        # 创建菜单
+        menu = QMenu(self.window)
+        # 简单美化菜单样式（你可以根据需要调整）
+        menu.setStyleSheet("QMenu { background-color: #2D2D2D; color: white; border: 1px solid #555; } "
+                           "QMenu::item:selected { background-color: #3F3F3F; }")
+        
+        action_delete = menu.addAction("删除文件")
+        
+        # 在鼠标位置弹出菜单
+        action = menu.exec_(self.ui.list_code.mapToGlobal(pos))
+
+        if action == action_delete:
+            self.handle_delete_file(item.text())
+    
+    def handle_delete_file(self, file_name):
+        """处理删除逻辑"""
+        project_root = self.app_controller.project_manager.project_root
+        full_path = os.path.join(project_root, file_name)
+
+        # 1. 弹出确认对话框
+        reply = QMessageBox.question(
+            self.window, 
+            '确认删除', 
+            f"你确定要永久删除文件 '{file_name}' 吗？\n此操作不可撤销。",
+            QMessageBox.Yes | QMessageBox.No, 
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            try:
+                # 2. 物理删除文件
+                if os.path.exists(full_path):
+                    os.remove(full_path)
+                
+                # 3. 🚀 关键逻辑：如果该文件在编辑器里开着，得通知 EditorManager 关闭它
+                self.close_editor_if_open(full_path)
+                
+                # 4. 刷新列表
+                self.refresh_code_list()
+                print(f"成功删除文件: {full_path}")
+                
+            except Exception as e:
+                QMessageBox.critical(self.window, "错误", f"删除失败: {e}")
+
+    def close_editor_if_open(self, file_path):
+        """检查编辑器是否打开了该文件，如果是则关闭对应的 Tab"""
+        em = self.app_controller.editor_manager
+        # 规范化路径用于对比
+        target_path = os.path.normpath(file_path)
+        
+        for i in range(em.stacked.count()):
+            editor = em.stacked.widget(i)
+            if hasattr(editor, 'file_path') and os.path.normpath(editor.file_path) == target_path:
+                # 调用你 editor_manager 里现成的 close_tab 方法
+                em.close_tab(i)
+                break
