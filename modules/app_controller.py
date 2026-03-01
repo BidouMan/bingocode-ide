@@ -265,6 +265,9 @@ class AppController:
         # 3. 确保所有项目改动已尝试保存（可选）
         # self.handle_save_project()
 
+    def open_file_in_editor(self, file_path):
+        """统一的打开文件入口"""
+        self.editor_manager.logic_open_file(file_path)
 
     def _handle_qt_key_press(self, event):
         if event.isAutoRepeat(): return 

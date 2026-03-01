@@ -325,3 +325,30 @@ class EditorManager(QObject):
                 else:
                     success = False
         return success
+
+    def logic_open_file(self, file_path):
+        """
+        逻辑打开文件：
+        1. 检查文件是否已在 Tab 中打开
+        2. 如果已打开，直接切换 Index
+        3. 如果未打开，读取磁盘内容并创建新 Tab
+        """
+        # 🚀 步骤 1: 遍历所有已打开的编辑器，检查路径
+        for i in range(self.stacked.count()):
+            editor = self.stacked.widget(i)
+            if hasattr(editor, 'file_path') and os.path.normpath(editor.file_path) == os.path.normpath(file_path):
+                # 找到已打开的文件，直接切换并返回
+                self.tabs.setCurrentIndex(i)
+                self.stacked.setCurrentIndex(i)
+                return
+
+        # 🚀 步骤 2: 如果没找到，则从磁盘读取并创建
+        try:
+            if os.path.exists(file_path):
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                # 使用你已有的 create_new_tab 方法
+                self.create_new_tab(file_path, content, auto_activate=True)
+        except Exception as e:
+            print(f"打开文件失败: {e}")

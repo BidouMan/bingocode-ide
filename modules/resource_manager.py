@@ -21,11 +21,17 @@ class ResourceManager(QObject):
         }
 
         self.setup_list_styles()
+        
+        
+        # 绑定信号
         self.bind_switch_page()
+        self.ui.list_code.itemDoubleClicked.connect(self.on_code_item_double_clicked)
         
         # 初始显示
         self.ui.outline_stracked.setCurrentWidget(self.ui.page_code)
         self.refresh_code_list()
+
+        
 
     def setup_list_styles(self):
         """精修：打造传统的单列纵向 Outline 列表"""
@@ -147,3 +153,17 @@ class ResourceManager(QObject):
                 family_name = QFontDatabase.applicationFontFamilies(font_id)[0]
                 return family_name
         return "Arial" # 如果加载失败，回退到 Arial
+    
+    def on_code_item_double_clicked(self, item):
+        """双击代码列表项时触发"""
+        file_name = item.text()
+        project_root = self.app_controller.project_manager.project_root
+        
+        if not project_root:
+            return
+            
+        full_path = os.path.join(project_root, file_name)
+        
+        # 🚀 确认文件存在后，通知 controller 打开文件
+        if os.path.exists(full_path):
+            self.app_controller.open_file_in_editor(full_path)
