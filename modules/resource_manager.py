@@ -84,6 +84,9 @@ class ResourceManager(QObject):
 
     def refresh_code_list(self):
         """扫描物理目录并填充代码列表"""
+        # 🚀 增加保护：如果 UI 还没初始化或者 list_code 被销毁，直接返回
+        if not hasattr(self.ui, 'list_code') or self.ui.list_code is None:
+            return
         self.ui.list_code.clear()
         
         # 获取路径 (注意适配你 ProjectManager 里的属性名)

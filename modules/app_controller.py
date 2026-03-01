@@ -128,7 +128,7 @@ class AppController:
 
         if success:
             self.editor_manager._clear_initial_state()
-            
+            self.res_manager.refresh_code_list()
             # 2. 获取目录下所有 py 文件
             all_files = [f for f in os.listdir(target_dir) 
                          if f.endswith(".py") and not f.startswith(".")
@@ -235,6 +235,7 @@ class AppController:
             self.render_manager.reset_session()
         # 1. 运行前全量保存（确保所有标签页的改动都进硬盘了）
         self.handle_save_project()
+        self.res_manager.refresh_code_list()
         self.ui.game_view.setFocus()
         # 2. 获取当前的动态入口
         run_path = self.project_manager.get_run_target()
