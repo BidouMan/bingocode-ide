@@ -754,7 +754,7 @@
                  <number>0</number>
                 </property>
                 <item>
-                 <widget class="QPushButton" name="btn_outline_bg">
+                 <widget class="QPushButton" name="btn_outline_code">
                   <property name="text">
                    <string>代码</string>
                   </property>
@@ -804,7 +804,7 @@
                  </widget>
                 </item>
                 <item>
-                 <widget class="QPushButton" name="btn_outline_code">
+                 <widget class="QPushButton" name="btn_outline_bg">
                   <property name="text">
                    <string>场景</string>
                   </property>
@@ -892,9 +892,9 @@
                    </size>
                   </property>
                   <property name="currentIndex">
-                   <number>0</number>
+                   <number>1</number>
                   </property>
-                  <widget class="QWidget" name="page_2">
+                  <widget class="QWidget" name="page_sprite">
                    <layout class="QVBoxLayout" name="verticalLayout_12">
                     <item>
                      <widget class="QFrame" name="sprite_page_frame">
@@ -932,7 +932,7 @@
                     </item>
                    </layout>
                   </widget>
-                  <widget class="QWidget" name="page_3">
+                  <widget class="QWidget" name="page_map">
                    <layout class="QVBoxLayout" name="verticalLayout_13">
                     <item>
                      <widget class="QFrame" name="map_page_frame">
@@ -959,7 +959,7 @@
                     </item>
                    </layout>
                   </widget>
-                  <widget class="QWidget" name="page_4">
+                  <widget class="QWidget" name="page_sound">
                    <layout class="QVBoxLayout" name="verticalLayout_14">
                     <item>
                      <widget class="QFrame" name="sound_page_frame">
@@ -986,8 +986,20 @@
                     </item>
                    </layout>
                   </widget>
-                  <widget class="QWidget" name="page_1">
+                  <widget class="QWidget" name="page_code">
                    <layout class="QVBoxLayout" name="verticalLayout_9">
+                    <property name="leftMargin">
+                     <number>0</number>
+                    </property>
+                    <property name="topMargin">
+                     <number>0</number>
+                    </property>
+                    <property name="rightMargin">
+                     <number>0</number>
+                    </property>
+                    <property name="bottomMargin">
+                     <number>0</number>
+                    </property>
                     <item>
                      <widget class="QFrame" name="code_page_frame">
                       <property name="frameShape">
@@ -996,19 +1008,23 @@
                       <property name="frameShadow">
                        <enum>QFrame::Shadow::Raised</enum>
                       </property>
-                      <widget class="QLabel" name="label">
-                       <property name="geometry">
-                        <rect>
-                         <x>20</x>
-                         <y>10</y>
-                         <width>58</width>
-                         <height>16</height>
-                        </rect>
+                      <layout class="QVBoxLayout" name="verticalLayout_16">
+                       <property name="leftMargin">
+                        <number>4</number>
                        </property>
-                       <property name="text">
-                        <string>代码页面</string>
+                       <property name="topMargin">
+                        <number>4</number>
                        </property>
-                      </widget>
+                       <property name="rightMargin">
+                        <number>4</number>
+                       </property>
+                       <property name="bottomMargin">
+                        <number>4</number>
+                       </property>
+                       <item>
+                        <widget class="QListWidget" name="list_code"/>
+                       </item>
+                      </layout>
                      </widget>
                     </item>
                    </layout>

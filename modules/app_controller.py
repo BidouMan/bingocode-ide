@@ -33,7 +33,7 @@ class AppController:
         self.stage_height = 480  
         
         # 整理过的模块
-        self.project_manager = ProjectManager()
+        self.project_manager = ProjectManager() # 这个必须要第一个实例化
         self.file_manager = FileManager(self.window)
         self.console_manager = ConsoleManager(self.ui.splitter, self.ui.console_output)        
         self.menu_manager = MenuManager(main_window)
@@ -42,7 +42,7 @@ class AppController:
         self.tabbar_manager = TabbarManager(self.ui.tab_frame)
         self.editor_manager = EditorManager(self.ui.code_stacked, self.tabbar_manager, self.project_manager)
         self.script_runner = ScriptRunner(self)
-        self.res_manager = ResourceManager(self.ui,self.window)       
+        self.res_manager = ResourceManager(self.ui,self.window,self)       
      
         #4. 绑定信号 (保持原有业务连接)
         self.setup_connections()
@@ -98,10 +98,10 @@ class AppController:
         
         self.res_manager.bind_switch_page()
 
-        menu_ui = self.res_manager.upload_menu.ui
-        menu_ui.btn_sprite.clicked.connect(self.res_manager.import_sprite_dialog)
-        menu_ui.btn_bg.clicked.connect(lambda: print("点击了上传背景"))
-        menu_ui.btn_sound.clicked.connect(lambda: print("点击了上传声音"))
+        # menu_ui = self.res_manager.upload_menu.ui
+        # menu_ui.btn_sprite.clicked.connect(self.res_manager.import_sprite_dialog)
+        # menu_ui.btn_bg.clicked.connect(lambda: print("点击了上传背景"))
+        # menu_ui.btn_sound.clicked.connect(lambda: print("点击了上传声音"))
     
 
     def handle_new_project(self):
@@ -235,7 +235,7 @@ class AppController:
             self.render_manager.reset_session()
         # 1. 运行前全量保存（确保所有标签页的改动都进硬盘了）
         self.handle_save_project()
-        
+        self.ui.game_view.setFocus()
         # 2. 获取当前的动态入口
         run_path = self.project_manager.get_run_target()
         

@@ -1,109 +1,146 @@
-from PySide6.QtCore import QObject, Qt,QSize
-from PySide6.QtWidgets import QListWidgetItem, QFileDialog 
-from PySide6.QtGui import QIcon,QPixmap,QPainter
 import os
-
-
-from modules.upload_menu_manager import UploadMenuManager
+from PySide6.QtCore import QObject, Qt, QSize
+from PySide6.QtWidgets import QListWidgetItem, QStyle
+from PySide6.QtGui import QIcon,QFont,QFontDatabase
+from PySide6.QtSvg import QSvgRenderer
 
 class ResourceManager(QObject):
-    def __init__(self, main_ui, parent_window):
+    def __init__(self, main_ui, parent_window, app_controller):
         super().__init__()
         self.ui = main_ui
         self.window = parent_window
-        
-        # 1. 映射表：将按钮对象与对应的页面对象关联
+        self.app_controller = app_controller
+        self.custom_font_family = self.load_custom_font()
+
+        # 修正映射：btn_outline_bg 文字是“代码”
         self.nav_map = {
-            self.ui.btn_outline_code: self.ui.page_1,
-            self.ui.btn_outline_sprite: self.ui.page_2,
-            self.ui.btn_outline_bg: self.ui.page_3,
-            self.ui.btn_outline_sound: self.ui.page_4
+            self.ui.btn_outline_code: self.ui.page_code,      
+            self.ui.btn_outline_sprite: self.ui.page_sprite, 
+            self.ui.btn_outline_bg: self.ui.page_map,     
+            self.ui.btn_outline_sound: self.ui.page_sound   
         }
 
-        self.upload_menu = UploadMenuManager(self.ui.sprite_page_frame)
+        self.setup_list_styles()
+        self.bind_switch_page()
         
-        # 初始化界面
-        self.ui.outline_stracked.setCurrentWidget(self.ui.page_1)
+        # 初始显示
+        self.ui.outline_stracked.setCurrentWidget(self.ui.page_code)
+        self.refresh_code_list()
 
-    
+    def setup_list_styles(self):
+        """精修：打造传统的单列纵向 Outline 列表"""
+        lw = self.ui.list_code
+        if not lw: return
+
+        # 🚀 关键：切回 ListMode (确保单列自上而下)
+        lw.setViewMode(lw.ViewMode.ListMode) 
+        lw.setFlow(lw.Flow.TopToBottom)
+        lw.setMovement(lw.Movement.Static)
+        
+        # 🚀 调整 1：图标稍微加大，从 18 增加到 22
+        lw.setIconSize(QSize(20, 20))  
+        lw.setSpacing(4)               # 行与行之间留出一点点缝隙
+        lw.setWordWrap(False)
+        
+        # 🚀 调整 2：通过 QSS 设置更大的字体和内边距
+        # 使用普通的字符串拼接，避免三引号引起的高亮问题
+        style = (
+            "QListWidget { "
+            "   border: none; "
+            "   background: transparent; "
+            "   outline: none; "
+            "   padding: 5px; "
+            "}"
+            "QListWidget::item { "
+            "   padding: 8px 12px; "        # 🚀 增加上下内边距，让点击区域更宽阔
+            "   border-radius: 6px; "
+            "   color: #E0E0E0; "
+         
+            "}"
+            "QListWidget::item:hover { "
+            "   background-color: #3F3F3F; "
+            "}"
+            "QListWidget::item:selected { "
+            "   background-color: #4A4A4A; "
+            "   color: #FFFFFF; "
+            "   font-weight: bold; "        # 选中后加粗，视觉更突出
+            "}"
+        )
+        lw.setStyleSheet(style)
+        lw.setStyleSheet(style)
+
     def bind_switch_page(self):
-        """核心优雅点：循环绑定所有导航按钮"""
+        """绑定导航按钮"""
         for btn in self.nav_map.keys():
-            # 使用 btn=btn 捕获当前循环的变量，避免闭包陷阱
             btn.clicked.connect(lambda checked=False, b=btn: self.switch_page(b))
 
     def switch_page(self, btn):
-        """执行切换逻辑"""
+        """切换页面逻辑"""
         target_page = self.nav_map.get(btn)
         if target_page:
             self.ui.outline_stracked.setCurrentWidget(target_page)
-            print(f"ResourceManager: 切换至 {target_page.objectName()}")
-        
-        if target_page == self.ui.page_2:
-                self.upload_menu.auto_layout()
-                self.upload_menu.show()
-    
+            if target_page == self.ui.page_code:
+                self.refresh_code_list()
 
-    def add_resource_to_list(self, file_path):
-        file_name = os.path.basename(file_path)
+    def refresh_code_list(self):
+        """扫描物理目录并填充代码列表"""
+        self.ui.list_code.clear()
         
-        # --- 1. 定义标准尺寸 ---
-        standard_size = 100  # 每个图标底板的大小
+        # 获取路径 (注意适配你 ProjectManager 里的属性名)
+        project_path = self.app_controller.project_manager.project_root
         
-        # --- 2. 创建一个透明的底板 ---
-        # 这就像是在一张透明的画布上作画
-        canvas = QPixmap(standard_size, standard_size)
-        canvas.fill(Qt.transparent) # 填充透明色
-        
-        # --- 3. 加载并缩放原图 ---
-        raw_pixmap = QPixmap(file_path)
-        # 保持比例缩放，确保图片不会被拉伸变形
-        scaled_pixmap = raw_pixmap.scaled(
-            standard_size, standard_size, 
-            Qt.KeepAspectRatio, 
-            Qt.SmoothTransformation
-        )
-        
-        # --- 4. 使用 QPainter 将缩放后的图画在底板中心 ---
-        painter = QPainter(canvas)
-        # 计算居中坐标： (画布宽 - 图片宽) / 2
-        x = (standard_size - scaled_pixmap.width()) // 2
-        y = (standard_size - scaled_pixmap.height()) // 2
-        painter.drawPixmap(x, y, scaled_pixmap)
-        painter.end() # 结束绘画
-        
-        # --- 5. 生成 Item ---
-        item = QListWidgetItem(file_name)
-        item.setIcon(QIcon(canvas)) # 关键：使用的是那个带透明底板的 canvas
-        item.setTextAlignment(Qt.AlignCenter)
-        
-        self.ui.list_sprite.addItem(item)
-    
-    def import_sprite_dialog(self):
-        """逻辑：弹出对话框并处理导入"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self.window,
-            "选择角色图片",
-            "",
-            "Image Files (*.png *.jpg *.jpeg *.bmp *.gif)"
-        )
-        
-        if file_path:
-            self.add_resource_to_list(file_path)
-    
-    # modules/resource_manager.py
+        if not project_path or not os.path.exists(project_path):
+            return
 
-def setup_list_style(self):
-    list_widget = self.ui.list_sprite
+        try:
+            # 过滤 py 文件并排序
+            files = [f for f in os.listdir(project_path) if f.endswith('.py') and not f.startswith('.')]
+            files.sort(key=lambda x: (x != "main.py", x.lower()))
+            
+            for file_name in files:
+                self._add_code_item(file_name)
+        except Exception as e:
+            print(f"刷新列表失败: {e}")
+
+    def _add_code_item(self, name):
+        """添加传统的行式条目"""
+        item = QListWidgetItem(name)
+        
+        # 1. 🚀 获取 SVG 图标路径
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        icon_path = os.path.join(base_dir, "assets", "icons", "python_file_1.svg")
+
+        # 2. 🚀 使用 QIcon 加载 SVG
+        # Qt 会自动识别 .svg 后缀并进行矢量渲染
+        if os.path.exists(icon_path):
+            icon = QIcon(icon_path)
+        else:
+            icon = self.window.style().standardIcon(QStyle.SP_FileIcon)
+
+        item.setIcon(icon)
+
+        # 3. 🚀 关键：除了 QSS，直接给 Item 对象设置字体 (这是最强效的)
+        font = QFont(self.custom_font_family)
+        font.setPointSize(16) # 🚀 直接设置字体大小为 18pt (相当于 24px 左右)
+        font.setWeight(QFont.Medium)
+        item.setFont(font)
+        
+        # icon = self.window.style().standardIcon(QStyle.SP_FileIcon)
+        # item.setIcon(icon)
+        
+        # 4. 🚀 必须给足高度！如果字体 24px，高度至少要 60px 才协调
+        item.setSizeHint(QSize(0, 32))         
+        self.ui.list_code.addItem(item)
     
-    # 网格大小要比图标底板大一些，留给文字空间
-    # 宽度 120 (留 10 左右边距), 高度 140 (留 40 给文字)
-    list_widget.setGridSize(QSize(120, 140))
-    
-    # 必须匹配上面代码里的 standard_size
-    list_widget.setIconSize(QSize(100, 100))
-    
-    list_widget.setSpacing(10)
-    list_widget.setViewMode(list_widget.ViewMode.IconMode)
-    list_widget.setResizeMode(list_widget.ResizeMode.Adjust)
-    list_widget.setMovement(list_widget.Movement.Static)
+    def load_custom_font(self):
+        """加载 assets/font 下的鸿蒙字体"""
+        # 获取字体文件的绝对路径
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        font_path = os.path.join(base_path, "assets", "font", "HarmonyOS_Sans_SC_Regular.ttf") # 🚀 确认你的文件名
+        
+        if os.path.exists(font_path):
+            font_id = QFontDatabase.addApplicationFont(font_path)
+            if font_id != -1:
+                family_name = QFontDatabase.applicationFontFamilies(font_id)[0]
+                return family_name
+        return "Arial" # 如果加载失败，回退到 Arial
