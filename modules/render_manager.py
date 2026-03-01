@@ -186,6 +186,10 @@ class RenderManager(QObject):
         
         # 设置位置：将逻辑中心点对齐到物理左上角
         item.setPos(x - w / 2, y - h / 2)
+        item._vox = data.get("vox", getattr(item, '_vox', 0))
+        item._voy = data.get("voy", getattr(item, '_voy', 0))
+        item._raw_cw = data.get("raw_cw", getattr(item, '_raw_cw', 0))
+        item._raw_ch = data.get("raw_ch", getattr(item, '_raw_ch', 0))
 
         # 3. 辅助属性更新
         if "visible" in data:
@@ -279,49 +283,83 @@ class RenderManager(QObject):
         self._adjust_bubble_size(existing_bubble, existing_bubble._text_obj, parent_item)
     
     def _adjust_bubble_size(self, bubble, text_item, parent_item):
-        # 1. 基础尺寸设置
-        t_rect = text_item.boundingRect()
-        padding = 10
-        radius = 12
-        arrow_h = 10    # 箭头高度
-        arrow_w = 8     # 🚀 箭头宽度（张嘴宽度变小）
-        arrow_x = 12    # 🚀 箭头在底部的起点位置（更靠左）
+        """
+        最终校准版：解决穿帮、解决距离过远、复现 Scratch 逻辑
+        """
+        # --- 1. 获取物理属性 (从缓存读取) ---
+        vox = getattr(parent_item, '_vox', 0)
+        voy = getattr(parent_item, '_voy', 0)
+        raw_cw = getattr(parent_item, '_raw_cw', 0)
+        raw_ch = getattr(parent_item, '_raw_ch', 0)
+        sx = getattr(parent_item, '_last_sx', 1.0)
+        sy = getattr(parent_item, '_last_sy', 1.0)
+        
+        # 🚀 计算角色在 Scene 里的物理中心 (考虑到 QGraphicsPixmapItem 默认是以左上角 setPos)
+        # 修正：parent_item.x() 是左上角，加上半宽才是中心
+        pw, ph = parent_item.pixmap().width(), parent_item.pixmap().height()
+        base_cx = parent_item.x() + pw / 2
+        base_cy = parent_item.y() + ph / 2
 
-        bw = max(t_rect.width() + padding * 2, 50)
+        # 🚀 计算内容（画中人）的真实视觉中心 (补偿偏移量)
+        # scx, scy 是“画中人”在屏幕上的像素坐标
+        scx = base_cx + (vox * abs(sx))
+        scy = base_cy + (voy * abs(sy))
+        
+        # 当前缩放下的视觉半高 (用于找头顶)
+        v_hh = (raw_ch * abs(sy)) / 2.0
+        v_hw = (raw_cw * abs(sx)) / 2.0
+
+        # --- 2. 气泡尺寸与路径绘制 (修复穿帮) ---
+        padding, radius, arrow_h, arrow_w = 12, 12, 12, 15
+        t_rect = text_item.boundingRect()
+        bw = max(t_rect.width() + padding * 2, 60)
         bh = t_rect.height() + padding * 2
         
-        # 2. 构建单轨迹路径
+        # 判定是否翻转 (Scratch 逻辑：大角色且镜像时翻转气泡)
+        is_flipped = (sx < 0) and (raw_cw * abs(sx) > 100)
+        arrow_x = bw - 30 if is_flipped else 15 # 箭头在底部的起点
+
         path = QPainterPath()
-        
-        # --- 顺时针绘制矩形轮廓 ---
         path.moveTo(radius, 0)
         path.lineTo(bw - radius, 0)
-        path.arcTo(bw - radius*2, 0, radius*2, radius*2, 90, -90) # 右上
+        path.arcTo(bw - radius*2, 0, radius*2, radius*2, 90, -90)
         path.lineTo(bw, bh - radius)
-        path.arcTo(bw - radius*2, bh - radius*2, radius*2, radius*2, 0, -90) # 右下
+        path.arcTo(bw - radius*2, bh - radius*2, radius*2, radius*2, 0, -90)
         
-        # --- 底部连线 + 小尾巴 ---
-        # 此时画笔在右下角弧线终点 (bw - radius, bh)
-        # 连线到箭头的右侧位置
-        path.lineTo(arrow_x + arrow_w, bh) 
-        path.lineTo(arrow_x, bh + arrow_h)   # 🚀 箭头尖端（左侧倾斜效果）
-        path.lineTo(arrow_x, bh)            # 回到底部边线
-        # -----------------------
-        
+        # 底部：一笔画出小尾巴，防止穿帮
+        if is_flipped:
+            path.lineTo(arrow_x + arrow_w, bh)
+            path.lineTo(arrow_x + arrow_w + 5, bh + arrow_h) # 略微向外倾斜
+            path.lineTo(arrow_x, bh)
+        else:
+            path.lineTo(arrow_x + arrow_w, bh)
+            path.lineTo(arrow_x - 5, bh + arrow_h) # 向左指
+            path.lineTo(arrow_x, bh)
+
         path.lineTo(radius, bh)
-        path.arcTo(0, bh - radius*2, radius*2, radius*2, 270, -90) # 左下
+        path.arcTo(0, bh - radius*2, radius*2, radius*2, 270, -90)
         path.lineTo(0, radius)
-        path.arcTo(0, 0, radius*2, radius*2, 180, -90) # 左上
+        path.arcTo(0, 0, radius*2, radius*2, 180, -90)
         path.closeSubpath()
         
         bubble.setPath(path)
         text_item.setPos(padding, padding)
 
-        # 3. 定位对齐
-        p_rect = parent_item.sceneBoundingRect()
-        # 适当微调 target_x 让气泡整体向左移，让小尾巴更精准地指在角色上方
-        target_x = p_rect.right() - 50 
-        target_y = p_rect.top() - bh - arrow_h + 15
+        # --- 3. 最终定位 (紧贴头顶) ---
+        # 锚点定在角色视觉边缘
+        if is_flipped:
+            target_x = scx - v_hw - (bw - 30)+10
+        else:
+            target_x = scx + v_hw -10
+            
+        # y 坐标：视觉头顶 - 气泡高 - 箭头高 + 5像素缓冲 (防止完全贴死)
+        target_y = (scy - v_hh) - bh - arrow_h +5
+
+        # --- 4. 边界保护 ---
+        if target_x < 10: target_x = 10
+        if target_x + bw > 630: target_x = 630 - bw
+        if target_y < 10: target_y = 10
+
         bubble.setPos(target_x, target_y)
 
     def eventFilter(self, obj, event):

@@ -62,7 +62,11 @@ class Sprite:
             "y": self._y,
             "angle": self._angle,
             "scale_x": 1.0, 
-            "type": "image"
+            "type": "image",
+            "vox": self._visual_offset_x,
+            "voy": self._visual_offset_y,
+            "raw_cw": self._content_w,
+            "raw_ch": self._content_h
         })
 
     # ---------- 运动模块 ----------
@@ -497,7 +501,12 @@ class Sprite:
             "y": self._y,
             "angle": display_angle,
             "scale_x": final_scale_x,
-            "scale_y": final_scale_y 
+            "scale_y": final_scale_y,
+            "vox": self._visual_offset_x,
+            "voy": self._visual_offset_y,
+            "cw": self._content_w,
+            "ch": self._content_h
+            
         })
 
     # ----------- 超级核心 -----------
