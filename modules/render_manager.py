@@ -212,34 +212,20 @@ class RenderManager(QObject):
             del self.sprites[sprite_id]
 
     def reset_session(self):
-        """重置会话，但不销毁系统级 UI"""
-        # 1. 只移除所有的 Sprite 角色
-        for sprite_item in self.sprites.values():
-            if sprite_item.scene(): # 确保还在场景中
-                self.scene.removeItem(sprite_item)
+        """物理重置：清空场景并重建基础 UI"""
+        self.scene.clear()       # 物理清理所有 Item
+        self.sprites.clear()     # 清空引用字典
+        self.layer_counter = 0   # 重置图层
         
-        # 2. 清空字典
-        self.sprites.clear()
-        self.layer_counter = 0
-
-        # 3. 隐藏 FPS 标签（可选，让新运行的代码自己决定是否显示）
-        if self.fps_label:
-            self.fps_label.setVisible(False)
-            self.fps_label.setPlainText("FPS: 0")
+        # 🚀 既然 scene 已经干干净净了，直接重新创建 FPS 标签即可
+        self._setup_fps_label()
     
         
-    # --- 待实现的详细功能 ---
-    def set_fps_visibility(self, data):
-        """处理 show_fps(True/False)"""
-        if data.get("action") == "show_fps":
-            visible = data.get("value", False)
-            self.fps_label.setVisible(visible)
-
     def update_fps_display(self, data):
-        """更新 FPS 文字内容和颜色"""
-        # 🚀 确保从 data 字典中提取 fps 键
-        fps_val = data.get("fps", 0) 
-        self.fps_label.setPlainText(f"FPS: {fps_val}")
+        """更新 FPS 数值"""
+        if self.fps_label:
+            fps_val = data.get("fps", 0)
+            self.fps_label.setPlainText(f"FPS: {fps_val}")
         
         # 变色逻辑保持不变
         if fps_val > 55:
@@ -248,6 +234,12 @@ class RenderManager(QObject):
             self.fps_label.setDefaultTextColor(Qt.yellow)
         else:
             self.fps_label.setDefaultTextColor(Qt.red)
+
+    def set_fps_visibility(self, data):
+        """控制 FPS 显示/隐藏"""
+        if self.fps_label:
+            visible = data.get("visible", False)
+            self.fps_label.setVisible(visible)
 
     def handle_say(self, sprite_id, text):
         if sprite_id not in self.sprites: return
@@ -281,6 +273,68 @@ class RenderManager(QObject):
 
         # 2. 强制刷新尺寸和路径
         self._adjust_bubble_size(existing_bubble, existing_bubble._text_obj, parent_item)
+    
+    
+
+    def eventFilter(self, obj, event):
+        """事件过滤器，捕获鼠标事件"""
+        if obj == self.view.viewport():
+            # 鼠标按下
+            if event.type() == event.Type.MouseButtonPress:
+                self.handle_mouse_press(event)
+                return True
+            
+            # 鼠标释放
+            elif event.type() == event.Type.MouseButtonRelease:
+                self.handle_mouse_release(event)
+                return True
+
+            elif event.type() == QEvent.MouseMove:
+                scene_pos = self.view.mapToScene(event.pos())
+                # 格式：M_MOVE:x,y
+                self.send_to_child(f"M_MOVE:{round(scene_pos.x(), 1)},{round(scene_pos.y(), 1)}")
+        
+        return super().eventFilter(obj, event)
+    
+    def handle_mouse_press(self, event):
+        """处理鼠标按下"""
+        self.view.setFocus()
+        # 🚀 发送鼠标按下消息给子进程
+        self.send_to_child("M_DOWN:")
+    
+    def handle_mouse_release(self, event):
+        """处理鼠标释放"""
+        # 🚀 发送鼠标释放消息给子进程
+        self.send_to_child("M_UP:")
+    
+    def send_to_child(self, message):
+        """发送消息到子进程"""        
+        # 🚀 使用 AppController 的 _send_to_engine 方法
+        if self.app_controller:
+            self.app_controller._send_to_engine(message)
+
+
+    def handle_audio(self, data):
+        """后续实现：播放声音"""
+        pass
+
+    def handle_camera(self, data):
+        """后续实现：镜头缩放、平移"""
+        pass
+    
+
+    # ---------- 内部函数 ----------
+    def _setup_fps_label(self):
+        """统一管理 FPS 标签的创建和样式配置"""
+        # 如果已存在（比如重新配置），先不理会，由 reset_session 统一 clear
+        self.fps_label = self.scene.addText("FPS: 0")
+        font = QFont("Arial", 24)
+        font.setBold(True)
+        self.fps_label.setFont(font)
+        self.fps_label.setDefaultTextColor(Qt.green)
+        self.fps_label.setZValue(9999) 
+        self.fps_label.setPos(10, 10)
+        self.fps_label.setVisible(False) # 默认隐藏
     
     def _adjust_bubble_size(self, bubble, text_item, parent_item):
         """
@@ -361,49 +415,3 @@ class RenderManager(QObject):
         if target_y < 10: target_y = 10
 
         bubble.setPos(target_x, target_y)
-
-    def eventFilter(self, obj, event):
-        """事件过滤器，捕获鼠标事件"""
-        if obj == self.view.viewport():
-            # 鼠标按下
-            if event.type() == event.Type.MouseButtonPress:
-                self.handle_mouse_press(event)
-                return True
-            
-            # 鼠标释放
-            elif event.type() == event.Type.MouseButtonRelease:
-                self.handle_mouse_release(event)
-                return True
-
-            elif event.type() == QEvent.MouseMove:
-                scene_pos = self.view.mapToScene(event.pos())
-                # 格式：M_MOVE:x,y
-                self.send_to_child(f"M_MOVE:{round(scene_pos.x(), 1)},{round(scene_pos.y(), 1)}")
-        
-        return super().eventFilter(obj, event)
-    
-    def handle_mouse_press(self, event):
-        """处理鼠标按下"""
-        self.view.setFocus()
-        # 🚀 发送鼠标按下消息给子进程
-        self.send_to_child("M_DOWN:")
-    
-    def handle_mouse_release(self, event):
-        """处理鼠标释放"""
-        # 🚀 发送鼠标释放消息给子进程
-        self.send_to_child("M_UP:")
-    
-    def send_to_child(self, message):
-        """发送消息到子进程"""        
-        # 🚀 使用 AppController 的 _send_to_engine 方法
-        if self.app_controller:
-            self.app_controller._send_to_engine(message)
-
-
-    def handle_audio(self, data):
-        """后续实现：播放声音"""
-        pass
-
-    def handle_camera(self, data):
-        """后续实现：镜头缩放、平移"""
-        pass

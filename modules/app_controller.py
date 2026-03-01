@@ -231,6 +231,8 @@ class AppController:
 
     def handle_run_script(self):
         """运行脚本：完全动态捕获"""
+        if hasattr(self, 'render_manager'):
+            self.render_manager.reset_session()
         # 1. 运行前全量保存（确保所有标签页的改动都进硬盘了）
         self.handle_save_project()
         

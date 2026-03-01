@@ -576,15 +576,14 @@ def key_down(key):
     return str(key).lower() in _PRESSED_KEYS
 
 def show_fps(visible=True):
+    """学生调用的接口"""
     global _SHOW_FPS
     _SHOW_FPS = visible
     packet = {
         "type": "UI_COMMAND",
-        "data": {"action": "show_fps", "value": visible}
+        "data": {"visible": visible}
     }
-    # 🚀 使用 sys.stdout.write 配合 \n 更加底层稳健
-    sys.stdout.write(json.dumps(packet) + "\n")
-    sys.stdout.flush()
+    print(json.dumps(packet), flush=True)
 
 def set_background(image_name):
     """
@@ -612,15 +611,13 @@ def set_background(image_name):
 # ---------- 内部函数 ----------
 
 def _send_fps_to_ide(fps):
+    """内部统计并发送 FPS 数值"""
     packet = {
         "type": "FPS_UPDATE",
         "data": {"fps": round(fps, 1)}
     }
-    # 🚀 明确发送到标准输出
     print(json.dumps(packet), flush=True)
 
-
-# bingo_engine.py
 
 def run():
     global _PERF_STATS,_MOUSE_STATE
