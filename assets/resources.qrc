@@ -32,5 +32,8 @@
     <file>icons/error_3.svg</file>
     <file>icons/error_1.svg</file>
     <file>icons/icon--unfullscreen.svg</file>
+    <file>icons/python_file_1.svg</file>
+    <file>icons/icon--delete.svg</file>
+    <file>font/HarmonyOS_Sans_SC_Regular.ttf</file>
   </qresource>
 </RCC>
