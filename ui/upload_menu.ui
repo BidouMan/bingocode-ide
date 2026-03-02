@@ -6,9 +6,21 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>400</width>
-    <height>300</height>
+    <width>70</width>
+    <height>116</height>
    </rect>
+  </property>
+  <property name="minimumSize">
+   <size>
+    <width>50</width>
+    <height>50</height>
+   </size>
+  </property>
+  <property name="maximumSize">
+   <size>
+    <width>70</width>
+    <height>116</height>
+   </size>
   </property>
   <property name="windowTitle">
    <string>Form</string>
@@ -29,10 +41,10 @@
    <property name="bottomMargin">
     <number>0</number>
    </property>
-   <item>
+   <item alignment="Qt::AlignmentFlag::AlignBottom">
     <widget class="QFrame" name="all_frame">
      <property name="frameShape">
-      <enum>QFrame::Shape::StyledPanel</enum>
+      <enum>QFrame::Shape::NoFrame</enum>
      </property>
      <property name="frameShadow">
       <enum>QFrame::Shadow::Raised</enum>
@@ -55,6 +67,9 @@
       </property>
       <item>
        <widget class="QFrame" name="menu_frame">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
         <property name="frameShape">
          <enum>QFrame::Shape::StyledPanel</enum>
         </property>
@@ -63,7 +78,7 @@
         </property>
         <layout class="QVBoxLayout" name="verticalLayout">
          <property name="spacing">
-          <number>2</number>
+          <number>20</number>
          </property>
          <property name="leftMargin">
           <number>0</number>
@@ -101,10 +116,49 @@
         </layout>
        </widget>
       </item>
-      <item>
+      <item alignment="Qt::AlignmentFlag::AlignHCenter|Qt::AlignmentFlag::AlignVCenter">
        <widget class="QPushButton" name="btn_upload">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>50</width>
+          <height>50</height>
+         </size>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>50</width>
+          <height>50</height>
+         </size>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">QPushButton#btn_upload {
+    background-color: transparent;
+    border: none;
+    padding: 0px;
+    margin: 0px;
+}</string>
+        </property>
         <property name="text">
-         <string>上传</string>
+         <string/>
+        </property>
+        <property name="icon">
+         <iconset resource="../assets/resources.qrc">
+          <normaloff>:/icons/sprite_upload.svg</normaloff>:/icons/sprite_upload.svg</iconset>
+        </property>
+        <property name="iconSize">
+         <size>
+          <width>40</width>
+          <height>40</height>
+         </size>
+        </property>
+        <property name="flat">
+         <bool>true</bool>
         </property>
        </widget>
       </item>
@@ -113,6 +167,8 @@
    </item>
   </layout>
  </widget>
- <resources/>
+ <resources>
+  <include location="../assets/resources.qrc"/>
+ </resources>
  <connections/>
 </ui>

@@ -3,7 +3,7 @@ from PySide6.QtCore import QObject, Qt, QSize,QEvent
 from PySide6.QtWidgets import (QListWidgetItem, QStyle, QMessageBox,
                                QWidget,QHBoxLayout,QLabel,QPushButton,QListWidget)
 from PySide6.QtGui import QIcon,QFont,QFontDatabase,QCursor
-
+from modules.upload_menu_manager import UploadMenuManager
 
 class CodeItemWidget(QWidget):
     def __init__(self, file_name, icon, font, delete_callback,rename_callback, double_click_callback, parent=None):
@@ -165,6 +165,7 @@ class ResourceManager(QObject):
         self.ui.list_code.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         self.ui.outline_stracked.setCurrentWidget(self.ui.page_code)
         self.refresh_code_list()
+        self.sprite_upload_menu = UploadMenuManager(self.ui.page_sprite)
 
         
 

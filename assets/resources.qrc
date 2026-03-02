@@ -14,7 +14,6 @@
     <file>icons/help.svg</file>
     <file>icons/addons.svg</file>
     <file>icons/cancel.svg</file>
-    <file>icons/icon--file-upload.svg</file>
     <file>icons/icon--file.svg</file>
     <file>icons/icon--settings.svg</file>
     <file>icons/zoom-in.svg</file>
@@ -34,6 +33,14 @@
     <file>icons/icon--unfullscreen.svg</file>
     <file>icons/python_file_1.svg</file>
     <file>icons/icon--delete.svg</file>
+
+    <file>icons/icon--file-upload.svg</file>
+
+    <file>icons/icon--paint.svg</file>
+    <file>icons/icon--select--sprite.svg</file>
+    <file>icons/sprite_upload.svg</file>
+
+
     <file>font/HarmonyOS_Sans_SC_Regular.ttf</file>
   </qresource>
 </RCC>

@@ -369,12 +369,14 @@ class Ui_Form(object):
         self.page_sprite.setObjectName(u"page_sprite")
         self.verticalLayout_12 = QVBoxLayout(self.page_sprite)
         self.verticalLayout_12.setObjectName(u"verticalLayout_12")
+        self.verticalLayout_12.setContentsMargins(0, 0, 0, 0)
         self.sprite_page_frame = QFrame(self.page_sprite)
         self.sprite_page_frame.setObjectName(u"sprite_page_frame")
         self.sprite_page_frame.setFrameShape(QFrame.Shape.StyledPanel)
         self.sprite_page_frame.setFrameShadow(QFrame.Shadow.Raised)
         self.verticalLayout_15 = QVBoxLayout(self.sprite_page_frame)
         self.verticalLayout_15.setObjectName(u"verticalLayout_15")
+        self.verticalLayout_15.setContentsMargins(4, 4, 4, 4)
         self.list_sprite = QListWidget(self.sprite_page_frame)
         self.list_sprite.setObjectName(u"list_sprite")
         self.list_sprite.setIconSize(QSize(80, 80))
@@ -739,7 +741,7 @@ class Ui_Form(object):
         self.btn_outline_code.setDefault(False)
         self.btn_outline_sprite.setDefault(False)
         self.btn_outline_sound.setDefault(False)
-        self.outline_stracked.setCurrentIndex(1)
+        self.outline_stracked.setCurrentIndex(0)
         self.code_stacked.setCurrentIndex(-1)
 
 
@@ -749,7 +751,7 @@ class Ui_Form(object):
     def retranslateUi(self, Form):
         Form.setWindowTitle(QCoreApplication.translate("Form", u"Form", None))
         self.btn_logo.setText("")
-        self.btn_file.setText(QCoreApplication.translate("Form", u"\u6587\u4ef61", None))
+        self.btn_file.setText(QCoreApplication.translate("Form", u"\u6587\u4ef6", None))
         self.btn_edit.setText(QCoreApplication.translate("Form", u"\u7f16\u8f91", None))
         self.btn_tool.setText(QCoreApplication.translate("Form", u"\u63d2\u4ef6", None))
         self.btn_setting.setText(QCoreApplication.translate("Form", u"\u8bbe\u7f6e", None))

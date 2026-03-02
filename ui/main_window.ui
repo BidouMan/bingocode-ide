@@ -185,7 +185,7 @@
              </size>
             </property>
             <property name="text">
-             <string>文件1</string>
+             <string>文件</string>
             </property>
             <property name="icon">
              <iconset resource="../assets/resources.qrc">
@@ -892,10 +892,22 @@
                    </size>
                   </property>
                   <property name="currentIndex">
-                   <number>1</number>
+                   <number>0</number>
                   </property>
                   <widget class="QWidget" name="page_sprite">
                    <layout class="QVBoxLayout" name="verticalLayout_12">
+                    <property name="leftMargin">
+                     <number>0</number>
+                    </property>
+                    <property name="topMargin">
+                     <number>0</number>
+                    </property>
+                    <property name="rightMargin">
+                     <number>0</number>
+                    </property>
+                    <property name="bottomMargin">
+                     <number>0</number>
+                    </property>
                     <item>
                      <widget class="QFrame" name="sprite_page_frame">
                       <property name="frameShape">
@@ -905,6 +917,18 @@
                        <enum>QFrame::Shadow::Raised</enum>
                       </property>
                       <layout class="QVBoxLayout" name="verticalLayout_15">
+                       <property name="leftMargin">
+                        <number>4</number>
+                       </property>
+                       <property name="topMargin">
+                        <number>4</number>
+                       </property>
+                       <property name="rightMargin">
+                        <number>4</number>
+                       </property>
+                       <property name="bottomMargin">
+                        <number>4</number>
+                       </property>
                        <item>
                         <widget class="QListWidget" name="list_sprite">
                          <property name="iconSize">
