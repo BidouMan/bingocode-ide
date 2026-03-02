@@ -7,165 +7,235 @@
     <x>0</x>
     <y>0</y>
     <width>70</width>
-    <height>116</height>
+    <height>226</height>
    </rect>
   </property>
   <property name="minimumSize">
    <size>
     <width>50</width>
-    <height>50</height>
+    <height>226</height>
    </size>
   </property>
   <property name="maximumSize">
    <size>
     <width>70</width>
-    <height>116</height>
+    <height>16777215</height>
    </size>
   </property>
   <property name="windowTitle">
    <string>Form</string>
   </property>
-  <layout class="QVBoxLayout" name="verticalLayout_3">
-   <property name="spacing">
-    <number>0</number>
+  <widget class="QPushButton" name="btn_upload">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>176</y>
+     <width>50</width>
+     <height>50</height>
+    </rect>
    </property>
-   <property name="leftMargin">
-    <number>0</number>
+   <property name="sizePolicy">
+    <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+     <horstretch>0</horstretch>
+     <verstretch>0</verstretch>
+    </sizepolicy>
    </property>
-   <property name="topMargin">
-    <number>0</number>
+   <property name="minimumSize">
+    <size>
+     <width>50</width>
+     <height>50</height>
+    </size>
    </property>
-   <property name="rightMargin">
-    <number>0</number>
+   <property name="maximumSize">
+    <size>
+     <width>50</width>
+     <height>50</height>
+    </size>
    </property>
-   <property name="bottomMargin">
-    <number>0</number>
-   </property>
-   <item alignment="Qt::AlignmentFlag::AlignBottom">
-    <widget class="QFrame" name="all_frame">
-     <property name="frameShape">
-      <enum>QFrame::Shape::NoFrame</enum>
-     </property>
-     <property name="frameShadow">
-      <enum>QFrame::Shadow::Raised</enum>
-     </property>
-     <layout class="QVBoxLayout" name="verticalLayout_2">
-      <property name="spacing">
-       <number>0</number>
-      </property>
-      <property name="leftMargin">
-       <number>0</number>
-      </property>
-      <property name="topMargin">
-       <number>0</number>
-      </property>
-      <property name="rightMargin">
-       <number>0</number>
-      </property>
-      <property name="bottomMargin">
-       <number>0</number>
-      </property>
-      <item>
-       <widget class="QFrame" name="menu_frame">
-        <property name="enabled">
-         <bool>false</bool>
-        </property>
-        <property name="frameShape">
-         <enum>QFrame::Shape::StyledPanel</enum>
-        </property>
-        <property name="frameShadow">
-         <enum>QFrame::Shadow::Raised</enum>
-        </property>
-        <layout class="QVBoxLayout" name="verticalLayout">
-         <property name="spacing">
-          <number>20</number>
-         </property>
-         <property name="leftMargin">
-          <number>0</number>
-         </property>
-         <property name="topMargin">
-          <number>0</number>
-         </property>
-         <property name="rightMargin">
-          <number>0</number>
-         </property>
-         <property name="bottomMargin">
-          <number>0</number>
-         </property>
-         <item>
-          <widget class="QPushButton" name="btn_sprite">
-           <property name="text">
-            <string>角色</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QPushButton" name="btn_bg">
-           <property name="text">
-            <string>声音</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QPushButton" name="btn_sound">
-           <property name="text">
-            <string>背景</string>
-           </property>
-          </widget>
-         </item>
-        </layout>
-       </widget>
-      </item>
-      <item alignment="Qt::AlignmentFlag::AlignHCenter|Qt::AlignmentFlag::AlignVCenter">
-       <widget class="QPushButton" name="btn_upload">
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-          <horstretch>0</horstretch>
-          <verstretch>0</verstretch>
-         </sizepolicy>
-        </property>
-        <property name="minimumSize">
-         <size>
-          <width>50</width>
-          <height>50</height>
-         </size>
-        </property>
-        <property name="maximumSize">
-         <size>
-          <width>50</width>
-          <height>50</height>
-         </size>
-        </property>
-        <property name="styleSheet">
-         <string notr="true">QPushButton#btn_upload {
+   <property name="styleSheet">
+    <string notr="true">QPushButton#btn_upload {
     background-color: transparent;
     border: none;
     padding: 0px;
     margin: 0px;
 }</string>
-        </property>
-        <property name="text">
-         <string/>
-        </property>
-        <property name="icon">
-         <iconset resource="../assets/resources.qrc">
-          <normaloff>:/icons/sprite_upload.svg</normaloff>:/icons/sprite_upload.svg</iconset>
-        </property>
-        <property name="iconSize">
-         <size>
-          <width>40</width>
-          <height>40</height>
-         </size>
-        </property>
-        <property name="flat">
-         <bool>true</bool>
-        </property>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-   </item>
-  </layout>
+   </property>
+   <property name="text">
+    <string/>
+   </property>
+   <property name="icon">
+    <iconset resource="../assets/resources.qrc">
+     <normaloff>:/icons/sprite_upload.svg</normaloff>:/icons/sprite_upload.svg</iconset>
+   </property>
+   <property name="iconSize">
+    <size>
+     <width>40</width>
+     <height>40</height>
+    </size>
+   </property>
+   <property name="flat">
+    <bool>true</bool>
+   </property>
+  </widget>
+  <widget class="QFrame" name="menu_frame">
+   <property name="enabled">
+    <bool>true</bool>
+   </property>
+   <property name="geometry">
+    <rect>
+     <x>20</x>
+     <y>10</y>
+     <width>30</width>
+     <height>150</height>
+    </rect>
+   </property>
+   <property name="minimumSize">
+    <size>
+     <width>30</width>
+     <height>150</height>
+    </size>
+   </property>
+   <property name="maximumSize">
+    <size>
+     <width>30</width>
+     <height>16777215</height>
+    </size>
+   </property>
+   <property name="styleSheet">
+    <string notr="true">/* 1. 菜单主体：极致瘦身后的胶囊风格 */
+QFrame#menu_frame {
+    /* 使用你指定的品牌绿 */
+    background-color: #53AA66; 
+    
+    /* 30px 宽度的圆角半径应为 15px 才能形成正圆半圆 */
+    border-top-left-radius: 15px;
+    border-top-right-radius: 15px;
+    
+    /* 底部也设为圆角，增加悬浮感 */
+    border-bottom-left-radius: 15px;
+    border-bottom-right-radius: 15px;
+    
+    border: none;
+}
+
+/* 2. 内部按钮：针对 20px 图标优化 */
+QFrame#menu_frame QPushButton {
+    background-color: transparent;
+    border: none;
+    /* 极致紧凑的边距 */
+    padding: 6px 0px; 
+    margin: 0px;
+}
+
+/* 3. 按钮悬停：淡白色高亮 */
+QFrame#menu_frame QPushButton:hover {
+    background-color: rgba(255, 255, 255, 0.4);
+    /* 悬停高亮也要做成圆角，适配 30px 宽度 */
+    border-radius: 12px;
+}
+
+/* 4. 站位容器：设为同样的绿色，实现完美重叠 */
+QWidget#widget {
+    background-color: #53AA66;
+    /* 底部圆角必须和父容器一致 */
+    border-bottom-left-radius: 15px;
+    border-bottom-right-radius: 15px;
+    border: none;
+}</string>
+   </property>
+   <property name="frameShape">
+    <enum>QFrame::Shape::StyledPanel</enum>
+   </property>
+   <property name="frameShadow">
+    <enum>QFrame::Shadow::Raised</enum>
+   </property>
+   <layout class="QVBoxLayout" name="verticalLayout" stretch="1,1,1,1">
+    <property name="spacing">
+     <number>1</number>
+    </property>
+    <property name="leftMargin">
+     <number>0</number>
+    </property>
+    <property name="topMargin">
+     <number>0</number>
+    </property>
+    <property name="rightMargin">
+     <number>0</number>
+    </property>
+    <property name="bottomMargin">
+     <number>0</number>
+    </property>
+    <item>
+     <widget class="QPushButton" name="btn_import">
+      <property name="text">
+       <string/>
+      </property>
+      <property name="icon">
+       <iconset resource="../assets/resources.qrc">
+        <normaloff>:/icons/icon--file-upload.svg</normaloff>:/icons/icon--file-upload.svg</iconset>
+      </property>
+      <property name="iconSize">
+       <size>
+        <width>20</width>
+        <height>20</height>
+       </size>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QPushButton" name="btn_paint">
+      <property name="text">
+       <string/>
+      </property>
+      <property name="icon">
+       <iconset resource="../assets/resources.qrc">
+        <normaloff>:/icons/icon--paint.svg</normaloff>:/icons/icon--paint.svg</iconset>
+      </property>
+      <property name="iconSize">
+       <size>
+        <width>20</width>
+        <height>20</height>
+       </size>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QPushButton" name="btn_open">
+      <property name="text">
+       <string/>
+      </property>
+      <property name="icon">
+       <iconset resource="../assets/resources.qrc">
+        <normaloff>:/icons/icon--select--sprite.svg</normaloff>:/icons/icon--select--sprite.svg</iconset>
+      </property>
+      <property name="iconSize">
+       <size>
+        <width>20</width>
+        <height>20</height>
+       </size>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QWidget" name="widget" native="true">
+      <property name="minimumSize">
+       <size>
+        <width>30</width>
+        <height>50</height>
+       </size>
+      </property>
+      <property name="maximumSize">
+       <size>
+        <width>30</width>
+        <height>50</height>
+       </size>
+      </property>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <zorder>menu_frame</zorder>
+  <zorder>btn_upload</zorder>
  </widget>
  <resources>
   <include location="../assets/resources.qrc"/>
