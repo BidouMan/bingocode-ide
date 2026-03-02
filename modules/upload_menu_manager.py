@@ -1,6 +1,6 @@
 # modules/upload_menu_manager.py
 from PySide6.QtWidgets import QWidget
-from PySide6.QtCore import Qt, QEvent, QPropertyAnimation, QEasingCurve, QPoint
+from PySide6.QtCore import Qt, QEvent, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QCursor
 from ui.upload_menu_ui import Ui_upload_menu 
 
@@ -10,32 +10,42 @@ class UploadMenuManager(QWidget):
         self.ui = Ui_upload_menu()
         self.ui.setupUi(self)
         
-        # 1. 容器固定尺寸
+        # 1. 基础属性
         self.fixed_w = 70
         self.fixed_h = 226 
         self.setFixedSize(self.fixed_w, self.fixed_h)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
-        # 🚀 2. 核心层级控制：确保按钮永远在最上层
-        self.ui.btn_upload.raise_()
+        # 2. 坐标与层级
+        self.ui.menu_frame.setParent(self)
+        self.btn_geo = self.ui.btn_upload.geometry()
         
-        # 3. 精准对齐 Y 轴
-        # 按钮在 176，我们让菜单高度展开为 160
-        self.full_menu_h = 130
-        # 菜单 Y = 按钮顶部(176) - 菜单高度(160) + 15(重叠部分，让它钻进按钮后方)
-        menu_y = 176 - self.full_menu_h + 15
-        self.ui.menu_frame.move(self.ui.menu_frame.x(), menu_y)
+        # 🚀 核心修复：不设宽度，只读宽度。利用偏移量实现 X 轴对齐
+        # 此时读取的是 Designer 里设定的高度和宽度
+        self.menu_w = self.ui.menu_frame.width()
+        self.full_menu_h = 120 
         
-        # 4. 初始状态
+        # 计算居中对齐的 X：按钮 X + (按钮宽 - 菜单宽)/2
+        self.menu_x = self.btn_geo.x() + (self.btn_geo.width() - self.menu_w) // 2
+        
+        # 设定底部锚点 Y（按钮顶部 + 10px 重叠）
+        self.anchor_y = self.btn_geo.y() + 10 
+        
+        # 3. 初始位置
+        self.ui.menu_frame.move(self.menu_x, self.anchor_y)
         self.ui.menu_frame.setMaximumHeight(0)
         self.ui.menu_frame.setVisible(False)
+        self.ui.btn_upload.raise_()
         
-        # 5. 动画设置
+        # 4. 动画配置
         self.anim = QPropertyAnimation(self.ui.menu_frame, b"maximumHeight")
-        self.anim.setDuration(300)
+        self.anim.setDuration(450) 
         self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         
-        # 6. 安装事件过滤
+        # 5. 信号连接
+        self.anim.valueChanged.connect(self._on_value_changed)
+        self.anim.finished.connect(self._on_anim_finished)
+        
         self.ui.btn_upload.installEventFilter(self)
         self.installEventFilter(self)
         if self.parentWidget():
@@ -43,33 +53,35 @@ class UploadMenuManager(QWidget):
         
         self.auto_layout()
 
+    def _on_value_changed(self, h):
+        """保持向上滑动感，且 X 坐标始终维持计算好的对齐值"""
+        self.ui.menu_frame.move(self.menu_x, self.anchor_y - h)
+        self.update()
+
+    def _on_anim_finished(self):
+        if self.ui.menu_frame.maximumHeight() == 0:
+            self.ui.menu_frame.setVisible(False)
+
     def toggle_menu(self, show):
         self.anim.stop()
         if show:
             self.ui.menu_frame.setVisible(True)
-            # 🚀 每次弹出前再次置顶按钮，确保盖住菜单底部
-            self.ui.btn_upload.raise_() 
             self.anim.setEndValue(self.full_menu_h)
         else:
             self.anim.setEndValue(0)
         self.anim.start()
+        self.ui.btn_upload.raise_()
 
     def eventFilter(self, obj, event):
-        # A. 鼠标进入按钮 -> 展开
         if obj == self.ui.btn_upload and event.type() == QEvent.Type.Enter:
             self.toggle_menu(True)
-            
-        # B. 鼠标离开整个 Manager 区域 -> 收回
         elif obj == self and event.type() == QEvent.Type.Leave:
-            # 修复：使用 QCursor 获取全局位置并转为本地坐标
             local_pos = self.mapFromGlobal(QCursor.pos())
             if not self.rect().contains(local_pos):
                 self.toggle_menu(False)
-            
-        # C. 父容器缩放重新定位
+        
         if obj == self.parentWidget() and event.type() == QEvent.Resize:
             self.auto_layout()
-            
         return super().eventFilter(obj, event)
 
     def auto_layout(self):
