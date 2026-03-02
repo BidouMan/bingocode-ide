@@ -6,11 +6,12 @@ from PySide6.QtGui import QIcon,QFont,QFontDatabase,QCursor
 
 
 class CodeItemWidget(QWidget):
-    def __init__(self, file_name, icon, font, delete_callback, double_click_callback, parent=None):
+    def __init__(self, file_name, icon, font, delete_callback,rename_callback, double_click_callback, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.file_name = file_name
         self.double_click_callback = double_click_callback
+        self.rename_callback = rename_callback
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(15, 0, 15, 0)
@@ -26,6 +27,27 @@ class CodeItemWidget(QWidget):
         self.name_label.setFont(font)
         self.name_label.setStyleSheet("color: #E0E0E0; background: transparent;")
         self.name_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+
+
+        # 🚀 3. 按钮容器 (用于存放重命名和删除按钮)
+        self.btn_container = QWidget()
+        self.btn_layout = QHBoxLayout(self.btn_container)
+        self.btn_layout.setContentsMargins(0, 0, 0, 0)
+        self.btn_layout.setSpacing(8) # 两个按钮之间的间距
+
+        # --- 重命名按钮 ---
+        self.rename_btn = QPushButton()
+        rename_icon = QIcon(":/icons/icon--edit.svg") # 确保你有这个图标
+        self.rename_btn.setIcon(rename_icon if not rename_icon.isNull() else self.style().standardIcon(QStyle.SP_DialogResetButton))
+        self.rename_btn.setFixedSize(26, 26)
+        self.rename_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        # self.rename_btn.setToolTip("重命名")
+        self.rename_btn.setStyleSheet("""
+            QPushButton { border: none; background: transparent; border-radius: 4px; }
+            QPushButton:hover { background-color: rgba(255, 255, 255, 0.1); }
+        """)
+        
 
         # 3. 删除按钮
         self.delete_btn = QPushButton()
@@ -51,25 +73,71 @@ class CodeItemWidget(QWidget):
             QPushButton:hover { background-color: rgba(255, 77, 77, 0.2); }
         """)
         
-        self.delete_btn.setVisible(False)
+        # self.delete_btn.setVisible(False)
         self.delete_btn.clicked.connect(lambda: delete_callback(self.file_name))
+        self.rename_btn.clicked.connect(lambda: rename_callback(self.file_name))
 
+        # 将按钮加入容器
+        self.btn_layout.addWidget(self.rename_btn)
+        self.btn_layout.addWidget(self.delete_btn)
+        
+        # 默认隐藏整个按钮容器
+        self.btn_container.setVisible(False)
+
+        # 重新编排主布局
         layout.addWidget(self.icon_label)
         layout.addWidget(self.name_label, 1)
-        layout.addWidget(self.delete_btn)
+        layout.addWidget(self.btn_container) # 添加容器而不是单个按钮
 
     def set_active(self, active):
         """同步显示状态"""
-        if self.delete_btn.isVisible() != active:
-            self.delete_btn.setVisible(active)
+        if self.btn_container.isVisible() != active:
+            self.btn_container.setVisible(active)
             if active:
-                self.delete_btn.raise_()
+                self.btn_container.raise_()
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.double_click_callback(self.file_name)
             # 🚀 阻止事件传递，防止 ListWidget 误判
             event.accept()
+    
+    def start_rename(self):
+        """进入原位重命名模式"""
+        from PySide6.QtWidgets import QLineEdit
+        
+        # 创建一个临时输入框，覆盖在 name_label 上
+        self.edit = QLineEdit(self)
+        self.edit.setText(self.file_name)
+        # 这里的布局计算要匹配你的 UI 样式
+        self.edit.setGeometry(self.name_label.geometry()) 
+        self.edit.setFont(self.name_label.font())
+        self.edit.setStyleSheet("""
+            QLineEdit { 
+                background: #2D2D2D; 
+                color: white; 
+                border: 1px solid #555; 
+                border-radius: 6px;
+            }
+        """)
+        
+        self.name_label.hide()
+        self.edit.show()
+        self.edit.setFocus()
+        self.edit.selectAll()
+
+        # 绑定提交逻辑
+        def finish():
+            new_name = self.edit.text().strip()
+            if new_name and new_name != self.file_name:
+                # 触发真正的物理重命名逻辑
+                self.rename_callback(self.file_name, new_name)
+            
+            self.edit.deleteLater()
+            self.name_label.show()
+
+        self.edit.returnPressed.connect(finish)
+        self.edit.editingFinished.connect(finish)
 
 class ResourceManager(QObject):
     def __init__(self, main_ui, parent_window, app_controller):
@@ -201,6 +269,7 @@ class ResourceManager(QObject):
         widget = CodeItemWidget(
             name, icon, QFont(self.custom_font_family, 14),
             self.handle_delete_file,
+            self.handle_rename_file,
             # 🚀 传给回调函数的应该是 full_path 而不是 name
             lambda _: self.app_controller.open_file_in_editor(full_path) 
         )
@@ -290,3 +359,49 @@ class ResourceManager(QObject):
         """供外部调用：清空列表选中并隐藏删除按钮"""
         self.ui.list_code.clearSelection()
         self.sync_delete_icons()
+    
+    def handle_rename_file(self, old_name, new_name=None):
+        """处理重命名"""
+        # 情况 A：如果没传 new_name，说明是刚点下按钮，开启编辑框
+        if new_name is None:
+            lw = self.ui.list_code
+            for i in range(lw.count()):
+                item = lw.item(i)
+                if item.data(Qt.ItemDataRole.UserRole) == old_name:
+                    widget = lw.itemWidget(item)
+                    if widget:
+                        widget.start_rename() # 开启原位编辑
+                    break
+            return
+
+        # 情况 B：拿到了新名字，执行物理重命名
+        if not new_name.endswith('.py'):
+            new_name += '.py'
+
+        project_root = self.app_controller.project_manager.project_root
+        old_path = os.path.join(project_root, old_name)
+        new_path = os.path.join(project_root, new_name)
+
+        if os.path.exists(new_path):
+            return # 实际开发中建议加个提示：文件名已存在
+
+        try:
+            # 1. 物理改名
+            os.rename(old_path, new_path)
+            
+            # 2. 同步编辑器中的 Tab 状态
+            em = self.app_controller.editor_manager
+            for i in range(em.stacked.count()):
+                editor = em.stacked.widget(i)
+                if hasattr(editor, 'file_path') and os.path.normpath(editor.file_path) == os.path.normpath(old_path):
+                    editor.file_path = new_path
+                    # 更新 Tab 的文字显示
+                    display_name = os.path.splitext(new_name)[0]
+                    em.tabs.setTabText(i, display_name)
+                    break
+            
+            # 3. 刷新列表
+            self.refresh_code_list()
+            
+        except Exception as e:
+            print(f"列表重命名失败: {e}")
