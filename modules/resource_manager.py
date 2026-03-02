@@ -1,16 +1,14 @@
 import os
-from PySide6.QtCore import QObject, Qt, QSize
-from PySide6.QtWidgets import (QListWidgetItem, QStyle,QMenu, QMessageBox,
-                               QWidget,QHBoxLayout,QLabel,QPushButton)
+from PySide6.QtCore import QObject, Qt, QSize,QEvent
+from PySide6.QtWidgets import (QListWidgetItem, QStyle, QMessageBox,
+                               QWidget,QHBoxLayout,QLabel,QPushButton,QListWidget)
 from PySide6.QtGui import QIcon,QFont,QFontDatabase,QCursor
-from PySide6.QtSvg import QSvgRenderer
 
-from assets import resources_rc
 
 class CodeItemWidget(QWidget):
     def __init__(self, file_name, icon, font, delete_callback, double_click_callback, parent=None):
         super().__init__(parent)
-        self.setAttribute(Qt.WA_TranslucentBackground) 
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.file_name = file_name
         self.double_click_callback = double_click_callback
 
@@ -21,13 +19,13 @@ class CodeItemWidget(QWidget):
         # 1. 图标
         self.icon_label = QLabel()
         self.icon_label.setPixmap(icon.pixmap(20, 20))
-        self.icon_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
         # 2. 文件名
         self.name_label = QLabel(file_name)
         self.name_label.setFont(font)
         self.name_label.setStyleSheet("color: #E0E0E0; background: transparent;")
-        self.name_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.name_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
         # 3. 删除按钮
         self.delete_btn = QPushButton()
@@ -46,7 +44,7 @@ class CodeItemWidget(QWidget):
             self.delete_btn.setStyleSheet("color: #FF4D4D; font-weight: bold; border: none;")
 
         self.delete_btn.setFixedSize(26, 26)
-        self.delete_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.delete_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         # 🚀 优化样式：增加悬停反馈
         self.delete_btn.setStyleSheet("""
             QPushButton { border: none; background: transparent; border-radius: 4px; }
@@ -68,8 +66,10 @@ class CodeItemWidget(QWidget):
                 self.delete_btn.raise_()
 
     def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
             self.double_click_callback(self.file_name)
+            # 🚀 阻止事件传递，防止 ListWidget 误判
+            event.accept()
 
 class ResourceManager(QObject):
     def __init__(self, main_ui, parent_window, app_controller):
@@ -89,9 +89,11 @@ class ResourceManager(QObject):
 
         self.setup_list_styles()       
         # 绑定信号
+        self.ui.list_code.installEventFilter(self)
         self.bind_switch_page()
         
         # 初始显示
+        self.ui.list_code.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         self.ui.outline_stracked.setCurrentWidget(self.ui.page_code)
         self.refresh_code_list()
 
@@ -102,10 +104,52 @@ class ResourceManager(QObject):
         if not lw: return
         lw.itemSelectionChanged.connect(self.sync_delete_icons)
         lw.setStyleSheet("""
-            QListWidget { border: none; background: transparent; outline: none; }
-            QListWidget::item { background: transparent; border-radius: 8px; margin: 2px 5px; }
-            QListWidget::item:selected { background-color: #4A4A4A; }
-            QListWidget QWidget { background: transparent; border: none; }
+            /* 1. 基础容器：彻底去边框和虚线框 */
+            QListWidget { 
+                border: none; 
+                background: transparent; 
+                outline: none; 
+            }
+            
+            /* 2. 列表项：保持你的圆角和边距逻辑 */
+            QListWidget::item { 
+                background: transparent; 
+                border-radius: 8px; 
+                margin: 2px 5px; 
+            }
+            
+            /* 3. 选中状态：统一激活和非激活的颜色基础，防止抠图感 */
+            QListWidget::item:selected { 
+                background-color: #3D3D3D; 
+            }
+            
+            /* 4. 视觉欺骗：失去焦点时强制透明 */
+            QListWidget::item:selected:!active { 
+                background-color: transparent; 
+            }
+
+            /* 5. 内部组件：确保背景不冲突 */
+            QListWidget QWidget { 
+                background: transparent; 
+                border: none; 
+            }
+            
+            /* 6. 按钮默认状态：完全收缩 (保持你原始的 0px 逻辑) */
+            QListWidget QPushButton {
+                background-color: transparent;
+                border: none;
+                width: 0px;
+                min-width: 0px;
+                max-width: 0px;
+                qproperty-flat: true;
+            }
+
+            /* 7. 按钮显影：列表激活且选中时恢复宽度 */
+            QListWidget:active ::item:selected QPushButton {
+                width: 24px;
+                min-width: 24px;
+                max-width: 24px;
+            }
         """)
 
     def bind_switch_page(self):
@@ -141,44 +185,43 @@ class ResourceManager(QObject):
 
     def _add_code_item(self, name):
         item = QListWidgetItem(self.ui.list_code)
-        # 🚀 存储数据到 Role 中，避免 Text 渲染导致的重叠
-        item.setData(Qt.UserRole, name) 
+        item.setData(Qt.ItemDataRole.UserRole, name)
         item.setSizeHint(QSize(0, 45))
         
-        
+        # 🚀 关键修改：获取文件的完整绝对路径
+        project_root = self.app_controller.project_manager.project_root
+        full_path = os.path.join(project_root, name)
+
         icon_path = ":/icons/python_file_1.svg"
         icon = QIcon(icon_path) 
         if icon.isNull():
-            # 如果加载失败（资源路径错误或未编译），使用系统默认的图标
             icon = self.window.style().standardIcon(QStyle.SP_FileIcon)
 
         widget = CodeItemWidget(
             name, icon, QFont(self.custom_font_family, 14),
             self.handle_delete_file,
-            self.app_controller.open_file_in_editor
+            # 🚀 传给回调函数的应该是 full_path 而不是 name
+            lambda _: self.app_controller.open_file_in_editor(full_path) 
         )
         self.ui.list_code.setItemWidget(item, widget)
-    
-    def load_custom_font(self):
+
+    @staticmethod
+    def load_custom_font():
         """加载 assets/font 下的鸿蒙字体"""
-        # 获取字体文件的绝对路径        
         res_path = ":/font/HarmonyOS_Sans_SC_Regular.ttf"
         font_id = QFontDatabase.addApplicationFont(res_path)
 
-        # 3. 判断是否加载成功
-        # addApplicationFont 失败会返回 -1
         if font_id != -1:
             families = QFontDatabase.applicationFontFamilies(font_id)
             if families:
                 return families[0]
-        
-        # 4. 如果加载失败，打印调试信息并回退
-        print(f"警告: 无法从资源加载字体 {res_path}，已回退到 Arial")
+
+        # 🚀 放在这里作为终极兜底，无论哪一步失败都会返回 Arial
         return "Arial"
-    
-        
-    
-    
+
+
+
+
     def handle_delete_file(self, file_name):
         """处理删除逻辑"""
         project_root = self.app_controller.project_manager.project_root
@@ -189,11 +232,11 @@ class ResourceManager(QObject):
             self.window, 
             '确认删除', 
             f"你确定要永久删除文件 '{file_name}' 吗？\n此操作不可撤销。",
-            QMessageBox.Yes | QMessageBox.No, 
-            QMessageBox.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
         )
 
-        if reply == QMessageBox.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
             try:
                 # 2. 物理删除文件
                 if os.path.exists(full_path):
@@ -231,4 +274,18 @@ class ResourceManager(QObject):
             if widget:
                 # 只有被选中的项才显示删除按钮
                 widget.set_active(item.isSelected())
-        lw.viewport().update()
+
+    
+    def eventFilter(self, watched, event):
+        if watched == self.ui.list_code:
+            # 只有在失去焦点且确实有选中项时才清理，避免冗余计算
+            if event.type() == QEvent.Type.FocusOut:
+                if self.ui.list_code.selectedItems():
+                    self.ui.list_code.clearSelection() 
+                    
+        return super().eventFilter(watched, event)
+
+    def clear_list_selection(self):
+        """供外部调用：清空列表选中并隐藏删除按钮"""
+        self.ui.list_code.clearSelection()
+        self.sync_delete_icons()
