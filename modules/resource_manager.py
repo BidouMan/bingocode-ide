@@ -91,6 +91,7 @@ class ResourceManager(QObject):
         # 绑定信号
         self.ui.list_code.installEventFilter(self)
         self.bind_switch_page()
+        self.app_controller.editor_manager.file_renamed_on_disk.connect(self.refresh_code_list)
         
         # 初始显示
         self.ui.list_code.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
