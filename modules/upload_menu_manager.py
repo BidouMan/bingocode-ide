@@ -1,5 +1,6 @@
-# modules/upload_menu_manager.py
-from PySide6.QtWidgets import QWidget
+import os
+import shutil  # 🚀 用于文件拷贝
+from PySide6.QtWidgets import QWidget,QFileDialog
 from PySide6.QtCore import Qt, QEvent, QPropertyAnimation, QEasingCurve, QRect
 from ui.upload_menu_ui import Ui_upload_menu 
 
@@ -8,6 +9,9 @@ class UploadMenuManager(QWidget):
         super().__init__(list_sprite)
         self.ui = Ui_upload_menu()
         self.ui.setupUi(self)
+
+        # 🚀 外部回调接口：由 ResourceManager 在初始化时绑定
+        self.on_import_finished = None
         
         # 1. 基础属性
         self.setFixedSize(50, 226)
@@ -46,7 +50,18 @@ class UploadMenuManager(QWidget):
         self.ui.btn_upload.installEventFilter(self)
         self.installEventFilter(self)
         list_sprite.installEventFilter(self)
+
+        # 绑定按键功能
+        self.setup_connections()
         self.auto_layout()
+
+
+    def setup_connections(self):
+        # 🚀 绑定按钮点击事件
+        self.ui.btn_import.clicked.connect(lambda: self.on_button_clicked("从文件导入"))
+        self.ui.btn_paint.clicked.connect(lambda: self.on_button_clicked("打开画板"))
+        self.ui.btn_open.clicked.connect(lambda: self.on_button_clicked("选择库文件"))
+
 
     def anim_menu(self, show=True):
         """形变动画逻辑"""
@@ -93,3 +108,43 @@ class UploadMenuManager(QWidget):
         # 保持在父窗口右下角偏移
         self.move(parent.width() - 70 +15, parent.height() - 226 -5)
         self.raise_()
+
+    
+    def on_button_clicked(self, action_name):
+        if action_name == "从文件导入":
+            self.import_assets()
+        self.anim_menu(False)
+
+    def import_assets(self):
+        """弹出文件对话框选择序列帧"""
+        files, _ = QFileDialog.getOpenFileNames(
+            self, "选择角色序列帧图片", "", 
+            "图片文件 (*.png *.jpg *.jpeg *.bmp);;所有文件 (*)"
+        )
+        
+        if files:
+            # 🚀 小步走：目前先默认角色名为 "hero"
+            self.process_imports(files, sprite_name="hero")
+        else:
+            print("ℹ️ 用户取消了导入")
+
+    def process_imports(self, file_paths, sprite_name):
+        """核心：将资源拷贝到当前打开的工程目录下"""
+        try:
+            # 🚀 修正：不再从脚本位置推算，而是通过管家获取真实的工程根目录
+            # 在 ResourceManager 初始化时，我们会确保这个路径是正确的
+            if hasattr(self, 'on_import_finished') and self.on_import_finished:
+                # 我们先进行物理拷贝。为了拿到 project_root，我们可以从 parent 向上找
+                # 或者更稳健地，直接让 ResourceManager 处理路径逻辑
+                
+                # 暂时先通过 parent 链找到 ResourceManager 拥有的 project_root
+                # 假设层级是：UploadMenuManager -> page_sprite -> outline_stacked -> main_ui -> ResourceManager
+                # 但更优雅的做法是直接通过回调让 ResourceManager 返回路径
+                
+                # 这里我们先假设你已经按照下文修改了 ResourceManager，
+                # 我们把“在哪里创建文件夹”的决定权交给管家。
+                if self.on_import_finished:
+                    self.on_import_finished(sprite_name, file_paths)
+                    
+        except Exception as e:
+            print(f"❌ 导入失败: {e}")

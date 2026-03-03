@@ -1,9 +1,53 @@
-import os
+import os,shutil
 from PySide6.QtCore import QObject, Qt, QSize,QEvent
-from PySide6.QtWidgets import (QListWidgetItem, QStyle, QMessageBox,
+from PySide6.QtWidgets import (QListWidgetItem, QStyle, QMessageBox,QFrame,
                                QWidget,QHBoxLayout,QLabel,QPushButton,QListWidget)
-from PySide6.QtGui import QIcon,QFont,QFontDatabase,QCursor
+from PySide6.QtGui import QIcon, QFont, QFontDatabase, QCursor, QPixmap
 from modules.upload_menu_manager import UploadMenuManager
+
+
+class SpriteItemWidget(QWidget):
+    def __init__(self, name, icon_path, font, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        
+        # 1. 优先创建布局
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 0, 10, 0)
+        layout.setSpacing(12)
+
+        # 2. 先创建名字标签 (确保文字逻辑最优先)
+        self.name_label = QLabel(name)
+        self.name_label.setFont(font)
+        self.name_label.setStyleSheet("color: white; background: transparent;")
+
+        # 3. 创建图标标签
+        self.icon_label = QLabel()
+        self.icon_label.setFixedSize(35, 35)
+        
+        # 🚀 极其稳妥的图片加载
+        try:
+            if icon_path and os.path.exists(icon_path):
+                px = QPixmap(icon_path)
+                if not px.isNull():
+                    self.icon_label.setPixmap(px.scaled(
+                        35, 35, 
+                        Qt.AspectRatioMode.KeepAspectRatio, 
+                        Qt.TransformationMode.SmoothTransformation
+                    ))
+                else:
+                    # 图片损坏或格式不对：显示黄色占位
+                    self.icon_label.setStyleSheet("background-color: #f1c40f; border-radius: 4px;")
+            else:
+                # 路径不存在：显示紫色占位
+                self.icon_label.setStyleSheet("background-color: #9b59b6; border-radius: 4px;")
+        except Exception as e:
+            print(f"图片加载崩溃预防: {e}")
+            self.icon_label.setStyleSheet("background-color: red; border-radius: 4px;")
+
+        # 4. 按顺序添加
+        layout.addWidget(self.icon_label)
+        layout.addWidget(self.name_label, 1)
 
 class CodeItemWidget(QWidget):
     def __init__(self, file_name, icon, font, delete_callback,rename_callback, double_click_callback, parent=None):
@@ -166,7 +210,7 @@ class ResourceManager(QObject):
         self.ui.outline_stracked.setCurrentWidget(self.ui.page_code)
         self.refresh_code_list()
         self.sprite_upload_menu = UploadMenuManager(self.ui.page_sprite)
-
+        self.sprite_upload_menu.on_import_finished = self.handle_sprite_import_success
         
 
     def setup_list_styles(self):
@@ -221,6 +265,11 @@ class ResourceManager(QObject):
                 max-width: 24px;
             }
         """)
+
+      
+        style = self.ui.list_code.styleSheet()
+        self.ui.list_sprite.setStyleSheet(style)
+        self.ui.list_sprite.setSpacing(2) # 增加项之间的间距
 
     def bind_switch_page(self):
         """绑定导航按钮"""
@@ -406,3 +455,67 @@ class ResourceManager(QObject):
             
         except Exception as e:
             print(f"列表重命名失败: {e}")
+    
+    def handle_sprite_import_success(self, sprite_name, original_files):
+        """
+        管家接到搬运工的原始文件，负责：
+        1. 确定工程目录下的目标位置
+        2. 执行物理拷贝
+        3. 刷新 UI 列表
+        """
+        # 🚀 1. 获取真正的工程根目录
+        project_root = self.app_controller.project_manager.project_root
+        if not project_root:
+            print("❌ 错误：当前未打开任何工程，无法导入资源")
+            return
+
+        # 2. 确定目标路径：工程目录/assets/sprites/角色名
+        target_dir = os.path.join(project_root, "assets", "sprites", sprite_name)
+        if not os.path.exists(target_dir):
+            os.makedirs(target_dir)
+
+        # 3. 执行拷贝逻辑
+        imported_paths = []
+        for i, src in enumerate(sorted(original_files)):
+            ext = os.path.splitext(src)[1]
+            dst = os.path.join(target_dir, f"{sprite_name}_{str(i).zfill(3)}{ext}")
+            shutil.copy2(src, dst)
+            imported_paths.append(dst)
+
+        print(f"✅ 资源已成功拷贝至工程目录: {target_dir}")
+
+        # 4. 🚀 简单实现：在 list_sprite 中显示名字
+        self._add_sprite_item_to_ui(sprite_name, imported_paths[0])
+
+    def _add_sprite_item_to_ui(self, name, icon_path):
+        lw = self.ui.list_sprite 
+        if not lw: return
+
+        # 1. 检查重复
+        for i in range(lw.count()):
+            if lw.item(i).data(Qt.ItemDataRole.UserRole) == name:
+                return
+
+        # 2. 创建容器
+        item = QListWidgetItem(lw)
+        item.setData(Qt.ItemDataRole.UserRole, name)
+        
+        # 🚀 这里的 SizeHint 非常重要，如果宽度设为0可能会出问题，设为 lw.width() 或 0 均可
+        item.setSizeHint(QSize(lw.width() - 20, 50)) 
+
+        # 3. 字体保底
+        try:
+            font = QFont(self.custom_font_family, 12, QFont.Weight.Bold)
+        except:
+            font = QFont("Arial", 12)
+            
+        # 4. 实例化
+        widget = SpriteItemWidget(name, icon_path, font)
+
+        # 5. 关联
+        lw.setItemWidget(item, widget)
+        lw.setCurrentItem(item)
+        
+        # 强制界面重绘
+        widget.show() 
+        print(f"✅ 已渲染角色: {name}, 路径: {icon_path}")
