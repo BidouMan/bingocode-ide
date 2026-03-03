@@ -659,7 +659,15 @@ class ResourceManager(QObject):
 
         # 名字部分
         name_label = QLabel(name)
-        name_label.setStyleSheet("color: #E0E0E0; font-size: 10px; background: transparent;")
+        # 🚀 核心修改：使用已加载的自定义字体家族
+        # self.custom_font_family 是你在 __init__ 中获取的字体名称
+        if hasattr(self, 'custom_font_family'):
+            name_label.setFont(QFont(self.custom_font_family, 12)) 
+        else:
+            name_label.setStyleSheet("font-size: 12px;") # 兜底策略
+
+        # 更新样式表：移除重复的 font-size 设置，确保背景透明
+        name_label.setStyleSheet("color: #E0E0E0; background: transparent;")
         layout.addWidget(name_label, 0, Qt.AlignmentFlag.AlignCenter)
 
         # 网格布局定位
