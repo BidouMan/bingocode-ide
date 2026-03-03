@@ -11,41 +11,45 @@ class SpriteItemWidget(QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
-        # 1. 优先创建布局
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 0, 10, 0)
         layout.setSpacing(12)
 
-        # 2. 先创建名字标签 (确保文字逻辑最优先)
+        # 1. 名字标签
         self.name_label = QLabel(name)
         self.name_label.setFont(font)
         self.name_label.setStyleSheet("color: white; background: transparent;")
 
-        # 3. 创建图标标签
+        # 2. 图标标签
         self.icon_label = QLabel()
-        self.icon_label.setFixedSize(35, 35)
+        # 增加显示尺寸到 40x40，让细节更清楚
+        self.icon_label.setFixedSize(40, 40)
         
-        # 🚀 极其稳妥的图片加载
-        try:
-            if icon_path and os.path.exists(icon_path):
-                px = QPixmap(icon_path)
-                if not px.isNull():
-                    self.icon_label.setPixmap(px.scaled(
-                        35, 35, 
-                        Qt.AspectRatioMode.KeepAspectRatio, 
-                        Qt.TransformationMode.SmoothTransformation
-                    ))
-                else:
-                    # 图片损坏或格式不对：显示黄色占位
-                    self.icon_label.setStyleSheet("background-color: #f1c40f; border-radius: 4px;")
+        if icon_path and os.path.exists(icon_path):
+            px = QPixmap(icon_path)
+            if not px.isNull():
+                # 🚀 关键修改：使用 SmoothTransformation 实现高质量缩放
+                # 这样可以极大地减少锯齿，让边缘更平滑
+                scaled_px = px.scaled(
+                    80, 80,  # 内部按 2 倍大小缩放（类似视网膜屏原理）
+                    Qt.AspectRatioMode.KeepAspectRatio, 
+                    Qt.TransformationMode.SmoothTransformation # 👈 必须有这一行
+                )
+                self.icon_label.setPixmap(scaled_px)
+                # 设置自动拉伸以适应 40x40 的容器
+                self.icon_label.setScaledContents(True) 
+                
+                # 给缩略图加一个微弱的深色背景，衬托白色或透明素材
+                self.icon_label.setStyleSheet("""
+                    background-color: rgba(255, 255, 255, 0.05); 
+                    border-radius: 4px;
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                """)
             else:
-                # 路径不存在：显示紫色占位
-                self.icon_label.setStyleSheet("background-color: #9b59b6; border-radius: 4px;")
-        except Exception as e:
-            print(f"图片加载崩溃预防: {e}")
-            self.icon_label.setStyleSheet("background-color: red; border-radius: 4px;")
+                self.icon_label.setStyleSheet("background-color: #f1c40f; border-radius: 4px;")
+        else:
+            self.icon_label.setStyleSheet("background-color: #9b59b6; border-radius: 4px;")
 
-        # 4. 按顺序添加
         layout.addWidget(self.icon_label)
         layout.addWidget(self.name_label, 1)
 
