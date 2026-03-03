@@ -1,14 +1,11 @@
 import os,shutil
-from PySide6.QtCore import QObject, Qt, QSize,QEvent,QRect
+from PySide6.QtCore import QObject, Qt, QSize,QEvent,QRect,QTimer
 from PySide6.QtWidgets import (QListWidgetItem, QStyle, QMessageBox,QFrame,QVBoxLayout,
                                QWidget,QHBoxLayout,QLabel,QPushButton,QListWidget,QStyledItemDelegate,
                                QApplication,QScrollArea,QGridLayout)
 from PySide6.QtGui import QIcon, QFont, QFontDatabase, QCursor, QPixmap,QColor,QPainter,QPen
 from modules.upload_menu_manager import UploadMenuManager
 
-
-size = 76
-w= 318
 
 class SpriteDelegate(QStyledItemDelegate):
     def paint(self, painter, option, index):
@@ -66,7 +63,7 @@ class SpriteDelegate(QStyledItemDelegate):
 
     def sizeHint(self, option, index):
         # 必须和 GridSize 保持一致
-        return QSize(size, size)
+        return QSize(76, 76)
 
 class SpriteItemWidget(QWidget):
     def __init__(self, name, font, parent=None):
@@ -460,9 +457,10 @@ class ResourceManager(QObject):
             if watched.objectName() == "spriteCard":
                 new_focus = QApplication.focusWidget()
                 
-                # 🚀 优化判定：只要新焦点不是卡片本身，就清空
-                # 这样即使点到 list_code、代码区或背景，都能触发清空
+                # 如果点的是空白或者其他非卡片区域
                 if not new_focus or new_focus.objectName() != "spriteCard":
+                    # 不排除任何卡片，全部隐藏
+                    self.hide_all_delete_buttons() 
                     self.clear_all_selections()
         
         return super().eventFilter(watched, event)
@@ -595,6 +593,7 @@ class ResourceManager(QObject):
         
 
     def add_sprite_card(self, name, index, icon_path=None):
+        from PySide6.QtCore import QTimer
         # 创建卡片
         card = QWidget()
         card.setFixedSize(74, 74) 
@@ -675,8 +674,54 @@ class ResourceManager(QObject):
         row, col = index // 4, index % 4
         self.sprite_grid_layout.addWidget(card, row, col, Qt.AlignmentFlag.AlignCenter)
 
+
+
+
+        # 🚀 1. 在这里准备长按定时器
+        card.long_press_timer = QTimer()
+        card.long_press_timer.setSingleShot(True)
+        card.long_press_timer.timeout.connect(lambda: self.show_delete_mode(card))
+
+        # 🚀 2. 在这里准备删除按钮
+        del_btn = QPushButton(card)
+        del_btn.setFixedSize(22,22)
+        del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        del_btn.setIcon(QIcon(":/icons/icon--delete.svg"))
+        del_btn.setIconSize(QSize(16, 16))
+        del_btn.move(50, 2) # 右上角
+        del_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ff4d4f;
+                border-radius: 11;
+                border: 2px solid #2D2D2D;
+            }
+            QPushButton:hover { background-color: #ff7875; }
+        """)
+
+
+        # ---------- 长按触发删除按钮 -----------
+        del_btn.hide()
+        card.del_btn = del_btn
+        
+        # 绑定删除按钮点击事件 (先打印，下一步再写删除逻辑)
+        del_btn.clicked.connect(lambda: self.handle_sprite_delete(name))
+
+        # 🚀 3. 安装鼠标按下/释放监听
+        def custom_mouse_press(event):
+            if event.button() == Qt.MouseButton.LeftButton:
+                card.long_press_timer.start(400) # 400ms 长按
+            self.handle_card_click(card, event)
+
+        def custom_mouse_release(event):
+            if card.long_press_timer.isActive():
+                card.long_press_timer.stop()
+
+        card.mousePressEvent = custom_mouse_press
+        card.mouseReleaseEvent = custom_mouse_release
+
+
         # 🚀 点击事件：高亮 + 拿焦点
-        card.mousePressEvent = lambda event: self.handle_card_click(card, event)
+        # card.mousePressEvent = lambda event: self.handle_card_click(card, event)
         card.mouseDoubleClickEvent = lambda event: self.start_sprite_rename(card, name)
 
         
@@ -738,7 +783,10 @@ class ResourceManager(QObject):
         """处理卡片点击：设置焦点并切换高亮"""
         event.accept()
         card.setFocus() # 🚀 让卡片抓住焦点
-        
+        self.hide_all_delete_buttons(exclude_card=card)
+
+
+
         # 取消旧的
         if hasattr(self, 'current_selected_card') and self.current_selected_card:
             try:
@@ -766,6 +814,7 @@ class ResourceManager(QObject):
     def start_sprite_rename(self, card, old_name):
         from PySide6.QtWidgets import QLineEdit
         
+
         name_label = card.findChild(QLabel, "spriteNameLabel")
         if not name_label: return
 
@@ -860,4 +909,52 @@ class ResourceManager(QObject):
         except Exception as e:
             QMessageBox.critical(self.window, "错误", f"文件夹重命名失败: {e}")
     
+
+    def show_delete_mode(self, card):
+        """长按触发的效果"""
+        if hasattr(card, 'del_btn'):
+            card.del_btn.show()
+            # 这里的 card.update() 确保按钮能立刻显示
+            card.update()
     
+    def hide_all_delete_buttons(self, exclude_card=None):
+        """隐藏所有删除按钮，支持排除特定卡片"""
+        for i in range(self.sprite_grid_layout.count()):
+            item = self.sprite_grid_layout.itemAt(i)
+            if item:
+                w = item.widget()
+                # 🚀 如果 w 存在，且不是我们要排除的那张卡片
+                if w and w != exclude_card and hasattr(w, 'del_btn'):
+                    w.del_btn.hide()
+    
+    def handle_sprite_delete(self, name):
+        """物理删除 assets/sprites 中的文件夹"""
+        # 1. 弹出二次确认弹窗
+        reply = QMessageBox.question(
+            self.window, 
+            "确认删除", 
+            f"确定要删除角色 '{name}' 吗？\n此操作将永久删除该文件夹及其所有素材，不可撤销！",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            project_root = self.app_controller.project_manager.project_root
+            if not project_root: return
+
+            # 构建路径
+            target_path = os.path.join(project_root, "assets", "sprites", name)
+
+            try:
+                if os.path.exists(target_path):
+                    import shutil
+                    # 🚀 使用 shutil.rmtree 递归删除整个文件夹
+                    shutil.rmtree(target_path)
+                    print(f"🗑️ 磁盘物理删除成功: {name}")
+                    
+                    # 🚀 刷新网格，让消失的角色在 UI 上也滚蛋
+                    self.refresh_sprite_grid()
+                else:
+                    QMessageBox.warning(self.window, "删除失败", "找不到该角色的文件夹。")
+            except Exception as e:
+                QMessageBox.critical(self.window, "错误", f"无法删除文件夹: {e}")
