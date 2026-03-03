@@ -631,13 +631,30 @@ class ResourceManager(QObject):
         if icon_path and os.path.exists(icon_path):
             pix = QPixmap(icon_path)
             if not pix.isNull():
-                icon_label.setPixmap(pix.scaled(
-                    40, 40, 
-                    Qt.AspectRatioMode.KeepAspectRatio, 
-                    Qt.TransformationMode.SmoothTransformation
-                ))
+                # 🚀 核心方案：模仿像素风格渲染
+                # 1. 检查原始尺寸，如果是极小图（比如 32x32 或 16x16）
+                if pix.width() < 100: 
+                    # 使用 FastTransformation (即邻近采样)，这样像素点边缘会非常锐利
+                    # 先放大一倍提高采样密度，再由容器进行物理显示
+                    target_pix = pix.scaled(
+                        80, 80, 
+                        Qt.AspectRatioMode.KeepAspectRatio, 
+                        Qt.TransformationMode.FastTransformation # 👈 像素风格的关键：不进行平滑
+                    )
+                else:
+                    # 对于普通高清大图，依然保持平滑缩放，防止锯齿太难看
+                    target_pix = pix.scaled(
+                        80, 80, 
+                        Qt.AspectRatioMode.KeepAspectRatio, 
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+                
+                icon_label.setPixmap(target_pix)
+                # 🚀 配合这个属性，让 80 缩回 40 时保持锐利
+                icon_label.setScaledContents(True)
         else:
             icon_label.setStyleSheet("background-color: #4A90E2; border-radius: 4px;")
+
         layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignCenter)
 
         # 名字部分
