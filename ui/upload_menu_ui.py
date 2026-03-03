@@ -39,21 +39,7 @@ class Ui_upload_menu(object):
         self.menu_frame.setEnabled(True)
         self.menu_frame.setMinimumSize(QSize(30, 0))
         self.menu_frame.setMaximumSize(QSize(30, 16777215))
-        self.menu_frame.setStyleSheet(u"#menu_frame {\n"
-"    /* \u8bbe\u7f6e\u80cc\u666f\u8272\uff0c\u8fd9\u91cc\u7528\u4e86\u4e00\u4e2a\u6df1\u7070\u8272\uff0c\u4f60\u53ef\u4ee5\u6362\u6210\u4f60\u559c\u6b22\u7684\u989c\u8272 */\n"
-"    background-color: #4B9B5C; \n"
-"    \n"
-"    /* \u9876\u90e8\u5706\u89d2\u8bbe\u7f6e\uff1a\u5de6\u4e0a, \u53f3\u4e0a, \u53f3\u4e0b, \u5de6\u4e0b */\n"
-"    /* \u5bbd\u5ea630px\uff0c\u534a\u5f84\u5efa\u8bae\u8bbe\u4e3a 15px\uff0c\u521a\u597d\u662f\u4e00\u4e2a\u5b8c\u7f8e\u7684\u534a\u5706\u9876 */\n"
-"    border-top-left-radius: 15px;\n"
-"    border-top-right-radius: 15px;\n"
-"    border-bottom-left-radius: 0px;\n"
-"    border-bottom-right-radius: 0px;\n"
-"\n"
-"    /* \u53ef\u9009\uff1a\u5982\u679c\u80cc\u666f\u8272\u592a\u6697\uff0c\u52a0\u4e2a\u7ec6\u8fb9\u6846\u5206\u754c */\n"
-"   \n"
-"    border-bottom: none; /* \u5e95\u90e8\u4e0d\u8981\u8fb9\u6846\uff0c\u65b9\u4fbf\u548c\u6309\u94ae\u5bf9\u63a5 */\n"
-"}")
+        self.menu_frame.setStyleSheet(u"")
         self.menu_frame.setFrameShape(QFrame.Shape.StyledPanel)
         self.menu_frame.setFrameShadow(QFrame.Shadow.Raised)
         self.verticalLayout = QVBoxLayout(self.menu_frame)

@@ -9,12 +9,23 @@ QWidget{
 #menu_frame,#code_frame,#code_stacked,#console,#splitter,
 #screen_btn_frame,#toolbtn_frame,#editor_frame,#sidebar_frame,
 #tab_frame,#toolbar_frame,#outline_menu_frame,#code_frame,
-#code_stacked,#splitter,#fullscreen_tool_bar{
+#code_stacked,#splitter,#fullscreen_tool_bar
+{
     margin: 0px;
     padding: 0px;
     border: none;
+    /* background-color:red; */
     background-color: rgb(34,37,43);
     
+}
+
+#code_page_frame,#outline_stracked,#sprite_page_frame,#list_sprite,#upload_menu_mask_container
+{
+    margin: 0px;
+    padding: 0px;
+    border: none;
+    /* background-color:red; */
+    background-color: transparent;
 }
 
 /* 代码编辑颜色 */
@@ -23,7 +34,7 @@ QWidget{
     padding: 0px;
     border: none;
     background-color:rgb(41,44,52);
-    /* background-color: red; */
+
 }
 
 /* 1. 外层容器负责：蓝边、圆角、背景 */
@@ -391,3 +402,20 @@ QToolTip {
 #tab{
     background-color: red;
 }
+
+UploadMenuManager #menu_frame{
+    /* 设置背景色，这里用了一个深灰色，你可以换成你喜欢的颜色 */
+    background-color: #4B9B5C; 
+    
+    /* 顶部圆角设置：左上, 右上, 右下, 左下 */
+    /* 宽度30px，半径建议设为 15px，刚好是一个完美的半圆顶 */
+    border-top-left-radius: 15px;
+    border-top-right-radius: 15px;
+    border-bottom-left-radius: 0px;
+    border-bottom-right-radius: 0px;
+
+    /* 可选：如果背景色太暗，加个细边框分界 */
+   
+    border-bottom: none; /* 底部不要边框，方便和按钮对接 */
+}
+

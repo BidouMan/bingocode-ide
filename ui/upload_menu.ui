@@ -25,6 +25,9 @@
   <property name="windowTitle">
    <string>Form</string>
   </property>
+  <property name="styleSheet">
+   <string notr="true"/>
+  </property>
   <layout class="QVBoxLayout" name="verticalLayout_2">
    <property name="spacing">
     <number>0</number>
@@ -72,21 +75,7 @@
       </size>
      </property>
      <property name="styleSheet">
-      <string notr="true">#menu_frame {
-    /* 设置背景色，这里用了一个深灰色，你可以换成你喜欢的颜色 */
-    background-color: #4B9B5C; 
-    
-    /* 顶部圆角设置：左上, 右上, 右下, 左下 */
-    /* 宽度30px，半径建议设为 15px，刚好是一个完美的半圆顶 */
-    border-top-left-radius: 15px;
-    border-top-right-radius: 15px;
-    border-bottom-left-radius: 0px;
-    border-bottom-right-radius: 0px;
-
-    /* 可选：如果背景色太暗，加个细边框分界 */
-   
-    border-bottom: none; /* 底部不要边框，方便和按钮对接 */
-}</string>
+      <string notr="true"/>
      </property>
      <property name="frameShape">
       <enum>QFrame::Shape::StyledPanel</enum>
