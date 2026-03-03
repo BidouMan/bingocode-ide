@@ -1,94 +1,87 @@
 # modules/upload_menu_manager.py
 from PySide6.QtWidgets import QWidget
-from PySide6.QtCore import Qt, QEvent, QPropertyAnimation, QEasingCurve
-from PySide6.QtGui import QCursor
+from PySide6.QtCore import Qt, QEvent, QPropertyAnimation, QEasingCurve, QRect
 from ui.upload_menu_ui import Ui_upload_menu 
 
 class UploadMenuManager(QWidget):
-    def __init__(self, parent_frame):
-        super().__init__(parent_frame)
+    def __init__(self, list_sprite):
+        super().__init__(list_sprite)
         self.ui = Ui_upload_menu()
         self.ui.setupUi(self)
         
-        # 1. 基础属性
-        self.fixed_w = 70
-        self.fixed_h = 226 
-        self.setFixedSize(self.fixed_w, self.fixed_h)
+        # 1. 基础属性（UI无法设置背景穿透和固定窗口尺寸）
+        self.setFixedSize(70, 226)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
-        # 2. 坐标与层级
-        self.ui.menu_frame.setParent(self)
-        self.btn_geo = self.ui.btn_upload.geometry()
+        # 🚀 2. 容器迁移 (为了实现局部 Mask，必须在代码中移动 Parent)
+        self.menu_container = QWidget(self)
+        self.menu_container.setGeometry(0, 0, 70, 226)
+        self.menu_container.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.ui.menu_frame.setParent(self.menu_container)
         
-        # 🚀 核心修复：不设宽度，只读宽度。利用偏移量实现 X 轴对齐
-        # 此时读取的是 Designer 里设定的高度和宽度
-        self.menu_w = self.ui.menu_frame.width()
-        self.full_menu_h = 120 
+        # 🚀 3. 核心对齐参数
+        # 动画抽出高度：3个30px按钮 + 4px顶边距 + 2个4px间距 + 占位高度 ≈ 140
+        self.target_h = 125 
+        self.anchor_y = 201 # 按钮圆心位置
         
-        # 计算居中对齐的 X：按钮 X + (按钮宽 - 菜单宽)/2
-        self.menu_x = self.btn_geo.x() + (self.btn_geo.width() - self.menu_w) // 2
-        
-        # 设定底部锚点 Y（按钮顶部 + 10px 重叠）
-        self.anchor_y = self.btn_geo.y() + 10 
-        
-        # 3. 初始位置
-        self.ui.menu_frame.move(self.menu_x, self.anchor_y)
-        self.ui.menu_frame.setMaximumHeight(0)
+        # 初始几何状态：高度为 0，位置在圆心
+        self.ui.menu_frame.setGeometry(20, self.anchor_y, 30, 0)
         self.ui.menu_frame.setVisible(False)
-        self.ui.btn_upload.raise_()
-        
-        # 4. 动画配置
-        self.anim = QPropertyAnimation(self.ui.menu_frame, b"maximumHeight")
-        self.anim.setDuration(450) 
-        self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        
-        # 5. 信号连接
-        self.anim.valueChanged.connect(self._on_value_changed)
-        self.anim.finished.connect(self._on_anim_finished)
-        
+
+        # 🚀 4. 按钮层级隔离 (确保主按钮不被 Mask 裁剪)
+        self.ui.btn_upload.setParent(self)
+        self.ui.btn_upload.setGeometry(10, 176, 50, 50)
+        self.ui.btn_upload.raise_() 
+
+        # 🚀 5. 应用遮罩 (UI 无法设置局部 QRegion Mask)
+        from PySide6.QtGui import QRegion
+        self.menu_container.setMask(QRegion(0, 0, 70, self.anchor_y))
+
+        # 6. 事件监听
+        self.anim = None
         self.ui.btn_upload.installEventFilter(self)
         self.installEventFilter(self)
-        if self.parentWidget():
-            self.parentWidget().installEventFilter(self)
-        
+        list_sprite.installEventFilter(self)
         self.auto_layout()
 
-    def _on_value_changed(self, h):
-        """保持向上滑动感，且 X 坐标始终维持计算好的对齐值"""
-        self.ui.menu_frame.move(self.menu_x, self.anchor_y - h)
-        self.update()
+    def anim_menu(self, show=True):
+        """形变动画逻辑"""
+        if self.anim and self.anim.state() == QPropertyAnimation.State.Running:
+            self.anim.stop()
 
-    def _on_anim_finished(self):
-        if self.ui.menu_frame.maximumHeight() == 0:
-            self.ui.menu_frame.setVisible(False)
-
-    def toggle_menu(self, show):
-        self.anim.stop()
+        self.anim = QPropertyAnimation(self.ui.menu_frame, b"geometry")
+        self.anim.setDuration(300)
+        
         if show:
             self.ui.menu_frame.setVisible(True)
-            self.anim.setEndValue(self.full_menu_h)
+            # 向上伸展
+            end_geo = QRect(20, self.anchor_y - self.target_h, 30, self.target_h)
         else:
-            self.anim.setEndValue(0)
+            # 向下收缩
+            end_geo = QRect(20, self.anchor_y, 30, 0)
+
+        self.anim.setStartValue(self.ui.menu_frame.geometry())
+        self.anim.setEndValue(end_geo)
+        self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        if not show:
+            self.anim.finished.connect(lambda: self.ui.menu_frame.setVisible(False))
+            
         self.anim.start()
-        self.ui.btn_upload.raise_()
 
     def eventFilter(self, obj, event):
         if obj == self.ui.btn_upload and event.type() == QEvent.Type.Enter:
-            self.toggle_menu(True)
+            self.anim_menu(True)
         elif obj == self and event.type() == QEvent.Type.Leave:
-            local_pos = self.mapFromGlobal(QCursor.pos())
-            if not self.rect().contains(local_pos):
-                self.toggle_menu(False)
+            self.anim_menu(False)
         
-        if obj == self.parentWidget() and event.type() == QEvent.Resize:
+        if event.type() == QEvent.Type.Resize:
             self.auto_layout()
         return super().eventFilter(obj, event)
 
     def auto_layout(self):
         parent = self.parentWidget()
         if not parent: return
-        margin = 15
-        new_x = parent.width() - self.fixed_w - margin
-        new_y = parent.height() - self.fixed_h - margin
-        self.move(new_x, new_y)
+        # 保持在父窗口右下角偏移
+        self.move(parent.width() - 70 +5, parent.height() - 226 -5)
         self.raise_()
