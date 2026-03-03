@@ -116,17 +116,21 @@ class UploadMenuManager(QWidget):
         self.anim_menu(False)
 
     def import_assets(self):
-        """弹出文件对话框选择序列帧"""
+        """弹出文件对话框"""
         files, _ = QFileDialog.getOpenFileNames(
             self, "选择角色序列帧图片", "", 
             "图片文件 (*.png *.jpg *.jpeg *.bmp);;所有文件 (*)"
         )
         
         if files:
-            # 🚀 小步走：目前先默认角色名为 "hero"
-            self.process_imports(files, sprite_name="hero")
-        else:
-            print("ℹ️ 用户取消了导入")
+            # 🚀 获取文件夹真实名称
+            import os
+            sprite_name = os.path.basename(os.path.dirname(files[0]))
+            if not sprite_name: sprite_name = "new_sprite"
+            
+            # 触发回调
+            if hasattr(self, 'on_import_finished') and self.on_import_finished:
+                self.on_import_finished(sprite_name, files)
 
     def process_imports(self, file_paths, sprite_name):
         """核心：将资源拷贝到当前打开的工程目录下"""

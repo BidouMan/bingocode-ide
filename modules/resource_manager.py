@@ -507,36 +507,29 @@ class ResourceManager(QObject):
         except Exception as e:
             print(f"列表重命名失败: {e}")
     
-    def handle_sprite_import_success(self, sprite_name, original_files):
-        """
-        管家接到搬运工的原始文件，负责：
-        1. 确定工程目录下的目标位置
-        2. 执行物理拷贝
-        3. 刷新 UI 列表
-        """
-        # 🚀 1. 获取真正的工程根目录
+    def handle_sprite_import_success(self, sprite_name, file_paths):
+        """第一步：只负责拷贝和触发刷新"""
+        import shutil
         project_root = self.app_controller.project_manager.project_root
-        if not project_root:
-            print("❌ 错误：当前未打开任何工程，无法导入资源")
-            return
+        if not project_root: return
 
-        # 2. 确定目标路径：工程目录/assets/sprites/角色名
+        # 确定目标路径
         target_dir = os.path.join(project_root, "assets", "sprites", sprite_name)
-        if not os.path.exists(target_dir):
-            os.makedirs(target_dir)
-
-        # 3. 执行拷贝逻辑
-        imported_paths = []
-        for i, src in enumerate(sorted(original_files)):
-            ext = os.path.splitext(src)[1]
-            dst = os.path.join(target_dir, f"{sprite_name}_{str(i).zfill(3)}{ext}")
-            shutil.copy2(src, dst)
-            imported_paths.append(dst)
-
-        print(f"✅ 资源已成功拷贝至工程目录: {target_dir}")
-
-        # 4. 🚀 简单实现：在 list_sprite 中显示名字
-        self._add_sprite_test_item(sprite_name, imported_paths[0])
+        
+        # 防止同名覆盖
+        counter = 1
+        base_target = target_dir
+        while os.path.exists(target_dir):
+            target_dir = f"{base_target}_{counter}"
+            sprite_name = f"{sprite_name}_{counter}"
+            counter += 1
+            
+        os.makedirs(target_dir, exist_ok=True)
+        for f in file_paths:
+            shutil.copy2(f, target_dir)
+            
+        # 拷贝完直接刷新界面
+        self.refresh_sprite_grid()
 
     def setup_sprite_grid_mode(self):
         # 1. 找到存放列表的容器 (verticalLayout_15)
@@ -573,11 +566,9 @@ class ResourceManager(QObject):
         self.scroll_area.setWidget(self.grid_container)
         container_layout.addWidget(self.scroll_area)
         
-        # 5. 测试：添加 8 个角色卡片
-        for i in range(8):
-            self.add_sprite_card(f"角色_{i}", i)
+        
 
-    def add_sprite_card(self, name, index):
+    def add_sprite_card(self, name, index,icon_path=None):
         # 创建一个自定义的 Widget 作为卡片
         card = QWidget()
         card.setFixedSize(74,74) # 这里的尺寸终于可以随心所欲了
@@ -598,9 +589,25 @@ class ResourceManager(QObject):
         layout.setSpacing(2)
 
         # 图标占位
+        # --- 重点修改：图标占位部分 ---
         icon_label = QLabel()
         icon_label.setFixedSize(40, 40)
-        icon_label.setStyleSheet("background-color: #4A90E2; border-radius: 4px;")
+        
+        # 🚀 只有这里做了判断：如果有图就显示图，没图就显示原来的蓝色块
+        if icon_path and os.path.exists(icon_path):
+            pix = QPixmap(icon_path)
+            if not pix.isNull():
+                # 严格缩放到 40x40，绝不撑开布局
+                icon_label.setPixmap(pix.scaled(
+                    40, 40, 
+                    Qt.AspectRatioMode.KeepAspectRatio, 
+                    Qt.TransformationMode.SmoothTransformation
+                ))
+            else:
+                icon_label.setStyleSheet("background-color: #4A90E2; border-radius: 4px;")
+        else:
+            icon_label.setStyleSheet("background-color: #4A90E2; border-radius: 4px;")
+            
         layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignCenter)
 
         # 名字
@@ -612,3 +619,44 @@ class ResourceManager(QObject):
         row = index // 4
         col = index % 4
         self.sprite_grid_layout.addWidget(card, row, col, Qt.AlignmentFlag.AlignCenter)
+    
+    def refresh_sprite_grid(self):
+        """核心：保持布局不动，只换数据源"""
+        # 清空
+        while self.sprite_grid_layout.count():
+            child = self.sprite_grid_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        # 获取路径
+        project_root = self.app_controller.project_manager.project_root
+        if not project_root: return
+        
+        sprites_dir = os.path.join(project_root, "assets", "sprites")
+        if not os.path.exists(sprites_dir):
+            os.makedirs(sprites_dir, exist_ok=True)
+            return
+
+        # 扫描文件夹
+        items = os.listdir(sprites_dir)
+        sprite_folders = [d for d in items if not d.startswith('.') and os.path.isdir(os.path.join(sprites_dir, d))]
+        sprite_folders.sort()
+
+        # 遍历渲染
+        for i, folder_name in enumerate(sprite_folders):
+            # 🚀 增加：寻找该角色文件夹下的第一张图
+            folder_path = os.path.join(sprites_dir, folder_name)
+            img_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.webp')
+            thumb_path = None
+            
+            try:
+                # 获取文件夹内所有文件，过滤出图片并排个序
+                files = [f for f in os.listdir(folder_path) if f.lower().endswith(img_exts)]
+                if files:
+                    files.sort()
+                    thumb_path = os.path.join(folder_path, files[0])
+            except:
+                pass
+
+            # 🚀 关键：依然使用 add_sprite_card，只是多传了 thumb_path
+            self.add_sprite_card(folder_name, i, thumb_path)
