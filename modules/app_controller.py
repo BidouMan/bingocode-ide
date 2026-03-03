@@ -129,6 +129,7 @@ class AppController:
         if success:
             self.editor_manager._clear_initial_state()
             self.res_manager.refresh_code_list()
+            self.res_manager.refresh_sprite_grid()
             # 2. 获取目录下所有 py 文件
             all_files = [f for f in os.listdir(target_dir) 
                          if f.endswith(".py") and not f.startswith(".")

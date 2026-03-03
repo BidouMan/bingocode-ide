@@ -237,7 +237,11 @@ class ResourceManager(QObject):
         self.app_controller = app_controller
         self.custom_font_family = self.load_custom_font()
 
-        # 修正映射：btn_outline_bg 文字是“代码”
+        # 1. 🚀 必须最先准备好网格容器（创建 self.sprite_grid_layout）
+        # 这一步相当于 list_code 在 UI 文件里就已经存在了一样
+        self.setup_sprite_grid_mode() 
+
+        # 2. 基础映射（保持不变）
         self.nav_map = {
             self.ui.btn_outline_code: self.ui.page_code,      
             self.ui.btn_outline_sprite: self.ui.page_sprite, 
@@ -246,22 +250,27 @@ class ResourceManager(QObject):
         }
 
         self.setup_list_styles()       
-        # 绑定信号
+
+        # 3. 信号绑定
         self.ui.list_code.installEventFilter(self)
         self.bind_switch_page()
-        self.app_controller.editor_manager.file_renamed_on_disk.connect(self.refresh_code_list)
         
-        # 初始显示
+        # 监听磁盘重命名
+        self.app_controller.editor_manager.file_renamed_on_disk.connect(self.refresh_code_list)
+                
+
+        # 4. 🚀 初始显示：像刷新代码列表一样，直接刷新角色网格
         self.ui.list_code.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         self.ui.outline_stracked.setCurrentWidget(self.ui.page_code)
-        self.refresh_code_list()
+        
+        self.refresh_code_list()    # 刷新代码列表
+        self.refresh_sprite_grid()  # 💡 现在刷新就不会报错了，因为 layout 已经准备好了
+        
+        # 5. 上传菜单管理
         self.sprite_upload_menu = UploadMenuManager(self.ui.page_sprite)
         self.sprite_upload_menu.on_import_finished = self.handle_sprite_import_success
 
-        self.setup_sprite_grid_mode()
-        # for i in range(8):
-        #     self.add_sprite_test_item(f"测试角色_{i}", "")
-        
+                
 
     def setup_list_styles(self):
         lw = self.ui.list_code
@@ -331,8 +340,12 @@ class ResourceManager(QObject):
         target_page = self.nav_map.get(btn)
         if target_page:
             self.ui.outline_stracked.setCurrentWidget(target_page)
+            
+            # 🚀 谁的页面被打开，就刷新谁
             if target_page == self.ui.page_code:
                 self.refresh_code_list()
+            elif target_page == self.ui.page_sprite:
+                self.refresh_sprite_grid()
 
     def refresh_code_list(self):
         if not hasattr(self.ui, 'list_code'): return
@@ -707,47 +720,48 @@ class ResourceManager(QObject):
     
     def refresh_sprite_grid(self):
         """核心：保持布局不动，只换数据源"""
-        # 🚀 关键修复：清空布局前，务必重置当前选中，防止变量指向已被销毁的卡片
-        self.current_selected_card = None
+        self.current_selected_card = None # 重置选中状态
 
-        # 清空
+        # 清空现有卡片
         while self.sprite_grid_layout.count():
             child = self.sprite_grid_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
 
-        # 获取路径
+        # 获取并校验路径
         project_root = self.app_controller.project_manager.project_root
-        if not project_root: return
+        if not project_root: 
+            return
         
+        # 确保 assets/sprites 目录存在
         sprites_dir = os.path.join(project_root, "assets", "sprites")
         if not os.path.exists(sprites_dir):
-            os.makedirs(sprites_dir, exist_ok=True)
+            # 如果是新项目，自动创建该目录以便后续导入
+            try:
+                os.makedirs(sprites_dir, exist_ok=True)
+            except: pass
             return
 
-        # 扫描文件夹
-        items = os.listdir(sprites_dir)
-        sprite_folders = [d for d in items if not d.startswith('.') and os.path.isdir(os.path.join(sprites_dir, d))]
-        sprite_folders.sort()
+        # 扫描并渲染文件夹（保持你原有的逻辑）
+        try:
+            items = os.listdir(sprites_dir)
+            sprite_folders = [d for d in items if not d.startswith('.') and os.path.isdir(os.path.join(sprites_dir, d))]
+            sprite_folders.sort()
 
-        # 遍历渲染
-        for i, folder_name in enumerate(sprite_folders):
-            # 🚀 增加：寻找该角色文件夹下的第一张图
-            folder_path = os.path.join(sprites_dir, folder_name)
-            img_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.webp')
-            thumb_path = None
-            
-            try:
-                # 获取文件夹内所有文件，过滤出图片并排个序
+            for i, folder_name in enumerate(sprite_folders):
+                folder_path = os.path.join(sprites_dir, folder_name)
+                img_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.webp')
+                thumb_path = None
+                
+                # 尝试寻找第一张图作为缩略图
                 files = [f for f in os.listdir(folder_path) if f.lower().endswith(img_exts)]
                 if files:
                     files.sort()
                     thumb_path = os.path.join(folder_path, files[0])
-            except:
-                pass
 
-            # 🚀 关键：依然使用 add_sprite_card，只是多传了 thumb_path
-            self.add_sprite_card(folder_name, i, thumb_path)
+                self.add_sprite_card(folder_name, i, thumb_path)
+        except Exception as e:
+            print(f"角色网格刷新失败: {e}")
     
     
     
