@@ -1,7 +1,7 @@
 import os,shutil
 from PySide6.QtCore import QObject, Qt, QSize,QEvent,QRect
 from PySide6.QtWidgets import (QListWidgetItem, QStyle, QMessageBox,QFrame,QVBoxLayout,
-                               QWidget,QHBoxLayout,QLabel,QPushButton,QListWidget,QStyledItemDelegate)
+                               QWidget,QHBoxLayout,QLabel,QPushButton,QListWidget,QStyledItemDelegate,QScrollArea,QGridLayout)
 from PySide6.QtGui import QIcon, QFont, QFontDatabase, QCursor, QPixmap,QColor,QPainter,QPen
 from modules.upload_menu_manager import UploadMenuManager
 
@@ -260,8 +260,8 @@ class ResourceManager(QObject):
         self.sprite_upload_menu.on_import_finished = self.handle_sprite_import_success
 
         self.setup_sprite_grid_mode()
-        for i in range(8):
-            self._add_sprite_test_item(f"测试角色_{i}", "")
+        # for i in range(8):
+        #     self.add_sprite_test_item(f"测试角色_{i}", "")
         
 
     def setup_list_styles(self):
@@ -539,49 +539,76 @@ class ResourceManager(QObject):
         self._add_sprite_test_item(sprite_name, imported_paths[0])
 
     def setup_sprite_grid_mode(self):
-        ls = self.ui.list_sprite
-        if not ls: return
+        # 1. 找到存放列表的容器 (verticalLayout_15)
+        container_layout = self.ui.verticalLayout_15
         
-        ls.setFixedWidth(w) 
-        ls.setViewMode(QListWidget.ViewMode.IconMode)
-        ls.setMovement(QListWidget.Movement.Static)
-        ls.setResizeMode(QListWidget.ResizeMode.Fixed)
+        # 2. 清除掉旧的 list_sprite (如果有的话)
+        if hasattr(self.ui, 'list_sprite'):
+            self.ui.list_sprite.deleteLater()
+
+        # 3. 创建一个新的滚动区域
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setStyleSheet("background: transparent;")
+
+        # 4. 创建内部容器和网格布局
+        self.grid_container = QWidget()
+        self.grid_container.setStyleSheet("background: transparent;")
+        self.sprite_grid_layout = QGridLayout(self.grid_container)
         
-        # 🚀 关键修改：将 78 降为 77
-        # 77 * 4 = 308。 加上 4px 的 padding 就是 312px。
-        # 312 < 316，Qt 没有任何理由再换行。
-        ls.setGridSize(QSize(size, size))
+        # 🚀 重点：设置间距和边距
+        self.sprite_grid_layout.setContentsMargins(4, 6, 4, 6) # 这里的边距可以自由控制了
+        self.sprite_grid_layout.setSpacing(0)
+        self.sprite_grid_layout.setVerticalSpacing(5)
+
+        # self.sprite_grid_layout.setSpacing(8) # 每个卡片之间的固定间距
+        for i in range(4):
+            self.sprite_grid_layout.setColumnStretch(i,1)
+
+
+        self.sprite_grid_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+
+        self.scroll_area.setWidget(self.grid_container)
+        container_layout.addWidget(self.scroll_area)
         
-        ls.setSpacing(0)
-        ls.setContentsMargins(0, 0, 0, 0)
-        ls.setFrameShape(QFrame.Shape.NoFrame)
-        ls.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        ls.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        
-        # 这里的 padding-left 依然保持，用来做整体平移
-        ls.setStyleSheet("""
-            QListWidget {
-                background-color: transparent;
-                border: none;
-                outline: none;
-                padding-left: 4px;   
-                padding-top: 5px;
-                margin: 0px;
+        # 5. 测试：添加 8 个角色卡片
+        for i in range(8):
+            self.add_sprite_card(f"角色_{i}", i)
+
+    def add_sprite_card(self, name, index):
+        # 创建一个自定义的 Widget 作为卡片
+        card = QWidget()
+        card.setFixedSize(74,74) # 这里的尺寸终于可以随心所欲了
+        card.setObjectName("spriteCard")
+        card.setStyleSheet("""
+            #spriteCard {
+                background-color: #2D2D2D;
+                border-radius: 8px;
             }
-            QListWidget::item {
-                background: transparent;
-                margin: 0px;
-                padding: 0px;
+            #spriteCard:hover {
+                background-color: #3D3D3D;
             }
         """)
+        
+        # 卡片内部布局 (图标 + 文字)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(2)
 
-        self.sprite_delegate = SpriteDelegate(ls)
-        ls.setItemDelegate(self.sprite_delegate)
+        # 图标占位
+        icon_label = QLabel()
+        icon_label.setFixedSize(40, 40)
+        icon_label.setStyleSheet("background-color: #4A90E2; border-radius: 4px;")
+        layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignCenter)
 
-    def _add_sprite_test_item(self, name, icon_path=""):
-        lw = self.ui.list_sprite
-        # 创建 Item 并设置显示文字
-        item = QListWidgetItem(name)
-        # 🚀 将路径存入 UserRole，这样 SpriteDelegate 就能读到它
-        item.setData(Qt.ItemDataRole.UserRole, icon_path)
-        lw.addItem(item)
+        # 名字
+        name_label = QLabel(name)
+        name_label.setStyleSheet("color: #E0E0E0; font-size: 10px;")
+        layout.addWidget(name_label, 0, Qt.AlignmentFlag.AlignCenter)
+
+        # 🚀 算出它该在第几行第几列
+        row = index // 4
+        col = index % 4
+        self.sprite_grid_layout.addWidget(card, row, col, Qt.AlignmentFlag.AlignCenter)
