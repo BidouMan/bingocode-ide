@@ -1,57 +1,100 @@
 import os,shutil
-from PySide6.QtCore import QObject, Qt, QSize,QEvent
-from PySide6.QtWidgets import (QListWidgetItem, QStyle, QMessageBox,QFrame,
-                               QWidget,QHBoxLayout,QLabel,QPushButton,QListWidget)
-from PySide6.QtGui import QIcon, QFont, QFontDatabase, QCursor, QPixmap
+from PySide6.QtCore import QObject, Qt, QSize,QEvent,QRect
+from PySide6.QtWidgets import (QListWidgetItem, QStyle, QMessageBox,QFrame,QVBoxLayout,
+                               QWidget,QHBoxLayout,QLabel,QPushButton,QListWidget,QStyledItemDelegate)
+from PySide6.QtGui import QIcon, QFont, QFontDatabase, QCursor, QPixmap,QColor,QPainter,QPen
 from modules.upload_menu_manager import UploadMenuManager
 
 
+size = 76
+w= 318
+
+class SpriteDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        name = index.data(Qt.ItemDataRole.DisplayRole)
+        icon_path = index.data(Qt.ItemDataRole.UserRole)
+        
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # 🚀 这里的 rect 宽度现在是 77
+        rect = option.rect
+        
+        # 卡片视觉大小设为 70x70，这样每两个卡片之间会有 7px 的间距
+        card_w, card_h = 70, 70
+        
+        # 绝对居中计算：(77 - 70) / 2 = 3.5px
+        card_rect = QRect(
+            int(rect.left() + (rect.width() - card_w) / 2),
+            int(rect.top() + (rect.height() - card_h) / 2),
+            card_w,
+            card_h
+        )
+
+        # --- 绘制背景 ---
+        if option.state & QStyle.StateFlag.State_Selected:
+            painter.setBrush(QColor(60, 60, 60))
+            painter.setPen(QPen(QColor(255, 85, 85), 2))
+        else:
+            painter.setBrush(QColor(45, 45, 45))
+            painter.setPen(Qt.PenStyle.NoPen)
+        
+        painter.drawRoundedRect(card_rect, 6, 6)
+
+        # --- 绘制图标 (蓝块) ---
+        icon_size = 40
+        icon_rect = QRect(
+            int(card_rect.center().x() - icon_size / 2),
+            card_rect.top() + 8,
+            icon_size,
+            icon_size
+        )
+        painter.setBrush(QColor(74, 144, 226))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(icon_rect, 6, 6)
+
+        # --- 绘制文字 ---
+        painter.setPen(QColor(230, 230, 230))
+        font = painter.font()
+        font.setPointSize(8)
+        painter.setFont(font)
+        text_rect = QRect(card_rect.left(), card_rect.bottom() - 18, card_w, 15)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, name)
+
+        painter.restore()
+
+    def sizeHint(self, option, index):
+        # 必须和 GridSize 保持一致
+        return QSize(size, size)
+
 class SpriteItemWidget(QWidget):
-    def __init__(self, name, icon_path, font, parent=None):
+    def __init__(self, name, font, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 0, 10, 0)
-        layout.setSpacing(12)
-
-        # 1. 名字标签
-        self.name_label = QLabel(name)
-        self.name_label.setFont(font)
-        self.name_label.setStyleSheet("color: white; background: transparent;")
-
-        # 2. 图标标签
-        self.icon_label = QLabel()
-        # 增加显示尺寸到 40x40，让细节更清楚
-        self.icon_label.setFixedSize(40, 40)
+        # 🚀 设为 78，紧贴格子边界
+        self.setFixedSize(78, 78)
         
-        if icon_path and os.path.exists(icon_path):
-            px = QPixmap(icon_path)
-            if not px.isNull():
-                # 🚀 关键修改：使用 SmoothTransformation 实现高质量缩放
-                # 这样可以极大地减少锯齿，让边缘更平滑
-                scaled_px = px.scaled(
-                    80, 80,  # 内部按 2 倍大小缩放（类似视网膜屏原理）
-                    Qt.AspectRatioMode.KeepAspectRatio, 
-                    Qt.TransformationMode.SmoothTransformation # 👈 必须有这一行
-                )
-                self.icon_label.setPixmap(scaled_px)
-                # 设置自动拉伸以适应 40x40 的容器
-                self.icon_label.setScaledContents(True) 
-                
-                # 给缩略图加一个微弱的深色背景，衬托白色或透明素材
-                self.icon_label.setStyleSheet("""
-                    background-color: rgba(255, 255, 255, 0.05); 
-                    border-radius: 4px;
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                """)
-            else:
-                self.icon_label.setStyleSheet("background-color: #f1c40f; border-radius: 4px;")
-        else:
-            self.icon_label.setStyleSheet("background-color: #9b59b6; border-radius: 4px;")
+        layout = QVBoxLayout(self)
+        # 左右边距设为 0，让内容在 78px 内部绝对居中
+        layout.setContentsMargins(0, 5, 0, 5) 
+        layout.setSpacing(2)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        layout.addWidget(self.icon_label)
-        layout.addWidget(self.name_label, 1)
+        # 蓝色方块
+        self.box = QFrame()
+        self.box.setFixedSize(48, 48) # 稍微大一点更协调
+        self.box.setStyleSheet("background-color: #4a90e2; border-radius: 6px;")
+        
+        # 名字
+        self.label = QLabel(name)
+        self.label.setFont(QFont(font.family(), 8))
+        self.label.setFixedWidth(74)
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label.setStyleSheet("color: white;")
+
+        layout.addWidget(self.box, 0, Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.label, 0, Qt.AlignmentFlag.AlignCenter)
 
 class CodeItemWidget(QWidget):
     def __init__(self, file_name, icon, font, delete_callback,rename_callback, double_click_callback, parent=None):
@@ -215,6 +258,10 @@ class ResourceManager(QObject):
         self.refresh_code_list()
         self.sprite_upload_menu = UploadMenuManager(self.ui.page_sprite)
         self.sprite_upload_menu.on_import_finished = self.handle_sprite_import_success
+
+        self.setup_sprite_grid_mode()
+        for i in range(8):
+            self._add_sprite_test_item(f"测试角色_{i}", "")
         
 
     def setup_list_styles(self):
@@ -489,37 +536,52 @@ class ResourceManager(QObject):
         print(f"✅ 资源已成功拷贝至工程目录: {target_dir}")
 
         # 4. 🚀 简单实现：在 list_sprite 中显示名字
-        self._add_sprite_item_to_ui(sprite_name, imported_paths[0])
+        self._add_sprite_test_item(sprite_name, imported_paths[0])
 
-    def _add_sprite_item_to_ui(self, name, icon_path):
-        lw = self.ui.list_sprite 
-        if not lw: return
-
-        # 1. 检查重复
-        for i in range(lw.count()):
-            if lw.item(i).data(Qt.ItemDataRole.UserRole) == name:
-                return
-
-        # 2. 创建容器
-        item = QListWidgetItem(lw)
-        item.setData(Qt.ItemDataRole.UserRole, name)
+    def setup_sprite_grid_mode(self):
+        ls = self.ui.list_sprite
+        if not ls: return
         
-        # 🚀 这里的 SizeHint 非常重要，如果宽度设为0可能会出问题，设为 lw.width() 或 0 均可
-        item.setSizeHint(QSize(lw.width() - 20, 50)) 
-
-        # 3. 字体保底
-        try:
-            font = QFont(self.custom_font_family, 12, QFont.Weight.Bold)
-        except:
-            font = QFont("Arial", 12)
-            
-        # 4. 实例化
-        widget = SpriteItemWidget(name, icon_path, font)
-
-        # 5. 关联
-        lw.setItemWidget(item, widget)
-        lw.setCurrentItem(item)
+        ls.setFixedWidth(w) 
+        ls.setViewMode(QListWidget.ViewMode.IconMode)
+        ls.setMovement(QListWidget.Movement.Static)
+        ls.setResizeMode(QListWidget.ResizeMode.Fixed)
         
-        # 强制界面重绘
-        widget.show() 
-        print(f"✅ 已渲染角色: {name}, 路径: {icon_path}")
+        # 🚀 关键修改：将 78 降为 77
+        # 77 * 4 = 308。 加上 4px 的 padding 就是 312px。
+        # 312 < 316，Qt 没有任何理由再换行。
+        ls.setGridSize(QSize(size, size))
+        
+        ls.setSpacing(0)
+        ls.setContentsMargins(0, 0, 0, 0)
+        ls.setFrameShape(QFrame.Shape.NoFrame)
+        ls.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        ls.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        # 这里的 padding-left 依然保持，用来做整体平移
+        ls.setStyleSheet("""
+            QListWidget {
+                background-color: transparent;
+                border: none;
+                outline: none;
+                padding-left: 4px;   
+                padding-top: 5px;
+                margin: 0px;
+            }
+            QListWidget::item {
+                background: transparent;
+                margin: 0px;
+                padding: 0px;
+            }
+        """)
+
+        self.sprite_delegate = SpriteDelegate(ls)
+        ls.setItemDelegate(self.sprite_delegate)
+
+    def _add_sprite_test_item(self, name, icon_path=""):
+        lw = self.ui.list_sprite
+        # 创建 Item 并设置显示文字
+        item = QListWidgetItem(name)
+        # 🚀 将路径存入 UserRole，这样 SpriteDelegate 就能读到它
+        item.setData(Qt.ItemDataRole.UserRole, icon_path)
+        lw.addItem(item)

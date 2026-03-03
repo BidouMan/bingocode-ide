@@ -855,6 +855,9 @@
                  <height>16777215</height>
                 </size>
                </property>
+               <property name="styleSheet">
+                <string notr="true"/>
+               </property>
                <property name="frameShape">
                 <enum>QFrame::Shape::StyledPanel</enum>
                </property>
@@ -891,6 +894,9 @@
                     <height>16777215</height>
                    </size>
                   </property>
+                  <property name="styleSheet">
+                   <string notr="true"/>
+                  </property>
                   <property name="currentIndex">
                    <number>0</number>
                   </property>
@@ -917,17 +923,20 @@
                        <enum>QFrame::Shadow::Raised</enum>
                       </property>
                       <layout class="QVBoxLayout" name="verticalLayout_15">
+                       <property name="spacing">
+                        <number>0</number>
+                       </property>
                        <property name="leftMargin">
-                        <number>4</number>
+                        <number>0</number>
                        </property>
                        <property name="topMargin">
-                        <number>4</number>
+                        <number>0</number>
                        </property>
                        <property name="rightMargin">
-                        <number>4</number>
+                        <number>0</number>
                        </property>
                        <property name="bottomMargin">
-                        <number>4</number>
+                        <number>0</number>
                        </property>
                        <item>
                         <widget class="QListWidget" name="list_sprite">
