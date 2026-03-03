@@ -9,37 +9,39 @@ class UploadMenuManager(QWidget):
         self.ui = Ui_upload_menu()
         self.ui.setupUi(self)
         
-        # 1. 基础属性（UI无法设置背景穿透和固定窗口尺寸）
+        # 1. 基础属性
         self.setFixedSize(50, 226)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
-        # 🚀 2. 容器迁移 (为了实现局部 Mask，必须在代码中移动 Parent)
+        # 🚀 2. 容器设置：不要设置鼠标穿透属性，否则子按钮无法响应
         self.menu_container = QWidget(self)
         self.menu_container.setGeometry(0, 0, 50, 226)
-        self.menu_container.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.ui.menu_frame.setParent(self.menu_container)
+        # 移除这行：self.menu_container.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         
+        self.ui.menu_frame.setParent(self.menu_container)
         self.menu_container.setObjectName("upload_menu_mask_container")
 
-        # 🚀 3. 核心对齐参数
-        # 动画抽出高度：3个30px按钮 + 4px顶边距 + 2个4px间距 + 占位高度 ≈ 140
-        self.target_h = 125 
-        self.anchor_y = 201 # 按钮圆心位置
+        # 3. 核心参数
+        self.target_h = 120 
+        self.anchor_y = 201 
         
-        # 初始几何状态：高度为 0，位置在圆心
+        # 给子按钮安装过滤器
+        for btn in [self.ui.btn_import, self.ui.btn_paint, self.ui.btn_open]:
+            btn.installEventFilter(self)
+
         self.ui.menu_frame.setGeometry(10, self.anchor_y, 30, 0)
         self.ui.menu_frame.setVisible(False)
 
-        # 🚀 4. 按钮层级隔离 (确保主按钮不被 Mask 裁剪)
+        # 🚀 4. 修正主按钮名称 (btn_upload -> btn_upload1)
         self.ui.btn_upload.setParent(self)
         self.ui.btn_upload.setGeometry(0, 176, 50, 50)
         self.ui.btn_upload.raise_() 
 
-        # 🚀 5. 应用遮罩 (UI 无法设置局部 QRegion Mask)
+        # 5. 应用遮罩
         from PySide6.QtGui import QRegion
         self.menu_container.setMask(QRegion(0, 0, 50, self.anchor_y))
 
-        # 6. 事件监听
+        # 🚀 6. 事件监听：修正 btn_upload1
         self.anim = None
         self.ui.btn_upload.installEventFilter(self)
         self.installEventFilter(self)
@@ -72,8 +74,12 @@ class UploadMenuManager(QWidget):
         self.anim.start()
 
     def eventFilter(self, obj, event):
+    
+
+        # 🚀 修正为主按钮 btn_upload1
         if obj == self.ui.btn_upload and event.type() == QEvent.Type.Enter:
             self.anim_menu(True)
+        # 当鼠标离开整个 UploadMenuManager 区域时收回
         elif obj == self and event.type() == QEvent.Type.Leave:
             self.anim_menu(False)
         

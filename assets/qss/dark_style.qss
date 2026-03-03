@@ -419,3 +419,24 @@ UploadMenuManager #menu_frame{
     border-bottom: none; /* 底部不要边框，方便和按钮对接 */
 }
 
+UploadMenuManager QPushButton {
+    border: none;
+    background-color: transparent;
+    padding: 0px;
+    margin: 0px;  /* 移除你之前可能加的 margin */
+    border-radius: 0px; /* 强制直角 */
+}
+
+/* 2. 通用的 Hover 状态 */
+UploadMenuManager #menu_frame QPushButton#btn_import:hover,
+UploadMenuManager #menu_frame QPushButton#btn_paint:hover,
+UploadMenuManager #menu_frame QPushButton#btn_open:hover {
+    background-color: #5bc772;
+}
+
+/* 🚀 3. 特殊处理：解决最顶端按钮的高亮溢出 */
+/* 假设 btn_import 是最上面的那个按钮 */
+UploadMenuManager QPushButton#btn_import:hover {
+    border-top-left-radius: 15px;
+    border-top-right-radius: 15px;
+}
