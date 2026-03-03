@@ -593,27 +593,37 @@ class ResourceManager(QObject):
         
 
     def add_sprite_card(self, name, index, icon_path=None):
+        """核心入口：负责卡片的创建与网格定位"""
         from PySide6.QtCore import QTimer
-        # 创建卡片
+        
+        # 1. 创建基础容器
         card = QWidget()
         card.setFixedSize(74, 74) 
         card.setObjectName("spriteCard")
-        
-        # 🚀 必须设置焦点策略，否则无法触发 FocusOut 事件
         card.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
-        
-        # 注册事件过滤器（用于监控它的失去焦点动作）
+        card.setProperty("selected", "false")
         card.installEventFilter(self)
+        
+        # 2. 调用内部构建逻辑
+        self._build_card_ui(card, name, icon_path)
+        self._build_card_delete_button(card, name)
+        self._setup_card_interactions(card, name)
 
+        # 3. 网格布局定位 (保持 4 列布局)
+        row, col = index // 4, index % 4
+        self.sprite_grid_layout.addWidget(card, row, col, Qt.AlignmentFlag.AlignCenter)
+        
+        return card
+
+    def _build_card_ui(self, card, name, icon_path):
+        """负责卡片的视觉样式、图标处理和文字"""
         card.setStyleSheet("""
             #spriteCard {
                 background-color: #2D2D2D;
                 border-radius: 8px;
                 border: 2px solid transparent;
             }
-            #spriteCard:hover {
-                background-color: #3D3D3D;
-            }
+            #spriteCard:hover { background-color: #3D3D3D; }
             #spriteCard[selected="true"] {
                 background-color: #3D3D3D;
                 border: 2px solid #5bc772;
@@ -624,92 +634,67 @@ class ResourceManager(QObject):
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(2)
 
-        # 图标部分
+        # --- 图标处理 (像素风格缩放) ---
         icon_label = QLabel()
         icon_label.setFixedSize(40, 40)
         if icon_path and os.path.exists(icon_path):
             pix = QPixmap(icon_path)
             if not pix.isNull():
-                # 🚀 核心方案：模仿像素风格渲染
-                # 1. 检查原始尺寸，如果是极小图（比如 32x32 或 16x16）
-                if pix.width() < 100: 
-                    # 使用 FastTransformation (即邻近采样)，这样像素点边缘会非常锐利
-                    # 先放大一倍提高采样密度，再由容器进行物理显示
-                    target_pix = pix.scaled(
-                        80, 80, 
-                        Qt.AspectRatioMode.KeepAspectRatio, 
-                        Qt.TransformationMode.FastTransformation # 👈 像素风格的关键：不进行平滑
-                    )
-                else:
-                    # 对于普通高清大图，依然保持平滑缩放，防止锯齿太难看
-                    target_pix = pix.scaled(
-                        80, 80, 
-                        Qt.AspectRatioMode.KeepAspectRatio, 
-                        Qt.TransformationMode.SmoothTransformation
-                    )
-                
+                mode = Qt.TransformationMode.FastTransformation if pix.width() < 100 else Qt.TransformationMode.SmoothTransformation
+                target_pix = pix.scaled(80, 80, Qt.AspectRatioMode.KeepAspectRatio, mode)
                 icon_label.setPixmap(target_pix)
-                # 🚀 配合这个属性，让 80 缩回 40 时保持锐利
                 icon_label.setScaledContents(True)
         else:
             icon_label.setStyleSheet("background-color: #4A90E2; border-radius: 4px;")
-
         layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignCenter)
 
-        # 名字部分
+        # --- 名字处理 (字体与颜色) ---
         name_label = QLabel(name)
         name_label.setObjectName("spriteNameLabel")
-        # 🚀 核心修改：使用已加载的自定义字体家族
-        # self.custom_font_family 是你在 __init__ 中获取的字体名称
         if hasattr(self, 'custom_font_family'):
-            name_label.setFont(QFont(self.custom_font_family, 12)) 
-        else:
-            name_label.setStyleSheet("font-size: 12px;") # 兜底策略
-
-        # 更新样式表：移除重复的 font-size 设置，确保背景透明
+            name_label.setFont(QFont(self.custom_font_family, 12))
         name_label.setStyleSheet("color: #E0E0E0; background: transparent;")
         layout.addWidget(name_label, 0, Qt.AlignmentFlag.AlignCenter)
 
-        # 网格布局定位
-        row, col = index // 4, index % 4
-        self.sprite_grid_layout.addWidget(card, row, col, Qt.AlignmentFlag.AlignCenter)
+        # 🚀 保持点击穿透
+        icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        name_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
-
-
-
-        # 🚀 1. 在这里准备长按定时器
-        card.long_press_timer = QTimer()
-        card.long_press_timer.setSingleShot(True)
-        card.long_press_timer.timeout.connect(lambda: self.show_delete_mode(card))
-
-        # 🚀 2. 在这里准备删除按钮
+    def _build_card_delete_button(self, card, name):
+        """负责创建右上角的删除按钮"""
         del_btn = QPushButton(card)
-        del_btn.setFixedSize(22,22)
+        del_btn.setFixedSize(22, 22)
         del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         del_btn.setIcon(QIcon(":/icons/icon--delete.svg"))
         del_btn.setIconSize(QSize(16, 16))
-        del_btn.move(50, 2) # 右上角
+        del_btn.move(50, 2)
+        # 修正了之前的 border-radius 单位问题
         del_btn.setStyleSheet("""
             QPushButton {
                 background-color: #ff4d4f;
-                border-radius: 11;
+                border-radius: 11px; 
                 border: 2px solid #2D2D2D;
             }
             QPushButton:hover { background-color: #ff7875; }
         """)
-
-
-        # ---------- 长按触发删除按钮 -----------
         del_btn.hide()
-        card.del_btn = del_btn
-        
-        # 绑定删除按钮点击事件 (先打印，下一步再写删除逻辑)
+        # 🚀 绑定物理删除逻辑
         del_btn.clicked.connect(lambda: self.handle_sprite_delete(name))
+        card.del_btn = del_btn
 
-        # 🚀 3. 安装鼠标按下/释放监听
+    def _setup_card_interactions(self, card, name):
+        """负责长按计时、点击高亮、双击重命名"""
+        from PySide6.QtCore import QTimer
+        
+        # 准备长按定时器
+        card.long_press_timer = QTimer()
+        card.long_press_timer.setSingleShot(True)
+        card.long_press_timer.timeout.connect(lambda: self.show_delete_mode(card))
+
+        # 整合 MousePress (长按计秒 + 点击高亮)
         def custom_mouse_press(event):
             if event.button() == Qt.MouseButton.LeftButton:
-                card.long_press_timer.start(400) # 400ms 长按
+                card.long_press_timer.start(400)
             self.handle_card_click(card, event)
 
         def custom_mouse_release(event):
@@ -718,20 +703,7 @@ class ResourceManager(QObject):
 
         card.mousePressEvent = custom_mouse_press
         card.mouseReleaseEvent = custom_mouse_release
-
-
-        # 🚀 点击事件：高亮 + 拿焦点
-        # card.mousePressEvent = lambda event: self.handle_card_click(card, event)
         card.mouseDoubleClickEvent = lambda event: self.start_sprite_rename(card, name)
-
-        
-
-        card.setProperty("selected", "false")
-        # 确保子控件不拦截双击
-        icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        name_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        
-        return card
     
     def refresh_sprite_grid(self):
         """核心：保持布局不动，只换数据源"""
