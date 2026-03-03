@@ -1,7 +1,8 @@
 import os,shutil
 from PySide6.QtCore import QObject, Qt, QSize,QEvent,QRect
 from PySide6.QtWidgets import (QListWidgetItem, QStyle, QMessageBox,QFrame,QVBoxLayout,
-                               QWidget,QHBoxLayout,QLabel,QPushButton,QListWidget,QStyledItemDelegate,QScrollArea,QGridLayout)
+                               QWidget,QHBoxLayout,QLabel,QPushButton,QListWidget,QStyledItemDelegate,
+                               QApplication,QScrollArea,QGridLayout)
 from PySide6.QtGui import QIcon, QFont, QFontDatabase, QCursor, QPixmap,QColor,QPainter,QPen
 from modules.upload_menu_manager import UploadMenuManager
 
@@ -103,6 +104,7 @@ class CodeItemWidget(QWidget):
         self.file_name = file_name
         self.double_click_callback = double_click_callback
         self.rename_callback = rename_callback
+        self.current_selected_card = None
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(15, 0, 15, 0)
@@ -418,7 +420,6 @@ class ResourceManager(QObject):
                 
                 # 4. 刷新列表
                 self.refresh_code_list()
-                print(f"成功删除文件: {full_path}")
                 
             except Exception as e:
                 QMessageBox.critical(self.window, "错误", f"删除失败: {e}")
@@ -448,12 +449,22 @@ class ResourceManager(QObject):
 
     
     def eventFilter(self, watched, event):
+        # 1. 代码列表逻辑
         if watched == self.ui.list_code:
-            # 只有在失去焦点且确实有选中项时才清理，避免冗余计算
             if event.type() == QEvent.Type.FocusOut:
                 if self.ui.list_code.selectedItems():
-                    self.ui.list_code.clearSelection() 
-                    
+                    self.ui.list_code.clearSelection()
+
+        # 2. 角色卡片逻辑
+        if event.type() == QEvent.Type.FocusOut:
+            if watched.objectName() == "spriteCard":
+                new_focus = QApplication.focusWidget()
+                
+                # 🚀 优化判定：只要新焦点不是卡片本身，就清空
+                # 这样即使点到 list_code、代码区或背景，都能触发清空
+                if not new_focus or new_focus.objectName() != "spriteCard":
+                    self.clear_all_selections()
+        
         return super().eventFilter(watched, event)
 
     def clear_list_selection(self):
@@ -541,87 +552,114 @@ class ResourceManager(QObject):
 
         # 3. 创建一个新的滚动区域
         self.scroll_area = QScrollArea()
+        self.scroll_area.setObjectName("SpriteScrollArea")
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll_area.setStyleSheet("background: transparent;")
 
+        # 🚀 关键修改：允许点击获取焦点，并安装过滤器
+        self.scroll_area.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.scroll_area.installEventFilter(self)
+
+
         # 4. 创建内部容器和网格布局
         self.grid_container = QWidget()
         self.grid_container.setStyleSheet("background: transparent;")
+        self.grid_container.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.sprite_grid_layout = QGridLayout(self.grid_container)
         
+
+
         # 🚀 重点：设置间距和边距
         self.sprite_grid_layout.setContentsMargins(4, 6, 4, 6) # 这里的边距可以自由控制了
         self.sprite_grid_layout.setSpacing(0)
         self.sprite_grid_layout.setVerticalSpacing(5)
 
-        # self.sprite_grid_layout.setSpacing(8) # 每个卡片之间的固定间距
+    
         for i in range(4):
             self.sprite_grid_layout.setColumnStretch(i,1)
 
 
         self.sprite_grid_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        
+        # self.grid_container.mousePressEvent = lambda event: self.clear_all_selections()
+        self.scroll_area.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.scroll_area.installEventFilter(self)
 
         self.scroll_area.setWidget(self.grid_container)
         container_layout.addWidget(self.scroll_area)
+
+        
         
         
 
-    def add_sprite_card(self, name, index,icon_path=None):
-        # 创建一个自定义的 Widget 作为卡片
+    def add_sprite_card(self, name, index, icon_path=None):
+        # 创建卡片
         card = QWidget()
-        card.setFixedSize(74,74) # 这里的尺寸终于可以随心所欲了
+        card.setFixedSize(74, 74) 
         card.setObjectName("spriteCard")
+        
+        # 🚀 必须设置焦点策略，否则无法触发 FocusOut 事件
+        card.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        
+        # 注册事件过滤器（用于监控它的失去焦点动作）
+        card.installEventFilter(self)
+
         card.setStyleSheet("""
             #spriteCard {
                 background-color: #2D2D2D;
                 border-radius: 8px;
+                border: 2px solid transparent;
             }
             #spriteCard:hover {
                 background-color: #3D3D3D;
             }
+            #spriteCard[selected="true"] {
+                background-color: #3D3D3D;
+                border: 2px solid #5bc772;
+            }
         """)
         
-        # 卡片内部布局 (图标 + 文字)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(2)
 
-        # 图标占位
-        # --- 重点修改：图标占位部分 ---
+        # 图标部分
         icon_label = QLabel()
         icon_label.setFixedSize(40, 40)
-        
-        # 🚀 只有这里做了判断：如果有图就显示图，没图就显示原来的蓝色块
         if icon_path and os.path.exists(icon_path):
             pix = QPixmap(icon_path)
             if not pix.isNull():
-                # 严格缩放到 40x40，绝不撑开布局
                 icon_label.setPixmap(pix.scaled(
                     40, 40, 
                     Qt.AspectRatioMode.KeepAspectRatio, 
                     Qt.TransformationMode.SmoothTransformation
                 ))
-            else:
-                icon_label.setStyleSheet("background-color: #4A90E2; border-radius: 4px;")
         else:
             icon_label.setStyleSheet("background-color: #4A90E2; border-radius: 4px;")
-            
         layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignCenter)
 
-        # 名字
+        # 名字部分
         name_label = QLabel(name)
-        name_label.setStyleSheet("color: #E0E0E0; font-size: 10px;")
+        name_label.setStyleSheet("color: #E0E0E0; font-size: 10px; background: transparent;")
         layout.addWidget(name_label, 0, Qt.AlignmentFlag.AlignCenter)
 
-        # 🚀 算出它该在第几行第几列
-        row = index // 4
-        col = index % 4
+        # 网格布局定位
+        row, col = index // 4, index % 4
         self.sprite_grid_layout.addWidget(card, row, col, Qt.AlignmentFlag.AlignCenter)
+
+        # 🚀 点击事件：高亮 + 拿焦点
+        card.mousePressEvent = lambda event: self.handle_card_click(card, event)
+        card.setProperty("selected", "false")
+        
+        return card
     
     def refresh_sprite_grid(self):
         """核心：保持布局不动，只换数据源"""
+        # 🚀 关键修复：清空布局前，务必重置当前选中，防止变量指向已被销毁的卡片
+        self.current_selected_card = None
+
         # 清空
         while self.sprite_grid_layout.count():
             child = self.sprite_grid_layout.takeAt(0)
@@ -660,3 +698,34 @@ class ResourceManager(QObject):
 
             # 🚀 关键：依然使用 add_sprite_card，只是多传了 thumb_path
             self.add_sprite_card(folder_name, i, thumb_path)
+    
+    
+    
+    def handle_card_click(self, card, event):
+        """处理卡片点击：设置焦点并切换高亮"""
+        event.accept()
+        card.setFocus() # 🚀 让卡片抓住焦点
+        
+        # 取消旧的
+        if hasattr(self, 'current_selected_card') and self.current_selected_card:
+            try:
+                self.current_selected_card.setProperty("selected", "false")
+                self.current_selected_card.style().unpolish(self.current_selected_card)
+                self.current_selected_card.style().polish(self.current_selected_card)
+            except RuntimeError: pass
+
+        # 选中新的
+        self.current_selected_card = card
+        card.setProperty("selected", "true")
+        card.style().unpolish(card)
+        card.style().polish(card)
+
+    def clear_all_selections(self):
+        """清除高亮状态"""
+        if hasattr(self, 'current_selected_card') and self.current_selected_card:
+            try:
+                self.current_selected_card.setProperty("selected", "false")
+                self.current_selected_card.style().unpolish(self.current_selected_card)
+                self.current_selected_card.style().polish(self.current_selected_card)
+            except RuntimeError: pass
+            self.current_selected_card = None
