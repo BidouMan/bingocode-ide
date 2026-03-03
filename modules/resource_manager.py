@@ -659,6 +659,7 @@ class ResourceManager(QObject):
 
         # 名字部分
         name_label = QLabel(name)
+        name_label.setObjectName("spriteNameLabel")
         # 🚀 核心修改：使用已加载的自定义字体家族
         # self.custom_font_family 是你在 __init__ 中获取的字体名称
         if hasattr(self, 'custom_font_family'):
@@ -676,7 +677,14 @@ class ResourceManager(QObject):
 
         # 🚀 点击事件：高亮 + 拿焦点
         card.mousePressEvent = lambda event: self.handle_card_click(card, event)
+        card.mouseDoubleClickEvent = lambda event: self.start_sprite_rename(card, name)
+
+        
+
         card.setProperty("selected", "false")
+        # 确保子控件不拦截双击
+        icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        name_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         
         return card
     
@@ -754,3 +762,102 @@ class ResourceManager(QObject):
                 self.current_selected_card.style().polish(self.current_selected_card)
             except RuntimeError: pass
             self.current_selected_card = None
+    
+    def start_sprite_rename(self, card, old_name):
+        from PySide6.QtWidgets import QLineEdit
+        
+        name_label = card.findChild(QLabel, "spriteNameLabel")
+        if not name_label: return
+
+        # 🚀 核心逻辑 1：暂时禁用卡片的布局刷新
+        # 这样在创建 edit 控件时，布局管理器不会去重新排列图标
+        card.layout().setEnabled(False)
+
+        # 🚀 核心逻辑 2：创建 edit，但不设置父对象为布局管理的对象
+        # 我们手动指定它在 card 上的位置
+        edit = QLineEdit(card)
+        edit.setText(old_name)
+        
+        # 获取 Label 当前的准确位置
+        geo = name_label.geometry()
+        
+        # 🚀 核心逻辑 3：绝对定位，且不让布局影响它
+        # 保持高度和位置完全一致，左右可以稍微扩一点方便输入
+        edit.setGeometry(geo.adjusted(-4, -2, 4, 2)) 
+        
+        edit.setFont(name_label.font())
+        edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        edit.setStyleSheet("""
+            QLineEdit {
+                background-color: #1A1A1A;
+                color: white;
+                border: 1px solid #5bc772;
+                border-radius: 4px;
+                padding-left: 4px;   /* 文字左右留白 */
+                padding-right: 4px;
+                padding-top: 1px;    /* 垂直方向微调 */
+                padding-bottom: 1px;
+                margin: 0px;
+            }
+        """)
+
+        # 隐藏文字，显示输入框
+        name_label.hide()
+        edit.show()
+        edit.setFocus()
+        edit.selectAll()
+
+        def finish_edit():
+            if not edit.isVisible(): return
+            
+            new_name = edit.text().strip()
+            
+            # 只有当名字真的变了，且不为空时才触发同步
+            if new_name and new_name != old_name:
+                # 🚀 接入磁盘同步
+                self.handle_sprite_physical_rename(old_name, new_name)
+            
+            # 以下是原有的 UI 恢复逻辑
+            edit.hide()
+            edit.deleteLater()
+            name_label.show()
+            card.layout().setEnabled(True)
+            card.update()
+
+        # 信号绑定
+        edit.editingFinished.connect(finish_edit)
+        # 捕获回车，让它失去焦点触发 finish_edit
+        edit.returnPressed.connect(edit.clearFocus)
+    
+    def handle_sprite_physical_rename(self, old_name, new_name):
+        """物理重命名 assets/sprites 中的文件夹"""
+        # 1. 获取项目根路径
+        project_root = self.app_controller.project_manager.project_root
+        if not project_root:
+            return
+
+        # 2. 构建旧路径和新路径
+        sprites_dir = os.path.join(project_root, "assets", "sprites")
+        old_path = os.path.join(sprites_dir, old_name)
+        new_path = os.path.join(sprites_dir, new_name)
+
+        # 3. 安全检查
+        if not os.path.exists(old_path):
+            return
+            
+        if os.path.exists(new_path):
+            QMessageBox.warning(self.window, "重命名失败", f"角色名称 '{new_name}' 已存在。")
+            return
+
+        # 4. 执行重命名
+        try:
+            os.rename(old_path, new_path)
+
+            # 5. 🚀 关键：重命名后必须刷新整个网格，以确保内部数据一致
+            # 如果不刷新，下次点击或再次改名时，逻辑引用的还是旧名字
+            self.refresh_sprite_grid()
+            
+        except Exception as e:
+            QMessageBox.critical(self.window, "错误", f"文件夹重命名失败: {e}")
+    
+    
