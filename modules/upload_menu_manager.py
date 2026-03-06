@@ -116,21 +116,27 @@ class UploadMenuManager(QWidget):
         self.anim_menu(False)
 
     def import_assets(self):
-        """弹出文件对话框"""
+        """弹出文件对话框：增加 .bgs 支持"""
+        # 🚀 修改：增加 .bgs 过滤器
         files, _ = QFileDialog.getOpenFileNames(
-            self, "选择角色序列帧图片", "", 
-            "图片文件 (*.png *.jpg *.jpeg *.bmp);;所有文件 (*)"
+            self, "选择角色资源", "", 
+            "Bingo 角色包 (*.bgs);;图片序列帧 (*.png *.jpg *.jpeg *.bmp);;所有文件 (*)"
         )
         
         if files:
-            # 🚀 获取文件夹真实名称
-            import os
-            sprite_name = os.path.basename(os.path.dirname(files[0]))
-            if not sprite_name: sprite_name = "new_sprite"
-            
-            # 触发回调
-            if hasattr(self, 'on_import_finished') and self.on_import_finished:
-                self.on_import_finished(sprite_name, files)
+            # 如果选中的是 .bgs 文件，我们单独处理
+            if len(files) == 1 and files[0].lower().endswith('.bgs'):
+                # 触发 .bgs 专属回调（复用接口，但传特殊标志）
+                if self.on_import_finished:
+                    self.on_import_finished(None, files, is_bgs=True)
+            else:
+                # 原有的序列帧处理逻辑
+                import os
+                sprite_name = os.path.basename(os.path.dirname(files[0]))
+                if not sprite_name: sprite_name = "new_sprite"
+                
+                if self.on_import_finished:
+                    self.on_import_finished(sprite_name, files, is_bgs=False)
 
     def process_imports(self, file_paths, sprite_name):
         """核心：将资源拷贝到当前打开的工程目录下"""

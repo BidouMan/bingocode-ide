@@ -1,4 +1,6 @@
 import os,shutil
+import zipfile  
+import json
 from PySide6.QtCore import QObject, Qt, QSize,QEvent,QRect,QTimer
 from PySide6.QtWidgets import (QListWidgetItem, QStyle, QMessageBox,QFrame,QVBoxLayout,
                                QWidget,QHBoxLayout,QLabel,QPushButton,QListWidget,QStyledItemDelegate,
@@ -529,29 +531,57 @@ class ResourceManager(QObject):
         except Exception as e:
             print(f"列表重命名失败: {e}")
     
-    def handle_sprite_import_success(self, sprite_name, file_paths):
-        """第一步：只负责拷贝和触发刷新"""
+    def handle_sprite_import_success(self, sprite_name, file_paths, is_bgs=False):
+        """核心：处理资源导入，支持 .bgs 解压和 config.json 读取"""
         import shutil
         project_root = self.app_controller.project_manager.project_root
         if not project_root: return
 
-        # 确定目标路径
-        target_dir = os.path.join(project_root, "assets", "sprites", sprite_name)
-        
-        # 防止同名覆盖
-        counter = 1
-        base_target = target_dir
-        while os.path.exists(target_dir):
-            target_dir = f"{base_target}_{counter}"
-            sprite_name = f"{sprite_name}_{counter}"
-            counter += 1
-            
-        os.makedirs(target_dir, exist_ok=True)
-        for f in file_paths:
-            shutil.copy2(f, target_dir)
-            
-        # 拷贝完直接刷新界面
+        sprites_dir = os.path.join(project_root, "assets", "sprites")
+
+        if is_bgs:
+            # --- 🚀 处理 .bgs 打包文件 ---
+            bgs_path = file_paths[0]
+            try:
+                with zipfile.ZipFile(bgs_path, 'r') as zip_ref:
+                    # 1. 尝试读取 config.json
+                    if "config.json" not in zip_ref.namelist():
+                        return
+                    
+                    with zip_ref.open('config.json') as f:
+                        config_data = json.load(f)
+                        real_name = config_data.get("name", "new_sprite")
+                    
+                    # 2. 确定目标目录（防重名）
+                    target_dir = self._get_safe_dir_name(sprites_dir, real_name)
+                    os.makedirs(target_dir, exist_ok=True)
+                    
+                    # 3. 解压所有内容
+                    zip_ref.extractall(target_dir)
+            except Exception as e:
+                print(f"❌ 解压 .bgs 失败: {e}")
+                return
+        else:
+            # --- 原有的普通图片拷贝逻辑 ---
+            target_dir = self._get_safe_dir_name(sprites_dir, sprite_name)
+            os.makedirs(target_dir, exist_ok=True)
+            for f in file_paths:
+                shutil.copy2(f, target_dir)
+
+        # 刷新界面
         self.refresh_sprite_grid()
+
+
+    def _get_safe_dir_name(self, base_path, name):
+        """内部工具：防止重名逻辑封装"""
+        target = os.path.join(base_path, name)
+        counter = 1
+        base_name = name
+        while os.path.exists(target):
+            name = f"{base_name}_{counter}"
+            target = os.path.join(base_path, name)
+            counter += 1
+        return target
 
     def setup_sprite_grid_mode(self):
         # 1. 找到存放列表的容器 (verticalLayout_15)
@@ -735,29 +765,34 @@ class ResourceManager(QObject):
         
         # 确保 assets/sprites 目录存在
         sprites_dir = os.path.join(project_root, "assets", "sprites")
-        if not os.path.exists(sprites_dir):
-            # 如果是新项目，自动创建该目录以便后续导入
-            try:
-                os.makedirs(sprites_dir, exist_ok=True)
-            except: pass
-            return
+        if not os.path.exists(sprites_dir): return
 
-        # 扫描并渲染文件夹（保持你原有的逻辑）
         try:
-            items = os.listdir(sprites_dir)
-            sprite_folders = [d for d in items if not d.startswith('.') and os.path.isdir(os.path.join(sprites_dir, d))]
+            sprite_folders = [d for d in os.listdir(sprites_dir) if not d.startswith('.') and os.path.isdir(os.path.join(sprites_dir, d))]
             sprite_folders.sort()
 
             for i, folder_name in enumerate(sprite_folders):
                 folder_path = os.path.join(sprites_dir, folder_name)
-                img_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.webp')
                 thumb_path = None
                 
-                # 尝试寻找第一张图作为缩略图
-                files = [f for f in os.listdir(folder_path) if f.lower().endswith(img_exts)]
-                if files:
-                    files.sort()
-                    thumb_path = os.path.join(folder_path, files[0])
+                # 🚀 优先尝试从 config.json 获取缩略图
+                config_path = os.path.join(folder_path, "config.json")
+                if os.path.exists(config_path):
+                    try:
+                        with open(config_path, 'r', encoding='utf-8') as f:
+                            cfg = json.load(f)
+                            # 获取第一张 costumes 的 file
+                            if cfg.get("costumes"):
+                                first_file = cfg["costumes"][0].get("file")
+                                thumb_path = os.path.join(folder_path, first_file)
+                    except: pass
+
+                # 兜底：如果没有 config.json 或读取失败，扫描第一张图
+                if not thumb_path or not os.path.exists(thumb_path):
+                    img_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.webp')
+                    files = sorted([f for f in os.listdir(folder_path) if f.lower().endswith(img_exts)])
+                    if files:
+                        thumb_path = os.path.join(folder_path, files[0])
 
                 self.add_sprite_card(folder_name, i, thumb_path)
         except Exception as e:
@@ -936,7 +971,7 @@ class ResourceManager(QObject):
                     import shutil
                     # 🚀 使用 shutil.rmtree 递归删除整个文件夹
                     shutil.rmtree(target_path)
-                    print(f"🗑️ 磁盘物理删除成功: {name}")
+    
                     
                     # 🚀 刷新网格，让消失的角色在 UI 上也滚蛋
                     self.refresh_sprite_grid()
