@@ -30,33 +30,49 @@ __all__ = ['Sprite', 'run','key_down','show_fps','set_background','mouse_down','
 
 class Sprite:
     def __init__(self, filename):        
-        # 使用内存地址作为唯一ID
+        # 1. 基础属性初始化
         self.id = str(id(self))
-        self.image = self._resolve_path(filename, "sprites")
         self._x = 320  
         self._y = 240
         self._scale = 100
         self._angle = 0
         self._rotation_style = "all"
         self._current_scale_x = 1.0
-        self.hitbox_scale = 0.8 # 允许微调碰撞精度
+        self.hitbox_scale = 0.8 
         self._groups = []
         self._visible = True
-        self._is_deleted = False # 增加删除标记
+        self._is_deleted = False 
         self._layer = 0
+        
+        # 🚀 2. 资源解析逻辑升级
+        # 尝试寻找解压后的角色文件夹 (例如 assets/sprites/洛克人)
+        self.sprite_dir = os.path.join("assets", "sprites", filename)
+        self.config = self._load_sprite_config()
+        
+        if self.config and "costumes" in self.config:
+            # 如果是 BGS 角色包格式
+            self.current_costume_index = 0
+            # 获取 config.json 中定义的第一个造型文件
+            first_frame = self.config["costumes"][0]["file"]
+            self.image = os.path.join(self.sprite_dir, first_frame)
+        else:
+            # 兼容旧逻辑：寻找单张图片
+            self.image = self._resolve_path(filename, "sprites")
+            self.sprite_dir = None
+            self.config = None
 
-        # 🚀 预设缓存变量
+        # 3. 渲染预设缓存
         self._cached_image = None
         self._cached_hitbox = None 
         self._visual_offset_x = 0
         self._visual_offset_y = 0
         
-        # 初始计算一次
+        # 4. 初始计算碰撞箱和图片信息
         self._setup_hitbox()
 
-        # 发送创建指令
+        # 5. 向 IDE 发送创建指令
         self._send_command("CREATE", {
-            # 🚀 关键：将相对路径转为绝对路径发给 IDE 渲染器
+            # 关键：转为绝对路径确保 IDE 渲染器能跨目录找到文件
             "image": os.path.abspath(self.image), 
             "x": self._x,
             "y": self._y,
@@ -398,6 +414,16 @@ class Sprite:
         self._send_command("UPDATE", {"id": self.id, "layer": value})
 
     # ---------- 内部调用 ----------
+    def _load_sprite_config(self):
+        """内部工具：尝试读取文件夹下的 config.json"""
+        config_path = os.path.join(self.sprite_dir, "config.json")
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"❌ 警告：读取角色配置 {config_path} 失败: {e}")
+        return None
     def _resolve_path(self, filename, category):
         """通用路径解析：工程根目录优先，其次是 assets/分类/ """
         if os.path.exists(filename):
