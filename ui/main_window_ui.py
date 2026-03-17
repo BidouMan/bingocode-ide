@@ -15,11 +15,12 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QApplication, QFrame, QGraphicsView, QHBoxLayout,
-    QHeaderView, QLabel, QListView, QListWidget,
-    QListWidgetItem, QPlainTextEdit, QPushButton, QSizePolicy,
-    QSlider, QSpacerItem, QSplitter, QStackedWidget,
-    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFrame, QGraphicsView,
+    QHBoxLayout, QHeaderView, QLabel, QListView,
+    QListWidget, QListWidgetItem, QPlainTextEdit, QPushButton,
+    QSizePolicy, QSlider, QSpacerItem, QSplitter,
+    QStackedWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
+    QWidget)
 import resources_rc
 
 class Ui_Form(object):
@@ -624,6 +625,7 @@ class Ui_Form(object):
         self.sprite_fps_list.setMaximumSize(QSize(100, 16777215))
         self.sprite_fps_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.sprite_fps_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.sprite_fps_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.sprite_fps_list.setMovement(QListView.Movement.Static)
         self.sprite_fps_list.setResizeMode(QListView.ResizeMode.Adjust)
         self.sprite_fps_list.setSpacing(5)

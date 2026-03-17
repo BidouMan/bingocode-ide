@@ -29,6 +29,7 @@ class SpriteEditorManager(QObject):
         self.canvas_scene = QGraphicsScene()
         self.canvas.setScene(self.canvas_scene)
 
+        
         self._setup_connections()
 
     def _setup_connections(self):
@@ -37,11 +38,19 @@ class SpriteEditorManager(QObject):
         # 动作列表点击 -> 切换动画序列
         self.anim_list.itemClicked.connect(self._on_animation_item_clicked)
 
+        # 动画管理器(删除+重命名)
         self.anim_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.anim_list.customContextMenuRequested.connect(self._show_anim_context_menu)
-        
-        # 🚀 只有在这里连接一次 itemChanged
         self.anim_list.itemChanged.connect(self._on_anim_renamed)
+
+        # 开启造型列表右键
+        self.fps_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.fps_list.customContextMenuRequested.connect(self._show_costume_context_menu)
+        self.fps_list.setSelectionMode(self.fps_list.SelectionMode.ExtendedSelection)
+        # 造型列表点击 -> 切换显示
+        self.fps_list.currentRowChanged.connect(self._on_costume_selection_changed)
+        # 动作列表点击 -> 切换动画序列
+        self.anim_list.itemClicked.connect(self._on_animation_item_clicked)
 
         # 按键绑定
         self.ui.btn_preview_add.clicked.connect(self.add_new_animation)
@@ -248,13 +257,39 @@ class SpriteEditorManager(QObject):
         self.refresh_all_ui("ALL")
 
     def _on_animation_item_clicked(self, item, column):
-        """当用户点击右下角动作树中的某一项时触发"""
         anim_name = item.text(0)
         if not self.model or anim_name not in self.model.animations:
             return
         
-        print(f"🎬 [DEBUG] 切换动画序列: {anim_name}")
+        # 1. 播放动画
         self.play_animation(anim_name)
+
+        # 2. 🚀 联动高亮（临时开启多选）
+        config = self.model.animations[anim_name]
+        start_idx = config.get("start", 1) - 1
+        end_idx = config.get("end", 1) - 1
+        
+        self.fps_list.blockSignals(True)
+        
+        # --- 核心黑科技：临时切换模式 ---
+        self.fps_list.setSelectionMode(self.fps_list.SelectionMode.MultiSelection)
+        self.fps_list.clearSelection()
+        
+        for i in range(start_idx, end_idx + 1):
+            list_item = self.fps_list.item(i)
+            if list_item:
+                list_item.setSelected(True)
+        
+        # 滚动到起始帧
+        first_item = self.fps_list.item(start_idx)
+        if first_item:
+            self.fps_list.scrollToItem(first_item, self.fps_list.ScrollHint.PositionAtTop)
+        
+        # 选中完成后，立刻切回单选模式
+        # 这样下次用户点左侧列表时，会自动触发“清空其它，只选当前”的逻辑
+        self.fps_list.setSelectionMode(self.fps_list.SelectionMode.SingleSelection)
+        
+        self.fps_list.blockSignals(False)
 
     # --- 动画引擎方法 ---
 
@@ -325,11 +360,13 @@ class SpriteEditorManager(QObject):
 
 
     def _on_costume_selection_changed(self, row):
+        # 如果是多选模式，row 可能只是最后一次点击的那一行
         if row < 0 or not self.model: return
+        
+        # 获取当前真正被点击（焦点所在）的那一张图
         img_path = self.model.get_costume_path(row + 1)
         if img_path:
             self.display_on_canvas(img_path)
-            # 只有在没播放动画时，点击左侧列表才更新预览窗
             if not self.is_playing:
                 self.update_preview_static(img_path)
 
@@ -362,3 +399,66 @@ class SpriteEditorManager(QObject):
             )
             self.preview.setPixmap(scaled_pix)
             self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    
+    from PySide6.QtWidgets import QMessageBox
+
+    def _show_costume_context_menu(self, pos):
+        """造型列表右键：物理删除"""
+        row = self.fps_list.currentRow()
+        if row < 0: return
+        
+        menu = QMenu(self.fps_list)
+        del_action = QAction(f"🗑️ 彻底删除造型: {row + 1}", menu)
+        del_action.triggered.connect(lambda: self.delete_costume_physically(row + 1))
+        menu.addAction(del_action)
+        menu.exec(QCursor.pos())
+
+    def delete_costume_physically(self, target_idx):
+        """彻底删除某一帧并修正所有动画索引"""
+        if not self.model: return
+        
+        # # 1. 二次确认
+        # msg = f"确定要物理删除第 {target_idx} 帧吗？\n这会改变后续所有动画的帧索引！"
+        # reply = QMessageBox.question(self.ui.Form, "物理删除确认", msg, 
+        #                             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        # if reply == QMessageBox.StandardButton.No: return
+
+        # 2. 从模型中移除图片路径
+        # 注意：target_idx 是 1-Base，对应 list 索引要减 1
+        removed_frame = self.model.costumes.pop(target_idx - 1)
+        
+        # 3. 🚀 核心：修正所有动画片段的索引
+        anims_to_delete = []
+        for name, config in self.model.animations.items():
+            start = config.get("start", 1)
+            end = config.get("end", 1)
+
+            # 情况 A: 动作在被删除帧之后 -> 整体前移
+            if start > target_idx:
+                config["start"] -= 1
+                config["end"] -= 1
+            
+            # 情况 B: 被删除帧在动作范围内
+            elif start <= target_idx <= end:
+                # 如果动作只有这一帧且被删了 -> 标记动作待删除
+                if start == end:
+                    anims_to_delete.append(name)
+                else:
+                    # 范围缩小
+                    config["end"] -= 1
+                    # 特殊情况：如果删的是 start 帧，start 不变（因为后面的补上来了），只需减 end
+                    # 但需要确保 end 依然 >= start
+            
+            # 情况 C: 动作在被删除帧之前 -> 不受影响
+
+        # 清理失效动作
+        for name in anims_to_delete:
+            del self.model.animations[name]
+            print(f"🧹 [DEBUG] 动作 {name} 因关联帧被删光而移除")
+
+        # 4. 保存模型并刷新 UI
+        self.model.save()
+        self.refresh_all_ui("ALL") # 刷新全部 UI 以确保索引同步
+        new_row = min(target_idx - 1, self.fps_list.count() - 1)
+        self.fps_list.setCurrentRow(new_row)
+        print(f"🔥 [DEBUG] 已物理删除帧 {target_idx}: {removed_frame}")

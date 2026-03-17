@@ -1455,6 +1455,9 @@
                 <property name="horizontalScrollBarPolicy">
                  <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
                 </property>
+                <property name="selectionMode">
+                 <enum>QAbstractItemView::SelectionMode::SingleSelection</enum>
+                </property>
                 <property name="movement">
                  <enum>QListView::Movement::Static</enum>
                 </property>
