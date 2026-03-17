@@ -18,8 +18,8 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
 from PySide6.QtWidgets import (QApplication, QFrame, QGraphicsView, QHBoxLayout,
     QHeaderView, QLabel, QListView, QListWidget,
     QListWidgetItem, QPlainTextEdit, QPushButton, QSizePolicy,
-    QSpacerItem, QSplitter, QStackedWidget, QTreeWidget,
-    QTreeWidgetItem, QVBoxLayout, QWidget)
+    QSlider, QSpacerItem, QSplitter, QStackedWidget,
+    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 import resources_rc
 
 class Ui_Form(object):
@@ -622,6 +622,8 @@ class Ui_Form(object):
         self.sprite_fps_list.setObjectName(u"sprite_fps_list")
         self.sprite_fps_list.setMinimumSize(QSize(100, 0))
         self.sprite_fps_list.setMaximumSize(QSize(100, 16777215))
+        self.sprite_fps_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.sprite_fps_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.sprite_fps_list.setMovement(QListView.Movement.Static)
         self.sprite_fps_list.setResizeMode(QListView.ResizeMode.Adjust)
         self.sprite_fps_list.setSpacing(5)
@@ -644,13 +646,23 @@ class Ui_Form(object):
         self.verticalLayout_20.setSpacing(0)
         self.verticalLayout_20.setObjectName(u"verticalLayout_20")
         self.verticalLayout_20.setContentsMargins(0, 0, 0, 0)
-        self.label_2 = QLabel(self.editor_preview_panel)
-        self.label_2.setObjectName(u"label_2")
-        self.label_2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.animate_label = QLabel(self.editor_preview_panel)
+        self.animate_label.setObjectName(u"animate_label")
+        self.animate_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.verticalLayout_20.addWidget(self.label_2)
+        self.verticalLayout_20.addWidget(self.animate_label)
 
-        self.animate_preview = QLabel(self.editor_preview_panel)
+        self.preview_bg = QFrame(self.editor_preview_panel)
+        self.preview_bg.setObjectName(u"preview_bg")
+        self.preview_bg.setMinimumSize(QSize(256, 256))
+        self.preview_bg.setMaximumSize(QSize(256, 256))
+        self.preview_bg.setFrameShape(QFrame.Shape.StyledPanel)
+        self.preview_bg.setFrameShadow(QFrame.Shadow.Raised)
+        self.verticalLayout_17 = QVBoxLayout(self.preview_bg)
+        self.verticalLayout_17.setSpacing(0)
+        self.verticalLayout_17.setObjectName(u"verticalLayout_17")
+        self.verticalLayout_17.setContentsMargins(0, 0, 0, 0)
+        self.animate_preview = QLabel(self.preview_bg)
         self.animate_preview.setObjectName(u"animate_preview")
         self.animate_preview.setMinimumSize(QSize(256, 256))
         self.animate_preview.setMaximumSize(QSize(256, 256))
@@ -658,7 +670,33 @@ class Ui_Form(object):
         self.animate_preview.setScaledContents(False)
         self.animate_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.verticalLayout_20.addWidget(self.animate_preview, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.verticalLayout_17.addWidget(self.animate_preview, 0, Qt.AlignmentFlag.AlignHCenter|Qt.AlignmentFlag.AlignVCenter)
+
+        self.horizontalLayout_12 = QHBoxLayout()
+        self.horizontalLayout_12.setObjectName(u"horizontalLayout_12")
+        self.horizontalSpacer_6 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        self.horizontalLayout_12.addItem(self.horizontalSpacer_6)
+
+        self.fps_slider = QSlider(self.preview_bg)
+        self.fps_slider.setObjectName(u"fps_slider")
+        self.fps_slider.setStyleSheet(u"")
+        self.fps_slider.setOrientation(Qt.Orientation.Horizontal)
+
+        self.horizontalLayout_12.addWidget(self.fps_slider)
+
+        self.horizontalSpacer_7 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        self.horizontalLayout_12.addItem(self.horizontalSpacer_7)
+
+        self.horizontalLayout_12.setStretch(0, 1)
+        self.horizontalLayout_12.setStretch(1, 2)
+        self.horizontalLayout_12.setStretch(2, 1)
+
+        self.verticalLayout_17.addLayout(self.horizontalLayout_12)
+
+
+        self.verticalLayout_20.addWidget(self.preview_bg, 0, Qt.AlignmentFlag.AlignHCenter)
 
         self.editor_preview_btns = QHBoxLayout()
         self.editor_preview_btns.setSpacing(0)
@@ -696,19 +734,26 @@ class Ui_Form(object):
 
         self.editor_preview_btns.addWidget(self.pushButton_4)
 
-        self.pushButton_9 = QPushButton(self.editor_preview_panel)
-        self.pushButton_9.setObjectName(u"pushButton_9")
-        self.pushButton_9.setMinimumSize(QSize(40, 40))
-        self.pushButton_9.setMaximumSize(QSize(40, 40))
-        self.pushButton_9.setIconSize(QSize(24, 24))
+        self.pushButton_10 = QPushButton(self.editor_preview_panel)
+        self.pushButton_10.setObjectName(u"pushButton_10")
+        self.pushButton_10.setMinimumSize(QSize(40, 40))
+        self.pushButton_10.setMaximumSize(QSize(40, 40))
 
-        self.editor_preview_btns.addWidget(self.pushButton_9)
+        self.editor_preview_btns.addWidget(self.pushButton_10)
+
+        self.btn_preview_add = QPushButton(self.editor_preview_panel)
+        self.btn_preview_add.setObjectName(u"btn_preview_add")
+        self.btn_preview_add.setMinimumSize(QSize(40, 40))
+        self.btn_preview_add.setMaximumSize(QSize(40, 40))
+        self.btn_preview_add.setIconSize(QSize(24, 24))
+
+        self.editor_preview_btns.addWidget(self.btn_preview_add)
 
         self.editor_preview_btns.setStretch(0, 1)
         self.editor_preview_btns.setStretch(1, 1)
         self.editor_preview_btns.setStretch(2, 1)
         self.editor_preview_btns.setStretch(3, 1)
-        self.editor_preview_btns.setStretch(4, 1)
+        self.editor_preview_btns.setStretch(5, 1)
 
         self.verticalLayout_20.addLayout(self.editor_preview_btns)
 
@@ -904,13 +949,14 @@ class Ui_Form(object):
         self.pushButton_7.setText(QCoreApplication.translate("Form", u"\u9020\u578b", None))
         self.pushButton_8.setText(QCoreApplication.translate("Form", u"\u5730\u56fe", None))
         self.pushButton_6.setText(QCoreApplication.translate("Form", u"\u58f0\u97f3", None))
-        self.label_2.setText(QCoreApplication.translate("Form", u"ANIMATION\u9884\u89c8", None))
+        self.animate_label.setText(QCoreApplication.translate("Form", u"ANIMATION\u9884\u89c8", None))
         self.animate_preview.setText(QCoreApplication.translate("Form", u"TextLabel", None))
         self.pushButton.setText(QCoreApplication.translate("Form", u"A", None))
         self.pushButton_2.setText(QCoreApplication.translate("Form", u"A", None))
         self.pushButton_3.setText(QCoreApplication.translate("Form", u"A", None))
         self.pushButton_4.setText(QCoreApplication.translate("Form", u"A", None))
-        self.pushButton_9.setText(QCoreApplication.translate("Form", u"A", None))
+        self.pushButton_10.setText(QCoreApplication.translate("Form", u"A", None))
+        self.btn_preview_add.setText(QCoreApplication.translate("Form", u"A", None))
         self.fullscreen_btn_run.setText("")
         self.fullscreen_btn_stop.setText("")
         self.fullscreen_btn_unfull.setText("")

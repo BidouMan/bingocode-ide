@@ -63,10 +63,48 @@ class SpriteDataModel(QObject):
             return os.path.join(self.project_path, filename)
         return None
 
+    # models/sprite_model.py
+
+    # models/sprite_model.py 建议修改如下：
+
     def save(self):
-        data = {"name": self.name, "costumes": self.costumes, "animations": self.animations}
-        with open(self.config_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
+        """持久化到 config.json"""
+        try:
+            # 1. 准备要写入的完整字典
+            # 如果你希望保留 JSON 里的其他字段（比如 name, count），先读取原文件
+            data = {}
+            if os.path.exists(self.config_path):
+                with open(self.config_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            
+            # 2. 🚀 关键：将当前的 self.animations 字典转换回 segments 列表
+            new_segments = []
+            for name, cfg in self.animations.items():
+                seg = {
+                    "name": name,
+                    "start": cfg.get("start", 1),
+                    "end": cfg.get("end", 1),
+                    "fps": cfg.get("fps", 10)
+                }
+                # 如果原 JSON 还有其他属性（如 loop），也可以加上
+                if "loop" in cfg: seg["loop"] = cfg["loop"]
+                new_segments.append(seg)
+            
+            # 3. 更新数据
+            data["segments"] = new_segments
+            data["frames"] = self.costumes  # 确保造型列表也被保存
+            
+            # 4. 🚀 写入文件（一定要用 'w' 模式覆盖）
+            with open(self.config_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=4, ensure_ascii=False)
+                
+            print(f"💾 [Model] 磁盘保存成功！当前动作数: {len(new_segments)}")
+            return True
+        except Exception as e:
+            print(f"❌ [Model] 磁盘保存失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
     
 
