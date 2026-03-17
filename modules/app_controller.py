@@ -55,8 +55,12 @@ class AppController:
         """绑定业务信号，完全保留文件和编辑器逻辑"""
         # 主页全局按钮-
         self.ui.btn_file.clicked.connect(lambda: self.menu_manager.show_popup_menu(self.ui.btn_file))
-        self.ui.btn_save.clicked.connect(self.handle_save_project)
+        # self.ui.btn_save.clicked.connect(self.handle_save_project)
 
+        # 编辑器页面切换按钮
+        self.ui.btn_code_editor.clicked.connect(lambda: self.ui.editor_stacked.setCurrentIndex(0))
+        self.ui.btn_sprite_editor.clicked.connect(lambda: self.ui.editor_stacked.setCurrentIndex(1))
+   
     
         # 菜单栏按钮_>文件管理 
         self.menu_manager.open_file_signal.connect(self.handle_open_project)        
@@ -88,7 +92,6 @@ class AppController:
 
 
         # 将捕获的JSON指令喂给render_manager
-        # self.console_manager.draw_signal.connect(self.render_manager.handle_instruction)
         self.console_manager.instruction_received.connect(self.render_manager.handle_instruction)
 
 
@@ -98,11 +101,10 @@ class AppController:
         
         self.res_manager.bind_switch_page()
 
-        # menu_ui = self.res_manager.upload_menu.ui
-        # menu_ui.btn_sprite.clicked.connect(self.res_manager.import_sprite_dialog)
-        # menu_ui.btn_bg.clicked.connect(lambda: print("点击了上传背景"))
-        # menu_ui.btn_sound.clicked.connect(lambda: print("点击了上传声音"))
     
+    # def handle_change_page_to_spriteeditor(self):
+    #     """切换到精灵编辑器页"""
+    #     self.ui.change_page.setCurrentIndex(2)
 
     def handle_new_project(self):
         """新建项目：重置并初始化运行目标"""

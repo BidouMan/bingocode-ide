@@ -16,10 +16,10 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
 from PySide6.QtWidgets import (QApplication, QFrame, QGraphicsView, QHBoxLayout,
-    QLabel, QLineEdit, QListView, QListWidget,
+    QHeaderView, QLabel, QListView, QListWidget,
     QListWidgetItem, QPlainTextEdit, QPushButton, QSizePolicy,
-    QSpacerItem, QSplitter, QStackedWidget, QVBoxLayout,
-    QWidget)
+    QSpacerItem, QSplitter, QStackedWidget, QTreeWidget,
+    QTreeWidgetItem, QVBoxLayout, QWidget)
 import resources_rc
 
 class Ui_Form(object):
@@ -42,10 +42,10 @@ class Ui_Form(object):
         self.change_page.setMaximumSize(QSize(16777215, 16777215))
         self.edit_stage_frame = QWidget()
         self.edit_stage_frame.setObjectName(u"edit_stage_frame")
-        self.verticalLayout_5 = QVBoxLayout(self.edit_stage_frame)
-        self.verticalLayout_5.setSpacing(0)
-        self.verticalLayout_5.setObjectName(u"verticalLayout_5")
-        self.verticalLayout_5.setContentsMargins(0, 0, 0, 0)
+        self.verticalLayout_19 = QVBoxLayout(self.edit_stage_frame)
+        self.verticalLayout_19.setSpacing(0)
+        self.verticalLayout_19.setObjectName(u"verticalLayout_19")
+        self.verticalLayout_19.setContentsMargins(0, 0, 0, 0)
         self.menu_frame = QFrame(self.edit_stage_frame)
         self.menu_frame.setObjectName(u"menu_frame")
         sizePolicy1 = QSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
@@ -96,31 +96,31 @@ class Ui_Form(object):
 
         self.horizontalLayout_3.addWidget(self.btn_file)
 
-        self.btn_edit = QPushButton(self.menu_frame)
-        self.btn_edit.setObjectName(u"btn_edit")
-        sizePolicy2.setHeightForWidth(self.btn_edit.sizePolicy().hasHeightForWidth())
-        self.btn_edit.setSizePolicy(sizePolicy2)
-        self.btn_edit.setMinimumSize(QSize(0, 0))
-        self.btn_edit.setMaximumSize(QSize(16777215, 40))
+        self.btn_code_editor = QPushButton(self.menu_frame)
+        self.btn_code_editor.setObjectName(u"btn_code_editor")
+        sizePolicy2.setHeightForWidth(self.btn_code_editor.sizePolicy().hasHeightForWidth())
+        self.btn_code_editor.setSizePolicy(sizePolicy2)
+        self.btn_code_editor.setMinimumSize(QSize(0, 0))
+        self.btn_code_editor.setMaximumSize(QSize(16777215, 40))
         icon2 = QIcon()
         icon2.addFile(u":/icons/icon--edit.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
-        self.btn_edit.setIcon(icon2)
-        self.btn_edit.setIconSize(QSize(24, 24))
+        self.btn_code_editor.setIcon(icon2)
+        self.btn_code_editor.setIconSize(QSize(24, 24))
 
-        self.horizontalLayout_3.addWidget(self.btn_edit)
+        self.horizontalLayout_3.addWidget(self.btn_code_editor)
 
-        self.btn_tool = QPushButton(self.menu_frame)
-        self.btn_tool.setObjectName(u"btn_tool")
-        sizePolicy2.setHeightForWidth(self.btn_tool.sizePolicy().hasHeightForWidth())
-        self.btn_tool.setSizePolicy(sizePolicy2)
-        self.btn_tool.setMinimumSize(QSize(0, 0))
-        self.btn_tool.setMaximumSize(QSize(16777215, 40))
+        self.btn_sprite_editor = QPushButton(self.menu_frame)
+        self.btn_sprite_editor.setObjectName(u"btn_sprite_editor")
+        sizePolicy2.setHeightForWidth(self.btn_sprite_editor.sizePolicy().hasHeightForWidth())
+        self.btn_sprite_editor.setSizePolicy(sizePolicy2)
+        self.btn_sprite_editor.setMinimumSize(QSize(0, 0))
+        self.btn_sprite_editor.setMaximumSize(QSize(16777215, 40))
         icon3 = QIcon()
         icon3.addFile(u":/icons/addons.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
-        self.btn_tool.setIcon(icon3)
-        self.btn_tool.setIconSize(QSize(20, 20))
+        self.btn_sprite_editor.setIcon(icon3)
+        self.btn_sprite_editor.setIconSize(QSize(20, 20))
 
-        self.horizontalLayout_3.addWidget(self.btn_tool)
+        self.horizontalLayout_3.addWidget(self.btn_sprite_editor)
 
         self.btn_setting = QPushButton(self.menu_frame)
         self.btn_setting.setObjectName(u"btn_setting")
@@ -135,20 +135,6 @@ class Ui_Form(object):
 
         self.horizontalLayout_3.addWidget(self.btn_setting)
 
-        self.horizontalSpacer_2 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
-
-        self.horizontalLayout_3.addItem(self.horizontalSpacer_2)
-
-        self.line_name_edit = QLineEdit(self.menu_frame)
-        self.line_name_edit.setObjectName(u"line_name_edit")
-        self.line_name_edit.setMinimumSize(QSize(0, 30))
-        self.line_name_edit.setMaximumSize(QSize(16777215, 30))
-        self.line_name_edit.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
-        self.line_name_edit.setFrame(True)
-        self.line_name_edit.setCursorPosition(7)
-
-        self.horizontalLayout_3.addWidget(self.line_name_edit)
-
         self.btn_save = QPushButton(self.menu_frame)
         self.btn_save.setObjectName(u"btn_save")
         sizePolicy2.setHeightForWidth(self.btn_save.sizePolicy().hasHeightForWidth())
@@ -161,6 +147,10 @@ class Ui_Form(object):
         self.btn_save.setIconSize(QSize(16, 16))
 
         self.horizontalLayout_3.addWidget(self.btn_save)
+
+        self.horizontalSpacer_2 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        self.horizontalLayout_3.addItem(self.horizontalSpacer_2)
 
         self.btn_help = QPushButton(self.menu_frame)
         self.btn_help.setObjectName(u"btn_help")
@@ -176,13 +166,20 @@ class Ui_Form(object):
         self.horizontalLayout_3.setStretch(2, 1)
         self.horizontalLayout_3.setStretch(3, 1)
         self.horizontalLayout_3.setStretch(4, 1)
-        self.horizontalLayout_3.setStretch(5, 6)
-        self.horizontalLayout_3.setStretch(6, 2)
-        self.horizontalLayout_3.setStretch(7, 1)
+        self.horizontalLayout_3.setStretch(5, 1)
+        self.horizontalLayout_3.setStretch(6, 6)
 
-        self.verticalLayout_5.addWidget(self.menu_frame)
+        self.verticalLayout_19.addWidget(self.menu_frame)
 
-        self.frame = QFrame(self.edit_stage_frame)
+        self.editor_stacked = QStackedWidget(self.edit_stage_frame)
+        self.editor_stacked.setObjectName(u"editor_stacked")
+        self.editor_code_web = QWidget()
+        self.editor_code_web.setObjectName(u"editor_code_web")
+        self.verticalLayout_5 = QVBoxLayout(self.editor_code_web)
+        self.verticalLayout_5.setSpacing(0)
+        self.verticalLayout_5.setObjectName(u"verticalLayout_5")
+        self.verticalLayout_5.setContentsMargins(0, 0, 0, 0)
+        self.frame = QFrame(self.editor_code_web)
         self.frame.setObjectName(u"frame")
         self.frame.setFrameShape(QFrame.Shape.StyledPanel)
         self.frame.setFrameShadow(QFrame.Shadow.Raised)
@@ -608,6 +605,138 @@ class Ui_Form(object):
 
         self.verticalLayout_5.addWidget(self.frame)
 
+        self.editor_stacked.addWidget(self.editor_code_web)
+        self.editor_sprite_web = QWidget()
+        self.editor_sprite_web.setObjectName(u"editor_sprite_web")
+        self.verticalLayout_18 = QVBoxLayout(self.editor_sprite_web)
+        self.verticalLayout_18.setSpacing(0)
+        self.verticalLayout_18.setObjectName(u"verticalLayout_18")
+        self.verticalLayout_18.setContentsMargins(0, 0, 0, 0)
+        self.widget_2 = QWidget(self.editor_sprite_web)
+        self.widget_2.setObjectName(u"widget_2")
+        self.horizontalLayout_11 = QHBoxLayout(self.widget_2)
+        self.horizontalLayout_11.setSpacing(0)
+        self.horizontalLayout_11.setObjectName(u"horizontalLayout_11")
+        self.horizontalLayout_11.setContentsMargins(0, 0, 0, 0)
+        self.sprite_fps_list = QListWidget(self.widget_2)
+        self.sprite_fps_list.setObjectName(u"sprite_fps_list")
+        self.sprite_fps_list.setMinimumSize(QSize(100, 0))
+        self.sprite_fps_list.setMaximumSize(QSize(100, 16777215))
+        self.sprite_fps_list.setMovement(QListView.Movement.Static)
+        self.sprite_fps_list.setResizeMode(QListView.ResizeMode.Adjust)
+        self.sprite_fps_list.setSpacing(5)
+        self.sprite_fps_list.setViewMode(QListView.ViewMode.IconMode)
+
+        self.horizontalLayout_11.addWidget(self.sprite_fps_list)
+
+        self.sprite_canvas = QGraphicsView(self.widget_2)
+        self.sprite_canvas.setObjectName(u"sprite_canvas")
+        self.sprite_canvas.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.sprite_canvas.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        self.horizontalLayout_11.addWidget(self.sprite_canvas)
+
+        self.editor_preview_panel = QWidget(self.widget_2)
+        self.editor_preview_panel.setObjectName(u"editor_preview_panel")
+        self.editor_preview_panel.setMinimumSize(QSize(264, 0))
+        self.editor_preview_panel.setMaximumSize(QSize(264, 16777215))
+        self.verticalLayout_20 = QVBoxLayout(self.editor_preview_panel)
+        self.verticalLayout_20.setSpacing(0)
+        self.verticalLayout_20.setObjectName(u"verticalLayout_20")
+        self.verticalLayout_20.setContentsMargins(0, 0, 0, 0)
+        self.label_2 = QLabel(self.editor_preview_panel)
+        self.label_2.setObjectName(u"label_2")
+        self.label_2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.verticalLayout_20.addWidget(self.label_2)
+
+        self.animate_preview = QLabel(self.editor_preview_panel)
+        self.animate_preview.setObjectName(u"animate_preview")
+        self.animate_preview.setMinimumSize(QSize(256, 256))
+        self.animate_preview.setMaximumSize(QSize(256, 256))
+        self.animate_preview.setStyleSheet(u"background:red;")
+        self.animate_preview.setScaledContents(False)
+        self.animate_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.verticalLayout_20.addWidget(self.animate_preview, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        self.editor_preview_btns = QHBoxLayout()
+        self.editor_preview_btns.setSpacing(0)
+        self.editor_preview_btns.setObjectName(u"editor_preview_btns")
+        self.editor_preview_btns.setContentsMargins(0, -1, 0, -1)
+        self.pushButton = QPushButton(self.editor_preview_panel)
+        self.pushButton.setObjectName(u"pushButton")
+        self.pushButton.setMinimumSize(QSize(40, 40))
+        self.pushButton.setMaximumSize(QSize(40, 40))
+        self.pushButton.setIconSize(QSize(24, 24))
+
+        self.editor_preview_btns.addWidget(self.pushButton)
+
+        self.pushButton_2 = QPushButton(self.editor_preview_panel)
+        self.pushButton_2.setObjectName(u"pushButton_2")
+        self.pushButton_2.setMinimumSize(QSize(40, 40))
+        self.pushButton_2.setMaximumSize(QSize(40, 40))
+        self.pushButton_2.setIconSize(QSize(24, 24))
+
+        self.editor_preview_btns.addWidget(self.pushButton_2)
+
+        self.pushButton_3 = QPushButton(self.editor_preview_panel)
+        self.pushButton_3.setObjectName(u"pushButton_3")
+        self.pushButton_3.setMinimumSize(QSize(40, 40))
+        self.pushButton_3.setMaximumSize(QSize(40, 40))
+        self.pushButton_3.setIconSize(QSize(24, 24))
+
+        self.editor_preview_btns.addWidget(self.pushButton_3)
+
+        self.pushButton_4 = QPushButton(self.editor_preview_panel)
+        self.pushButton_4.setObjectName(u"pushButton_4")
+        self.pushButton_4.setMinimumSize(QSize(40, 40))
+        self.pushButton_4.setMaximumSize(QSize(40, 40))
+        self.pushButton_4.setIconSize(QSize(24, 24))
+
+        self.editor_preview_btns.addWidget(self.pushButton_4)
+
+        self.pushButton_9 = QPushButton(self.editor_preview_panel)
+        self.pushButton_9.setObjectName(u"pushButton_9")
+        self.pushButton_9.setMinimumSize(QSize(40, 40))
+        self.pushButton_9.setMaximumSize(QSize(40, 40))
+        self.pushButton_9.setIconSize(QSize(24, 24))
+
+        self.editor_preview_btns.addWidget(self.pushButton_9)
+
+        self.editor_preview_btns.setStretch(0, 1)
+        self.editor_preview_btns.setStretch(1, 1)
+        self.editor_preview_btns.setStretch(2, 1)
+        self.editor_preview_btns.setStretch(3, 1)
+        self.editor_preview_btns.setStretch(4, 1)
+
+        self.verticalLayout_20.addLayout(self.editor_preview_btns)
+
+        self.animate_list = QTreeWidget(self.editor_preview_panel)
+        __qtreewidgetitem = QTreeWidgetItem()
+        __qtreewidgetitem.setText(0, u"1");
+        self.animate_list.setHeaderItem(__qtreewidgetitem)
+        self.animate_list.setObjectName(u"animate_list")
+        self.animate_list.setMinimumSize(QSize(256, 0))
+        self.animate_list.setMaximumSize(QSize(256, 16777215))
+        self.animate_list.setStyleSheet(u"background:red;")
+        self.animate_list.setFrameShape(QFrame.Shape.NoFrame)
+        self.animate_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.animate_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.animate_list.header().setVisible(False)
+
+        self.verticalLayout_20.addWidget(self.animate_list, 0, Qt.AlignmentFlag.AlignHCenter)
+
+
+        self.horizontalLayout_11.addWidget(self.editor_preview_panel)
+
+
+        self.verticalLayout_18.addWidget(self.widget_2)
+
+        self.editor_stacked.addWidget(self.editor_sprite_web)
+
+        self.verticalLayout_19.addWidget(self.editor_stacked)
+
         self.change_page.addWidget(self.edit_stage_frame)
         self.fullscreen = QWidget()
         self.fullscreen.setObjectName(u"fullscreen")
@@ -741,6 +870,7 @@ class Ui_Form(object):
         self.retranslateUi(Form)
 
         self.change_page.setCurrentIndex(0)
+        self.editor_stacked.setCurrentIndex(1)
         self.btn_outline_code.setDefault(False)
         self.btn_outline_sprite.setDefault(False)
         self.btn_outline_sound.setDefault(False)
@@ -755,12 +885,10 @@ class Ui_Form(object):
         Form.setWindowTitle(QCoreApplication.translate("Form", u"Form", None))
         self.btn_logo.setText("")
         self.btn_file.setText(QCoreApplication.translate("Form", u"\u6587\u4ef6", None))
-        self.btn_edit.setText(QCoreApplication.translate("Form", u"\u7f16\u8f91", None))
-        self.btn_tool.setText(QCoreApplication.translate("Form", u"\u63d2\u4ef6", None))
-        self.btn_setting.setText(QCoreApplication.translate("Form", u"\u8bbe\u7f6e", None))
-        self.line_name_edit.setInputMask(QCoreApplication.translate("Form", u"\u672a\u547d\u540d....", None))
-        self.line_name_edit.setText(QCoreApplication.translate("Form", u"\u672a\u547d\u540d....", None))
-        self.btn_save.setText(QCoreApplication.translate("Form", u"\u4fdd\u5b58", None))
+        self.btn_code_editor.setText(QCoreApplication.translate("Form", u"\u4ee3\u7801", None))
+        self.btn_sprite_editor.setText(QCoreApplication.translate("Form", u"\u89d2\u8272", None))
+        self.btn_setting.setText(QCoreApplication.translate("Form", u"\u5730\u56fe", None))
+        self.btn_save.setText(QCoreApplication.translate("Form", u"\u58f0\u97f3", None))
         self.btn_help.setText("")
         self.btn_run.setText("")
         self.btn_stop.setText("")
@@ -776,6 +904,13 @@ class Ui_Form(object):
         self.pushButton_7.setText(QCoreApplication.translate("Form", u"\u9020\u578b", None))
         self.pushButton_8.setText(QCoreApplication.translate("Form", u"\u5730\u56fe", None))
         self.pushButton_6.setText(QCoreApplication.translate("Form", u"\u58f0\u97f3", None))
+        self.label_2.setText(QCoreApplication.translate("Form", u"ANIMATION\u9884\u89c8", None))
+        self.animate_preview.setText(QCoreApplication.translate("Form", u"TextLabel", None))
+        self.pushButton.setText(QCoreApplication.translate("Form", u"A", None))
+        self.pushButton_2.setText(QCoreApplication.translate("Form", u"A", None))
+        self.pushButton_3.setText(QCoreApplication.translate("Form", u"A", None))
+        self.pushButton_4.setText(QCoreApplication.translate("Form", u"A", None))
+        self.pushButton_9.setText(QCoreApplication.translate("Form", u"A", None))
         self.fullscreen_btn_run.setText("")
         self.fullscreen_btn_stop.setText("")
         self.fullscreen_btn_unfull.setText("")
