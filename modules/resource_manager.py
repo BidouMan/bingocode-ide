@@ -1,7 +1,7 @@
 import os,shutil
 import zipfile  
 import json
-from PySide6.QtCore import QObject, Qt, QSize,QEvent,QRect,QTimer
+from PySide6.QtCore import QObject, Qt, QSize,QEvent,QRect,QTimer,Signal
 from PySide6.QtWidgets import (QListWidgetItem, QStyle, QMessageBox,QFrame,QVBoxLayout,
                                QWidget,QHBoxLayout,QLabel,QPushButton,QListWidget,QStyledItemDelegate,
                                QApplication,QScrollArea,QGridLayout)
@@ -232,6 +232,8 @@ class CodeItemWidget(QWidget):
         self.edit.editingFinished.connect(finish)
 
 class ResourceManager(QObject):
+    sig_sprite_selected = Signal(str)  # 双击卡片时：发送文件夹绝对路径
+    sig_sprite_imported = Signal(str)  # 导入成功时：发送文件夹绝对路径
     def __init__(self, main_ui, parent_window, app_controller):
         super().__init__()
         self.ui = main_ui
@@ -534,25 +536,29 @@ class ResourceManager(QObject):
     def handle_sprite_import_success(self, sprite_name, file_paths, is_bgs=False):
         """核心：处理资源导入，支持 .bgs 解压和 config.json 读取"""
         import shutil
+        import zipfile # 确保导入了 zipfile
+        
         project_root = self.app_controller.project_manager.project_root
         if not project_root: return
 
         sprites_dir = os.path.join(project_root, "assets", "sprites")
+        target_dir = "" 
 
         if is_bgs:
-            # --- 🚀 处理 .bgs 打包文件 ---
             bgs_path = file_paths[0]
             try:
                 with zipfile.ZipFile(bgs_path, 'r') as zip_ref:
-                    # 1. 尝试读取 config.json
+                    # 1. 先读取 config.json 获取真实名字
                     if "config.json" not in zip_ref.namelist():
+                        print("❌ .bgs 文件缺少 config.json")
                         return
                     
                     with zip_ref.open('config.json') as f:
                         config_data = json.load(f)
+                        # 🚀 修复点：确保获取到名字
                         real_name = config_data.get("name", "new_sprite")
                     
-                    # 2. 确定目标目录（防重名）
+                    # 2. 确定目标目录（使用获取到的 real_name）
                     target_dir = self._get_safe_dir_name(sprites_dir, real_name)
                     os.makedirs(target_dir, exist_ok=True)
                     
@@ -562,14 +568,35 @@ class ResourceManager(QObject):
                 print(f"❌ 解压 .bgs 失败: {e}")
                 return
         else:
-            # --- 原有的普通图片拷贝逻辑 ---
+            # 普通图片拷贝逻辑
             target_dir = self._get_safe_dir_name(sprites_dir, sprite_name)
             os.makedirs(target_dir, exist_ok=True)
             for f in file_paths:
                 shutil.copy2(f, target_dir)
 
-        # 刷新界面
-        self.refresh_sprite_grid()
+        # 🚀 后续逻辑：生成配置、发射信号、刷新网格
+        if target_dir and os.path.exists(target_dir):
+            self.init_sprite_config(target_dir)
+            self.sig_sprite_imported.emit(target_dir)
+            self.refresh_sprite_grid()
+
+    # 🚀 【新增函数】：用于生成基础 JSON
+    def init_sprite_config(self, sprite_path):
+        config_file = os.path.join(sprite_path, "config.json")
+        if not os.path.exists(config_file):
+            # 扫描图片文件
+            img_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.webp')
+            images = sorted([f for f in os.listdir(sprite_path) if f.lower().endswith(img_exts)])
+            
+            default_data = {
+                "name": os.path.basename(sprite_path),
+                "costumes": images, # 你的 Model 期待的是字符串列表
+                "animations": {
+                    "默认": {"start": 1, "end": len(images), "fps": 10, "loop": True}
+                }
+            }
+            with open(config_file, 'w', encoding='utf-8') as f:
+                json.dump(default_data, f, indent=4, ensure_ascii=False)
 
 
     def _get_safe_dir_name(self, base_path, name):
@@ -746,7 +773,15 @@ class ResourceManager(QObject):
 
         card.mousePressEvent = custom_mouse_press
         card.mouseReleaseEvent = custom_mouse_release
-        card.mouseDoubleClickEvent = lambda event: self.start_sprite_rename(card, name)
+        # card.mouseDoubleClickEvent = lambda event: self.start_sprite_rename(card, name)
+        def on_double_click(event):
+            project_root = self.app_controller.project_manager.project_root
+            full_path = os.path.join(project_root, "assets", "sprites", name)
+            # 🚀 发射选中信号，通知 AppController 切换页面并加载
+            self.sig_sprite_selected.emit(full_path)
+
+        card.mouseDoubleClickEvent = on_double_click
+
     
     def refresh_sprite_grid(self):
         """核心：保持布局不动，只换数据源"""

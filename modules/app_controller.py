@@ -20,6 +20,8 @@ from modules.file_manager import FileManager
 from modules.script_runner import ScriptRunner
 from modules.resource_manager import ResourceManager
 from modules.upload_menu_manager import UploadMenuManager
+from models.sprite_model import SpriteDataModel
+from modules.sprite_editor_manager import SpriteEditorManager
 
 class AppController:
     def __init__(self, main_window: Ui_Form):
@@ -27,6 +29,7 @@ class AppController:
         self.ui: Ui_Form = main_window.ui
         self.last_active_index = -1
         self._is_adjusting = False
+       
         
         # 🚀 1. 核心分辨率：统一使用 640x480 (自研引擎黄金比例)
         self.stage_width = 640   
@@ -34,6 +37,10 @@ class AppController:
         
         # 整理过的模块
         self.project_manager = ProjectManager() # 这个必须要第一个实例化
+
+        # 注入角色编辑器管理器
+        self.sprite_editor = SpriteEditorManager(self.ui) 
+        
         self.file_manager = FileManager(self.window)
         self.console_manager = ConsoleManager(self.ui.splitter, self.ui.console_output)        
         self.menu_manager = MenuManager(main_window)
@@ -100,11 +107,25 @@ class AppController:
         self.ui.game_view.keyReleaseEvent = self._handle_qt_key_release
         
         self.res_manager.bind_switch_page()
+        
+        # 2. 绑定资源导入信号：导入即同步模型数据 (不切页面)
+        self.res_manager.sig_sprite_imported.connect(self.sprite_editor.load_sprite)
 
+        # 3. 绑定资源双击信号：双击即加载并切到编辑页面
+        self.res_manager.sig_sprite_selected.connect(self._open_and_switch_to_editor)
+
+
+
+    def _open_and_switch_to_editor(self, path):
+        print(f"🛎️ [AppController] 收到编辑请求，目标路径: {path}")
     
-    # def handle_change_page_to_spriteeditor(self):
-    #     """切换到精灵编辑器页"""
-    #     self.ui.change_page.setCurrentIndex(2)
+        # 1. 切换页面 (确保这里的 index 是正确的)
+        # 这里的 index 1 通常对应你 UI 里的编辑器页面
+        self.ui.editor_stacked.setCurrentIndex(1) 
+        
+        # 2. 通知编辑器加载数据
+        self.sprite_editor.load_sprite(path)
+
 
     def handle_new_project(self):
         """新建项目：重置并初始化运行目标"""

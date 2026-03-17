@@ -1528,7 +1528,7 @@
                     </size>
                    </property>
                    <property name="styleSheet">
-                    <string notr="true">background:red;</string>
+                    <string notr="true"/>
                    </property>
                    <property name="text">
                     <string>TextLabel</string>
@@ -1694,7 +1694,7 @@
                     </size>
                    </property>
                    <property name="styleSheet">
-                    <string notr="true">background:red;</string>
+                    <string notr="true"/>
                    </property>
                    <property name="frameShape">
                     <enum>QFrame::Shape::NoFrame</enum>

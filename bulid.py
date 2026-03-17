@@ -2,7 +2,7 @@ import os
 import sys
 import shutil
 from pathlib import Path
-import PyInstaller.__main__
+import PyInstaller.__main__ # type: ignore
 
 def build():
     entry_point = "main.py"

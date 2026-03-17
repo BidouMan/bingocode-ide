@@ -654,7 +654,7 @@ class Ui_Form(object):
         self.animate_preview.setObjectName(u"animate_preview")
         self.animate_preview.setMinimumSize(QSize(256, 256))
         self.animate_preview.setMaximumSize(QSize(256, 256))
-        self.animate_preview.setStyleSheet(u"background:red;")
+        self.animate_preview.setStyleSheet(u"")
         self.animate_preview.setScaledContents(False)
         self.animate_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -719,7 +719,7 @@ class Ui_Form(object):
         self.animate_list.setObjectName(u"animate_list")
         self.animate_list.setMinimumSize(QSize(256, 0))
         self.animate_list.setMaximumSize(QSize(256, 16777215))
-        self.animate_list.setStyleSheet(u"background:red;")
+        self.animate_list.setStyleSheet(u"")
         self.animate_list.setFrameShape(QFrame.Shape.NoFrame)
         self.animate_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.animate_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
