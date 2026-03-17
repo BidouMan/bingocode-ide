@@ -24,6 +24,7 @@ class SpriteEditorManager(QObject):
         self.canvas = self.ui.sprite_canvas
         self.preview = self.ui.animate_preview
         self.anim_list = self.ui.animate_list
+        self.ui.fps_slider.setRange(1, 60)
 
         # 画布初始化
         self.canvas_scene = QGraphicsScene()
@@ -53,6 +54,7 @@ class SpriteEditorManager(QObject):
         self.anim_list.itemClicked.connect(self._on_animation_item_clicked)
 
         # 按键绑定
+        self.ui.fps_slider.valueChanged.connect(self._on_fps_slider_changed)
         self.ui.btn_preview_add.clicked.connect(self.add_new_animation)
 
     def add_new_animation(self):
@@ -291,6 +293,12 @@ class SpriteEditorManager(QObject):
         
         self.fps_list.blockSignals(False)
 
+        # 同步 Slider 位置
+        fps = self.current_anim_config.get("fps", 10)
+        self.ui.fps_slider.blockSignals(True) # 阻塞信号，防止触发上面的 _on_fps_slider_changed 导致重复保存
+        self.ui.fps_slider.setValue(fps)
+        self.ui.fps_slider.blockSignals(False)
+
     # --- 动画引擎方法 ---
 
     def play_animation(self, anim_name):
@@ -416,15 +424,7 @@ class SpriteEditorManager(QObject):
     def delete_costume_physically(self, target_idx):
         """彻底删除某一帧并修正所有动画索引"""
         if not self.model: return
-        
-        # # 1. 二次确认
-        # msg = f"确定要物理删除第 {target_idx} 帧吗？\n这会改变后续所有动画的帧索引！"
-        # reply = QMessageBox.question(self.ui.Form, "物理删除确认", msg, 
-        #                             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        # if reply == QMessageBox.StandardButton.No: return
 
-        # 2. 从模型中移除图片路径
-        # 注意：target_idx 是 1-Base，对应 list 索引要减 1
         removed_frame = self.model.costumes.pop(target_idx - 1)
         
         # 3. 🚀 核心：修正所有动画片段的索引
@@ -454,11 +454,38 @@ class SpriteEditorManager(QObject):
         # 清理失效动作
         for name in anims_to_delete:
             del self.model.animations[name]
-            print(f"🧹 [DEBUG] 动作 {name} 因关联帧被删光而移除")
 
         # 4. 保存模型并刷新 UI
         self.model.save()
         self.refresh_all_ui("ALL") # 刷新全部 UI 以确保索引同步
         new_row = min(target_idx - 1, self.fps_list.count() - 1)
         self.fps_list.setCurrentRow(new_row)
-        print(f"🔥 [DEBUG] 已物理删除帧 {target_idx}: {removed_frame}")
+    
+    def _on_fps_slider_changed(self, value):
+        """当 FPS 滑动条数值改变时触发"""
+        if not self.model or not self.current_anim_config:
+            return
+
+        # 1. 获取当前选中的动画名字
+        current_item = self.anim_list.currentItem()
+        if not current_item:
+            return
+        
+        anim_name = current_item.text(0)
+        
+        # 2. 更新模型数据
+        self.model.animations[anim_name]["fps"] = value
+        # 实时更新当前运行配置，这样播放器能立刻感知
+        self.current_anim_config["fps"] = value
+        
+        # 3. 🚀 关键：如果正在播放，实时调整计时器间隔
+        if self.is_playing:
+            interval = int(1000 / max(value, 1))
+            self.timer.setInterval(interval) 
+            
+        # 4. 打印调试信息（可选：如果你界面上有个 Label 显示数字更好）
+        # self.ui.fps_label.setText(f"{value} FPS")
+        print(f"⚡ [DEBUG] FPS 实时调整为: {value}")
+        
+        # 5. 延迟保存（或者在停止滑动后保存，防止频繁写磁盘）
+        self.model.save()
