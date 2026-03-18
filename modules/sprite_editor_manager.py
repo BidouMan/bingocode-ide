@@ -1,6 +1,6 @@
 import os
 from PySide6.QtCore import QObject, Qt, QTimer,QRectF
-from PySide6.QtGui import QPixmap,QPainter,QAction, QCursor,QBrush,QColor
+from PySide6.QtGui import QPixmap,QPainter,QAction, QCursor,QBrush,QColor,QIcon
 from PySide6.QtWidgets import (QTreeWidgetItem, QLineEdit, QHBoxLayout, QWidget, 
                              QSpinBox, QLabel, QMenu, QInputDialog,QGraphicsScene)
 from models.sprite_model import SpriteDataModel
@@ -14,6 +14,8 @@ class SpriteEditorManager(QObject):
         self.model = None
         self.current_project_path = ""
         self.current_bg_index = 0
+        self.is_playing = False
+
 
         # 1. 🚀 替换画布控件 (只做一次，不要覆盖)
         from modules.canvas_manager import SmartCanvas
@@ -31,7 +33,8 @@ class SpriteEditorManager(QObject):
 
         # 3. 动画引擎核心变量
         self.timer = QTimer()
-        self.timer.timeout.connect(self._update_animation_frame)
+        self.timer.timeout.disconnect() # 先断开所有可能的连接防止重复
+        self.timer.timeout.connect(self.play_next_frame)
         self.current_anim_config = None
         self.current_frame_index = 0
         self.is_playing = False
@@ -66,8 +69,12 @@ class SpriteEditorManager(QObject):
 
         # 按键绑定
         self.ui.fps_slider.valueChanged.connect(self._on_fps_slider_changed)
+        self.ui.btn_preview_play.clicked.connect(self.toggle_play)
+        self.ui.btn_preview_prev.clicked.connect(self.play_prev_frame)
+        self.ui.btn_preview_next.clicked.connect(self.play_next_frame)
         self.ui.btn_preview_add.clicked.connect(self.add_new_animation)
         self.ui.btn_preview_change_bg.clicked.connect(self.toggle_preview_background)
+
 
     def add_new_animation(self):
         """添加新动画片段，处理重名逻辑"""
@@ -116,23 +123,14 @@ class SpriteEditorManager(QObject):
 
 
     def _update_animation_list(self):
-        """刷新动作树，支持双击原地编辑名字"""
-        print("🌳 [DEBUG] SpriteEditorManager: 刷新动作树(原地编辑模式)...")
-        
+        """刷新动作树，支持双击原地编辑名字"""       
         self.anim_list.setColumnCount(2)
         self.anim_list.setColumnWidth(0, 110)
         self.anim_list.setColumnWidth(1, 90)
         
         # 🚀 开启右键菜单策略
         self.anim_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        # try: self.anim_list.customContextMenuRequested.disconnect()
-        # except: pass
         self.anim_list.customContextMenuRequested.connect(self._show_anim_context_menu)
-
-        # 🚀 监听编辑完成信号 (防止重复连接)
-        # try: self.anim_list.itemChanged.disconnect()
-        # except: pass
-        # self.anim_list.itemChanged.connect(self._on_anim_renamed)
 
         self.anim_list.blockSignals(True)
         self.anim_list.clear()
@@ -182,6 +180,18 @@ class SpriteEditorManager(QObject):
             # 绑定数值改变
             start_input.valueChanged.connect(lambda val, n=name: self._on_anim_data_changed(n, "start", val))
             end_input.valueChanged.connect(lambda val, n=name: self._on_anim_data_changed(n, "end", val))
+
+        # ✨ 就是这行：列表倒完数据后，立即点一下第一个
+        if self.anim_list.topLevelItemCount() > 0:
+            # 只有在“当前没有选中项”时才自动选第一个（这解决了你担心的重复触发问题）
+            if not self.anim_list.currentItem():
+                first_item = self.anim_list.topLevelItem(0)
+                self.anim_list.setCurrentItem(first_item)
+                # 主动调用点击函数，把整套预览逻辑带起来
+                self._on_animation_item_clicked(first_item, 0)
+
+                self.ui.btn_preview_play.setChecked(True)
+                self.is_playing = True
 
         self.anim_list.blockSignals(False)
         self.anim_list.doItemsLayout()
@@ -270,6 +280,7 @@ class SpriteEditorManager(QObject):
         self.model.data_changed.connect(self.refresh_all_ui)
         self.refresh_all_ui("ALL")
 
+
     def _on_animation_item_clicked(self, item, column):
         anim_name = item.text(0)
         if not self.model or anim_name not in self.model.animations:
@@ -280,8 +291,8 @@ class SpriteEditorManager(QObject):
 
         # 2. 🚀 联动高亮（临时开启多选）
         config = self.model.animations[anim_name]
-        start_idx = config.get("start", 1) - 1
-        end_idx = config.get("end", 1) - 1
+        start_idx = config.get("start", 1) 
+        end_idx = config.get("end", 1) 
         
         self.fps_list.blockSignals(True)
         
@@ -569,6 +580,82 @@ class SpriteEditorManager(QObject):
         if img_path:
             self.update_preview_static(img_path)
 
-        print(f"🌆 [DEBUG] 背景切换模式: {self.current_bg_index}")
+    
+
+    def toggle_play(self):
+        if not self.current_anim_config:
+            self.ui.btn_preview_play.setChecked(False)
+            return
+
+        # 完全信任 UI 按钮的状态
+        self.is_playing = self.ui.btn_preview_play.isChecked()
+        
+        if self.is_playing:
+            fps = self.current_anim_config.get("fps", 10)
+            self.timer.start(int(1000 / max(fps, 1)))
+        else:
+            self.timer.stop()
+
+    
+
+     # 建议把渲染和列表同步封装成一个私有函数
+
+    def play_next_frame(self):
+        """播放下一帧"""
+        # 🚀 逻辑修正：如果是手动点击“下一帧”按钮触发的
+        if self.sender() == self.ui.btn_preview_next:
+            if self.is_playing:
+                # 强制取消按钮的选中状态（这会自动触发图标变回播放箭头）
+                self.ui.btn_preview_play.setChecked(False)
+                # 手动调用一次，确保 timer 停止，is_playing 变 False
+                self.toggle_play() 
+
+        if not self.model or not self.current_anim_config:
+            return
+            
+        start = self.current_anim_config.get("start", 1)
+        end = self.current_anim_config.get("end", 1)
+        
+        # 索引循环逻辑
+        if self.current_frame_index >= end:
+            self.current_frame_index = start
+        else:
+            self.current_frame_index += 1
+            
+        # 执行渲染
+        self._sync_animation_frame()
+
+    def play_prev_frame(self):
+        """播放上一帧"""
+        # 🚀 逻辑修正：手动点击“上一帧”时
+        if self.sender() == self.ui.btn_preview_prev:
+            if self.is_playing:
+                self.ui.btn_preview_play.setChecked(False)
+                self.toggle_play()
+
+        if not self.model or not self.current_anim_config:
+            return
+            
+        start = self.current_anim_config.get("start", 1)
+        end = self.current_anim_config.get("end", 1)
+            
+        if self.current_frame_index <= start:
+            self.current_frame_index = end
+        else:
+            self.current_frame_index -= 1
+        
+        self._sync_animation_frame()
+    
+    def _sync_animation_frame(self):
+        """内部工具：同步当前的帧到画布和列表"""
+        img_path = self.model.get_costume_path(self.current_frame_index)
+        if img_path:
+            # 1. 渲染画面
+            self.update_preview_static(img_path)
+            
+            # 2. 同步右侧列表高亮 (注意索引偏移，如果列表从0开始则-1)
+            self.ui.sprite_fps_list.blockSignals(True)
+            self.ui.sprite_fps_list.setCurrentRow(self.current_frame_index - 1)
+            self.ui.sprite_fps_list.blockSignals(False)
 
     

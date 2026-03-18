@@ -375,7 +375,7 @@
        <item>
         <widget class="QStackedWidget" name="editor_stacked">
          <property name="currentIndex">
-          <number>0</number>
+          <number>1</number>
          </property>
          <widget class="QWidget" name="editor_code_web">
           <layout class="QVBoxLayout" name="verticalLayout_5">
@@ -1691,13 +1691,17 @@
                      </property>
                      <property name="icon">
                       <iconset resource="../assets/resources.qrc">
-                       <normaloff>:/icons/btn_preview_play.svg</normaloff>:/icons/btn_preview_play.svg</iconset>
+                       <normaloff>:/icons/btn_preview_play.svg</normaloff>
+                       <normalon>:/icons/btn_preview_pause.svg</normalon>:/icons/btn_preview_play.svg</iconset>
                      </property>
                      <property name="iconSize">
                       <size>
                        <width>28</width>
                        <height>16</height>
                       </size>
+                     </property>
+                     <property name="checkable">
+                      <bool>true</bool>
                      </property>
                      <property name="flat">
                       <bool>false</bool>

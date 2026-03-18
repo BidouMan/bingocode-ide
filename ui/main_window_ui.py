@@ -722,8 +722,10 @@ class Ui_Form(object):
         self.btn_preview_play.setMaximumSize(QSize(40, 24))
         icon11 = QIcon()
         icon11.addFile(u":/icons/btn_preview_play.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
+        icon11.addFile(u":/icons/btn_preview_pause.svg", QSize(), QIcon.Mode.Normal, QIcon.State.On)
         self.btn_preview_play.setIcon(icon11)
         self.btn_preview_play.setIconSize(QSize(28, 16))
+        self.btn_preview_play.setCheckable(True)
         self.btn_preview_play.setFlat(False)
 
         self.editor_preview_btns.addWidget(self.btn_preview_play)
@@ -937,7 +939,7 @@ class Ui_Form(object):
         self.retranslateUi(Form)
 
         self.change_page.setCurrentIndex(0)
-        self.editor_stacked.setCurrentIndex(0)
+        self.editor_stacked.setCurrentIndex(1)
         self.btn_outline_code.setDefault(False)
         self.btn_outline_sprite.setDefault(False)
         self.btn_outline_sound.setDefault(False)
