@@ -1,10 +1,11 @@
 import os
-from PySide6.QtCore import QObject, Qt, QTimer
+from PySide6.QtCore import QObject, Qt, QTimer,QRectF
 from PySide6.QtGui import QPixmap,QPainter,QAction, QCursor,QBrush,QColor
 from PySide6.QtWidgets import (QTreeWidgetItem, QLineEdit, QHBoxLayout, QWidget, 
                              QSpinBox, QLabel, QMenu, QInputDialog,QGraphicsScene)
 from models.sprite_model import SpriteDataModel
 from modules.checkerboard_manager import checker_manager
+from modules.canvas_manager import SmartCanvas
 
 class SpriteEditorManager(QObject):
     def __init__(self, ui_form):
@@ -12,44 +13,35 @@ class SpriteEditorManager(QObject):
         self.ui = ui_form
         self.model = None
         self.current_project_path = ""
-
-        # checkerboard_style = """
-        #     background-color: #ffffff;
-        #     background-image: linear-gradient(45deg, #f0f0f0 25%, transparent 25%),
-        #                     linear-gradient(-45deg, #f0f0f0 25%, transparent 25%),
-        #                     linear-gradient(45deg, transparent 75%, #f0f0f0 75%),
-        #                     linear-gradient(-45deg, transparent 75%, #f0f0f0 75%);
-        #     background-size: 20px 20px;
-        #     background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
-        # """
-
-        # # 将其加入循环
-        # self.bg_styles = [
-        #     "background-color: #2b2b2b;", # 深色
-        #     "background-color: #ffffff;", # 纯白
-        #     checkerboard_style            # 棋盘格
-        # ]
         self.current_bg_index = 0
 
-        # 1. 动画引擎核心变量
+        # 1. 🚀 替换画布控件 (只做一次，不要覆盖)
+        from modules.canvas_manager import SmartCanvas
+        parent_widget = self.ui.sprite_canvas.parentWidget()
+        parent_layout = parent_widget.layout()
+        
+        self.canvas = SmartCanvas(parent_widget)
+        parent_layout.replaceWidget(self.ui.sprite_canvas, self.canvas)
+        self.ui.sprite_canvas.hide()
+        self.ui.sprite_canvas.deleteLater()
+        
+        # 2. 绑定场景 (指向我们的新 self.canvas)
+        self.canvas_scene = QGraphicsScene()
+        self.canvas.setScene(self.canvas_scene)
+
+        # 3. 动画引擎核心变量
         self.timer = QTimer()
         self.timer.timeout.connect(self._update_animation_frame)
         self.current_anim_config = None
-        self.current_frame_index = 0  # 这里的 index 是 1-Base 的真实帧号
+        self.current_frame_index = 0
         self.is_playing = False
 
-        # UI 组件引用
+        # 4. UI 组件引用 (注意：不要再给 self.canvas 赋值了！)
         self.fps_list = self.ui.sprite_fps_list
-        self.canvas = self.ui.sprite_canvas
         self.preview = self.ui.animate_preview
         self.anim_list = self.ui.animate_list
         self.ui.fps_slider.setRange(1, 60)
 
-        # 画布初始化
-        self.canvas_scene = QGraphicsScene()
-        self.canvas.setScene(self.canvas_scene)
-
-        
         self._setup_connections()
 
     def _setup_connections(self):
@@ -400,21 +392,48 @@ class SpriteEditorManager(QObject):
 
     def display_on_canvas(self, path):
         pix = QPixmap(path)
-        if pix.isNull(): return
+        if pix.isNull(): 
+            self.canvas_scene.clear()
+            # 清空场景时，重置 zoom_level 和 SceneRect 
+            self.canvas._zoom_level = 1.0
+            self.canvas.setSceneRect(QRectF()) 
+            return
         
+        # 1. 清理并添加新图
         self.canvas_scene.clear()
-        
-        # 🚀 这里的重点：QGraphicsView 本身也有缩放控制
-        # 如果你之后要在画布上实现鼠标滚轮缩放像素，这种设置是必须的
         item = self.canvas_scene.addPixmap(pix)
         
-        # 关键设置：如果以后对 View 进行 scale()，确保它是像素化的
-        self.canvas.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        self.canvas.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
+        # 2. 彻底重置所有变换（非常重要）
+        # 这样可以确保 scale 计算是从 1.0 开始的干净状态
+        self.canvas.resetTransform()
         
-        self.canvas_scene.setSceneRect(pix.rect())
+        # 3. 计算自适应缩放系数
+        # 这里建议使用 viewport() 的实时尺寸
+        view_w = self.canvas.viewport().width()
+        view_h = self.canvas.viewport().height()
+        
+        # 如果刚启动程序窗口还没显示，可能会得到 0，做个保底
+        if view_w <= 0: view_w = 800
+        if view_h <= 0: view_h = 600
+
+        sc_width = view_w / pix.width()
+        sc_height = view_h / pix.height()
+        
+        # 取最小比例并留出 30% 空隙 (0.7)
+        initial_scale = min(sc_width, sc_height) * 0.7
+        
+        # 限制自动缩放范围：不小于1倍，不大于15倍
+        initial_scale = max(1.0, min(initial_scale, 15.0))
+        
+        # 4. 应用缩放并同步变量
+        self.canvas.scale(initial_scale, initial_scale)
+        self.canvas._zoom_level = initial_scale 
+
+        # 5. 🚀 关键：顺序逻辑
+        # 必须先执行 update_scene_range 扩展可滑动的“轨道”
+        # 然后再执行 centerOn 才能确保图片能被定位到轨道中心
+        self.canvas.update_scene_range() 
         self.canvas.centerOn(item)
-        print(f"🎨 [DEBUG] 画布已更新(像素模式)")
 
     def update_preview_static(self, path):
         """

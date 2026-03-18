@@ -67,6 +67,10 @@ class CheckerboardManager:
             return
 
         colors = self.themes.get(theme, self.themes["light"])
+        if scale > 2.0:
+            s = 8  # 高倍率下用小格子
+        else:
+            s = 16 # 低倍率下用大格子
         s = self.grid_size
 
         # 1. 计算对齐场景 (0,0) 的起始坐标 (Modulo Tiling)
