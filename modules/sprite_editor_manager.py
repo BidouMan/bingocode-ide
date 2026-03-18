@@ -1,9 +1,10 @@
 import os
 from PySide6.QtCore import QObject, Qt, QTimer
-from PySide6.QtGui import QPixmap,QPainter,QAction, QCursor
+from PySide6.QtGui import QPixmap,QPainter,QAction, QCursor,QBrush,QColor
 from PySide6.QtWidgets import (QTreeWidgetItem, QLineEdit, QHBoxLayout, QWidget, 
                              QSpinBox, QLabel, QMenu, QInputDialog,QGraphicsScene)
 from models.sprite_model import SpriteDataModel
+from modules.checkerboard_manager import checker_manager
 
 class SpriteEditorManager(QObject):
     def __init__(self, ui_form):
@@ -11,6 +12,24 @@ class SpriteEditorManager(QObject):
         self.ui = ui_form
         self.model = None
         self.current_project_path = ""
+
+        # checkerboard_style = """
+        #     background-color: #ffffff;
+        #     background-image: linear-gradient(45deg, #f0f0f0 25%, transparent 25%),
+        #                     linear-gradient(-45deg, #f0f0f0 25%, transparent 25%),
+        #                     linear-gradient(45deg, transparent 75%, #f0f0f0 75%),
+        #                     linear-gradient(-45deg, transparent 75%, #f0f0f0 75%);
+        #     background-size: 20px 20px;
+        #     background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+        # """
+
+        # # 将其加入循环
+        # self.bg_styles = [
+        #     "background-color: #2b2b2b;", # 深色
+        #     "background-color: #ffffff;", # 纯白
+        #     checkerboard_style            # 棋盘格
+        # ]
+        self.current_bg_index = 0
 
         # 1. 动画引擎核心变量
         self.timer = QTimer()
@@ -56,6 +75,7 @@ class SpriteEditorManager(QObject):
         # 按键绑定
         self.ui.fps_slider.valueChanged.connect(self._on_fps_slider_changed)
         self.ui.btn_preview_add.clicked.connect(self.add_new_animation)
+        self.ui.btn_preview_change_bg.clicked.connect(self.toggle_preview_background)
 
     def add_new_animation(self):
         """添加新动画片段，处理重名逻辑"""
@@ -397,18 +417,45 @@ class SpriteEditorManager(QObject):
         print(f"🎨 [DEBUG] 画布已更新(像素模式)")
 
     def update_preview_static(self, path):
-        pix = QPixmap(path)
-        if not pix.isNull():
-            # 缩放以适应预览窗大小
-            scaled_pix = pix.scaled(
-                self.preview.size(), 
-                Qt.AspectRatioMode.KeepAspectRatio, 
-                Qt.TransformationMode.FastTransformation
-            )
-            self.preview.setPixmap(scaled_pix)
-            self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    
-    from PySide6.QtWidgets import QMessageBox
+        """
+        修改版：手动在底层绘制当前选中的背景模式，然后再叠加角色图
+        """
+        source_pix = QPixmap(path)
+        if source_pix.isNull(): return
+
+        # 1. 创建一个和预览窗体一样大的透明画布
+        final_view_size = self.preview.size()
+        full_canvas = QPixmap(final_view_size)
+        painter = QPainter(full_canvas)
+        
+        # 2. 绘制当前背景
+        if self.current_bg_index == 0:
+            full_canvas.fill(QColor("#2b2b2b")) # 深色
+        elif self.current_bg_index == 1:
+            full_canvas.fill(QColor("#ffffff")) # 纯白
+        elif self.current_bg_index == 2:
+            # 🚀 重点：直接使用 manager 的画刷填充整块区域
+            brush = checker_manager.get_brush(theme="light")
+            painter.fillRect(full_canvas.rect(), brush)
+
+        # 3. 绘制角色（计算居中缩放）
+        scaled_pix = source_pix.scaled(
+            final_view_size, 
+            Qt.AspectRatioMode.KeepAspectRatio, 
+            Qt.TransformationMode.FastTransformation
+        )
+        
+        # 计算居中坐标
+        x = (final_view_size.width() - scaled_pix.width()) // 2
+        y = (final_view_size.height() - scaled_pix.height()) // 2
+        
+        painter.drawPixmap(x, y, scaled_pix)
+        painter.end()
+
+        # 4. 将合成好的整张图（含背景）设置给 Label
+        self.preview.setPixmap(full_canvas)
+        
+
 
     def _show_costume_context_menu(self, pos):
         """造型列表右键：物理删除"""
@@ -489,3 +536,20 @@ class SpriteEditorManager(QObject):
         
         # 5. 延迟保存（或者在停止滑动后保存，防止频繁写磁盘）
         self.model.save()
+    
+    from PySide6.QtGui import QPixmap, QPainter, QColor
+
+    def toggle_preview_background(self):
+        """切换预览窗口的背景模式"""
+        self.current_bg_index = (self.current_bg_index + 1) % 3
+        
+        # 强制刷新当前帧，让新背景立刻生效
+        # 获取当前正在显示的这一帧路径
+        current_row = self.fps_list.currentRow()
+        img_path = self.model.get_costume_path(current_row + 1)
+        if img_path:
+            self.update_preview_static(img_path)
+
+        print(f"🌆 [DEBUG] 背景切换模式: {self.current_bg_index}")
+
+    

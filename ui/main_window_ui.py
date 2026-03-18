@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFrame, QGraphic
     QSizePolicy, QSlider, QSpacerItem, QSplitter,
     QStackedWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
     QWidget)
-import resources_rc
+import resources_rc # type: ignore
 
 class Ui_Form(object):
     def setupUi(self, Form):
@@ -736,12 +736,12 @@ class Ui_Form(object):
 
         self.editor_preview_btns.addWidget(self.pushButton_4)
 
-        self.pushButton_10 = QPushButton(self.editor_preview_panel)
-        self.pushButton_10.setObjectName(u"pushButton_10")
-        self.pushButton_10.setMinimumSize(QSize(40, 40))
-        self.pushButton_10.setMaximumSize(QSize(40, 40))
+        self.btn_preview_change_bg = QPushButton(self.editor_preview_panel)
+        self.btn_preview_change_bg.setObjectName(u"btn_preview_change_bg")
+        self.btn_preview_change_bg.setMinimumSize(QSize(40, 40))
+        self.btn_preview_change_bg.setMaximumSize(QSize(40, 40))
 
-        self.editor_preview_btns.addWidget(self.pushButton_10)
+        self.editor_preview_btns.addWidget(self.btn_preview_change_bg)
 
         self.btn_preview_add = QPushButton(self.editor_preview_panel)
         self.btn_preview_add.setObjectName(u"btn_preview_add")
@@ -957,7 +957,7 @@ class Ui_Form(object):
         self.pushButton_2.setText(QCoreApplication.translate("Form", u"A", None))
         self.pushButton_3.setText(QCoreApplication.translate("Form", u"A", None))
         self.pushButton_4.setText(QCoreApplication.translate("Form", u"A", None))
-        self.pushButton_10.setText(QCoreApplication.translate("Form", u"A", None))
+        self.btn_preview_change_bg.setText(QCoreApplication.translate("Form", u"A", None))
         self.btn_preview_add.setText(QCoreApplication.translate("Form", u"A", None))
         self.fullscreen_btn_run.setText("")
         self.fullscreen_btn_stop.setText("")

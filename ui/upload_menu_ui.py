@@ -17,7 +17,7 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QPalette, QPixmap, QRadialGradient, QTransform)
 from PySide6.QtWidgets import (QApplication, QFrame, QPushButton, QSizePolicy,
     QSpacerItem, QVBoxLayout, QWidget)
-import resources_rc
+import resources_rc # type: ignore
 
 class Ui_upload_menu(object):
     def setupUi(self, upload_menu):

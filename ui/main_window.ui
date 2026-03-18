@@ -1741,7 +1741,7 @@
                     </widget>
                    </item>
                    <item>
-                    <widget class="QPushButton" name="pushButton_10">
+                    <widget class="QPushButton" name="btn_preview_change_bg">
                      <property name="minimumSize">
                       <size>
                        <width>40</width>
