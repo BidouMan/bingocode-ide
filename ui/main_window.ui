@@ -375,7 +375,7 @@
        <item>
         <widget class="QStackedWidget" name="editor_stacked">
          <property name="currentIndex">
-          <number>1</number>
+          <number>0</number>
          </property>
          <widget class="QWidget" name="editor_code_web">
           <layout class="QVBoxLayout" name="verticalLayout_5">
@@ -1630,113 +1630,141 @@
                   </widget>
                  </item>
                  <item>
-                  <layout class="QHBoxLayout" name="editor_preview_btns" stretch="1,1,1,1,0,1">
+                  <layout class="QHBoxLayout" name="editor_preview_btns" stretch="0,0,0,0,0,0">
                    <property name="spacing">
-                    <number>0</number>
+                    <number>4</number>
                    </property>
                    <property name="leftMargin">
-                    <number>0</number>
+                    <number>8</number>
                    </property>
                    <property name="rightMargin">
-                    <number>0</number>
+                    <number>8</number>
                    </property>
                    <item>
-                    <widget class="QPushButton" name="pushButton">
+                    <widget class="QPushButton" name="btn_preview_prev">
                      <property name="minimumSize">
                       <size>
                        <width>40</width>
-                       <height>40</height>
+                       <height>24</height>
                       </size>
                      </property>
                      <property name="maximumSize">
                       <size>
                        <width>40</width>
-                       <height>40</height>
+                       <height>24</height>
                       </size>
                      </property>
                      <property name="text">
-                      <string>A</string>
+                      <string/>
+                     </property>
+                     <property name="icon">
+                      <iconset resource="../assets/resources.qrc">
+                       <normaloff>:/icons/btn_preview_prev.svg</normaloff>:/icons/btn_preview_prev.svg</iconset>
                      </property>
                      <property name="iconSize">
                       <size>
-                       <width>24</width>
-                       <height>24</height>
+                       <width>28</width>
+                       <height>16</height>
                       </size>
+                     </property>
+                     <property name="flat">
+                      <bool>false</bool>
                      </property>
                     </widget>
                    </item>
                    <item>
-                    <widget class="QPushButton" name="pushButton_2">
+                    <widget class="QPushButton" name="btn_preview_play">
                      <property name="minimumSize">
                       <size>
                        <width>40</width>
-                       <height>40</height>
+                       <height>24</height>
                       </size>
                      </property>
                      <property name="maximumSize">
                       <size>
                        <width>40</width>
-                       <height>40</height>
+                       <height>24</height>
                       </size>
                      </property>
                      <property name="text">
-                      <string>A</string>
+                      <string/>
+                     </property>
+                     <property name="icon">
+                      <iconset resource="../assets/resources.qrc">
+                       <normaloff>:/icons/btn_preview_play.svg</normaloff>:/icons/btn_preview_play.svg</iconset>
                      </property>
                      <property name="iconSize">
                       <size>
-                       <width>24</width>
-                       <height>24</height>
+                       <width>28</width>
+                       <height>16</height>
                       </size>
+                     </property>
+                     <property name="flat">
+                      <bool>false</bool>
                      </property>
                     </widget>
                    </item>
                    <item>
-                    <widget class="QPushButton" name="pushButton_3">
+                    <widget class="QPushButton" name="btn_preview_next">
                      <property name="minimumSize">
                       <size>
                        <width>40</width>
-                       <height>40</height>
+                       <height>24</height>
                       </size>
                      </property>
                      <property name="maximumSize">
                       <size>
                        <width>40</width>
-                       <height>40</height>
+                       <height>24</height>
                       </size>
                      </property>
                      <property name="text">
-                      <string>A</string>
+                      <string/>
+                     </property>
+                     <property name="icon">
+                      <iconset resource="../assets/resources.qrc">
+                       <normaloff>:/icons/btn_preview_next.svg</normaloff>:/icons/btn_preview_next.svg</iconset>
                      </property>
                      <property name="iconSize">
                       <size>
-                       <width>24</width>
-                       <height>24</height>
+                       <width>28</width>
+                       <height>16</height>
                       </size>
+                     </property>
+                     <property name="flat">
+                      <bool>false</bool>
                      </property>
                     </widget>
                    </item>
                    <item>
-                    <widget class="QPushButton" name="pushButton_4">
+                    <widget class="QPushButton" name="btn_preview_scale">
                      <property name="minimumSize">
                       <size>
                        <width>40</width>
-                       <height>40</height>
+                       <height>24</height>
                       </size>
                      </property>
                      <property name="maximumSize">
                       <size>
                        <width>40</width>
-                       <height>40</height>
+                       <height>24</height>
                       </size>
                      </property>
                      <property name="text">
-                      <string>A</string>
+                      <string/>
+                     </property>
+                     <property name="icon">
+                      <iconset resource="../assets/resources.qrc">
+                       <normaloff>:/icons/btn_preview_scale.svg</normaloff>:/icons/btn_preview_scale.svg</iconset>
                      </property>
                      <property name="iconSize">
                       <size>
-                       <width>24</width>
-                       <height>24</height>
+                       <width>28</width>
+                       <height>16</height>
                       </size>
+                     </property>
+                     <property name="flat">
+                      <bool>false</bool>
                      </property>
                     </widget>
                    </item>
@@ -1745,17 +1773,30 @@
                      <property name="minimumSize">
                       <size>
                        <width>40</width>
-                       <height>40</height>
+                       <height>24</height>
                       </size>
                      </property>
                      <property name="maximumSize">
                       <size>
                        <width>40</width>
-                       <height>40</height>
+                       <height>24</height>
                       </size>
                      </property>
                      <property name="text">
-                      <string>A</string>
+                      <string/>
+                     </property>
+                     <property name="icon">
+                      <iconset resource="../assets/resources.qrc">
+                       <normaloff>:/icons/btn_preview_change_bg.svg</normaloff>:/icons/btn_preview_change_bg.svg</iconset>
+                     </property>
+                     <property name="iconSize">
+                      <size>
+                       <width>28</width>
+                       <height>16</height>
+                      </size>
+                     </property>
+                     <property name="flat">
+                      <bool>false</bool>
                      </property>
                     </widget>
                    </item>
@@ -1764,23 +1805,30 @@
                      <property name="minimumSize">
                       <size>
                        <width>40</width>
-                       <height>40</height>
+                       <height>24</height>
                       </size>
                      </property>
                      <property name="maximumSize">
                       <size>
                        <width>40</width>
-                       <height>40</height>
+                       <height>24</height>
                       </size>
                      </property>
                      <property name="text">
-                      <string>A</string>
+                      <string/>
+                     </property>
+                     <property name="icon">
+                      <iconset resource="../assets/resources.qrc">
+                       <normaloff>:/icons/btn_preview_add.svg</normaloff>:/icons/btn_preview_add.svg</iconset>
                      </property>
                      <property name="iconSize">
                       <size>
-                       <width>24</width>
-                       <height>24</height>
+                       <width>28</width>
+                       <height>16</height>
                       </size>
+                     </property>
+                     <property name="flat">
+                      <bool>false</bool>
                      </property>
                     </widget>
                    </item>
