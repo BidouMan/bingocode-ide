@@ -296,25 +296,21 @@ class SpriteEditorManager(QObject):
         end_idx = config.get("end", 1) 
         
         self.fps_list.blockSignals(True)
-        
-        # --- 核心黑科技：临时切换模式 ---
         self.fps_list.setSelectionMode(self.fps_list.SelectionMode.MultiSelection)
         self.fps_list.clearSelection()
         
+        # 🚀 修正点：i 是 1~N，那么 Row 索引必须是 i-1
         for i in range(start_idx, end_idx + 1):
-            list_item = self.fps_list.item(i)
+            list_item = self.fps_list.item(i - 1) # 这里减 1 确保对齐 Row 0
             if list_item:
                 list_item.setSelected(True)
         
-        # 滚动到起始帧
-        first_item = self.fps_list.item(start_idx)
+        # 滚动到起始帧（同样是 start_idx - 1）
+        first_item = self.fps_list.item(start_idx - 1)
         if first_item:
             self.fps_list.scrollToItem(first_item, self.fps_list.ScrollHint.PositionAtTop)
         
-        # 选中完成后，立刻切回单选模式
-        # 这样下次用户点左侧列表时，会自动触发“清空其它，只选当前”的逻辑
         self.fps_list.setSelectionMode(self.fps_list.SelectionMode.SingleSelection)
-        
         self.fps_list.blockSignals(False)
 
         # 同步 Slider 位置
@@ -646,15 +642,26 @@ class SpriteEditorManager(QObject):
         self._sync_animation_frame()
     
     def _sync_animation_frame(self):
-        """内部工具：同步当前的帧到画布和列表"""
+        """同步帧，并确保索引完全匹配 (1-based to 0-based)"""
         img_path = self.model.get_costume_path(self.current_frame_index)
         if img_path:
-            # 1. 渲染画面
             self.update_preview_static(img_path)
             
-            # 2. 同步右侧列表高亮 (注意索引偏移，如果列表从0开始则-1)
             self.ui.sprite_fps_list.blockSignals(True)
-            self.ui.sprite_fps_list.setCurrentRow(self.current_frame_index - 1)
+            
+            # 获取对应的 List Item
+            # 🚀 修正点：current_frame_index(1~N) -> item(index-1)
+            target_row = self.current_frame_index - 1
+            item = self.ui.sprite_fps_list.item(target_row)
+            
+            if item:
+                if self.sender() == self.timer:
+                    # 自动播放时：仅滚动，不改变选中蓝底
+                    self.ui.sprite_fps_list.scrollToItem(item, self.ui.sprite_fps_list.ScrollHint.EnsureVisible)
+                else:
+                    # 手动点击（Prev/Next）时：强行选中该行
+                    self.ui.sprite_fps_list.setCurrentRow(target_row)
+                    
             self.ui.sprite_fps_list.blockSignals(False)
 
 
