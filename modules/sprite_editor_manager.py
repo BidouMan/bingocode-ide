@@ -680,3 +680,25 @@ class SpriteEditorManager(QObject):
             if img_path:
                 self.update_preview_static(img_path)
     
+    def cleanup(self):
+        """安全释放资源，防止退出时析构冲突"""
+        try:
+            # 1. 停止计时器（防止销毁过程中触发刷新）
+            if hasattr(self, 'timer') and self.timer.isActive():
+                self.timer.stop()
+                self.timer.blockSignals(True) # 彻底切断信号
+            
+            # 2. 清空场景
+            if hasattr(self, 'canvas_scene') and self.canvas_scene:
+                self.canvas_scene.clear()
+                # 解绑场景，防止 QGraphicsView 销毁时去访问已失效的 Python 场景对象
+                if hasattr(self, 'canvas'):
+                    self.canvas.setScene(None)
+
+            # 3. 解除对 UI 的引用，帮助 GC
+            self.ui = None
+            self.model = None
+            print("✅ [DEBUG] SpriteEditorManager 清理完成")
+        except Exception as e:
+            print(f"❌ [DEBUG] 清理报错: {e}")
+    

@@ -66,11 +66,16 @@ class BingoIDE(QWidget):
             self.controller.screen_manager.apply_ratio_constraint()
 
     def closeEvent(self, event):
-        """窗口关闭时清理子进程"""
         if hasattr(self, 'controller'):
-            self.controller.script_runner.stop_script()
-            self.controller.handle_exit_cleanup()
-        event.accept()
+            if self.controller.request_exit():
+                self.controller.handle_exit_cleanup()
+                # 彻底切断引用
+                del self.controller
+                event.accept()
+            else:
+                event.ignore()
+        else:
+            event.accept()
 
 # --- 5. 程序启动入口 ---
 if __name__ == "__main__":
