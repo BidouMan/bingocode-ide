@@ -14,7 +14,7 @@ class SpriteEditorManager(QObject):
         self.model = None
         self.current_project_path = ""
         self.current_bg_index = 0
-        self.is_playing = False
+        self.is_original_size = False
 
 
         # 1. 🚀 替换画布控件 (只做一次，不要覆盖)
@@ -33,7 +33,7 @@ class SpriteEditorManager(QObject):
 
         # 3. 动画引擎核心变量
         self.timer = QTimer()
-        self.timer.timeout.disconnect() # 先断开所有可能的连接防止重复
+        # self.timer.timeout.disconnect() # 先断开所有可能的连接防止重复
         self.timer.timeout.connect(self.play_next_frame)
         self.current_anim_config = None
         self.current_frame_index = 0
@@ -72,6 +72,7 @@ class SpriteEditorManager(QObject):
         self.ui.btn_preview_play.clicked.connect(self.toggle_play)
         self.ui.btn_preview_prev.clicked.connect(self.play_prev_frame)
         self.ui.btn_preview_next.clicked.connect(self.play_next_frame)
+        self.ui.btn_preview_scale.clicked.connect(self.toggle_preview_scale)
         self.ui.btn_preview_add.clicked.connect(self.add_new_animation)
         self.ui.btn_preview_change_bg.clicked.connect(self.toggle_preview_background)
 
@@ -447,42 +448,43 @@ class SpriteEditorManager(QObject):
         self.canvas.centerOn(item)
 
     def update_preview_static(self, path):
-        """
-        修改版：手动在底层绘制当前选中的背景模式，然后再叠加角色图
-        """
         source_pix = QPixmap(path)
         if source_pix.isNull(): return
 
-        # 1. 创建一个和预览窗体一样大的透明画布
+        # 1. 画布准备
         final_view_size = self.preview.size()
         full_canvas = QPixmap(final_view_size)
         painter = QPainter(full_canvas)
         
-        # 2. 绘制当前背景
+        # 2. 背景绘制 (保持你原有的逻辑)
         if self.current_bg_index == 0:
-            full_canvas.fill(QColor("#2b2b2b")) # 深色
+            full_canvas.fill(QColor("#2b2b2b"))
         elif self.current_bg_index == 1:
-            full_canvas.fill(QColor("#ffffff")) # 纯白
+            full_canvas.fill(QColor("#ffffff"))
         elif self.current_bg_index == 2:
-            # 🚀 重点：直接使用 manager 的画刷填充整块区域
             brush = checker_manager.get_brush(theme="light")
             painter.fillRect(full_canvas.rect(), brush)
 
-        # 3. 绘制角色（计算居中缩放）
-        scaled_pix = source_pix.scaled(
-            final_view_size, 
-            Qt.AspectRatioMode.KeepAspectRatio, 
-            Qt.TransformationMode.FastTransformation
-        )
+        # 🚀 3. 绘制角色 (使用我们手动的变量)
+        if self.is_original_size:
+            # 模式：原始尺寸 (1:1)
+            target_pix = source_pix
+        else:
+            # 模式：适配尺寸 (拉伸)
+            target_pix = source_pix.scaled(
+                final_view_size, 
+                Qt.AspectRatioMode.KeepAspectRatio, 
+                Qt.TransformationMode.FastTransformation
+            )
         
-        # 计算居中坐标
-        x = (final_view_size.width() - scaled_pix.width()) // 2
-        y = (final_view_size.height() - scaled_pix.height()) // 2
+        # 居中计算
+        x = (final_view_size.width() - target_pix.width()) // 2
+        y = (final_view_size.height() - target_pix.height()) // 2
         
-        painter.drawPixmap(x, y, scaled_pix)
+        painter.drawPixmap(x, y, target_pix)
         painter.end()
 
-        # 4. 将合成好的整张图（含背景）设置给 Label
+        # 4. 显示
         self.preview.setPixmap(full_canvas)
         
 
@@ -596,9 +598,6 @@ class SpriteEditorManager(QObject):
         else:
             self.timer.stop()
 
-    
-
-     # 建议把渲染和列表同步封装成一个私有函数
 
     def play_next_frame(self):
         """播放下一帧"""
@@ -658,4 +657,19 @@ class SpriteEditorManager(QObject):
             self.ui.sprite_fps_list.setCurrentRow(self.current_frame_index - 1)
             self.ui.sprite_fps_list.blockSignals(False)
 
+
+    def toggle_preview_scale(self):
+        """手动切换缩放状态"""
+        # 1. 状态取反
+        self.is_original_size = not self.is_original_size
+        
+        # 2. 打印 Debug 信息，确保点击生效
+        state_str = "原始尺寸" if self.is_original_size else "适配尺寸"
+        print(f"🔘 [DEBUG] 缩放按钮点击! 当前模式: {state_str}")
+
+        # 3. 强制触发当前帧重绘
+        if self.model and hasattr(self, 'current_frame_index'):
+            img_path = self.model.get_costume_path(self.current_frame_index)
+            if img_path:
+                self.update_preview_static(img_path)
     
