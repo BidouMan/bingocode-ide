@@ -9,8 +9,27 @@ class ProjectManager:
         self.sound_dir = None
         # 新增：记录代码文件的路径
         self.current_run_target = ""
-        
+
+        self._code_dirty = False    # 代码是否有改动
+        self._resource_dirty = False # 资源是否有改动
         self.create_temp_project()
+
+    def mark_code_dirty(self, dirty=True):
+        self._code_dirty = dirty
+        if dirty:
+            print("📝 [ProjectManager] 代码状态已变脏")
+
+    def mark_resource_dirty(self, dirty=True):
+        self._resource_dirty = dirty
+        if dirty:
+            print("📦 [ProjectManager] 资源状态已变脏")
+        
+    def reset_dirty(self):
+        self._code_dirty = False
+        self._resource_dirty = False
+
+    def is_any_dirty(self):
+        return self._code_dirty or self._resource_dirty
 
     def set_run_target(self, file_path):
         """动态设置当前的运行目标"""
@@ -51,7 +70,8 @@ class ProjectManager:
         with open(self.main_script_path, "w", encoding="utf-8") as f:
             f.write("# Welcome to BingoIDE\nprint('Hello Bingo!')")
 
-    
+        self._is_dirty = False # 新项目初始是干净的
+
     def create_new_project_env(self):
         """核心逻辑：重置管家状态，创建一个全新的临时地盘"""
         import tempfile

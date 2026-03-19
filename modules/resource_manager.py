@@ -9,6 +9,7 @@ from PySide6.QtGui import QIcon, QFont, QFontDatabase, QCursor, QPixmap,QColor,Q
 from modules.upload_menu_manager import UploadMenuManager
 
 
+
 class SpriteDelegate(QStyledItemDelegate):
     def paint(self, painter, option, index):
         name = index.data(Qt.ItemDataRole.DisplayRole)
@@ -579,6 +580,10 @@ class ResourceManager(QObject):
             self.init_sprite_config(target_dir)
             self.sig_sprite_imported.emit(target_dir)
             self.refresh_sprite_grid()
+
+            # 告诉项目管理器：有新角色进来了，项目已经“脏”了，退出时记得提醒保存
+            if hasattr(self.app_controller, 'project_manager'):
+                self.app_controller.project_manager.mark_resource_dirty()
 
     # 🚀 【新增函数】：用于生成基础 JSON
     def init_sprite_config(self, sprite_path):

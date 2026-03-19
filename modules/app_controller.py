@@ -367,48 +367,56 @@ class AppController:
 
     def request_exit(self):
         """
-        决定是否允许退出。
-        逻辑：
-        1. 如果是临时项目 -> 必须弹窗（询问保存到哪，或丢弃）。
-        2. 如果代码有改动 -> 必须弹窗。
-        3. 否则 -> 准许退出。
+        退出前的决策逻辑
         """
-        # 1. 获取项目路径
         project_root = self.project_manager.project_root.lower()
         
-        # 2. 判断是否为临时项目 (检查路径中是否含有特定临时标识)
-        # 补充：如果路径为空，或者包含 Temp, tmp, /T/ 等
-        is_temp = not project_root or "temp" in project_root or "tmp" in project_root or "b-temp" in project_root
+        # 1. 环境判定
+        import tempfile
+        temp_dir = tempfile.gettempdir().lower()
+        is_temp = not project_root or temp_dir in project_root or "temp" in project_root
 
-        # 3. 检查代码改动状态
-        has_unsaved_code = False
-        if hasattr(self, 'editor_manager'):
-            has_unsaved_code = self.editor_manager.has_unsaved_changes()
+        # 2. 状态判定 (直接读取 ProjectManager 的标记)
+        code_dirty = getattr(self.project_manager, '_code_dirty', False)
+        res_dirty = getattr(self.project_manager, '_resource_dirty', False)
 
-        # 🚀 核心逻辑判断：临时项目 OR 有未保存代码
-        if is_temp or has_unsaved_code:
+        # 调试打印，你可以在控制台看到到底是哪个变量触发的
+        print(f"🔍 退出检查: is_temp={is_temp}, code_dirty={code_dirty}, res_dirty={res_dirty}")
+
+        # 🚀 重新梳理逻辑：
+        # 只要代码脏了 (code_dirty) -> 必须弹窗
+        # 或者 (是临时项目 且 资源脏了) -> 必须弹窗
+        # 或者 (是临时项目 且 用户有过操作) -> 必须弹窗
+        
+        should_prompt = False
+        if code_dirty:
+            should_prompt = True
+        elif is_temp and (res_dirty or self._user_has_any_action()):
+            should_prompt = True
+
+        if should_prompt:
             msg_box = QMessageBox(self.window)
             msg_box.setWindowTitle("Bingo IDE")
             msg_box.setText("要保存对项目的更改吗？")
-            msg_box.setInformativeText("当前项目处于临时目录或有未保存的代码，关闭后更改将丢失。")
+            msg_box.setInformativeText("如果不保存，您的代码改动（或临时项目中的资源）将会丢失。")
             
-            # 设置标准按钮
             save_btn = msg_box.addButton("保存项目", QMessageBox.AcceptRole)
-            discard_btn = msg_box.addButton("直接退出", QMessageBox.DestructiveRole)
+            discard_btn = msg_box.addButton("不保存退出", QMessageBox.DestructiveRole)
             cancel_btn = msg_box.addButton("取消", QMessageBox.RejectRole)
             
             msg_box.setDefaultButton(save_btn)
             msg_box.exec()
             
             clicked = msg_box.clickedButton()
-            
             if clicked == save_btn:
-                # 调用另存为逻辑
-                success = self.handle_save_project() 
-                return success # 如果用户中途取消了另存为对话框，则返回 False，拦截退出
+                # 如果用户选保存，保存后重置脏标记
+                success = self.handle_save_project()
+                if success:
+                    self.project_manager.reset_dirty()
+                return success
             elif clicked == discard_btn:
-                return True # 用户明确不要了，允许退出
+                return True
             else:
-                return False # 点击取消或关闭弹窗，拦截退出
-
-        return True # 已经是正式项目且无代码改动，允许直接退出 # 没有改动，直接走 # 没有未保存内容，静默退出
+                return False
+        
+        return True # 干净的正式项目，直接退出 # 既不是临时项目也没改动，直接退出 # 已经是正式项目且无代码改动，允许直接退出 # 没有改动，直接走 # 没有未保存内容，静默退出

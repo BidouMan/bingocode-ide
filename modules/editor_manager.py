@@ -99,6 +99,9 @@ class EditorManager(QObject):
 
         # 监听内容变化 (完整保留)
         editor.textChanged.connect(lambda: self._handle_text_changed(editor))
+        # editor.textChanged.connect(lambda: self.pm.mark_dirty())
+        # editor.textChanged.connect(lambda: self._set_tab_modified(editor, True))
+    
 
         # --- 🚀 只有需要时才激活焦点 ---
         if auto_activate:
@@ -111,6 +114,9 @@ class EditorManager(QObject):
         """处理文本改变：处理小圆点 + 延迟创建物理文件"""
         # 1. 触发原有的未保存状态小圆点
         self._set_tab_modified(editor, True)   
+
+        if hasattr(self, 'pm') and self.pm:
+            self.pm.mark_code_dirty(True)
 
     def _do_physical_save(self, editor):
         """执行物理写入磁盘"""
