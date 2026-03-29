@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFrame, QGraphic
     QSizePolicy, QSlider, QSpacerItem, QSplitter,
     QStackedWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
     QWidget)
-import resources_rc # type: ignore
+import resources_rc
 
 class Ui_Form(object):
     def setupUi(self, Form):
@@ -939,7 +939,7 @@ class Ui_Form(object):
         self.retranslateUi(Form)
 
         self.change_page.setCurrentIndex(0)
-        self.editor_stacked.setCurrentIndex(1)
+        self.editor_stacked.setCurrentIndex(0)
         self.btn_outline_code.setDefault(False)
         self.btn_outline_sprite.setDefault(False)
         self.btn_outline_sound.setDefault(False)

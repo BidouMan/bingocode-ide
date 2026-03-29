@@ -212,6 +212,17 @@ class RenderManager(QObject):
         if not item:
             return
 
+        # 处理图像更新
+        if "image" in data:
+            image_path = data["image"]
+            pixmap = QPixmap(image_path)
+            if not pixmap.isNull():
+                if isinstance(item, QGraphicsPixmapItem):
+                    item.setPixmap(pixmap)
+                    item.setTransformOriginPoint(
+                        pixmap.width() / 2, pixmap.height() / 2
+                    )
+
         # 1. 基础属性获取 (优先从 data 取，取不到则保持当前状态)
         rect = item.boundingRect()
         w, h = rect.width(), rect.height()
@@ -274,6 +285,15 @@ class RenderManager(QObject):
 
     def reset_session(self):
         """物理重置：清空场景并重建基础 UI"""
+        # 停止所有动画定时器
+        for sprite_id, item in list(self.sprites.items()):
+            if hasattr(item, "animation_timer"):
+                try:
+                    item.animation_timer.stop()
+                    del item.animation_timer
+                except:
+                    pass
+
         self.scene.clear()  # 物理清理所有 Item
         self.sprites.clear()  # 清空引用字典
         self.layer_counter = 0  # 重置图层

@@ -15,6 +15,7 @@ _SHOW_FPS = False
 _PERF_STATS = {"last_time": time.time(), "frame_count": 0}
 _GROUPS = {}
 _MOUSE_STATE = {"down": False, "last_down": False, "x": 0, "y": 0}  # 用字典包装鼠标状态
+_SPRITES = {}  # 存储所有精灵实例
 
 
 class _MouseType:
@@ -132,6 +133,9 @@ class Sprite:
             create_data["config"] = self.config
 
         self._send_command("CREATE", create_data)
+
+        # 将精灵添加到全局集合
+        _SPRITES[self.id] = self
 
     # ---------- 运动模块 ----------
     def set_xy(self, x, y):
@@ -290,23 +294,65 @@ class Sprite:
         播放指定名称的动画
         参数: animation_name - 动画名称（如 'idle', 'walk' 等）
         """
-        if not self.config or "animations" not in self.config:
+        if not self.config:
             return
 
-        animation = self.config["animations"].get(animation_name)
-        if not animation:
+        # 如果当前已经在播放这个动画，就不需要重复设置
+        if (
+            hasattr(self, "_current_animation")
+            and self._current_animation == animation_name
+        ):
             return
 
-        # 获取动画配置
-        start = animation.get("start", 1)
-        end = animation.get("end", 1)
-        fps = animation.get("fps", 10)
+        # 检查 segments 字段（用户的 JSON 格式）
+        if "segments" in self.config:
+            for segment in self.config["segments"]:
+                if segment.get("name") == animation_name:
+                    # 获取动画配置
+                    start = segment.get("start", 1)
+                    end = segment.get("end", 1)
+                    fps = segment.get("fps", 10)
 
-        # 发送动画播放指令
-        self._send_command(
-            "PLAY_ANIMATION",
-            {"animation": animation_name, "start": start, "end": end, "fps": fps},
-        )
+                    # 存储动画状态
+                    self.animation_state = {
+                        "start": start - 1,
+                        "end": end - 1,
+                        "fps": fps,
+                        "current_frame": start - 1,
+                        "last_frame_time": time.time(),
+                        "frame_duration": 1.0 / fps,
+                    }
+
+                    # 记录当前播放的动画名称
+                    self._current_animation = animation_name
+
+                    # 更新当前帧
+                    self._update_animation_frame()
+                    return
+        # 兼容旧格式：animations 字段
+        elif "animations" in self.config:
+            animation = self.config["animations"].get(animation_name)
+            if animation:
+                # 获取动画配置
+                start = animation.get("start", 1)
+                end = animation.get("end", 1)
+                fps = animation.get("fps", 10)
+
+                # 存储动画状态
+                self.animation_state = {
+                    "start": start - 1,
+                    "end": end - 1,
+                    "fps": fps,
+                    "current_frame": start - 1,
+                    "last_frame_time": time.time(),
+                    "frame_duration": 1.0 / fps,
+                }
+
+                # 记录当前播放的动画名称
+                self._current_animation = animation_name
+
+                # 更新当前帧
+                self._update_animation_frame()
 
     # ---------- 侦测模块 ----------
     def is_touch_edge(self):
@@ -418,6 +464,9 @@ class Sprite:
             for g in self._groups:
                 if self in _GROUPS.get(g, []):
                     _GROUPS[g].remove(self)
+        # 从全局精灵集合中移除
+        if self.id in _SPRITES:
+            del _SPRITES[self.id]
 
     def distance_to(self, target):
         """
@@ -601,22 +650,42 @@ class Sprite:
             display_angle = 0
             final_scale_x = base_scale
 
-        # 🚀 发送指令：确保携带 scale_y
-        self._send_command(
-            "UPDATE",
-            {
-                "x": self._x,
-                "y": self._y,
-                "angle": display_angle,
-                "scale": base_scale,
-                "scale_x": final_scale_x,
-                "scale_y": final_scale_y,
-                "vox": self._visual_offset_x,
-                "voy": self._visual_offset_y,
-                "cw": self._content_w,
-                "ch": self._content_h,
-            },
-        )
+        # 🚀 发送指令：确保携带 scale_y 和图像信息
+        update_data = {
+            "x": self._x,
+            "y": self._y,
+            "angle": display_angle,
+            "scale": base_scale,
+            "scale_x": final_scale_x,
+            "scale_y": final_scale_y,
+            "vox": self._visual_offset_x,
+            "voy": self._visual_offset_y,
+            "cw": self._content_w,
+            "ch": self._content_h,
+        }
+
+        # 添加图像信息（如果有）
+        if hasattr(self, "image") and self.image:
+            update_data["image"] = os.path.abspath(self.image)
+
+        self._send_command("UPDATE", update_data)
+
+    def _update_animation_frame(self):
+        """更新动画帧"""
+        if not hasattr(self, "animation_state") or not self.animation_state:
+            return
+
+        # 获取当前帧
+        current_frame = self.animation_state["current_frame"]
+
+        # 获取帧文件路径
+        if self.config and "frames" in self.config:
+            if current_frame < len(self.config["frames"]):
+                frame_file = self.config["frames"][current_frame]
+                self.image = os.path.join(self.sprite_dir, frame_file)
+
+                # 更新变换和图像
+                self._update_transform()
 
     # ----------- 超级核心 -----------
     def _send_command(self, cmd_type, data_dict):
@@ -726,7 +795,7 @@ def _send_fps_to_ide(fps):
 
 
 def run():
-    global _PERF_STATS, _MOUSE_STATE
+    global _PERF_STATS, _MOUSE_STATE, _SPRITES
     _MOUSE_STATE["down"] = False
     main_module = sys.modules["__main__"]
     if not hasattr(main_module, "loop"):
@@ -740,6 +809,26 @@ def run():
 
     while True:
         start_frame = time.time()
+
+        # 更新所有精灵的动画
+        for sprite in _SPRITES.values():
+            if hasattr(sprite, "animation_state") and sprite.animation_state:
+                sprite_state = sprite.animation_state
+                now = time.time()
+                elapsed = now - sprite_state["last_frame_time"]
+
+                # 检查是否需要更新帧
+                if elapsed >= sprite_state["frame_duration"]:
+                    # 更新帧索引
+                    sprite_state["current_frame"] += 1
+                    if sprite_state["current_frame"] > sprite_state["end"]:
+                        sprite_state["current_frame"] = sprite_state["start"]
+
+                    # 更新帧时间
+                    sprite_state["last_frame_time"] = now
+
+                    # 更新帧
+                    sprite._update_animation_frame()
 
         # 执行用户逻辑
         main_module.loop()
