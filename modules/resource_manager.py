@@ -1,35 +1,56 @@
-import os,shutil
-import zipfile  
+import os, shutil
+import zipfile
 import json
-from PySide6.QtCore import QObject, Qt, QSize,QEvent,QRect,QTimer,Signal
-from PySide6.QtWidgets import (QListWidgetItem, QStyle, QMessageBox,QFrame,QVBoxLayout,
-                               QWidget,QHBoxLayout,QLabel,QPushButton,QListWidget,QStyledItemDelegate,
-                               QApplication,QScrollArea,QGridLayout)
-from PySide6.QtGui import QIcon, QFont, QFontDatabase, QCursor, QPixmap,QColor,QPainter,QPen
+from PySide6.QtCore import QObject, Qt, QSize, QEvent, QRect, QTimer, Signal
+from PySide6.QtWidgets import (
+    QListWidgetItem,
+    QStyle,
+    QMessageBox,
+    QFrame,
+    QVBoxLayout,
+    QWidget,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QListWidget,
+    QStyledItemDelegate,
+    QApplication,
+    QScrollArea,
+    QGridLayout,
+)
+from PySide6.QtGui import (
+    QIcon,
+    QFont,
+    QFontDatabase,
+    QCursor,
+    QPixmap,
+    QColor,
+    QPainter,
+    QPen,
+)
 from modules.upload_menu_manager import UploadMenuManager
-
 
 
 class SpriteDelegate(QStyledItemDelegate):
     def paint(self, painter, option, index):
         name = index.data(Qt.ItemDataRole.DisplayRole)
         icon_path = index.data(Qt.ItemDataRole.UserRole)
-        
+
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         # 🚀 这里的 rect 宽度现在是 77
         rect = option.rect
-        
+
         # 卡片视觉大小设为 70x70，这样每两个卡片之间会有 7px 的间距
         card_w, card_h = 70, 70
-        
+
         # 绝对居中计算：(77 - 70) / 2 = 3.5px
         card_rect = QRect(
             int(rect.left() + (rect.width() - card_w) / 2),
             int(rect.top() + (rect.height() - card_h) / 2),
             card_w,
-            card_h
+            card_h,
         )
 
         # --- 绘制背景 ---
@@ -39,7 +60,7 @@ class SpriteDelegate(QStyledItemDelegate):
         else:
             painter.setBrush(QColor(45, 45, 45))
             painter.setPen(Qt.PenStyle.NoPen)
-        
+
         painter.drawRoundedRect(card_rect, 6, 6)
 
         # --- 绘制图标 (蓝块) ---
@@ -48,7 +69,7 @@ class SpriteDelegate(QStyledItemDelegate):
             int(card_rect.center().x() - icon_size / 2),
             card_rect.top() + 8,
             icon_size,
-            icon_size
+            icon_size,
         )
         painter.setBrush(QColor(74, 144, 226))
         painter.setPen(Qt.PenStyle.NoPen)
@@ -68,25 +89,26 @@ class SpriteDelegate(QStyledItemDelegate):
         # 必须和 GridSize 保持一致
         return QSize(76, 76)
 
+
 class SpriteItemWidget(QWidget):
     def __init__(self, name, font, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        
+
         # 🚀 设为 78，紧贴格子边界
         self.setFixedSize(78, 78)
-        
+
         layout = QVBoxLayout(self)
         # 左右边距设为 0，让内容在 78px 内部绝对居中
-        layout.setContentsMargins(0, 5, 0, 5) 
+        layout.setContentsMargins(0, 5, 0, 5)
         layout.setSpacing(2)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # 蓝色方块
         self.box = QFrame()
-        self.box.setFixedSize(48, 48) # 稍微大一点更协调
+        self.box.setFixedSize(48, 48)  # 稍微大一点更协调
         self.box.setStyleSheet("background-color: #4a90e2; border-radius: 6px;")
-        
+
         # 名字
         self.label = QLabel(name)
         self.label.setFont(QFont(font.family(), 8))
@@ -97,8 +119,18 @@ class SpriteItemWidget(QWidget):
         layout.addWidget(self.box, 0, Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.label, 0, Qt.AlignmentFlag.AlignCenter)
 
+
 class CodeItemWidget(QWidget):
-    def __init__(self, file_name, icon, font, delete_callback,rename_callback, double_click_callback, parent=None):
+    def __init__(
+        self,
+        file_name,
+        icon,
+        font,
+        delete_callback,
+        rename_callback,
+        double_click_callback,
+        parent=None,
+    ):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.file_name = file_name
@@ -121,18 +153,20 @@ class CodeItemWidget(QWidget):
         self.name_label.setStyleSheet("color: #E0E0E0; background: transparent;")
         self.name_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
-
-
         # 🚀 3. 按钮容器 (用于存放重命名和删除按钮)
         self.btn_container = QWidget()
         self.btn_layout = QHBoxLayout(self.btn_container)
         self.btn_layout.setContentsMargins(0, 0, 0, 0)
-        self.btn_layout.setSpacing(8) # 两个按钮之间的间距
+        self.btn_layout.setSpacing(8)  # 两个按钮之间的间距
 
         # --- 重命名按钮 ---
         self.rename_btn = QPushButton()
-        rename_icon = QIcon(":/icons/icon--edit.svg") # 确保你有这个图标
-        self.rename_btn.setIcon(rename_icon if not rename_icon.isNull() else self.style().standardIcon(QStyle.SP_DialogResetButton))
+        rename_icon = QIcon(":/icons/icon--edit.svg")  # 确保你有这个图标
+        self.rename_btn.setIcon(
+            rename_icon
+            if not rename_icon.isNull()
+            else self.style().standardIcon(QStyle.SP_DialogResetButton)
+        )
         self.rename_btn.setFixedSize(26, 26)
         self.rename_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         # self.rename_btn.setToolTip("重命名")
@@ -140,15 +174,14 @@ class CodeItemWidget(QWidget):
             QPushButton { border: none; background: transparent; border-radius: 4px; }
             QPushButton:hover { background-color: rgba(255, 255, 255, 0.1); }
         """)
-        
 
         # 3. 删除按钮
         self.delete_btn = QPushButton()
         delete_icon_path = ":/icons/icon--delete.svg"
-        
+
         # 🚀 修改变量名为 delete_icon，避免覆盖构造函数参数中的 icon
         delete_icon = QIcon(delete_icon_path)
-        
+
         # 资源系统判定：使用 isNull() 替代 os.path.exists()
         if not delete_icon.isNull():
             self.delete_btn.setIcon(delete_icon)
@@ -156,7 +189,9 @@ class CodeItemWidget(QWidget):
         else:
             # 兜底逻辑：如果 QRC 资源未加载成功，显示红色文本
             self.delete_btn.setText("×")
-            self.delete_btn.setStyleSheet("color: #FF4D4D; font-weight: bold; border: none;")
+            self.delete_btn.setStyleSheet(
+                "color: #FF4D4D; font-weight: bold; border: none;"
+            )
 
         self.delete_btn.setFixedSize(26, 26)
         self.delete_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -165,7 +200,7 @@ class CodeItemWidget(QWidget):
             QPushButton { border: none; background: transparent; border-radius: 4px; }
             QPushButton:hover { background-color: rgba(255, 77, 77, 0.2); }
         """)
-        
+
         # self.delete_btn.setVisible(False)
         self.delete_btn.clicked.connect(lambda: delete_callback(self.file_name))
         self.rename_btn.clicked.connect(lambda: rename_callback(self.file_name))
@@ -173,14 +208,14 @@ class CodeItemWidget(QWidget):
         # 将按钮加入容器
         self.btn_layout.addWidget(self.rename_btn)
         self.btn_layout.addWidget(self.delete_btn)
-        
+
         # 默认隐藏整个按钮容器
         self.btn_container.setVisible(False)
 
         # 重新编排主布局
         layout.addWidget(self.icon_label)
         layout.addWidget(self.name_label, 1)
-        layout.addWidget(self.btn_container) # 添加容器而不是单个按钮
+        layout.addWidget(self.btn_container)  # 添加容器而不是单个按钮
 
     def set_active(self, active):
         """同步显示状态"""
@@ -194,16 +229,16 @@ class CodeItemWidget(QWidget):
             self.double_click_callback(self.file_name)
             # 🚀 阻止事件传递，防止 ListWidget 误判
             event.accept()
-    
+
     def start_rename(self):
         """进入原位重命名模式"""
         from PySide6.QtWidgets import QLineEdit
-        
+
         # 创建一个临时输入框，覆盖在 name_label 上
         self.edit = QLineEdit(self)
         self.edit.setText(self.file_name)
         # 这里的布局计算要匹配你的 UI 样式
-        self.edit.setGeometry(self.name_label.geometry()) 
+        self.edit.setGeometry(self.name_label.geometry())
         self.edit.setFont(self.name_label.font())
         self.edit.setStyleSheet("""
             QLineEdit { 
@@ -213,7 +248,7 @@ class CodeItemWidget(QWidget):
                 border-radius: 6px;
             }
         """)
-        
+
         self.name_label.hide()
         self.edit.show()
         self.edit.setFocus()
@@ -225,16 +260,18 @@ class CodeItemWidget(QWidget):
             if new_name and new_name != self.file_name:
                 # 触发真正的物理重命名逻辑
                 self.rename_callback(self.file_name, new_name)
-            
+
             self.edit.deleteLater()
             self.name_label.show()
 
         self.edit.returnPressed.connect(finish)
         self.edit.editingFinished.connect(finish)
 
+
 class ResourceManager(QObject):
     sig_sprite_selected = Signal(str)  # 双击卡片时：发送文件夹绝对路径
     sig_sprite_imported = Signal(str)  # 导入成功时：发送文件夹绝对路径
+
     def __init__(self, main_ui, parent_window, app_controller):
         super().__init__()
         self.ui = main_ui
@@ -244,42 +281,45 @@ class ResourceManager(QObject):
 
         # 1. 🚀 必须最先准备好网格容器（创建 self.sprite_grid_layout）
         # 这一步相当于 list_code 在 UI 文件里就已经存在了一样
-        self.setup_sprite_grid_mode() 
+        self.setup_sprite_grid_mode()
 
         # 2. 基础映射（保持不变）
         self.nav_map = {
-            self.ui.btn_outline_code: self.ui.page_code,      
-            self.ui.btn_outline_sprite: self.ui.page_sprite, 
-            self.ui.btn_outline_bg: self.ui.page_map,     
-            self.ui.btn_outline_sound: self.ui.page_sound   
+            self.ui.btn_outline_code: self.ui.page_code,
+            self.ui.btn_outline_sprite: self.ui.page_sprite,
+            self.ui.btn_outline_bg: self.ui.page_map,
+            self.ui.btn_outline_sound: self.ui.page_sound,
         }
 
-        self.setup_list_styles()       
+        self.setup_list_styles()
 
         # 3. 信号绑定
         self.ui.list_code.installEventFilter(self)
         self.bind_switch_page()
-        
+
         # 监听磁盘重命名
-        self.app_controller.editor_manager.file_renamed_on_disk.connect(self.refresh_code_list)
-                
+        self.app_controller.editor_manager.file_renamed_on_disk.connect(
+            self.refresh_code_list
+        )
+
+        # 记录最后选择的角色路径
+        self.last_selected_sprite_path = None
 
         # 4. 🚀 初始显示：像刷新代码列表一样，直接刷新角色网格
         self.ui.list_code.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         self.ui.outline_stracked.setCurrentWidget(self.ui.page_code)
-        
-        self.refresh_code_list()    # 刷新代码列表
+
+        self.refresh_code_list()  # 刷新代码列表
         self.refresh_sprite_grid()  # 💡 现在刷新就不会报错了，因为 layout 已经准备好了
-        
+
         # 5. 上传菜单管理
         self.sprite_upload_menu = UploadMenuManager(self.ui.page_sprite)
         self.sprite_upload_menu.on_import_finished = self.handle_sprite_import_success
 
-                
-
     def setup_list_styles(self):
         lw = self.ui.list_code
-        if not lw: return
+        if not lw:
+            return
         lw.itemSelectionChanged.connect(self.sync_delete_icons)
         lw.setStyleSheet("""
             /* 1. 基础容器：彻底去边框和虚线框 */
@@ -330,10 +370,9 @@ class ResourceManager(QObject):
             }
         """)
 
-      
         style = self.ui.list_code.styleSheet()
         self.ui.list_sprite.setStyleSheet(style)
-        self.ui.list_sprite.setSpacing(2) # 增加项之间的间距
+        self.ui.list_sprite.setSpacing(2)  # 增加项之间的间距
 
     def bind_switch_page(self):
         """绑定导航按钮"""
@@ -345,7 +384,7 @@ class ResourceManager(QObject):
         target_page = self.nav_map.get(btn)
         if target_page:
             self.ui.outline_stracked.setCurrentWidget(target_page)
-            
+
             # 🚀 谁的页面被打开，就刷新谁
             if target_page == self.ui.page_code:
                 self.refresh_code_list()
@@ -353,19 +392,25 @@ class ResourceManager(QObject):
                 self.refresh_sprite_grid()
 
     def refresh_code_list(self):
-        if not hasattr(self.ui, 'list_code'): return
+        if not hasattr(self.ui, "list_code"):
+            return
         self.ui.list_code.clear()
-        
+
         project_root = self.app_controller.project_manager.project_root
-        if not project_root or not os.path.exists(project_root): return
+        if not project_root or not os.path.exists(project_root):
+            return
 
         try:
-            files = [f for f in os.listdir(project_root) if f.endswith('.py') and not f.startswith('.')]
+            files = [
+                f
+                for f in os.listdir(project_root)
+                if f.endswith(".py") and not f.startswith(".")
+            ]
             files.sort(key=lambda x: (x != "main.py", x.lower()))
-            
+
             for file_name in files:
                 self._add_code_item(file_name)
-            
+
             self.sync_delete_icons()
         except Exception as e:
             print(f"刷新失败: {e}")
@@ -374,22 +419,24 @@ class ResourceManager(QObject):
         item = QListWidgetItem(self.ui.list_code)
         item.setData(Qt.ItemDataRole.UserRole, name)
         item.setSizeHint(QSize(0, 45))
-        
+
         # 🚀 关键修改：获取文件的完整绝对路径
         project_root = self.app_controller.project_manager.project_root
         full_path = os.path.join(project_root, name)
 
         icon_path = ":/icons/python_file_1.svg"
-        icon = QIcon(icon_path) 
+        icon = QIcon(icon_path)
         if icon.isNull():
             icon = self.window.style().standardIcon(QStyle.SP_FileIcon)
 
         widget = CodeItemWidget(
-            name, icon, QFont(self.custom_font_family, 14),
+            name,
+            icon,
+            QFont(self.custom_font_family, 14),
             self.handle_delete_file,
             self.handle_rename_file,
             # 🚀 传给回调函数的应该是 full_path 而不是 name
-            lambda _: self.app_controller.open_file_in_editor(full_path) 
+            lambda _: self.app_controller.open_file_in_editor(full_path),
         )
         self.ui.list_code.setItemWidget(item, widget)
 
@@ -407,9 +454,6 @@ class ResourceManager(QObject):
         # 🚀 放在这里作为终极兜底，无论哪一步失败都会返回 Arial
         return "Arial"
 
-
-
-
     def handle_delete_file(self, file_name):
         """处理删除逻辑"""
         project_root = self.app_controller.project_manager.project_root
@@ -417,11 +461,11 @@ class ResourceManager(QObject):
 
         # 1. 弹出确认对话框
         reply = QMessageBox.question(
-            self.window, 
-            '确认删除', 
+            self.window,
+            "确认删除",
             f"你确定要永久删除文件 '{file_name}' 吗？\n此操作不可撤销。",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.No,
         )
 
         if reply == QMessageBox.StandardButton.Yes:
@@ -429,13 +473,13 @@ class ResourceManager(QObject):
                 # 2. 物理删除文件
                 if os.path.exists(full_path):
                     os.remove(full_path)
-                
+
                 # 3. 🚀 关键逻辑：如果该文件在编辑器里开着，得通知 EditorManager 关闭它
                 self.close_editor_if_open(full_path)
-                
+
                 # 4. 刷新列表
                 self.refresh_code_list()
-                
+
             except Exception as e:
                 QMessageBox.critical(self.window, "错误", f"删除失败: {e}")
 
@@ -444,14 +488,17 @@ class ResourceManager(QObject):
         em = self.app_controller.editor_manager
         # 规范化路径用于对比
         target_path = os.path.normpath(file_path)
-        
+
         for i in range(em.stacked.count()):
             editor = em.stacked.widget(i)
-            if hasattr(editor, 'file_path') and os.path.normpath(editor.file_path) == target_path:
+            if (
+                hasattr(editor, "file_path")
+                and os.path.normpath(editor.file_path) == target_path
+            ):
                 # 调用你 editor_manager 里现成的 close_tab 方法
                 em.close_tab(i)
                 break
-    
+
     def sync_delete_icons(self):
         """同步所有按钮的显示状态"""
         lw = self.ui.list_code
@@ -462,7 +509,6 @@ class ResourceManager(QObject):
                 # 只有被选中的项才显示删除按钮
                 widget.set_active(item.isSelected())
 
-    
     def eventFilter(self, watched, event):
         # 1. 代码列表逻辑
         if watched == self.ui.list_code:
@@ -474,20 +520,20 @@ class ResourceManager(QObject):
         if event.type() == QEvent.Type.FocusOut:
             if watched.objectName() == "spriteCard":
                 new_focus = QApplication.focusWidget()
-                
+
                 # 如果点的是空白或者其他非卡片区域
                 if not new_focus or new_focus.objectName() != "spriteCard":
                     # 不排除任何卡片，全部隐藏
-                    self.hide_all_delete_buttons() 
+                    self.hide_all_delete_buttons()
                     self.clear_all_selections()
-        
+
         return super().eventFilter(watched, event)
 
     def clear_list_selection(self):
         """供外部调用：清空列表选中并隐藏删除按钮"""
         self.ui.list_code.clearSelection()
         self.sync_delete_icons()
-    
+
     def handle_rename_file(self, old_name, new_name=None):
         """处理重命名"""
         # 情况 A：如果没传 new_name，说明是刚点下按钮，开启编辑框
@@ -498,71 +544,74 @@ class ResourceManager(QObject):
                 if item.data(Qt.ItemDataRole.UserRole) == old_name:
                     widget = lw.itemWidget(item)
                     if widget:
-                        widget.start_rename() # 开启原位编辑
+                        widget.start_rename()  # 开启原位编辑
                     break
             return
 
         # 情况 B：拿到了新名字，执行物理重命名
-        if not new_name.endswith('.py'):
-            new_name += '.py'
+        if not new_name.endswith(".py"):
+            new_name += ".py"
 
         project_root = self.app_controller.project_manager.project_root
         old_path = os.path.join(project_root, old_name)
         new_path = os.path.join(project_root, new_name)
 
         if os.path.exists(new_path):
-            return # 实际开发中建议加个提示：文件名已存在
+            return  # 实际开发中建议加个提示：文件名已存在
 
         try:
             # 1. 物理改名
             os.rename(old_path, new_path)
-            
+
             # 2. 同步编辑器中的 Tab 状态
             em = self.app_controller.editor_manager
             for i in range(em.stacked.count()):
                 editor = em.stacked.widget(i)
-                if hasattr(editor, 'file_path') and os.path.normpath(editor.file_path) == os.path.normpath(old_path):
+                if hasattr(editor, "file_path") and os.path.normpath(
+                    editor.file_path
+                ) == os.path.normpath(old_path):
                     editor.file_path = new_path
                     # 更新 Tab 的文字显示
                     display_name = os.path.splitext(new_name)[0]
                     em.tabs.setTabText(i, display_name)
                     break
-            
+
             # 3. 刷新列表
             self.refresh_code_list()
-            
+
         except Exception as e:
             print(f"列表重命名失败: {e}")
-    
+
     def handle_sprite_import_success(self, sprite_name, file_paths, is_bgs=False):
         """核心：处理资源导入，支持 .bgs 解压和 config.json 读取"""
         import shutil
-        import zipfile # 确保导入了 zipfile
-        
+        import zipfile  # 确保导入了 zipfile
+
         project_root = self.app_controller.project_manager.project_root
-        if not project_root: return
+        if not project_root:
+            return
 
         sprites_dir = os.path.join(project_root, "assets", "sprites")
-        target_dir = "" 
+        target_dir = ""
 
         if is_bgs:
             bgs_path = file_paths[0]
             try:
-                with zipfile.ZipFile(bgs_path, 'r') as zip_ref:
+                with zipfile.ZipFile(bgs_path, "r") as zip_ref:
                     # 1. 先读取 config.json 获取真实名字
                     if "config.json" not in zip_ref.namelist():
                         print("❌ .bgs 文件缺少 config.json")
                         return
-                    
-                    with zip_ref.open('config.json') as f:
+
+                    with zip_ref.open("config.json") as f:
                         config_data = json.load(f)
                         # 🚀 修复点：确保获取到名字
                         real_name = config_data.get("name", "new_sprite")
-                    
+
                     # 2. 确定目标目录（使用获取到的 real_name）
                     target_dir = self._get_safe_dir_name(sprites_dir, real_name)
                     os.makedirs(target_dir, exist_ok=True)
-                    
+
                     # 3. 解压所有内容
                     zip_ref.extractall(target_dir)
             except Exception as e:
@@ -582,7 +631,7 @@ class ResourceManager(QObject):
             self.refresh_sprite_grid()
 
             # 告诉项目管理器：有新角色进来了，项目已经“脏”了，退出时记得提醒保存
-            if hasattr(self.app_controller, 'project_manager'):
+            if hasattr(self.app_controller, "project_manager"):
                 self.app_controller.project_manager.mark_resource_dirty()
 
     # 🚀 【新增函数】：用于生成基础 JSON
@@ -590,19 +639,20 @@ class ResourceManager(QObject):
         config_file = os.path.join(sprite_path, "config.json")
         if not os.path.exists(config_file):
             # 扫描图片文件
-            img_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.webp')
-            images = sorted([f for f in os.listdir(sprite_path) if f.lower().endswith(img_exts)])
-            
+            img_exts = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
+            images = sorted(
+                [f for f in os.listdir(sprite_path) if f.lower().endswith(img_exts)]
+            )
+
             default_data = {
                 "name": os.path.basename(sprite_path),
-                "costumes": images, # 你的 Model 期待的是字符串列表
+                "costumes": images,  # 你的 Model 期待的是字符串列表
                 "animations": {
                     "默认": {"start": 1, "end": len(images), "fps": 10, "loop": True}
-                }
+                },
             }
-            with open(config_file, 'w', encoding='utf-8') as f:
+            with open(config_file, "w", encoding="utf-8") as f:
                 json.dump(default_data, f, indent=4, ensure_ascii=False)
-
 
     def _get_safe_dir_name(self, base_path, name):
         """内部工具：防止重名逻辑封装"""
@@ -618,9 +668,9 @@ class ResourceManager(QObject):
     def setup_sprite_grid_mode(self):
         # 1. 找到存放列表的容器 (verticalLayout_15)
         container_layout = self.ui.verticalLayout_15
-        
+
         # 2. 清除掉旧的 list_sprite (如果有的话)
-        if hasattr(self.ui, 'list_sprite'):
+        if hasattr(self.ui, "list_sprite"):
             self.ui.list_sprite.deleteLater()
 
         # 3. 创建一个新的滚动区域
@@ -628,34 +678,35 @@ class ResourceManager(QObject):
         self.scroll_area.setObjectName("SpriteScrollArea")
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
-        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
         self.scroll_area.setStyleSheet("background: transparent;")
 
         # 🚀 关键修改：允许点击获取焦点，并安装过滤器
         self.scroll_area.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.scroll_area.installEventFilter(self)
 
-
         # 4. 创建内部容器和网格布局
         self.grid_container = QWidget()
         self.grid_container.setStyleSheet("background: transparent;")
         self.grid_container.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.sprite_grid_layout = QGridLayout(self.grid_container)
-        
-
 
         # 🚀 重点：设置间距和边距
-        self.sprite_grid_layout.setContentsMargins(4, 6, 4, 6) # 这里的边距可以自由控制了
+        self.sprite_grid_layout.setContentsMargins(
+            4, 6, 4, 6
+        )  # 这里的边距可以自由控制了
         self.sprite_grid_layout.setSpacing(0)
         self.sprite_grid_layout.setVerticalSpacing(5)
 
-    
         for i in range(4):
-            self.sprite_grid_layout.setColumnStretch(i,1)
+            self.sprite_grid_layout.setColumnStretch(i, 1)
 
+        self.sprite_grid_layout.setAlignment(
+            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft
+        )
 
-        self.sprite_grid_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        
         # self.grid_container.mousePressEvent = lambda event: self.clear_all_selections()
         self.scroll_area.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.scroll_area.installEventFilter(self)
@@ -663,22 +714,18 @@ class ResourceManager(QObject):
         self.scroll_area.setWidget(self.grid_container)
         container_layout.addWidget(self.scroll_area)
 
-        
-        
-        
-
     def add_sprite_card(self, name, index, icon_path=None):
         """核心入口：负责卡片的创建与网格定位"""
         from PySide6.QtCore import QTimer
-        
+
         # 1. 创建基础容器
         card = QWidget()
-        card.setFixedSize(74, 74) 
+        card.setFixedSize(74, 74)
         card.setObjectName("spriteCard")
         card.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         card.setProperty("selected", "false")
         card.installEventFilter(self)
-        
+
         # 2. 调用内部构建逻辑
         self._build_card_ui(card, name, icon_path)
         self._build_card_delete_button(card, name)
@@ -687,7 +734,7 @@ class ResourceManager(QObject):
         # 3. 网格布局定位 (保持 4 列布局)
         row, col = index // 4, index % 4
         self.sprite_grid_layout.addWidget(card, row, col, Qt.AlignmentFlag.AlignCenter)
-        
+
         return card
 
     def _build_card_ui(self, card, name, icon_path):
@@ -704,7 +751,7 @@ class ResourceManager(QObject):
                 border: 2px solid #5bc772;
             }
         """)
-        
+
         layout = QVBoxLayout(card)
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(2)
@@ -715,8 +762,14 @@ class ResourceManager(QObject):
         if icon_path and os.path.exists(icon_path):
             pix = QPixmap(icon_path)
             if not pix.isNull():
-                mode = Qt.TransformationMode.FastTransformation if pix.width() < 100 else Qt.TransformationMode.SmoothTransformation
-                target_pix = pix.scaled(80, 80, Qt.AspectRatioMode.KeepAspectRatio, mode)
+                mode = (
+                    Qt.TransformationMode.FastTransformation
+                    if pix.width() < 100
+                    else Qt.TransformationMode.SmoothTransformation
+                )
+                target_pix = pix.scaled(
+                    80, 80, Qt.AspectRatioMode.KeepAspectRatio, mode
+                )
                 icon_label.setPixmap(target_pix)
                 icon_label.setScaledContents(True)
         else:
@@ -726,7 +779,7 @@ class ResourceManager(QObject):
         # --- 名字处理 (字体与颜色) ---
         name_label = QLabel(name)
         name_label.setObjectName("spriteNameLabel")
-        if hasattr(self, 'custom_font_family'):
+        if hasattr(self, "custom_font_family"):
             name_label.setFont(QFont(self.custom_font_family, 12))
         name_label.setStyleSheet("color: #E0E0E0; background: transparent;")
         layout.addWidget(name_label, 0, Qt.AlignmentFlag.AlignCenter)
@@ -760,7 +813,7 @@ class ResourceManager(QObject):
     def _setup_card_interactions(self, card, name):
         """负责长按计时、点击高亮、双击重命名"""
         from PySide6.QtCore import QTimer
-        
+
         # 准备长按定时器
         card.long_press_timer = QTimer()
         card.long_press_timer.setSingleShot(True)
@@ -778,6 +831,7 @@ class ResourceManager(QObject):
 
         card.mousePressEvent = custom_mouse_press
         card.mouseReleaseEvent = custom_mouse_release
+
         # card.mouseDoubleClickEvent = lambda event: self.start_sprite_rename(card, name)
         def on_double_click(event):
             project_root = self.app_controller.project_manager.project_root
@@ -787,10 +841,9 @@ class ResourceManager(QObject):
 
         card.mouseDoubleClickEvent = on_double_click
 
-    
     def refresh_sprite_grid(self):
         """核心：保持布局不动，只换数据源"""
-        self.current_selected_card = None # 重置选中状态
+        self.current_selected_card = None  # 重置选中状态
 
         # 清空现有卡片
         while self.sprite_grid_layout.count():
@@ -800,61 +853,81 @@ class ResourceManager(QObject):
 
         # 获取并校验路径
         project_root = self.app_controller.project_manager.project_root
-        if not project_root: 
+        if not project_root:
             return
-        
+
         # 确保 assets/sprites 目录存在
         sprites_dir = os.path.join(project_root, "assets", "sprites")
-        if not os.path.exists(sprites_dir): return
+        if not os.path.exists(sprites_dir):
+            return
 
         try:
-            sprite_folders = [d for d in os.listdir(sprites_dir) if not d.startswith('.') and os.path.isdir(os.path.join(sprites_dir, d))]
+            sprite_folders = [
+                d
+                for d in os.listdir(sprites_dir)
+                if not d.startswith(".") and os.path.isdir(os.path.join(sprites_dir, d))
+            ]
             sprite_folders.sort()
 
             for i, folder_name in enumerate(sprite_folders):
                 folder_path = os.path.join(sprites_dir, folder_name)
                 thumb_path = None
-                
+
                 # 🚀 优先尝试从 config.json 获取缩略图
                 config_path = os.path.join(folder_path, "config.json")
                 if os.path.exists(config_path):
                     try:
-                        with open(config_path, 'r', encoding='utf-8') as f:
+                        with open(config_path, "r", encoding="utf-8") as f:
                             cfg = json.load(f)
                             # 获取第一张 costumes 的 file
                             if cfg.get("costumes"):
                                 first_file = cfg["costumes"][0].get("file")
                                 thumb_path = os.path.join(folder_path, first_file)
-                    except: pass
+                    except:
+                        pass
 
                 # 兜底：如果没有 config.json 或读取失败，扫描第一张图
                 if not thumb_path or not os.path.exists(thumb_path):
-                    img_exts = ('.png', '.jpg', '.jpeg', '.bmp', '.webp')
-                    files = sorted([f for f in os.listdir(folder_path) if f.lower().endswith(img_exts)])
+                    img_exts = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
+                    files = sorted(
+                        [
+                            f
+                            for f in os.listdir(folder_path)
+                            if f.lower().endswith(img_exts)
+                        ]
+                    )
                     if files:
                         thumb_path = os.path.join(folder_path, files[0])
 
                 self.add_sprite_card(folder_name, i, thumb_path)
         except Exception as e:
             print(f"角色网格刷新失败: {e}")
-    
-    
-    
+
     def handle_card_click(self, card, event):
         """处理卡片点击：设置焦点并切换高亮"""
         event.accept()
-        card.setFocus() # 🚀 让卡片抓住焦点
+        card.setFocus()  # 🚀 让卡片抓住焦点
         self.hide_all_delete_buttons(exclude_card=card)
 
-
+        # 获取卡片名称
+        name_label = card.findChild(QLabel, "spriteNameLabel")
+        if name_label:
+            sprite_name = name_label.text()
+            project_root = self.app_controller.project_manager.project_root
+            if project_root:
+                # 记录最后选择的角色路径
+                self.last_selected_sprite_path = os.path.join(
+                    project_root, "assets", "sprites", sprite_name
+                )
 
         # 取消旧的
-        if hasattr(self, 'current_selected_card') and self.current_selected_card:
+        if hasattr(self, "current_selected_card") and self.current_selected_card:
             try:
                 self.current_selected_card.setProperty("selected", "false")
                 self.current_selected_card.style().unpolish(self.current_selected_card)
                 self.current_selected_card.style().polish(self.current_selected_card)
-            except RuntimeError: pass
+            except RuntimeError:
+                pass
 
         # 选中新的
         self.current_selected_card = card
@@ -864,20 +937,21 @@ class ResourceManager(QObject):
 
     def clear_all_selections(self):
         """清除高亮状态"""
-        if hasattr(self, 'current_selected_card') and self.current_selected_card:
+        if hasattr(self, "current_selected_card") and self.current_selected_card:
             try:
                 self.current_selected_card.setProperty("selected", "false")
                 self.current_selected_card.style().unpolish(self.current_selected_card)
                 self.current_selected_card.style().polish(self.current_selected_card)
-            except RuntimeError: pass
+            except RuntimeError:
+                pass
             self.current_selected_card = None
-    
+
     def start_sprite_rename(self, card, old_name):
         from PySide6.QtWidgets import QLineEdit
-        
 
         name_label = card.findChild(QLabel, "spriteNameLabel")
-        if not name_label: return
+        if not name_label:
+            return
 
         # 🚀 核心逻辑 1：暂时禁用卡片的布局刷新
         # 这样在创建 edit 控件时，布局管理器不会去重新排列图标
@@ -887,14 +961,14 @@ class ResourceManager(QObject):
         # 我们手动指定它在 card 上的位置
         edit = QLineEdit(card)
         edit.setText(old_name)
-        
+
         # 获取 Label 当前的准确位置
         geo = name_label.geometry()
-        
+
         # 🚀 核心逻辑 3：绝对定位，且不让布局影响它
         # 保持高度和位置完全一致，左右可以稍微扩一点方便输入
-        edit.setGeometry(geo.adjusted(-4, -2, 4, 2)) 
-        
+        edit.setGeometry(geo.adjusted(-4, -2, 4, 2))
+
         edit.setFont(name_label.font())
         edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
         edit.setStyleSheet("""
@@ -918,15 +992,16 @@ class ResourceManager(QObject):
         edit.selectAll()
 
         def finish_edit():
-            if not edit.isVisible(): return
-            
+            if not edit.isVisible():
+                return
+
             new_name = edit.text().strip()
-            
+
             # 只有当名字真的变了，且不为空时才触发同步
             if new_name and new_name != old_name:
                 # 🚀 接入磁盘同步
                 self.handle_sprite_physical_rename(old_name, new_name)
-            
+
             # 以下是原有的 UI 恢复逻辑
             edit.hide()
             edit.deleteLater()
@@ -938,7 +1013,7 @@ class ResourceManager(QObject):
         edit.editingFinished.connect(finish_edit)
         # 捕获回车，让它失去焦点触发 finish_edit
         edit.returnPressed.connect(edit.clearFocus)
-    
+
     def handle_sprite_physical_rename(self, old_name, new_name):
         """物理重命名 assets/sprites 中的文件夹"""
         # 1. 获取项目根路径
@@ -954,9 +1029,11 @@ class ResourceManager(QObject):
         # 3. 安全检查
         if not os.path.exists(old_path):
             return
-            
+
         if os.path.exists(new_path):
-            QMessageBox.warning(self.window, "重命名失败", f"角色名称 '{new_name}' 已存在。")
+            QMessageBox.warning(
+                self.window, "重命名失败", f"角色名称 '{new_name}' 已存在。"
+            )
             return
 
         # 4. 执行重命名
@@ -966,18 +1043,17 @@ class ResourceManager(QObject):
             # 5. 🚀 关键：重命名后必须刷新整个网格，以确保内部数据一致
             # 如果不刷新，下次点击或再次改名时，逻辑引用的还是旧名字
             self.refresh_sprite_grid()
-            
+
         except Exception as e:
             QMessageBox.critical(self.window, "错误", f"文件夹重命名失败: {e}")
-    
 
     def show_delete_mode(self, card):
         """长按触发的效果"""
-        if hasattr(card, 'del_btn'):
+        if hasattr(card, "del_btn"):
             card.del_btn.show()
             # 这里的 card.update() 确保按钮能立刻显示
             card.update()
-    
+
     def hide_all_delete_buttons(self, exclude_card=None):
         """隐藏所有删除按钮，支持排除特定卡片"""
         for i in range(self.sprite_grid_layout.count()):
@@ -985,23 +1061,24 @@ class ResourceManager(QObject):
             if item:
                 w = item.widget()
                 # 🚀 如果 w 存在，且不是我们要排除的那张卡片
-                if w and w != exclude_card and hasattr(w, 'del_btn'):
+                if w and w != exclude_card and hasattr(w, "del_btn"):
                     w.del_btn.hide()
-    
+
     def handle_sprite_delete(self, name):
         """物理删除 assets/sprites 中的文件夹"""
         # 1. 弹出二次确认弹窗
         reply = QMessageBox.question(
-            self.window, 
-            "确认删除", 
+            self.window,
+            "确认删除",
             f"确定要删除角色 '{name}' 吗？\n此操作将永久删除该文件夹及其所有素材，不可撤销！",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.No,
         )
 
         if reply == QMessageBox.StandardButton.Yes:
             project_root = self.app_controller.project_manager.project_root
-            if not project_root: return
+            if not project_root:
+                return
 
             # 构建路径
             target_path = os.path.join(project_root, "assets", "sprites", name)
@@ -1009,13 +1086,15 @@ class ResourceManager(QObject):
             try:
                 if os.path.exists(target_path):
                     import shutil
+
                     # 🚀 使用 shutil.rmtree 递归删除整个文件夹
                     shutil.rmtree(target_path)
-    
-                    
+
                     # 🚀 刷新网格，让消失的角色在 UI 上也滚蛋
                     self.refresh_sprite_grid()
                 else:
-                    QMessageBox.warning(self.window, "删除失败", "找不到该角色的文件夹。")
+                    QMessageBox.warning(
+                        self.window, "删除失败", "找不到该角色的文件夹。"
+                    )
             except Exception as e:
                 QMessageBox.critical(self.window, "错误", f"无法删除文件夹: {e}")
