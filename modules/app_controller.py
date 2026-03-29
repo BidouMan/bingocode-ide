@@ -437,12 +437,11 @@ class AppController:
         # 🚀 重新梳理逻辑：
         # 只要代码脏了 (code_dirty) -> 必须弹窗
         # 或者 (是临时项目 且 资源脏了) -> 必须弹窗
-        # 或者 (是临时项目 且 用户有过操作) -> 必须弹窗
 
         should_prompt = False
         if code_dirty:
             should_prompt = True
-        elif is_temp and (res_dirty or self._user_has_any_action()):
+        elif is_temp and res_dirty:
             should_prompt = True
 
         if should_prompt:
