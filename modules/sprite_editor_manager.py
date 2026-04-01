@@ -56,6 +56,10 @@ class SpriteEditorManager(QObject):
         self.anim_list = self.ui.animate_list
         self.ui.fps_slider.setRange(1, 60)
 
+        # 移除分支图标和缩进，让选中区域覆盖整行
+        self.anim_list.setRootIsDecorated(False)
+        self.anim_list.setIndentation(0)
+
         self._setup_connections()
 
     def _setup_connections(self):
@@ -134,10 +138,8 @@ class SpriteEditorManager(QObject):
 
     def _update_animation_list(self):
         """刷新动作树，支持双击原地编辑名字"""
-        self.anim_list.setColumnCount(3)
-        self.anim_list.setColumnWidth(0, 110)
-        self.anim_list.setColumnWidth(1, 90)
-        self.anim_list.setColumnWidth(2, 50)
+        self.anim_list.setColumnCount(1)
+        self.anim_list.setColumnWidth(0, 220)
 
         # 🚀 开启右键菜单策略
         self.anim_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -150,48 +152,58 @@ class SpriteEditorManager(QObject):
 
         for name, config in self.model.animations.items():
             item = QTreeWidgetItem(self.anim_list)
-            item.setText(0, name)
             # 🚀 存储一份原始名字到 UserRole，方便重命名时对比
             item.setData(0, Qt.ItemDataRole.UserRole, name)
             # 🚀 设置第一列（名字）可以编辑
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
 
-            # 注入输入框容器 (保持透明和 NoFocus 解决高亮断层)
-            edit_widget = QWidget()
-            edit_widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            edit_widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-            edit_widget.setStyleSheet("background: transparent; border: none;")
+            # 创建单一容器来管理所有组件
+            container_widget = QWidget()
+            container_widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            container_widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+            container_widget.setStyleSheet("background: transparent; border: none;")
 
-            layout = QHBoxLayout(edit_widget)
-            layout.setContentsMargins(5, 0, 5, 0)
-            layout.setSpacing(2)
+            # 使用水平布局排列所有组件
+            container_layout = QHBoxLayout(container_widget)
+            container_layout.setContentsMargins(20, 0, 8, 0)
+            container_layout.setSpacing(4)
 
+            # 创建动画名称标签
+            name_label = QLabel(name)
+            name_label.setStyleSheet("color: white;")
+
+            # 添加弹簧（拉伸空间）
+            from PySide6.QtWidgets import QSpacerItem, QSizePolicy
+
+            spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+            # 创建起始帧输入框
             start_input = QSpinBox()
             start_input.setRange(1, 999)
             start_input.setValue(config.get("start", 1))
             start_input.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
             start_input.setFixedWidth(35)
             start_input.setStyleSheet(
-                "background: rgba(0,0,0,50); color: white; border-radius: 2px;"
+                "background: rgba(0,0,0,120); color: white; border-radius: 2px;"
             )
+            start_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
+            # 创建连接线标签
             line_label = QLabel("-")
+            line_label.setStyleSheet("color: #9ca0a4;")
 
+            # 创建结束帧输入框
             end_input = QSpinBox()
             end_input.setRange(1, 999)
             end_input.setValue(config.get("end", 1))
             end_input.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
             end_input.setFixedWidth(35)
-            end_input.setStyleSheet(start_input.styleSheet())
+            end_input.setStyleSheet(
+                "background: rgba(0,0,0,120); color: white; border-radius: 2px;"
+            )
+            end_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-            layout.addWidget(start_input)
-            layout.addWidget(line_label)
-            layout.addWidget(end_input)
-
-            self.anim_list.addTopLevelItem(item)
-            self.anim_list.setItemWidget(item, 1, edit_widget)
-
-            # 添加循环复选框
+            # 添加循环按钮
             loop_icon_path = os.path.join("assets", "icons", "anim_loop.svg")
             loop_off_icon_path = os.path.join("assets", "icons", "anim_loop_off.svg")
             loop_icon = QIcon(loop_icon_path)
@@ -202,20 +214,32 @@ class SpriteEditorManager(QObject):
             loop_button.setFixedSize(24, 24)
             loop_button.setFlat(True)
             loop_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            loop_button.setStyleSheet("padding: 0;")
+            loop_button.setStyleSheet("padding: 0; border: none; margin: 0;")
+            loop_button.setContentsMargins(0, 0, 0, 0)
 
             if is_loop:
                 loop_button.setIcon(loop_icon)
-                loop_button.setIconSize(QSize(16, 16))
+                loop_button.setIconSize(QSize(14, 14))
             else:
                 loop_button.setIcon(loop_off_icon)
-                loop_button.setIconSize(QSize(16, 16))
+                loop_button.setIconSize(QSize(14, 14))
 
+            # 连接循环按钮点击事件
             loop_button.clicked.connect(
                 lambda checked, n=name, btn=loop_button: self._on_loop_toggled(n, btn)
             )
 
-            self.anim_list.setItemWidget(item, 2, loop_button)
+            # 添加所有组件到布局
+            container_layout.addWidget(name_label)
+            container_layout.addItem(spacer)
+            container_layout.addWidget(start_input)
+            container_layout.addWidget(line_label)
+            container_layout.addWidget(end_input)
+            container_layout.addWidget(loop_button)
+
+            # 设置容器为item的widget
+            self.anim_list.addTopLevelItem(item)
+            self.anim_list.setItemWidget(item, 0, container_widget)
 
             # 绑定数值改变
             start_input.valueChanged.connect(

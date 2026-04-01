@@ -120,7 +120,7 @@
           <property name="bottomMargin">
            <number>0</number>
           </property>
-          <item>
+          <item alignment="Qt::AlignmentFlag::AlignTop">
            <widget class="QPushButton" name="btn_logo">
             <property name="enabled">
              <bool>true</bool>
@@ -134,13 +134,13 @@
             <property name="minimumSize">
              <size>
               <width>60</width>
-              <height>40</height>
+              <height>39</height>
              </size>
             </property>
             <property name="maximumSize">
              <size>
               <width>60</width>
-              <height>40</height>
+              <height>39</height>
              </size>
             </property>
             <property name="focusPolicy">
@@ -397,7 +397,7 @@
            <item>
             <widget class="QFrame" name="frame">
              <property name="frameShape">
-              <enum>QFrame::Shape::StyledPanel</enum>
+              <enum>QFrame::Shape::NoFrame</enum>
              </property>
              <property name="frameShadow">
               <enum>QFrame::Shadow::Raised</enum>
@@ -407,13 +407,13 @@
              </property>
              <layout class="QHBoxLayout" name="horizontalLayout_2">
               <property name="spacing">
-               <number>5</number>
+               <number>0</number>
               </property>
               <property name="leftMargin">
                <number>0</number>
               </property>
               <property name="topMargin">
-               <number>4</number>
+               <number>0</number>
               </property>
               <property name="rightMargin">
                <number>0</number>
@@ -458,7 +458,7 @@
                   <number>0</number>
                  </property>
                  <property name="rightMargin">
-                  <number>8</number>
+                  <number>0</number>
                  </property>
                  <property name="bottomMargin">
                   <number>0</number>
@@ -889,7 +889,7 @@
                        <string notr="true"/>
                       </property>
                       <property name="currentIndex">
-                       <number>0</number>
+                       <number>3</number>
                       </property>
                       <widget class="QWidget" name="page_sprite">
                        <layout class="QVBoxLayout" name="verticalLayout_12">
@@ -1117,7 +1117,7 @@
                    <property name="frameShadow">
                     <enum>QFrame::Shadow::Raised</enum>
                    </property>
-                   <layout class="QHBoxLayout" name="horizontalLayout" stretch="1,0">
+                   <layout class="QHBoxLayout" name="horizontalLayout" stretch="1">
                     <property name="spacing">
                      <number>0</number>
                     </property>
@@ -1236,79 +1236,6 @@
                          </property>
                          <property name="flat">
                           <bool>true</bool>
-                         </property>
-                        </widget>
-                       </item>
-                      </layout>
-                     </widget>
-                    </item>
-                    <item>
-                     <widget class="QFrame" name="toolbtn_frame">
-                      <property name="sizePolicy">
-                       <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
-                        <horstretch>0</horstretch>
-                        <verstretch>0</verstretch>
-                       </sizepolicy>
-                      </property>
-                      <property name="minimumSize">
-                       <size>
-                        <width>0</width>
-                        <height>0</height>
-                       </size>
-                      </property>
-                      <property name="maximumSize">
-                       <size>
-                        <width>300</width>
-                        <height>16777215</height>
-                       </size>
-                      </property>
-                      <property name="frameShape">
-                       <enum>QFrame::Shape::StyledPanel</enum>
-                      </property>
-                      <property name="frameShadow">
-                       <enum>QFrame::Shadow::Raised</enum>
-                      </property>
-                      <layout class="QHBoxLayout" name="horizontalLayout_8">
-                       <property name="spacing">
-                        <number>1</number>
-                       </property>
-                       <property name="leftMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="topMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="rightMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="bottomMargin">
-                        <number>0</number>
-                       </property>
-                       <item>
-                        <widget class="QPushButton" name="pushButton_5">
-                         <property name="text">
-                          <string>脚本</string>
-                         </property>
-                        </widget>
-                       </item>
-                       <item>
-                        <widget class="QPushButton" name="pushButton_7">
-                         <property name="text">
-                          <string>造型</string>
-                         </property>
-                        </widget>
-                       </item>
-                       <item>
-                        <widget class="QPushButton" name="pushButton_8">
-                         <property name="text">
-                          <string>地图</string>
-                         </property>
-                        </widget>
-                       </item>
-                       <item>
-                        <widget class="QPushButton" name="pushButton_6">
-                         <property name="text">
-                          <string>声音</string>
                          </property>
                         </widget>
                        </item>
@@ -1449,6 +1376,9 @@
                   <height>16777215</height>
                  </size>
                 </property>
+                <property name="styleSheet">
+                 <string notr="true"/>
+                </property>
                 <property name="verticalScrollBarPolicy">
                  <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
                 </property>
@@ -1474,6 +1404,12 @@
               </item>
               <item>
                <widget class="QGraphicsView" name="sprite_canvas">
+                <property name="styleSheet">
+                 <string notr="true"/>
+                </property>
+                <property name="frameShape">
+                 <enum>QFrame::Shape::NoFrame</enum>
+                </property>
                 <property name="verticalScrollBarPolicy">
                  <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
                 </property>
@@ -1498,7 +1434,7 @@
                 </property>
                 <layout class="QVBoxLayout" name="verticalLayout_20">
                  <property name="spacing">
-                  <number>0</number>
+                  <number>1</number>
                  </property>
                  <property name="leftMargin">
                   <number>0</number>
@@ -1515,7 +1451,7 @@
                  <item>
                   <widget class="QLabel" name="animate_label">
                    <property name="text">
-                    <string>ANIMATION预览</string>
+                    <string>ANIMATION</string>
                    </property>
                    <property name="alignment">
                     <set>Qt::AlignmentFlag::AlignCenter</set>
@@ -1537,7 +1473,7 @@
                     </size>
                    </property>
                    <property name="frameShape">
-                    <enum>QFrame::Shape::StyledPanel</enum>
+                    <enum>QFrame::Shape::NoFrame</enum>
                    </property>
                    <property name="frameShadow">
                     <enum>QFrame::Shadow::Raised</enum>
@@ -1558,7 +1494,7 @@
                     <property name="bottomMargin">
                      <number>0</number>
                     </property>
-                    <item alignment="Qt::AlignmentFlag::AlignHCenter|Qt::AlignmentFlag::AlignVCenter">
+                    <item alignment="Qt::AlignmentFlag::AlignHCenter|Qt::AlignmentFlag::AlignTop">
                      <widget class="QLabel" name="animate_preview">
                       <property name="minimumSize">
                        <size>
@@ -1575,8 +1511,11 @@
                       <property name="styleSheet">
                        <string notr="true"/>
                       </property>
+                      <property name="frameShape">
+                       <enum>QFrame::Shape::StyledPanel</enum>
+                      </property>
                       <property name="text">
-                       <string>TextLabel</string>
+                       <string/>
                       </property>
                       <property name="scaledContents">
                        <bool>false</bool>
@@ -1587,7 +1526,10 @@
                      </widget>
                     </item>
                     <item>
-                     <layout class="QHBoxLayout" name="horizontalLayout_12" stretch="1,2,1">
+                     <layout class="QHBoxLayout" name="fps_slider_box" stretch="1,2,1">
+                      <property name="bottomMargin">
+                       <number>4</number>
+                      </property>
                       <item>
                        <spacer name="horizontalSpacer_6">
                         <property name="orientation">
@@ -1629,214 +1571,228 @@
                    </layout>
                   </widget>
                  </item>
-                 <item>
-                  <layout class="QHBoxLayout" name="editor_preview_btns" stretch="0,0,0,0,0,0">
-                   <property name="spacing">
-                    <number>4</number>
+                 <item alignment="Qt::AlignmentFlag::AlignHCenter">
+                  <widget class="QFrame" name="btn_preview_btns">
+                   <property name="frameShape">
+                    <enum>QFrame::Shape::StyledPanel</enum>
                    </property>
-                   <property name="leftMargin">
-                    <number>8</number>
+                   <property name="frameShadow">
+                    <enum>QFrame::Shadow::Raised</enum>
                    </property>
-                   <property name="rightMargin">
-                    <number>8</number>
-                   </property>
-                   <item>
-                    <widget class="QPushButton" name="btn_preview_prev">
-                     <property name="minimumSize">
-                      <size>
-                       <width>40</width>
-                       <height>24</height>
-                      </size>
-                     </property>
-                     <property name="maximumSize">
-                      <size>
-                       <width>40</width>
-                       <height>24</height>
-                      </size>
-                     </property>
-                     <property name="text">
-                      <string/>
-                     </property>
-                     <property name="icon">
-                      <iconset resource="../assets/resources.qrc">
-                       <normaloff>:/icons/btn_preview_prev.svg</normaloff>:/icons/btn_preview_prev.svg</iconset>
-                     </property>
-                     <property name="iconSize">
-                      <size>
-                       <width>28</width>
-                       <height>16</height>
-                      </size>
-                     </property>
-                     <property name="flat">
-                      <bool>false</bool>
-                     </property>
-                    </widget>
-                   </item>
-                   <item>
-                    <widget class="QPushButton" name="btn_preview_play">
-                     <property name="minimumSize">
-                      <size>
-                       <width>40</width>
-                       <height>24</height>
-                      </size>
-                     </property>
-                     <property name="maximumSize">
-                      <size>
-                       <width>40</width>
-                       <height>24</height>
-                      </size>
-                     </property>
-                     <property name="text">
-                      <string/>
-                     </property>
-                     <property name="icon">
-                      <iconset resource="../assets/resources.qrc">
-                       <normaloff>:/icons/btn_preview_play.svg</normaloff>
-                       <normalon>:/icons/btn_preview_pause.svg</normalon>:/icons/btn_preview_play.svg</iconset>
-                     </property>
-                     <property name="iconSize">
-                      <size>
-                       <width>28</width>
-                       <height>16</height>
-                      </size>
-                     </property>
-                     <property name="checkable">
-                      <bool>true</bool>
-                     </property>
-                     <property name="flat">
-                      <bool>false</bool>
-                     </property>
-                    </widget>
-                   </item>
-                   <item>
-                    <widget class="QPushButton" name="btn_preview_next">
-                     <property name="minimumSize">
-                      <size>
-                       <width>40</width>
-                       <height>24</height>
-                      </size>
-                     </property>
-                     <property name="maximumSize">
-                      <size>
-                       <width>40</width>
-                       <height>24</height>
-                      </size>
-                     </property>
-                     <property name="text">
-                      <string/>
-                     </property>
-                     <property name="icon">
-                      <iconset resource="../assets/resources.qrc">
-                       <normaloff>:/icons/btn_preview_next.svg</normaloff>:/icons/btn_preview_next.svg</iconset>
-                     </property>
-                     <property name="iconSize">
-                      <size>
-                       <width>28</width>
-                       <height>16</height>
-                      </size>
-                     </property>
-                     <property name="flat">
-                      <bool>false</bool>
-                     </property>
-                    </widget>
-                   </item>
-                   <item>
-                    <widget class="QPushButton" name="btn_preview_scale">
-                     <property name="minimumSize">
-                      <size>
-                       <width>40</width>
-                       <height>24</height>
-                      </size>
-                     </property>
-                     <property name="maximumSize">
-                      <size>
-                       <width>40</width>
-                       <height>24</height>
-                      </size>
-                     </property>
-                     <property name="text">
-                      <string/>
-                     </property>
-                     <property name="icon">
-                      <iconset resource="../assets/resources.qrc">
-                       <normaloff>:/icons/btn_preview_scale.svg</normaloff>:/icons/btn_preview_scale.svg</iconset>
-                     </property>
-                     <property name="iconSize">
-                      <size>
-                       <width>28</width>
-                       <height>16</height>
-                      </size>
-                     </property>
-                     <property name="flat">
-                      <bool>false</bool>
-                     </property>
-                    </widget>
-                   </item>
-                   <item>
-                    <widget class="QPushButton" name="btn_preview_change_bg">
-                     <property name="minimumSize">
-                      <size>
-                       <width>40</width>
-                       <height>24</height>
-                      </size>
-                     </property>
-                     <property name="maximumSize">
-                      <size>
-                       <width>40</width>
-                       <height>24</height>
-                      </size>
-                     </property>
-                     <property name="text">
-                      <string/>
-                     </property>
-                     <property name="icon">
-                      <iconset resource="../assets/resources.qrc">
-                       <normaloff>:/icons/btn_preview_change_bg.svg</normaloff>:/icons/btn_preview_change_bg.svg</iconset>
-                     </property>
-                     <property name="iconSize">
-                      <size>
-                       <width>28</width>
-                       <height>16</height>
-                      </size>
-                     </property>
-                     <property name="flat">
-                      <bool>false</bool>
-                     </property>
-                    </widget>
-                   </item>
-                   <item>
-                    <widget class="QPushButton" name="btn_preview_add">
-                     <property name="minimumSize">
-                      <size>
-                       <width>40</width>
-                       <height>24</height>
-                      </size>
-                     </property>
-                     <property name="maximumSize">
-                      <size>
-                       <width>40</width>
-                       <height>24</height>
-                      </size>
-                     </property>
-                     <property name="text">
-                      <string/>
-                     </property>
-                     <property name="icon">
-                      <iconset resource="../assets/resources.qrc">
-                       <normaloff>:/icons/btn_preview_add.svg</normaloff>:/icons/btn_preview_add.svg</iconset>
-                     </property>
-                     <property name="iconSize">
-                      <size>
-                       <width>28</width>
-                       <height>16</height>
-                      </size>
-                     </property>
-                     <property name="flat">
-                      <bool>false</bool>
-                     </property>
-                    </widget>
-                   </item>
-                  </layout>
+                   <layout class="QHBoxLayout" name="horizontalLayout_8">
+                    <property name="spacing">
+                     <number>4</number>
+                    </property>
+                    <property name="leftMargin">
+                     <number>8</number>
+                    </property>
+                    <property name="topMargin">
+                     <number>8</number>
+                    </property>
+                    <property name="rightMargin">
+                     <number>8</number>
+                    </property>
+                    <property name="bottomMargin">
+                     <number>8</number>
+                    </property>
+                    <item>
+                     <widget class="QPushButton" name="btn_preview_prev">
+                      <property name="minimumSize">
+                       <size>
+                        <width>38</width>
+                        <height>24</height>
+                       </size>
+                      </property>
+                      <property name="maximumSize">
+                       <size>
+                        <width>38</width>
+                        <height>24</height>
+                       </size>
+                      </property>
+                      <property name="text">
+                       <string/>
+                      </property>
+                      <property name="icon">
+                       <iconset resource="../assets/resources.qrc">
+                        <normaloff>:/icons/btn_preview_prev.svg</normaloff>:/icons/btn_preview_prev.svg</iconset>
+                      </property>
+                      <property name="iconSize">
+                       <size>
+                        <width>28</width>
+                        <height>16</height>
+                       </size>
+                      </property>
+                      <property name="flat">
+                       <bool>true</bool>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QPushButton" name="btn_preview_play">
+                      <property name="minimumSize">
+                       <size>
+                        <width>38</width>
+                        <height>24</height>
+                       </size>
+                      </property>
+                      <property name="maximumSize">
+                       <size>
+                        <width>38</width>
+                        <height>24</height>
+                       </size>
+                      </property>
+                      <property name="text">
+                       <string/>
+                      </property>
+                      <property name="icon">
+                       <iconset resource="../assets/resources.qrc">
+                        <normaloff>:/icons/btn_preview_play.svg</normaloff>
+                        <normalon>:/icons/btn_preview_pause.svg</normalon>:/icons/btn_preview_play.svg</iconset>
+                      </property>
+                      <property name="iconSize">
+                       <size>
+                        <width>28</width>
+                        <height>16</height>
+                       </size>
+                      </property>
+                      <property name="checkable">
+                       <bool>true</bool>
+                      </property>
+                      <property name="flat">
+                       <bool>true</bool>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QPushButton" name="btn_preview_next">
+                      <property name="minimumSize">
+                       <size>
+                        <width>38</width>
+                        <height>24</height>
+                       </size>
+                      </property>
+                      <property name="maximumSize">
+                       <size>
+                        <width>38</width>
+                        <height>24</height>
+                       </size>
+                      </property>
+                      <property name="text">
+                       <string/>
+                      </property>
+                      <property name="icon">
+                       <iconset resource="../assets/resources.qrc">
+                        <normaloff>:/icons/btn_preview_next.svg</normaloff>:/icons/btn_preview_next.svg</iconset>
+                      </property>
+                      <property name="iconSize">
+                       <size>
+                        <width>28</width>
+                        <height>16</height>
+                       </size>
+                      </property>
+                      <property name="flat">
+                       <bool>true</bool>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QPushButton" name="btn_preview_scale">
+                      <property name="minimumSize">
+                       <size>
+                        <width>38</width>
+                        <height>24</height>
+                       </size>
+                      </property>
+                      <property name="maximumSize">
+                       <size>
+                        <width>38</width>
+                        <height>24</height>
+                       </size>
+                      </property>
+                      <property name="text">
+                       <string/>
+                      </property>
+                      <property name="icon">
+                       <iconset resource="../assets/resources.qrc">
+                        <normaloff>:/icons/btn_preview_scale.svg</normaloff>:/icons/btn_preview_scale.svg</iconset>
+                      </property>
+                      <property name="iconSize">
+                       <size>
+                        <width>28</width>
+                        <height>16</height>
+                       </size>
+                      </property>
+                      <property name="flat">
+                       <bool>true</bool>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QPushButton" name="btn_preview_change_bg">
+                      <property name="minimumSize">
+                       <size>
+                        <width>38</width>
+                        <height>24</height>
+                       </size>
+                      </property>
+                      <property name="maximumSize">
+                       <size>
+                        <width>38</width>
+                        <height>24</height>
+                       </size>
+                      </property>
+                      <property name="text">
+                       <string/>
+                      </property>
+                      <property name="icon">
+                       <iconset resource="../assets/resources.qrc">
+                        <normaloff>:/icons/btn_preview_change_bg.svg</normaloff>:/icons/btn_preview_change_bg.svg</iconset>
+                      </property>
+                      <property name="iconSize">
+                       <size>
+                        <width>28</width>
+                        <height>16</height>
+                       </size>
+                      </property>
+                      <property name="flat">
+                       <bool>true</bool>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QPushButton" name="btn_preview_add">
+                      <property name="minimumSize">
+                       <size>
+                        <width>38</width>
+                        <height>24</height>
+                       </size>
+                      </property>
+                      <property name="maximumSize">
+                       <size>
+                        <width>38</width>
+                        <height>24</height>
+                       </size>
+                      </property>
+                      <property name="text">
+                       <string/>
+                      </property>
+                      <property name="icon">
+                       <iconset resource="../assets/resources.qrc">
+                        <normaloff>:/icons/btn_preview_add.svg</normaloff>:/icons/btn_preview_add.svg</iconset>
+                      </property>
+                      <property name="iconSize">
+                       <size>
+                        <width>28</width>
+                        <height>16</height>
+                       </size>
+                      </property>
+                      <property name="flat">
+                       <bool>true</bool>
+                      </property>
+                     </widget>
+                    </item>
+                   </layout>
+                  </widget>
                  </item>
                  <item alignment="Qt::AlignmentFlag::AlignHCenter">
                   <widget class="QTreeWidget" name="animate_list">

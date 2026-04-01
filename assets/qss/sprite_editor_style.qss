@@ -1,0 +1,115 @@
+#sprite_fps_list {
+    margin: 0px;
+    padding: 0px;
+    border: none;
+    border-right: 1px solid rgb(12, 12, 12);
+    background-color: rgb(34,37,43);
+}
+
+#sprite_canvas {
+    margin: 0px;
+    padding: 0px;
+    border: none;
+    background-color: rgb(34,37,43);
+}
+
+
+
+#editor_preview_panel {
+    margin: 0px;
+    padding: 0px;
+    border: none;
+    border-left: 1px solid rgb(12, 12, 12);
+    background-color: rgb(34,37,43);
+}
+
+#animate_label {
+    color:#00FF8C;
+    margin: 6px;
+    padding: 0px;
+    border: none;
+    background-color: rgb(34,37,43);
+}
+
+#preview_bg {
+    margin: 0px;
+    padding: 0px;
+    background:transparent;
+}
+
+#animate_preview {
+    margin-left: 4px;
+    margin-right: 4px;
+    padding: 0px;
+    border: 1px solid rgb(69, 69, 69);
+    background-color: #1E1E1E;
+}
+
+
+#fps_slider {
+    background-color: rgb(41, 44, 52);
+    border: none;
+    height: 4px;
+    margin: 4px 4px 8px 4px;
+}
+
+#fps_slider::groove:horizontal {
+    background-color: rgb(55, 59, 68);
+    height: 4px;
+    border-radius: 2px;
+}
+
+#fps_slider::handle:horizontal {
+    background-color: #9ca0a4;
+    width: 12px;
+    height: 12px;
+    border-radius: 6px;
+    margin: -4px 0;
+}
+
+#fps_slider::handle:horizontal:hover {
+    background-color: #abb2bf;
+}
+
+#animate_list {
+    margin-left: 4px;
+    margin-right: 4px;
+
+    padding: 0px;
+    border: none;
+    background-color: #1E1E1E
+}
+
+#btn_preview_btns{
+    background-color: transparent; 
+    border: none
+}
+
+#btn_preview_btns QPushButton {
+    border: none;
+    border-radius: 4px;
+    background-color: rgb(40, 43, 52); 
+    
+}
+#btn_preview_btns QPushButton:pressed,
+#btn_preview_btns QPushButton:hover{
+    background-color: rgb(62, 66, 79);
+    border: none
+}
+
+
+
+#animate_list::item:hover {
+    background-color: #3e4451;
+}
+
+#animate_list::item:selected {
+    background-color: #528bff;
+    color: white;
+}
+
+#animate_list::item:selected:hover {
+    background-color: #528bff;
+    color: white;
+}
+

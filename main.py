@@ -89,8 +89,10 @@ if __name__ == "__main__":
     QLoggingCategory.setFilterRules("*.debug=false\nqt.qpa.fonts=false\n*.warning=false")
     # 加载暗色皮肤
     style_data = load_stylesheet(os.path.join('assets', 'qss', 'dark_style.qss'))
+    # 加载 sprite editor 样式
+    sprite_style_data = load_stylesheet(os.path.join('assets', 'qss', 'sprite_editor_style.qss'))
     if style_data: 
-        app.setStyleSheet(style_data) 
+        app.setStyleSheet(style_data + sprite_style_data) 
     
     # 显示窗口
     window = BingoIDE()
