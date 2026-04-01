@@ -151,6 +151,10 @@ class AppController:
         if not target_dir:
             return
 
+        # 🚀 修复焦点丢失问题：强制主窗口重新获取焦点
+        self.window.activateWindow()
+        self.window.raise_()
+
         # 1. 切换根目录（现在它不会因为没 main.py 而返回 False 了）
         success, _ = self.project_manager.open_project(target_dir)
 
@@ -234,6 +238,10 @@ class AppController:
 
         if not full_path:
             return
+
+        # 🚀 修复焦点丢失问题：强制主窗口重新获取焦点
+        self.window.activateWindow()
+        self.window.raise_()
 
         # 3. 解析目标路径：去掉 .bingo 后缀，作为项目文件夹
         target_project_dir = os.path.splitext(full_path)[0]

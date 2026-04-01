@@ -1,5 +1,5 @@
 import os
-from PySide6.QtCore import QObject, Qt, QTimer, QRectF, QSize
+from PySide6.QtCore import QObject, Qt, QTimer, QRectF, QSize, QEvent
 from PySide6.QtGui import QPixmap, QPainter, QAction, QCursor, QBrush, QColor, QIcon
 from PySide6.QtWidgets import (
     QTreeWidgetItem,
@@ -12,6 +12,9 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QGraphicsScene,
     QPushButton,
+    QListWidgetItem,
+    QAbstractItemView,
+    QListView,
 )
 from models.sprite_model import SpriteDataModel
 from modules.checkerboard_manager import checker_manager
@@ -45,7 +48,7 @@ class SpriteEditorManager(QObject):
         # 3. 动画引擎核心变量
         self.timer = QTimer()
         # self.timer.timeout.disconnect() # 先断开所有可能的连接防止重复
-        self.timer.timeout.connect(self.play_next_frame)
+        self.timer.timeout.connect(self._update_animation_frame)
         self.current_anim_config = None
         self.current_frame_index = 0
         self.is_playing = False
@@ -55,6 +58,19 @@ class SpriteEditorManager(QObject):
         self.preview = self.ui.animate_preview
         self.anim_list = self.ui.animate_list
         self.ui.fps_slider.setRange(1, 60)
+
+        # 禁用滚动条
+        self.fps_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.fps_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        # 禁用水平滚动
+        self.fps_list.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.fps_list.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.fps_list.setMovement(QListView.Static)
+
+        # 彻底阻止水平滚动
+        self.fps_list.viewport().setMouseTracking(True)
+        self.fps_list.viewport().installEventFilter(self)
 
         # 移除分支图标和缩进，让选中区域覆盖整行
         self.anim_list.setRootIsDecorated(False)
@@ -274,7 +290,7 @@ class SpriteEditorManager(QObject):
         menu = QMenu(self.anim_list)
 
         # 只保留删除动作
-        delete_action = QAction("🗑️ 删除动作", menu)
+        delete_action = QAction("删除动作", menu)
         delete_action.triggered.connect(lambda: self.delete_animation(anim_name))
 
         menu.addAction(delete_action)
@@ -351,7 +367,8 @@ class SpriteEditorManager(QObject):
         self.refresh_all_ui("ALL")
 
     def _on_animation_item_clicked(self, item, column):
-        anim_name = item.text(0)
+        # 从UserRole获取动画名称
+        anim_name = item.data(0, Qt.ItemDataRole.UserRole)
         if not self.model or anim_name not in self.model.animations:
             return
 
@@ -432,16 +449,17 @@ class SpriteEditorManager(QObject):
         if img_path:
             self.update_preview_static(img_path)
 
-        # 2. 递增帧号
+        # 2. 移除序列帧列表同步功能，保持列表位置不变
+
+        # 3. 递增帧号
         self.current_frame_index += 1
 
-        # 3. 边界检查
+        # 4. 边界检查
         if self.current_frame_index > end:
             if loop:
                 self.current_frame_index = start
             else:
                 self.stop_animation()
-                print("⏹️ [DEBUG] 动画播放完毕(不循环)")
 
     # --- UI 刷新逻辑 ---
 
@@ -454,8 +472,75 @@ class SpriteEditorManager(QObject):
     def _update_fps_list(self):
         self.fps_list.blockSignals(True)
         self.fps_list.clear()
-        for i, filename in enumerate(self.model.costumes):
-            self.fps_list.addItem(f"{i + 1}: {filename}")
+
+        try:
+            from PySide6.QtWidgets import QVBoxLayout, QSizePolicy
+
+            for i, filename in enumerate(self.model.costumes):
+                # 创建卡片widget
+                card_widget = QWidget()
+                # 设置卡片为正方形，参考resource_manager.py中的实现
+                card_widget.setFixedSize(78, 78)
+                card_widget.setStyleSheet("""
+                    QWidget {
+                        background-color: #1e1e1e;
+                        border: 1px solid #2d2d2d;
+                        border-radius: 4px;
+                        margin: 0;
+                        padding: 0;
+                    }
+                    QWidget:hover {
+                        background-color: #3e4451;
+                        border: 1px solid #4a4f58;
+                    }
+                """)
+                card_layout = QVBoxLayout(card_widget)
+                card_layout.setContentsMargins(4, 4, 4, 4)
+                card_layout.setSpacing(4)
+                card_layout.setAlignment(Qt.AlignCenter)
+
+                # 创建缩略图标签
+                thumbnail_label = QLabel()
+                thumbnail_label.setAlignment(Qt.AlignCenter)
+                thumbnail_label.setSizePolicy(
+                    QSizePolicy.Expanding, QSizePolicy.Expanding
+                )
+                thumbnail_label.setStyleSheet("background: transparent; border: none;")
+
+                # 尝试加载图片作为缩略图
+                costume_path = self.model.get_costume_path(i + 1)
+                if costume_path:
+                    pixmap = QPixmap(costume_path)
+                    if not pixmap.isNull():
+                        # 缩放到正方形大小，使用fast模式
+                        scaled_pixmap = pixmap.scaled(
+                            60, 60, Qt.KeepAspectRatioByExpanding, Qt.FastTransformation
+                        )
+                        thumbnail_label.setPixmap(scaled_pixmap)
+
+                # 创建帧数标签
+                frame_label = QLabel(f"帧 {i + 1}")
+                frame_label.setAlignment(Qt.AlignCenter)
+                frame_label.setStyleSheet(
+                    "color: #abb2bf; font-size: 10px; background: transparent; border: none;"
+                )
+
+                # 添加到布局
+                card_layout.addWidget(thumbnail_label)
+                card_layout.addWidget(frame_label)
+
+                # 创建列表项并设置widget
+                item = QListWidgetItem()
+                # 设置QListWidgetItem为正方形，与卡片大小一致
+                item.setSizeHint(QSize(80, 80))
+                item.setTextAlignment(Qt.AlignCenter)
+                self.fps_list.addItem(item)
+                self.fps_list.setItemWidget(item, card_widget)
+        except Exception as e:
+            # 如果卡片创建失败，回退到文本显示
+            for i, filename in enumerate(self.model.costumes):
+                self.fps_list.addItem(f"{i + 1}: {filename}")
+
         self.fps_list.blockSignals(False)
         if self.fps_list.count() > 0:
             self.fps_list.setCurrentRow(0)
@@ -464,6 +549,45 @@ class SpriteEditorManager(QObject):
         # 如果是多选模式，row 可能只是最后一次点击的那一行
         if row < 0 or not self.model:
             return
+
+        # 重置所有卡片的样式
+        for i in range(self.fps_list.count()):
+            item = self.fps_list.item(i)
+            if item:
+                widget = self.fps_list.itemWidget(item)
+                if widget:
+                    widget.setStyleSheet("""
+                        QWidget {
+                            background-color: #1e1e1e;
+                            border: 1px solid #2d2d2d;
+                            border-radius: 4px;
+                            margin: 0;
+                            padding: 0;
+                        }
+                        QWidget:hover {
+                            background-color: #3e4451;
+                            border: 1px solid #4a4f58;
+                        }
+                    """)
+
+        # 设置选中卡片的样式
+        current_item = self.fps_list.currentItem()
+        if current_item:
+            current_widget = self.fps_list.itemWidget(current_item)
+            if current_widget:
+                current_widget.setStyleSheet("""
+                    QWidget {
+                        background-color: #1e1e1e;
+                        border: 2px solid rgb(91, 199, 114);
+                        border-radius: 4px;
+                        margin: 0;
+                        padding: 0;
+                    }
+                    QWidget:hover {
+                        background-color: #3e4451;
+                        border: 2px solid rgb(91, 199, 114);
+                    }
+                """)
 
         # 获取当前真正被点击（焦点所在）的那一张图
         img_path = self.model.get_costume_path(row + 1)
@@ -567,7 +691,7 @@ class SpriteEditorManager(QObject):
             return
 
         menu = QMenu(self.fps_list)
-        del_action = QAction(f"🗑️ 彻底删除造型: {row + 1}", menu)
+        del_action = QAction(f"删除造型: {row + 1}", menu)
         del_action.triggered.connect(lambda: self.delete_costume_physically(row + 1))
         menu.addAction(del_action)
         menu.exec(QCursor.pos())
@@ -771,28 +895,19 @@ class SpriteEditorManager(QObject):
 
     def _sync_animation_frame(self):
         """同步帧，并确保索引完全匹配 (1-based to 0-based)"""
-        img_path = self.model.get_costume_path(self.current_frame_index)
-        if img_path:
-            self.update_preview_static(img_path)
+        self.ui.sprite_fps_list.blockSignals(True)
 
-            self.ui.sprite_fps_list.blockSignals(True)
+        # 获取对应的 List Item
+        # 🚀 修正点：current_frame_index(1~N) -> item(index-1)
+        target_row = self.current_frame_index - 1
+        item = self.ui.sprite_fps_list.item(target_row)
 
-            # 获取对应的 List Item
-            # 🚀 修正点：current_frame_index(1~N) -> item(index-1)
-            target_row = self.current_frame_index - 1
-            item = self.ui.sprite_fps_list.item(target_row)
+        if item:
+            # 直接设置当前行，不再区分sender
+            self.ui.sprite_fps_list.setCurrentRow(target_row)
+            # 移除滚动功能，保持列表位置不变
 
-            if item:
-                if self.sender() == self.timer:
-                    # 自动播放时：仅滚动，不改变选中蓝底
-                    self.ui.sprite_fps_list.scrollToItem(
-                        item, self.ui.sprite_fps_list.ScrollHint.EnsureVisible
-                    )
-                else:
-                    # 手动点击（Prev/Next）时：强行选中该行
-                    self.ui.sprite_fps_list.setCurrentRow(target_row)
-
-            self.ui.sprite_fps_list.blockSignals(False)
+        self.ui.sprite_fps_list.blockSignals(False)
 
     def toggle_preview_scale(self):
         """手动切换缩放状态"""
@@ -808,6 +923,23 @@ class SpriteEditorManager(QObject):
             img_path = self.model.get_costume_path(self.current_frame_index)
             if img_path:
                 self.update_preview_static(img_path)
+
+    def eventFilter(self, obj, event):
+        """事件过滤器：阻止水平滚动但允许选择"""
+        if obj == self.fps_list.viewport():
+            if event.type() == QEvent.MouseMove:
+                if event.buttons() & Qt.LeftButton:
+                    # 检测是否在进行水平拖拽
+                    if hasattr(self, "_last_mouse_pos"):
+                        delta_x = abs(event.pos().x() - self._last_mouse_pos.x())
+                        delta_y = abs(event.pos().y() - self._last_mouse_pos.y())
+                        # 如果水平移动大于垂直移动，阻止水平滚动
+                        if delta_x > delta_y and delta_x > 5:
+                            return True
+            elif event.type() == QEvent.MouseButtonPress:
+                # 记录点击位置
+                self._last_mouse_pos = event.pos()
+        return super().eventFilter(obj, event)
 
     def cleanup(self):
         """安全释放资源，防止退出时析构冲突"""

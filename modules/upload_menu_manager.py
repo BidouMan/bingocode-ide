@@ -124,6 +124,10 @@ class UploadMenuManager(QWidget):
         )
         
         if files:
+            # 🚀 修复焦点丢失问题：强制主窗口重新获取焦点
+            self.activateWindow()
+            self.raise_()
+            
             # 如果选中的是 .bgs 文件，我们单独处理
             if len(files) == 1 and files[0].lower().endswith('.bgs'):
                 # 触发 .bgs 专属回调（复用接口，但传特殊标志）

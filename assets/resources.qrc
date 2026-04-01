@@ -47,6 +47,7 @@
     <file>icons/btn_preview_scale.svg</file>
     <file>icons/anim_loop.svg</file>
     <file>icons/anim_loop_off.svg</file>
+    <file>icons/map_upload.svg</file>
 
     <file>font/HarmonyOS_Sans_SC_Regular.ttf</file>
   </qresource>

@@ -192,6 +192,10 @@ class EditorManager(QObject):
             )
             
             if new_path:
+                # 🚀 修复焦点丢失问题：强制主窗口重新获取焦点
+                parent_window.activateWindow()
+                parent_window.raise_()
+                
                 # 如果用户选了新路径，且原本后台有残留文件，则清理
                 if path and os.path.exists(path) and path != new_path:
                     try: os.remove(path)
@@ -228,6 +232,10 @@ class EditorManager(QObject):
             )
             
             if new_path:
+                # 🚀 修复焦点丢失问题：强制主窗口重新获取焦点
+                parent_window.activateWindow()
+                parent_window.raise_()
+                
                 # 执行物理保存并更新编辑器状态
                 editor.file_path = new_path
                 if self._do_physical_save(editor):

@@ -25,6 +25,11 @@ class FileManager(QObject):
         file_path, _ = QFileDialog.getOpenFileName(
             self.window, "选择文件", "", "Python Files (*.py);;All Files (*)"
         )
+        
+        # 🚀 修复焦点丢失问题：强制主窗口重新获取焦点
+        self.window.activateWindow()
+        self.window.raise_()
+        
         if file_path:
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
