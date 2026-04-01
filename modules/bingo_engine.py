@@ -289,10 +289,11 @@ class Sprite:
         # 确保 text 是字符串
         self._send_command("SAY", {"text": str(text)})
 
-    def play(self, animation_name):
+    def play(self, animation_name, transition_time=0.2):
         """
         播放指定名称的动画
         参数: animation_name - 动画名称（如 'idle', 'walk' 等）
+              transition_time - 平滑过渡时间（秒），默认0.2秒
         """
         if not self.config:
             return
@@ -304,61 +305,77 @@ class Sprite:
         ):
             return
 
-        # 检查 segments 字段（用户的 JSON 格式）
+        # 获取动画配置
+        animation_config = None
         if "segments" in self.config:
             for segment in self.config["segments"]:
                 if segment.get("name") == animation_name:
-                    # 获取动画配置
-                    start = segment.get("start", 1)
-                    end = segment.get("end", 1)
-                    fps = segment.get("fps", 10)
-                    loop = segment.get("loop", True)
-
-                    # 存储动画状态
-                    self.animation_state = {
-                        "start": start - 1,
-                        "end": end - 1,
-                        "fps": fps,
-                        "loop": loop,
-                        "current_frame": start - 1,
-                        "last_frame_time": time.time(),
-                        "frame_duration": 1.0 / fps,
-                        "is_playing": True,
-                    }
-
-                    # 记录当前播放的动画名称
-                    self._current_animation = animation_name
-
-                    # 更新当前帧
-                    self._update_animation_frame()
-                    return
-        # 兼容旧格式：animations 字段
+                    animation_config = segment
+                    break
         elif "animations" in self.config:
-            animation = self.config["animations"].get(animation_name)
-            if animation:
-                # 获取动画配置
-                start = animation.get("start", 1)
-                end = animation.get("end", 1)
-                fps = animation.get("fps", 10)
-                loop = animation.get("loop", True)
+            animation_config = self.config["animations"].get(animation_name)
 
-                # 存储动画状态
-                self.animation_state = {
-                    "start": start - 1,
-                    "end": end - 1,
-                    "fps": fps,
-                    "loop": loop,
-                    "current_frame": start - 1,
-                    "last_frame_time": time.time(),
-                    "frame_duration": 1.0 / fps,
-                    "is_playing": True,
-                }
+        if not animation_config:
+            return
 
-                # 记录当前播放的动画名称
-                self._current_animation = animation_name
+        # 获取动画参数
+        start = animation_config.get("start", 1)
+        end = animation_config.get("end", 1)
+        fps = animation_config.get("fps", 10)
+        loop = animation_config.get("loop", True)
 
-                # 更新当前帧
-                self._update_animation_frame()
+        # 如果当前没有动画在播放，直接设置新动画
+        if not hasattr(self, "animation_state") or not self.animation_state:
+            self.animation_state = {
+                "start": start - 1,
+                "end": end - 1,
+                "fps": fps,
+                "loop": loop,
+                "current_frame": start - 1,
+                "last_frame_time": time.time(),
+                "frame_duration": 1.0 / fps,
+                "is_playing": True,
+            }
+            self._current_animation = animation_name
+            self._update_animation_frame()
+            return
+
+        # 如果有动画在播放，并且需要平滑过渡
+        if transition_time > 0:
+            # 保存当前动画状态作为源动画
+            self._source_animation = self.animation_state.copy()
+
+            # 创建目标动画状态
+            self._target_animation = {
+                "start": start - 1,
+                "end": end - 1,
+                "fps": fps,
+                "loop": loop,
+                "current_frame": start - 1,
+                "last_frame_time": time.time(),
+                "frame_duration": 1.0 / fps,
+                "is_playing": True,
+            }
+
+            # 设置过渡状态
+            self._transition_start_time = time.time()
+            self._transition_duration = transition_time
+            self._is_transitioning = True
+        else:
+            # 直接切换，不使用过渡
+            self.animation_state = {
+                "start": start - 1,
+                "end": end - 1,
+                "fps": fps,
+                "loop": loop,
+                "current_frame": start - 1,
+                "last_frame_time": time.time(),
+                "frame_duration": 1.0 / fps,
+                "is_playing": True,
+            }
+
+        # 记录当前播放的动画名称
+        self._current_animation = animation_name
 
     # ---------- 侦测模块 ----------
     def is_touch_edge(self):
@@ -681,8 +698,32 @@ class Sprite:
         if not hasattr(self, "animation_state") or not self.animation_state:
             return
 
-        # 获取当前帧
-        current_frame = self.animation_state["current_frame"]
+        # 如果正在过渡中，使用混合后的帧
+        if hasattr(self, "_is_transitioning") and self._is_transitioning:
+            # 计算过渡进度（0.0 到 1.0）
+            elapsed = time.time() - self._transition_start_time
+            progress = min(elapsed / self._transition_duration, 1.0)
+
+            # 由于我们使用的是序列帧动画，不能直接进行像素级混合
+            # 这里采用简单的帧切换策略：根据进度决定显示哪个动画的帧
+            if progress < 0.5:
+                # 前半段显示源动画的帧
+                current_frame = self._source_animation["current_frame"]
+            else:
+                # 后半段显示目标动画的帧
+                current_frame = self._target_animation["current_frame"]
+
+            # 如果过渡完成，结束过渡状态
+            if progress >= 1.0:
+                self.animation_state = self._target_animation
+                del self._source_animation
+                del self._target_animation
+                del self._transition_start_time
+                del self._transition_duration
+                del self._is_transitioning
+        else:
+            # 正常动画播放
+            current_frame = self.animation_state["current_frame"]
 
         # 获取帧文件路径
         if self.config and "frames" in self.config:
@@ -818,7 +859,42 @@ def run():
 
         # 更新所有精灵的动画
         for sprite in _SPRITES.values():
-            if hasattr(sprite, "animation_state") and sprite.animation_state:
+            # 如果正在过渡中，需要同时更新源动画和目标动画
+            if hasattr(sprite, "_is_transitioning") and sprite._is_transitioning:
+                # 更新源动画
+                source_state = sprite._source_animation
+                if source_state.get("is_playing", True):
+                    now = time.time()
+                    elapsed = now - source_state["last_frame_time"]
+                    if elapsed >= source_state["frame_duration"]:
+                        source_state["current_frame"] += 1
+                        if source_state["current_frame"] > source_state["end"]:
+                            if source_state.get("loop", True):
+                                source_state["current_frame"] = source_state["start"]
+                            else:
+                                source_state["current_frame"] = source_state["end"]
+                                source_state["is_playing"] = False
+                        source_state["last_frame_time"] = now
+
+                # 更新目标动画
+                target_state = sprite._target_animation
+                if target_state.get("is_playing", True):
+                    now = time.time()
+                    elapsed = now - target_state["last_frame_time"]
+                    if elapsed >= target_state["frame_duration"]:
+                        target_state["current_frame"] += 1
+                        if target_state["current_frame"] > target_state["end"]:
+                            if target_state.get("loop", True):
+                                target_state["current_frame"] = target_state["start"]
+                            else:
+                                target_state["current_frame"] = target_state["end"]
+                                target_state["is_playing"] = False
+                        target_state["last_frame_time"] = now
+
+                # 更新帧（使用过渡逻辑）
+                sprite._update_animation_frame()
+            elif hasattr(sprite, "animation_state") and sprite.animation_state:
+                # 正常动画播放
                 sprite_state = sprite.animation_state
 
                 # 检查动画是否正在播放
