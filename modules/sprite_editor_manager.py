@@ -674,9 +674,10 @@ class SpriteEditorManager(QObject):
                 Qt.TransformationMode.FastTransformation,
             )
 
-        # 居中计算
+        # 居中计算，向上偏移
         x = (final_view_size.width() - target_pix.width()) // 2
-        y = (final_view_size.height() - target_pix.height()) // 2
+        # 向上移动10像素
+        y = (final_view_size.height() - target_pix.height()) // 2 - 10
 
         painter.drawPixmap(x, y, target_pix)
         painter.end()

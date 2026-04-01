@@ -113,18 +113,19 @@
     background-color: #1E1E1E;
 }
 
-
 #fps_slider {
-    background-color: rgb(41, 44, 52);
+    background-color: transparent;
     border: none;
     height: 4px;
     margin: 4px 4px 8px 4px;
+    border-radius: 2px;
 }
 
 #fps_slider::groove:horizontal {
     background-color: rgb(55, 59, 68);
     height: 4px;
     border-radius: 2px;
+    border: none;
 }
 
 #fps_slider::handle:horizontal {
