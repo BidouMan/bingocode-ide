@@ -312,15 +312,18 @@ class Sprite:
                     start = segment.get("start", 1)
                     end = segment.get("end", 1)
                     fps = segment.get("fps", 10)
+                    loop = segment.get("loop", True)
 
                     # 存储动画状态
                     self.animation_state = {
                         "start": start - 1,
                         "end": end - 1,
                         "fps": fps,
+                        "loop": loop,
                         "current_frame": start - 1,
                         "last_frame_time": time.time(),
                         "frame_duration": 1.0 / fps,
+                        "is_playing": True,
                     }
 
                     # 记录当前播放的动画名称
@@ -337,15 +340,18 @@ class Sprite:
                 start = animation.get("start", 1)
                 end = animation.get("end", 1)
                 fps = animation.get("fps", 10)
+                loop = animation.get("loop", True)
 
                 # 存储动画状态
                 self.animation_state = {
                     "start": start - 1,
                     "end": end - 1,
                     "fps": fps,
+                    "loop": loop,
                     "current_frame": start - 1,
                     "last_frame_time": time.time(),
                     "frame_duration": 1.0 / fps,
+                    "is_playing": True,
                 }
 
                 # 记录当前播放的动画名称
@@ -814,6 +820,11 @@ def run():
         for sprite in _SPRITES.values():
             if hasattr(sprite, "animation_state") and sprite.animation_state:
                 sprite_state = sprite.animation_state
+
+                # 检查动画是否正在播放
+                if not sprite_state.get("is_playing", True):
+                    continue
+
                 now = time.time()
                 elapsed = now - sprite_state["last_frame_time"]
 
@@ -821,8 +832,16 @@ def run():
                 if elapsed >= sprite_state["frame_duration"]:
                     # 更新帧索引
                     sprite_state["current_frame"] += 1
+
+                    # 根据 loop 属性决定是否循环
                     if sprite_state["current_frame"] > sprite_state["end"]:
-                        sprite_state["current_frame"] = sprite_state["start"]
+                        if sprite_state.get("loop", True):
+                            # 循环播放：回到起始帧
+                            sprite_state["current_frame"] = sprite_state["start"]
+                        else:
+                            # 非循环播放：停在最后一帧，停止动画
+                            sprite_state["current_frame"] = sprite_state["end"]
+                            sprite_state["is_playing"] = False
 
                     # 更新帧时间
                     sprite_state["last_frame_time"] = now
