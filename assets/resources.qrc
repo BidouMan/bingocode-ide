@@ -45,7 +45,8 @@
     <file>icons/btn_preview_play.svg</file>
     <file>icons/btn_preview_prev.svg</file>
     <file>icons/btn_preview_scale.svg</file>
-
+    <file>icons/anim_loop.svg</file>
+    <file>icons/anim_loop_off.svg</file>
 
     <file>font/HarmonyOS_Sans_SC_Regular.ttf</file>
   </qresource>

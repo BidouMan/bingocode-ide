@@ -307,7 +307,7 @@ class ResourceManager(QObject):
 
         # 4. 🚀 初始显示：像刷新代码列表一样，直接刷新角色网格
         self.ui.list_code.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
-        self.ui.outline_stracked.setCurrentWidget(self.ui.page_code)
+        self.ui.outline_stracked.setCurrentWidget(self.ui.page_sprite)
 
         self.refresh_code_list()  # 刷新代码列表
         self.refresh_sprite_grid()  # 💡 现在刷新就不会报错了，因为 layout 已经准备好了

@@ -243,18 +243,26 @@ class QCodeEditor(QTextEdit):
         
         # 初始化组件
         self.load_custom_font()
-        self.highlighter = PygmentsHighlighter(self.document())
-        self.completer = CompleterWidget(self)
-        self.completer.clicked.connect(self.insert_completion)
-        self.line_number_area = LineNumberArea(self)
+        # 只创建一次高亮器
+        if not hasattr(self, 'highlighter'):
+            self.highlighter = PygmentsHighlighter(self.document())
+        # 只创建一次补全框
+        if not hasattr(self, 'completer'):
+            self.completer = CompleterWidget(self)
+            self.completer.clicked.connect(self.insert_completion)
+        # 只创建一次行号区域
+        if not hasattr(self, 'line_number_area'):
+            self.line_number_area = LineNumberArea(self)
 
-        # 信号连接
-        self.document().blockCountChanged.connect(self.update_line_number_area_width)
-        self.document().documentLayout().update.connect(lambda: self.line_number_area.update())
-        self.verticalScrollBar().valueChanged.connect(lambda: self.line_number_area.update())
-        self.cursorPositionChanged.connect(self.viewport().update)
-        self.cursorPositionChanged.connect(self.handle_line_validation)
-        self.textChanged.connect(self.request_analyze)
+        # 信号连接（确保只连接一次）
+        if not hasattr(self, '_signals_connected'):
+            self.document().blockCountChanged.connect(self.update_line_number_area_width)
+            self.document().documentLayout().update.connect(lambda: self.line_number_area.update())
+            self.verticalScrollBar().valueChanged.connect(lambda: self.line_number_area.update())
+            self.cursorPositionChanged.connect(self.viewport().update)
+            self.cursorPositionChanged.connect(self.handle_line_validation)
+            self.textChanged.connect(self.request_analyze)
+            self._signals_connected = True
 
         # 防抖定时器（避免实时输入频繁检查）
         self.analyze_timer = QTimer(self)
@@ -265,6 +273,9 @@ class QCodeEditor(QTextEdit):
         self.setup_font()
         self.update_font_metrics_cache()
         self.update_line_number_area_width(0)
+        # 设置行号区域位置
+        if hasattr(self, 'line_number_area'):
+            self.line_number_area.setGeometry(0, 0, self.line_number_area.width(), self.viewport().height())
         QTimer.singleShot(50, self.init_validation)
 
     def init_validation(self):

@@ -310,20 +310,10 @@ class Ui_Form(object):
         self.horizontalLayout_4.setSpacing(0)
         self.horizontalLayout_4.setObjectName(u"horizontalLayout_4")
         self.horizontalLayout_4.setContentsMargins(0, 0, 0, 0)
-        self.btn_outline_code = QPushButton(self.outline_menu_frame)
-        self.btn_outline_code.setObjectName(u"btn_outline_code")
-        self.btn_outline_code.setCheckable(True)
-        self.btn_outline_code.setChecked(True)
-        self.btn_outline_code.setAutoExclusive(True)
-        self.btn_outline_code.setAutoDefault(False)
-        self.btn_outline_code.setFlat(False)
-
-        self.horizontalLayout_4.addWidget(self.btn_outline_code)
-
         self.btn_outline_sprite = QPushButton(self.outline_menu_frame)
         self.btn_outline_sprite.setObjectName(u"btn_outline_sprite")
         self.btn_outline_sprite.setCheckable(True)
-        self.btn_outline_sprite.setChecked(False)
+        self.btn_outline_sprite.setChecked(True)
         self.btn_outline_sprite.setAutoExclusive(True)
         self.btn_outline_sprite.setAutoDefault(False)
         self.btn_outline_sprite.setFlat(False)
@@ -345,6 +335,16 @@ class Ui_Form(object):
         self.btn_outline_sound.setFlat(False)
 
         self.horizontalLayout_4.addWidget(self.btn_outline_sound)
+
+        self.btn_outline_code = QPushButton(self.outline_menu_frame)
+        self.btn_outline_code.setObjectName(u"btn_outline_code")
+        self.btn_outline_code.setCheckable(True)
+        self.btn_outline_code.setChecked(False)
+        self.btn_outline_code.setAutoExclusive(True)
+        self.btn_outline_code.setAutoDefault(False)
+        self.btn_outline_code.setFlat(False)
+
+        self.horizontalLayout_4.addWidget(self.btn_outline_code)
 
 
         self.verticalLayout_2.addWidget(self.outline_menu_frame)
@@ -940,9 +940,9 @@ class Ui_Form(object):
 
         self.change_page.setCurrentIndex(0)
         self.editor_stacked.setCurrentIndex(0)
-        self.btn_outline_code.setDefault(False)
         self.btn_outline_sprite.setDefault(False)
         self.btn_outline_sound.setDefault(False)
+        self.btn_outline_code.setDefault(False)
         self.outline_stracked.setCurrentIndex(0)
         self.code_stacked.setCurrentIndex(-1)
 
@@ -962,10 +962,10 @@ class Ui_Form(object):
         self.btn_run.setText("")
         self.btn_stop.setText("")
         self.btn_full_screen.setText("")
-        self.btn_outline_code.setText(QCoreApplication.translate("Form", u"\u4ee3\u7801", None))
         self.btn_outline_sprite.setText(QCoreApplication.translate("Form", u"\u89d2\u8272", None))
         self.btn_outline_bg.setText(QCoreApplication.translate("Form", u"\u573a\u666f", None))
         self.btn_outline_sound.setText(QCoreApplication.translate("Form", u"\u58f0\u97f3", None))
+        self.btn_outline_code.setText(QCoreApplication.translate("Form", u"\u4ee3\u7801", None))
         self.label_3.setText(QCoreApplication.translate("Form", u"\u5730\u56fe\u9875\u9762", None))
         self.label_4.setText(QCoreApplication.translate("Form", u"\u58f0\u97f3\u9875\u9762", None))
         self.btn_add_tab.setText(QCoreApplication.translate("Form", u"+", None))
