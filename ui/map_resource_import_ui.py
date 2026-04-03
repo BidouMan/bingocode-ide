@@ -51,17 +51,17 @@ class Ui_Form(object):
 
         self.horizontalLayout.addWidget(self.label)
 
-        self.lineEdit = QLineEdit(self.widget)
-        self.lineEdit.setObjectName(u"lineEdit")
-        self.lineEdit.setFrame(True)
-        self.lineEdit.setEchoMode(QLineEdit.EchoMode.Normal)
+        self.import_res_path = QLineEdit(self.widget)
+        self.import_res_path.setObjectName(u"import_res_path")
+        self.import_res_path.setFrame(True)
+        self.import_res_path.setEchoMode(QLineEdit.EchoMode.Normal)
 
-        self.horizontalLayout.addWidget(self.lineEdit)
+        self.horizontalLayout.addWidget(self.import_res_path)
 
-        self.pushButton = QPushButton(self.widget)
-        self.pushButton.setObjectName(u"pushButton")
+        self.btn_browse = QPushButton(self.widget)
+        self.btn_browse.setObjectName(u"btn_browse")
 
-        self.horizontalLayout.addWidget(self.pushButton)
+        self.horizontalLayout.addWidget(self.btn_browse)
 
 
         self.verticalLayout.addWidget(self.widget, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -80,31 +80,40 @@ class Ui_Form(object):
         self.horizontalLayout_2.setSpacing(0)
         self.horizontalLayout_2.setObjectName(u"horizontalLayout_2")
         self.horizontalLayout_2.setContentsMargins(0, 0, 0, 0)
-        self.radioButton = QRadioButton(self.groupBox)
-        self.radioButton.setObjectName(u"radioButton")
-        self.radioButton.setChecked(True)
+        self.radioButton_image = QRadioButton(self.groupBox)
+        self.radioButton_image.setObjectName(u"radioButton_image")
+        self.radioButton_image.setChecked(True)
 
-        self.horizontalLayout_2.addWidget(self.radioButton)
+        self.horizontalLayout_2.addWidget(self.radioButton_image)
 
-        self.radioButton_2 = QRadioButton(self.groupBox)
-        self.radioButton_2.setObjectName(u"radioButton_2")
+        self.radioButton_tileset = QRadioButton(self.groupBox)
+        self.radioButton_tileset.setObjectName(u"radioButton_tileset")
 
-        self.horizontalLayout_2.addWidget(self.radioButton_2)
+        self.horizontalLayout_2.addWidget(self.radioButton_tileset)
 
 
         self.horizontalLayout_3.addWidget(self.groupBox)
 
-        self.comboBox = QComboBox(self.widget_2)
-        self.comboBox.addItem("")
-        self.comboBox.addItem("")
-        self.comboBox.addItem("")
-        self.comboBox.setObjectName(u"comboBox")
-        self.comboBox.setEditable(True)
+        self.horizontalSpacer_3 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
-        self.horizontalLayout_3.addWidget(self.comboBox)
+        self.horizontalLayout_3.addItem(self.horizontalSpacer_3)
+
+        self.label_2 = QLabel(self.widget_2)
+        self.label_2.setObjectName(u"label_2")
+
+        self.horizontalLayout_3.addWidget(self.label_2)
+
+        self.comboBox_size = QComboBox(self.widget_2)
+        self.comboBox_size.addItem("")
+        self.comboBox_size.addItem("")
+        self.comboBox_size.addItem("")
+        self.comboBox_size.setObjectName(u"comboBox_size")
+        self.comboBox_size.setEditable(True)
+
+        self.horizontalLayout_3.addWidget(self.comboBox_size)
 
         self.horizontalLayout_3.setStretch(0, 2)
-        self.horizontalLayout_3.setStretch(1, 1)
+        self.horizontalLayout_3.setStretch(3, 1)
 
         self.verticalLayout.addWidget(self.widget_2, 0, Qt.AlignmentFlag.AlignHCenter)
 
@@ -120,15 +129,15 @@ class Ui_Form(object):
 
         self.horizontalLayout_4.addItem(self.horizontalSpacer)
 
-        self.pushButton_2 = QPushButton(self.widget_3)
-        self.pushButton_2.setObjectName(u"pushButton_2")
+        self.btn_no = QPushButton(self.widget_3)
+        self.btn_no.setObjectName(u"btn_no")
 
-        self.horizontalLayout_4.addWidget(self.pushButton_2)
+        self.horizontalLayout_4.addWidget(self.btn_no)
 
-        self.pushButton_3 = QPushButton(self.widget_3)
-        self.pushButton_3.setObjectName(u"pushButton_3")
+        self.btn_ok = QPushButton(self.widget_3)
+        self.btn_ok.setObjectName(u"btn_ok")
 
-        self.horizontalLayout_4.addWidget(self.pushButton_3)
+        self.horizontalLayout_4.addWidget(self.btn_ok)
 
         self.horizontalSpacer_2 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
@@ -152,15 +161,16 @@ class Ui_Form(object):
     def retranslateUi(self, Form):
         Form.setWindowTitle(QCoreApplication.translate("Form", u"Form", None))
         self.label.setText(QCoreApplication.translate("Form", u"\u8d44\u6e90\u8def\u5f84:", None))
-        self.pushButton.setText(QCoreApplication.translate("Form", u"\u6d4f\u89c8", None))
+        self.btn_browse.setText(QCoreApplication.translate("Form", u"\u6d4f\u89c8", None))
         self.groupBox.setTitle("")
-        self.radioButton.setText(QCoreApplication.translate("Form", u"\u56fe\u50cf\u6a21\u5f0f", None))
-        self.radioButton_2.setText(QCoreApplication.translate("Form", u"\u56fe\u5757\u96c6\u5408", None))
-        self.comboBox.setItemText(0, QCoreApplication.translate("Form", u"16x16", None))
-        self.comboBox.setItemText(1, QCoreApplication.translate("Form", u"32x32", None))
-        self.comboBox.setItemText(2, QCoreApplication.translate("Form", u"64x64", None))
+        self.radioButton_image.setText(QCoreApplication.translate("Form", u"\u56fe\u50cf\u6a21\u5f0f", None))
+        self.radioButton_tileset.setText(QCoreApplication.translate("Form", u"\u56fe\u5757\u96c6\u5408", None))
+        self.label_2.setText(QCoreApplication.translate("Form", u"\u5c3a\u5bf8:", None))
+        self.comboBox_size.setItemText(0, QCoreApplication.translate("Form", u"16x16", None))
+        self.comboBox_size.setItemText(1, QCoreApplication.translate("Form", u"32x32", None))
+        self.comboBox_size.setItemText(2, QCoreApplication.translate("Form", u"64x64", None))
 
-        self.pushButton_2.setText(QCoreApplication.translate("Form", u"\u53d6\u6d88", None))
-        self.pushButton_3.setText(QCoreApplication.translate("Form", u"\u786e\u5b9a", None))
+        self.btn_no.setText(QCoreApplication.translate("Form", u"\u53d6\u6d88", None))
+        self.btn_ok.setText(QCoreApplication.translate("Form", u"\u786e\u5b9a", None))
     # retranslateUi
 

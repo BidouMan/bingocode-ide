@@ -5,12 +5,14 @@ from PySide6.QtWidgets import (
     QGraphicsScene,
     QGraphicsPixmapItem,
     QGraphicsView,
-    QFileDialog,
     QGraphicsRectItem,
+    QGraphicsLineItem,
+    QDialog,
 )
 from PySide6.QtGui import QPixmap, QPen, QBrush, QColor
 from models.map_model import MapDataModel
 from modules.canvas_manager import SmartCanvas
+from modules.map_resource_import_dialog import MapResourceImportDialog
 
 
 class TileItem(QGraphicsRectItem):
@@ -27,14 +29,14 @@ class TileItem(QGraphicsRectItem):
 
     def mousePressEvent(self, event):
         """处理鼠标点击事件"""
-        if self.is_deleted:
-            return
-        if event.button() == Qt.LeftButton:
-            self.manager.select_tile(self.resource_info, self.tile_index)
         try:
+            if self.is_deleted:
+                return
+            if event.button() == Qt.LeftButton:
+                self.manager.select_tile(self.resource_info, self.tile_index)
             super().mousePressEvent(event)
-        except RuntimeError:
-            pass
+        except Exception as e:
+            print(f"图块点击事件错误: {e}")
 
     def delete(self):
         """标记为已删除"""
@@ -55,14 +57,14 @@ class ResourceItem(QGraphicsRectItem):
 
     def mousePressEvent(self, event):
         """处理鼠标点击事件"""
-        if self.is_deleted:
-            return
-        if event.button() == Qt.LeftButton:
-            self.manager.select_resource(self.index)
         try:
+            if self.is_deleted:
+                return
+            if event.button() == Qt.LeftButton:
+                self.manager.select_resource(self.index)
             super().mousePressEvent(event)
-        except RuntimeError:
-            pass
+        except Exception as e:
+            print(f"资源点击事件错误: {e}")
 
     def delete(self):
         """标记为已删除"""
@@ -254,66 +256,63 @@ class MapEditorManager(QObject):
         if not self.res_list_view:
             return
 
-        # 弹出文件选择对话框
-        files, _ = QFileDialog.getOpenFileNames(
-            None,
-            "选择资源文件",
-            "",
-            "图片文件 (*.png *.jpg *.jpeg *.bmp);;所有文件 (*)",
-        )
+        # 弹出导入对话框
+        dialog = MapResourceImportDialog()
 
-        if files:
-            # 弹出图块尺寸选择对话框
-            from PySide6.QtWidgets import QInputDialog
+        if dialog.exec() == QDialog.Accepted:
+            # 获取导入数据
+            import_data = dialog.get_import_data()
+            files = import_data["files"]
+            resource_type = import_data["resource_type"]
+            tile_size = import_data["tile_size"]
 
-            tile_size, ok = QInputDialog.getItem(
-                None,
-                "设置图块尺寸",
-                "请选择图块尺寸:",
-                ["16", "32", "64"],
-                1,  # 默认选择32
-                False,
-            )
+            # 保存上传的资源
+            for file_path in files:
+                if os.path.exists(file_path):
+                    resource_info = {
+                        "name": os.path.basename(file_path),
+                        "path": file_path,
+                        "resource_type": resource_type,
+                    }
 
-            if ok:
-                tile_size = int(tile_size)
+                    # 如果是图块集合，添加图块尺寸信息
+                    if resource_type == "tileset":
+                        resource_info["tile_size"] = tile_size
+                        resource_info["tiles"] = []  # 存储切割后的图块信息
 
-                # 保存上传的资源
-                for file_path in files:
-                    if os.path.exists(file_path):
-                        resource_info = {
-                            "name": os.path.basename(file_path),
-                            "path": file_path,
-                            "tile_size": tile_size,
-                            "tiles": [],  # 存储切割后的图块信息
-                        }
-                        self.uploaded_resources.append(resource_info)
+                    self.uploaded_resources.append(resource_info)
 
-                # 更新资源列表显示
-                self._update_res_list_display()
+            # 更新资源列表显示
+            self._update_res_list_display()
 
     def select_resource(self, index):
         """选择资源"""
-        if 0 <= index < len(self.uploaded_resources):
-            self.selected_resource_index = index
-            self.selected_tile_index = -1  # 重置图块选择
-            print(f"选中资源: {self.uploaded_resources[index]['name']}")
-            self._update_res_list_display()
+        try:
+            if 0 <= index < len(self.uploaded_resources):
+                self.selected_resource_index = index
+                self.selected_tile_index = -1  # 重置图块选择
+                print(f"选中资源: {self.uploaded_resources[index]['name']}")
+                self._update_res_list_display()
+        except Exception as e:
+            print(f"选择资源错误: {e}")
 
     def select_tile(self, resource_info, tile_index):
         """选择图块"""
-        # 查找资源索引
-        resource_index = -1
-        for i, res in enumerate(self.uploaded_resources):
-            if res == resource_info:
-                resource_index = i
-                break
+        try:
+            # 查找资源索引
+            resource_index = -1
+            for i, res in enumerate(self.uploaded_resources):
+                if res == resource_info:
+                    resource_index = i
+                    break
 
-        if resource_index != -1:
-            self.selected_resource_index = resource_index
-            self.selected_tile_index = tile_index
-            print(f"选中图块: 资源={resource_info['name']}, 图块索引={tile_index}")
-            self._update_res_list_display()
+            if resource_index != -1:
+                self.selected_resource_index = resource_index
+                self.selected_tile_index = tile_index
+                print(f"选中图块: 资源={resource_info['name']}, 图块索引={tile_index}")
+                self._update_res_list_display()
+        except Exception as e:
+            print(f"选择图块错误: {e}")
 
     def _update_res_list_display(self):
         """更新资源列表显示"""
@@ -333,14 +332,19 @@ class MapEditorManager(QObject):
                 if original_pixmap.isNull():
                     continue
 
-                # 获取图块尺寸
+                # 获取资源类型和图块尺寸
+                resource_type = resource.get("resource_type", "image")
                 tile_size = resource.get("tile_size", 32)
 
-                # 计算图块数量
+                # 计算图块数量（仅图块集合模式）
                 image_width = original_pixmap.width()
                 image_height = original_pixmap.height()
-                tiles_per_row = image_width // tile_size
-                tiles_per_col = image_height // tile_size
+                tiles_per_row = 0
+                tiles_per_col = 0
+
+                if resource_type == "tileset":
+                    tiles_per_row = image_width // tile_size
+                    tiles_per_col = image_height // tile_size
 
                 # 计算显示区域大小 - 撑满256宽度
                 display_width = 256  # 整个视图宽度
@@ -372,48 +376,75 @@ class MapEditorManager(QObject):
                 pixmap_item.setPos(pixmap_x, pixmap_y)
                 scene.addItem(pixmap_item)
 
-                # 绘制图块网格
-                for row in range(tiles_per_col):
-                    for col in range(tiles_per_row):
-                        tile_index = row * tiles_per_row + col
+                # 创建可点击的区域（仅图像模式）
+                image_rect = QGraphicsRectItem(
+                    pixmap_x, pixmap_y, scaled_width, scaled_height
+                )
 
-                        # 计算图块在原始图片中的位置
-                        tile_x = col * tile_size
-                        tile_y = row * tile_size
+                # 设置选中状态样式（仅图像模式）
+                if resource_type == "image":
+                    is_resource_selected = i == self.selected_resource_index
+                    if is_resource_selected:
+                        image_rect.setBrush(QBrush(QColor(100, 149, 237, 50)))
+                        image_rect.setPen(Qt.NoPen)
+                    else:
+                        image_rect.setPen(Qt.NoPen)
+                        image_rect.setBrush(Qt.NoBrush)
+                else:
+                    # 图块集合模式，不显示资源级别的选中状态
+                    image_rect.setPen(Qt.NoPen)
+                    image_rect.setBrush(Qt.NoBrush)
 
-                        # 计算图块在显示图片中的位置
-                        display_tile_x = pixmap_x + tile_x * scale
-                        display_tile_y = pixmap_y + tile_y * scale
-                        display_tile_width = tile_size * scale
-                        display_tile_height = tile_size * scale
+                scene.addItem(image_rect)
 
-                        # 检查是否是选中的图块
-                        is_tile_selected = (
-                            i == self.selected_resource_index
-                            and self.selected_tile_index == tile_index
-                        )
+                # 创建资源项（用于点击事件）
+                resource_item = ResourceItem(image_rect.rect(), resource, i, self)
+                scene.addItem(resource_item)
 
-                        # 创建图块边框
-                        tile_rect = QGraphicsRectItem(
-                            display_tile_x,
-                            display_tile_y,
-                            display_tile_width,
-                            display_tile_height,
-                        )
+                # 绘制图块网格（仅图块集合模式）
+                if resource_type == "tileset":
+                    for row in range(tiles_per_col):
+                        for col in range(tiles_per_row):
+                            tile_index = row * tiles_per_row + col
 
-                        if is_tile_selected:
-                            tile_rect.setPen(QPen(QColor(255, 0, 0), 2))
-                        else:
-                            tile_rect.setPen(QPen(QColor(0, 0, 0, 128), 1))
+                            # 计算图块在原始图片中的位置
+                            tile_x = col * tile_size
+                            tile_y = row * tile_size
 
-                        tile_rect.setBrush(Qt.NoBrush)
-                        scene.addItem(tile_rect)
+                            # 计算图块在显示图片中的位置
+                            display_tile_x = pixmap_x + tile_x * scale
+                            display_tile_y = pixmap_y + tile_y * scale
+                            display_tile_width = tile_size * scale
+                            display_tile_height = tile_size * scale
 
-                        # 创建图块项（用于点击事件）
-                        tile_item = TileItem(
-                            tile_rect.rect(), resource, tile_index, self
-                        )
-                        scene.addItem(tile_item)
+                            # 检查是否是选中的图块
+                            is_tile_selected = (
+                                i == self.selected_resource_index
+                                and self.selected_tile_index == tile_index
+                            )
+
+                            # 创建图块边框（调整坐标避免浮点精度问题）
+                            tile_rect = QGraphicsRectItem(
+                                int(display_tile_x),
+                                int(display_tile_y),
+                                int(display_tile_width),
+                                int(display_tile_height),
+                            )
+
+                            if is_tile_selected:
+                                tile_rect.setBrush(QBrush(QColor(100, 149, 237, 50)))
+                                tile_rect.setPen(Qt.NoPen)
+                            else:
+                                tile_rect.setPen(QPen(QColor(200, 200, 200), 1))
+                                tile_rect.setBrush(Qt.NoBrush)
+
+                            scene.addItem(tile_rect)
+
+                            # 创建图块项（用于点击事件）
+                            tile_item = TileItem(
+                                tile_rect.rect(), resource, tile_index, self
+                            )
+                            scene.addItem(tile_item)
 
                 # 更新位置 - 根据实际图片高度调整间距
                 y_pos += scaled_height
