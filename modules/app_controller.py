@@ -26,6 +26,7 @@ from modules.resource_manager import ResourceManager
 from modules.upload_menu_manager import UploadMenuManager
 from models.sprite_model import SpriteDataModel
 from modules.sprite_editor_manager import SpriteEditorManager
+from modules.map_editor_manager import MapEditorManager
 
 
 class AppController:
@@ -44,6 +45,11 @@ class AppController:
 
         # 注入角色编辑器管理器
         self.sprite_editor = SpriteEditorManager(self.ui)
+
+        # 注入地图编辑器管理器
+        self.map_editor = MapEditorManager()
+        # 初始化地图编辑器的资源列表视图，确保默认页面时上传按钮能工作
+        self.map_editor.set_res_list_view(self.ui.res_list_view)
 
         self.file_manager = FileManager(self.window)
         self.console_manager = ConsoleManager(self.ui.splitter, self.ui.console_output)
@@ -73,6 +79,12 @@ class AppController:
             lambda: self.ui.editor_stacked.setCurrentIndex(0)
         )
         self.ui.btn_sprite_editor.clicked.connect(self.handle_switch_to_sprite_editor)
+        self.ui.btn_map_editor.clicked.connect(self.handle_switch_to_map_editor)
+
+        # 地图编辑器上传按钮
+        self.ui.btn_res_list_upload.clicked.connect(
+            self.map_editor.handle_resource_upload
+        )
 
         # 菜单栏按钮_>文件管理
         self.menu_manager.open_file_signal.connect(self.handle_open_project)
@@ -420,6 +432,15 @@ class AppController:
                         self.sprite_editor.load_sprite(sprite_path)
                         # 更新最后选择的路径
                         self.res_manager.last_selected_sprite_path = sprite_path
+
+    def handle_switch_to_map_editor(self):
+        """切换到地图编辑页面"""
+        self.ui.editor_stacked.setCurrentIndex(2)
+        # 初始化地图编辑器的画布
+        if hasattr(self, "map_editor"):
+            self.map_editor.set_canvas_widget(self.ui.editor_map_canvas)
+            # 初始化资源列表视图
+            self.map_editor.set_res_list_view(self.ui.res_list_view)
 
     def request_exit(self):
         """
