@@ -15,13 +15,13 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox,
-    QFrame, QGraphicsView, QGridLayout, QHBoxLayout,
-    QHeaderView, QLabel, QLayout, QLineEdit,
-    QListView, QListWidget, QListWidgetItem, QPlainTextEdit,
-    QPushButton, QSizePolicy, QSlider, QSpacerItem,
-    QSplitter, QStackedWidget, QTreeWidget, QTreeWidgetItem,
-    QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox,
+    QComboBox, QFrame, QGraphicsView, QGridLayout,
+    QHBoxLayout, QHeaderView, QLabel, QLayout,
+    QLineEdit, QListView, QListWidget, QListWidgetItem,
+    QPlainTextEdit, QPushButton, QSizePolicy, QSlider,
+    QSpacerItem, QSplitter, QStackedWidget, QTreeWidget,
+    QTreeWidgetItem, QVBoxLayout, QWidget)
 import resources_rc
 
 class Ui_Form(object):
@@ -1051,27 +1051,40 @@ class Ui_Form(object):
         self.horizontalLayout_18.addWidget(self.btn_editor_map_export)
 
         self.btn_editor_map_move = QPushButton(self.frame_5)
+        self.buttonGroup = QButtonGroup(Form)
+        self.buttonGroup.setObjectName(u"buttonGroup")
+        self.buttonGroup.addButton(self.btn_editor_map_move)
         self.btn_editor_map_move.setObjectName(u"btn_editor_map_move")
+        self.btn_editor_map_move.setCheckable(True)
+        self.btn_editor_map_move.setChecked(True)
 
         self.horizontalLayout_18.addWidget(self.btn_editor_map_move)
 
         self.btn_editor_map_draw = QPushButton(self.frame_5)
+        self.buttonGroup.addButton(self.btn_editor_map_draw)
         self.btn_editor_map_draw.setObjectName(u"btn_editor_map_draw")
+        self.btn_editor_map_draw.setCheckable(True)
 
         self.horizontalLayout_18.addWidget(self.btn_editor_map_draw)
 
         self.btn_editor_map_erase = QPushButton(self.frame_5)
+        self.buttonGroup.addButton(self.btn_editor_map_erase)
         self.btn_editor_map_erase.setObjectName(u"btn_editor_map_erase")
+        self.btn_editor_map_erase.setCheckable(True)
 
         self.horizontalLayout_18.addWidget(self.btn_editor_map_erase)
 
         self.btn_editor_map_select = QPushButton(self.frame_5)
+        self.buttonGroup.addButton(self.btn_editor_map_select)
         self.btn_editor_map_select.setObjectName(u"btn_editor_map_select")
+        self.btn_editor_map_select.setCheckable(True)
 
         self.horizontalLayout_18.addWidget(self.btn_editor_map_select)
 
         self.btn_editor_map_mark = QPushButton(self.frame_5)
+        self.buttonGroup.addButton(self.btn_editor_map_mark)
         self.btn_editor_map_mark.setObjectName(u"btn_editor_map_mark")
+        self.btn_editor_map_mark.setCheckable(True)
 
         self.horizontalLayout_18.addWidget(self.btn_editor_map_mark)
 
@@ -1543,7 +1556,7 @@ class Ui_Form(object):
         self.retranslateUi(Form)
 
         self.change_page.setCurrentIndex(0)
-        self.editor_stacked.setCurrentIndex(2)
+        self.editor_stacked.setCurrentIndex(0)
         self.btn_outline_sprite.setDefault(False)
         self.btn_outline_sound.setDefault(False)
         self.btn_outline_code.setDefault(False)

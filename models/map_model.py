@@ -1,5 +1,6 @@
 import os
 import json
+import numpy as np
 from PySide6.QtCore import QObject, Signal
 
 
@@ -17,14 +18,14 @@ class MapDataModel(QObject):
     def _initialize_default_data(self):
         """初始化默认地图数据"""
         self.map_data = {
-            "width": 32,          # 地图宽度（瓦片数量）
-            "height": 32,         # 地图高度（瓦片数量）
-            "tile_size": 32,      # 瓦片大小（像素）
+            "width": 100,         # 地图宽度（瓦片数量）
+            "height": 100,        # 地图高度（瓦片数量）
+            "tile_size": 16,      # 瓦片大小（像素）
             "layers": [           # 地图图层
                 {
                     "name": "ground",
                     "visible": True,
-                    "tiles": []
+                    "tiles": None  # 将使用numpy数组
                 }
             ],
             "tile_sets": []       # 瓦片集配置
@@ -38,7 +39,7 @@ class MapDataModel(QObject):
         height = self.map_data["height"]
         
         for layer in self.map_data["layers"]:
-            layer["tiles"] = [[0 for _ in range(width)] for _ in range(height)]
+            layer["tiles"] = np.zeros((height, width), dtype=np.int32)
     
     def get_tile(self, layer_index, x, y):
         """获取指定位置的瓦片ID"""
@@ -92,7 +93,7 @@ class MapDataModel(QObject):
         """初始化图层的瓦片数据"""
         width = self.map_data["width"]
         height = self.map_data["height"]
-        layer["tiles"] = [[0 for _ in range(width)] for _ in range(height)]
+        layer["tiles"] = np.zeros((height, width), dtype=np.int32)
     
     def remove_layer(self, index):
         """删除图层"""
@@ -117,8 +118,26 @@ class MapDataModel(QObject):
             file_path = self._get_default_save_path()
         
         try:
+            # 创建可序列化的副本
+            save_data = {
+                "width": self.map_data["width"],
+                "height": self.map_data["height"],
+                "tile_size": self.map_data["tile_size"],
+                "layers": [],
+                "tile_sets": self.map_data["tile_sets"]
+            }
+            
+            # 将numpy数组转换为列表
+            for layer in self.map_data["layers"]:
+                layer_data = {
+                    "name": layer["name"],
+                    "visible": layer["visible"],
+                    "tiles": layer["tiles"].tolist()
+                }
+                save_data["layers"].append(layer_data)
+            
             with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(self.map_data, f, indent=2, ensure_ascii=False)
+                json.dump(save_data, f, indent=2, ensure_ascii=False)
             return True
         except Exception as e:
             print(f"保存地图失败: {e}")
@@ -128,7 +147,26 @@ class MapDataModel(QObject):
         """从文件加载地图数据"""
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
-                self.map_data = json.load(f)
+                loaded_data = json.load(f)
+            
+            # 重建地图数据结构
+            self.map_data = {
+                "width": loaded_data["width"],
+                "height": loaded_data["height"],
+                "tile_size": loaded_data["tile_size"],
+                "layers": [],
+                "tile_sets": loaded_data["tile_sets"]
+            }
+            
+            # 将列表转换为numpy数组
+            for layer_data in loaded_data["layers"]:
+                layer = {
+                    "name": layer_data["name"],
+                    "visible": layer_data["visible"],
+                    "tiles": np.array(layer_data["tiles"], dtype=np.int32)
+                }
+                self.map_data["layers"].append(layer)
+            
             self.data_changed.emit()
             return True
         except Exception as e:

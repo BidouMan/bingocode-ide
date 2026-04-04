@@ -405,7 +405,7 @@
        <item>
         <widget class="QStackedWidget" name="editor_stacked">
          <property name="currentIndex">
-          <number>2</number>
+          <number>0</number>
          </property>
          <widget class="QWidget" name="editor_code_web">
           <layout class="QVBoxLayout" name="verticalLayout_5">
@@ -2527,6 +2527,15 @@
                       <property name="text">
                        <string>移动</string>
                       </property>
+                      <property name="checkable">
+                       <bool>true</bool>
+                      </property>
+                      <property name="checked">
+                       <bool>true</bool>
+                      </property>
+                      <attribute name="buttonGroup">
+                       <string notr="true">buttonGroup</string>
+                      </attribute>
                      </widget>
                     </item>
                     <item>
@@ -2534,6 +2543,12 @@
                       <property name="text">
                        <string>绘制</string>
                       </property>
+                      <property name="checkable">
+                       <bool>true</bool>
+                      </property>
+                      <attribute name="buttonGroup">
+                       <string notr="true">buttonGroup</string>
+                      </attribute>
                      </widget>
                     </item>
                     <item>
@@ -2541,6 +2556,12 @@
                       <property name="text">
                        <string>擦除</string>
                       </property>
+                      <property name="checkable">
+                       <bool>true</bool>
+                      </property>
+                      <attribute name="buttonGroup">
+                       <string notr="true">buttonGroup</string>
+                      </attribute>
                      </widget>
                     </item>
                     <item>
@@ -2548,6 +2569,12 @@
                       <property name="text">
                        <string>选区</string>
                       </property>
+                      <property name="checkable">
+                       <bool>true</bool>
+                      </property>
+                      <attribute name="buttonGroup">
+                       <string notr="true">buttonGroup</string>
+                      </attribute>
                      </widget>
                     </item>
                     <item>
@@ -2555,6 +2582,12 @@
                       <property name="text">
                        <string>标记</string>
                       </property>
+                      <property name="checkable">
+                       <bool>true</bool>
+                      </property>
+                      <attribute name="buttonGroup">
+                       <string notr="true">buttonGroup</string>
+                      </attribute>
                      </widget>
                     </item>
                     <item>
@@ -3487,4 +3520,7 @@
   <include location="../assets/resources.qrc"/>
  </resources>
  <connections/>
+ <buttongroups>
+  <buttongroup name="buttonGroup"/>
+ </buttongroups>
 </ui>
