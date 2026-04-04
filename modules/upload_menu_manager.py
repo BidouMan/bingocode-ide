@@ -14,6 +14,7 @@ class UploadMenuManager(QWidget):
 
         # 🚀 外部回调接口：由 ResourceManager 在初始化时绑定
         self.on_import_finished = None
+        self.on_create_map = None
         
         # 1. 基础属性
         self.setFixedSize(50, 226)
@@ -115,6 +116,10 @@ class UploadMenuManager(QWidget):
     def on_button_clicked(self, action_name):
         if action_name == "从文件导入":
             self.import_assets()
+        elif action_name == "创建地图":
+            # 触发创建地图的回调
+            if self.on_create_map:
+                self.on_create_map()
         self.anim_menu(False)
 
 
@@ -176,6 +181,7 @@ class MapUploadMenuManager(QWidget):
 
         # 🚀 外部回调接口：由 ResourceManager 在初始化时绑定
         self.on_import_finished = None
+        self.on_create_map = None
         
         # 1. 基础属性
         self.setFixedSize(50, 226)
@@ -276,6 +282,10 @@ class MapUploadMenuManager(QWidget):
     def on_button_clicked(self, action_name):
         if action_name == "从文件导入":
             self.import_assets()
+        elif action_name == "创建地图":
+            # 触发创建地图的回调
+            if self.on_create_map:
+                self.on_create_map()
         self.anim_menu(False)
 
 

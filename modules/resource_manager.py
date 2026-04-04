@@ -120,6 +120,9 @@ class SpriteItemWidget(QWidget):
         layout.addWidget(self.label, 0, Qt.AlignmentFlag.AlignCenter)
 
 
+
+
+
 class CodeItemWidget(QWidget):
     def __init__(
         self,
@@ -320,6 +323,7 @@ class ResourceManager(QObject):
         # 地图上传菜单管理
         self.map_upload_menu = MapUploadMenuManager(self.ui.page_map)
         self.map_upload_menu.on_import_finished = self.handle_map_import_success
+        self.map_upload_menu.on_create_map = self.handle_create_map
 
     def setup_list_styles(self):
         lw = self.ui.list_code
@@ -378,6 +382,9 @@ class ResourceManager(QObject):
         style = self.ui.list_code.styleSheet()
         self.ui.list_sprite.setStyleSheet(style)
         self.ui.list_sprite.setSpacing(2)  # 增加项之间的间距
+        
+        # 设置地图列表为网格布局
+        self.setup_map_grid_mode()
 
     def bind_switch_page(self):
         """绑定导航按钮"""
@@ -721,6 +728,54 @@ class ResourceManager(QObject):
         self.scroll_area.setWidget(self.grid_container)
         container_layout.addWidget(self.scroll_area)
 
+    def setup_map_grid_mode(self):
+        # 1. 找到存放列表的容器 (verticalLayout_21)
+        container_layout = self.ui.verticalLayout_21
+
+        # 2. 清除掉旧的 list_map (如果有的话)
+        if hasattr(self.ui, "list_map"):
+            self.ui.list_map.deleteLater()
+
+        # 3. 创建一个新的滚动区域
+        self.map_scroll_area = QScrollArea()
+        self.map_scroll_area.setObjectName("MapScrollArea")
+        self.map_scroll_area.setWidgetResizable(True)
+        self.map_scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.map_scroll_area.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.map_scroll_area.setStyleSheet("background: transparent;")
+
+        # 关键修改：允许点击获取焦点，并安装过滤器
+        self.map_scroll_area.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.map_scroll_area.installEventFilter(self)
+
+        # 4. 创建内部容器和网格布局
+        self.map_grid_container = QWidget()
+        self.map_grid_container.setStyleSheet("background: transparent;")
+        self.map_grid_container.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.map_grid_layout = QGridLayout(self.map_grid_container)
+
+        # 重点：设置间距和边距
+        self.map_grid_layout.setContentsMargins(
+            4, 6, 4, 6
+        )  # 这里的边距可以自由控制了
+        self.map_grid_layout.setSpacing(0)
+        self.map_grid_layout.setVerticalSpacing(5)
+
+        for i in range(4):
+            self.map_grid_layout.setColumnStretch(i, 1)
+
+        self.map_grid_layout.setAlignment(
+            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft
+        )
+
+        self.map_scroll_area.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.map_scroll_area.installEventFilter(self)
+
+        self.map_scroll_area.setWidget(self.map_grid_container)
+        container_layout.addWidget(self.map_scroll_area)
+
     def add_sprite_card(self, name, index, icon_path=None):
         """核心入口：负责卡片的创建与网格定位"""
         from PySide6.QtCore import QTimer
@@ -741,6 +796,29 @@ class ResourceManager(QObject):
         # 3. 网格布局定位 (保持 4 列布局)
         row, col = index // 4, index % 4
         self.sprite_grid_layout.addWidget(card, row, col, Qt.AlignmentFlag.AlignCenter)
+
+        return card
+
+    def add_map_card(self, name, index, icon_path=None):
+        """核心入口：负责地图卡片的创建与网格定位"""
+        from PySide6.QtCore import QTimer
+
+        # 1. 创建基础容器
+        card = QWidget()
+        card.setFixedSize(74, 74)
+        card.setObjectName("mapCard")
+        card.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        card.setProperty("selected", "false")
+        card.installEventFilter(self)
+
+        # 2. 调用内部构建逻辑
+        self._build_map_card_ui(card, name, icon_path)
+        self._build_card_delete_button(card, name)
+        self._setup_card_interactions(card, name)
+
+        # 3. 网格布局定位 (保持 4 列布局)
+        row, col = index // 4, index % 4
+        self.map_grid_layout.addWidget(card, row, col, Qt.AlignmentFlag.AlignCenter)
 
         return card
 
@@ -786,6 +864,58 @@ class ResourceManager(QObject):
         # --- 名字处理 (字体与颜色) ---
         name_label = QLabel(name)
         name_label.setObjectName("spriteNameLabel")
+        if hasattr(self, "custom_font_family"):
+            name_label.setFont(QFont(self.custom_font_family, 12))
+        name_label.setStyleSheet("color: #E0E0E0; background: transparent;")
+        layout.addWidget(name_label, 0, Qt.AlignmentFlag.AlignCenter)
+
+        # 🚀 保持点击穿透
+        icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        name_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+    def _build_map_card_ui(self, card, name, icon_path):
+        """负责地图卡片的视觉样式、图标处理和文字"""
+        card.setStyleSheet("""
+            #mapCard {
+                background-color: #2D2D2D;
+                border-radius: 8px;
+                border: 2px solid transparent;
+            }
+            #mapCard:hover { background-color: #3D3D3D; }
+            #mapCard[selected="true"] {
+                background-color: #3D3D3D;
+                border: 2px solid #5bc772;
+            }
+        """)
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(2)
+
+        # --- 图标处理 (像素风格缩放) ---
+        icon_label = QLabel()
+        icon_label.setFixedSize(40, 40)
+        if icon_path and os.path.exists(icon_path):
+            pix = QPixmap(icon_path)
+            if not pix.isNull():
+                mode = (
+                    Qt.TransformationMode.FastTransformation
+                    if pix.width() < 100
+                    else Qt.TransformationMode.SmoothTransformation
+                )
+                target_pix = pix.scaled(
+                    80, 80, Qt.AspectRatioMode.KeepAspectRatio, mode
+                )
+                icon_label.setPixmap(target_pix)
+                icon_label.setScaledContents(True)
+        else:
+            # 地图用绿色方块
+            icon_label.setStyleSheet("background-color: #5bc772; border-radius: 4px;")
+        layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignCenter)
+
+        # --- 名字处理 (字体与颜色) ---
+        name_label = QLabel(name)
+        name_label.setObjectName("mapNameLabel")
         if hasattr(self, "custom_font_family"):
             name_label.setFont(QFont(self.custom_font_family, 12))
         name_label.setStyleSheet("color: #E0E0E0; background: transparent;")
@@ -1108,9 +1238,15 @@ class ResourceManager(QObject):
 
     def refresh_map_list(self):
         """刷新地图列表"""
-        if not hasattr(self.ui, "list_map"):
-            return
-        self.ui.list_map.clear()
+        # 检查地图网格布局是否存在，如果不存在则重新创建
+        if not hasattr(self, "map_grid_layout"):
+            self.setup_map_grid_mode()
+        
+        # 清空现有卡片
+        while self.map_grid_layout.count():
+            child = self.map_grid_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
 
         project_root = self.app_controller.project_manager.project_root
         if not project_root or not os.path.exists(project_root):
@@ -1126,14 +1262,38 @@ class ResourceManager(QObject):
                 ]
                 map_files.sort()
 
-                for file_name in map_files:
-                    item = QListWidgetItem(self.ui.list_map)
-                    item.setText(os.path.splitext(file_name)[0])
-                    item.setData(Qt.ItemDataRole.UserRole, file_name)
-                    item.setSizeHint(QSize(0, 45))
+                for i, file_name in enumerate(map_files):
+                    map_name = os.path.splitext(file_name)[0]
+                    self.add_map_card(map_name, i)
+                    print(f"DEBUG: 加载地图文件: {file_name}")
         except Exception as e:
             print(f"刷新地图列表失败: {e}")
 
     def handle_map_import_success(self, map_name, file_paths, is_bgs=False):
         """处理地图导入成功的回调"""
         self.refresh_map_list()
+
+    def handle_create_map(self):
+        """处理创建地图的回调"""
+        # 获取当前地图数量，生成默认名字
+        map_count = self.map_grid_layout.count()
+        map_name = f"地图{map_count + 1}"
+        
+        # 保存地图数据到文件
+        project_root = self.app_controller.project_manager.project_root
+        if project_root:
+            maps_dir = os.path.join(project_root, "assets", "maps")
+            os.makedirs(maps_dir, exist_ok=True)
+            
+            # 创建地图文件路径
+            map_file_path = os.path.join(maps_dir, f"{map_name}.json")
+            
+            # 使用地图编辑器的地图模型保存地图数据
+            if hasattr(self.app_controller, "map_editor") and self.app_controller.map_editor:
+                map_model = self.app_controller.map_editor.map_model
+                if map_model:
+                    map_model.save(map_file_path)
+                    print(f"DEBUG: 地图已保存到: {map_file_path}")
+        
+        # 创建地图卡片
+        self.add_map_card(map_name, map_count)

@@ -65,9 +65,9 @@ class AppController:
 
         # 4. 绑定信号 (保持原有业务连接)
         self.setup_connections()
-        
+
         # 自动切换到地图编辑器页面（调试用）
-        self.handle_switch_to_map_editor()
+        # self.handle_switch_to_map_editor()
 
     def setup_connections(self):
         """绑定业务信号，完全保留文件和编辑器逻辑"""
@@ -93,7 +93,7 @@ class AppController:
         self.ui.btn_editor_map_gird.toggled.connect(
             self.map_editor.toggle_grid_visibility
         )
-        
+
         # 绑定地图编辑器工具按钮
         self.map_editor.setup_tool_buttons(self.ui)
 
@@ -450,17 +450,17 @@ class AppController:
         print(f"当前页面索引: {self.ui.editor_stacked.currentIndex()}")
         self.ui.editor_stacked.setCurrentIndex(2)
         print(f"切换后页面索引: {self.ui.editor_stacked.currentIndex()}")
-        
+
         # 初始化地图编辑器的画布
         if hasattr(self, "map_editor"):
             print(f"地图编辑器实例: {self.map_editor}")
             print(f"画布控件: {self.ui.editor_map_canvas}")
             print(f"资源列表视图: {self.ui.res_list_view}")
-            
+
             if self.ui.editor_map_canvas:
                 print(f"画布控件类型: {type(self.ui.editor_map_canvas)}")
                 print(f"画布控件场景: {self.ui.editor_map_canvas.scene()}")
-            
+
             self.map_editor.set_canvas_widget(self.ui.editor_map_canvas)
             # 初始化资源列表视图
             self.map_editor.set_res_list_view(self.ui.res_list_view)
