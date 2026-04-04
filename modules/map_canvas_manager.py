@@ -39,8 +39,8 @@ class MapCanvas(QGraphicsView):
         self.setBackgroundBrush(QBrush(QColor("#21252b")))
 
     def wheelEvent(self, event: QWheelEvent):
-        """缩放逻辑：手动计算偏移，确保鼠标位置保持不变"""
-        # 使用合适的缩放系数
+        """缩放逻辑：完美实现以鼠标位置为中心的缩放"""
+        # 使用合适的缩放系数，确保缩放平滑
         zoom_in_factor = 1.1
         zoom_out_factor = 1 / zoom_in_factor
         zoom_factor = zoom_in_factor if event.angleDelta().y() > 0 else zoom_out_factor
@@ -48,39 +48,35 @@ class MapCanvas(QGraphicsView):
         new_zoom = self._zoom_level * zoom_factor
 
         if self._min_zoom <= new_zoom <= self._max_zoom:
-            # 获取鼠标位置（视图坐标）
+            # 获取鼠标在视图中的位置
             mouse_pos = event.position().toPoint()
             
-            # 将视图坐标转换为场景坐标（缩放前）
+            # 关键：缩放前记录鼠标指向的场景坐标
             scene_pos_before = self.mapToScene(mouse_pos)
             
-            # 临时禁用AnchorUnderMouse，避免自动平移干扰
-            old_anchor = self.transformationAnchor()
+            # 临时禁用自动锚点，避免Qt的内置行为干扰
             self.setTransformationAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
             
-            # 执行缩放
+            # 执行缩放操作
             self.scale(zoom_factor, zoom_factor)
             self._zoom_level = new_zoom
             
-            # 将视图坐标转换为场景坐标（缩放后）
+            # 缩放后计算鼠标新的场景坐标
             scene_pos_after = self.mapToScene(mouse_pos)
             
-            # 计算偏移量
-            delta = scene_pos_before - scene_pos_after
+            # 计算需要平移的偏移量，确保鼠标位置不变
+            offset = scene_pos_before - scene_pos_after
             
-            # 平移视图以保持鼠标位置不变
-            if not delta.isNull():
-                self.translate(delta.x(), delta.y())
-            
-            # 恢复AnchorUnderMouse设置
-            self.setTransformationAnchor(old_anchor)
+            # 应用平移，精确保持鼠标位置
+            if not offset.isNull():
+                self.translate(offset.x(), offset.y())
             
             # 刷新视图
             self.viewport().update()
         else:
             pass
         
-        # 阻止滚轮事件传递给父类，避免触发默认的滚动行为
+        # 阻止事件传递，避免默认滚动行为
         event.accept()
 
     def mousePressEvent(self, event: QMouseEvent):
