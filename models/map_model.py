@@ -14,6 +14,8 @@ class MapDataModel(QObject):
         self.project_path = project_path
         self.map_data = {}
         self._initialize_default_data()
+        # 使用固定偏移量处理负坐标
+        self.coord_offset = 1000  # 足够大的偏移量，确保所有坐标都是正数
     
     def _initialize_default_data(self):
         """初始化默认地图数据"""
@@ -43,20 +45,54 @@ class MapDataModel(QObject):
     
     def get_tile(self, layer_index, x, y):
         """获取指定位置的瓦片ID"""
+        # 应用固定偏移量，确保坐标为正数
+        array_x = x + self.coord_offset
+        array_y = y + self.coord_offset
+        
         if 0 <= layer_index < len(self.map_data["layers"]):
             layer = self.map_data["layers"][layer_index]
-            if 0 <= y < len(layer["tiles"]) and 0 <= x < len(layer["tiles"][0]):
-                return layer["tiles"][y][x]
+            if 0 <= array_y < len(layer["tiles"]) and 0 <= array_x < len(layer["tiles"][0]):
+                return layer["tiles"][array_y][array_x]
         return 0
     
     def set_tile(self, layer_index, x, y, tile_id):
-        """设置指定位置的瓦片ID"""
+        """设置指定位置的瓦片ID，自动处理边界扩展"""
+        print(f"DEBUG: 设置瓦片 - 坐标: ({x}, {y}), 瓦片ID: {tile_id}")
+        
+        # 应用固定偏移量，确保坐标为正数
+        array_x = x + self.coord_offset
+        array_y = y + self.coord_offset
+        
+        print(f"DEBUG: 坐标偏移 - 实际坐标: ({x}, {y}), 数组坐标: ({array_x}, {array_y})")
+        
+        # 检查是否需要扩展数组
+        required_width = max(self.map_data["width"], array_x + 1)
+        required_height = max(self.map_data["height"], array_y + 1)
+        
+        print(f"DEBUG: 需要尺寸 - width={required_width}, height={required_height}")
+        
+        # 如果超出当前范围，扩展数组
+        current_width = self.map_data["width"]
+        current_height = self.map_data["height"]
+        
+        print(f"DEBUG: 当前尺寸 - width={current_width}, height={current_height}")
+        
+        if required_width > current_width or required_height > current_height:
+            print(f"DEBUG: 需要扩展地图数组")
+            self._expand_map(required_width, required_height)
+        
+        # 设置瓦片
         if 0 <= layer_index < len(self.map_data["layers"]):
             layer = self.map_data["layers"][layer_index]
-            if 0 <= y < len(layer["tiles"]) and 0 <= x < len(layer["tiles"][0]):
-                layer["tiles"][y][x] = tile_id
+            if 0 <= array_y < len(layer["tiles"]) and 0 <= array_x < len(layer["tiles"][0]):
+                layer["tiles"][array_y][array_x] = tile_id
+                print(f"DEBUG: 瓦片设置成功 - 数组坐标: ({array_x}, {array_y}), 瓦片ID: {tile_id}")
                 self.data_changed.emit()
                 return True
+            else:
+                print(f"DEBUG: 瓦片设置失败 - 数组坐标超出范围: ({array_x}, {array_y}), 数组尺寸: {len(layer['tiles'][0])}x{len(layer['tiles'])}")
+        else:
+            print(f"DEBUG: 瓦片设置失败 - 图层索引无效: {layer_index}")
         return False
     
     def get_map_size(self):
@@ -94,6 +130,40 @@ class MapDataModel(QObject):
         width = self.map_data["width"]
         height = self.map_data["height"]
         layer["tiles"] = np.zeros((height, width), dtype=np.int32)
+    
+    def _expand_map(self, new_width, new_height):
+        """扩展地图数组"""
+        print(f"DEBUG: 扩展地图 - 新尺寸: {new_width}x{new_height}")
+        
+        # 保存原始数据的深拷贝
+        old_layers_data = []
+        for layer in self.map_data["layers"]:
+            old_layers_data.append(layer["tiles"].copy())
+            print(f"DEBUG: 保存图层数据 - 形状: {layer['tiles'].shape}")
+        
+        # 更新地图尺寸
+        self.map_data["width"] = new_width
+        self.map_data["height"] = new_height
+        
+        # 重新初始化所有图层
+        for layer in self.map_data["layers"]:
+            self._initialize_layer_tiles(layer)
+            print(f"DEBUG: 重新初始化图层 - 新形状: {layer['tiles'].shape}")
+        
+        # 复制旧数据到新位置（直接复制，因为使用了固定偏移量）
+        for i, old_tiles in enumerate(old_layers_data):
+            new_layer = self.map_data["layers"][i]
+            
+            # 获取旧数据的形状
+            h, w = old_tiles.shape
+            print(f"DEBUG: 复制数据 - 旧形状: {old_tiles.shape}")
+            
+            # 直接复制到新数组的对应位置
+            if h <= new_height and w <= new_width:
+                new_layer["tiles"][:h, :w] = old_tiles
+                print(f"DEBUG: 数据复制成功")
+            else:
+                print(f"DEBUG: 数据复制失败 - 旧数据尺寸超出新数组边界")
     
     def remove_layer(self, index):
         """删除图层"""

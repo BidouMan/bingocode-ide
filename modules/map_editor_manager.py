@@ -455,6 +455,10 @@ class MapEditorManager(QObject):
             width, height = self.map_model.get_map_size()
             tile_size = self.map_model.get_tile_size()
 
+            print(
+                f"DEBUG: 渲染地图 - 地图尺寸: {width}x{height}, 瓦片大小: {tile_size}"
+            )
+
             # 移除所有图块项（保留背景和网格）
             items = scene.items()
             for item in items:
@@ -475,8 +479,15 @@ class MapEditorManager(QObject):
                     # 获取所有非零的瓦片位置
                     y_indices, x_indices = np.where(tile_data > 0)
 
+                    print(f"DEBUG: 渲染瓦片数量: {len(y_indices)}")
                     for y, x in zip(y_indices, x_indices):
                         stored_tile_id = tile_data[y, x]
+                        # 数组坐标减去偏移量得到实际坐标
+                        actual_x = x - self.map_model.coord_offset
+                        actual_y = y - self.map_model.coord_offset
+                        print(
+                            f"DEBUG: 渲染瓦片 - 数组坐标: ({x}, {y}), 实际坐标: ({actual_x}, {actual_y}), 瓦片ID: {stored_tile_id}"
+                        )
 
                         # 遍历所有资源，查找匹配的资源
                         for resource_index, resource in enumerate(
@@ -526,7 +537,12 @@ class MapEditorManager(QObject):
                                     )
 
                                     pixmap_item = QGraphicsPixmapItem(tile_pixmap)
-                                    pixmap_item.setPos(x * tile_size, y * tile_size)
+                                    # 使用实际坐标
+                                    actual_x = x - self.map_model.coord_offset
+                                    actual_y = y - self.map_model.coord_offset
+                                    pixmap_item.setPos(
+                                        actual_x * tile_size, actual_y * tile_size
+                                    )
                                     scene.addItem(pixmap_item)
                             else:
                                 # 单张图片模式，图块ID格式：resource_index + 1
@@ -542,7 +558,12 @@ class MapEditorManager(QObject):
                                         )
 
                                         pixmap_item = QGraphicsPixmapItem(pixmap)
-                                        pixmap_item.setPos(x * tile_size, y * tile_size)
+                                        # 使用实际坐标
+                                        actual_x = x - self.map_model.coord_offset
+                                        actual_y = y - self.map_model.coord_offset
+                                        pixmap_item.setPos(
+                                            actual_x * tile_size, actual_y * tile_size
+                                        )
                                         scene.addItem(pixmap_item)
 
             # 刷新视图
@@ -643,16 +664,12 @@ class MapEditorManager(QObject):
         # 获取瓦片大小
         tile_size = self.map_model.get_tile_size()
 
-        # 计算瓦片坐标
+        # 计算瓦片坐标（支持负坐标）
         tile_x = int(scene_pos.x() / tile_size)
         tile_y = int(scene_pos.y() / tile_size)
 
-        # 检查边界
-        width, height = self.map_model.get_map_size()
-        if 0 <= tile_x < width and 0 <= tile_y < height:
-            return (tile_x, tile_y)
-
-        return None
+        # 移除边界检查，支持任意坐标
+        return (tile_x, tile_y)
 
     def _handle_mouse_press(self, event):
         """处理鼠标按下事件"""
@@ -864,9 +881,15 @@ class MapEditorManager(QObject):
 
                 x, y = tile_pos
 
+                print(
+                    f"DEBUG: 绘制位置 - 原始坐标: ({x}, {y}), 瓦片尺寸: {tiles_width}x{tiles_height}"
+                )
+
                 # 将图块位置对齐到图块大小的整数倍
                 aligned_x = x - (x % tiles_width)
                 aligned_y = y - (y % tiles_height)
+
+                print(f"DEBUG: 绘制位置 - 对齐后坐标: ({aligned_x}, {aligned_y})")
 
                 # 检查并清除与新图块重叠的所有已存在图块
                 # 获取地图上所有非零的图块位置
@@ -953,9 +976,13 @@ class MapEditorManager(QObject):
                                     break
 
                 # 更新地图数据（只在左上角位置记录图块）
-                self.map_model.set_tile(
+                print(
+                    f"DEBUG: 设置瓦片 - 图层: {self.current_layer}, 位置: ({aligned_x}, {aligned_y}), 瓦片ID: {tile_id}"
+                )
+                result = self.map_model.set_tile(
                     self.current_layer, aligned_x, aligned_y, tile_id
                 )
+                print(f"DEBUG: 设置瓦片结果: {result}")
         except Exception as e:
             print(f"绘制瓦片错误: {e}")
 
