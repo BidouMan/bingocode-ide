@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1144</width>
-    <height>855</height>
+    <width>1218</width>
+    <height>921</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -2587,6 +2587,12 @@
                      <widget class="QPushButton" name="btn_editor_map_snap">
                       <property name="text">
                        <string>吸附</string>
+                      </property>
+                      <property name="checkable">
+                       <bool>true</bool>
+                      </property>
+                      <property name="checked">
+                       <bool>true</bool>
                       </property>
                      </widget>
                     </item>

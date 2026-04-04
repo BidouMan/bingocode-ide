@@ -1085,6 +1085,8 @@ class Ui_Form(object):
 
         self.btn_editor_map_snap = QPushButton(self.frame_5)
         self.btn_editor_map_snap.setObjectName(u"btn_editor_map_snap")
+        self.btn_editor_map_snap.setCheckable(True)
+        self.btn_editor_map_snap.setChecked(True)
 
         self.horizontalLayout_18.addWidget(self.btn_editor_map_snap)
 

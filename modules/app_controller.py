@@ -93,6 +93,9 @@ class AppController:
         self.ui.btn_editor_map_gird.toggled.connect(
             self.map_editor.toggle_grid_visibility
         )
+        
+        # 绑定地图编辑器工具按钮
+        self.map_editor.setup_tool_buttons(self.ui)
 
         # 菜单栏按钮_>文件管理
         self.menu_manager.open_file_signal.connect(self.handle_open_project)
