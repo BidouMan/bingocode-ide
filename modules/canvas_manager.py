@@ -25,9 +25,12 @@ class SmartCanvas(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
 
-        # 隐藏滚动条
+        # 隐藏滚动条并禁用滚动功能
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # 禁用滚动条的滚轮事件处理
+        self.horizontalScrollBar().setDisabled(True)
+        self.verticalScrollBar().setDisabled(True)
 
         # 🚀 兼容性修复：由于某些版本不支持 setCenterOnScroll，我们手动通过 ScrollMode 控制
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
@@ -79,18 +82,33 @@ class SmartCanvas(QGraphicsView):
 
     def wheelEvent(self, event: QWheelEvent):
         """缩放逻辑"""
+        print(f"DEBUG: 滚轮事件触发，角度变化: {event.angleDelta().y()}")
+        print(f"DEBUG: 当前缩放级别: {self._zoom_level}")
+        
         zoom_in_factor = 1.15
         zoom_out_factor = 1 / zoom_in_factor
         zoom_factor = zoom_in_factor if event.angleDelta().y() > 0 else zoom_out_factor
+        
+        print(f"DEBUG: 缩放因子: {zoom_factor}")
 
         new_zoom = self._zoom_level * zoom_factor
+        print(f"DEBUG: 新缩放级别: {new_zoom}")
+        
         if self._min_zoom <= new_zoom <= self._max_zoom:
+            print(f"DEBUG: 执行缩放")
             self.scale(zoom_factor, zoom_factor)
             self._zoom_level = new_zoom
 
             # 🚀 关键：缩放后立即重新计算合法的平移边界
             self.update_scene_range()
             self.viewport().update()
+            print(f"DEBUG: 缩放完成，新缩放级别: {self._zoom_level}")
+        else:
+            print(f"DEBUG: 缩放超出限制范围")
+        
+        # 阻止滚轮事件传递给父类，避免触发默认的滚动行为
+        event.accept()
+        print(f"DEBUG: 滚轮事件已处理")
 
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.MiddleButton:
@@ -115,8 +133,8 @@ class SmartCanvas(QGraphicsView):
         super().mouseReleaseEvent(event)
 
     def drawBackground(self, painter: QPainter, rect):
-        """绘制深灰工作区 + 素材区棋盘格"""
-        painter.fillRect(rect, QColor("#383838"))
+        """绘制浅灰工作区 + 素材区棋盘格"""
+        painter.fillRect(rect, QColor("#f0f0f0"))
 
         if not self.scene():
             return

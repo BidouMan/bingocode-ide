@@ -1,5 +1,5 @@
 import os
-from PySide6.QtCore import QObject, Signal, Qt, QRectF
+from PySide6.QtCore import QObject, Signal, Qt, QRectF, QPoint
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsScene,
@@ -9,10 +9,18 @@ from PySide6.QtWidgets import (
     QGraphicsLineItem,
     QDialog,
 )
-from PySide6.QtGui import QPixmap, QPen, QBrush, QColor
+from PySide6.QtGui import (
+    QPixmap,
+    QPen,
+    QBrush,
+    QColor,
+    QMouseEvent,
+    QWheelEvent,
+    QPainter,
+)
 from models.map_model import MapDataModel
-from modules.canvas_manager import SmartCanvas
 from modules.map_resource_import_dialog import MapResourceImportDialog
+from modules.map_canvas_manager import MapCanvas
 
 
 class TileItem(QGraphicsRectItem):
@@ -195,69 +203,99 @@ class MapEditorManager(QObject):
         self.map_model.data_changed.connect(self._on_map_data_changed)
 
     def _initialize_canvas_manager(self):
-        """初始化画布管理器"""
+        """初始化画布管理器 - 完全按照sprite_editor的模式"""
+        print("DEBUG: 开始初始化画布管理器")
         if not self.canvas_widget:
+            print("DEBUG: canvas_widget 为 None")
             return
 
-        # 使用现有的QGraphicsView作为画布管理器
-        self.canvas_manager = self.canvas_widget
+        # 1. 替换画布控件 (只做一次，不要覆盖)
+        parent_widget = self.canvas_widget.parentWidget()
+        parent_layout = parent_widget.layout()
 
-        # 导入必要的类
-        from PySide6.QtWidgets import QGraphicsScene, QGraphicsRectItem
-        from PySide6.QtGui import QBrush, QColor, QPen
+        self.canvas_manager = MapCanvas(parent_widget)
+        parent_layout.replaceWidget(self.canvas_widget, self.canvas_manager)
+        self.canvas_widget.hide()
+        self.canvas_widget.deleteLater()
 
-        # 创建场景
-        scene = QGraphicsScene()
+        # 2. 绑定场景，设置无限画布范围
+        # 坐标原点：左上角(0,0)，但允许显示负坐标，实现真正的无限画布效果
+        self.canvas_scene = QGraphicsScene(
+            -10000, -10000, 20000, 20000
+        )  # 包含正负坐标的大场景，实现无限画布
+        self.canvas_manager.setScene(self.canvas_scene)
 
-        # 设置场景到视图
-        self.canvas_manager.setScene(scene)
-
-        # 设置视图属性
-        self.canvas_manager.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        self.canvas_manager.setResizeAnchor(QGraphicsView.AnchorViewCenter)
-        self.canvas_manager.setTransformationAnchor(QGraphicsView.AnchorViewCenter)
-        self.canvas_manager.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
-        self.canvas_manager.setMouseTracking(True)  # 启用鼠标追踪
-
-        # 获取地图数据
+        # 3. 获取地图数据
         width, height = self.map_model.get_map_size()
         tile_size = self.map_model.get_tile_size()
+        print(f"DEBUG: 地图尺寸: {width}x{height}, 图块大小: {tile_size}")
 
-        # 设置场景大小
+        # 4. 设置场景大小
         scene_width = width * tile_size
         scene_height = height * tile_size
-        scene.setSceneRect(0, 0, scene_width, scene_height)
 
-        # 创建灰色背景矩形
+        # 5. 创建游戏窗口显示范围（640x480）
+        game_window_rect = QGraphicsRectItem(0, 0, 640, 480)
+        game_window_rect.setPen(QPen(QColor(255, 255, 255), 2, Qt.PenStyle.DashLine))
+        game_window_rect.setBrush(Qt.NoBrush)
+        self.canvas_scene.addItem(game_window_rect)
+        print("DEBUG: 添加游戏窗口显示范围(640x480)")
+
+        # 6. 创建一个容器项，用于包含所有地图元素
+        from PySide6.QtWidgets import QGraphicsItemGroup
+
+        map_container = QGraphicsItemGroup()
+        self.canvas_scene.addItem(map_container)
+
+        # 7. 创建红色背景，使用游戏引擎相同的坐标系统（左上角(0,0)）
         background = QGraphicsRectItem(0, 0, scene_width, scene_height)
-        background.setBrush(QBrush(QColor(200, 200, 200)))  # 灰色背景
+        background.setBrush(QBrush(QColor(255, 0, 0)))  # 红色背景
         background.setPen(Qt.NoPen)
-        scene.addItem(background)
+        map_container.addToGroup(background)
+        print("DEBUG: 添加红色背景")
 
-        # 绘制瓦片网格
-        pen = QPen(QColor(100, 100, 100, 50), 1)
+        # 8. 绘制可见的瓦片网格，以游戏引擎坐标系统（左上角(0,0)）为原点
+        pen = QPen(QColor(255, 255, 255), 2)  # 白色网格线
         for x in range(width + 1):
-            scene.addLine(x * tile_size, 0, x * tile_size, scene_height, pen)
+            line_x = x * tile_size
+            line = self.canvas_scene.addLine(line_x, 0, line_x, scene_height, pen)
+            map_container.addToGroup(line)
         for y in range(height + 1):
-            scene.addLine(0, y * tile_size, scene_width, y * tile_size, pen)
+            line_y = y * tile_size
+            line = self.canvas_scene.addLine(0, line_y, scene_width, line_y, pen)
+            map_container.addToGroup(line)
+        print("DEBUG: 添加白色网格线")
 
-        # 绑定鼠标事件
+        # 7. 彻底重置所有变换（非常重要）
+        self.canvas_manager.resetTransform()
+
+        # 8. 设置默认缩放为160%（与游戏引擎一致）
+        initial_scale = 1.6
+        self.canvas_manager.scale(initial_scale, initial_scale)
+        self.canvas_manager._zoom_level = initial_scale
+        print(f"DEBUG: 设置默认缩放为{initial_scale * 100}%")
+
+        # 10. 让红色网格完整显示在画布范围内
+        # 设置视图中心点为红色网格的中心位置(80,80)，这样整个网格都能显示
+        self.canvas_manager.centerOn(80, 80)
+        print("DEBUG: 红色网格已完整显示在画布范围内")
+
+        # 10. 绑定鼠标事件
         self._bind_mouse_events()
 
-        # 刷新视图
-        self.canvas_manager.viewport().update()
-
     def _bind_mouse_events(self):
-        """绑定鼠标事件"""
+        """绑定鼠标事件 - 完全按照sprite_editor的模式"""
         # 保存原始的鼠标事件处理函数
         self.original_mousePressEvent = self.canvas_manager.mousePressEvent
         self.original_mouseMoveEvent = self.canvas_manager.mouseMoveEvent
         self.original_mouseReleaseEvent = self.canvas_manager.mouseReleaseEvent
+        self.original_wheelEvent = self.canvas_manager.wheelEvent
 
         # 绑定自定义的鼠标事件处理函数
         self.canvas_manager.mousePressEvent = self._handle_mouse_press
         self.canvas_manager.mouseMoveEvent = self._handle_mouse_move
         self.canvas_manager.mouseReleaseEvent = self._handle_mouse_release
+        self.canvas_manager.wheelEvent = self._handle_wheel_event
 
         print("鼠标事件绑定完成")
 
@@ -598,21 +636,27 @@ class MapEditorManager(QObject):
                     self._draw_tile(tile_pos)
                     # 移除预览
                     self._remove_preview()
+            else:
+                # 其他鼠标按钮（包括中键）交给MapCanvas处理
+                self.original_mousePressEvent(event)
         except Exception as e:
             print(f"鼠标按下事件错误: {e}")
 
     def _handle_mouse_move(self, event):
         """处理鼠标移动事件"""
         try:
-            print(f"DEBUG: 鼠标移动事件，位置: {event.pos()}")
             if self.is_drawing and event.buttons() & Qt.LeftButton:
                 tile_pos = self._screen_to_tile(event.pos())
                 if tile_pos and tile_pos != self.last_tile_pos:
                     self._draw_tile(tile_pos)
                     self.last_tile_pos = tile_pos
             else:
-                # 显示预览图块
-                self._update_preview(event.pos())
+                # 如果是中键拖动，交给MapCanvas处理
+                if event.buttons() & Qt.MiddleButton:
+                    self.original_mouseMoveEvent(event)
+                else:
+                    # 显示预览图块
+                    self._update_preview(event.pos())
 
         except Exception as e:
             print(f"鼠标移动事件错误: {e}")
@@ -624,10 +668,18 @@ class MapEditorManager(QObject):
                 self.is_drawing = False
                 self.last_tile_pos = None
             else:
-                # 调用父类的鼠标释放事件处理
-                SmartCanvas.mouseReleaseEvent(self.canvas_manager, event)
+                # 其他鼠标按钮交给MapCanvas处理
+                self.original_mouseReleaseEvent(event)
         except Exception as e:
             print(f"鼠标释放事件错误: {e}")
+
+    def _handle_wheel_event(self, event):
+        """处理滚轮事件 - 调用原始的wheelEvent方法"""
+        try:
+            # 调用原始的wheelEvent方法，让MapCanvas自己处理缩放
+            self.original_wheelEvent(event)
+        except Exception as e:
+            print(f"滚轮事件错误: {e}")
 
     def _draw_tile(self, tile_pos):
         """绘制瓦片"""

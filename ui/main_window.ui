@@ -960,13 +960,6 @@
                             <number>0</number>
                            </property>
                            <item>
-                            <widget class="QLabel" name="label_25">
-                             <property name="text">
-                              <string>创建场景/选择创景/上传场景</string>
-                             </property>
-                            </widget>
-                           </item>
-                           <item>
                             <widget class="QListWidget" name="list_sprite">
                              <property name="iconSize">
                               <size>
@@ -2642,6 +2635,12 @@
                    </property>
                    <property name="autoFillBackground">
                     <bool>true</bool>
+                   </property>
+                   <property name="verticalScrollBarPolicy">
+                    <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
+                   </property>
+                   <property name="horizontalScrollBarPolicy">
+                    <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
                    </property>
                   </widget>
                  </item>

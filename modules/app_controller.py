@@ -65,6 +65,9 @@ class AppController:
 
         # 4. 绑定信号 (保持原有业务连接)
         self.setup_connections()
+        
+        # 自动切换到地图编辑器页面（调试用）
+        self.handle_switch_to_map_editor()
 
     def setup_connections(self):
         """绑定业务信号，完全保留文件和编辑器逻辑"""

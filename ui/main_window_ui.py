@@ -389,11 +389,6 @@ class Ui_Form(object):
         self.verticalLayout_15.setSpacing(0)
         self.verticalLayout_15.setObjectName(u"verticalLayout_15")
         self.verticalLayout_15.setContentsMargins(0, 0, 0, 0)
-        self.label_25 = QLabel(self.sprite_page_frame)
-        self.label_25.setObjectName(u"label_25")
-
-        self.verticalLayout_15.addWidget(self.label_25)
-
         self.list_sprite = QListWidget(self.sprite_page_frame)
         self.list_sprite.setObjectName(u"list_sprite")
         self.list_sprite.setIconSize(QSize(80, 80))
@@ -1116,6 +1111,8 @@ class Ui_Form(object):
         self.editor_map_canvas.setObjectName(u"editor_map_canvas")
         self.editor_map_canvas.setMinimumSize(QSize(100, 0))
         self.editor_map_canvas.setAutoFillBackground(True)
+        self.editor_map_canvas.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.editor_map_canvas.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         self.verticalLayout_25.addWidget(self.editor_map_canvas)
 
@@ -1583,7 +1580,6 @@ class Ui_Form(object):
         self.btn_outline_bg.setText(QCoreApplication.translate("Form", u"\u573a\u666f", None))
         self.btn_outline_sound.setText(QCoreApplication.translate("Form", u"\u58f0\u97f3", None))
         self.btn_outline_code.setText(QCoreApplication.translate("Form", u"\u4ee3\u7801", None))
-        self.label_25.setText(QCoreApplication.translate("Form", u"\u521b\u5efa\u573a\u666f/\u9009\u62e9\u521b\u666f/\u4e0a\u4f20\u573a\u666f", None))
         self.label_4.setText(QCoreApplication.translate("Form", u"\u58f0\u97f3\u9875\u9762", None))
         self.btn_add_tab.setText(QCoreApplication.translate("Form", u"+", None))
         self.animate_label.setText(QCoreApplication.translate("Form", u"ANIMATION", None))
