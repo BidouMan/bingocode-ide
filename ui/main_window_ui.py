@@ -1090,6 +1090,8 @@ class Ui_Form(object):
 
         self.btn_editor_map_gird = QPushButton(self.frame_5)
         self.btn_editor_map_gird.setObjectName(u"btn_editor_map_gird")
+        self.btn_editor_map_gird.setCheckable(True)
+        self.btn_editor_map_gird.setChecked(True)
 
         self.horizontalLayout_18.addWidget(self.btn_editor_map_gird)
 
@@ -1553,7 +1555,7 @@ class Ui_Form(object):
         self.retranslateUi(Form)
 
         self.change_page.setCurrentIndex(0)
-        self.editor_stacked.setCurrentIndex(0)
+        self.editor_stacked.setCurrentIndex(2)
         self.btn_outline_sprite.setDefault(False)
         self.btn_outline_sound.setDefault(False)
         self.btn_outline_code.setDefault(False)

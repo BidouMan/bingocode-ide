@@ -192,6 +192,9 @@ class MapEditorManager(QObject):
         self.preview_item = None  # 预览图块项
         self.preview_tile_pos = None  # 预览图块位置
 
+        # 网格线相关
+        self.grid_lines = []  # 存储网格线对象，用于控制显示/隐藏
+
         # 鼠标状态
         self.is_drawing = False
         self.last_tile_pos = None
@@ -236,7 +239,9 @@ class MapEditorManager(QObject):
 
         # 5. 创建游戏窗口显示范围（640x480）
         game_window_rect = QGraphicsRectItem(0, 0, 640, 480)
-        game_window_rect.setPen(QPen(QColor(255, 255, 255), 2, Qt.PenStyle.DashLine))
+        game_window_rect.setPen(
+            QPen(QColor(180, 180, 255), 0, Qt.PenStyle.DashLine)
+        )  # 淡紫色，最细的虚线
         game_window_rect.setBrush(Qt.NoBrush)
         self.canvas_scene.addItem(game_window_rect)
         print("DEBUG: 添加游戏窗口显示范围(640x480)")
@@ -247,24 +252,32 @@ class MapEditorManager(QObject):
         map_container = QGraphicsItemGroup()
         self.canvas_scene.addItem(map_container)
 
-        # 7. 创建红色背景，使用游戏引擎相同的坐标系统（左上角(0,0)）
-        background = QGraphicsRectItem(0, 0, scene_width, scene_height)
-        background.setBrush(QBrush(QColor(255, 0, 0)))  # 红色背景
-        background.setPen(Qt.NoPen)
-        map_container.addToGroup(background)
-        print("DEBUG: 添加红色背景")
-
-        # 8. 绘制可见的瓦片网格，以游戏引擎坐标系统（左上角(0,0)）为原点
-        pen = QPen(QColor(255, 255, 255), 2)  # 白色网格线
+        # 7. 绘制可见的瓦片网格，以游戏引擎坐标系统（左上角(0,0)）为原点
+        pen = QPen(QColor(196, 93, 41, 128), 0)  # rgb(196, 93, 41)网格线，最细，半透明
+        self.grid_lines.clear()  # 清空之前的网格线
         for x in range(width + 1):
             line_x = x * tile_size
             line = self.canvas_scene.addLine(line_x, 0, line_x, scene_height, pen)
             map_container.addToGroup(line)
+            self.grid_lines.append(line)
         for y in range(height + 1):
             line_y = y * tile_size
             line = self.canvas_scene.addLine(0, line_y, scene_width, line_y, pen)
             map_container.addToGroup(line)
-        print("DEBUG: 添加白色网格线")
+            self.grid_lines.append(line)
+        print("DEBUG: 添加rgb(196, 93, 41)网格线")
+
+        # 9. 添加x/y轴线（像Godot一样）
+        # x轴线（红色，水平方向）
+        x_axis_pen = QPen(QColor(200, 50, 50), 0)  # 降低饱和度的红色，最细
+        x_axis = self.canvas_scene.addLine(-10000, 0, 10000, 0, x_axis_pen)
+        map_container.addToGroup(x_axis)
+
+        # y轴线（绿色，垂直方向）
+        y_axis_pen = QPen(QColor(50, 200, 50), 0)  # 降低饱和度的绿色，最细
+        y_axis = self.canvas_scene.addLine(0, -10000, 0, 10000, y_axis_pen)
+        map_container.addToGroup(y_axis)
+        print("DEBUG: 添加x/y轴线")
 
         # 7. 彻底重置所有变换（非常重要）
         self.canvas_manager.resetTransform()
@@ -339,6 +352,12 @@ class MapEditorManager(QObject):
         """设置当前编辑工具"""
         self.current_tool = tool_name
         print(f"当前工具: {tool_name}")
+
+    def toggle_grid_visibility(self, visible):
+        """控制网格线的显示/隐藏"""
+        for line in self.grid_lines:
+            line.setVisible(visible)
+        print(f"网格线显示状态: {'显示' if visible else '隐藏'}")
 
     def set_current_tile(self, tile_id):
         """设置当前选中的瓦片ID"""

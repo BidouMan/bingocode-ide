@@ -18,8 +18,8 @@ class MapDataModel(QObject):
     def _initialize_default_data(self):
         """初始化默认地图数据"""
         self.map_data = {
-            "width": 10,          # 地图宽度（瓦片数量）
-            "height": 10,         # 地图高度（瓦片数量）
+            "width": 40,          # 地图宽度（瓦片数量）- 640/16=40
+            "height": 30,         # 地图高度（瓦片数量）- 480/16=30
             "tile_size": 16,      # 瓦片大小（像素）
             "layers": [           # 地图图层
                 {

@@ -89,6 +89,11 @@ class AppController:
             self.map_editor.handle_resource_upload
         )
 
+        # 地图编辑器网格显示/隐藏按钮
+        self.ui.btn_editor_map_gird.toggled.connect(
+            self.map_editor.toggle_grid_visibility
+        )
+
         # 菜单栏按钮_>文件管理
         self.menu_manager.open_file_signal.connect(self.handle_open_project)
         self.menu_manager.save_file_signal.connect(self.handle_save_project)
