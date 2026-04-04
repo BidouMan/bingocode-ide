@@ -39,42 +39,33 @@ class MapCanvas(QGraphicsView):
         self.setBackgroundBrush(QBrush(QColor("#21252b")))
 
     def wheelEvent(self, event: QWheelEvent):
-        """缩放逻辑：完美实现以鼠标位置为中心的缩放"""
-        # 使用合适的缩放系数，确保缩放平滑
-        zoom_in_factor = 1.1
-        zoom_out_factor = 1 / zoom_in_factor
-        zoom_factor = zoom_in_factor if event.angleDelta().y() > 0 else zoom_out_factor
-
-        new_zoom = self._zoom_level * zoom_factor
-
+        """缩放逻辑：工业级实现 - 基于点的缩放（Point-based Zooming）"""
+        # 1. 记录缩放前的"锚点"场景坐标
+        mouse_pos = event.position().toPoint()
+        scene_pos = self.mapToScene(mouse_pos)
+        
+        # 2. 计算新缩放倍率
+        factor = 1.15 if event.angleDelta().y() > 0 else 1/1.15
+        new_zoom = self._zoom_level * factor
+        
         if self._min_zoom <= new_zoom <= self._max_zoom:
-            # 获取鼠标在视图中的位置
-            mouse_pos = event.position().toPoint()
-            
-            # 关键：缩放前记录鼠标指向的场景坐标
-            scene_pos_before = self.mapToScene(mouse_pos)
-            
-            # 临时禁用自动锚点，避免Qt的内置行为干扰
-            self.setTransformationAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
-            
-            # 执行缩放操作
-            self.scale(zoom_factor, zoom_factor)
+            # 3. 执行物理缩放
+            self.scale(factor, factor)
             self._zoom_level = new_zoom
             
-            # 缩放后计算鼠标新的场景坐标
-            scene_pos_after = self.mapToScene(mouse_pos)
+            # 4. 关键：计算补偿位移
+            # 缩放后，原来的scene_pos在视口中的新位置
+            new_mouse_pos = self.mapFromScene(scene_pos)
             
-            # 计算需要平移的偏移量，确保鼠标位置不变
-            offset = scene_pos_before - scene_pos_after
+            # 计算新位置与实际鼠标位置的偏差
+            delta = new_mouse_pos - mouse_pos
             
-            # 应用平移，精确保持鼠标位置
-            if not offset.isNull():
-                self.translate(offset.x(), offset.y())
+            # 5. 调整滚动条，把偏差抵消掉
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() + delta.x())
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() + delta.y())
             
             # 刷新视图
             self.viewport().update()
-        else:
-            pass
         
         # 阻止事件传递，避免默认滚动行为
         event.accept()
