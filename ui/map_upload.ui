@@ -132,7 +132,7 @@
        </widget>
       </item>
       <item>
-       <widget class="QPushButton" name="btn_paint">
+       <widget class="QPushButton" name="btn_creat">
         <property name="minimumSize">
          <size>
           <width>0</width>
@@ -150,7 +150,7 @@
         </property>
         <property name="icon">
          <iconset resource="../assets/resources.qrc">
-          <normaloff>:/icons/icon--paint.svg</normaloff>:/icons/icon--paint.svg</iconset>
+          <normaloff>:/icons/编辑.svg</normaloff>:/icons/编辑.svg</iconset>
         </property>
         <property name="iconSize">
          <size>

@@ -414,7 +414,8 @@ QToolTip {
     background-color: red;
 }
 
-UploadMenuManager #menu_frame{
+UploadMenuManager #menu_frame,
+MapUploadMenuManager #menu_frame{
     /* 设置背景色，这里用了一个深灰色，你可以换成你喜欢的颜色 */
     background-color: #4B9B5C; 
     
@@ -430,7 +431,8 @@ UploadMenuManager #menu_frame{
     border-bottom: none; /* 底部不要边框，方便和按钮对接 */
 }
 
-UploadMenuManager QPushButton {
+UploadMenuManager QPushButton,
+MapUploadMenuManager QPushButton {
     border: none;
     background-color: transparent;
     padding: 0px;
@@ -441,13 +443,17 @@ UploadMenuManager QPushButton {
 /* 2. 通用的 Hover 状态 */
 UploadMenuManager #menu_frame QPushButton#btn_import:hover,
 UploadMenuManager #menu_frame QPushButton#btn_paint:hover,
-UploadMenuManager #menu_frame QPushButton#btn_open:hover {
+UploadMenuManager #menu_frame QPushButton#btn_open:hover,
+MapUploadMenuManager #menu_frame QPushButton#btn_import:hover,
+MapUploadMenuManager #menu_frame QPushButton#btn_creat:hover,
+MapUploadMenuManager #menu_frame QPushButton#btn_open:hover {
     background-color: #5bc772;
 }
 
 /* 🚀 3. 特殊处理：解决最顶端按钮的高亮溢出 */
 /* 假设 btn_import 是最上面的那个按钮 */
-UploadMenuManager QPushButton#btn_import:hover {
+UploadMenuManager QPushButton#btn_import:hover,
+MapUploadMenuManager QPushButton#btn_import:hover {
     border-top-left-radius: 15px;
     border-top-right-radius: 15px;
 }

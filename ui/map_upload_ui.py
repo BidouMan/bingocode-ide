@@ -59,17 +59,17 @@ class Ui_upload_menu(object):
 
         self.verticalLayout.addWidget(self.btn_import)
 
-        self.btn_paint = QPushButton(self.menu_frame)
-        self.btn_paint.setObjectName(u"btn_paint")
-        self.btn_paint.setMinimumSize(QSize(0, 30))
-        self.btn_paint.setMaximumSize(QSize(16777215, 30))
+        self.btn_creat = QPushButton(self.menu_frame)
+        self.btn_creat.setObjectName(u"btn_creat")
+        self.btn_creat.setMinimumSize(QSize(0, 30))
+        self.btn_creat.setMaximumSize(QSize(16777215, 30))
         icon1 = QIcon()
-        icon1.addFile(u":/icons/icon--paint.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
-        self.btn_paint.setIcon(icon1)
-        self.btn_paint.setIconSize(QSize(20, 20))
-        self.btn_paint.setFlat(True)
+        icon1.addFile(u":/icons/\u7f16\u8f91.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
+        self.btn_creat.setIcon(icon1)
+        self.btn_creat.setIconSize(QSize(20, 20))
+        self.btn_creat.setFlat(True)
 
-        self.verticalLayout.addWidget(self.btn_paint)
+        self.verticalLayout.addWidget(self.btn_creat)
 
         self.btn_open = QPushButton(self.menu_frame)
         self.btn_open.setObjectName(u"btn_open")
@@ -122,7 +122,7 @@ class Ui_upload_menu(object):
     def retranslateUi(self, upload_menu):
         upload_menu.setWindowTitle(QCoreApplication.translate("upload_menu", u"Form", None))
         self.btn_import.setText("")
-        self.btn_paint.setText("")
+        self.btn_creat.setText("")
         self.btn_open.setText("")
         self.btn_upload.setText("")
     # retranslateUi

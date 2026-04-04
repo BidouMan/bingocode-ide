@@ -28,7 +28,7 @@ from PySide6.QtGui import (
     QPainter,
     QPen,
 )
-from modules.upload_menu_manager import UploadMenuManager
+from modules.upload_menu_manager import UploadMenuManager, MapUploadMenuManager
 
 
 class SpriteDelegate(QStyledItemDelegate):
@@ -311,10 +311,15 @@ class ResourceManager(QObject):
 
         self.refresh_code_list()  # 刷新代码列表
         self.refresh_sprite_grid()  # 💡 现在刷新就不会报错了，因为 layout 已经准备好了
+        self.refresh_map_list()  # 刷新地图列表
 
         # 5. 上传菜单管理
         self.sprite_upload_menu = UploadMenuManager(self.ui.page_sprite)
         self.sprite_upload_menu.on_import_finished = self.handle_sprite_import_success
+        
+        # 地图上传菜单管理
+        self.map_upload_menu = MapUploadMenuManager(self.ui.page_map)
+        self.map_upload_menu.on_import_finished = self.handle_map_import_success
 
     def setup_list_styles(self):
         lw = self.ui.list_code
@@ -390,6 +395,8 @@ class ResourceManager(QObject):
                 self.refresh_code_list()
             elif target_page == self.ui.page_sprite:
                 self.refresh_sprite_grid()
+            elif target_page == self.ui.page_map:
+                self.refresh_map_list()
 
     def refresh_code_list(self):
         if not hasattr(self.ui, "list_code"):
@@ -1098,3 +1105,35 @@ class ResourceManager(QObject):
                     )
             except Exception as e:
                 QMessageBox.critical(self.window, "错误", f"无法删除文件夹: {e}")
+
+    def refresh_map_list(self):
+        """刷新地图列表"""
+        if not hasattr(self.ui, "list_map"):
+            return
+        self.ui.list_map.clear()
+
+        project_root = self.app_controller.project_manager.project_root
+        if not project_root or not os.path.exists(project_root):
+            return
+
+        try:
+            maps_dir = os.path.join(project_root, "assets", "maps")
+            if os.path.exists(maps_dir):
+                map_files = [
+                    f
+                    for f in os.listdir(maps_dir)
+                    if f.endswith(".json") and not f.startswith(".")
+                ]
+                map_files.sort()
+
+                for file_name in map_files:
+                    item = QListWidgetItem(self.ui.list_map)
+                    item.setText(os.path.splitext(file_name)[0])
+                    item.setData(Qt.ItemDataRole.UserRole, file_name)
+                    item.setSizeHint(QSize(0, 45))
+        except Exception as e:
+            print(f"刷新地图列表失败: {e}")
+
+    def handle_map_import_success(self, map_name, file_paths, is_bgs=False):
+        """处理地图导入成功的回调"""
+        self.refresh_map_list()
