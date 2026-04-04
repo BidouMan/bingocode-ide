@@ -242,6 +242,10 @@ class MapEditorManager(QObject):
         tile_size = self.map_model.get_tile_size()
         print(f"DEBUG: 地图尺寸: {width}x{height}, 图块大小: {tile_size}")
 
+        # 设置地图模型引用给画布管理器，用于动态网格绘制
+        self.canvas_manager.map_model = self.map_model
+        self.canvas_manager.tile_size = tile_size
+
         # 4. 设置场景大小
         scene_width = width * tile_size
         scene_height = height * tile_size
@@ -262,21 +266,8 @@ class MapEditorManager(QObject):
         self.canvas_scene.addItem(map_container)
 
         # 7. 绘制可见的瓦片网格，以游戏引擎坐标系统（左上角(0,0)）为原点
-        pen = QPen(
-            QColor(196, 93, 41, 64), 0
-        )  # rgb(196, 93, 41)网格线，最细，透明度降低一半
-        self.grid_lines.clear()  # 清空之前的网格线
-        for x in range(width + 1):
-            line_x = x * tile_size
-            line = self.canvas_scene.addLine(line_x, 0, line_x, scene_height, pen)
-            map_container.addToGroup(line)
-            self.grid_lines.append(line)
-        for y in range(height + 1):
-            line_y = y * tile_size
-            line = self.canvas_scene.addLine(0, line_y, scene_width, line_y, pen)
-            map_container.addToGroup(line)
-            self.grid_lines.append(line)
-        print("DEBUG: 添加rgb(196, 93, 41)网格线")
+        # 网格线现在在画布的drawBackground中动态绘制
+        print("DEBUG: 网格线将在画布drawBackground中动态绘制")
 
         # 9. 添加x/y轴线（像Godot一样）
         # x轴线（红色，水平方向）
@@ -361,13 +352,16 @@ class MapEditorManager(QObject):
 
     def set_tool(self, tool_name):
         """设置当前编辑工具"""
+        # 切换工具时清除预览
+        self._remove_preview()
         self.current_tool = tool_name
         print(f"当前工具: {tool_name}")
 
     def toggle_grid_visibility(self, visible):
         """控制网格线的显示/隐藏"""
-        for line in self.grid_lines:
-            line.setVisible(visible)
+        if self.canvas_manager:
+            self.canvas_manager._grid_visible = visible
+            self.canvas_manager.viewport().update()
         print(f"网格线显示状态: {'显示' if visible else '隐藏'}")
 
     def set_current_tile(self, tile_id):
@@ -794,26 +788,21 @@ class MapEditorManager(QObject):
                         tile_size = self.map_model.get_tile_size()
                         new_x = int(self.selected_item.pos().x() / tile_size)
                         new_y = int(self.selected_item.pos().y() / tile_size)
+                        original_x, original_y = self.original_tile_pos
 
                         # 获取原始位置的图块ID
-                        layer = self.map_model.get_layer(self.current_layer)
-                        if layer and layer["tiles"] is not None:
-                            original_x, original_y = self.original_tile_pos
-                            if (
-                                0 <= original_x < layer["tiles"].shape[1]
-                                and 0 <= original_y < layer["tiles"].shape[0]
-                            ):
-                                tile_id = layer["tiles"][original_y, original_x]
-
-                                # 清除原始位置
-                                self.map_model.set_tile(
-                                    self.current_layer, original_x, original_y, 0
-                                )
-
-                                # 设置新位置
-                                self.map_model.set_tile(
-                                    self.current_layer, new_x, new_y, tile_id
-                                )
+                        tile_id = self.map_model.get_tile(
+                            self.current_layer, original_x, original_y
+                        )
+                        if tile_id > 0:
+                            # 先清除原始位置
+                            self.map_model.set_tile(
+                                self.current_layer, original_x, original_y, 0
+                            )
+                            # 然后设置新位置
+                            self.map_model.set_tile(
+                                self.current_layer, new_x, new_y, tile_id
+                            )
 
                     # 取消选中状态
                     self.selected_item = None
@@ -1098,12 +1087,57 @@ class MapEditorManager(QObject):
     def _remove_preview(self):
         """移除预览图块"""
         try:
+            print(f"DEBUG: 开始移除预览 - preview_item: {self.preview_item}")
+
+            # 移除当前预览项
             if self.preview_item:
                 scene = self.canvas_manager.scene()
+                print(f"DEBUG: 场景: {scene}")
                 if scene:
+                    print(f"DEBUG: 从场景中移除预览项")
                     scene.removeItem(self.preview_item)
                 self.preview_item = None
+                print(f"DEBUG: 预览项已设置为None")
+
+            # 清理地图场景中所有可能残留的预览项
+            scene = self.canvas_manager.scene()
+            if scene:
+                from PySide6.QtWidgets import QGraphicsPixmapItem
+
+                items = scene.items()
+                for item in items:
+                    if isinstance(item, QGraphicsPixmapItem) and item.zValue() == 100:
+                        print(f"DEBUG: 发现并移除地图场景中的残留预览项: {item}")
+                        scene.removeItem(item)
+
+            # 清理资源列表视图场景中的预览项
+            if self.res_list_view:
+                res_scene = self.res_list_view.scene()
+                if res_scene:
+                    from PySide6.QtWidgets import QGraphicsPixmapItem
+
+                    res_items = res_scene.items()
+                    for item in res_items:
+                        if (
+                            isinstance(item, QGraphicsPixmapItem)
+                            and item.zValue() == 100
+                        ):
+                            print(
+                                f"DEBUG: 发现并移除资源列表场景中的残留预览项: {item}"
+                            )
+                            res_scene.removeItem(item)
+
             self.preview_tile_pos = None
+            print(f"DEBUG: 预览位置已清除")
+
+            # 强制刷新场景和视图
+            if scene:
+                scene.update()
+            if self.canvas_manager:
+                self.canvas_manager.viewport().update()
+            if self.res_list_view:
+                self.res_list_view.viewport().update()
+            print(f"DEBUG: 场景和视图已刷新")
         except Exception as e:
             print(f"移除预览错误: {e}")
 
@@ -1448,8 +1482,8 @@ class MapEditorManager(QObject):
             self.ui.btn_editor_map_draw.setChecked(tool == "draw")
             self.ui.btn_editor_map_erase.setChecked(tool == "erase")
 
-        # 切换到擦除模式时移除预览图
-        if tool == "erase":
+        # 切换到移动或擦除模式时移除预览图
+        if tool == "erase" or tool == "move":
             self._remove_preview()
         # 切换到绘制模式时，如果已选中资源，显示预览
         elif tool == "draw" and self.selected_resource_index >= 0:

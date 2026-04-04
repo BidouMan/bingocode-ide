@@ -15,6 +15,9 @@ class SmartCanvas(QGraphicsView):
         # 去掉边框
         self.setFrameStyle(QFrame.NoFrame)
         self._init_settings()
+        # 地图模型引用
+        self.map_model = None
+        self.tile_size = 16
 
     def _init_settings(self):
         """性能与交互初始设置"""
@@ -133,27 +136,12 @@ class SmartCanvas(QGraphicsView):
         super().mouseReleaseEvent(event)
 
     def drawBackground(self, painter: QPainter, rect):
-        """绘制浅灰工作区 + 素材区棋盘格"""
-        painter.fillRect(rect, QColor("#f0f0f0"))
-
-        if not self.scene():
-            return
-        items = self.scene().items()
-        if not items:
-            return
-
-        content_rect = items[0].boundingRect()
-        visible_content_area = rect.intersected(content_rect)
-
-        if not visible_content_area.isEmpty():
-            painter.save()
-            painter.setClipRect(visible_content_area)
-            grid_step = 8 if self._zoom_level > 2.0 else 16
-            self._render_checkerboard(painter, visible_content_area, grid_step)
-            painter.restore()
-
-            if self._zoom_level > 8.0:
-                self._draw_pixel_grid(painter, content_rect)
+        """绘制背景和动态网格线"""
+        painter.fillRect(rect, QColor(30, 30, 30))
+        
+        # 如果有地图模型，绘制动态网格线
+        if self.map_model:
+            self._draw_dynamic_grid(painter, rect)
 
     def _render_checkerboard(self, painter, rect, step):
         """高性能棋盘格绘制"""
@@ -173,6 +161,67 @@ class SmartCanvas(QGraphicsView):
                 curr_x += step
             curr_y += step
 
+    def _draw_dynamic_grid(self, painter, rect):
+        """绘制动态网格线 - 只显示绘制区域周围的网格"""
+        import numpy as np
+        
+        # 获取当前图层的瓦片数据
+        layer = self.map_model.get_layer(0)
+        if not layer or layer["tiles"] is None:
+            return
+        
+        tile_data = layer["tiles"]
+        
+        # 获取所有非零的瓦片位置
+        y_indices, x_indices = np.where(tile_data > 0)
+        
+        # 设置网格线样式
+        grid_pen = QPen(QColor(196, 93, 41, 64), 0)
+        painter.setPen(grid_pen)
+        
+        if len(y_indices) > 0:
+            # 有绘制内容时，显示绘制区域周围的网格
+            # 计算绘制区域的边界
+            min_x = np.min(x_indices) - self.map_model.coord_offset
+            max_x = np.max(x_indices) - self.map_model.coord_offset
+            min_y = np.min(y_indices) - self.map_model.coord_offset
+            max_y = np.max(y_indices) - self.map_model.coord_offset
+            
+            # 向外扩展4个格子
+            expand_size = 4
+            grid_min_x = min_x - expand_size
+            grid_max_x = max_x + expand_size
+            grid_min_y = min_y - expand_size
+            grid_max_y = max_y + expand_size
+            
+            # 绘制垂直线
+            for x in range(grid_min_x, grid_max_x + 1):
+                line_x = x * self.tile_size
+                painter.drawLine(line_x, grid_min_y * self.tile_size, line_x, grid_max_y * self.tile_size)
+            
+            # 绘制水平线
+            for y in range(grid_min_y, grid_max_y + 1):
+                line_y = y * self.tile_size
+                painter.drawLine(grid_min_x * self.tile_size, line_y, grid_max_x * self.tile_size, line_y)
+        else:
+            # 没有绘制内容时，显示中心区域的网格
+            # 显示以原点为中心的20x20网格
+            center_size = 10  # 中心10x10个格子
+            grid_min_x = -center_size
+            grid_max_x = center_size
+            grid_min_y = -center_size
+            grid_max_y = center_size
+            
+            # 绘制垂直线
+            for x in range(grid_min_x, grid_max_x + 1):
+                line_x = x * self.tile_size
+                painter.drawLine(line_x, grid_min_y * self.tile_size, line_x, grid_max_y * self.tile_size)
+            
+            # 绘制水平线
+            for y in range(grid_min_y, grid_max_y + 1):
+                line_y = y * self.tile_size
+                painter.drawLine(grid_min_x * self.tile_size, line_y, grid_max_x * self.tile_size, line_y)
+    
     def _draw_pixel_grid(self, painter, scene_rect):
         """像素网格线"""
         painter.save()
@@ -185,8 +234,8 @@ class SmartCanvas(QGraphicsView):
             int(scene_rect.right()),
             int(scene_rect.bottom()),
         )
-        for x in range(l, r + 1):
+        for x in range(l, r + 1, 1):
             painter.drawLine(x, t, x, b)
-        for y in range(t, b + 1):
+        for y in range(t, b + 1, 1):
             painter.drawLine(l, y, r, y)
         painter.restore()
