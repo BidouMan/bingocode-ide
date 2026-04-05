@@ -48,6 +48,8 @@ class AppController:
 
         # 注入地图编辑器管理器
         self.map_editor = MapEditorManager()
+        # 设置项目管理器
+        self.map_editor.project_manager = self.project_manager
         # 初始化地图编辑器的资源列表视图，确保默认页面时上传按钮能工作
         self.map_editor.set_res_list_view(self.ui.res_list_view)
 
@@ -143,6 +145,8 @@ class AppController:
 
         # 3. 绑定资源双击信号：双击即加载并切到编辑页面
         self.res_manager.sig_sprite_selected.connect(self._open_and_switch_to_editor)
+        # 4. 绑定地图双击信号：双击即加载并切到地图编辑页面
+        self.res_manager.sig_map_selected.connect(self._open_and_switch_to_map_editor)
 
     def _open_and_switch_to_editor(self, path):
         print(f"🛎️ [AppController] 收到编辑请求，目标路径: {path}")
@@ -153,6 +157,19 @@ class AppController:
 
         # 2. 通知编辑器加载数据
         self.sprite_editor.load_sprite(path)
+
+    def _open_and_switch_to_map_editor(self, path):
+        print(f"🛎️ [AppController] 收到地图编辑请求，目标路径: {path}")
+
+        # 1. 切换到地图编辑页面
+        self.ui.editor_stacked.setCurrentIndex(2)
+
+        # 2. 初始化地图编辑器的画布
+        self.map_editor.set_canvas_widget(self.ui.editor_map_canvas)
+        self.map_editor.set_res_list_view(self.ui.res_list_view)
+
+        # 3. 加载地图文件
+        self.map_editor.load_map_from_path(path)
 
     def handle_new_project(self):
         """新建项目：重置并初始化运行目标"""

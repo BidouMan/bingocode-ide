@@ -274,6 +274,7 @@ class CodeItemWidget(QWidget):
 class ResourceManager(QObject):
     sig_sprite_selected = Signal(str)  # 双击卡片时：发送文件夹绝对路径
     sig_sprite_imported = Signal(str)  # 导入成功时：发送文件夹绝对路径
+    sig_map_selected = Signal(str)  # 双击地图卡片时：发送地图文件绝对路径
 
     def __init__(self, main_ui, parent_window, app_controller):
         super().__init__()
@@ -972,9 +973,10 @@ class ResourceManager(QObject):
         # card.mouseDoubleClickEvent = lambda event: self.start_sprite_rename(card, name)
         def on_double_click(event):
             project_root = self.app_controller.project_manager.project_root
-            full_path = os.path.join(project_root, "assets", "sprites", name)
-            # 🚀 发射选中信号，通知 AppController 切换页面并加载
-            self.sig_sprite_selected.emit(full_path)
+            # 每个地图有独立文件夹，路径格式：maps/地图名称/地图名称.json
+            full_path = os.path.join(project_root, "assets", "maps", name, f"{name}.json")
+            # 🚀 发射选中信号，通知 AppController 切换页面并加载地图
+            self.sig_map_selected.emit(full_path)
 
         card.mouseDoubleClickEvent = on_double_click
 
@@ -1255,17 +1257,20 @@ class ResourceManager(QObject):
         try:
             maps_dir = os.path.join(project_root, "assets", "maps")
             if os.path.exists(maps_dir):
-                map_files = [
-                    f
-                    for f in os.listdir(maps_dir)
-                    if f.endswith(".json") and not f.startswith(".")
+                # 扫描所有子文件夹，每个地图有独立文件夹
+                map_folders = [
+                    d
+                    for d in os.listdir(maps_dir)
+                    if not d.startswith(".") and os.path.isdir(os.path.join(maps_dir, d))
                 ]
-                map_files.sort()
+                map_folders.sort()
 
-                for i, file_name in enumerate(map_files):
-                    map_name = os.path.splitext(file_name)[0]
-                    self.add_map_card(map_name, i)
-                    print(f"DEBUG: 加载地图文件: {file_name}")
+                for i, folder_name in enumerate(map_folders):
+                    # 每个地图文件夹内有对应的json文件
+                    map_file_path = os.path.join(maps_dir, folder_name, f"{folder_name}.json")
+                    if os.path.exists(map_file_path):
+                        self.add_map_card(folder_name, i)
+                        print(f"DEBUG: 加载地图文件: {folder_name}.json")
         except Exception as e:
             print(f"刷新地图列表失败: {e}")
 
@@ -1279,21 +1284,28 @@ class ResourceManager(QObject):
         map_count = self.map_grid_layout.count()
         map_name = f"地图{map_count + 1}"
         
-        # 保存地图数据到文件
+        # 保存地图数据到文件 - 每个地图一个独立文件夹
         project_root = self.app_controller.project_manager.project_root
         if project_root:
             maps_dir = os.path.join(project_root, "assets", "maps")
-            os.makedirs(maps_dir, exist_ok=True)
+            map_folder = os.path.join(maps_dir, map_name)
+            tilesets_dir = os.path.join(map_folder, "tilesets")
             
-            # 创建地图文件路径
-            map_file_path = os.path.join(maps_dir, f"{map_name}.json")
+            # 创建必要的目录结构 - 每个地图有独立文件夹
+            os.makedirs(map_folder, exist_ok=True)
+            os.makedirs(tilesets_dir, exist_ok=True)
+            
+            # 创建地图文件路径 - JSON文件放在地图文件夹内
+            map_file_path = os.path.join(map_folder, f"{map_name}.json")
             
             # 使用地图编辑器的地图模型保存地图数据
             if hasattr(self.app_controller, "map_editor") and self.app_controller.map_editor:
                 map_model = self.app_controller.map_editor.map_model
                 if map_model:
-                    map_model.save(map_file_path)
-                    print(f"DEBUG: 地图已保存到: {map_file_path}")
+                    # 设置当前地图路径，用于自动保存
+                    self.app_controller.map_editor.current_map_path = map_file_path
+                    save_result = map_model.save(map_file_path)
+                    print(f"DEBUG: 地图已保存到: {map_file_path}, 结果: {save_result}")
         
         # 创建地图卡片
         self.add_map_card(map_name, map_count)

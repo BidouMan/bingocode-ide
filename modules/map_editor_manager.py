@@ -18,6 +18,7 @@ from PySide6.QtGui import (
     QWheelEvent,
     QPainter,
     QCursor,
+    QImage,
 )
 from models.map_model import MapDataModel
 from modules.map_resource_import_dialog import MapResourceImportDialog
@@ -186,7 +187,9 @@ class MapEditorManager(QObject):
 
         # 资源列表相关
         self.res_list_view = None
-        self.uploaded_resources = []  # 存储上传的资源
+        # 按地图路径存储资源，实现资源隔离
+        self.map_resources = {}  # {map_path: [resources]}
+        self.current_resources = []  # 当前地图的资源
         self.selected_resource_index = -1  # 当前选中的资源索引
         self.selected_tile_index = -1  # 当前选中的图块索引
         self.resource_items = []  # 存储资源项的图形项
@@ -195,6 +198,7 @@ class MapEditorManager(QObject):
         # 预览相关
         self.preview_item = None  # 预览图块项
         self.preview_tile_pos = None  # 预览图块位置
+        self._is_updating_preview = False  # 防止预览更新无限循环的标志
 
         # 网格线相关
         self.grid_lines = []  # 存储网格线对象，用于控制显示/隐藏
@@ -207,6 +211,14 @@ class MapEditorManager(QObject):
         self.selected_item = None
         self.drag_start_pos = None
         self.original_tile_pos = None  # 原始瓦片位置
+
+        # 地图路径相关
+        self.current_map_path = None  # 当前地图文件路径
+        self.is_map_modified = False  # 地图是否被修改
+
+        # 单画布图层模式相关属性
+        self.map_layer_image = None  # 地图图层的QImage
+        self.map_layer_item = None  # 地图图层的QGraphicsPixmapItem
 
     def _initialize_map_model(self):
         """初始化地图数据模型"""
@@ -295,6 +307,28 @@ class MapEditorManager(QObject):
         self.canvas_manager.centerOn(80, 80)
         print("DEBUG: 红色网格已完整显示在画布范围内")
 
+        # 创建单画布图层
+        # 创建大的QImage作为地图图层画布
+        canvas_width = 4096
+        canvas_height = 4096
+        self.map_layer_image = QImage(
+            canvas_width, canvas_height, QImage.Format_ARGB32_Premultiplied
+        )
+        self.map_layer_image.fill(Qt.transparent)
+
+        # 创建QGraphicsPixmapItem
+        self.map_layer_item = QGraphicsPixmapItem()
+        self.map_layer_item.setPixmap(QPixmap.fromImage(self.map_layer_image))
+
+        # 设置图层位置（居中）
+        offset_x = canvas_width // 2
+        offset_y = canvas_height // 2
+        self.map_layer_item.setPos(-offset_x, -offset_y)
+
+        # 添加到场景
+        self.canvas_scene.addItem(self.map_layer_item)
+        print("DEBUG: 单画布图层已创建")
+
         # 10. 绑定鼠标事件
         self._bind_mouse_events()
 
@@ -380,6 +414,189 @@ class MapEditorManager(QObject):
         self._initialize_map_model()
         self._update_canvas()
 
+    def load_map_from_path(self, file_path):
+        """从指定路径加载地图"""
+        if file_path:
+            print(f"DEBUG: 加载地图开始: {file_path}")
+            print(f"DEBUG: 当前地图路径: {self.current_map_path}")
+            print(f"DEBUG: 当前资源数量: {len(self.current_resources)}")
+
+            # 先清除之前的资源选择状态
+            self.selected_resource_index = -1
+            self.selected_tile_index = -1
+            # 清除预览
+            self._remove_preview()
+
+            # 加载地图数据
+            print(f"DEBUG: 开始加载地图数据: {file_path}")
+            if self.map_model.load(file_path):
+                print(f"DEBUG: 地图数据加载成功")
+                self.current_map_path = file_path
+                self.is_map_modified = False
+                self.map_loaded.emit(file_path)
+                print(f"地图已从: {file_path} 加载")
+
+                # 切换到当前地图的资源列表
+                if file_path not in self.map_resources:
+                    self.map_resources[file_path] = []
+                    print(f"DEBUG: 创建新的资源列表: {file_path}")
+                else:
+                    print(f"DEBUG: 使用已存在的资源列表: {file_path}")
+
+                # 从地图模型加载已保存的资源信息
+                tile_sets = self.map_model.get_tile_sets()
+                print(f"DEBUG: 从地图模型加载的瓦片集数量: {len(tile_sets)}")
+
+                # 扫描tilesets目录，加载已存在的图片资源 - 每个地图独立的tilesets目录
+                map_dir = os.path.dirname(file_path)
+                tilesets_dir = os.path.join(map_dir, "tilesets")
+                print(f"DEBUG: 扫描tilesets目录: {tilesets_dir}")
+
+                if os.path.exists(tilesets_dir):
+                    # 获取所有图片文件
+                    image_files = []
+                    for file in os.listdir(tilesets_dir):
+                        if file.lower().endswith(
+                            (".png", ".jpg", ".jpeg", ".gif", ".bmp")
+                        ):
+                            image_files.append(file)
+                    print(f"DEBUG: 找到图片文件: {image_files}")
+
+                    # 加载图片资源
+                    for image_file in image_files:
+                        # 检查资源是否已存在
+                        exists = False
+                        for res in self.map_resources[file_path]:
+                            if res.get("name") == image_file:
+                                exists = True
+                                break
+
+                        if not exists:
+                            # 构建完整图片路径
+                            full_image_path = os.path.join(
+                                map_dir, "tilesets", image_file
+                            )
+                            # 加载图片以获取实际尺寸
+                            from PySide6.QtGui import QPixmap
+
+                            pixmap = QPixmap(full_image_path)
+                            if not pixmap.isNull():
+                                width = pixmap.width()
+                                height = pixmap.height()
+                            else:
+                                width = 32
+                                height = 32
+
+                            image_path = os.path.join("tilesets", image_file)
+
+                            # 检查地图模型中是否已有此资源
+                            tile_set_exists = False
+                            for tile_set in tile_sets:
+                                if tile_set.get("name") == image_file:
+                                    tile_set_exists = True
+                                    break
+
+                            # 检查地图模型中是否已有此资源的详细信息
+                            resource_type = "image"
+                            tile_size = 32  # 默认瓦片大小
+
+                            for tile_set in tile_sets:
+                                if tile_set.get("name") == image_file:
+                                    resource_type = tile_set.get(
+                                        "resource_type", "image"
+                                    )
+                                    # 如果是图块集，使用图块大小
+                                    if resource_type == "tileset":
+                                        tile_size = tile_set.get("tile_width", 32)
+                                    break
+
+                            resource_info = {
+                                "name": image_file,
+                                "path": image_path,
+                                "resource_type": resource_type,
+                                "tile_size": tile_size,
+                                "width": width,
+                                "height": height,
+                                "frames": 1,
+                            }
+                            self.map_resources[file_path].append(resource_info)
+
+                            # 如果地图模型中没有此资源，才添加
+                            if not tile_set_exists:
+                                self.map_model.add_tile_set(
+                                    name=image_file,
+                                    image_path=full_image_path,
+                                    tile_width=width,
+                                    tile_height=height,
+                                )
+                            print(f"DEBUG: 添加资源: {image_file}")
+                else:
+                    print(f"DEBUG: tilesets目录不存在: {tilesets_dir}")
+
+                # 从地图模型加载资源信息到当前资源列表
+                tile_sets = self.map_model.get_tile_sets()
+                for tile_set in tile_sets:
+                    # 构建资源信息
+                    resource_name = tile_set.get("name")
+                    image_path = tile_set.get("image_path")
+
+                    # 转换为相对路径
+                    if os.path.isabs(image_path):
+                        relative_path = os.path.relpath(image_path, map_dir)
+                    else:
+                        relative_path = image_path
+
+                    # 检查资源是否已存在
+                    exists = False
+                    for res in self.map_resources[file_path]:
+                        if res.get("name") == resource_name:
+                            exists = True
+                            break
+
+                    if not exists:
+                        # 获取图片尺寸
+                        from PySide6.QtGui import QPixmap
+
+                        pixmap = QPixmap(image_path)
+                        if not pixmap.isNull():
+                            width = pixmap.width()
+                            height = pixmap.height()
+                        else:
+                            width = tile_set.get("tile_width", 32)
+                            height = tile_set.get("tile_height", 32)
+
+                        resource_info = {
+                            "name": resource_name,
+                            "path": relative_path,
+                            "resource_type": "image",
+                            "tile_size": 32,
+                            "width": width,
+                            "height": height,
+                            "frames": 1,
+                        }
+                        self.map_resources[file_path].append(resource_info)
+                        print(f"DEBUG: 从地图模型加载资源: {resource_name}")
+
+                # 更新当前资源列表
+                self.current_resources = self.map_resources[file_path]
+                print(
+                    f"DEBUG: 当前资源列表更新为: {file_path}, 资源数量: {len(self.current_resources)}"
+                )
+
+                # 更新资源列表显示
+                self._update_res_list_display()
+                print(f"DEBUG: 资源列表显示已更新")
+
+                # 加载地图后立即更新画布显示
+                self._update_canvas()
+                print(f"DEBUG: 画布显示已更新")
+                print(
+                    f"切换到地图资源: {file_path}, 资源数量: {len(self.current_resources)}"
+                )
+            else:
+                print(f"DEBUG: 地图数据加载失败: {file_path}")
+                self.error_occurred.emit("加载地图失败")
+
     def save_map(self):
         """保存地图"""
         from PySide6.QtWidgets import QFileDialog
@@ -436,38 +653,25 @@ class MapEditorManager(QObject):
             print(f"地图模型: {self.map_model}")
 
     def _render_map(self):
-        """渲染地图"""
+        """渲染地图 - 单画布图层模式"""
         try:
-            if not self.canvas_manager:
+            if not self.canvas_manager or not self.map_layer_image:
                 return
 
-            scene = self.canvas_manager.scene()
-            if not scene:
-                return
+            # 清空画布
+            self.map_layer_image.fill(Qt.transparent)
+
+            # 创建QPainter绘制到单画布上
+            painter = QPainter(self.map_layer_image)
 
             # 获取地图数据
-            width, height = self.map_model.get_map_size()
             tile_size = self.map_model.get_tile_size()
 
-            print(
-                f"DEBUG: 渲染地图 - 地图尺寸: {width}x{height}, 瓦片大小: {tile_size}"
-            )
-
-            # 移除所有图块项（保留背景和网格）
-            items = scene.items()
-            for item in items:
-                # 只移除QPixmapItem类型的图块
-                from PySide6.QtWidgets import QGraphicsPixmapItem
-
-                if isinstance(item, QGraphicsPixmapItem) and item != self.preview_item:
-                    scene.removeItem(item)
-
-            # 绘制所有已绘制的瓦片
+            # 绘制当前图层的所有瓦片
             layer = self.map_model.get_layer(self.current_layer)
             if layer and layer["visible"]:
                 tile_data = layer["tiles"]
                 if tile_data is not None:
-                    # 导入numpy
                     import numpy as np
 
                     # 获取所有非零的瓦片位置
@@ -479,86 +683,103 @@ class MapEditorManager(QObject):
                         # 数组坐标减去偏移量得到实际坐标
                         actual_x = x - self.map_model.coord_offset
                         actual_y = y - self.map_model.coord_offset
-                        print(
-                            f"DEBUG: 渲染瓦片 - 数组坐标: ({x}, {y}), 实际坐标: ({actual_x}, {actual_y}), 瓦片ID: {stored_tile_id}"
-                        )
 
                         # 遍历所有资源，查找匹配的资源
                         for resource_index, resource in enumerate(
-                            self.uploaded_resources
+                            self.current_resources
                         ):
                             resource_type = resource.get("resource_type", "image")
 
                             if resource_type == "tileset":
-                                # 图块集合模式，渲染所有图块，而不仅仅是当前选中的图块
-                                # 加载资源图片
-                                from PySide6.QtGui import QPixmap
-
-                                pixmap = QPixmap(resource["path"])
-                                if not pixmap.isNull():
-                                    tile_size_resource = resource["tile_size"]
-
-                                    # 计算图块在原图中的位置
-                                    tiles_per_row = pixmap.width() // tile_size_resource
-                                    # 图块集合模式，图块ID格式：resource_index * 1000 + tile_index + 1
-                                    if stored_tile_id // 1000 == resource_index:
-                                        # 提取图块索引
-                                        tile_index = (stored_tile_id % 1000) - 1
-                                        if tile_index >= 0:
+                                # 图块集合模式，图块ID格式：resource_index * 1000 + tile_index + 1
+                                if stored_tile_id // 1000 == resource_index:
+                                    # 提取图块索引
+                                    tile_index = (stored_tile_id % 1000) - 1
+                                    if tile_index >= 0:
+                                        # 加载资源图片（处理相对路径）
+                                        image_path = resource["path"]
+                                        if not os.path.isabs(image_path):
+                                            if self.current_map_path:
+                                                map_dir = os.path.dirname(
+                                                    self.current_map_path
+                                                )
+                                                image_path = os.path.join(
+                                                    map_dir, image_path
+                                                )
+                                        pixmap = QPixmap(image_path)
+                                        if not pixmap.isNull():
+                                            tile_size_resource = resource["tile_size"]
+                                            tiles_per_row = (
+                                                pixmap.width() // tile_size_resource
+                                            )
                                             tile_row = tile_index // tiles_per_row
                                             tile_col = tile_index % tiles_per_row
-                                        else:
-                                            continue
-                                    else:
-                                        continue
 
-                                    # 裁剪图块
-                                    from PySide6.QtCore import QRectF
+                                            # 计算图块在原图中的位置
+                                            tile_rect = QRectF(
+                                                tile_col * tile_size_resource,
+                                                tile_row * tile_size_resource,
+                                                tile_size_resource,
+                                                tile_size_resource,
+                                            )
 
-                                    tile_rect = QRectF(
-                                        tile_col * tile_size_resource,
-                                        tile_row * tile_size_resource,
-                                        tile_size_resource,
-                                        tile_size_resource,
-                                    )
+                                            # 计算绘制位置（相对于画布中心）
+                                            canvas_center_x = (
+                                                self.map_layer_image.width() // 2
+                                            )
+                                            canvas_center_y = (
+                                                self.map_layer_image.height() // 2
+                                            )
+                                            draw_x = (
+                                                canvas_center_x + actual_x * tile_size
+                                            )
+                                            draw_y = (
+                                                canvas_center_y + actual_y * tile_size
+                                            )
 
-                                    # 创建图块的QPixmap
-                                    tile_pixmap = pixmap.copy(tile_rect.toRect())
-
-                                    # 添加到场景（保持原始尺寸）
-                                    from PySide6.QtWidgets import (
-                                        QGraphicsPixmapItem,
-                                    )
-
-                                    pixmap_item = QGraphicsPixmapItem(tile_pixmap)
-                                    # 使用实际坐标
-                                    actual_x = x - self.map_model.coord_offset
-                                    actual_y = y - self.map_model.coord_offset
-                                    pixmap_item.setPos(
-                                        actual_x * tile_size, actual_y * tile_size
-                                    )
-                                    scene.addItem(pixmap_item)
+                                            # 绘制图块到画布
+                                            painter.drawPixmap(
+                                                draw_x,
+                                                draw_y,
+                                                pixmap,
+                                                tile_rect.x(),
+                                                tile_rect.y(),
+                                                tile_rect.width(),
+                                                tile_rect.height(),
+                                            )
                             else:
                                 # 单张图片模式，图块ID格式：resource_index + 1
                                 if stored_tile_id == resource_index + 1:
-                                    # 加载资源图片
-                                    from PySide6.QtGui import QPixmap
-
-                                    pixmap = QPixmap(resource["path"])
+                                    # 加载资源图片（处理相对路径）
+                                    image_path = resource["path"]
+                                    if not os.path.isabs(image_path):
+                                        if self.current_map_path:
+                                            map_dir = os.path.dirname(
+                                                self.current_map_path
+                                            )
+                                            image_path = os.path.join(
+                                                map_dir, image_path
+                                            )
+                                    pixmap = QPixmap(image_path)
                                     if not pixmap.isNull():
-                                        # 添加到场景（保持原始尺寸）
-                                        from PySide6.QtWidgets import (
-                                            QGraphicsPixmapItem,
+                                        # 计算绘制位置（相对于画布中心）
+                                        canvas_center_x = (
+                                            self.map_layer_image.width() // 2
                                         )
+                                        canvas_center_y = (
+                                            self.map_layer_image.height() // 2
+                                        )
+                                        draw_x = canvas_center_x + actual_x * tile_size
+                                        draw_y = canvas_center_y + actual_y * tile_size
 
-                                        pixmap_item = QGraphicsPixmapItem(pixmap)
-                                        # 使用实际坐标
-                                        actual_x = x - self.map_model.coord_offset
-                                        actual_y = y - self.map_model.coord_offset
-                                        pixmap_item.setPos(
-                                            actual_x * tile_size, actual_y * tile_size
-                                        )
-                                        scene.addItem(pixmap_item)
+                                        # 绘制图片到画布
+                                        painter.drawPixmap(draw_x, draw_y, pixmap)
+
+            painter.end()
+
+            # 更新PixmapItem显示
+            if self.map_layer_item:
+                self.map_layer_item.setPixmap(QPixmap.fromImage(self.map_layer_image))
 
             # 刷新视图
             self.canvas_manager.viewport().update()
@@ -597,10 +818,15 @@ class MapEditorManager(QObject):
 
             # 获取选中的资源和图块
             if self.selected_resource_index >= 0 and self.selected_tile_index >= 0:
-                resource = self.uploaded_resources[self.selected_resource_index]
+                resource = self.current_resources[self.selected_resource_index]
 
-                # 加载资源图片
-                pixmap = QPixmap(resource["path"])
+                # 加载资源图片（处理相对路径）
+                image_path = resource["path"]
+                if not os.path.isabs(image_path):
+                    if self.current_map_path:
+                        map_dir = os.path.dirname(self.current_map_path)
+                        image_path = os.path.join(map_dir, image_path)
+                pixmap = QPixmap(image_path)
                 if pixmap.isNull():
                     return
 
@@ -831,7 +1057,7 @@ class MapEditorManager(QObject):
         try:
             if self.selected_resource_index >= 0:
                 # 获取选中的资源
-                resource = self.uploaded_resources[self.selected_resource_index]
+                resource = self.current_resources[self.selected_resource_index]
                 resource_type = resource.get("resource_type", "image")
 
                 # 获取图块大小
@@ -858,7 +1084,13 @@ class MapEditorManager(QObject):
                     # 获取图片实际大小
                     from PySide6.QtGui import QPixmap
 
-                    pixmap = QPixmap(resource["path"])
+                    # 处理相对路径
+                    image_path = resource["path"]
+                    if not os.path.isabs(image_path):
+                        if self.current_map_path:
+                            map_dir = os.path.dirname(self.current_map_path)
+                            image_path = os.path.join(map_dir, image_path)
+                    pixmap = QPixmap(image_path)
                     if pixmap.isNull():
                         return
                     tile_width = pixmap.width()
@@ -903,7 +1135,7 @@ class MapEditorManager(QObject):
                         # 查找对应的资源
                         found = False
                         for resource_index, resource in enumerate(
-                            self.uploaded_resources
+                            self.current_resources
                         ):
                             resource_type = resource.get("resource_type", "image")
 
@@ -920,7 +1152,17 @@ class MapEditorManager(QObject):
                                     # 获取图片实际大小
                                     from PySide6.QtGui import QPixmap
 
-                                    pixmap = QPixmap(resource["path"])
+                                    # 处理相对路径
+                                    image_path = resource["path"]
+                                    if not os.path.isabs(image_path):
+                                        if self.current_map_path:
+                                            map_dir = os.path.dirname(
+                                                self.current_map_path
+                                            )
+                                            image_path = os.path.join(
+                                                map_dir, image_path
+                                            )
+                                    pixmap = QPixmap(image_path)
                                     if not pixmap.isNull():
                                         existing_tile_size = max(
                                             pixmap.width(), pixmap.height()
@@ -972,12 +1214,31 @@ class MapEditorManager(QObject):
                     self.current_layer, aligned_x, aligned_y, tile_id
                 )
                 print(f"DEBUG: 设置瓦片结果: {result}")
+
+                # 设置地图为已修改状态
+                self.is_map_modified = True
+
+                # 自动保存地图（如果当前地图有文件路径）
+                if self.current_map_path:
+                    save_result = self.map_model.save(self.current_map_path)
+                    print(
+                        f"DEBUG: 自动保存地图到: {self.current_map_path}, 结果: {save_result}"
+                    )
+
+                # 更新画布显示
+                self._update_canvas()
         except Exception as e:
             print(f"绘制瓦片错误: {e}")
 
     def _update_preview(self, screen_pos):
         """更新预览图块"""
         try:
+            # 防止无限循环
+            if self._is_updating_preview:
+                return
+
+            self._is_updating_preview = True
+
             if not self.canvas_manager or not self.map_model:
                 return
 
@@ -986,7 +1247,7 @@ class MapEditorManager(QObject):
                 self._remove_preview()
                 return
 
-            resource = self.uploaded_resources[self.selected_resource_index]
+            resource = self.current_resources[self.selected_resource_index]
             resource_type = resource.get("resource_type", "image")
 
             # 检查是否需要图块索引
@@ -1005,17 +1266,29 @@ class MapEditorManager(QObject):
                 # 获取图片实际大小
                 from PySide6.QtGui import QPixmap
 
-                pixmap = QPixmap(resource["path"])
+                # 处理相对路径
+                image_path = resource["path"]
+                if not os.path.isabs(image_path):
+                    if self.current_map_path:
+                        map_dir = os.path.dirname(self.current_map_path)
+                        image_path = os.path.join(map_dir, image_path)
+                pixmap = QPixmap(image_path)
                 if pixmap.isNull():
                     self._remove_preview()
                     return
                 tile_width = pixmap.width()
                 tile_height = pixmap.height()
 
-            # 加载资源图片
+            # 加载资源图片（处理相对路径）
             from PySide6.QtGui import QPixmap
 
-            pixmap = QPixmap(resource["path"])
+            # 处理相对路径
+            image_path = resource["path"]
+            if not os.path.isabs(image_path):
+                if self.current_map_path:
+                    map_dir = os.path.dirname(self.current_map_path)
+                    image_path = os.path.join(map_dir, image_path)
+            pixmap = QPixmap(image_path)
             if pixmap.isNull():
                 return
 
@@ -1070,7 +1343,7 @@ class MapEditorManager(QObject):
                 if aligned_tile_pos == self.preview_tile_pos:
                     return
 
-                # 更新预览位置
+                # 更新预览位置记录
                 self.preview_tile_pos = aligned_tile_pos
 
                 preview_pos = (aligned_x * tile_size, aligned_y * tile_size)
@@ -1083,6 +1356,9 @@ class MapEditorManager(QObject):
 
         except Exception as e:
             pass
+        finally:
+            # 重置标志
+            self._is_updating_preview = False
 
     def _remove_preview(self):
         """移除预览图块"""
@@ -1221,31 +1497,99 @@ class MapEditorManager(QObject):
             # 保存上传的资源
             for file_path in files:
                 if os.path.exists(file_path):
+                    # 获取当前地图名称
+                    map_name = "未知地图"
+                    if self.current_map_path:
+                        map_name = os.path.splitext(
+                            os.path.basename(self.current_map_path)
+                        )[0]
+
+                    # 创建tilesets目录 - 每个地图独立的tilesets目录
+                    if self.project_manager and self.current_map_path:
+                        # 获取地图文件所在目录（地图文件夹）
+                        map_dir = os.path.dirname(self.current_map_path)
+                        tilesets_dir = os.path.join(map_dir, "tilesets")
+                        os.makedirs(tilesets_dir, exist_ok=True)
+
+                        # 复制文件到当前地图的tilesets目录
+                        file_name = os.path.basename(file_path)
+                        dest_path = os.path.join(tilesets_dir, file_name)
+
+                        # 复制文件
+                        import shutil
+
+                        shutil.copy2(file_path, dest_path)
+
+                        # 使用相对路径（相对于地图文件）
+                        relative_path = os.path.join("tilesets", file_name)
+                    else:
+                        # 如果没有项目管理器，使用原始路径
+                        relative_path = file_path
+
+                    # 获取图片尺寸
+                    from PySide6.QtGui import QPixmap
+
+                    pixmap = QPixmap(file_path)
+                    if not pixmap.isNull():
+                        width = pixmap.width()
+                        height = pixmap.height()
+                    else:
+                        width = 32
+                        height = 32
+
                     resource_info = {
                         "name": os.path.basename(file_path),
-                        "path": file_path,
+                        "path": relative_path,
                         "resource_type": resource_type,
+                        "tile_size": tile_size if resource_type == "tileset" else 32,
+                        "width": width,
+                        "height": height,
+                        "frames": 1,
                     }
 
                     # 如果是图块集合，添加图块尺寸信息
                     if resource_type == "tileset":
-                        resource_info["tile_size"] = tile_size
                         resource_info["tiles"] = []  # 存储切割后的图块信息
 
-                    self.uploaded_resources.append(resource_info)
-                    print(f"DEBUG: 添加资源: {resource_info['name']}")
+                    # 添加到当前地图的资源列表
+                    if self.current_map_path:
+                        if self.current_map_path not in self.map_resources:
+                            self.map_resources[self.current_map_path] = []
+                        self.map_resources[self.current_map_path].append(resource_info)
+                        # 更新当前资源列表
+                        self.current_resources = self.map_resources[
+                            self.current_map_path
+                        ]
+
+                        # 添加到地图模型的tile_sets中
+                        if self.project_manager and self.current_map_path:
+                            map_dir = os.path.dirname(self.current_map_path)
+                            full_image_path = os.path.join(map_dir, relative_path)
+                            self.map_model.add_tile_set(
+                                name=resource_info["name"],
+                                image_path=full_image_path,
+                                tile_width=width,
+                                tile_height=height,
+                            )
+                    else:
+                        # 如果没有当前地图路径，添加到临时资源列表
+                        self.current_resources.append(resource_info)
+
+                    print(
+                        f"DEBUG: 添加资源: {resource_info['name']}, 保存路径: {relative_path}"
+                    )
 
             # 更新资源列表显示
-            print(f"DEBUG: 上传完成，资源总数: {len(self.uploaded_resources)}")
+            print(f"DEBUG: 上传完成，资源总数: {len(self.current_resources)}")
             self._update_res_list_display()
 
     def select_resource(self, index):
         """选择资源"""
         try:
-            if 0 <= index < len(self.uploaded_resources):
+            if 0 <= index < len(self.current_resources):
                 self.selected_resource_index = index
                 self.selected_tile_index = -1  # 重置图块选择
-                print(f"DEBUG: 选中资源: {self.uploaded_resources[index]['name']}")
+                print(f"DEBUG: 选中资源: {self.current_resources[index]['name']}")
                 print(
                     f"DEBUG: 资源索引: {self.selected_resource_index}, 图块索引: {self.selected_tile_index}"
                 )
@@ -1258,7 +1602,7 @@ class MapEditorManager(QObject):
         try:
             # 查找资源索引
             resource_index = -1
-            for i, res in enumerate(self.uploaded_resources):
+            for i, res in enumerate(self.current_resources):
                 if res == resource_info:
                     resource_index = i
                     break
@@ -1291,9 +1635,9 @@ class MapEditorManager(QObject):
         # 添加资源到场景
         y_pos = 0  # 移除顶部边距
 
-        print(f"DEBUG: 更新资源列表，资源数量: {len(self.uploaded_resources)}")
+        print(f"DEBUG: 更新资源列表，资源数量: {len(self.current_resources)}")
 
-        for i, resource in enumerate(self.uploaded_resources):
+        for i, resource in enumerate(self.current_resources):
             try:
                 print(
                     f"DEBUG: 处理资源 {i}: {resource['name']}, 类型: {resource.get('resource_type', 'unknown')}"
@@ -1301,8 +1645,13 @@ class MapEditorManager(QObject):
                 print(f"DEBUG: 资源路径: {resource['path']}")
                 print(f"DEBUG: 文件是否存在: {os.path.exists(resource['path'])}")
 
-                # 加载原始图片
-                original_pixmap = QPixmap(resource["path"])
+                # 加载原始图片（处理相对路径）
+                image_path = resource["path"]
+                if not os.path.isabs(image_path):
+                    if self.current_map_path:
+                        map_dir = os.path.dirname(self.current_map_path)
+                        image_path = os.path.join(map_dir, image_path)
+                original_pixmap = QPixmap(image_path)
                 print(f"DEBUG: 图片加载结果: {not original_pixmap.isNull()}")
                 if original_pixmap.isNull():
                     print(f"DEBUG: 图片加载失败: {resource['path']}")
@@ -1488,7 +1837,7 @@ class MapEditorManager(QObject):
         # 切换到绘制模式时，如果已选中资源，显示预览
         elif tool == "draw" and self.selected_resource_index >= 0:
             # 检查是否需要图块索引
-            resource = self.uploaded_resources[self.selected_resource_index]
+            resource = self.current_resources[self.selected_resource_index]
             resource_type = resource.get("resource_type", "image")
             # 图块集合需要选中图块，单张图片不需要
             if (
