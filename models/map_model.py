@@ -1,70 +1,6 @@
 import os
 import json
-import math
-import numpy as np
 from PySide6.QtCore import QObject, Signal
-
-
-class ChunkedMapData:
-    """区块化地图数据模型，使用空间哈希+NumPy矩阵的混血架构"""
-    
-    def __init__(self, chunk_size=16):
-        self.chunk_size = chunk_size
-        self.chunks = {}  # 结构: {(chunk_x, chunk_y): np.ndarray}
-        self.empty_tile_id = 0
-
-    def _get_or_create_chunk(self, chunk_x, chunk_y):
-        """获取或创建指定区块"""
-        chunk_key = (chunk_x, chunk_y)
-        if chunk_key not in self.chunks:
-            self.chunks[chunk_key] = np.full(
-                (self.chunk_size, self.chunk_size),
-                self.empty_tile_id,
-                dtype=np.int32,
-            )
-        return self.chunks[chunk_key]
-
-    def set_tile(self, world_x, world_y, tile_id):
-        """设置世界坐标下的瓦片ID"""
-        # 使用math.floor确保负数坐标也能正确归入对应的Chunk
-        cx = math.floor(world_x / self.chunk_size)
-        cy = math.floor(world_y / self.chunk_size)
-        
-        # 计算在Chunk内部的相对位置
-        lx = world_x - (cx * self.chunk_size)
-        ly = world_y - (cy * self.chunk_size)
-        
-        self._get_or_create_chunk(cx, cy)[ly, lx] = tile_id
-
-    def get_tile(self, world_x, world_y):
-        """获取世界坐标下的瓦片ID"""
-        # 使用math.floor确保负数坐标也能正确归入对应的Chunk
-        cx = math.floor(world_x / self.chunk_size)
-        cy = math.floor(world_y / self.chunk_size)
-        
-        chunk_key = (cx, cy)
-        if chunk_key not in self.chunks:
-            return self.empty_tile_id
-        
-        # 计算在Chunk内部的相对位置
-        lx = world_x - (cx * self.chunk_size)
-        ly = world_y - (cy * self.chunk_size)
-        
-        return self.chunks[chunk_key][ly, lx]
-
-    def get_visible_chunks(self, left, top, right, bottom):
-        """返回当前屏幕视口内涵盖的所有区块"""
-        start_cx = math.floor(left / self.chunk_size)
-        end_cx = math.floor(right / self.chunk_size)
-        start_cy = math.floor(top / self.chunk_size)
-        end_cy = math.floor(bottom / self.chunk_size)
-
-        visible = []
-        for cy in range(start_cy, end_cy + 1):
-            for cx in range(start_cx, end_cx + 1):
-                if (cx, cy) in self.chunks:
-                    visible.append((cx, cy, self.chunks[(cx, cy)]))
-        return visible
 
 
 class MapDataModel(QObject):
@@ -76,7 +12,6 @@ class MapDataModel(QObject):
         super().__init__()
         self.project_path = project_path
         self.map_data = {}
-        self.layer_chunks = {}  # key: int 图层序号 → value: ChunkedMapData
         self._initialize_default_data()
     
     def _initialize_default_data(self):
@@ -89,33 +24,36 @@ class MapDataModel(QObject):
                 {
                     "name": "ground",
                     "visible": True,
-                    "tiles": []  # 仅用于兼容导出，运行时使用 layer_chunks
+                    "tiles": {},  # 使用字典存储：(x, y): tile_id
+                    "objects": []  # 用于存放不规则的大图或背景
                 }
             ],
             "tile_sets": []       # 瓦片集配置
         }
-        
-        # 为默认图层创建 ChunkedMapData
-        self.layer_chunks[0] = ChunkedMapData(chunk_size=16)
     
     def get_tile(self, layer_index, x, y):
         """获取指定位置的瓦片ID"""
         if 0 <= layer_index < len(self.map_data["layers"]):
-            # 从 layer_chunks 获取数据，禁止遍历列表
-            if layer_index in self.layer_chunks:
-                return self.layer_chunks[layer_index].get_tile(x, y)
-            return 0
+            layer = self.map_data["layers"][layer_index]
+            return layer["tiles"].get((int(x), int(y)), 0)
         return 0
     
     def set_tile(self, layer_index, x, y, tile_id):
-        """设置指定位置的瓦片ID，写入 layer_chunks"""
+        """设置指定位置的瓦片ID，直接操作字典"""
         if 0 <= layer_index < len(self.map_data["layers"]):
-            # 写入 layer_chunks，禁止直接操作 layer["tiles"]
-            if layer_index in self.layer_chunks:
-                self.layer_chunks[layer_index].set_tile(x, y, tile_id)
-                self.data_changed.emit()
-                return True
-            return False
+            layer = self.map_data["layers"][layer_index]
+            key = (int(x), int(y))
+            
+            if tile_id == 0:
+                # 如果tile_id为0，删除该坐标点以节省内存
+                if key in layer["tiles"]:
+                    del layer["tiles"][key]
+            else:
+                # 否则设置瓦片ID
+                layer["tiles"][key] = int(tile_id)
+            
+            self.data_changed.emit()
+            return True
         return False
     
     def get_map_size(self):
@@ -141,20 +79,17 @@ class MapDataModel(QObject):
         new_layer = {
             "name": name,
             "visible": True,
-            "tiles": []  # 仅用于兼容导出，运行时使用 layer_chunks
+            "tiles": {},
+            "objects": []
         }
         self.map_data["layers"].append(new_layer)
-        new_index = len(self.map_data["layers"]) - 1
-        self.layer_chunks[new_index] = ChunkedMapData(chunk_size=16)
         self.data_changed.emit()
-        return new_index
+        return len(self.map_data["layers"]) - 1
     
     def remove_layer(self, index):
         """删除图层"""
         if 0 <= index < len(self.map_data["layers"]):
             del self.map_data["layers"][index]
-            if index in self.layer_chunks:
-                del self.layer_chunks[index]
             self.data_changed.emit()
             return True
         return False
@@ -180,31 +115,17 @@ class MapDataModel(QObject):
                 "tile_sets": self.map_data["tile_sets"]
             }
             
-            # 遍历 layer_chunks 中所有区块，收集所有非 0 瓦片
-            for layer_index, layer in enumerate(self.map_data["layers"]):
+            # 将字典的(x, y)转换为JSON支持的列表[[x, y, id], ...]
+            for layer in self.map_data["layers"]:
                 tiles_list = []
-                
-                # 从 ChunkedMapData 导出数据
-                if layer_index in self.layer_chunks:
-                    chunked_data = self.layer_chunks[layer_index]
-                    
-                    # 遍历所有区块
-                    for (chunk_x, chunk_y), chunk in chunked_data.chunks.items():
-                        # 遍历区块内的所有瓦片
-                        for local_y in range(chunk.shape[0]):
-                            for local_x in range(chunk.shape[1]):
-                                tile_id = chunk[local_y, local_x]
-                                if tile_id != 0:
-                                    # 计算世界坐标
-                                    world_x = chunk_x * chunked_data.chunk_size + local_x
-                                    world_y = chunk_y * chunked_data.chunk_size + local_y
-                                    # 将NumPy类型转换为Python原生类型，确保JSON可序列化
-                                    tiles_list.append([int(world_x), int(world_y), int(tile_id)])
+                for (x, y), tile_id in layer["tiles"].items():
+                    tiles_list.append([x, y, tile_id])
                 
                 layer_data = {
                     "name": layer["name"],
                     "visible": layer["visible"],
-                    "tiles": tiles_list
+                    "tiles": tiles_list,
+                    "objects": layer["objects"]
                 }
                 save_data["layers"].append(layer_data)
             
@@ -255,50 +176,25 @@ class MapDataModel(QObject):
                 "tile_sets": loaded_data["tile_sets"]
             }
             
-            # 清空所有 layer_chunks
-            self.layer_chunks.clear()
-            
-            # 遍历 JSON 中的 layers
+            # 遍历JSON中的layers，将列表读回，重新构建为以(x, y)为键的字典
             for layer_data in loaded_data["layers"]:
-                # 创建图层结构（仅用于兼容导出）
+                # 创建图层结构
                 layer = {
                     "name": layer_data["name"],
                     "visible": layer_data["visible"],
-                    "tiles": []  # 仅用于兼容导出，运行时使用 layer_chunks
+                    "tiles": {},
+                    "objects": layer_data.get("objects", [])
                 }
-                self.map_data["layers"].append(layer)
                 
-                # 获取图层索引
-                layer_index = len(self.map_data["layers"]) - 1
-                
-                # 为图层创建 ChunkedMapData
-                self.layer_chunks[layer_index] = ChunkedMapData(chunk_size=16)
-                
-                # 遍历 JSON 中的 tiles: [[x,y,tile_id], ...]
+                # 将[[x, y, id], ...]转换为{(x, y): id}
                 tiles_data = layer_data["tiles"]
+                for tile_data in tiles_data:
+                    if len(tile_data) == 3:
+                        tx, ty, tid = tile_data
+                        if tid != 0:
+                            layer["tiles"][(int(tx), int(ty))] = int(tid)
                 
-                # 检测格式：如果是二维数组（旧格式），转换为稀疏格式
-                if tiles_data and isinstance(tiles_data[0], list) and isinstance(tiles_data[0][0], (int, float)):
-                    # 旧格式：二维数组 [[tile_id, tile_id, ...], [tile_id, ...], ...]
-                    for y, row in enumerate(tiles_data):
-                        for x, tile_id in enumerate(row):
-                            if tile_id != 0:
-                                # 对每个点执行：chunk.set_tile(x, y, tile_id)
-                                self.layer_chunks[layer_index].set_tile(x, y, tile_id)
-                else:
-                    # 新格式：稀疏格式 [[x, y, tile_id], [x, y, tile_id], ...]
-                    # 首先确保当前图层的 chunked 实例已存在
-                    if layer_index not in self.layer_chunks:
-                        self.layer_chunks[layer_index] = ChunkedMapData(chunk_size=16)
-                        
-                    chunk_data = self.layer_chunks[layer_index]
-                    
-                    for tile_data in tiles_data:
-                        if len(tile_data) == 3:
-                            tx, ty, tid = tile_data
-                            if tid != 0:
-                                # 显式转换确保类型正确
-                                chunk_data.set_tile(int(tx), int(ty), int(tid))
+                self.map_data["layers"].append(layer)
             
             # 记录加载的所有瓦片坐标
             try:

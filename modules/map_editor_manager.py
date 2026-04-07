@@ -467,6 +467,7 @@ class MapEditorManager(QObject):
                         "resource_type": resource_type,
                         "tile_width": tile_width,
                         "tile_height": tile_height,
+                        "tile_size": tile_width if resource_type == "tileset" else 32,
                         "width": pixmap.width(),
                         "height": pixmap.height(),
                         "frames": 1,
@@ -610,8 +611,10 @@ class MapEditorManager(QObject):
                         # 从缓存获取图片，避免重复加载
                         pixmap = self.get_pixmap(image_path)
                         if pixmap:
-                            tile_size_resource = resource.get("tile_width", 32)
-                            tiles_per_row = pixmap.width() // tile_size_resource
+                            # 使用资源的tile_width和tile_height进行裁剪
+                            tile_width_resource = resource.get("tile_width", 16)
+                            tile_height_resource = resource.get("tile_height", 16)
+                            tiles_per_row = pixmap.width() // tile_width_resource
 
                             # 提取图块索引
                             tile_index = (tile_id % 1000) - 1
@@ -625,10 +628,10 @@ class MapEditorManager(QObject):
                             from PySide6.QtCore import QRectF
 
                             tile_rect = QRectF(
-                                tile_col * tile_size_resource,
-                                tile_row * tile_size_resource,
-                                tile_size_resource,
-                                tile_size_resource,
+                                tile_col * tile_width_resource,
+                                tile_row * tile_height_resource,
+                                tile_width_resource,
+                                tile_height_resource,
                             )
 
                             # 创建图块的QPixmap
@@ -638,8 +641,10 @@ class MapEditorManager(QObject):
                             from PySide6.QtWidgets import QGraphicsPixmapItem
 
                             pixmap_item = QGraphicsPixmapItem(tile_pixmap)
-                            # 使用当前图块集的 tile_width 和 tile_height 计算位置
-                            pixmap_item.setPos(x * tile_width, y * tile_height)
+                            # 使用资源的tile_width和tile_height计算位置
+                            pixmap_item.setPos(
+                                x * tile_width_resource, y * tile_height_resource
+                            )
                             pixmap_item.setZValue(1)
                             # 禁用鼠标事件，让事件穿透到画布
                             pixmap_item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
@@ -690,42 +695,36 @@ class MapEditorManager(QObject):
     def _render_map(self):
         """根据模型数据重新渲染整个地图图层"""
         try:
-            import numpy as np
-
             print("=== 开始渲染地图 ===")
             scene = self.canvas_manager.scene()
 
             # 1. 清理当前场景中已有的瓦片项，防止叠加
-            for item in self.tile_items.values():
+            # 只删除瓦片项，保留背景网格线和坐标轴线
+            for item in list(self.tile_items.values()):
                 try:
                     scene.removeItem(item)
                 except:
                     pass
             self.tile_items.clear()
 
-            # 2. 获取当前图层的分块数据
-            if self.current_layer not in self.map_model.layer_chunks:
-                print(f"警告: 图层 {self.current_layer} 无数据")
+            # 2. 获取当前图层数据
+            layer = self.map_model.get_layer(self.current_layer)
+            if not layer or not layer.get("visible", True):
+                print(f"警告: 图层 {self.current_layer} 不可见或不存在")
                 return
 
-            chunked_data = self.map_model.layer_chunks[self.current_layer]
             tile_size = self.map_model.get_tile_size()
+            print(f"✅ 地图瓦片大小: {tile_size}")
 
-            # 3. 遍历所有非空区块
-            for (chunk_x, chunk_y), chunk in chunked_data.chunks.items():
-                # 使用 numpy 的高效索引获取非零瓦片
-                rows, cols = np.where(chunk != 0)
+            # 3. 遍历字典的keys，直接使用原始坐标
+            for (tx, ty), tile_id in layer["tiles"].items():
+                if tile_id <= 0:
+                    continue
 
-                for i in range(len(rows)):
-                    local_y, local_x = rows[i], cols[i]
-                    tile_id = int(chunk[local_y, local_x])
+                print(f"🎯 绘制瓦片 → 坐标({tx},{ty}) ID={tile_id}")
 
-                    # 计算绝对世界坐标
-                    world_x = chunk_x * chunked_data.chunk_size + local_x
-                    world_y = chunk_y * chunked_data.chunk_size + local_y
-
-                    # 渲染瓦片
-                    self._update_single_tile(world_x, world_y)
+                # 渲染瓦片
+                self._update_single_tile(tx, ty)
 
             print(f"DEBUG: 渲染完成，场景瓦片数量: {len(self.tile_items)}")
 
@@ -971,8 +970,8 @@ class MapEditorManager(QObject):
                             + 1
                         )
                         # 图块集合使用固定的图块大小
-                        tile_width = resource.get("tile_size", tile_size)
-                        tile_height = resource.get("tile_size", tile_size)
+                        tile_width = resource.get("tile_width", tile_size)
+                        tile_height = resource.get("tile_height", tile_size)
                     else:
                         return
                 else:
@@ -1089,8 +1088,8 @@ class MapEditorManager(QObject):
 
             # 计算图块在网格中的尺寸（以瓦片为单位）
             if resource_type == "tileset":
-                tile_width = resource.get("tile_size", tile_size)
-                tile_height = resource.get("tile_size", tile_size)
+                tile_width = resource.get("tile_width", tile_size)
+                tile_height = resource.get("tile_height", tile_size)
             else:
                 # 获取图片实际大小
                 image_path = resource["path"]
@@ -1144,8 +1143,9 @@ class MapEditorManager(QObject):
             # 根据资源类型处理图片
             if resource_type == "tileset":
                 # 图块集合模式，裁剪特定图块
-                tile_size_resource = resource["tile_size"]
-                tiles_per_row = pixmap.width() // tile_size_resource
+                tile_width_resource = resource.get("tile_width", 16)
+                tile_height_resource = resource.get("tile_height", 16)
+                tiles_per_row = pixmap.width() // tile_width_resource
                 tile_row = self.selected_tile_index // tiles_per_row
                 tile_col = self.selected_tile_index % tiles_per_row
 
@@ -1153,10 +1153,10 @@ class MapEditorManager(QObject):
                 from PySide6.QtCore import QRectF
 
                 tile_rect = QRectF(
-                    tile_col * tile_size_resource,
-                    tile_row * tile_size_resource,
-                    tile_size_resource,
-                    tile_size_resource,
+                    tile_col * tile_width_resource,
+                    tile_row * tile_height_resource,
+                    tile_width_resource,
+                    tile_height_resource,
                 )
                 scaled_tile = pixmap.copy(tile_rect.toRect())
             else:
@@ -1419,6 +1419,8 @@ class MapEditorManager(QObject):
                     # 如果是图块集合，添加图块尺寸信息
                     if resource_type == "tileset":
                         resource_info["tiles"] = []  # 存储切割后的图块信息
+                        resource_info["tile_width"] = tile_size
+                        resource_info["tile_height"] = tile_size
 
                     # 添加到资源列表
                     self.uploaded_resources.append(resource_info)
@@ -1427,12 +1429,22 @@ class MapEditorManager(QObject):
                     if self.project_manager and self.current_map_path:
                         map_dir = os.path.dirname(self.current_map_path)
                         full_image_path = os.path.join(map_dir, relative_path)
-                        self.map_model.add_tile_set(
-                            name=resource_info["name"],
-                            image_path=full_image_path,
-                            tile_width=width,
-                            tile_height=height,
-                        )
+                        # 如果是图块集，使用用户设置的tile_size作为图块尺寸
+                        if resource_type == "tileset":
+                            self.map_model.add_tile_set(
+                                name=resource_info["name"],
+                                image_path=full_image_path,
+                                tile_width=tile_size,
+                                tile_height=tile_size,
+                            )
+                        else:
+                            # 如果是单张图片，使用图片的实际尺寸
+                            self.map_model.add_tile_set(
+                                name=resource_info["name"],
+                                image_path=full_image_path,
+                                tile_width=width,
+                                tile_height=height,
+                            )
 
                     print(
                         f"DEBUG: 添加资源: {resource_info['name']}, 保存路径: {relative_path}"
