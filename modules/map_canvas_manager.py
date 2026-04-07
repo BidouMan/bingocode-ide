@@ -19,7 +19,7 @@ class MapCanvas(QGraphicsView):
         self._max_zoom = 32.0
         self._min_zoom = 0.5  # 增加最小缩放限制，避免缩小后网格线消失
         self._is_panning = False
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         # 去掉边框
         self.setFrameStyle(QFrame.NoFrame)
         self._init_settings()
@@ -28,6 +28,11 @@ class MapCanvas(QGraphicsView):
         self.tile_size = 16
         # 网格显示控制
         self._grid_visible = True
+        # 网格纹理缓存
+        self._grid_brush = None
+        self._grid_pixmap = None
+        # 初始化网格纹理
+        self._init_grid_texture()
 
     def _init_settings(self):
         """性能与交互初始设置"""
@@ -50,6 +55,27 @@ class MapCanvas(QGraphicsView):
 
         # 设置背景色（OneDark 深色）
         self.setBackgroundBrush(QBrush(QColor("#21252b")))
+
+    def _init_grid_texture(self):
+        """初始化网格纹理"""
+        from PySide6.QtGui import QPixmap, QPainter
+
+        # 创建一个瓦片大小的纹理
+        pixmap = QPixmap(self.tile_size, self.tile_size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+
+        # 绘制网格线
+        painter = QPainter(pixmap)
+        grid_color = QColor(196, 93, 41, 64)
+        painter.setPen(QPen(grid_color, 0))
+
+        # 绘制右边框和底边框
+        painter.drawLine(self.tile_size - 1, 0, self.tile_size - 1, self.tile_size - 1)
+        painter.drawLine(0, self.tile_size - 1, self.tile_size - 1, self.tile_size - 1)
+        painter.end()
+
+        self._grid_pixmap = pixmap
+        self._grid_brush = QBrush(pixmap)
 
     def wheelEvent(self, event: QWheelEvent):
         """缩放逻辑：工业级实现 - 基于点的缩放（Point-based Zooming）"""
@@ -135,33 +161,13 @@ class MapCanvas(QGraphicsView):
         # 调用父类的drawBackground
         super().drawBackground(painter, rect)
 
-        # 如果网格可见，绘制全画布网格
-        if self._grid_visible:
-            self._draw_full_canvas_grid(painter, rect)
-
-    def _draw_full_canvas_grid(self, painter, rect):
-        """绘制全画布网格线 - 只渲染可见区域"""
-        # 设置网格线样式
-        grid_pen = QPen(QColor(196, 93, 41, 64), 0)
-        painter.setPen(grid_pen)
-
-        # 计算可见区域的网格线范围
-        # 向下取整到最近的瓦片边界
-        start_x = int(math.floor(rect.left() / self.tile_size)) * self.tile_size
-        start_y = int(math.floor(rect.top() / self.tile_size)) * self.tile_size
-
-        # 向上取整到最近的瓦片边界
-        end_x = int(math.ceil(rect.right() / self.tile_size)) * self.tile_size
-        end_y = int(math.ceil(rect.bottom() / self.tile_size)) * self.tile_size
-
-        # 绘制垂直线
-        x = start_x
-        while x <= end_x:
-            painter.drawLine(x, rect.top(), x, rect.bottom())
-            x += self.tile_size
-
-        # 绘制水平线
-        y = start_y
-        while y <= end_y:
-            painter.drawLine(rect.left(), y, rect.right(), y)
-            y += self.tile_size
+        # 如果网格可见，使用网格纹理绘制
+        if self._grid_visible and self._grid_brush:
+            # 保存当前画笔
+            old_brush = painter.brush()
+            # 使用网格纹理画笔
+            painter.setBrush(self._grid_brush)
+            # 绘制覆盖整个可见区域的矩形
+            painter.drawRect(rect)
+            # 恢复原来的画笔
+            painter.setBrush(old_brush)

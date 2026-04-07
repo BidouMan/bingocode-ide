@@ -1,0 +1,31 @@
+{
+  "width": 40,
+  "height": 30,
+  "tile_size": 16,
+  "layers": [
+    {
+      "name": "ground",
+      "visible": true,
+      "tiles": [
+        [
+          2,
+          2,
+          1001
+        ],
+        [
+          3,
+          3,
+          1002
+        ]
+      ]
+    }
+  ],
+  "tile_sets": [
+    {
+      "name": "test.png",
+      "image_path": "tilesets/test.png",
+      "tile_width": 16,
+      "tile_height": 16
+    }
+  ]
+}

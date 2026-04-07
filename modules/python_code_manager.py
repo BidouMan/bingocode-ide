@@ -344,7 +344,8 @@ class QCodeEditor(QTextEdit):
                 continue
 
             # 检查2：冒号缺失
-            first_word = stripped.split('(')[0].split(':')[0].split()[0] if stripped.split() else ""
+            parts = stripped.split()
+            first_word = parts[0].split('(')[0].split(':')[0] if parts else ""
             if first_word in COLON_KEYWORDS and not stripped.endswith(':'):
                 self.error_lines[i] = ERROR_TYPES["missing_colon"].format(first_word)
                 expect_indent = False

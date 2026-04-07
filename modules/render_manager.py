@@ -360,23 +360,27 @@ class RenderManager(QObject):
 
     def eventFilter(self, obj, event):
         """事件过滤器，捕获鼠标事件"""
-        if obj == self.view.viewport():
-            # 鼠标按下
-            if event.type() == event.Type.MouseButtonPress:
-                self.handle_mouse_press(event)
-                return True
+        try:
+            if hasattr(self, 'view') and self.view and obj == self.view.viewport():
+                # 鼠标按下
+                if event.type() == event.Type.MouseButtonPress:
+                    self.handle_mouse_press(event)
+                    return True
 
-            # 鼠标释放
-            elif event.type() == event.Type.MouseButtonRelease:
-                self.handle_mouse_release(event)
-                return True
+                # 鼠标释放
+                elif event.type() == event.Type.MouseButtonRelease:
+                    self.handle_mouse_release(event)
+                    return True
 
-            elif event.type() == QEvent.MouseMove:
-                scene_pos = self.view.mapToScene(event.pos())
-                # 格式：M_MOVE:x,y
-                self.send_to_child(
-                    f"M_MOVE:{round(scene_pos.x(), 1)},{round(scene_pos.y(), 1)}"
-                )
+                elif event.type() == QEvent.MouseMove:
+                    scene_pos = self.view.mapToScene(event.pos())
+                    # 格式：M_MOVE:x,y
+                    self.send_to_child(
+                        f"M_MOVE:{round(scene_pos.x(), 1)},{round(scene_pos.y(), 1)}"
+                    )
+        except RuntimeError:
+            # 对象已销毁，忽略事件
+            pass
 
         return super().eventFilter(obj, event)
 

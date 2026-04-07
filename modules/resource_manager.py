@@ -296,6 +296,9 @@ class ResourceManager(QObject):
         }
 
         self.setup_list_styles()
+        
+        # 图片缓存，避免重复加载相同的图片
+        self._pixmap_cache = {}
 
         # 3. 信号绑定
         self.ui.list_code.installEventFilter(self)
@@ -525,22 +528,26 @@ class ResourceManager(QObject):
                 widget.set_active(item.isSelected())
 
     def eventFilter(self, watched, event):
-        # 1. 代码列表逻辑
-        if watched == self.ui.list_code:
+        try:
+            # 1. 代码列表逻辑
+            if hasattr(self, 'ui') and self.ui and watched == self.ui.list_code:
+                if event.type() == QEvent.Type.FocusOut:
+                    if self.ui.list_code.selectedItems():
+                        self.ui.list_code.clearSelection()
+
+            # 2. 角色卡片逻辑
             if event.type() == QEvent.Type.FocusOut:
-                if self.ui.list_code.selectedItems():
-                    self.ui.list_code.clearSelection()
+                if watched.objectName() == "spriteCard":
+                    new_focus = QApplication.focusWidget()
 
-        # 2. 角色卡片逻辑
-        if event.type() == QEvent.Type.FocusOut:
-            if watched.objectName() == "spriteCard":
-                new_focus = QApplication.focusWidget()
-
-                # 如果点的是空白或者其他非卡片区域
-                if not new_focus or new_focus.objectName() != "spriteCard":
-                    # 不排除任何卡片，全部隐藏
-                    self.hide_all_delete_buttons()
-                    self.clear_all_selections()
+                    # 如果点的是空白或者其他非卡片区域
+                    if not new_focus or new_focus.objectName() != "spriteCard":
+                        # 不排除任何卡片，全部隐藏
+                        self.hide_all_delete_buttons()
+                        self.clear_all_selections()
+        except RuntimeError:
+            # 对象已销毁，忽略事件
+            pass
 
         return super().eventFilter(watched, event)
 
@@ -846,18 +853,30 @@ class ResourceManager(QObject):
         icon_label = QLabel()
         icon_label.setFixedSize(40, 40)
         if icon_path and os.path.exists(icon_path):
-            pix = QPixmap(icon_path)
-            if not pix.isNull():
-                mode = (
-                    Qt.TransformationMode.FastTransformation
-                    if pix.width() < 100
-                    else Qt.TransformationMode.SmoothTransformation
-                )
-                target_pix = pix.scaled(
-                    80, 80, Qt.AspectRatioMode.KeepAspectRatio, mode
-                )
+            # 检查缓存中是否已有该图片
+            if icon_path in self._pixmap_cache:
+                target_pix = self._pixmap_cache[icon_path]
+            else:
+                pix = QPixmap(icon_path)
+                if not pix.isNull():
+                    mode = (
+                        Qt.TransformationMode.FastTransformation
+                        if pix.width() < 100
+                        else Qt.TransformationMode.SmoothTransformation
+                    )
+                    target_pix = pix.scaled(
+                        80, 80, Qt.AspectRatioMode.KeepAspectRatio, mode
+                    )
+                    # 缓存缩放后的图片
+                    self._pixmap_cache[icon_path] = target_pix
+                else:
+                    target_pix = None
+            
+            if target_pix:
                 icon_label.setPixmap(target_pix)
                 icon_label.setScaledContents(True)
+            else:
+                icon_label.setStyleSheet("background-color: #4A90E2; border-radius: 4px;")
         else:
             icon_label.setStyleSheet("background-color: #4A90E2; border-radius: 4px;")
         layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignCenter)
@@ -897,18 +916,31 @@ class ResourceManager(QObject):
         icon_label = QLabel()
         icon_label.setFixedSize(40, 40)
         if icon_path and os.path.exists(icon_path):
-            pix = QPixmap(icon_path)
-            if not pix.isNull():
-                mode = (
-                    Qt.TransformationMode.FastTransformation
-                    if pix.width() < 100
-                    else Qt.TransformationMode.SmoothTransformation
-                )
-                target_pix = pix.scaled(
-                    80, 80, Qt.AspectRatioMode.KeepAspectRatio, mode
-                )
+            # 检查缓存中是否已有该图片
+            if icon_path in self._pixmap_cache:
+                target_pix = self._pixmap_cache[icon_path]
+            else:
+                pix = QPixmap(icon_path)
+                if not pix.isNull():
+                    mode = (
+                        Qt.TransformationMode.FastTransformation
+                        if pix.width() < 100
+                        else Qt.TransformationMode.SmoothTransformation
+                    )
+                    target_pix = pix.scaled(
+                        80, 80, Qt.AspectRatioMode.KeepAspectRatio, mode
+                    )
+                    # 缓存缩放后的图片
+                    self._pixmap_cache[icon_path] = target_pix
+                else:
+                    target_pix = None
+            
+            if target_pix:
                 icon_label.setPixmap(target_pix)
                 icon_label.setScaledContents(True)
+            else:
+                # 地图用绿色方块
+                icon_label.setStyleSheet("background-color: #5bc772; border-radius: 4px;")
         else:
             # 地图用绿色方块
             icon_label.setStyleSheet("background-color: #5bc772; border-radius: 4px;")

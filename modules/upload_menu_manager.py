@@ -93,15 +93,19 @@ class UploadMenuManager(QWidget):
 
 
     def eventFilter(self, obj, event):
-        # 🚀 修正为主按钮 btn_upload1
-        if obj == self.ui.btn_upload and event.type() == QEvent.Type.Enter:
-            self.anim_menu(True)
-        # 当鼠标离开整个 UploadMenuManager 区域时收回
-        elif obj == self and event.type() == QEvent.Type.Leave:
-            self.anim_menu(False)
-        
-        if event.type() == QEvent.Type.Resize:
-            self.auto_layout()
+        try:
+            # 🚀 修正为主按钮 btn_upload1
+            if hasattr(self, 'ui') and self.ui and obj == self.ui.btn_upload and event.type() == QEvent.Type.Enter:
+                self.anim_menu(True)
+            # 当鼠标离开整个 UploadMenuManager 区域时收回
+            elif obj == self and event.type() == QEvent.Type.Leave:
+                self.anim_menu(False)
+            
+            if event.type() == QEvent.Type.Resize:
+                self.auto_layout()
+        except RuntimeError:
+            # 对象已销毁，忽略事件
+            pass
         return super().eventFilter(obj, event)
 
 
@@ -259,15 +263,19 @@ class MapUploadMenuManager(QWidget):
 
 
     def eventFilter(self, obj, event):
-        # 🚀 修正为主按钮 btn_upload1
-        if obj == self.ui.btn_upload and event.type() == QEvent.Type.Enter:
-            self.anim_menu(True)
-        # 当鼠标离开整个 UploadMenuManager 区域时收回
-        elif obj == self and event.type() == QEvent.Type.Leave:
-            self.anim_menu(False)
-        
-        if event.type() == QEvent.Type.Resize:
-            self.auto_layout()
+        try:
+            # 🚀 修正为主按钮 btn_upload1
+            if hasattr(self, 'ui') and self.ui and obj == self.ui.btn_upload and event.type() == QEvent.Type.Enter:
+                self.anim_menu(True)
+            # 当鼠标离开整个 UploadMenuManager 区域时收回
+            elif obj == self and event.type() == QEvent.Type.Leave:
+                self.anim_menu(False)
+            
+            if event.type() == QEvent.Type.Resize:
+                self.auto_layout()
+        except RuntimeError:
+            # 对象已销毁，忽略事件
+            pass
         return super().eventFilter(obj, event)
 
 
