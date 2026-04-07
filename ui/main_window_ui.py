@@ -934,6 +934,8 @@ class Ui_Form(object):
         self.col_editor_view.setMinimumSize(QSize(256, 256))
         self.col_editor_view.setMaximumSize(QSize(240, 240))
         self.col_editor_view.setAutoFillBackground(True)
+        self.col_editor_view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.col_editor_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         self.verticalLayout_22.addWidget(self.col_editor_view, 0, Qt.AlignmentFlag.AlignTop)
 
@@ -1306,10 +1308,10 @@ class Ui_Form(object):
 
         self.gridLayout.addLayout(self.horizontalLayout_12, 2, 2, 1, 1)
 
-        self.checkBox_2 = QCheckBox(self.frame_9)
-        self.checkBox_2.setObjectName(u"checkBox_2")
+        self.map_collision = QCheckBox(self.frame_9)
+        self.map_collision.setObjectName(u"map_collision")
 
-        self.gridLayout.addWidget(self.checkBox_2, 9, 2, 1, 1)
+        self.gridLayout.addWidget(self.map_collision, 9, 2, 1, 1)
 
         self.label_16 = QLabel(self.frame_9)
         self.label_16.setObjectName(u"label_16")
@@ -1640,7 +1642,7 @@ class Ui_Form(object):
         self.att_mark_name.setText(QCoreApplication.translate("Form", u"\u51fa\u751f\u70b9", None))
         self.label_19.setText(QCoreApplication.translate("Form", u"X", None))
         self.att_mapsize_x.setText(QCoreApplication.translate("Form", u"100", None))
-        self.checkBox_2.setText(QCoreApplication.translate("Form", u"\u542f\u7528", None))
+        self.map_collision.setText(QCoreApplication.translate("Form", u"\u542f\u7528", None))
         self.label_16.setText(QCoreApplication.translate("Form", u"\u5730\u56fe\u91cd\u529b", None))
         self.label_9.setText(QCoreApplication.translate("Form", u"\u540d\u79f0", None))
         self.label_17.setText(QCoreApplication.translate("Form", u"\u6807\u8bb0\u540d\u79f0", None))

@@ -919,7 +919,7 @@
                        <string notr="true"/>
                       </property>
                       <property name="currentIndex">
-                       <number>3</number>
+                       <number>0</number>
                       </property>
                       <widget class="QWidget" name="page_sprite">
                        <layout class="QVBoxLayout" name="verticalLayout_12">
@@ -2247,6 +2247,12 @@
                          <property name="autoFillBackground">
                           <bool>true</bool>
                          </property>
+                         <property name="verticalScrollBarPolicy">
+                          <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
+                         </property>
+                         <property name="horizontalScrollBarPolicy">
+                          <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
+                         </property>
                         </widget>
                        </item>
                       </layout>
@@ -2999,7 +3005,7 @@
                         </layout>
                        </item>
                        <item row="9" column="2">
-                        <widget class="QCheckBox" name="checkBox_2">
+                        <widget class="QCheckBox" name="map_collision">
                          <property name="text">
                           <string>启用</string>
                          </property>

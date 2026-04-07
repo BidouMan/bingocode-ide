@@ -99,6 +99,8 @@ class AppController:
         # 绑定地图编辑器工具按钮
         self.map_editor.setup_tool_buttons(self.ui)
 
+
+
         # 菜单栏按钮_>文件管理
         self.menu_manager.open_file_signal.connect(self.handle_open_project)
         self.menu_manager.save_file_signal.connect(self.handle_save_project)
@@ -167,6 +169,10 @@ class AppController:
         # 2. 初始化地图编辑器的画布
         self.map_editor.set_canvas_widget(self.ui.editor_map_canvas)
         self.map_editor.set_res_list_view(self.ui.res_list_view)
+        
+        # 初始化碰撞编辑器
+        if hasattr(self.ui, "col_editor_view"):
+            self.map_editor.initialize_collision_editor(self.ui.col_editor_view)
 
         # 3. 加载地图文件
         self.map_editor.load_map_from_path(path)
@@ -216,7 +222,7 @@ class AppController:
 
             # 3. 只加载main.py（懒加载：其他文件通过代码列表点击加载）
             all_files.sort(key=lambda x: (x != "main.py", x.lower()))
-            
+
             # 只加载main.py文件
             for file_name in all_files:
                 if file_name == "main.py":
@@ -484,6 +490,10 @@ class AppController:
             self.map_editor.set_canvas_widget(self.ui.editor_map_canvas)
             # 初始化资源列表视图
             self.map_editor.set_res_list_view(self.ui.res_list_view)
+
+            # 初始化碰撞编辑器
+            if hasattr(self.ui, "col_editor_view"):
+                self.map_editor.initialize_collision_editor(self.ui.col_editor_view)
 
     def request_exit(self):
         """

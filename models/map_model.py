@@ -173,8 +173,31 @@ class MapDataModel(QObject):
                 "height": loaded_data["height"],
                 "tile_size": loaded_data["tile_size"],
                 "layers": [],
-                "tile_sets": loaded_data["tile_sets"]
+                "tile_sets": []
             }
+            
+            # 处理tile_sets，确保每个tile_set都有tiles数组
+            for tile_set_data in loaded_data.get("tile_sets", []):
+                tile_set = {
+                    "name": tile_set_data["name"],
+                    "image_path": tile_set_data["image_path"],
+                    "tile_width": tile_set_data["tile_width"],
+                    "tile_height": tile_set_data["tile_height"],
+                    "tile_count": tile_set_data.get("tile_count", 0),
+                    "tiles": []
+                }
+                
+                # 处理旧版本的collision属性（兼容旧地图）
+                if "collision" in tile_set_data:
+                    # 如果有全局collision属性，为每个图块设置相同的碰撞状态
+                    collision_value = tile_set_data["collision"]
+                    tile_count = tile_set_data.get("tile_count", 0)
+                    tile_set["tiles"] = [{"collision": collision_value} for _ in range(tile_count)]
+                elif "tiles" in tile_set_data:
+                    # 如果已有tiles数组，直接使用
+                    tile_set["tiles"] = tile_set_data["tiles"]
+                
+                self.map_data["tile_sets"].append(tile_set)
             
             # 遍历JSON中的layers，将列表读回，重新构建为以(x, y)为键的字典
             for layer_data in loaded_data["layers"]:
@@ -242,7 +265,8 @@ class MapDataModel(QObject):
             "image_path": image_path,
             "tile_width": tile_width,
             "tile_height": tile_height,
-            "tile_count": 0  # 将在加载图片后计算
+            "tile_count": 0,  # 将在加载图片后计算
+            "tiles": []  # 每个图块单独的碰撞设置
         }
         self.map_data["tile_sets"].append(tile_set)
         self.data_changed.emit()
@@ -257,3 +281,42 @@ class MapDataModel(QObject):
         if 0 <= index < len(self.map_data["tile_sets"]):
             return self.map_data["tile_sets"][index]
         return None
+    
+    def set_tile_collision(self, tile_set_index, tile_index, collision):
+        """设置单个图块的碰撞状态"""
+        if 0 <= tile_set_index < len(self.map_data["tile_sets"]):
+            tile_set = self.map_data["tile_sets"][tile_set_index]
+            # 确保tiles数组足够大
+            while len(tile_set["tiles"]) <= tile_index:
+                tile_set["tiles"].append({"collision": True})  # 默认开启碰撞
+            tile_set["tiles"][tile_index]["collision"] = collision
+            self.data_changed.emit()
+            return True
+        return False
+    
+    def get_tile_collision(self, tile_set_index, tile_index):
+        """获取单个图块的碰撞状态"""
+        if 0 <= tile_set_index < len(self.map_data["tile_sets"]):
+            tile_set = self.map_data["tile_sets"][tile_set_index]
+            if 0 <= tile_index < len(tile_set["tiles"]):
+                return tile_set["tiles"][tile_index].get("collision", True)
+        return True
+    
+    def set_tile_set_collision(self, index, collision):
+        """设置整个瓦片集的碰撞状态（兼容旧方法）"""
+        if 0 <= index < len(self.map_data["tile_sets"]):
+            tile_set = self.map_data["tile_sets"][index]
+            # 为所有图块设置相同的碰撞状态
+            for i in range(len(tile_set["tiles"])):
+                tile_set["tiles"][i]["collision"] = collision
+            self.data_changed.emit()
+            return True
+        return False
+    
+    def get_tile_set_collision(self, index):
+        """获取瓦片集的碰撞状态（兼容旧方法，返回第一个图块的状态）"""
+        if 0 <= index < len(self.map_data["tile_sets"]):
+            tile_set = self.map_data["tile_sets"][index]
+            if tile_set["tiles"]:
+                return tile_set["tiles"][0].get("collision", True)
+        return True
