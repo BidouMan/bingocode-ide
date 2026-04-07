@@ -1330,14 +1330,11 @@ class ResourceManager(QObject):
             # 创建地图文件路径 - JSON文件放在地图文件夹内
             map_file_path = os.path.join(map_folder, f"{map_name}.json")
             
-            # 使用地图编辑器的地图模型保存地图数据
-            if hasattr(self.app_controller, "map_editor") and self.app_controller.map_editor:
-                map_model = self.app_controller.map_editor.map_model
-                if map_model:
-                    # 设置当前地图路径，用于自动保存
-                    self.app_controller.map_editor.current_map_path = map_file_path
-                    save_result = map_model.save(map_file_path)
-                    print(f"DEBUG: 地图已保存到: {map_file_path}, 结果: {save_result}")
+            # 创建新的空地图模型来保存新地图数据
+            from models.map_model import MapDataModel
+            new_map_model = MapDataModel()
+            save_result = new_map_model.save(map_file_path)
+            print(f"DEBUG: 新地图已保存到: {map_file_path}, 结果: {save_result}")
         
         # 创建地图卡片
         self.add_map_card(map_name, map_count)
