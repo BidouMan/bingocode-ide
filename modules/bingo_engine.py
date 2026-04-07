@@ -8,6 +8,17 @@ import threading
 from PIL import Image
 from PySide6.QtCore import QRectF
 
+# 添加项目根目录到Python路径
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+try:
+    from models.map_model import MapDataModel
+except ImportError:
+    try:
+        from modules.models.map_model import MapDataModel
+    except ImportError:
+        raise ImportError("无法导入MapDataModel模块")
+
 sys.stdout = os.fdopen(sys.stdout.fileno(), "w", buffering=1)
 
 _PRESSED_KEYS = set()
@@ -16,6 +27,8 @@ _PERF_STATS = {"last_time": time.time(), "frame_count": 0}
 _GROUPS = {}
 _MOUSE_STATE = {"down": False, "last_down": False, "x": 0, "y": 0}  # 用字典包装鼠标状态
 _SPRITES = {}  # 存储所有精灵实例
+_CURRENT_MAP = None  # 当前加载的地图数据
+_MAP_SPRITES = {}  # 地图瓦片精灵
 
 
 class _MouseType:
@@ -42,6 +55,7 @@ __all__ = [
     "mouse_down",
     "mouse_pressed",
     "mouse",
+    "load_map",
 ]
 
 
@@ -839,6 +853,148 @@ def _send_fps_to_ide(fps):
     """内部统计并发送 FPS 数值"""
     packet = {"type": "FPS_UPDATE", "data": {"fps": round(fps, 1)}}
     print(json.dumps(packet), flush=True)
+
+
+def load_map(map_name):
+    """
+    加载并显示地图
+
+    Args:
+        map_name: 地图名称（不含扩展名）
+    """
+    global _CURRENT_MAP, _MAP_SPRITES
+
+    # 清理之前的地图
+    _clear_map()
+
+    try:
+        # 从当前工作目录的assets/maps文件夹读取地图文件
+        # 地图文件格式: assets/maps/{map_name}/{map_name}.json
+        map_file = os.path.join("assets", "maps", map_name, f"{map_name}.json")
+
+        print(f"✅ [BingoEngine] 加载地图: {map_name}")
+        print(f"   - 地图文件: {map_file}")
+        print(f"   - 文件存在: {os.path.exists(map_file)}")
+
+        if not os.path.exists(map_file):
+            print(f"❌ [BingoEngine] 地图文件不存在: {map_file}")
+            return False
+
+        # 加载地图数据
+        map_model = MapDataModel()
+        if not map_model.load(map_file):
+            print(f"❌ [BingoEngine] 加载地图失败: {map_file}")
+            return False
+
+        _CURRENT_MAP = map_model.map_data
+        print(f"✅ [BingoEngine] 地图加载成功: {map_name}")
+        print(f"   - 尺寸: {_CURRENT_MAP['width']}x{_CURRENT_MAP['height']}")
+        print(f"   - 图层数: {len(_CURRENT_MAP['layers'])}")
+
+        # 渲染地图
+        _render_map()
+        return True
+
+    except Exception as e:
+        print(f"❌ [BingoEngine] 加载地图时出错: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return False
+
+
+def _clear_map():
+    """清理地图资源"""
+    global _CURRENT_MAP, _MAP_SPRITES
+
+    # 删除地图瓦片精灵
+    for sprite_id in list(_MAP_SPRITES.keys()):
+        packet = {"type": "DELETE", "id": sprite_id}
+        print(json.dumps(packet), flush=True)
+        del _MAP_SPRITES[sprite_id]
+
+    _CURRENT_MAP = None
+    _MAP_SPRITES = {}
+
+
+def _render_map():
+    """渲染地图"""
+    global _CURRENT_MAP, _MAP_SPRITES
+
+    print("🔍 [Debug] 开始渲染地图...")
+
+    if not _CURRENT_MAP:
+        print("❌ [Debug] 当前地图数据为空")
+        return
+
+    print(f"🔍 [Debug] 地图数据: {_CURRENT_MAP}")
+    tile_size = _CURRENT_MAP["tile_size"]
+    print(f"🔍 [Debug] 瓦片大小: {tile_size}")
+
+    # 遍历所有图层
+    for layer_idx, layer in enumerate(_CURRENT_MAP["layers"]):
+        print(
+            f"🔍 [Debug] 处理图层 {layer_idx}: {layer['name']}, 可见性: {layer['visible']}"
+        )
+        if not layer["visible"]:
+            print(f"🔍 [Debug] 图层 {layer_idx} 不可见，跳过")
+            continue
+
+        print(f"🔍 [Debug] 图层 {layer_idx} 的瓦片数据: {layer['tiles']}")
+        print(f"🔍 [Debug] 瓦片数量: {len(layer['tiles'])}")
+
+        # 遍历图层中的所有瓦片（字典格式：{(x, y): tile_id}）
+        for (x, y), tile_id in layer["tiles"].items():
+            print(f"🔍 [Debug] 瓦片: x={x}, y={y}, tile_id={tile_id}")
+            if tile_id > 0:
+                # 计算瓦片在屏幕上的位置
+                screen_x = x * tile_size + tile_size // 2
+                screen_y = y * tile_size + tile_size // 2
+                print(f"🔍 [Debug] 瓦片屏幕位置: x={screen_x}, y={screen_y}")
+
+                # 创建瓦片精灵ID
+                sprite_id = f"map_{layer_idx}_{x}_{y}"
+
+                # 创建瓦片精灵
+                tile_sprite = {
+                    "type": "CREATE",
+                    "id": sprite_id,
+                    "data": {
+                        "x": screen_x,
+                        "y": screen_y,
+                        "angle": 0,
+                        "scale": 1.0,
+                        "scale_x": 1.0,
+                        "scale_y": 1.0,
+                        "type": "tile",
+                        "tile_id": tile_id,
+                        "tile_set_index": 0,  # 默认使用第一个瓦片集
+                        "layer": layer_idx,
+                        "tile_size": tile_size,
+                    },
+                }
+
+                # 添加瓦片集信息（如果有）
+                if "tile_sets" in _CURRENT_MAP and _CURRENT_MAP["tile_sets"]:
+                    tile_set = _CURRENT_MAP["tile_sets"][0]
+                    print(f"🔍 [Debug] 瓦片集信息: {tile_set}")
+                    if "image_path" in tile_set:
+                        tile_sprite["data"]["tile_set_image_path"] = tile_set[
+                            "image_path"
+                        ]
+                        print(f"🔍 [Debug] 瓦片集图片路径: {tile_set['image_path']}")
+
+                    # 添加瓦片集的宽度和高度信息
+                    if "tile_width" in tile_set:
+                        tile_sprite["data"]["tile_set_width"] = tile_set["tile_width"]
+                    if "tile_height" in tile_set:
+                        tile_sprite["data"]["tile_set_height"] = tile_set["tile_height"]
+
+                print(f"🔍 [Debug] 发送瓦片创建指令: {tile_sprite}")
+                print(json.dumps(tile_sprite), flush=True)
+                _MAP_SPRITES[sprite_id] = tile_sprite
+
+    print(f"✅ [BingoEngine] 地图渲染完成，共 {len(_MAP_SPRITES)} 个瓦片")
 
 
 def run():
