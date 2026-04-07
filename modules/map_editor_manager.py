@@ -231,9 +231,7 @@ class MapEditorManager(QObject):
 
     def _initialize_canvas_manager(self):
         """初始化画布管理器 - 完全按照sprite_editor的模式"""
-        print("DEBUG: 开始初始化画布管理器")
         if not self.canvas_widget:
-            print("DEBUG: canvas_widget 为 None")
             return
 
         # 1. 替换画布控件 (只做一次，不要覆盖)
@@ -255,10 +253,9 @@ class MapEditorManager(QObject):
         )  # 包含正负坐标的大场景，实现无限画布
         self.canvas_manager.setScene(self.canvas_scene)
 
-        # 3. 获取地图数据
+        # 设置地图模型和瓦片大小
         width, height = self.map_model.get_map_size()
         tile_size = self.map_model.get_tile_size()
-        print(f"DEBUG: 地图尺寸: {width}x{height}, 图块大小: {tile_size}")
 
         # 设置地图模型引用给画布管理器，用于动态网格绘制
         self.canvas_manager.map_model = self.map_model
@@ -275,7 +272,6 @@ class MapEditorManager(QObject):
         )  # 淡紫色，最细的虚线
         game_window_rect.setBrush(Qt.NoBrush)
         self.canvas_scene.addItem(game_window_rect)
-        print("DEBUG: 添加游戏窗口显示范围(640x480)")
 
         # 6. 创建一个容器项，用于包含所有地图元素
         from PySide6.QtWidgets import QGraphicsItemGroup
@@ -285,7 +281,6 @@ class MapEditorManager(QObject):
 
         # 7. 绘制可见的瓦片网格，以游戏引擎坐标系统（左上角(0,0)）为原点
         # 网格线现在在画布的drawBackground中动态绘制
-        print("DEBUG: 网格线将在画布drawBackground中动态绘制")
 
         # 9. 添加x/y轴线（像Godot一样）
         # x轴线（红色，水平方向）
@@ -297,7 +292,6 @@ class MapEditorManager(QObject):
         y_axis_pen = QPen(QColor(50, 200, 50), 0)  # 降低饱和度的绿色，最细
         y_axis = self.canvas_scene.addLine(0, -10000, 0, 10000, y_axis_pen)
         map_container.addToGroup(y_axis)
-        print("DEBUG: 添加x/y轴线")
 
         # 7. 彻底重置所有变换（非常重要）
         self.canvas_manager.resetTransform()
@@ -306,16 +300,13 @@ class MapEditorManager(QObject):
         initial_scale = 1.6
         self.canvas_manager.scale(initial_scale, initial_scale)
         self.canvas_manager._zoom_level = initial_scale
-        print(f"DEBUG: 设置默认缩放为{initial_scale * 100}%")
 
         # 10. 让红色网格完整显示在画布范围内
         # 设置视图中心点为红色网格的中心位置(80,80)，这样整个网格都能显示
         self.canvas_manager.centerOn(80, 80)
-        print("DEBUG: 红色网格已完整显示在画布范围内")
 
         # 10. 绑定鼠标事件
         self._bind_mouse_events()
-        print("DEBUG: 鼠标事件绑定完成")
 
     def get_pixmap(self, file_path):
         """从缓存获取图片，如果不存在则加载并缓存"""
@@ -380,20 +371,12 @@ class MapEditorManager(QObject):
         return super().eventFilter(obj, event)
 
     def _clear_resource_items(self):
-        """清理资源项和图块项"""
+        """清理资源项（只清理资源列表视图中的项，不清理地图画布上的图块）"""
         try:
-            # 从场景中移除所有图块项
+            # 从资源列表视图场景中移除所有资源项
             if self.res_list_view:
                 scene = self.res_list_view.scene()
                 if scene:
-                    # 从场景中移除所有图块项
-                    for tile_item in self.tile_items.values():
-                        try:
-                            scene.removeItem(tile_item)
-                            tile_item.is_deleted = True
-                        except Exception as e:
-                            print(f"从场景移除图块项错误: {e}")
-
                     # 从场景中移除所有资源项
                     for resource_item in self.resource_items:
                         try:
@@ -448,7 +431,6 @@ class MapEditorManager(QObject):
     def load_map_from_path(self, file_path):
         """从指定路径加载地图 - 修复资源加载逻辑"""
         if file_path:
-            print(f"DEBUG: 加载地图开始: {file_path}")
             # 清除之前的状态
             self.selected_resource_index = -1
             self.selected_tile_index = -1
@@ -461,9 +443,25 @@ class MapEditorManager(QObject):
                 self.is_map_modified = False
                 self.map_loaded.emit(file_path)
 
+                # 强制清理场景中的所有瓦片项（确保切换地图时彻底清空画布）
+                if self.canvas_manager and self.canvas_manager.scene():
+                    scene = self.canvas_manager.scene()
+                    # 获取场景中的所有项
+                    all_items = scene.items()
+                    from PySide6.QtWidgets import QGraphicsPixmapItem
+
+                    # 移除所有瓦片项（QGraphicsPixmapItem）
+                    for item in all_items:
+                        if isinstance(item, QGraphicsPixmapItem):
+                            try:
+                                scene.removeItem(item)
+                            except Exception as e:
+                                pass
+                    # 清空tile_items字典
+                    self.tile_items.clear()
+
                 # 加载瓦片集资源
                 tile_sets = self.map_model.get_tile_sets()
-                print(f"DEBUG: 从地图模型加载的瓦片集数量: {len(tile_sets)}")
 
                 map_dir = os.path.dirname(file_path)
                 for tile_set in tile_sets:
@@ -582,6 +580,35 @@ class MapEditorManager(QObject):
             print(f"画布管理器: {self.canvas_manager}")
             print(f"地图模型: {self.map_model}")
 
+    def _erase_tile(self, scene_pos):
+        """物理碰撞拾取擦除方法"""
+        try:
+            # 1. 获取网格坐标用于清理数据模型
+            gx, gy = self._get_grid_pos_from_scene_pos(scene_pos)
+
+            # 2. 【核心修复】物理拾取：获取鼠标点下的所有图形项
+            items = self.canvas_manager.scene().items(scene_pos)
+            for item in items:
+                # 只删除带有"tile"标签的PixmapItem，防止误伤背景网格
+                if isinstance(item, QGraphicsPixmapItem) and item.data(0) == "tile":
+                    self.canvas_manager.scene().removeItem(item)
+                    # 同时清理字典中的引用（如果有）
+                    if (gx, gy) in self.tile_items:
+                        del self.tile_items[(gx, gy)]
+
+            # 3. 同步清理数据模型中的数据
+            self.map_model.set_tile(self.current_layer, gx, gy, 0)  # 0 代表空
+
+            # 设置地图为已修改状态
+            self.is_map_modified = True
+
+            # 自动保存地图（如果当前地图有文件路径）
+            if self.current_map_path:
+                save_result = self.map_model.save(self.current_map_path)
+
+        except Exception as e:
+            print(f"擦除图块错误: {e}")
+
     def _update_single_tile(self, x, y, tile_id):
         """
         更新单个瓦片 - 统一位置计算版本
@@ -631,6 +658,9 @@ class MapEditorManager(QObject):
                 # 添加到场景
                 scene.addItem(item)
                 self.tile_items[(x, y)] = item
+
+                # 给图块打标签，方便擦除时识别
+                item.setData(0, "tile")
 
                 # 记录渲染时的图块位置（世界网格坐标）
                 self._record_coordinates(
@@ -701,7 +731,6 @@ class MapEditorManager(QObject):
     def _render_map(self):
         """根据模型数据重新渲染整个地图图层"""
         try:
-            print("=== 开始渲染地图 ===")
             scene = self.canvas_manager.scene()
 
             # 1. 清理当前场景中已有的瓦片项，防止叠加
@@ -709,7 +738,7 @@ class MapEditorManager(QObject):
             for item in list(self.tile_items.values()):
                 try:
                     scene.removeItem(item)
-                except:
+                except Exception as e:
                     pass
             self.tile_items.clear()
 
@@ -720,19 +749,17 @@ class MapEditorManager(QObject):
                 return
 
             tile_size = self.map_model.get_tile_size()
-            print(f"✅ 地图瓦片大小: {tile_size}")
+
+            # 获取图层中的瓦片数据
+            tiles = layer.get("tiles", {})
 
             # 3. 遍历字典的keys，直接使用原始坐标
-            for (tx, ty), tile_id in layer["tiles"].items():
+            for (tx, ty), tile_id in tiles.items():
                 if tile_id <= 0:
                     continue
 
-                print(f"🎯 绘制瓦片 → 坐标({tx},{ty}) ID={tile_id}")
-
                 # 渲染瓦片
                 self._update_single_tile(tx, ty, tile_id)
-
-            print(f"DEBUG: 渲染完成，场景瓦片数量: {len(self.tile_items)}")
 
         except Exception as e:
             print(f"渲染地图失败: {e}")
@@ -834,22 +861,7 @@ class MapEditorManager(QObject):
                 elif self.current_tool == "erase":
                     # 擦除工具：删除瓦片
                     scene_pos = self.canvas_manager.mapToScene(event.pos())
-                    items = self.canvas_manager.scene().items(scene_pos)
-
-                    # 查找并删除图块项
-                    for item in items:
-                        if (
-                            isinstance(item, QGraphicsPixmapItem)
-                            and item != self.preview_item
-                        ):
-                            # 获取图块位置并更新地图数据
-                            tile_size = self.map_model.get_tile_size()
-                            tile_x = int(item.pos().x() / tile_size)
-                            tile_y = int(item.pos().y() / tile_size)
-                            self.map_model.set_tile(
-                                self.current_layer, tile_x, tile_y, 0
-                            )
-                            break
+                    self._erase_tile(scene_pos)
             else:
                 # 其他鼠标按钮（包括中键）交给MapCanvas处理
                 self.original_mousePressEvent(event)
@@ -884,22 +896,7 @@ class MapEditorManager(QObject):
                 elif self.current_tool == "erase":
                     # 擦除工具：删除瓦片
                     scene_pos = self.canvas_manager.mapToScene(event.pos())
-                    items = self.canvas_manager.scene().items(scene_pos)
-
-                    # 查找并删除图块项
-                    for item in items:
-                        if (
-                            isinstance(item, QGraphicsPixmapItem)
-                            and item != self.preview_item
-                        ):
-                            # 获取图块位置并更新地图数据
-                            tile_size = self.map_model.get_tile_size()
-                            tile_x = int(item.pos().x() / tile_size)
-                            tile_y = int(item.pos().y() / tile_size)
-                            self.map_model.set_tile(
-                                self.current_layer, tile_x, tile_y, 0
-                            )
-                            break
+                    self._erase_tile(scene_pos)
             else:
                 # 如果是中键拖动，交给MapCanvas处理
                 if event.buttons() & Qt.MiddleButton:
@@ -938,6 +935,18 @@ class MapEditorManager(QObject):
                             self.map_model.set_tile(
                                 self.current_layer, new_x, new_y, tile_id
                             )
+
+                            # 更新tile_items字典，确保擦除功能正常工作
+                            if (original_x, original_y) in self.tile_items:
+                                item = self.tile_items.pop((original_x, original_y))
+                                self.tile_items[(new_x, new_y)] = item
+
+                            # 设置地图为已修改状态
+                            self.is_map_modified = True
+
+                            # 自动保存地图（如果当前地图有文件路径）
+                            if self.current_map_path:
+                                save_result = self.map_model.save(self.current_map_path)
 
                     # 取消选中状态
                     self.selected_item = None
@@ -1264,27 +1273,24 @@ class MapEditorManager(QObject):
         try:
             # 尝试访问对象的属性来检查是否已删除
             if canvas_widget is None or not hasattr(canvas_widget, "parentWidget"):
-                print("DEBUG: canvas_widget无效，跳过设置")
                 return
 
             # 尝试调用一个方法来进一步验证
             canvas_widget.parentWidget()
         except RuntimeError:
-            print("DEBUG: canvas_widget已被删除，跳过设置")
             return
-
-        print(f"设置画布控件: {canvas_widget}")
 
         # 如果画布管理器已经初始化，需要重新初始化以确保地图数据正确切换
         if hasattr(self, "canvas_manager") and self.canvas_manager:
-            print("DEBUG: 画布管理器已存在，重新初始化")
             # 清理旧的瓦片项
-            if hasattr(self, "tile_items"):
-                for item in list(self.tile_items.values()):
-                    try:
-                        self.canvas_manager.scene().removeItem(item)
-                    except:
-                        pass
+            if hasattr(self, "tile_items") and self.canvas_manager:
+                old_scene = self.canvas_manager.scene()
+                if old_scene:
+                    for item in list(self.tile_items.values()):
+                        try:
+                            old_scene.removeItem(item)
+                        except:
+                            pass
                 self.tile_items.clear()
             # 清理旧的画布管理器
             self.canvas_manager = None
@@ -1328,7 +1334,6 @@ class MapEditorManager(QObject):
         """处理资源上传按钮点击事件"""
         # 检查资源列表视图是否已初始化
         if not self.res_list_view:
-            print("DEBUG: res_list_view 未设置，无法上传资源")
             return
 
         # 弹出导入对话框
@@ -1340,8 +1345,6 @@ class MapEditorManager(QObject):
             files = import_data["files"]
             resource_type = import_data["resource_type"]
             tile_size = import_data["tile_size"]
-
-            print(f"DEBUG: 导入数据: 文件数量={len(files)}, 资源类型={resource_type}")
 
             # 保存上传的资源
             for file_path in files:
@@ -1426,12 +1429,8 @@ class MapEditorManager(QObject):
                                 tile_height=height,
                             )
 
-                    print(
-                        f"DEBUG: 添加资源: {resource_info['name']}, 保存路径: {relative_path}"
-                    )
-
             # 更新资源列表显示
-            print(f"DEBUG: 上传完成，资源总数: {len(self.uploaded_resources)}")
+
             self._update_res_list_display()
 
     def select_resource(self, index):
@@ -1440,10 +1439,7 @@ class MapEditorManager(QObject):
             if 0 <= index < len(self.uploaded_resources):
                 self.selected_resource_index = index
                 self.selected_tile_index = -1  # 重置图块选择
-                print(f"DEBUG: 选中资源: {self.uploaded_resources[index]['name']}")
-                print(
-                    f"DEBUG: 资源索引: {self.selected_resource_index}, 图块索引: {self.selected_tile_index}"
-                )
+
                 self._update_res_list_display()
         except Exception as e:
             print(f"选择资源错误: {e}")
@@ -1464,9 +1460,7 @@ class MapEditorManager(QObject):
                 print(
                     f"DEBUG: 选中图块: 资源={resource_info['name']}, 图块索引={tile_index}"
                 )
-                print(
-                    f"DEBUG: 资源索引: {self.selected_resource_index}, 图块索引: {self.selected_tile_index}"
-                )
+
                 self._update_res_list_display()
         except Exception as e:
             print(f"选择图块错误: {e}")
@@ -1474,7 +1468,6 @@ class MapEditorManager(QObject):
     def _update_res_list_display(self):
         """更新资源列表显示"""
         if not self.res_list_view:
-            print("DEBUG: res_list_view 未设置")
             return
 
         # 清理旧的资源项和图块项
@@ -1486,16 +1479,8 @@ class MapEditorManager(QObject):
         # 添加资源到场景
         y_pos = 0  # 移除顶部边距
 
-        print(f"DEBUG: 更新资源列表，资源数量: {len(self.uploaded_resources)}")
-
         for i, resource in enumerate(self.uploaded_resources):
             try:
-                print(
-                    f"DEBUG: 处理资源 {i}: {resource['name']}, 类型: {resource.get('resource_type', 'unknown')}"
-                )
-                print(f"DEBUG: 资源路径: {resource['path']}")
-                print(f"DEBUG: 文件是否存在: {os.path.exists(resource['path'])}")
-
                 # 加载原始图片（处理相对路径）
                 image_path = resource["path"]
                 if not os.path.isabs(image_path):
@@ -1503,28 +1488,23 @@ class MapEditorManager(QObject):
                         map_dir = os.path.dirname(self.current_map_path)
                         image_path = os.path.join(map_dir, image_path)
                 original_pixmap = QPixmap(image_path)
-                print(f"DEBUG: 图片加载结果: {not original_pixmap.isNull()}")
                 if original_pixmap.isNull():
-                    print(f"DEBUG: 图片加载失败: {resource['path']}")
                     continue
 
                 # 获取资源类型和图块尺寸
                 resource_type = resource.get("resource_type", "image")
                 tile_size = resource.get("tile_size", 32)
-                print(f"DEBUG: 资源类型: {resource_type}, 图块尺寸: {tile_size}")
 
                 # 计算图块数量（仅图块集合模式）
                 image_width = original_pixmap.width()
                 image_height = original_pixmap.height()
                 tiles_per_row = 0
                 tiles_per_col = 0
-                print(f"DEBUG: 图片尺寸: {image_width}x{image_height}")
 
                 if resource_type == "tileset":
                     # 修复：兼容图片尺寸小于图块尺寸的情况
                     tiles_per_row = max(1, image_width // tile_size)
                     tiles_per_col = max(1, image_height // tile_size)
-                    print(f"DEBUG: 图块数量: {tiles_per_row}x{tiles_per_col}")
 
                 # 计算显示区域大小 - 撑满256宽度
                 display_width = 256  # 整个视图宽度
@@ -1535,12 +1515,10 @@ class MapEditorManager(QObject):
                     scale = 1.0  # 保持原始尺寸
                 else:
                     scale = display_width / image_width  # 大于等于256宽度的图片缩放
-                print(f"DEBUG: 缩放比例: {scale}")
 
                 # 创建缩放后的图片
                 scaled_width = int(image_width * scale)
                 scaled_height = int(image_height * scale)
-                print(f"DEBUG: 缩放后尺寸: {scaled_width}x{scaled_height}")
 
                 scaled_pixmap = original_pixmap.scaled(
                     scaled_width,
@@ -1552,13 +1530,11 @@ class MapEditorManager(QObject):
                 # 计算显示位置
                 pixmap_x = 0
                 pixmap_y = y_pos
-                print(f"DEBUG: 显示位置: ({pixmap_x}, {pixmap_y})")
 
                 # 添加缩放后的图片
                 pixmap_item = QGraphicsPixmapItem(scaled_pixmap)
                 pixmap_item.setPos(pixmap_x, pixmap_y)
                 scene.addItem(pixmap_item)
-                print(f"DEBUG: 添加图片到场景")
 
                 # 绘制图块网格或创建单张图片的可点击区域
                 if resource_type == "tileset":
@@ -1622,11 +1598,9 @@ class MapEditorManager(QObject):
 
                     scene.addItem(resource_item)
                     self.resource_items.append(resource_item)
-                    print(f"DEBUG: 添加资源项到场景")
 
                 # 更新位置 - 根据实际图片高度调整间距
                 y_pos += scaled_height
-                print(f"DEBUG: 更新位置到: {y_pos}")
 
             except Exception as e:
                 print(f"创建资源缩略图失败: {e}")
@@ -1634,7 +1608,6 @@ class MapEditorManager(QObject):
         # 设置场景大小
         scene_height = max(500, y_pos)
         scene.setSceneRect(0, 0, 256, scene_height)
-        print(f"DEBUG: 场景大小: 256x{scene_height}")
 
         # 设置场景到视图
         self.res_list_view.setScene(scene)
@@ -1642,7 +1615,6 @@ class MapEditorManager(QObject):
         self.res_list_view.update()  # 添加 update() 方法调用，确保视图刷新
         # 自动滚动到顶部，确保用户可以看到导入的图片
         self.res_list_view.verticalScrollBar().setValue(0)
-        print(f"DEBUG: 场景设置到视图，已滚动到顶部")
 
     def setup_tool_buttons(self, ui):
         """绑定工具按钮到对应的功能"""

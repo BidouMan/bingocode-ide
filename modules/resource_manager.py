@@ -1302,7 +1302,6 @@ class ResourceManager(QObject):
                     map_file_path = os.path.join(maps_dir, folder_name, f"{folder_name}.json")
                     if os.path.exists(map_file_path):
                         self.add_map_card(folder_name, i)
-                        print(f"DEBUG: 加载地图文件: {folder_name}.json")
         except Exception as e:
             print(f"刷新地图列表失败: {e}")
 
