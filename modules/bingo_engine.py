@@ -313,11 +313,11 @@ class Sprite:
         # 确保 text 是字符串
         self._send_command("SAY", {"text": str(text)})
 
-    def play(self, animation_name, transition_time=0.2):
+    def play(self, animation_name, transition_time=0.1):
         """
         播放指定名称的动画
         参数: animation_name - 动画名称（如 'idle', 'walk' 等）
-              transition_time - 平滑过渡时间（秒），默认0.2秒
+              transition_time - 平滑过渡时间（秒），默认0.1秒
         """
         if not self.config:
             return
@@ -364,41 +364,19 @@ class Sprite:
             self._update_animation_frame()
             return
 
-        # 如果有动画在播放，并且需要平滑过渡
-        if transition_time > 0:
-            # 保存当前动画状态作为源动画
-            self._source_animation = self.animation_state.copy()
-
-            # 创建目标动画状态
-            self._target_animation = {
-                "start": start - 1,
-                "end": end - 1,
-                "fps": fps,
-                "loop": loop,
-                "current_frame": start - 1,
-                "last_frame_time": time.time(),
-                "frame_duration": 1.0 / fps,
-                "is_playing": True,
-            }
-
-            # 设置过渡状态
-            self._transition_start_time = time.time()
-            self._transition_duration = transition_time
-            self._is_transitioning = True
-            self._update_animation_frame()
-        else:
-            # 直接切换，不使用过渡
-            self.animation_state = {
-                "start": start - 1,
-                "end": end - 1,
-                "fps": fps,
-                "loop": loop,
-                "current_frame": start - 1,
-                "last_frame_time": time.time(),
-                "frame_duration": 1.0 / fps,
-                "is_playing": True,
-            }
-            self._update_animation_frame()
+        # 直接切换动画状态，不使用复杂的过渡逻辑
+        # 这样动画切换会更加流畅，没有延迟
+        self.animation_state = {
+            "start": start - 1,
+            "end": end - 1,
+            "fps": fps,
+            "loop": loop,
+            "current_frame": start - 1,
+            "last_frame_time": time.time(),
+            "frame_duration": 1.0 / fps,
+            "is_playing": True,
+        }
+        self._update_animation_frame()
 
         # 记录当前播放的动画名称
         self._current_animation = animation_name

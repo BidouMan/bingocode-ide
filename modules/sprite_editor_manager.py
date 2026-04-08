@@ -743,33 +743,25 @@ class SpriteEditorManager(QObject):
         if not self.model or not self.current_anim_config:
             return
 
-        # 1. 获取当前选中的动画名字
-        current_item = self.anim_list.currentItem()
-        if not current_item:
-            return
+        # 直接更新当前动画配置的FPS值
+        # 不依赖于选中的动画项，避免动画名称为空的问题
+        if self.current_anim_config:
+            # 更新当前运行配置
+            self.current_anim_config["fps"] = value
+            
+            # 更新模型数据中的对应动画
+            if self.anim_list.currentItem():
+                anim_name = self.anim_list.currentItem().text(0)
+                if anim_name and anim_name in self.model.animations:
+                    self.model.animations[anim_name]["fps"] = value
 
-        anim_name = current_item.text(0)
-        
-        # 检查动画名称是否有效
-        if not anim_name or anim_name not in self.model.animations:
-            return
+            # 关键：如果正在播放，实时调整计时器间隔
+            if self.is_playing:
+                interval = int(1000 / max(value, 1))
+                self.timer.setInterval(interval)
 
-        # 2. 更新模型数据
-        self.model.animations[anim_name]["fps"] = value
-        # 实时更新当前运行配置，这样播放器能立刻感知
-        self.current_anim_config["fps"] = value
-
-        # 3. 🚀 关键：如果正在播放，实时调整计时器间隔
-        if self.is_playing:
-            interval = int(1000 / max(value, 1))
-            self.timer.setInterval(interval)
-
-        # 4. 打印调试信息（可选：如果你界面上有个 Label 显示数字更好）
-        # self.ui.fps_label.setText(f"{value} FPS")
-        print(f"⚡ [DEBUG] FPS 实时调整为: {value}")
-
-        # 5. 延迟保存（或者在停止滑动后保存，防止频繁写磁盘）
-        self.model.save()
+            # 保存模型
+            self.model.save()
 
     def _on_loop_toggled(self, anim_name, button):
         """处理循环状态切换"""
