@@ -1302,6 +1302,7 @@ class ResourceManager(QObject):
                     map_file_path = os.path.join(maps_dir, folder_name, f"{folder_name}.json")
                     if os.path.exists(map_file_path):
                         self.add_map_card(folder_name, i)
+
         except Exception as e:
             print(f"刷新地图列表失败: {e}")
 
@@ -1325,7 +1326,6 @@ class ResourceManager(QObject):
             # 创建必要的目录结构 - 每个地图有独立文件夹
             os.makedirs(map_folder, exist_ok=True)
             os.makedirs(tilesets_dir, exist_ok=True)
-            
             # 创建地图文件路径 - JSON文件放在地图文件夹内
             map_file_path = os.path.join(map_folder, f"{map_name}.json")
             

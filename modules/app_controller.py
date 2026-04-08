@@ -99,8 +99,6 @@ class AppController:
         # 绑定地图编辑器工具按钮
         self.map_editor.setup_tool_buttons(self.ui)
 
-
-
         # 菜单栏按钮_>文件管理
         self.menu_manager.open_file_signal.connect(self.handle_open_project)
         self.menu_manager.save_file_signal.connect(self.handle_save_project)
@@ -169,7 +167,7 @@ class AppController:
         # 2. 初始化地图编辑器的画布
         self.map_editor.set_canvas_widget(self.ui.editor_map_canvas)
         self.map_editor.set_res_list_view(self.ui.res_list_view)
-        
+
         # 初始化碰撞编辑器
         if hasattr(self.ui, "col_editor_view"):
             self.map_editor.initialize_collision_editor(self.ui.col_editor_view)

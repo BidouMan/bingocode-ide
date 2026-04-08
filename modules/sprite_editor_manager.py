@@ -749,6 +749,10 @@ class SpriteEditorManager(QObject):
             return
 
         anim_name = current_item.text(0)
+        
+        # 检查动画名称是否有效
+        if not anim_name or anim_name not in self.model.animations:
+            return
 
         # 2. 更新模型数据
         self.model.animations[anim_name]["fps"] = value

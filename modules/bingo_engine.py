@@ -385,6 +385,7 @@ class Sprite:
             self._transition_start_time = time.time()
             self._transition_duration = transition_time
             self._is_transitioning = True
+            self._update_animation_frame()
         else:
             # 直接切换，不使用过渡
             self.animation_state = {
@@ -397,6 +398,7 @@ class Sprite:
                 "frame_duration": 1.0 / fps,
                 "is_playing": True,
             }
+            self._update_animation_frame()
 
         # 记录当前播放的动画名称
         self._current_animation = animation_name
@@ -722,9 +724,20 @@ class Sprite:
         if not hasattr(self, "animation_state") or not self.animation_state:
             return
 
+        # 检查是否在过渡状态
+        if hasattr(self, "_is_transitioning") and self._is_transitioning:
+            # 计算过渡进度
+            now = time.time()
+            elapsed = now - self._transition_start_time
+            progress = min(elapsed / self._transition_duration, 1.0)
+
             if progress < 0.5:
                 # 前半段显示源动画的帧
                 current_frame = self._source_animation["current_frame"]
+            else:
+                # 后半段显示目标动画的帧
+                current_frame = self._target_animation["current_frame"]
+
             # 如果过渡完成，结束过渡状态
             if progress >= 1.0:
                 self.animation_state = self._target_animation
@@ -1031,29 +1044,8 @@ def _render_map():
         for tile_data in batch_commands:
             _MAP_SPRITES[tile_data["id"]] = tile_data
 
-    # 清理不再可见的瓦片
-    tiles_to_remove = []
-    for layer_idx, x, y in list(_RENDERED_TILES):
-        screen_x = x * tile_size + tile_size // 2
-        screen_y = y * tile_size + tile_size // 2
-
-        # 检查瓦片是否在当前视口外
-        if (
-            screen_x < viewport_left
-            or screen_x > viewport_right
-            or screen_y < viewport_top
-            or screen_y > viewport_bottom
-        ):
-            sprite_id = f"tile_{layer_idx}_{x}_{y}"
-            tiles_to_remove.append(sprite_id)
-            _RENDERED_TILES.remove((layer_idx, x, y))
-
-    # 删除不再可见的瓦片
-    for sprite_id in tiles_to_remove:
-        if sprite_id in _MAP_SPRITES:
-            packet = {"type": "DELETE", "id": sprite_id}
-            print(json.dumps(packet), flush=True)
-            del _MAP_SPRITES[sprite_id]
+    # 在静态图层烘焙模式下，不需要清理瓦片（所有瓦片都已渲染）
+    # 只有在动态渲染模式下才需要清理视口外的瓦片
 
     # 性能监控
     render_time = (time.time() - start_time) * 1000  # 转换为毫秒
