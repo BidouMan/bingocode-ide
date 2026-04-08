@@ -990,6 +990,10 @@ def _render_map():
             # 创建瓦片精灵ID
             sprite_id = f"map_{layer_idx}_{x}_{y}"
 
+            # 解析tile_id：格式为 resource_index * 1000 + tile_index + 1
+            resource_index = tile_id // 1000
+            actual_tile_index = (tile_id % 1000) - 1
+
             # 添加到批量渲染列表
             tile_data = {
                 "id": sprite_id,
@@ -1000,8 +1004,8 @@ def _render_map():
                 "scale_x": 1.0,
                 "scale_y": 1.0,
                 "type": "tile",
-                "tile_id": tile_id,
-                "tile_set_index": 0,
+                "tile_id": actual_tile_index + 1,  # 恢复为从1开始的索引
+                "tile_set_index": resource_index,
                 "layer": layer_idx,
                 "tile_size": tile_size,
             }
@@ -1011,14 +1015,12 @@ def _render_map():
             rendered_count += 1
 
     # 批量渲染：一次性发送所有可见瓦片的渲染指令
-    if batch_commands and tile_set_info:
+    if batch_commands and _CURRENT_MAP.get("tile_sets"):
         packet = {
             "type": "CREATE_BATCH",
             "data": {
                 "tiles": batch_commands,
-                "tile_set_image_path": tile_set_info.get("image_path", ""),
-                "tile_set_width": tile_set_info.get("tile_width", 32),
-                "tile_set_height": tile_set_info.get("tile_height", 32),
+                "tile_sets": _CURRENT_MAP["tile_sets"],
                 "tile_size": tile_size,
             },
         }

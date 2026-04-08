@@ -19,7 +19,7 @@ from PySide6.QtGui import (
     QFontDatabase,
     QPainterPath,
 )
-from PySide6.QtCore import Qt, QObject, QEvent
+from PySide6.QtCore import Qt, QObject, QEvent, QRect as QtCore_QRect
 
 
 class RenderManager(QObject):
@@ -121,6 +121,10 @@ class RenderManager(QObject):
                     self.reset_session()
                 elif cmd_type == "PLAY_ANIMATION":
                     self.play_animation(sprite_id, data)
+
+            # 3. 处理批量渲染指令
+            elif cmd_type == "CREATE_BATCH":
+                self.create_batch_tiles(data)
 
         except Exception as e:
             # 🚀 必须打印错误，否则如果里面崩溃了你完全不知道
@@ -361,7 +365,7 @@ class RenderManager(QObject):
     def eventFilter(self, obj, event):
         """事件过滤器，捕获鼠标事件"""
         try:
-            if hasattr(self, 'view') and self.view and obj == self.view.viewport():
+            if hasattr(self, "view") and self.view and obj == self.view.viewport():
                 # 鼠标按下
                 if event.type() == event.Type.MouseButtonPress:
                     self.handle_mouse_press(event)
@@ -478,6 +482,122 @@ class RenderManager(QObject):
         item.animation_timer.timeout.connect(update_frame)
         item.animation_timer.setInterval(int(1000 / fps))
         item.animation_timer.start()
+
+    def create_batch_tiles(self, data):
+        """批量创建瓦片精灵"""
+        tiles = data.get("tiles", [])
+        tile_size = data.get("tile_size", 32)
+
+        if not tiles:
+            return
+
+        # 获取所有瓦片集信息
+        tile_sets = data.get("tile_sets", [])
+        if not tile_sets:
+            return
+
+        # 创建瓦片集字典，用于快速查找
+        tile_set_dict = {}
+        for i, tile_set in enumerate(tile_sets):
+            tile_set_dict[i] = {
+                "image_path": tile_set.get("image_path", ""),
+                "tile_width": tile_set.get("tile_width", 32),
+                "tile_height": tile_set.get("tile_height", 32),
+                "pixmap": None,
+                "cols": 0,
+                "rows": 0,
+            }
+
+        # 加载所有瓦片集图片
+        for tile_set_index, tile_set_info in tile_set_dict.items():
+            image_path = tile_set_info["image_path"]
+            if image_path:
+                pixmap = QPixmap(image_path)
+                if not pixmap.isNull():
+                    tile_set_info["pixmap"] = pixmap
+                    tile_set_info["cols"] = (
+                        pixmap.width() // tile_set_info["tile_width"]
+                    )
+                    tile_set_info["rows"] = (
+                        pixmap.height() // tile_set_info["tile_height"]
+                    )
+                    print(
+                        f"✅ [RenderManager] 加载瓦片集 {tile_set_index}: {image_path}"
+                    )
+                    print(f"   - 尺寸: {pixmap.size()}")
+                    print(
+                        f"   - 瓦片大小: {tile_set_info['tile_width']}x{tile_set_info['tile_height']}"
+                    )
+                    print(
+                        f"   - 行列数: {tile_set_info['cols']}x{tile_set_info['rows']}"
+                    )
+                else:
+                    print(f"❌ [RenderManager] 瓦片集加载失败: {image_path}")
+
+        created_count = 0
+        for tile_data in tiles:
+            sprite_id = tile_data.get("id")
+            if not sprite_id:
+                continue
+
+            tile_id = tile_data.get("tile_id", 0)
+            if tile_id <= 0:
+                continue
+
+            # 获取瓦片集索引（默认为0）
+            tile_set_index = tile_data.get("tile_set_index", 0)
+
+            # 检查瓦片集是否存在
+            if tile_set_index not in tile_set_dict:
+                continue
+
+            tile_set_info = tile_set_dict[tile_set_index]
+            pixmap = tile_set_info.get("pixmap")
+
+            if not pixmap:
+                continue
+
+            # 计算瓦片在瓦片集中的位置
+            tile_index = tile_id - 1
+            tile_col = tile_index % tile_set_info["cols"]
+            tile_row = tile_index // tile_set_info["cols"]
+
+            # 检查瓦片索引是否有效
+            if tile_row >= tile_set_info["rows"]:
+                continue
+
+            # 从瓦片集中裁剪出单个瓦片
+            tile_rect = QtCore_QRect(
+                tile_col * tile_set_info["tile_width"],
+                tile_row * tile_set_info["tile_height"],
+                tile_set_info["tile_width"],
+                tile_set_info["tile_height"],
+            )
+            tile_pixmap = pixmap.copy(tile_rect)
+
+            if tile_pixmap.isNull():
+                continue
+
+            # 创建瓦片精灵
+            item = QGraphicsPixmapItem(tile_pixmap)
+            item.setTransformOriginPoint(tile_size // 2, tile_size // 2)
+
+            # 存储精灵
+            self.sprites[sprite_id] = item
+            self.scene.addItem(item)
+
+            # 设置图层
+            layer = tile_data.get("layer", 0)
+            item.setZValue(layer)
+
+            # 更新位置
+            x = tile_data.get("x", 0)
+            y = tile_data.get("y", 0)
+            item.setPos(x - tile_size // 2, y - tile_size // 2)
+
+            created_count += 1
+
+        print(f"✅ [RenderManager] 批量创建 {created_count} 个瓦片精灵完成")
 
     # ---------- 内部函数 ----------
     def _setup_fps_label(self):
