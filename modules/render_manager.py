@@ -443,17 +443,18 @@ class RenderManager(QObject):
         y = data.get("y", 240)
         map_width = data.get("map_width", 0)
         map_height = data.get("map_height", 0)
+        tile_size = data.get("tile_size", 16)
 
         # 调用高性能摄像机更新方法
-        self.update_camera(x, y, map_width, map_height)
+        self.update_camera(x, y, map_width, map_height, tile_size)
 
-    def update_camera(self, target_x, target_y, map_w_tiles, map_h_tiles):
+    def update_camera(self, target_x, target_y, map_w_tiles, map_h_tiles, tile_size=16):
         """
         高性能摄像机更新
         :param target_x, target_y: 玩家当前的像素坐标
         :param map_w_tiles, map_h_tiles: 地图总行列数（用于动态计算边界）
+        :param tile_size: 图块尺寸，默认值为16
         """
-        tile_size = 16
         map_px_w = map_w_tiles * tile_size
         map_px_h = map_h_tiles * tile_size
 

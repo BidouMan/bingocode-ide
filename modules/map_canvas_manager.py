@@ -25,7 +25,7 @@ class MapCanvas(QGraphicsView):
         self._init_settings()
         # 地图模型引用
         self.map_model = None
-        self.tile_size = 16
+        self.tile_size = None
         # 网格显示控制
         self._grid_visible = True
         # 网格纹理缓存
@@ -60,8 +60,9 @@ class MapCanvas(QGraphicsView):
         """初始化网格纹理"""
         from PySide6.QtGui import QPixmap, QPainter
 
-        # 创建一个瓦片大小的纹理
-        pixmap = QPixmap(self.tile_size, self.tile_size)
+        # 创建一个瓦片大小的纹理，如果tile_size为None则使用默认值16
+        tile_size = self.tile_size or 16
+        pixmap = QPixmap(tile_size, tile_size)
         pixmap.fill(Qt.GlobalColor.transparent)
 
         # 绘制网格线
@@ -70,8 +71,8 @@ class MapCanvas(QGraphicsView):
         painter.setPen(QPen(grid_color, 0))
 
         # 绘制右边框和底边框
-        painter.drawLine(self.tile_size - 1, 0, self.tile_size - 1, self.tile_size - 1)
-        painter.drawLine(0, self.tile_size - 1, self.tile_size - 1, self.tile_size - 1)
+        painter.drawLine(tile_size - 1, 0, tile_size - 1, tile_size - 1)
+        painter.drawLine(0, tile_size - 1, tile_size - 1, tile_size - 1)
         painter.end()
 
         self._grid_pixmap = pixmap

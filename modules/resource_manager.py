@@ -120,9 +120,6 @@ class SpriteItemWidget(QWidget):
         layout.addWidget(self.label, 0, Qt.AlignmentFlag.AlignCenter)
 
 
-
-
-
 class CodeItemWidget(QWidget):
     def __init__(
         self,
@@ -296,7 +293,7 @@ class ResourceManager(QObject):
         }
 
         self.setup_list_styles()
-        
+
         # 图片缓存，避免重复加载相同的图片
         self._pixmap_cache = {}
 
@@ -323,7 +320,7 @@ class ResourceManager(QObject):
         # 5. 上传菜单管理
         self.sprite_upload_menu = UploadMenuManager(self.ui.page_sprite)
         self.sprite_upload_menu.on_import_finished = self.handle_sprite_import_success
-        
+
         # 地图上传菜单管理
         self.map_upload_menu = MapUploadMenuManager(self.ui.page_map)
         self.map_upload_menu.on_import_finished = self.handle_map_import_success
@@ -386,7 +383,7 @@ class ResourceManager(QObject):
         style = self.ui.list_code.styleSheet()
         self.ui.list_sprite.setStyleSheet(style)
         self.ui.list_sprite.setSpacing(2)  # 增加项之间的间距
-        
+
         # 设置地图列表为网格布局
         self.setup_map_grid_mode()
 
@@ -530,7 +527,7 @@ class ResourceManager(QObject):
     def eventFilter(self, watched, event):
         try:
             # 1. 代码列表逻辑
-            if hasattr(self, 'ui') and self.ui and watched == self.ui.list_code:
+            if hasattr(self, "ui") and self.ui and watched == self.ui.list_code:
                 if event.type() == QEvent.Type.FocusOut:
                     if self.ui.list_code.selectedItems():
                         self.ui.list_code.clearSelection()
@@ -765,9 +762,7 @@ class ResourceManager(QObject):
         self.map_grid_layout = QGridLayout(self.map_grid_container)
 
         # 重点：设置间距和边距
-        self.map_grid_layout.setContentsMargins(
-            4, 6, 4, 6
-        )  # 这里的边距可以自由控制了
+        self.map_grid_layout.setContentsMargins(4, 6, 4, 6)  # 这里的边距可以自由控制了
         self.map_grid_layout.setSpacing(0)
         self.map_grid_layout.setVerticalSpacing(5)
 
@@ -871,12 +866,14 @@ class ResourceManager(QObject):
                     self._pixmap_cache[icon_path] = target_pix
                 else:
                     target_pix = None
-            
+
             if target_pix:
                 icon_label.setPixmap(target_pix)
                 icon_label.setScaledContents(True)
             else:
-                icon_label.setStyleSheet("background-color: #4A90E2; border-radius: 4px;")
+                icon_label.setStyleSheet(
+                    "background-color: #4A90E2; border-radius: 4px;"
+                )
         else:
             icon_label.setStyleSheet("background-color: #4A90E2; border-radius: 4px;")
         layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignCenter)
@@ -934,13 +931,15 @@ class ResourceManager(QObject):
                     self._pixmap_cache[icon_path] = target_pix
                 else:
                     target_pix = None
-            
+
             if target_pix:
                 icon_label.setPixmap(target_pix)
                 icon_label.setScaledContents(True)
             else:
                 # 地图用绿色方块
-                icon_label.setStyleSheet("background-color: #5bc772; border-radius: 4px;")
+                icon_label.setStyleSheet(
+                    "background-color: #5bc772; border-radius: 4px;"
+                )
         else:
             # 地图用绿色方块
             icon_label.setStyleSheet("background-color: #5bc772; border-radius: 4px;")
@@ -1005,8 +1004,10 @@ class ResourceManager(QObject):
         # card.mouseDoubleClickEvent = lambda event: self.start_sprite_rename(card, name)
         def on_double_click(event):
             project_root = self.app_controller.project_manager.project_root
-            # 每个地图有独立文件夹，路径格式：maps/地图名称/地图名称.json
-            full_path = os.path.join(project_root, "assets", "maps", name, f"{name}.json")
+            # 每个地图有独立文件夹，路径格式：maps/地图名称/地图名称.info（二进制格式）
+            full_path = os.path.join(
+                project_root, "assets", "maps", name, f"{name}.info"
+            )
             # 🚀 发射选中信号，通知 AppController 切换页面并加载地图
             self.sig_map_selected.emit(full_path)
 
@@ -1275,7 +1276,7 @@ class ResourceManager(QObject):
         # 检查地图网格布局是否存在，如果不存在则重新创建
         if not hasattr(self, "map_grid_layout"):
             self.setup_map_grid_mode()
-        
+
         # 清空现有卡片
         while self.map_grid_layout.count():
             child = self.map_grid_layout.takeAt(0)
@@ -1293,13 +1294,24 @@ class ResourceManager(QObject):
                 map_folders = [
                     d
                     for d in os.listdir(maps_dir)
-                    if not d.startswith(".") and os.path.isdir(os.path.join(maps_dir, d))
+                    if not d.startswith(".")
+                    and os.path.isdir(os.path.join(maps_dir, d))
                 ]
                 map_folders.sort()
 
                 for i, folder_name in enumerate(map_folders):
-                    # 每个地图文件夹内有对应的json文件
-                    map_file_path = os.path.join(maps_dir, folder_name, f"{folder_name}.json")
+                    # 每个地图文件夹内有对应的文件（支持二进制和JSON格式）
+                    # 先检查二进制文件（.info文件作为入口）
+                    info_file_path = os.path.join(
+                        maps_dir, folder_name, f"{folder_name}.info"
+                    )
+                    map_file_path = info_file_path
+
+                    # 如果二进制文件不存在，尝试JSON文件（兼容旧版本）
+                    if not os.path.exists(map_file_path):
+                        map_file_path = os.path.join(
+                            maps_dir, folder_name, f"{folder_name}.json"
+                        )
                     if os.path.exists(map_file_path):
                         self.add_map_card(folder_name, i)
 
@@ -1315,25 +1327,26 @@ class ResourceManager(QObject):
         # 获取当前地图数量，生成默认名字
         map_count = self.map_grid_layout.count()
         map_name = f"地图{map_count + 1}"
-        
+
         # 保存地图数据到文件 - 每个地图一个独立文件夹
         project_root = self.app_controller.project_manager.project_root
         if project_root:
             maps_dir = os.path.join(project_root, "assets", "maps")
             map_folder = os.path.join(maps_dir, map_name)
             tilesets_dir = os.path.join(map_folder, "tilesets")
-            
+
             # 创建必要的目录结构 - 每个地图有独立文件夹
             os.makedirs(map_folder, exist_ok=True)
             os.makedirs(tilesets_dir, exist_ok=True)
-            # 创建地图文件路径 - JSON文件放在地图文件夹内
-            map_file_path = os.path.join(map_folder, f"{map_name}.json")
-            
+            # 创建地图文件路径 - 使用二进制格式（.info作为入口文件）
+            map_file_path = os.path.join(map_folder, f"{map_name}.info")
+
             # 创建新的空地图模型来保存新地图数据
             from models.map_model import MapDataModel
+
             new_map_model = MapDataModel()
             save_result = new_map_model.save(map_file_path)
             print(f"DEBUG: 新地图已保存到: {map_file_path}, 结果: {save_result}")
-        
+
         # 创建地图卡片
         self.add_map_card(map_name, map_count)

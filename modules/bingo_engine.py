@@ -426,7 +426,7 @@ class Sprite:
         return False
 
     def is_touch(self, target):
-        """判断是否碰到另一个 Sprite 或鼠标"""
+        """判断是否碰到另一个 Sprite、鼠标或带有指定标签的图块"""
         if self._is_deleted or not self._visible:
             return False
 
@@ -438,12 +438,56 @@ class Sprite:
 
         if target is mouse:
             mx, my = _MOUSE_STATE["x"], _MOUSE_STATE["y"]
-
             # 🚀 2. 判定鼠标点 (mx, my) 是否在内容矩形 r1 内
-            # r1[0]=左, r1[1]=上, r1[2]=右, r1[3]=下
             return r1[0] <= mx <= r1[2] and r1[1] <= my <= r1[3]
 
-        # 🚀 3. 原有的 Sprite 间碰撞逻辑
+        # 🚀 3. 如果目标是字符串，进行标签碰撞检测
+        if isinstance(target, str):
+            tag = target
+            # 获取精灵的位置
+            sprite_x, sprite_y = self.x, self.y
+
+            # 获取地图数据
+            if hasattr(self, "map_data") and self.map_data:
+                tile_size = self.map_data.get("tile_size", 16)
+
+                # 计算精灵包围盒覆盖的图块范围
+                min_tile_x = int(r1[0] // tile_size)
+                max_tile_x = int(r1[2] // tile_size)
+                min_tile_y = int(r1[1] // tile_size)
+                max_tile_y = int(r1[3] // tile_size)
+
+                # 遍历所有图层
+                for layer in self.map_data.get("layers", []):
+                    tiles = layer.get("tiles", {})
+
+                    # 检查每个图块
+                    for (tile_x, tile_y), tile_id in tiles.items():
+                        if tile_id > 0:
+                            # 检查图块是否在精灵包围盒内
+                            if (
+                                min_tile_x <= tile_x <= max_tile_x
+                                and min_tile_y <= tile_y <= max_tile_y
+                            ):
+                                # 解析tile_id获取资源索引和图块索引
+                                resource_index = tile_id // 1000
+                                tile_index = (tile_id % 1000) - 1
+
+                                # 获取图块标签
+                                if (
+                                    hasattr(self, "app_controller")
+                                    and self.app_controller
+                                ):
+                                    map_model = self.app_controller.map_editor.map_model
+                                    if map_model:
+                                        tile_tag = map_model.get_tile_tag(
+                                            resource_index, tile_index
+                                        )
+                                        if tile_tag == tag:
+                                            return True
+            return False
+
+        # 🚀 4. 原有的 Sprite 间碰撞逻辑
         if target is None or not hasattr(target, "_visible") or not target._visible:
             return False
 
@@ -850,11 +894,17 @@ def get_main_player():
     return None
 
 
-def _send_camera_update(x, y, map_w, map_h):
+def _send_camera_update(x, y, map_w, map_h, tile_size=16):
     """发送摄像机更新指令到IDE"""
     camera_packet = {
         "type": "CAMERA_UPDATE",
-        "data": {"x": x, "y": y, "map_width": map_w, "map_height": map_h},
+        "data": {
+            "x": x,
+            "y": y,
+            "map_width": map_w,
+            "map_height": map_h,
+            "tile_size": tile_size,
+        },
     }
     print(json.dumps(camera_packet), flush=True)
 
@@ -884,8 +934,16 @@ def load_map(map_name):
 
     try:
         # 从当前工作目录的assets/maps文件夹读取地图文件
-        # 地图文件格式: assets/maps/{map_name}/{map_name}.json
-        map_file = os.path.join("assets", "maps", map_name, f"{map_name}.json")
+        # 尝试加载二进制文件（通过检查.info文件），如果不存在再回退到JSON文件
+        map_dir = os.path.join("assets", "maps", map_name)
+        info_file = os.path.join(map_dir, f"{map_name}.info")
+
+        # 如果二进制文件存在，使用.info文件作为入口
+        if os.path.exists(info_file):
+            map_file = info_file
+        else:
+            # 如果二进制文件不存在，尝试加载JSON文件（兼容旧版本）
+            map_file = os.path.join(map_dir, f"{map_name}.json")
 
         print(f"✅ [BingoEngine] 加载地图: {map_name}")
         print(f"   - 地图文件: {map_file}")
@@ -978,13 +1036,43 @@ def _render_map():
             screen_x = x * tile_size + tile_size // 2
             screen_y = y * tile_size + tile_size // 2
 
-            # 解析tile_id：格式为 resource_index * 1000 + tile_index + 1
-            resource_index = tile_id // 1000
-            actual_tile_index = (tile_id % 1000) - 1
+            # 解析tile_id：格式为 resource_index * 1000 + tile_index + 1（图块集模式）
+            # 或 resource_index + 1（单张图片模式）
+            # 确保转换为Python原生类型，避免numpy类型导致JSON序列化失败
+            tile_id_int = int(tile_id)
+
+            # 判断是图块集模式还是单张图片模式
+            if tile_id_int < 1000:
+                # 单张图片模式：tile_id = resource_index + 1
+                resource_index = tile_id_int - 1
+                actual_tile_index = 0
+            else:
+                # 图块集模式：tile_id = resource_index * 1000 + tile_index + 1
+                resource_index = tile_id_int // 1000
+                actual_tile_index = (tile_id_int % 1000) - 1
+
+            # 调试信息
+            if resource_index >= len(_CURRENT_MAP["tile_sets"]):
+                print(
+                    f"DEBUG: 资源索引超出范围: {resource_index}, 瓦片集数量: {len(_CURRENT_MAP['tile_sets'])}"
+                )
+                print(
+                    f"DEBUG: 瓦片ID: {tile_id_int}, 实际瓦片索引: {actual_tile_index}"
+                )
 
             # 生成唯一的瓦片ID
             sprite_id = f"tile_{layer_idx}_{x}_{y}"
             tile_key = (layer_idx, x, y)
+
+            # 获取瓦片集的具体瓦片大小
+            tile_set_size = tile_size  # 默认使用地图的全局tile_size
+            if resource_index < len(_CURRENT_MAP["tile_sets"]):
+                tile_set = _CURRENT_MAP["tile_sets"][resource_index]
+                tile_set_size = tile_set.get("tile_width", tile_size)
+
+            # 计算瓦片在屏幕上的位置 - 使用资源的实际尺寸
+            screen_x = x * tile_set_size + tile_set_size // 2
+            screen_y = y * tile_set_size + tile_set_size // 2
 
             # 添加到批量渲染列表
             tile_data = {
@@ -999,7 +1087,7 @@ def _render_map():
                 "tile_id": actual_tile_index + 1,  # 恢复为从1开始的索引
                 "tile_set_index": resource_index,
                 "layer": layer_idx,
-                "tile_size": tile_size,
+                "tile_size": tile_set_size,
             }
 
             batch_commands.append(tile_data)
@@ -1008,12 +1096,27 @@ def _render_map():
 
     # 批量渲染：一次性发送所有可见瓦片的渲染指令
     if batch_commands and _CURRENT_MAP.get("tile_sets"):
+        # 处理瓦片集信息，确保包含完整的图片路径
+        processed_tile_sets = []
+        for tile_set in _CURRENT_MAP["tile_sets"]:
+            processed_tile_set = tile_set.copy()
+            # 确保image_path字段存在（兼容二进制格式）
+            if "image_path" in processed_tile_set:
+                processed_tile_set["image"] = processed_tile_set["image_path"]
+            processed_tile_sets.append(processed_tile_set)
+
+        # 使用第一个瓦片集的瓦片大小作为数据包的tile_size
+        packet_tile_size = tile_size
+        if _CURRENT_MAP["tile_sets"]:
+            first_tile_set = _CURRENT_MAP["tile_sets"][0]
+            packet_tile_size = first_tile_set.get("tile_width", tile_size)
+
         packet = {
             "type": "CREATE_BATCH",
             "data": {
                 "tiles": batch_commands,
-                "tile_sets": _CURRENT_MAP["tile_sets"],
-                "tile_size": tile_size,
+                "tile_sets": processed_tile_sets,
+                "tile_size": packet_tile_size,
             },
         }
         print(json.dumps(packet), flush=True)
@@ -1035,7 +1138,12 @@ def _render_map():
     )
     print(f"✅ [BingoEngine] 地图渲染完成")
     print(f"   - 总瓦片数: {total_tiles}")
-    print(f"   - 视口可见: {visible_count} ({visible_count / total_tiles * 100:.1f}%)")
+    if total_tiles > 0:
+        print(
+            f"   - 视口可见: {visible_count} ({visible_count / total_tiles * 100:.1f}%)"
+        )
+    else:
+        print(f"   - 视口可见: {visible_count} (0%)")
     print(f"   - 实际渲染: {rendered_count}")
     print(f"   - 渲染时间: {render_time:.2f}ms")
 
@@ -1141,7 +1249,8 @@ def run():
             _CAMERA_Y = _FOLLOW_TARGET.y
 
             # 3. 使用跟随目标更新摄像机
-            _send_camera_update(_FOLLOW_TARGET.x, _FOLLOW_TARGET.y, mw, mh)
+            tile_size = _CURRENT_MAP["tile_size"]
+            _send_camera_update(_FOLLOW_TARGET.x, _FOLLOW_TARGET.y, mw, mh, tile_size)
 
             # 4. 只在摄像机位置变化较大时重新渲染地图，避免频繁渲染
             # 计算摄像机移动距离，如果超过半个瓦片大小则重新渲染
