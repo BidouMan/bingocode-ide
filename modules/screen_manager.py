@@ -28,6 +28,7 @@ class ScreenManager:
         
         # 通知渲染经理对齐场景
         QTimer.singleShot(100, self.ctrl.render_manager.apply_fit)
+        QTimer.singleShot(100, self.ctrl.render_manager.apply_fit)
 
     def exit_fullscreen(self):
         """退出全屏返回编辑"""
@@ -38,7 +39,7 @@ class ScreenManager:
         
         # 🚀 重点：还原编辑模式固定尺寸
         self.ui.game_view.setFixedSize(320, 240)
-        
+        QTimer.singleShot(50, self.ctrl.render_manager.apply_fit)
         QTimer.singleShot(50, self.ctrl.render_manager.apply_fit)
 
     def apply_ratio_constraint(self):

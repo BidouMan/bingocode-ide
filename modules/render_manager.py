@@ -63,7 +63,12 @@ class RenderManager(QObject):
         self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
+        # 性能优化：减轻集成显卡压力
+        self.view.setViewportUpdateMode(QGraphicsView.MinimalViewportUpdate)
+        self.view.setOptimizationFlag(QGraphicsView.IndirectPainting)
+
         self.sprites = {}
+        self.static_layers = {}  # 静态图层烘焙，{layer_idx: QGraphicsPixmapItem}
         self.apply_fit()
 
         # 显示FPS帧数
@@ -126,14 +131,19 @@ class RenderManager(QObject):
             elif cmd_type == "CREATE_BATCH":
                 self.create_batch_tiles(data)
 
-        except Exception as e:
-            # 🚀 必须打印错误，否则如果里面崩溃了你完全不知道
-            print(f"❌ [IDE 指令解析失败]: {e}")
-            import traceback
+            # 4. 处理摄像机更新指令
+            elif cmd_type == "CAMERA_UPDATE":
+                self.handle_camera_update(data)
 
-            traceback.print_exc()
+            # 5. 处理场景更新指令
+            elif cmd_type == "SCENE_UPDATE":
+                self.handle_scene_update(data)
+
+        except Exception as e:
+            print(f"❌ [RenderManager] 处理指令失败: {e}")
 
     def create_sprite(self, sprite_id, data):
+        """创建精灵"""
         image_path = data.get("image", "")
         stype = data.get("type", "image")
         print(f"✅ [RenderManager] 收到创建精灵指令: {sprite_id}")
@@ -300,6 +310,7 @@ class RenderManager(QObject):
 
         self.scene.clear()  # 物理清理所有 Item
         self.sprites.clear()  # 清空引用字典
+        self.static_layers.clear()  # 清空静态图层
         self.layer_counter = 0  # 重置图层
 
         # 🚀 既然 scene 已经干干净净了，直接重新创建 FPS 标签即可
@@ -413,20 +424,68 @@ class RenderManager(QObject):
         """后续实现：镜头缩放、平移"""
         pass
 
+    def handle_scene_update(self, data):
+        """处理场景更新指令，更新SceneRect"""
+        width = data.get("width", 640)
+        height = data.get("height", 480)
+
+        # 更新场景大小
+        self.scene.setSceneRect(0, 0, width, height)
+        print(f"✅ [RenderManager] 场景更新 - 尺寸: {width}x{height}")
+        print(f"   - 场景边界: {self.scene.sceneRect()}")
+
+        # 确保视图可以滚动到新的边界
+        self.view.ensureVisible(self.scene.sceneRect())
+
+    def handle_camera_update(self, data):
+        """处理摄像机更新指令"""
+        x = data.get("x", 320)
+        y = data.get("y", 240)
+        map_width = data.get("map_width", 0)
+        map_height = data.get("map_height", 0)
+
+        # 调用高性能摄像机更新方法
+        self.update_camera(x, y, map_width, map_height)
+
+    def update_camera(self, target_x, target_y, map_w_tiles, map_h_tiles):
+        """
+        高性能摄像机更新
+        :param target_x, target_y: 玩家当前的像素坐标
+        :param map_w_tiles, map_h_tiles: 地图总行列数（用于动态计算边界）
+        """
+        tile_size = 16
+        map_px_w = map_w_tiles * tile_size
+        map_px_h = map_h_tiles * tile_size
+
+        view_w, view_h = 640, 480
+
+        # 1. 计算摄像机中心点允许滑动的极限区间
+        # 当地图小于等于窗口时，摄像机可以自由跟随玩家
+        if map_px_w <= view_w:
+            limit_min_x = 0
+            limit_max_x = map_px_w
+        else:
+            limit_min_x = view_w / 2
+            limit_max_x = map_px_w - view_w / 2
+
+        if map_px_h <= view_h:
+            limit_min_y = 0
+            limit_max_y = map_px_h
+        else:
+            limit_min_y = view_h / 2
+            limit_max_y = map_px_h - view_h / 2
+
+        # 2. 限制计算 (Clamping)
+        cam_x = max(limit_min_x, min(target_x, limit_max_x))
+        cam_y = max(limit_min_y, min(target_y, limit_max_y))
+
+        # 3. 执行底层视口居中（由 Qt C++ 内核处理，对老电脑极其友好）
+        self.view.centerOn(cam_x, cam_y)
+
     def play_animation(self, sprite_id, data):
         """播放动画"""
         item = self.sprites.get(sprite_id)
         if not item:
-            return
-
-        # 获取动画配置
-        animation_name = data.get("animation")
-        start = data.get("start", 1)
-        end = data.get("end", 1)
-        fps = data.get("fps", 10)
-
-        # 获取精灵的配置信息（从 sprite_data 属性中获取）
-        if not hasattr(item, "sprite_data"):
             return
 
         sprite_data = item.sprite_data
@@ -434,45 +493,35 @@ class RenderManager(QObject):
             return
 
         costumes = sprite_data["costumes"]
-
-        # 创建动画定时器
-        from PySide6.QtCore import QTimer
+        fps = data.get("fps", 10)
 
         # 停止之前的动画
         if hasattr(item, "animation_timer"):
             item.animation_timer.stop()
+            del item.animation_timer
 
-        # 初始化动画状态
-        item.current_frame_index = start - 1  # 转换为 0-based 索引
-        item.animation_start = start - 1
-        item.animation_end = end - 1
-        item.animation_fps = fps
+        # 初始化当前帧索引
+        item.current_frame_index = 0
 
         def update_frame():
-            if not item or item.current_frame_index > item.animation_end:
-                item.current_frame_index = item.animation_start
+            if item.current_frame_index >= len(costumes):
+                item.current_frame_index = 0
 
-            # 获取当前帧的图片路径
-            if item.current_frame_index < len(costumes):
-                costume = costumes[item.current_frame_index]
-                if isinstance(costume, dict):
-                    frame_file = costume.get("file")
-                else:
-                    frame_file = costume
+            frame_file = costumes[item.current_frame_index]
 
-                # 构建完整的图片路径
-                sprite_dir = sprite_data.get("sprite_dir", "")
-                if sprite_dir:
-                    image_path = os.path.join(sprite_dir, frame_file)
+            # 构建完整的图片路径
+            sprite_dir = sprite_data.get("sprite_dir", "")
+            if sprite_dir:
+                image_path = os.path.join(sprite_dir, frame_file)
 
-                    # 更新精灵图片
-                    pixmap = QPixmap(image_path)
-                    if not pixmap.isNull():
-                        if isinstance(item, QGraphicsPixmapItem):
-                            item.setPixmap(pixmap)
-                            item.setTransformOriginPoint(
-                                pixmap.width() / 2, pixmap.height() / 2
-                            )
+                # 更新精灵图片
+                pixmap = QPixmap(image_path)
+                if not pixmap.isNull():
+                    if isinstance(item, QGraphicsPixmapItem):
+                        item.setPixmap(pixmap)
+                        item.setTransformOriginPoint(
+                            pixmap.width() / 2, pixmap.height() / 2
+                        )
 
             # 下一帧
             item.current_frame_index += 1
@@ -484,9 +533,9 @@ class RenderManager(QObject):
         item.animation_timer.start()
 
     def create_batch_tiles(self, data):
-        """批量创建瓦片精灵"""
+        """批量创建瓦片精灵 - 静态图层烘焙模式"""
         tiles = data.get("tiles", [])
-        tile_size = data.get("tile_size", 32)
+        tile_size = data.get("tile_size", 16)
 
         if not tiles:
             return
@@ -501,8 +550,8 @@ class RenderManager(QObject):
         for i, tile_set in enumerate(tile_sets):
             tile_set_dict[i] = {
                 "image_path": tile_set.get("image_path", ""),
-                "tile_width": tile_set.get("tile_width", 32),
-                "tile_height": tile_set.get("tile_height", 32),
+                "tile_width": tile_set.get("tile_width", 16),
+                "tile_height": tile_set.get("tile_height", 16),
                 "pixmap": None,
                 "cols": 0,
                 "rows": 0,
@@ -534,70 +583,120 @@ class RenderManager(QObject):
                 else:
                     print(f"❌ [RenderManager] 瓦片集加载失败: {image_path}")
 
-        created_count = 0
+        # 按图层分组瓦片
+        tiles_by_layer = {}
+
+        # 找到所有瓦片的最小和最大坐标
+        min_x = float("inf")
+        max_x = -float("inf")
+        min_y = float("inf")
+        max_y = -float("inf")
+
         for tile_data in tiles:
-            sprite_id = tile_data.get("id")
-            if not sprite_id:
-                continue
-
-            tile_id = tile_data.get("tile_id", 0)
-            if tile_id <= 0:
-                continue
-
-            # 获取瓦片集索引（默认为0）
-            tile_set_index = tile_data.get("tile_set_index", 0)
-
-            # 检查瓦片集是否存在
-            if tile_set_index not in tile_set_dict:
-                continue
-
-            tile_set_info = tile_set_dict[tile_set_index]
-            pixmap = tile_set_info.get("pixmap")
-
-            if not pixmap:
-                continue
-
-            # 计算瓦片在瓦片集中的位置
-            tile_index = tile_id - 1
-            tile_col = tile_index % tile_set_info["cols"]
-            tile_row = tile_index // tile_set_info["cols"]
-
-            # 检查瓦片索引是否有效
-            if tile_row >= tile_set_info["rows"]:
-                continue
-
-            # 从瓦片集中裁剪出单个瓦片
-            tile_rect = QtCore_QRect(
-                tile_col * tile_set_info["tile_width"],
-                tile_row * tile_set_info["tile_height"],
-                tile_set_info["tile_width"],
-                tile_set_info["tile_height"],
-            )
-            tile_pixmap = pixmap.copy(tile_rect)
-
-            if tile_pixmap.isNull():
-                continue
-
-            # 创建瓦片精灵
-            item = QGraphicsPixmapItem(tile_pixmap)
-            item.setTransformOriginPoint(tile_size // 2, tile_size // 2)
-
-            # 存储精灵
-            self.sprites[sprite_id] = item
-            self.scene.addItem(item)
-
-            # 设置图层
             layer = tile_data.get("layer", 0)
-            item.setZValue(layer)
+            if layer not in tiles_by_layer:
+                tiles_by_layer[layer] = []
+            tiles_by_layer[layer].append(tile_data)
 
-            # 更新位置
+            # 更新地图尺寸
             x = tile_data.get("x", 0)
             y = tile_data.get("y", 0)
-            item.setPos(x - tile_size // 2, y - tile_size // 2)
+            min_x = min(min_x, x - tile_size)
+            max_x = max(max_x, x + tile_size)
+            min_y = min(min_y, y - tile_size)
+            max_y = max(max_y, y + tile_size)
 
-            created_count += 1
+        # 确保图层大小至少为场景大小
+        scene_rect = self.scene.sceneRect()
+        min_x = min(min_x, scene_rect.left())
+        max_x = max(max_x, scene_rect.right())
+        min_y = min(min_y, scene_rect.top())
+        max_y = max(max_y, scene_rect.bottom())
 
-        print(f"✅ [RenderManager] 批量创建 {created_count} 个瓦片精灵完成")
+        # 为每个图层创建静态烘焙图
+        for layer, layer_tiles in tiles_by_layer.items():
+            # 创建图层的像素图，使用整个地图的大小
+            layer_width = max_x - min_x
+            layer_height = max_y - min_y
+            layer_pixmap = QPixmap(layer_width, layer_height)
+            layer_pixmap.fill(Qt.transparent)
+
+            # 创建画家
+            painter = QPainter(layer_pixmap)
+
+            # 绘制所有瓦片到图层像素图
+            for tile_data in layer_tiles:
+                tile_id = tile_data.get("tile_id", 0)
+                if tile_id <= 0:
+                    continue
+
+                # 获取瓦片集索引（默认为0）
+                tile_set_index = tile_data.get("tile_set_index", 0)
+
+                # 检查瓦片集是否存在
+                if tile_set_index not in tile_set_dict:
+                    continue
+
+                tile_set_info = tile_set_dict[tile_set_index]
+                pixmap = tile_set_info.get("pixmap")
+
+                if not pixmap:
+                    continue
+
+                # 计算瓦片在瓦片集中的位置
+                tile_index = tile_id - 1
+                tile_col = tile_index % tile_set_info["cols"]
+                tile_row = tile_index // tile_set_info["cols"]
+
+                # 检查瓦片索引是否有效
+                if tile_row >= tile_set_info["rows"]:
+                    continue
+
+                # 从瓦片集中裁剪出单个瓦片
+                tile_rect = QtCore_QRect(
+                    tile_col * tile_set_info["tile_width"],
+                    tile_row * tile_set_info["tile_height"],
+                    tile_set_info["tile_width"],
+                    tile_set_info["tile_height"],
+                )
+                tile_pixmap = pixmap.copy(tile_rect)
+
+                if tile_pixmap.isNull():
+                    continue
+
+                # 计算绘制位置（使用相对坐标）
+                x = tile_data.get("x", 0)
+                y = tile_data.get("y", 0)
+                draw_x = x - min_x - tile_size // 2
+                draw_y = y - min_y - tile_size // 2
+
+                # 绘制瓦片到图层像素图
+                painter.drawPixmap(draw_x, draw_y, tile_pixmap)
+
+            painter.end()
+
+            # 移除旧的图层（如果存在）
+            if layer in self.static_layers:
+                old_item = self.static_layers[layer]
+                self.scene.removeItem(old_item)
+                del old_item
+
+            # 创建图层精灵
+            layer_item = QGraphicsPixmapItem(layer_pixmap)
+            layer_item.setZValue(layer)
+
+            # 设置图层位置（使用最小坐标作为偏移）
+            layer_item.setPos(min_x, min_y)
+
+            # 存储图层
+            self.static_layers[layer] = layer_item
+            self.scene.addItem(layer_item)
+
+            print(
+                f"✅ [RenderManager] 创建静态图层 {layer}，包含 {len(layer_tiles)} 个瓦片"
+            )
+
+        print(f"✅ [RenderManager] 静态图层烘焙完成，总瓦片数: {len(tiles)}")
 
     # ---------- 内部函数 ----------
     def _setup_fps_label(self):

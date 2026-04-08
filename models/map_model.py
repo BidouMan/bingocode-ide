@@ -106,10 +106,42 @@ class MapDataModel(QObject):
             file_path = self._get_default_save_path()
         
         try:
+            # 动态计算地图尺寸：根据所有图层中实际绘制的图块位置
+            min_x = float('inf')
+            max_x = -float('inf')
+            min_y = float('inf')
+            max_y = -float('inf')
+            
+            for layer in self.map_data["layers"]:
+                for (x, y), tile_id in layer["tiles"].items():
+                    if tile_id != 0:
+                        min_x = min(min_x, x)
+                        max_x = max(max_x, x)
+                        min_y = min(min_y, y)
+                        max_y = max(max_y, y)
+            
+            # 如果没有绘制任何图块，使用默认尺寸
+            if min_x == float('inf'):
+                map_width = self.map_data["width"]
+                map_height = self.map_data["height"]
+            else:
+                # 地图尺寸 = 最大坐标 - 最小坐标 + 1（确保包含所有图块）
+                map_width = max_x - min_x + 1
+                map_height = max_y - min_y + 1
+            
+            # 添加最小尺寸限制：最小宽度640，最小高度480（像素）
+            # 转换为瓦片数：640/16=40, 480/16=30
+            tile_size = self.map_data["tile_size"]
+            min_width_tiles = 640 // tile_size
+            min_height_tiles = 480 // tile_size
+            
+            map_width = max(map_width, min_width_tiles)
+            map_height = max(map_height, min_height_tiles)
+            
             # 创建可序列化的副本
             save_data = {
-                "width": self.map_data["width"],
-                "height": self.map_data["height"],
+                "width": map_width,
+                "height": map_height,
                 "tile_size": self.map_data["tile_size"],
                 "layers": [],
                 "tile_sets": self.map_data["tile_sets"]
@@ -167,7 +199,7 @@ class MapDataModel(QObject):
             with open(file_path, 'r', encoding='utf-8') as f:
                 loaded_data = json.load(f)
             
-            # 重建地图数据结构
+            # 重建地图数据结构，使用加载的动态尺寸
             self.map_data = {
                 "width": loaded_data["width"],
                 "height": loaded_data["height"],

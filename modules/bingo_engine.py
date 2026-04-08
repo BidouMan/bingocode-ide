@@ -33,6 +33,7 @@ _CAMERA_Y = 240  # 相机Y坐标（屏幕中心）
 _CAMERA_ZOOM = 1.0  # 相机缩放比例
 _SCREEN_WIDTH = 640  # 屏幕宽度
 _SCREEN_HEIGHT = 480  # 屏幕高度
+_FOLLOW_TARGET = None  # 摄像机跟随目标
 
 # 渲染缓存
 _RENDERED_TILES = set()  # 已渲染的瓦片缓存
@@ -64,6 +65,7 @@ __all__ = [
     "mouse_pressed",
     "mouse",
     "load_map",
+    "follow",
 ]
 
 
@@ -720,27 +722,14 @@ class Sprite:
         if not hasattr(self, "animation_state") or not self.animation_state:
             return
 
-        # 如果正在过渡中，使用混合后的帧
-        if hasattr(self, "_is_transitioning") and self._is_transitioning:
-            # 计算过渡进度（0.0 到 1.0）
-            elapsed = time.time() - self._transition_start_time
-            progress = min(elapsed / self._transition_duration, 1.0)
-
-            # 由于我们使用的是序列帧动画，不能直接进行像素级混合
-            # 这里采用简单的帧切换策略：根据进度决定显示哪个动画的帧
             if progress < 0.5:
                 # 前半段显示源动画的帧
                 current_frame = self._source_animation["current_frame"]
-            else:
-                # 后半段显示目标动画的帧
-                current_frame = self._target_animation["current_frame"]
-
             # 如果过渡完成，结束过渡状态
             if progress >= 1.0:
                 self.animation_state = self._target_animation
                 del self._source_animation
                 del self._target_animation
-                del self._transition_start_time
                 del self._transition_duration
                 del self._is_transitioning
         else:
@@ -863,6 +852,33 @@ def _send_fps_to_ide(fps):
     print(json.dumps(packet), flush=True)
 
 
+def get_main_player():
+    """获取主玩家（第一个创建的精灵）"""
+    for sprite in _SPRITES.values():
+        return sprite
+    return None
+
+
+def _send_camera_update(x, y, map_w, map_h):
+    """发送摄像机更新指令到IDE"""
+    camera_packet = {
+        "type": "CAMERA_UPDATE",
+        "data": {"x": x, "y": y, "map_width": map_w, "map_height": map_h},
+    }
+    print(json.dumps(camera_packet), flush=True)
+
+
+def follow(sprite):
+    """
+    设置摄像机跟随指定精灵
+
+    Args:
+        sprite: 要跟随的精灵对象
+    """
+    global _FOLLOW_TARGET
+    _FOLLOW_TARGET = sprite
+
+
 def load_map(map_name):
     """
     加载并显示地图
@@ -898,6 +914,17 @@ def load_map(map_name):
         print(f"✅ [BingoEngine] 地图加载成功: {map_name}")
         print(f"   - 尺寸: {_CURRENT_MAP['width']}x{_CURRENT_MAP['height']}")
         print(f"   - 图层数: {len(_CURRENT_MAP['layers'])}")
+
+        # 发送场景更新指令，更新SceneRect
+        tile_size = _CURRENT_MAP.get("tile_size", 16)
+        map_width_px = _CURRENT_MAP["width"] * tile_size
+        map_height_px = _CURRENT_MAP["height"] * tile_size
+
+        scene_update_packet = {
+            "type": "SCENE_UPDATE",
+            "data": {"width": map_width_px, "height": map_height_px},
+        }
+        print(json.dumps(scene_update_packet), flush=True)
 
         # 渲染地图
         _render_map()
@@ -937,15 +964,6 @@ def _render_map():
 
     tile_size = _CURRENT_MAP["tile_size"]
 
-    # 计算视口范围（考虑缩放）
-    viewport_half_width = (_SCREEN_WIDTH // 2) / _CAMERA_ZOOM
-    viewport_half_height = (_SCREEN_HEIGHT // 2) / _CAMERA_ZOOM
-
-    viewport_left = _CAMERA_X - viewport_half_width - tile_size
-    viewport_right = _CAMERA_X + viewport_half_width + tile_size
-    viewport_top = _CAMERA_Y - viewport_half_height - tile_size
-    viewport_bottom = _CAMERA_Y + viewport_half_height + tile_size
-
     batch_commands = []
     rendered_count = 0
     visible_count = 0
@@ -960,7 +978,7 @@ def _render_map():
         if not layer["visible"]:
             continue
 
-        # 遍历图层中的所有瓦片
+        # 遍历图层中的所有瓦片（静态图层烘焙模式下渲染所有瓦片）
         for (x, y), tile_id in layer["tiles"].items():
             if tile_id <= 0:
                 continue
@@ -969,30 +987,13 @@ def _render_map():
             screen_x = x * tile_size + tile_size // 2
             screen_y = y * tile_size + tile_size // 2
 
-            # 视口裁剪：只渲染视口内的瓦片
-            if (
-                screen_x < viewport_left
-                or screen_x > viewport_right
-                or screen_y < viewport_top
-                or screen_y > viewport_bottom
-            ):
-                continue
-
-            visible_count += 1
-
-            # 创建瓦片缓存键
-            tile_key = f"{layer_idx}_{x}_{y}_{tile_id}"
-
-            # 渲染缓存：避免重复渲染相同的瓦片
-            if tile_key in _RENDERED_TILES:
-                continue
-
-            # 创建瓦片精灵ID
-            sprite_id = f"map_{layer_idx}_{x}_{y}"
-
             # 解析tile_id：格式为 resource_index * 1000 + tile_index + 1
             resource_index = tile_id // 1000
             actual_tile_index = (tile_id % 1000) - 1
+
+            # 生成唯一的瓦片ID
+            sprite_id = f"tile_{layer_idx}_{x}_{y}"
+            tile_key = (layer_idx, x, y)
 
             # 添加到批量渲染列表
             tile_data = {
@@ -1029,6 +1030,30 @@ def _render_map():
         # 更新已渲染的精灵字典
         for tile_data in batch_commands:
             _MAP_SPRITES[tile_data["id"]] = tile_data
+
+    # 清理不再可见的瓦片
+    tiles_to_remove = []
+    for layer_idx, x, y in list(_RENDERED_TILES):
+        screen_x = x * tile_size + tile_size // 2
+        screen_y = y * tile_size + tile_size // 2
+
+        # 检查瓦片是否在当前视口外
+        if (
+            screen_x < viewport_left
+            or screen_x > viewport_right
+            or screen_y < viewport_top
+            or screen_y > viewport_bottom
+        ):
+            sprite_id = f"tile_{layer_idx}_{x}_{y}"
+            tiles_to_remove.append(sprite_id)
+            _RENDERED_TILES.remove((layer_idx, x, y))
+
+    # 删除不再可见的瓦片
+    for sprite_id in tiles_to_remove:
+        if sprite_id in _MAP_SPRITES:
+            packet = {"type": "DELETE", "id": sprite_id}
+            print(json.dumps(packet), flush=True)
+            del _MAP_SPRITES[sprite_id]
 
     # 性能监控
     render_time = (time.time() - start_time) * 1000  # 转换为毫秒
@@ -1131,6 +1156,31 @@ def run():
 
         # 执行用户逻辑
         main_module.loop()
+
+        # 更新摄像机位置
+        if _CURRENT_MAP and _FOLLOW_TARGET:
+            # 1. 获取地图尺寸
+            mw = _CURRENT_MAP.get("width", 0)
+            mh = _CURRENT_MAP.get("height", 0)
+
+            # 2. 更新摄像机位置
+            global _CAMERA_X, _CAMERA_Y
+            old_camera_x = _CAMERA_X
+            old_camera_y = _CAMERA_Y
+            _CAMERA_X = _FOLLOW_TARGET.x
+            _CAMERA_Y = _FOLLOW_TARGET.y
+
+            # 3. 使用跟随目标更新摄像机
+            _send_camera_update(_FOLLOW_TARGET.x, _FOLLOW_TARGET.y, mw, mh)
+
+            # 4. 只在摄像机位置变化较大时重新渲染地图，避免频繁渲染
+            # 计算摄像机移动距离，如果超过半个瓦片大小则重新渲染
+            tile_size = _CURRENT_MAP["tile_size"]
+            if (
+                abs(_CAMERA_X - old_camera_x) >= tile_size // 2
+                or abs(_CAMERA_Y - old_camera_y) >= tile_size // 2
+            ):
+                _render_map()
 
         # 每一帧结束时，记录当前状态供下一帧对比(鼠标持续按下还是单次按下)
         _MOUSE_STATE["last_down"] = _MOUSE_STATE["down"]
