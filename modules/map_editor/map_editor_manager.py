@@ -605,6 +605,13 @@ class MapEditorManager(QObject):
                 self._update_res_list_display()
                 # 地图加载完成后强制完整渲染一次，确保所有瓦片都显示
                 self._render_full_map()
+                
+                # 更新属性面板中的地图名称
+                if hasattr(self, "ui") and hasattr(self.ui, "att_map_name"):
+                    map_name = self.property_manager.get_map_name()
+                    self.ui.att_map_name.blockSignals(True)
+                    self.ui.att_map_name.setText(map_name)
+                    self.ui.att_map_name.blockSignals(False)
             else:
                 print(f"DEBUG: 地图数据加载失败: {file_path}")
                 self.error_occurred.emit("加载地图失败")
@@ -1546,6 +1553,15 @@ class MapEditorManager(QObject):
     def _on_tag_changed(self, tag):
         """处理标签变化"""
         self.property_manager.set_tile_tag(tag)
+        
+    def _on_map_name_changed(self, name):
+        """处理地图名称变化"""
+        # 更新地图模型中的名称
+        self.property_manager.set_map_name(name)
+        
+        # 如果有当前地图路径，更新目录名称
+        if self.current_map_path:
+            self._rename_map_directory(name)
 
     def _get_tile_pixmap_for_collision(self, resource_index, tile_index):
         """为碰撞管理器提供图块图像"""
@@ -1553,7 +1569,7 @@ class MapEditorManager(QObject):
             return None
 
         resource = self.uploaded_resources[resource_index]
-
+        
         # 获取图块图像
         pixmap = None
         if resource["resource_type"] == "tileset":
@@ -1577,6 +1593,54 @@ class MapEditorManager(QObject):
             pixmap = self._source_image_cache.get(image_path)
 
         return pixmap
+        
+    def _rename_map_directory(self, new_name):
+        """重命名地图目录和内部文件"""
+        try:
+            # 获取当前地图目录路径
+            current_dir = os.path.dirname(self.current_map_path)
+            parent_dir = os.path.dirname(current_dir)
+            old_dir_name = os.path.basename(current_dir)
+            
+            # 创建新的目录名称
+            new_dir_name = new_name
+            new_dir_path = os.path.join(parent_dir, new_dir_name)
+            
+            # 如果目录名称没有变化，不需要重命名
+            if old_dir_name == new_dir_name:
+                return
+                
+            # 检查新目录是否已存在
+            if os.path.exists(new_dir_path):
+                print(f"⚠️ 目录已存在: {new_dir_path}")
+                return
+                
+            # 获取当前地图文件名（不带扩展名）
+            old_filename = os.path.basename(self.current_map_path)
+            old_base_name = os.path.splitext(old_filename)[0]
+            
+            # 创建新的文件名
+            new_base_name = new_name
+            new_filename = f"{new_base_name}.info"
+            
+            # 重命名目录内的所有相关文件
+            for ext in [".info", ".tiles", ".collision", ".resources"]:
+                old_file_path = os.path.join(current_dir, f"{old_base_name}{ext}")
+                new_file_path = os.path.join(current_dir, f"{new_base_name}{ext}")
+                if os.path.exists(old_file_path):
+                    os.rename(old_file_path, new_file_path)
+                    print(f"✅ 文件重命名成功: {old_base_name}{ext} -> {new_base_name}{ext}")
+            
+            # 重命名目录
+            os.rename(current_dir, new_dir_path)
+            print(f"✅ 目录重命名成功: {old_dir_name} -> {new_dir_name}")
+            
+            # 更新当前地图路径
+            self.current_map_path = os.path.join(new_dir_path, new_filename)
+            print(f"✅ 更新地图路径: {self.current_map_path}")
+            
+        except Exception as e:
+            print(f"❌ 目录重命名失败: {e}")
 
     def _record_coordinates(self, action, coordinates=None, tile_id=None):
         """记录坐标信息到md文件"""
@@ -2050,6 +2114,9 @@ class MapEditorManager(QObject):
         # 绑定标签输入框
         if hasattr(self.ui, "att_tag"):
             self.ui.att_tag.textChanged.connect(self._on_tag_changed)
+        # 绑定地图名称输入框
+        if hasattr(self.ui, "att_map_name"):
+            self.ui.att_map_name.textChanged.connect(self._on_map_name_changed)
         # 设置初始工具状态
         self.set_current_tool(self.current_tool)
         print("工具按钮绑定完成")

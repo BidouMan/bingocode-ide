@@ -1345,6 +1345,8 @@ class ResourceManager(QObject):
             from models.map_model import MapDataModel
 
             new_map_model = MapDataModel()
+            # 设置地图名称
+            new_map_model.set_map_name(map_name)
             save_result = new_map_model.save(map_file_path)
             print(f"DEBUG: 新地图已保存到: {map_file_path}, 结果: {save_result}")
 

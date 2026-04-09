@@ -25,6 +25,7 @@ class MapDataModel(QObject):
     def _initialize_default_data(self):
         """初始化默认地图数据"""
         self.map_data = {
+            "name": "未命名地图",  # 地图名称
             "width": 40,  # 地图宽度（瓦片数量）- 640/16=40
             "height": 30,  # 地图高度（瓦片数量）- 480/16=30
             "tile_size": 16,  # 瓦片大小（像素）
@@ -125,6 +126,15 @@ class MapDataModel(QObject):
     def set_tile_size(self, tile_size):
         """设置瓦片大小"""
         self.map_data["tile_size"] = tile_size
+        self.data_changed.emit()
+
+    def get_map_name(self):
+        """获取地图名称"""
+        return self.map_data.get("name", "未命名地图")
+
+    def set_map_name(self, name):
+        """设置地图名称"""
+        self.map_data["name"] = name
         self.data_changed.emit()
 
     def save(self, file_path=None):
@@ -267,7 +277,13 @@ class MapDataModel(QObject):
             f.write(struct.pack("<I", 0x4D415050))  # "MAP_"
 
             # 写入版本号（4字节）
-            f.write(struct.pack("<I", 2))  # 更新版本号以支持偏移量
+            f.write(struct.pack("<I", 3))  # 更新版本号以支持地图名称
+
+            # 写入地图名称
+            map_name = self.map_data.get("name", "")
+            name_bytes = map_name.encode("utf-8")
+            f.write(struct.pack("<I", len(name_bytes)))
+            f.write(name_bytes)
 
             # 写入地图尺寸（8字节）
             f.write(struct.pack("<II", width, height))
@@ -530,6 +546,7 @@ class MapDataModel(QObject):
                 tile_set_count,
                 offset_x,
                 offset_y,
+                map_name,
             ) = self._load_map_info(base_name + ".info")
 
             # 2. 加载图块数据 (.tiles)
@@ -546,7 +563,12 @@ class MapDataModel(QObject):
             )
 
             # 更新地图数据
+            # 如果地图名称为空（旧版本文件），使用文件基本名称作为地图名称
+            if not map_name:
+                map_name = os.path.basename(base_name)
+            
             self.map_data = {
+                "name": map_name,
                 "width": width,
                 "height": height,
                 "tile_size": tile_size,
@@ -572,6 +594,12 @@ class MapDataModel(QObject):
 
             # 读取版本号（4字节）
             version = struct.unpack("<I", f.read(4))[0]
+
+            # 读取地图名称（版本3及以上）
+            map_name = ""
+            if version >= 3:
+                name_length = struct.unpack("<I", f.read(4))[0]
+                map_name = f.read(name_length).decode("utf-8")
 
             # 读取地图尺寸（8字节）
             width, height = struct.unpack("<II", f.read(8))
@@ -599,6 +627,7 @@ class MapDataModel(QObject):
                 tile_set_count,
                 offset_x,
                 offset_y,
+                map_name,
             )
 
     def _load_map_tiles(

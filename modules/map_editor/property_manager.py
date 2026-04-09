@@ -52,3 +52,16 @@ class PropertyManager(QObject):
             if self.map_model:
                 return self.map_model.get_tile_collision(resource_index, tile_index)
         return False
+        
+    def get_map_name(self):
+        """获取地图名称"""
+        if self.map_model:
+            return self.map_model.get_map_name()
+        return "未命名地图"
+        
+    def set_map_name(self, name):
+        """设置地图名称"""
+        if self.map_model:
+            self.map_model.set_map_name(name)
+            return True
+        return False
