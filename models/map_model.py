@@ -65,34 +65,36 @@ class MapDataModel(QObject):
             else:
                 # 否则设置瓦片ID
                 layer["tiles"][key] = int(tile_id)
-                
+
                 # 检查新绘制的图块是否超出当前地图尺寸
                 current_width = self.map_data["width"]
                 current_height = self.map_data["height"]
                 offset_x = self.map_data.get("offset_x", 0)
                 offset_y = self.map_data.get("offset_y", 0)
-                
+
                 # 计算图块相对于地图原点的位置
                 rel_x = x - offset_x
                 rel_y = y - offset_y
-                
+
                 # 如果超出当前尺寸，更新地图尺寸
                 if rel_x >= current_width or rel_y >= current_height:
                     new_width = max(current_width, rel_x + 1)
                     new_height = max(current_height, rel_y + 1)
-                    
+
                     # 添加最小尺寸限制：最小宽度40，最小高度30（基于16像素瓦片，640x480像素）
                     tile_size = self.map_data["tile_size"]
                     min_width_tiles = 640 // tile_size
                     min_height_tiles = 480 // tile_size
                     new_width = max(new_width, min_width_tiles)
                     new_height = max(new_height, min_height_tiles)
-                    
+
                     # 更新地图尺寸
                     if new_width != current_width or new_height != current_height:
                         self.map_data["width"] = new_width
                         self.map_data["height"] = new_height
-                        print(f"DEBUG: 地图尺寸更新: {current_width}x{current_height} -> {new_width}x{new_height}")
+                        print(
+                            f"DEBUG: 地图尺寸更新: {current_width}x{current_height} -> {new_width}x{new_height}"
+                        )
 
             # 使用防抖机制，避免频繁触发信号
             self._debounce_timer.start()
@@ -174,6 +176,7 @@ class MapDataModel(QObject):
             print(f"=== 开始保存地图数据 ===")
             print(f"DEBUG: 保存路径: {file_path}")
             print(f"DEBUG: 当前地图数据 - 图层数: {len(self.map_data['layers'])}")
+            print(f"DEBUG: 当前地图数据 - tile_size: {self.map_data['tile_size']}")
 
             # 统计每个图层的瓦片数量
             total_tiles = 0
@@ -183,6 +186,12 @@ class MapDataModel(QObject):
                 print(
                     f"DEBUG: 图层 {i} ({layer.get('name', 'unnamed')}) 瓦片数: {tile_count}"
                 )
+                # 打印前3个瓦片的详细信息
+                tiles = layer.get("tiles", {})
+                for j, ((x, y), tile_id) in enumerate(list(tiles.items())[:3]):
+                    print(f"DEBUG:   瓦片 {j}: [{x}, {y}] -> ID: {tile_id}")
+                if len(tiles) > 3:
+                    print(f"DEBUG:   ... 还有 {len(tiles) - 3} 个瓦片")
             print(f"DEBUG: 总瓦片数: {total_tiles}")
             # 动态计算地图尺寸：根据所有图层中实际绘制的图块位置
             min_x = float("inf")
@@ -383,7 +392,7 @@ class MapDataModel(QObject):
                         rel_y = y - offset_y
                         if 0 <= rel_x < width and 0 <= rel_y < height:
                             # 解析tile_id获取资源索引和图块索引
-                            resource_index = tile_id // 1000
+                            resource_index = (tile_id // 1000) - 1
                             tile_index = (tile_id % 1000) - 1
 
                             # 获取图块碰撞状态
@@ -417,7 +426,7 @@ class MapDataModel(QObject):
             # 获取地图文件所在目录（用于计算相对路径）
             map_dir = os.path.dirname(file_path)
             maps_dir = os.path.dirname(map_dir)
-            
+
             # 保存每个瓦片集
             for tile_set in self.map_data["tile_sets"]:
                 # 写入瓦片集名称长度（4字节）
@@ -462,115 +471,12 @@ class MapDataModel(QObject):
                     f.write(tag_bytes)
 
     def load(self, file_path):
-        """从文件加载地图数据（支持二进制分层存储和JSON格式）"""
+        """从二进制分层文件加载地图数据"""
         try:
-            # 检查文件扩展名，判断是二进制格式还是JSON格式
-            _, ext = os.path.splitext(file_path)
-
-            if ext == ".json":
-                # 从JSON文件加载（兼容旧版本）
-                return self._load_from_json(file_path)
-            else:
-                # 从二进制分层文件加载
-                return self._load_from_binary(file_path)
+            # 只支持二进制分层文件格式
+            return self._load_from_binary(file_path)
         except Exception as e:
             print(f"加载地图失败: {e}")
-            return False
-
-    def _load_from_json(self, file_path):
-        """从JSON文件加载地图数据（兼容旧版本）"""
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                loaded_data = json.load(f)
-
-            # 重建地图数据结构，使用加载的动态尺寸
-            self.map_data = {
-                "width": loaded_data["width"],
-                "height": loaded_data["height"],
-                "tile_size": loaded_data["tile_size"],
-                "layers": [],
-                "tile_sets": [],
-            }
-
-            # 处理tile_sets，确保每个tile_set都有tiles数组
-            for tile_set_data in loaded_data.get("tile_sets", []):
-                tile_set = {
-                    "name": tile_set_data["name"],
-                    "image_path": tile_set_data["image_path"],
-                    "tile_width": tile_set_data["tile_width"],
-                    "tile_height": tile_set_data["tile_height"],
-                    "tile_count": tile_set_data.get("tile_count", 0),
-                    "tiles": [],
-                }
-
-                # 处理旧版本的collision属性（兼容旧地图）
-                if "collision" in tile_set_data:
-                    # 如果有全局collision属性，为每个图块设置相同的碰撞状态
-                    collision_value = tile_set_data["collision"]
-                    tile_count = tile_set_data.get("tile_count", 0)
-                    tile_set["tiles"] = [
-                        {"collision": collision_value} for _ in range(tile_count)
-                    ]
-                elif "tiles" in tile_set_data:
-                    # 如果已有tiles数组，直接使用
-                    tile_set["tiles"] = tile_set_data["tiles"]
-
-                self.map_data["tile_sets"].append(tile_set)
-
-            # 遍历JSON中的layers，将列表读回，重新构建为以(x, y)为键的字典
-            for layer_data in loaded_data["layers"]:
-                # 创建图层结构
-                layer = {
-                    "name": layer_data["name"],
-                    "visible": layer_data["visible"],
-                    "tiles": {},
-                    "objects": layer_data.get("objects", []),
-                }
-
-                # 将[[x, y, id], ...]转换为{(x, y): id}
-                tiles_data = layer_data["tiles"]
-                for tile_data in tiles_data:
-                    if len(tile_data) == 3:
-                        tx, ty, tid = tile_data
-                        if tid != 0:
-                            layer["tiles"][(int(tx), int(ty))] = int(tid)
-
-                self.map_data["layers"].append(layer)
-
-            # 记录加载的所有瓦片坐标
-            try:
-                import datetime
-
-                record_dir = (
-                    "/Volumes/WorkStation/MyWork/CodeStation/MyIDE/MyWorkspace/备份"
-                )
-                os.makedirs(record_dir, exist_ok=True)
-                record_file = os.path.join(record_dir, "coordinate_log.md")
-
-                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-                with open(record_file, "a", encoding="utf-8") as f_record:
-                    f_record.write(f"## {timestamp} - Load Map (JSON)\n\n")
-                    f_record.write(f"**File Path:** {file_path}\n\n")
-                    f_record.write("**Tiles Loaded:**\n\n")
-
-                    for layer_idx, layer_data in enumerate(loaded_data["layers"]):
-                        f_record.write(
-                            f"### Layer {layer_idx}: {layer_data['name']}\n\n"
-                        )
-                        for tile in layer_data["tiles"]:
-                            f_record.write(
-                                f"- [x={tile[0]}, y={tile[1]}] -> ID: {tile[2]}\n"
-                            )
-                        f_record.write("\n")
-
-            except Exception as e:
-                print(f"记录加载坐标错误: {e}")
-
-            self.data_changed.emit()
-            return True
-        except Exception as e:
-            print(f"从JSON加载地图失败: {e}")
             return False
 
     def _load_from_binary(self, file_path):
@@ -607,7 +513,7 @@ class MapDataModel(QObject):
             # 如果地图名称为空（旧版本文件），使用文件基本名称作为地图名称
             if not map_name:
                 map_name = os.path.basename(base_name)
-            
+
             self.map_data = {
                 "name": map_name,
                 "width": width,
@@ -618,6 +524,28 @@ class MapDataModel(QObject):
                 "layers": layers,
                 "tile_sets": tile_sets,
             }
+
+            # 打印加载后的地图数据信息
+            print(
+                f"DEBUG: 二进制地图加载完成 - width: {width}, height: {height}, tile_size: {tile_size}"
+            )
+            print(
+                f"DEBUG: 二进制地图加载完成 - offset_x: {offset_x}, offset_y: {offset_y}"
+            )
+            print(
+                f"DEBUG: 二进制地图加载完成 - 图层数: {len(layers)}, 瓦片集数: {len(tile_sets)}"
+            )
+
+            # 打印图层信息
+            for i, layer in enumerate(layers):
+                tile_count = len(layer.get("tiles", {}))
+                print(
+                    f"DEBUG: 图层 {i} ({layer.get('name', 'unnamed')}) 瓦片数: {tile_count}"
+                )
+                # 打印前3个瓦片的详细信息
+                tiles = layer.get("tiles", {})
+                for j, ((x, y), tile_id) in enumerate(list(tiles.items())[:3]):
+                    print(f"DEBUG:   瓦片 {j}: [{x}, {y}] -> ID: {tile_id}")
 
             self.data_changed.emit()
             return True
@@ -732,7 +660,7 @@ class MapDataModel(QObject):
 
             # 读取瓦片集数量（4字节）
             actual_tile_set_count = struct.unpack("<I", f.read(4))[0]
-            
+
             # 获取地图文件所在目录（用于解析相对路径）
             map_dir = os.path.dirname(file_path)
             maps_dir = os.path.dirname(map_dir)
@@ -746,7 +674,7 @@ class MapDataModel(QObject):
                 # 读取图片路径
                 path_length = struct.unpack("<I", f.read(4))[0]
                 image_path = f.read(path_length).decode("utf-8")
-                
+
                 # 如果是相对路径，转换为绝对路径
                 if not os.path.isabs(image_path):
                     # 相对于maps目录的相对路径

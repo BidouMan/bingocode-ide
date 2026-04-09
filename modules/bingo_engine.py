@@ -932,14 +932,7 @@ def load_map(map_name):
         # 从当前工作目录的assets/maps文件夹读取地图文件
         # 尝试加载二进制文件（通过检查.info文件），如果不存在再回退到JSON文件
         map_dir = os.path.join("assets", "maps", map_name)
-        info_file = os.path.join(map_dir, f"{map_name}.info")
-
-        # 如果二进制文件存在，使用.info文件作为入口
-        if os.path.exists(info_file):
-            map_file = info_file
-        else:
-            # 如果二进制文件不存在，尝试加载JSON文件（兼容旧版本）
-            map_file = os.path.join(map_dir, f"{map_name}.json")
+        map_file = os.path.join(map_dir, f"{map_name}.info")
 
         print(f"✅ [BingoEngine] 加载地图: {map_name}")
         print(f"   - 地图文件: {map_file}")
@@ -979,6 +972,16 @@ def load_map(map_name):
         tile_size = _CURRENT_MAP.get("tile_size", 16)
         map_width_px = _CURRENT_MAP["width"] * tile_size
         map_height_px = _CURRENT_MAP["height"] * tile_size
+
+        print(f"DEBUG: BingoEngine - 地图渲染前信息:")
+        print(f"DEBUG:   tile_size: {tile_size}")
+        print(
+            f"DEBUG:   map_width: {_CURRENT_MAP['width']}, map_height: {_CURRENT_MAP['height']}"
+        )
+        print(f"DEBUG:   map_width_px: {map_width_px}, map_height_px: {map_height_px}")
+        print(
+            f"DEBUG:   offset_x: {_CURRENT_MAP.get('offset_x', 0)}, offset_y: {_CURRENT_MAP.get('offset_y', 0)}"
+        )
 
         scene_update_packet = {
             "type": "SCENE_UPDATE",
@@ -1024,6 +1027,11 @@ def _render_map():
 
     tile_size = _CURRENT_MAP["tile_size"]
 
+    print(f"DEBUG: BingoEngine - 开始渲染地图:")
+    print(f"DEBUG:   tile_size: {tile_size}")
+    print(f"DEBUG:   图层数: {len(_CURRENT_MAP.get('layers', []))}")
+    print(f"DEBUG:   瓦片集数: {len(_CURRENT_MAP.get('tile_sets', []))}")
+
     batch_commands = []
     rendered_count = 0
     visible_count = 0
@@ -1050,12 +1058,12 @@ def _render_map():
 
             # 判断是图块集模式还是单张图片模式
             if tile_id_int < 1000:
-                # 单张图片模式：tile_id = resource_index + 1
+                # 单张图片模式：tile_id = resource_index + 1（旧格式兼容）
                 resource_index = tile_id_int - 1
                 actual_tile_index = 0
             else:
-                # 图块集模式：tile_id = resource_index * 1000 + tile_index + 1
-                resource_index = tile_id_int // 1000
+                # 图块集模式：tile_id = (resource_index + 1) * 1000 + tile_index + 1
+                resource_index = (tile_id_int // 1000) - 1
                 actual_tile_index = (tile_id_int % 1000) - 1
 
             # 调试信息
@@ -1071,15 +1079,16 @@ def _render_map():
             sprite_id = f"tile_{layer_idx}_{x}_{y}"
             tile_key = (layer_idx, x, y)
 
-            # 获取瓦片集的具体瓦片大小
+            # 获取瓦片集的具体瓦片大小（图块实际大小）
             tile_set_size = tile_size  # 默认使用地图的全局tile_size
             if resource_index < len(_CURRENT_MAP["tile_sets"]):
                 tile_set = _CURRENT_MAP["tile_sets"][resource_index]
                 tile_set_size = tile_set.get("tile_width", tile_size)
 
-            # 计算瓦片在屏幕上的位置 - 使用资源的实际尺寸
-            screen_x = x * tile_set_size + tile_set_size // 2
-            screen_y = y * tile_set_size + tile_set_size // 2
+            # 计算瓦片在屏幕上的位置 - 使用地图的全局tile_size（格子大小）
+            # 这样图块始终在原来的格子位置上，不受图块大小变化影响
+            screen_x = x * tile_size + tile_size // 2
+            screen_y = y * tile_size + tile_size // 2
 
             # 添加到批量渲染列表
             tile_data = {
@@ -1112,11 +1121,9 @@ def _render_map():
                 processed_tile_set["image"] = processed_tile_set["image_path"]
             processed_tile_sets.append(processed_tile_set)
 
-        # 使用第一个瓦片集的瓦片大小作为数据包的tile_size
+        # 使用地图的全局tile_size作为数据包的tile_size（格子大小）
+        # 这样图块始终在原来的格子位置上
         packet_tile_size = tile_size
-        if _CURRENT_MAP["tile_sets"]:
-            first_tile_set = _CURRENT_MAP["tile_sets"][0]
-            packet_tile_size = first_tile_set.get("tile_width", tile_size)
 
         packet = {
             "type": "CREATE_BATCH",
@@ -1138,6 +1145,14 @@ def _render_map():
     # 性能监控
     render_time = (time.time() - start_time) * 1000  # 转换为毫秒
     _LAST_RENDER_TIME = render_time
+
+    print(f"DEBUG: BingoEngine - 地图渲染完成:")
+    print(f"DEBUG:   总瓦片数: {rendered_count}")
+    print(
+        f"DEBUG:   视口可见: {visible_count} ({visible_count / rendered_count * 100:.1f}%)"
+    )
+    print(f"DEBUG:   实际渲染: {len(batch_commands)}")
+    print(f"DEBUG:   渲染时间: {render_time:.2f}ms")
 
     # 输出性能统计
     total_tiles = sum(

@@ -481,19 +481,20 @@ class AppController:
         # 初始化地图编辑器的画布
         if hasattr(self, "map_editor"):
             print(f"地图编辑器实例: {self.map_editor}")
-            print(f"画布控件: {self.ui.editor_map_canvas}")
-            print(f"资源列表视图: {self.ui.res_list_view}")
-
-            if self.ui.editor_map_canvas:
+            
+            # 检查控件是否存在且有效
+            if hasattr(self.ui, "editor_map_canvas") and self.ui.editor_map_canvas:
+                print(f"画布控件: {self.ui.editor_map_canvas}")
                 print(f"画布控件类型: {type(self.ui.editor_map_canvas)}")
                 print(f"画布控件场景: {self.ui.editor_map_canvas.scene()}")
-
-            self.map_editor.set_canvas_widget(self.ui.editor_map_canvas)
-            # 初始化资源列表视图
-            self.map_editor.set_res_list_view(self.ui.res_list_view)
+                self.map_editor.set_canvas_widget(self.ui.editor_map_canvas)
+            
+            if hasattr(self.ui, "res_list_view") and self.ui.res_list_view:
+                print(f"资源列表视图: {self.ui.res_list_view}")
+                self.map_editor.set_res_list_view(self.ui.res_list_view)
 
             # 初始化碰撞编辑器
-            if hasattr(self.ui, "col_editor_view"):
+            if hasattr(self.ui, "col_editor_view") and self.ui.col_editor_view:
                 self.map_editor.initialize_collision_editor(self.ui.col_editor_view)
 
     def request_exit(self):

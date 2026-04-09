@@ -295,6 +295,8 @@ class MapEditorManager(QObject):
         # 设置地图模型引用给画布管理器，用于动态网格绘制
         self.canvas_manager.map_model = self.map_model
         self.canvas_manager.tile_size = tile_size
+        # 初始化网格纹理以适应瓦片尺寸
+        self.canvas_manager._init_grid_texture()
 
         # 4. 设置场景大小
         scene_width = width * tile_size
@@ -482,35 +484,8 @@ class MapEditorManager(QObject):
                 self.is_map_modified = False
                 self.map_loaded.emit(file_path)
 
-                # 加载瓦片集资源到uploaded_resources列表
-                print(
-                    f"DEBUG: 加载瓦片集资源，数量: {len(self.map_model.map_data['tile_sets'])}"
-                )
+                # 清空上传资源列表，准备重新加载
                 self.uploaded_resources.clear()
-                for tile_set in self.map_model.map_data["tile_sets"]:
-                    image_path = tile_set.get("image_path", "")
-                    if image_path:
-                        if not os.path.isabs(image_path):
-                            if self.current_map_path:
-                                map_dir = os.path.dirname(self.current_map_path)
-                                image_path = os.path.join(map_dir, image_path)
-                        # 添加到上传资源列表
-                        resource = {
-                            "name": tile_set.get("name", "unknown"),
-                            "path": image_path,
-                            "resource_type": "tileset",
-                            "tiles": tile_set.get("tiles", []),
-                            "tile_width": tile_set.get("tile_width", 16),
-                            "tile_height": tile_set.get("tile_height", 16),
-                            "tile_size": tile_set.get("tile_width", 16),
-                        }
-                        self.uploaded_resources.append(resource)
-                        print(
-                            f"DEBUG: 加载资源: {resource['name']}, 路径: {resource['path']}"
-                        )
-
-                # 更新资源列表显示
-                self._update_res_list_display()
 
                 # 强制清理场景中的所有瓦片项（确保切换地图时彻底清空画布）
                 if self.canvas_manager and self.canvas_manager.scene():
@@ -616,6 +591,9 @@ class MapEditorManager(QObject):
                 
                 # 更新属性面板中的地图尺寸
                 self._update_map_size_display()
+                
+                # 更新属性面板中的瓦片大小
+                self._update_tile_size_display()
             else:
                 print(f"DEBUG: 地图数据加载失败: {file_path}")
                 self.error_occurred.emit("加载地图失败")
@@ -886,8 +864,8 @@ class MapEditorManager(QObject):
             resource_type = resource.get("resource_type", "image")
 
             if resource_type == "tileset":
-                # 图块集合模式，图块ID格式：resource_index * 1000 + tile_index + 1
-                if tile_id // 1000 == resource_index:
+                # 图块集合模式，图块ID格式：(resource_index + 1) * 1000 + tile_index + 1
+                if (tile_id // 1000) - 1 == resource_index:
                     # 处理资源路径（转换为绝对路径）
                     image_path = resource["path"]
                     if not os.path.isabs(image_path):
@@ -934,8 +912,8 @@ class MapEditorManager(QObject):
                         )
                         return pixmap.copy(tile_rect.toRect())
             else:
-                # 单张图片模式，图块ID格式：resource_index * 1000 + 1
-                if tile_id == resource_index * 1000 + 1:
+                # 单张图片模式，图块ID格式：(resource_index + 1) * 1000 + 1
+                if tile_id == (resource_index + 1) * 1000 + 1:
                     # 处理资源路径（转换为绝对路径）
                     image_path = resource["path"]
                     if not os.path.isabs(image_path):
@@ -1273,17 +1251,18 @@ class MapEditorManager(QObject):
             # 根据资源类型确定图块ID
             if resource_type == "tileset":
                 # 图块集合模式，使用资源索引和图块索引的组合作为图块ID
-                # 格式：resource_index * 1000 + tile_index + 1
+                # 格式：(resource_index + 1) * 1000 + tile_index + 1
+                # 这样确保图块集模式的tile_id始终大于等于1000，避免与单张图片模式混淆
                 tile_index = self.selected_tile_index
                 # 如果没有选择图块索引，使用默认值0
                 if tile_index < 0:
                     tile_index = 0
 
-                tile_id = self.selected_resource_index * 1000 + tile_index + 1
+                tile_id = (self.selected_resource_index + 1) * 1000 + tile_index + 1
                 print(f"DEBUG: 图块集模式 - 生成tile_id: {tile_id}")
             else:
                 # 单张图片模式，使用统一的资源ID格式
-                tile_id = self.selected_resource_index * 1000 + 1
+                tile_id = (self.selected_resource_index + 1) * 1000 + 1
                 print(f"DEBUG: 单张图片模式 - 生成tile_id: {tile_id}")
 
             # 获取纯粹的网格索引 (0, 1, 2...)
@@ -1613,6 +1592,61 @@ class MapEditorManager(QObject):
                 self.ui.att_mapsize_y.setText(str(height))
                 self.ui.att_mapsize_y.setReadOnly(True)
                 self.ui.att_mapsize_y.blockSignals(False)
+    
+    def _update_tile_size_display(self):
+        """更新属性面板中的瓦片大小显示"""
+        if hasattr(self, "ui") and hasattr(self.ui, "att_tile_size"):
+            # 获取当前瓦片大小
+            tile_size = self.map_model.get_tile_size()
+            
+            # 查找匹配的瓦片大小选项
+            for i in range(self.ui.att_tile_size.count()):
+                item_text = self.ui.att_tile_size.itemText(i)
+                if item_text.startswith(f"{tile_size}x"):
+                    self.ui.att_tile_size.blockSignals(True)
+                    self.ui.att_tile_size.setCurrentIndex(i)
+                    self.ui.att_tile_size.blockSignals(False)
+                    break
+    
+    def _on_tile_size_changed(self):
+        """处理瓦片尺寸变化事件"""
+        if not hasattr(self, "ui") or not hasattr(self.ui, "att_tile_size"):
+            return
+            
+        # 获取新的瓦片尺寸
+        size_text = self.ui.att_tile_size.currentText()
+        new_tile_size = int(size_text.split("x")[0])
+        
+        # 如果尺寸没有变化，不进行处理
+        if self.map_model.get_tile_size() == new_tile_size:
+            return
+            
+        print(f"DEBUG: 瓦片尺寸变化: {self.map_model.get_tile_size()} -> {new_tile_size}")
+        
+        # 更新地图模型的全局tile_size（这是格子大小，不是图块大小）
+        self.map_model.set_tile_size(new_tile_size)
+        
+        # 更新画布管理器的tile_size（网格大小）
+        if self.canvas_manager:
+            self.canvas_manager.tile_size = new_tile_size
+            # 重新初始化网格纹理以适应新的瓦片尺寸
+            self.canvas_manager._init_grid_texture()
+            # 强制重新渲染地图
+            self._render_full_map()
+            # 更新视图
+            self.canvas_manager.viewport().update()
+        
+        # 注意：不重新切割图块，不修改资源和tile_sets的尺寸属性
+        # 图块保持原来的大小和位置，只有格子大小发生变化
+        
+        # 更新资源列表显示（刷新视图）
+        self._update_res_list_display()
+        
+        # 自动保存地图
+        if self.current_map_path:
+            print(f"DEBUG: 瓦片尺寸变化后自动保存地图到: {self.current_map_path}")
+            save_result = self.map_model.save(self.current_map_path)
+            print(f"DEBUG: 保存结果: {save_result}")
 
     def _get_tile_pixmap_for_collision(self, resource_index, tile_index):
         """为碰撞管理器提供图块图像"""
@@ -1822,126 +1856,129 @@ class MapEditorManager(QObject):
         # 检查资源列表视图是否已初始化
         if not self.res_list_view:
             return
+            
+        # 直接调用系统文件选择器
+        from PySide6.QtWidgets import QFileDialog
+        
+        files, _ = QFileDialog.getOpenFileNames(
+            self.parent(),
+            "选择图像资源",
+            "",
+            "图片文件 (*.png *.jpg *.jpeg *.bmp);;所有文件 (*)",
+        )
+        
+        if not files:
+            return
+            
+        # 获取属性面板中选择的瓦片尺寸
+        tile_size = 32  # 默认值
+        if hasattr(self, "ui") and hasattr(self.ui, "att_tile_size"):
+            size_text = self.ui.att_tile_size.currentText()
+            tile_size = int(size_text.split("x")[0])
+        
+        # 保存上传的资源
+        for file_path in files:
+            if os.path.exists(file_path):
+                # 获取当前地图名称
+                map_name = "未知地图"
+                if self.current_map_path:
+                    map_name = os.path.splitext(
+                        os.path.basename(self.current_map_path)
+                    )[0]
 
-        # 弹出导入对话框
-        dialog = MapResourceImportDialog()
+                # 创建tilesets目录 - 每个地图独立的tilesets目录
+                if self.project_manager and self.current_map_path:
+                    # 获取地图文件所在目录（地图文件夹）
+                    map_dir = os.path.dirname(self.current_map_path)
+                    tilesets_dir = os.path.join(map_dir, "tilesets")
+                    os.makedirs(tilesets_dir, exist_ok=True)
 
-        if dialog.exec() == QDialog.Accepted:
-            # 获取导入数据
-            import_data = dialog.get_import_data()
-            files = import_data["files"]
-            resource_type = import_data["resource_type"]
-            tile_size = import_data["tile_size"]
+                    # 复制文件到当前地图的tilesets目录
+                    file_name = os.path.basename(file_path)
+                    dest_path = os.path.join(tilesets_dir, file_name)
 
-            # 保存上传的资源
-            for file_path in files:
-                if os.path.exists(file_path):
-                    # 获取当前地图名称
-                    map_name = "未知地图"
-                    if self.current_map_path:
-                        map_name = os.path.splitext(
-                            os.path.basename(self.current_map_path)
-                        )[0]
+                    # 复制文件
+                    import shutil
 
-                    # 创建tilesets目录 - 每个地图独立的tilesets目录
-                    if self.project_manager and self.current_map_path:
-                        # 获取地图文件所在目录（地图文件夹）
-                        map_dir = os.path.dirname(self.current_map_path)
-                        tilesets_dir = os.path.join(map_dir, "tilesets")
-                        os.makedirs(tilesets_dir, exist_ok=True)
+                    shutil.copy2(file_path, dest_path)
 
-                        # 复制文件到当前地图的tilesets目录
-                        file_name = os.path.basename(file_path)
-                        dest_path = os.path.join(tilesets_dir, file_name)
+                    # 使用相对路径（相对于地图文件）
+                    relative_path = os.path.join("tilesets", file_name)
+                else:
+                    # 如果没有项目管理器，使用原始路径
+                    relative_path = file_path
 
-                        # 复制文件
-                        import shutil
+                # 获取图片尺寸并进行切割处理
+                from PySide6.QtGui import QPixmap
+                
+                # 初始化默认值
+                width = tile_size
+                height = tile_size
+                resource_type = "tileset"
 
-                        shutil.copy2(file_path, dest_path)
+                # 使用复制后的文件路径加载图片
+                pixmap = QPixmap(dest_path)
+                if not pixmap.isNull():
+                    original_width = pixmap.width()
+                    original_height = pixmap.height()
+                    width = original_width
+                    height = original_height
 
-                        # 使用相对路径（相对于地图文件）
-                        relative_path = os.path.join("tilesets", file_name)
-                    else:
-                        # 如果没有项目管理器，使用原始路径
-                        relative_path = file_path
+                resource_info = {
+                    "name": os.path.basename(file_path),
+                    "path": relative_path,
+                    "resource_type": resource_type,
+                    "tile_size": tile_size,
+                    "width": width,
+                    "height": height,
+                    "frames": 1,
+                }
 
-                    # 获取图片尺寸并根据需要缩放
-                    from PySide6.QtGui import QPixmap
+                # 添加图块尺寸信息
+                resource_info["tile_width"] = tile_size
+                resource_info["tile_height"] = tile_size
 
-                    pixmap = QPixmap(file_path)
-                    if not pixmap.isNull():
-                        original_width = pixmap.width()
-                        original_height = pixmap.height()
+                print(
+                    f"DEBUG: 资源上传 - 名称: {resource_info['name']}, 类型: {resource_type}, 尺寸: {width}x{height}, tile_width: {resource_info.get('tile_width', 0)}"
+                )
 
-                        # 如果是单张图片，按照用户选择的tile_size进行缩放
-                        if resource_type == "image":
-                            # 缩放图片到指定尺寸（使用快速缩放避免像素图模糊）
-                            scaled_pixmap = pixmap.scaled(
-                                tile_size,
-                                tile_size,
-                                Qt.AspectRatioMode.IgnoreAspectRatio,
-                                Qt.TransformationMode.FastTransformation,
-                            )
-                            # 保存缩放后的图片
-                            scaled_pixmap.save(dest_path)
-                            width = tile_size
-                            height = tile_size
-                        else:
-                            width = original_width
-                            height = original_height
-                    else:
-                        # 图片加载失败时使用tile_size作为默认尺寸
-                        width = tile_size
-                        height = tile_size
-
-                    resource_info = {
-                        "name": os.path.basename(file_path),
-                        "path": relative_path,
-                        "resource_type": resource_type,
-                        "tile_size": tile_size,
-                        "width": width,
-                        "height": height,
-                        "frames": 1,
-                    }
-
-                    # 添加图块尺寸信息
-                    resource_info["tile_width"] = tile_size
-                    resource_info["tile_height"] = tile_size
-
-                    print(
-                        f"DEBUG: 资源上传 - 名称: {resource_info['name']}, 类型: {resource_type}, 尺寸: {width}x{height}, tile_width: {resource_info.get('tile_width', 0)}"
+                # 添加到资源列表
+                self.uploaded_resources.append(resource_info)
+                
+                # 添加到地图模型的tile_sets中
+                if self.project_manager and self.current_map_path:
+                    map_dir = os.path.dirname(self.current_map_path)
+                    full_image_path = os.path.join(map_dir, relative_path)
+                    # 统一使用用户设置的tile_size作为图块尺寸
+                    self.map_model.add_tile_set(
+                        name=resource_info["name"],
+                        image_path=full_image_path,
+                        tile_width=tile_size,
+                        tile_height=tile_size,
                     )
 
-                    # 添加到资源列表
-                    self.uploaded_resources.append(resource_info)
+        # 更新地图模型的全局tile_size
+        self.map_model.set_tile_size(tile_size)
 
-                    # 更新地图模型的全局tile_size
-                    self.map_model.set_tile_size(tile_size)
+        # 更新画布管理器的tile_size
+        if self.canvas_manager:
+            self.canvas_manager.tile_size = tile_size
 
-                    # 更新画布管理器的tile_size
-                    if self.canvas_manager:
-                        self.canvas_manager.tile_size = tile_size
+        # 清理缓存，确保新上传的资源能正确加载
+        self._pixmap_cache.clear()
+        self._source_image_cache.clear()
 
-                    # 添加到地图模型的tile_sets中
-                    if self.project_manager and self.current_map_path:
-                        map_dir = os.path.dirname(self.current_map_path)
-                        full_image_path = os.path.join(map_dir, relative_path)
-                        # 统一使用用户设置的tile_size作为图块尺寸
-                        self.map_model.add_tile_set(
-                            name=resource_info["name"],
-                            image_path=full_image_path,
-                            tile_width=tile_size,
-                            tile_height=tile_size,
-                        )
+        # 更新资源列表显示
+        self._update_res_list_display()
 
-            # 更新资源列表显示
-            self._update_res_list_display()
+        # 强制重新渲染地图，确保新上传的图块能正常显示
+        self._render_full_map()
 
-            # 自动保存地图（如果当前地图有文件路径）
-            if self.current_map_path:
-                print(f"DEBUG: 资源上传后自动保存地图到: {self.current_map_path}")
-                save_result = self.map_model.save(self.current_map_path)
-                print(f"DEBUG: 保存结果: {save_result}")
+        # 自动保存地图（如果当前地图有文件路径）
+        if self.current_map_path:
+            print(f"DEBUG: 资源上传后自动保存地图到: {self.current_map_path}")
+            save_result = self.map_model.save(self.current_map_path)
+            print(f"DEBUG: 保存结果: {save_result}")
 
     def select_resource(self, index):
         """选择资源"""
@@ -2181,6 +2218,9 @@ class MapEditorManager(QObject):
         # 绑定地图名称输入框
         if hasattr(self.ui, "att_map_name"):
             self.ui.att_map_name.textChanged.connect(self._on_map_name_changed)
+        # 绑定瓦片尺寸选择框
+        if hasattr(self.ui, "att_tile_size"):
+            self.ui.att_tile_size.currentIndexChanged.connect(self._on_tile_size_changed)
         # 设置初始工具状态
         self.set_current_tool(self.current_tool)
         print("工具按钮绑定完成")
