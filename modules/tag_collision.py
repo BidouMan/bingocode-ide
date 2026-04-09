@@ -1,8 +1,8 @@
 """标签碰撞系统"""
 from typing import Dict, List, Tuple, Optional, Any
-from .collision_data import CollisionData
+from models.collision_data import CollisionData
 from .static_grid import StaticCollisionGrid
-from .collision_detector import CollisionDetector
+from .map_editor.collision_detector import CollisionDetector
 
 
 class CollisionCache:

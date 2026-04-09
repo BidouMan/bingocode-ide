@@ -22,10 +22,10 @@ from PySide6.QtGui import (
     QImage,
 )
 from models.map_model import MapDataModel
-from modules.map_resource_import_dialog import MapResourceImportDialog
-from modules.map_canvas_manager import MapCanvas
-from modules.map_editor.collision_manager import CollisionManager
-from modules.map_editor.property_manager import PropertyManager
+from .map_resource_import_dialog import MapResourceImportDialog
+from .map_canvas_manager import MapCanvas
+from .collision_manager import CollisionManager
+from .property_manager import PropertyManager
 
 
 class TileItem(QGraphicsRectItem):

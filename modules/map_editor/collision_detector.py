@@ -1,6 +1,6 @@
 """碰撞检测算法实现"""
 from typing import List, Tuple, Optional
-from .collision_data import CollisionData, RectangleShape, CircleShape, PolygonShape
+from models.collision_data import CollisionData, RectangleShape, CircleShape, PolygonShape
 
 
 class CollisionDetector:

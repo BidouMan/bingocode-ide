@@ -4,7 +4,7 @@ import numpy as np
 import zlib
 import json
 from typing import Dict, Any, List, Tuple
-from .collision_data import CollisionData
+from models.collision_data import CollisionData
 
 
 class BinaryStorage:

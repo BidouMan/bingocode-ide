@@ -26,7 +26,7 @@ from modules.resource_manager import ResourceManager
 from modules.upload_menu_manager import UploadMenuManager
 from models.sprite_model import SpriteDataModel
 from modules.sprite_editor_manager import SpriteEditorManager
-from modules.map_editor_manager import MapEditorManager
+from modules.map_editor.map_editor_manager import MapEditorManager
 
 
 class AppController:
