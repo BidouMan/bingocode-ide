@@ -24,6 +24,8 @@ from PySide6.QtGui import (
 from models.map_model import MapDataModel
 from modules.map_resource_import_dialog import MapResourceImportDialog
 from modules.map_canvas_manager import MapCanvas
+from modules.map_editor.collision_manager import CollisionManager
+from modules.map_editor.property_manager import PropertyManager
 
 
 class TileItem(QGraphicsRectItem):
@@ -183,6 +185,15 @@ class MapEditorManager(QObject):
         if self.canvas_widget:
             self._initialize_canvas_manager()
 
+        # 初始化碰撞管理器和属性管理器
+        self.collision_manager = CollisionManager(self.map_model)
+        self.property_manager = PropertyManager(self.map_model)
+
+        # 设置图块图像获取函数
+        self.collision_manager.set_tile_pixmap_provider(
+            self._get_tile_pixmap_for_collision
+        )
+
         # 设置按键绑定
         self._setup_key_bindings()
 
@@ -234,11 +245,17 @@ class MapEditorManager(QObject):
         # 对象池 (Object Pool) —— 老机器的救星
         self._item_pool = []  # 存放闲置的 QGraphicsPixmapItem
 
-        # 碰撞编辑器相关
-        self.col_editor_scene = None  # 碰撞编辑器场景
-        self.col_editor_view = None  # 碰撞编辑器视图引用
-        self.current_collision_tile = None  # 当前选中的碰撞图块
-        self.collision_rect_item = None  # 碰撞框图形项
+        # 信号定义
+        self.tile_selected = Signal(int, int)  # 瓦片选中信号
+
+    def __del__(self):
+        """清理资源，避免程序退出时崩溃"""
+        try:
+            # 移除场景事件过滤器
+            if hasattr(self, "canvas_scene") and self.canvas_scene:
+                self.canvas_scene.removeEventFilter(self)
+        except Exception:
+            pass
 
     def _initialize_map_model(self):
         """初始化地图数据模型"""
@@ -347,33 +364,41 @@ class MapEditorManager(QObject):
 
     def eventFilter(self, obj, event):
         """场景事件过滤器，确保绘制事件被正确处理"""
-        from PySide6.QtCore import QEvent
+        try:
+            # 检查对象是否有效
+            if not obj or not event:
+                return super().eventFilter(obj, event)
 
-        if obj == self.canvas_scene:
-            if event.type() == QEvent.MouseButtonPress:
-                if event.button() == Qt.LeftButton and self.current_tool == "draw":
-                    scene_pos = event.scenePos()
-                    # 调用鼠标按下处理方法，确保逻辑一致
-                    self._handle_mouse_press(event)
-                    return True
-            elif event.type() == QEvent.MouseMove:
-                if (
-                    event.buttons() & Qt.LeftButton
-                    and self.current_tool == "draw"
-                    and self.is_drawing
-                ):
-                    scene_pos = event.scenePos()
-                    # 获取网格位置（从场景坐标）
-                    tile_pos = self._get_grid_pos_from_scene_pos(scene_pos)
-                    if tile_pos and tile_pos != self.last_tile_pos:
-                        self._draw_tile(scene_pos)
-                        self.last_tile_pos = tile_pos
-                    return True
-            elif event.type() == QEvent.MouseButtonRelease:
-                if event.button() == Qt.LeftButton and self.current_tool == "draw":
-                    self.is_drawing = False
-                    return True
-        return super().eventFilter(obj, event)
+            from PySide6.QtCore import QEvent
+
+            if obj == self.canvas_scene:
+                if event.type() == QEvent.MouseButtonPress:
+                    if event.button() == Qt.LeftButton and self.current_tool == "draw":
+                        scene_pos = event.scenePos()
+                        # 调用鼠标按下处理方法，确保逻辑一致
+                        self._handle_mouse_press(event)
+                        return True
+                elif event.type() == QEvent.MouseMove:
+                    if (
+                        event.buttons() & Qt.LeftButton
+                        and self.current_tool == "draw"
+                        and self.is_drawing
+                    ):
+                        scene_pos = event.scenePos()
+                        # 获取网格位置（从场景坐标）
+                        tile_pos = self._get_grid_pos_from_scene_pos(scene_pos)
+                        if tile_pos and tile_pos != self.last_tile_pos:
+                            self._draw_tile(scene_pos)
+                            self.last_tile_pos = tile_pos
+                        return True
+                elif event.type() == QEvent.MouseButtonRelease:
+                    if event.button() == Qt.LeftButton and self.current_tool == "draw":
+                        self.is_drawing = False
+                        return True
+            return super().eventFilter(obj, event)
+        except Exception:
+            # 避免在程序退出时崩溃
+            return False
 
     def _clear_resource_items(self):
         """清理资源项（只清理资源列表视图中的项，不清理地图画布上的图块）"""
@@ -578,7 +603,8 @@ class MapEditorManager(QObject):
 
                 # 更新资源列表和画布
                 self._update_res_list_display()
-                self._update_canvas()
+                # 地图加载完成后强制完整渲染一次，确保所有瓦片都显示
+                self._render_full_map()
             else:
                 print(f"DEBUG: 地图数据加载失败: {file_path}")
                 self.error_occurred.emit("加载地图失败")
@@ -693,6 +719,7 @@ class MapEditorManager(QObject):
         print("=== 更新画布显示 ===")
         if self.canvas_manager and self.map_model:
             print("调用渲染地图")
+            # 使用视口裁剪渲染，提高性能
             self._render_map()
         else:
             print(f"画布管理器: {self.canvas_manager}")
@@ -913,15 +940,51 @@ class MapEditorManager(QObject):
                         return pixmap
         return None
 
+    def _render_full_map(self):
+        """渲染整个地图，不使用视口裁剪"""
+        try:
+            if not self.canvas_manager or not self.map_model:
+                return
+
+            scene = self.canvas_manager.scene()
+            if not scene:
+                return
+
+            # 获取当前图层数据
+            layer = self.map_model.get_layer(self.current_layer)
+            if not layer or not layer.get("visible", True):
+                print(f"警告: 图层 {self.current_layer} 不可见或不存在")
+                return
+
+            # 清理所有现有的瓦片项
+            for item in list(self.tile_items.values()):
+                self._recycle_item(item)
+            self.tile_items.clear()
+
+            # 获取图层中的所有瓦片数据
+            tiles = layer.get("tiles", {})
+
+            # 渲染所有瓦片
+            for (tx, ty), tile_id in tiles.items():
+                if tile_id > 0:
+                    self._update_single_tile(tx, ty, tile_id)
+
+            print(f"✅ 完整地图渲染完成，瓦片数量: {len(tiles)}")
+
+        except Exception as e:
+            print(f"完整地图渲染失败: {e}")
+            import traceback
+
+            traceback.print_exc()
+
     def _render_map(self):
         """根据模型数据渲染视口内的地图图层"""
         try:
             scene = self.canvas_manager.scene()
-            view = self.canvas_manager.view()
 
             # 获取视口范围
-            view_rect = view.viewport().rect()
-            scene_rect = view.mapToScene(view_rect).boundingRect()
+            view_rect = self.canvas_manager.viewport().rect()
+            scene_rect = self.canvas_manager.mapToScene(view_rect).boundingRect()
 
             # 获取当前图层数据
             layer = self.map_model.get_layer(self.current_layer)
@@ -1415,6 +1478,10 @@ class MapEditorManager(QObject):
     def _remove_preview(self):
         """移除预览图块"""
         try:
+            # 检查 canvas_manager 是否存在
+            if not self.canvas_manager:
+                return
+
             # 移除当前预览项
             if self.preview_item:
                 scene = self.canvas_manager.scene()
@@ -1441,31 +1508,19 @@ class MapEditorManager(QObject):
 
     def initialize_collision_editor(self, col_editor_view):
         """初始化碰撞编辑器"""
-        print(f"初始化碰撞编辑器: {col_editor_view}")
-        self.col_editor_view = col_editor_view
-        self.col_editor_scene = QGraphicsScene()
-        self.col_editor_view.setScene(self.col_editor_scene)
-
-        # 禁用滚动条和滚轮滚动
-        self.col_editor_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.col_editor_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.col_editor_view.setDragMode(QGraphicsView.NoDrag)
-
-        # 设置居中对齐（根据用户分析的核心修复）
-        self.col_editor_view.setAlignment(Qt.AlignCenter)
-        self.col_editor_view.setTransformationAnchor(
-            QGraphicsView.ViewportAnchor.AnchorViewCenter
-        )
-
-        print(
-            f"碰撞编辑器初始化完成: scene={self.col_editor_scene}, view={self.col_editor_view}"
-        )
+        self.collision_manager.initialize_collision_editor(col_editor_view)
 
     def set_current_collision_tile(self, resource_index, tile_index):
         """设置当前选中的碰撞图块"""
         if resource_index >= 0 and resource_index < len(self.uploaded_resources):
-            self.current_collision_tile = (resource_index, tile_index)
-            self._update_collision_display()
+            # 调用碰撞管理器设置当前碰撞图块
+            self.collision_manager.set_current_collision_tile(
+                resource_index, tile_index
+            )
+            # 调用属性管理器设置当前瓦片
+            self.property_manager.set_current_tile(resource_index, tile_index)
+            # 发送瓦片选中信号
+            self.tile_selected.emit(resource_index, tile_index)
 
             # 更新map_collision checkbox的状态
             if hasattr(self, "ui") and hasattr(self.ui, "map_collision"):
@@ -1484,18 +1539,18 @@ class MapEditorManager(QObject):
                     self.ui.att_tag.setText(tile_tag)
                     self.ui.att_tag.blockSignals(False)
 
-    def _update_collision_display(self):
-        """更新碰撞编辑器的显示"""
-        if (
-            not self.col_editor_scene
-            or not self.col_editor_view
-            or not self.current_collision_tile
-        ):
-            return
+    def set_collision_enabled(self, enabled):
+        """设置碰撞启用状态"""
+        self.collision_manager.set_collision_enabled(enabled)
 
-        resource_index, tile_index = self.current_collision_tile
+    def _on_tag_changed(self, tag):
+        """处理标签变化"""
+        self.property_manager.set_tile_tag(tag)
+
+    def _get_tile_pixmap_for_collision(self, resource_index, tile_index):
+        """为碰撞管理器提供图块图像"""
         if resource_index < 0 or resource_index >= len(self.uploaded_resources):
-            return
+            return None
 
         resource = self.uploaded_resources[resource_index]
 
@@ -1521,152 +1576,7 @@ class MapEditorManager(QObject):
 
             pixmap = self._source_image_cache.get(image_path)
 
-        if pixmap and not pixmap.isNull():
-            # 在更新场景前先隐藏视图，避免闪烁
-            self.col_editor_view.hide()
-
-            # 获取视图大小
-            view_rect = self.col_editor_view.viewport().rect()
-            view_width = view_rect.width()
-            view_height = view_rect.height()
-
-            # 黄金分割尺寸（大约占视图的61.8%）
-            target_width = view_width * 0.618
-            target_height = view_height * 0.618
-
-            # 计算缩放比例
-            pixmap_width = pixmap.width()
-            pixmap_height = pixmap.height()
-
-            # 计算保持比例的缩放因子
-            scale_x = target_width / pixmap_width
-            scale_y = target_height / pixmap_height
-            scale = min(scale_x, scale_y)
-
-            # 最小缩放限制（避免图块太小）
-            min_scale = 2.0  # 至少放大到原始大小的2倍
-            scale = max(scale, min_scale)
-
-            # 清空场景
-            self.col_editor_scene.clear()
-
-            # 显示原图（放在场景中心位置）
-            pixmap_item = QGraphicsPixmapItem(pixmap)
-            # 将图块放在场景中心位置，使图块中心点对准场景原点
-            pixmap_item.setPos(-pixmap_width / 2, -pixmap_height / 2)
-            self.col_editor_scene.addItem(pixmap_item)
-
-            # 显示碰撞框（半透明淡蓝色矩形）
-            if self.map_model:
-                collision_enabled = False
-                if resource["resource_type"] == "tileset":
-                    collision_enabled = self.map_model.get_tile_collision(
-                        resource_index, tile_index
-                    )
-                else:
-                    # 单张图片使用瓦片集的碰撞设置
-                    collision_enabled = self.map_model.get_tile_set_collision(
-                        resource_index
-                    )
-
-                if collision_enabled:
-                    # 创建半透明淡蓝色碰撞框（放在场景中心位置）
-                    rect_item = QGraphicsRectItem(
-                        -pixmap_width / 2,
-                        -pixmap_height / 2,
-                        pixmap.width(),
-                        pixmap.height(),
-                    )
-                    rect_item.setBrush(
-                        QBrush(QColor(100, 149, 237, 100))
-                    )  # 半透明淡蓝色
-                    rect_item.setPen(QPen(QColor(100, 149, 237), 1))
-                    self.col_editor_scene.addItem(rect_item)
-                    self.collision_rect_item = rect_item
-
-            # 计算图块的中心点
-            pixmap_center_x = pixmap_width / 2
-            pixmap_center_y = pixmap_height / 2
-
-            # 计算视图需要滚动到的位置，使图块中心对准视图中心
-            view_center_x = (
-                pixmap_center_x - (view_width / 2 - pixmap_width * scale / 2) / scale
-            )
-            view_center_y = (
-                pixmap_center_y - (view_height / 2 - pixmap_height * scale / 2) / scale
-            )
-
-            # 获取视图大小
-            view_rect = self.col_editor_view.viewport().rect()
-            view_width = view_rect.width()
-            view_height = view_rect.height()
-
-            # 黄金分割尺寸（大约占视图的61.8%）
-            target_width = view_width * 0.618
-            target_height = view_height * 0.618
-
-            # 计算缩放比例
-            scale_x = target_width / pixmap_width
-            scale_y = target_height / pixmap_height
-            scale = min(scale_x, scale_y)
-
-            # 最小缩放限制（避免图块太小）
-            min_scale = 2.0
-            scale = max(scale, min_scale)
-
-            # 图块已经放在场景中心位置（中心点在(0,0)）
-            # 所以现在的平移量就是视图中心点的位置
-
-            # 重新设计变换逻辑：先缩放，后平移到视图中心
-            transform = self.col_editor_view.transform()
-            transform.reset()
-
-            # 先缩放
-            transform.scale(scale, scale)
-
-            # 再平移到视图中心
-            transform.translate(view_width / 2, view_height / 2)
-
-            self.col_editor_view.setTransform(transform)
-
-            # 添加详细的调试信息
-            print(f"DEBUG 居中计算:")
-            print(f"  图块尺寸: {pixmap_width}x{pixmap_height}")
-            print(f"  图块中心点: ({pixmap_center_x}, {pixmap_center_y})")
-            print(f"  视图尺寸: {view_width}x{view_height}")
-            print(f"  缩放比例: {scale}")
-            print(f"  平移量: ({view_width / 2}, {view_height / 2})")
-
-            # 计算图块最左边到视图左边的距离
-            scaled_width = pixmap_width * scale
-            left_distance = (view_width - scaled_width) / 2
-            print(f"  缩放后图块宽度: {scaled_width}")
-            print(f"  图块最左边到视图左边距离: {left_distance}")
-            print(f"  图块最右边到视图右边距离: {left_distance}")
-
-            # 显示视图
-            self.col_editor_view.show()
-        else:
-            # 如果没有pixmap，清空场景
-            self.col_editor_scene.clear()
-            self.col_editor_view.fitInView(
-                self.col_editor_scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio
-            )
-
-    def set_collision_enabled(self, enabled):
-        """设置碰撞启用状态"""
-        if self.current_collision_tile:
-            resource_index, tile_index = self.current_collision_tile
-            if self.map_model:
-                self.map_model.set_tile_collision(resource_index, tile_index, enabled)
-                self._update_collision_display()
-
-    def _on_tag_changed(self, tag):
-        """处理标签变化"""
-        if self.current_collision_tile:
-            resource_index, tile_index = self.current_collision_tile
-            if self.map_model:
-                self.map_model.set_tile_tag(resource_index, tile_index, tag)
+        return pixmap
 
     def _record_coordinates(self, action, coordinates=None, tile_id=None):
         """记录坐标信息到md文件"""
@@ -1695,32 +1605,6 @@ class MapEditorManager(QObject):
 
         except Exception as e:
             print(f"记录坐标错误: {e}")
-
-            # 清理资源列表视图场景中的预览项
-            if self.res_list_view:
-                res_scene = self.res_list_view.scene()
-                if res_scene:
-                    from PySide6.QtWidgets import QGraphicsPixmapItem
-
-                    res_items = res_scene.items()
-                    for item in res_items:
-                        if (
-                            isinstance(item, QGraphicsPixmapItem)
-                            and item.zValue() == 100
-                        ):
-                            res_scene.removeItem(item)
-
-            self.preview_tile_pos = None
-
-            # 强制刷新场景和视图
-            if scene:
-                scene.update()
-            if self.canvas_manager:
-                self.canvas_manager.viewport().update()
-            if self.res_list_view:
-                self.res_list_view.viewport().update()
-        except Exception as e:
-            pass
 
     def get_map_model(self):
         """获取地图数据模型"""
