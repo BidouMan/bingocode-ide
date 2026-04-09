@@ -14,6 +14,7 @@ class MapDataModel(QObject):
         super().__init__()
         self.project_path = project_path
         self.map_data = {}
+        self._changed_area = set()  # 变化区域跟踪
         self._initialize_default_data()
 
     def _initialize_default_data(self):
@@ -48,6 +49,9 @@ class MapDataModel(QObject):
             layer = self.map_data["layers"][layer_index]
             key = (int(x), int(y))
 
+            # 添加到变化区域跟踪
+            self._changed_area.add(key)
+
             if tile_id == 0:
                 # 如果tile_id为0，删除该坐标点以节省内存
                 if key in layer["tiles"]:
@@ -67,6 +71,14 @@ class MapDataModel(QObject):
     def get_tile_size(self):
         """获取瓦片大小"""
         return self.map_data["tile_size"]
+
+    def get_changed_area(self):
+        """获取变化区域"""
+        return self._changed_area.copy()
+
+    def clear_changed_area(self):
+        """清除变化区域"""
+        self._changed_area.clear()
 
     def get_layer_count(self):
         """获取图层数量"""
@@ -98,7 +110,7 @@ class MapDataModel(QObject):
         self.map_data["width"] = width
         self.map_data["height"] = height
         self.data_changed.emit()
-        
+
     def set_tile_size(self, tile_size):
         """设置瓦片大小"""
         self.map_data["tile_size"] = tile_size

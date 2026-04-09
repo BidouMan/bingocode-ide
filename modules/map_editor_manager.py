@@ -672,8 +672,21 @@ class MapEditorManager(QObject):
 
     def _on_map_data_changed(self):
         """地图数据变化时的处理 - 增量更新"""
-        # 不再调用全量渲染，而是等待具体的瓦片更新
-        pass
+        if not self.map_model:
+            return
+
+        # 获取变化区域
+        changed_area = self.map_model.get_changed_area()
+        if not changed_area:
+            return
+
+        # 只更新变化的瓦片
+        for x, y in changed_area:
+            tile_id = self.map_model.get_tile(self.current_layer, x, y)
+            self._update_single_tile(x, y, tile_id)
+
+        # 清除变化记录
+        self.map_model.clear_changed_area()
 
     def _update_canvas(self):
         """更新画布显示"""
@@ -716,7 +729,7 @@ class MapEditorManager(QObject):
 
     def _update_single_tile(self, x, y, tile_id):
         """
-        更新单个瓦片 - 统一位置计算版本
+        更新单个瓦片 - 优化对象池使用版本
         x, y: 网格索引 (0, 1, 2...)
         """
         try:
@@ -730,18 +743,31 @@ class MapEditorManager(QObject):
             # 使用地图的全局tile_size计算位置，避免双重缩放
             tile_size = self.map_model.get_tile_size()
 
-            # 1. 如果该位置已有瓦片，先回收旧瓦片
-            if (x, y) in self.tile_items:
-                old_item = self.tile_items.pop((x, y))
-                self._recycle_item(old_item)
-
-            # 如果瓦片ID为0，不需要绘制
+            # 如果瓦片ID为0，清除瓦片
             if tile_id == 0:
+                if (x, y) in self.tile_items:
+                    old_item = self.tile_items.pop((x, y))
+                    self._recycle_item(old_item)
                 return
 
-            # 2. 使用新的缓存系统获取图块图像
+            # 检查是否已有瓦片且瓦片ID相同，如果相同则无需更新
+            if (x, y) in self.tile_items:
+                existing_item = self.tile_items[(x, y)]
+                existing_tile_id = existing_item.data(1)
+                if existing_tile_id == tile_id:
+                    return
+
+            # 获取图块图像
             pixmap = self.get_cached_pixmap(tile_id)
-            if pixmap:
+            if not pixmap:
+                return
+
+            # 如果位置已有瓦片，更新现有瓦片而不是创建新瓦片
+            if (x, y) in self.tile_items:
+                existing_item = self.tile_items[(x, y)]
+                existing_item.setPixmap(pixmap)
+                existing_item.setData(1, tile_id)
+            else:
                 # 使用对象池获取图块项
                 item = self._get_item_from_pool(pixmap)
 
@@ -763,11 +789,12 @@ class MapEditorManager(QObject):
 
                 # 给图块打标签，方便擦除时识别
                 item.setData(0, "tile")
+                item.setData(1, tile_id)
 
-                # 记录渲染时的图块位置（世界网格坐标）
-                self._record_coordinates(
-                    f"Render Tile", coordinates=(x, y), tile_id=tile_id
-                )
+            # 记录渲染时的图块位置（世界网格坐标）
+            self._record_coordinates(
+                f"Render Tile", coordinates=(x, y), tile_id=tile_id
+            )
 
         except Exception as e:
             print(f"更新单个瓦片错误: {e}")
@@ -887,20 +914,16 @@ class MapEditorManager(QObject):
         return None
 
     def _render_map(self):
-        """根据模型数据重新渲染整个地图图层"""
+        """根据模型数据渲染视口内的地图图层"""
         try:
             scene = self.canvas_manager.scene()
+            view = self.canvas_manager.view()
 
-            # 1. 清理当前场景中已有的瓦片项，防止叠加
-            # 只删除瓦片项，保留背景网格线和坐标轴线
-            for item in list(self.tile_items.values()):
-                try:
-                    scene.removeItem(item)
-                except Exception as e:
-                    pass
-            self.tile_items.clear()
+            # 获取视口范围
+            view_rect = view.viewport().rect()
+            scene_rect = view.mapToScene(view_rect).boundingRect()
 
-            # 2. 获取当前图层数据
+            # 获取当前图层数据
             layer = self.map_model.get_layer(self.current_layer)
             if not layer or not layer.get("visible", True):
                 print(f"警告: 图层 {self.current_layer} 不可见或不存在")
@@ -908,16 +931,38 @@ class MapEditorManager(QObject):
 
             tile_size = self.map_model.get_tile_size()
 
+            # 计算视口内的瓦片范围
+            min_tile_x = int(scene_rect.left() // tile_size) - 1  # 扩展一个瓦片边界
+            max_tile_x = int(scene_rect.right() // tile_size) + 2  # 扩展一个瓦片边界
+            min_tile_y = int(scene_rect.top() // tile_size) - 1  # 扩展一个瓦片边界
+            max_tile_y = int(scene_rect.bottom() // tile_size) + 2  # 扩展一个瓦片边界
+
             # 获取图层中的瓦片数据
             tiles = layer.get("tiles", {})
 
-            # 3. 遍历字典的keys，直接使用原始坐标
+            # 清理视口外的瓦片项
+            tiles_to_remove = []
+            for (tx, ty), item in self.tile_items.items():
+                if (
+                    tx < min_tile_x
+                    or tx > max_tile_x
+                    or ty < min_tile_y
+                    or ty > max_tile_y
+                ):
+                    tiles_to_remove.append((tx, ty))
+
+            for tx, ty in tiles_to_remove:
+                item = self.tile_items.pop((tx, ty))
+                self._recycle_item(item)
+
+            # 渲染视口内的瓦片
             for (tx, ty), tile_id in tiles.items():
                 if tile_id <= 0:
                     continue
 
-                # 渲染瓦片
-                self._update_single_tile(tx, ty, tile_id)
+                # 只渲染视口内的瓦片
+                if min_tile_x <= tx <= max_tile_x and min_tile_y <= ty <= max_tile_y:
+                    self._update_single_tile(tx, ty, tile_id)
 
         except Exception as e:
             print(f"渲染地图失败: {e}")
@@ -1821,7 +1866,7 @@ class MapEditorManager(QObject):
                             # 缩放图片到指定尺寸（使用快速缩放避免像素图模糊）
                             scaled_pixmap = pixmap.scaled(
                                 tile_size,
-                                tile_size, 
+                                tile_size,
                                 Qt.AspectRatioMode.IgnoreAspectRatio,
                                 Qt.TransformationMode.FastTransformation,
                             )
@@ -1860,11 +1905,11 @@ class MapEditorManager(QObject):
 
                     # 更新地图模型的全局tile_size
                     self.map_model.set_tile_size(tile_size)
-                    
+
                     # 更新画布管理器的tile_size
                     if self.canvas_manager:
                         self.canvas_manager.tile_size = tile_size
-                    
+
                     # 添加到地图模型的tile_sets中
                     if self.project_manager and self.current_map_path:
                         map_dir = os.path.dirname(self.current_map_path)

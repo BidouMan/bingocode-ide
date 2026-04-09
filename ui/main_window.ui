@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1218</width>
-    <height>921</height>
+    <width>1078</width>
+    <height>718</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -405,7 +405,7 @@
        <item>
         <widget class="QStackedWidget" name="editor_stacked">
          <property name="currentIndex">
-          <number>0</number>
+          <number>2</number>
          </property>
          <widget class="QWidget" name="editor_code_web">
           <layout class="QVBoxLayout" name="verticalLayout_5">
@@ -919,7 +919,7 @@
                        <string notr="true"/>
                       </property>
                       <property name="currentIndex">
-                       <number>0</number>
+                       <number>1</number>
                       </property>
                       <widget class="QWidget" name="page_sprite">
                        <layout class="QVBoxLayout" name="verticalLayout_12">
@@ -2124,141 +2124,6 @@
                      </widget>
                     </item>
                     <item>
-                     <widget class="QWidget" name="res_info" native="true">
-                      <property name="sizePolicy">
-                       <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
-                        <horstretch>0</horstretch>
-                        <verstretch>0</verstretch>
-                       </sizepolicy>
-                      </property>
-                      <property name="minimumSize">
-                       <size>
-                        <width>256</width>
-                        <height>24</height>
-                       </size>
-                      </property>
-                      <property name="maximumSize">
-                       <size>
-                        <width>256</width>
-                        <height>24</height>
-                       </size>
-                      </property>
-                      <layout class="QHBoxLayout" name="horizontalLayout_23">
-                       <property name="leftMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="topMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="rightMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="bottomMargin">
-                        <number>0</number>
-                       </property>
-                       <item>
-                        <spacer name="horizontalSpacer_11">
-                         <property name="orientation">
-                          <enum>Qt::Orientation::Horizontal</enum>
-                         </property>
-                         <property name="sizeHint" stdset="0">
-                          <size>
-                           <width>40</width>
-                           <height>20</height>
-                          </size>
-                         </property>
-                        </spacer>
-                       </item>
-                       <item>
-                        <widget class="QLabel" name="label_res_list_name">
-                         <property name="text">
-                          <string>资源:foreasdnew</string>
-                         </property>
-                        </widget>
-                       </item>
-                       <item>
-                        <widget class="QLabel" name="label_res_list_id">
-                         <property name="text">
-                          <string>ID:12</string>
-                         </property>
-                        </widget>
-                       </item>
-                       <item>
-                        <widget class="QLabel" name="label_res_list_size">
-                         <property name="text">
-                          <string>尺寸:16x16</string>
-                         </property>
-                        </widget>
-                       </item>
-                       <item>
-                        <spacer name="horizontalSpacer_9">
-                         <property name="orientation">
-                          <enum>Qt::Orientation::Horizontal</enum>
-                         </property>
-                         <property name="sizeHint" stdset="0">
-                          <size>
-                           <width>40</width>
-                           <height>20</height>
-                          </size>
-                         </property>
-                        </spacer>
-                       </item>
-                      </layout>
-                     </widget>
-                    </item>
-                    <item>
-                     <widget class="QWidget" name="widget" native="true">
-                      <layout class="QVBoxLayout" name="verticalLayout_22">
-                       <property name="spacing">
-                        <number>0</number>
-                       </property>
-                       <property name="leftMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="topMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="rightMargin">
-                        <number>0</number>
-                       </property>
-                       <property name="bottomMargin">
-                        <number>0</number>
-                       </property>
-                       <item alignment="Qt::AlignmentFlag::AlignTop">
-                        <widget class="QGraphicsView" name="col_editor_view">
-                         <property name="sizePolicy">
-                          <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
-                           <horstretch>0</horstretch>
-                           <verstretch>0</verstretch>
-                          </sizepolicy>
-                         </property>
-                         <property name="minimumSize">
-                          <size>
-                           <width>256</width>
-                           <height>256</height>
-                          </size>
-                         </property>
-                         <property name="maximumSize">
-                          <size>
-                           <width>240</width>
-                           <height>240</height>
-                          </size>
-                         </property>
-                         <property name="autoFillBackground">
-                          <bool>true</bool>
-                         </property>
-                         <property name="verticalScrollBarPolicy">
-                          <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
-                         </property>
-                         <property name="horizontalScrollBarPolicy">
-                          <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
-                         </property>
-                        </widget>
-                       </item>
-                      </layout>
-                     </widget>
-                    </item>
-                    <item>
                      <widget class="QFrame" name="res_col_toolbar">
                       <property name="sizePolicy">
                        <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
@@ -2423,6 +2288,141 @@
                          <property name="flat">
                           <bool>true</bool>
                          </property>
+                        </widget>
+                       </item>
+                      </layout>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QWidget" name="widget" native="true">
+                      <layout class="QVBoxLayout" name="verticalLayout_22">
+                       <property name="spacing">
+                        <number>0</number>
+                       </property>
+                       <property name="leftMargin">
+                        <number>0</number>
+                       </property>
+                       <property name="topMargin">
+                        <number>0</number>
+                       </property>
+                       <property name="rightMargin">
+                        <number>0</number>
+                       </property>
+                       <property name="bottomMargin">
+                        <number>0</number>
+                       </property>
+                       <item alignment="Qt::AlignmentFlag::AlignTop">
+                        <widget class="QGraphicsView" name="col_editor_view">
+                         <property name="sizePolicy">
+                          <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                           <horstretch>0</horstretch>
+                           <verstretch>0</verstretch>
+                          </sizepolicy>
+                         </property>
+                         <property name="minimumSize">
+                          <size>
+                           <width>256</width>
+                           <height>256</height>
+                          </size>
+                         </property>
+                         <property name="maximumSize">
+                          <size>
+                           <width>240</width>
+                           <height>240</height>
+                          </size>
+                         </property>
+                         <property name="autoFillBackground">
+                          <bool>true</bool>
+                         </property>
+                         <property name="verticalScrollBarPolicy">
+                          <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
+                         </property>
+                         <property name="horizontalScrollBarPolicy">
+                          <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
+                         </property>
+                        </widget>
+                       </item>
+                       <item>
+                        <widget class="QWidget" name="res_info" native="true">
+                         <property name="sizePolicy">
+                          <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                           <horstretch>0</horstretch>
+                           <verstretch>0</verstretch>
+                          </sizepolicy>
+                         </property>
+                         <property name="minimumSize">
+                          <size>
+                           <width>256</width>
+                           <height>30</height>
+                          </size>
+                         </property>
+                         <property name="maximumSize">
+                          <size>
+                           <width>256</width>
+                           <height>30</height>
+                          </size>
+                         </property>
+                         <layout class="QHBoxLayout" name="horizontalLayout_23">
+                          <property name="leftMargin">
+                           <number>0</number>
+                          </property>
+                          <property name="topMargin">
+                           <number>0</number>
+                          </property>
+                          <property name="rightMargin">
+                           <number>0</number>
+                          </property>
+                          <property name="bottomMargin">
+                           <number>0</number>
+                          </property>
+                          <item>
+                           <spacer name="horizontalSpacer_11">
+                            <property name="orientation">
+                             <enum>Qt::Orientation::Horizontal</enum>
+                            </property>
+                            <property name="sizeHint" stdset="0">
+                             <size>
+                              <width>40</width>
+                              <height>20</height>
+                             </size>
+                            </property>
+                           </spacer>
+                          </item>
+                          <item>
+                           <widget class="QLabel" name="label_res_list_name">
+                            <property name="text">
+                             <string>资源:foreasdnew</string>
+                            </property>
+                           </widget>
+                          </item>
+                          <item>
+                           <widget class="QLabel" name="label_res_list_id">
+                            <property name="text">
+                             <string>ID:12</string>
+                            </property>
+                           </widget>
+                          </item>
+                          <item>
+                           <widget class="QLabel" name="label_res_list_size">
+                            <property name="text">
+                             <string>尺寸:16x16</string>
+                            </property>
+                           </widget>
+                          </item>
+                          <item>
+                           <spacer name="horizontalSpacer_9">
+                            <property name="orientation">
+                             <enum>Qt::Orientation::Horizontal</enum>
+                            </property>
+                            <property name="sizeHint" stdset="0">
+                             <size>
+                              <width>40</width>
+                              <height>20</height>
+                             </size>
+                            </property>
+                           </spacer>
+                          </item>
+                         </layout>
                         </widget>
                        </item>
                       </layout>
@@ -2699,6 +2699,19 @@
                      <number>0</number>
                     </property>
                     <item>
+                     <spacer name="horizontalSpacer_14">
+                      <property name="orientation">
+                       <enum>Qt::Orientation::Horizontal</enum>
+                      </property>
+                      <property name="sizeHint" stdset="0">
+                       <size>
+                        <width>40</width>
+                        <height>20</height>
+                       </size>
+                      </property>
+                     </spacer>
+                    </item>
+                    <item>
                      <widget class="QLabel" name="label_editor_map_name">
                       <property name="text">
                        <string>地图1</string>
@@ -2838,6 +2851,13 @@
                        <property name="horizontalSpacing">
                         <number>-1</number>
                        </property>
+                       <item row="18" column="0" colspan="3">
+                        <widget class="Line" name="line_3">
+                         <property name="orientation">
+                          <enum>Qt::Orientation::Horizontal</enum>
+                         </property>
+                        </widget>
+                       </item>
                        <item row="1" column="0">
                         <widget class="QLabel" name="label_13">
                          <property name="text">
@@ -2845,112 +2865,38 @@
                          </property>
                         </widget>
                        </item>
-                       <item row="4" column="2">
-                        <widget class="QComboBox" name="att_tile_size">
-                         <property name="editable">
-                          <bool>true</bool>
-                         </property>
-                         <item>
-                          <property name="text">
-                           <string>16x16</string>
-                          </property>
-                         </item>
-                         <item>
-                          <property name="text">
-                           <string>32x32</string>
-                          </property>
-                         </item>
-                         <item>
-                          <property name="text">
-                           <string>64x64</string>
-                          </property>
-                         </item>
-                        </widget>
-                       </item>
-                       <item row="5" column="0" colspan="3">
-                        <widget class="Line" name="line_2">
-                         <property name="orientation">
-                          <enum>Qt::Orientation::Horizontal</enum>
-                         </property>
-                        </widget>
-                       </item>
-                       <item row="10" column="2">
-                        <widget class="QLineEdit" name="att_tag">
+                       <item row="12" column="0">
+                        <widget class="QLabel" name="att_collision">
                          <property name="text">
-                          <string>地面</string>
+                          <string>碰撞</string>
                          </property>
                         </widget>
                        </item>
-                       <item row="13" column="2">
-                        <layout class="QHBoxLayout" name="horizontalLayout_16">
-                         <item>
-                          <widget class="QLabel" name="label_22">
-                           <property name="text">
-                            <string>X</string>
-                           </property>
-                          </widget>
-                         </item>
-                         <item>
-                          <widget class="QLineEdit" name="att_mark_pos_x">
-                           <property name="text">
-                            <string>100</string>
-                           </property>
-                          </widget>
-                         </item>
-                        </layout>
-                       </item>
-                       <item row="2" column="0">
-                        <widget class="QLabel" name="label_14">
-                         <property name="text">
-                          <string>地图尺寸</string>
-                         </property>
-                        </widget>
-                       </item>
-                       <item row="8" column="2">
-                        <widget class="QLabel" name="att_tile_id">
-                         <property name="text">
-                          <string>19</string>
-                         </property>
-                        </widget>
-                       </item>
-                       <item row="1" column="1">
-                        <spacer name="horizontalSpacer_12">
-                         <property name="orientation">
-                          <enum>Qt::Orientation::Horizontal</enum>
-                         </property>
-                         <property name="sizeHint" stdset="0">
-                          <size>
-                           <width>30</width>
-                           <height>20</height>
-                          </size>
-                         </property>
-                        </spacer>
-                       </item>
-                       <item row="4" column="0">
-                        <widget class="QLabel" name="label_15">
-                         <property name="text">
-                          <string>图块尺寸</string>
-                         </property>
-                        </widget>
-                       </item>
-                       <item row="8" column="0">
+                       <item row="13" column="0">
                         <widget class="QLabel" name="label_10">
                          <property name="text">
                           <string>编号</string>
                          </property>
                         </widget>
                        </item>
-                       <item row="13" column="0">
-                        <widget class="QLabel" name="label_18">
+                       <item row="9" column="2">
+                        <widget class="QLineEdit" name="att_tile_name">
                          <property name="text">
-                          <string>标记位置</string>
+                          <string>地图1</string>
+                         </property>
+                        </widget>
+                       </item>
+                       <item row="12" column="2">
+                        <widget class="QCheckBox" name="map_collision">
+                         <property name="text">
+                          <string>启用</string>
                          </property>
                         </widget>
                        </item>
                        <item row="10" column="0">
                         <widget class="QLabel" name="label_12">
                          <property name="text">
-                          <string>标签</string>
+                          <string>物理属性</string>
                          </property>
                         </widget>
                        </item>
@@ -2972,18 +2918,100 @@
                          </item>
                         </layout>
                        </item>
-                       <item row="11" column="0" colspan="3">
-                        <widget class="Line" name="line_3">
+                       <item row="4" column="0">
+                        <widget class="QLabel" name="label_15">
+                         <property name="text">
+                          <string>图块尺寸</string>
+                         </property>
+                        </widget>
+                       </item>
+                       <item row="19" column="0">
+                        <widget class="QLabel" name="label_17">
+                         <property name="text">
+                          <string>标记名称</string>
+                         </property>
+                        </widget>
+                       </item>
+                       <item row="5" column="2">
+                        <widget class="QCheckBox" name="att_gravity">
+                         <property name="text">
+                          <string>启用</string>
+                         </property>
+                        </widget>
+                       </item>
+                       <item row="5" column="0">
+                        <widget class="QLabel" name="label_16">
+                         <property name="text">
+                          <string>地图重力</string>
+                         </property>
+                        </widget>
+                       </item>
+                       <item row="7" column="0" colspan="3">
+                        <widget class="Line" name="line_2">
                          <property name="orientation">
                           <enum>Qt::Orientation::Horizontal</enum>
                          </property>
                         </widget>
                        </item>
-                       <item row="12" column="2">
-                        <widget class="QLineEdit" name="att_mark_name">
+                       <item row="20" column="2">
+                        <layout class="QHBoxLayout" name="horizontalLayout_16">
+                         <item>
+                          <widget class="QLabel" name="label_22">
+                           <property name="text">
+                            <string>X</string>
+                           </property>
+                          </widget>
+                         </item>
+                         <item>
+                          <widget class="QLineEdit" name="att_mark_pos_x">
+                           <property name="text">
+                            <string>100</string>
+                           </property>
+                          </widget>
+                         </item>
+                        </layout>
+                       </item>
+                       <item row="13" column="2">
+                        <widget class="QLabel" name="att_tile_id">
                          <property name="text">
-                          <string>出生点</string>
+                          <string>19</string>
                          </property>
+                        </widget>
+                       </item>
+                       <item row="10" column="2">
+                        <widget class="QComboBox" name="att_omboBox">
+                         <property name="editable">
+                          <bool>true</bool>
+                         </property>
+                         <property name="currentText">
+                          <string>墙体</string>
+                         </property>
+                         <property name="currentIndex">
+                          <number>0</number>
+                         </property>
+                         <property name="duplicatesEnabled">
+                          <bool>false</bool>
+                         </property>
+                         <item>
+                          <property name="text">
+                           <string>墙体</string>
+                          </property>
+                         </item>
+                         <item>
+                          <property name="text">
+                           <string>跳板</string>
+                          </property>
+                         </item>
+                         <item>
+                          <property name="text">
+                           <string>背景</string>
+                          </property>
+                         </item>
+                         <item>
+                          <property name="text">
+                           <string>自定义</string>
+                          </property>
+                         </item>
                         </widget>
                        </item>
                        <item row="2" column="2">
@@ -3004,35 +3032,83 @@
                          </item>
                         </layout>
                        </item>
-                       <item row="9" column="2">
-                        <widget class="QCheckBox" name="map_collision">
+                       <item row="2" column="0">
+                        <widget class="QLabel" name="label_14">
                          <property name="text">
-                          <string>启用</string>
+                          <string>地图尺寸</string>
                          </property>
                         </widget>
                        </item>
-                       <item row="6" column="0">
-                        <widget class="QLabel" name="label_16">
+                       <item row="19" column="2">
+                        <widget class="QLineEdit" name="att_mark_name">
                          <property name="text">
-                          <string>地图重力</string>
+                          <string>出生点</string>
                          </property>
                         </widget>
                        </item>
-                       <item row="7" column="0">
+                       <item row="1" column="2">
+                        <widget class="QLineEdit" name="att_map_name">
+                         <property name="text">
+                          <string>地图1</string>
+                         </property>
+                        </widget>
+                       </item>
+                       <item row="20" column="0">
+                        <widget class="QLabel" name="label_18">
+                         <property name="text">
+                          <string>标记位置</string>
+                         </property>
+                        </widget>
+                       </item>
+                       <item row="4" column="2">
+                        <widget class="QComboBox" name="att_tile_size">
+                         <property name="editable">
+                          <bool>true</bool>
+                         </property>
+                         <property name="duplicatesEnabled">
+                          <bool>false</bool>
+                         </property>
+                         <property name="frame">
+                          <bool>true</bool>
+                         </property>
+                         <item>
+                          <property name="text">
+                           <string>16x16</string>
+                          </property>
+                         </item>
+                         <item>
+                          <property name="text">
+                           <string>32x32</string>
+                          </property>
+                         </item>
+                         <item>
+                          <property name="text">
+                           <string>64x64</string>
+                          </property>
+                         </item>
+                        </widget>
+                       </item>
+                       <item row="1" column="1">
+                        <spacer name="horizontalSpacer_12">
+                         <property name="orientation">
+                          <enum>Qt::Orientation::Horizontal</enum>
+                         </property>
+                         <property name="sizeHint" stdset="0">
+                          <size>
+                           <width>30</width>
+                           <height>20</height>
+                          </size>
+                         </property>
+                        </spacer>
+                       </item>
+                       <item row="9" column="0">
                         <widget class="QLabel" name="label_9">
                          <property name="text">
                           <string>名称</string>
                          </property>
                         </widget>
                        </item>
-                       <item row="12" column="0">
-                        <widget class="QLabel" name="label_17">
-                         <property name="text">
-                          <string>标记名称</string>
-                         </property>
-                        </widget>
-                       </item>
-                       <item row="14" column="2">
+                       <item row="21" column="2">
                         <layout class="QHBoxLayout" name="horizontalLayout_17">
                          <item>
                           <widget class="QLabel" name="label_23">
@@ -3050,31 +3126,19 @@
                          </item>
                         </layout>
                        </item>
-                       <item row="6" column="2">
-                        <widget class="QCheckBox" name="att_gravity">
-                         <property name="text">
-                          <string>启用</string>
+                       <item row="11" column="2">
+                        <widget class="QLineEdit" name="att_tag">
+                         <property name="enabled">
+                          <bool>false</bool>
                          </property>
-                        </widget>
-                       </item>
-                       <item row="1" column="2">
-                        <widget class="QLineEdit" name="att_map_name">
-                         <property name="text">
-                          <string>地图1</string>
+                         <property name="maximumSize">
+                          <size>
+                           <width>16777215</width>
+                           <height>0</height>
+                          </size>
                          </property>
-                        </widget>
-                       </item>
-                       <item row="7" column="2">
-                        <widget class="QLineEdit" name="att_tile_name">
                          <property name="text">
-                          <string>地图1</string>
-                         </property>
-                        </widget>
-                       </item>
-                       <item row="9" column="0">
-                        <widget class="QLabel" name="att_collision">
-                         <property name="text">
-                          <string>物理碰撞</string>
+                          <string/>
                          </property>
                         </widget>
                        </item>
