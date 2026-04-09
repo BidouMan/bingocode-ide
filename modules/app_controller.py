@@ -147,6 +147,9 @@ class AppController:
         self.res_manager.sig_sprite_selected.connect(self._open_and_switch_to_editor)
         # 4. 绑定地图双击信号：双击即加载并切到地图编辑页面
         self.res_manager.sig_map_selected.connect(self._open_and_switch_to_map_editor)
+        
+        # 5. 绑定地图重命名信号：地图重命名后刷新地图列表
+        self.map_editor.map_renamed.connect(self.res_manager.refresh_map_list)
 
     def _open_and_switch_to_editor(self, path):
         print(f"🛎️ [AppController] 收到编辑请求，目标路径: {path}")

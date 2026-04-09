@@ -562,6 +562,18 @@ class RenderManager(QObject):
         for tile_set_index, tile_set_info in tile_set_dict.items():
             image_path = tile_set_info["image_path"]
             if image_path:
+                # 如果是相对路径，转换为绝对路径
+                if not os.path.isabs(image_path):
+                    # 获取项目路径
+                    project_path = ""
+                    if self.app_controller and hasattr(
+                        self.app_controller, "project_manager"
+                    ):
+                        project_path = self.app_controller.project_manager.project_root
+
+                    if project_path:
+                        image_path = os.path.join(project_path, image_path)
+
                 pixmap = QPixmap(image_path)
                 if not pixmap.isNull():
                     tile_set_info["pixmap"] = pixmap

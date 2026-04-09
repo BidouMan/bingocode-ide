@@ -167,6 +167,7 @@ class MapEditorManager(QObject):
     # 信号定义
     map_loaded = Signal(str)  # 地图加载完成信号
     map_saved = Signal(str)  # 地图保存完成信号
+    map_renamed = Signal()  # 地图重命名完成信号
     error_occurred = Signal(str)  # 错误发生信号
 
     def __init__(self, canvas_widget=None, parent=None):
@@ -612,6 +613,9 @@ class MapEditorManager(QObject):
                     self.ui.att_map_name.blockSignals(True)
                     self.ui.att_map_name.setText(map_name)
                     self.ui.att_map_name.blockSignals(False)
+                
+                # 更新属性面板中的地图尺寸
+                self._update_map_size_display()
             else:
                 print(f"DEBUG: 地图数据加载失败: {file_path}")
                 self.error_occurred.emit("加载地图失败")
@@ -1556,12 +1560,53 @@ class MapEditorManager(QObject):
         
     def _on_map_name_changed(self, name):
         """处理地图名称变化"""
+        print(f"=== 地图名称变化: {name} ===")
+        print(f"当前地图路径: {self.current_map_path}")
+        
         # 更新地图模型中的名称
         self.property_manager.set_map_name(name)
+        print(f"地图模型名称已更新: {self.property_manager.get_map_name()}")
         
         # 如果有当前地图路径，更新目录名称
         if self.current_map_path:
+            print(f"开始重命名目录...")
             self._rename_map_directory(name)
+            print(f"重命名后路径: {self.current_map_path}")
+            
+            # 保存前打印地图数据
+            print(f"保存前地图数据:")
+            print(f"  尺寸: {self.map_model.get_map_size()}")
+            print(f"  图层数: {self.map_model.get_layer_count()}")
+            for i, layer in enumerate(self.map_model.map_data['layers']):
+                print(f"  图层 {i}: {len(layer['tiles'])} 个瓦片")
+            
+            # 重命名后保存地图数据到新的文件路径
+            print(f"开始保存地图...")
+            self.save_map()
+            print(f"地图保存完成")
+            
+            # 发出地图重命名完成信号，通知资源管理器刷新地图列表
+            self.map_renamed.emit()
+            
+    def _update_map_size_display(self):
+        """更新属性面板中的地图尺寸显示"""
+        if hasattr(self, "ui"):
+            # 获取地图尺寸
+            width, height = self.map_model.get_map_size()
+            
+            # 更新地图宽度显示
+            if hasattr(self.ui, "att_mapsize_x"):
+                self.ui.att_mapsize_x.blockSignals(True)
+                self.ui.att_mapsize_x.setText(str(width))
+                self.ui.att_mapsize_x.setReadOnly(True)
+                self.ui.att_mapsize_x.blockSignals(False)
+            
+            # 更新地图高度显示
+            if hasattr(self.ui, "att_mapsize_y"):
+                self.ui.att_mapsize_y.blockSignals(True)
+                self.ui.att_mapsize_y.setText(str(height))
+                self.ui.att_mapsize_y.setReadOnly(True)
+                self.ui.att_mapsize_y.blockSignals(False)
 
     def _get_tile_pixmap_for_collision(self, resource_index, tile_index):
         """为碰撞管理器提供图块图像"""
@@ -1622,6 +1667,19 @@ class MapEditorManager(QObject):
             # 创建新的文件名
             new_base_name = new_name
             new_filename = f"{new_base_name}.info"
+            
+            # 更新地图模型中瓦片集的路径（将旧目录名替换为新目录名）
+            old_tilesets_path = os.path.join(current_dir, "tilesets")
+            new_tilesets_path = os.path.join(new_dir_path, "tilesets")
+            
+            for tile_set in self.map_model.map_data["tile_sets"]:
+                image_path = tile_set.get("image_path", "")
+                if image_path:
+                    # 如果路径包含旧目录名，替换为新目录名
+                    if old_tilesets_path in image_path:
+                        new_image_path = image_path.replace(old_tilesets_path, new_tilesets_path)
+                        tile_set["image_path"] = new_image_path
+                        print(f"✅ 更新瓦片集路径: {image_path} -> {new_image_path}")
             
             # 重命名目录内的所有相关文件
             for ext in [".info", ".tiles", ".collision", ".resources"]:

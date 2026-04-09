@@ -960,6 +960,20 @@ def load_map(map_name):
         print(f"✅ [BingoEngine] 地图加载成功: {map_name}")
         print(f"   - 尺寸: {_CURRENT_MAP['width']}x{_CURRENT_MAP['height']}")
         print(f"   - 图层数: {len(_CURRENT_MAP['layers'])}")
+        print(
+            f"   - 偏移量: ({_CURRENT_MAP.get('offset_x', 0)}, {_CURRENT_MAP.get('offset_y', 0)})"
+        )
+
+        # 打印图层瓦片信息
+        for i, layer in enumerate(_CURRENT_MAP["layers"]):
+            print(f"   - 图层 {i} ({layer['name']}): {len(layer['tiles'])} 个瓦片")
+            # 打印前5个瓦片的坐标和ID
+            tile_count = 0
+            for (x, y), tile_id in list(layer["tiles"].items())[:5]:
+                print(f"     [{x}, {y}] -> ID: {tile_id}")
+                tile_count += 1
+            if tile_count > 0 and len(layer["tiles"]) > 5:
+                print(f"     ... 还有 {len(layer['tiles']) - 5} 个瓦片")
 
         # 发送场景更新指令，更新SceneRect
         tile_size = _CURRENT_MAP.get("tile_size", 16)
@@ -1028,10 +1042,6 @@ def _render_map():
         for (x, y), tile_id in layer["tiles"].items():
             if tile_id <= 0:
                 continue
-
-            # 计算瓦片在屏幕上的位置
-            screen_x = x * tile_size + tile_size // 2
-            screen_y = y * tile_size + tile_size // 2
 
             # 解析tile_id：格式为 resource_index * 1000 + tile_index + 1（图块集模式）
             # 或 resource_index + 1（单张图片模式）

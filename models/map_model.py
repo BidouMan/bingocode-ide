@@ -386,6 +386,10 @@ class MapDataModel(QObject):
             # 写入瓦片集数量（4字节）
             f.write(struct.pack("<I", len(self.map_data["tile_sets"])))
 
+            # 获取地图文件所在目录（用于计算相对路径）
+            map_dir = os.path.dirname(file_path)
+            maps_dir = os.path.dirname(map_dir)
+            
             # 保存每个瓦片集
             for tile_set in self.map_data["tile_sets"]:
                 # 写入瓦片集名称长度（4字节）
@@ -395,6 +399,15 @@ class MapDataModel(QObject):
 
                 # 写入图片路径长度（4字节）
                 image_path = tile_set.get("image_path", "")
+                # 将绝对路径转换为相对于maps目录的相对路径
+                if os.path.isabs(image_path):
+                    try:
+                        # 计算相对于maps目录的相对路径
+                        rel_path = os.path.relpath(image_path, maps_dir)
+                        image_path = rel_path
+                    except ValueError:
+                        # 如果无法计算相对路径（不同驱动器），保留绝对路径
+                        pass
                 path_bytes = image_path.encode("utf-8")
                 f.write(struct.pack("<I", len(path_bytes)))
                 f.write(path_bytes)
@@ -691,6 +704,10 @@ class MapDataModel(QObject):
 
             # 读取瓦片集数量（4字节）
             actual_tile_set_count = struct.unpack("<I", f.read(4))[0]
+            
+            # 获取地图文件所在目录（用于解析相对路径）
+            map_dir = os.path.dirname(file_path)
+            maps_dir = os.path.dirname(map_dir)
 
             # 加载每个瓦片集
             for _ in range(actual_tile_set_count):
@@ -701,6 +718,11 @@ class MapDataModel(QObject):
                 # 读取图片路径
                 path_length = struct.unpack("<I", f.read(4))[0]
                 image_path = f.read(path_length).decode("utf-8")
+                
+                # 如果是相对路径，转换为绝对路径
+                if not os.path.isabs(image_path):
+                    # 相对于maps目录的相对路径
+                    image_path = os.path.join(maps_dir, image_path)
 
                 # 读取瓦片宽度和高度
                 tile_width, tile_height = struct.unpack("<II", f.read(8))
