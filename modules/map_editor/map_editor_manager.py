@@ -722,6 +722,12 @@ class MapEditorManager(QObject):
             tile_id = self.map_model.get_tile(self.current_layer, x, y)
             self._update_single_tile(x, y, tile_id)
 
+        # 检查地图尺寸是否变化，如果变化了就更新显示
+        current_width, current_height = self.map_model.get_map_size()
+        if not hasattr(self, '_last_map_size') or self._last_map_size != (current_width, current_height):
+            self._update_map_size_display()
+            self._last_map_size = (current_width, current_height)
+
         # 清除变化记录
         self.map_model.clear_changed_area()
 

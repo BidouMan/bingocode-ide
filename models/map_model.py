@@ -65,6 +65,34 @@ class MapDataModel(QObject):
             else:
                 # 否则设置瓦片ID
                 layer["tiles"][key] = int(tile_id)
+                
+                # 检查新绘制的图块是否超出当前地图尺寸
+                current_width = self.map_data["width"]
+                current_height = self.map_data["height"]
+                offset_x = self.map_data.get("offset_x", 0)
+                offset_y = self.map_data.get("offset_y", 0)
+                
+                # 计算图块相对于地图原点的位置
+                rel_x = x - offset_x
+                rel_y = y - offset_y
+                
+                # 如果超出当前尺寸，更新地图尺寸
+                if rel_x >= current_width or rel_y >= current_height:
+                    new_width = max(current_width, rel_x + 1)
+                    new_height = max(current_height, rel_y + 1)
+                    
+                    # 添加最小尺寸限制：最小宽度40，最小高度30（基于16像素瓦片，640x480像素）
+                    tile_size = self.map_data["tile_size"]
+                    min_width_tiles = 640 // tile_size
+                    min_height_tiles = 480 // tile_size
+                    new_width = max(new_width, min_width_tiles)
+                    new_height = max(new_height, min_height_tiles)
+                    
+                    # 更新地图尺寸
+                    if new_width != current_width or new_height != current_height:
+                        self.map_data["width"] = new_width
+                        self.map_data["height"] = new_height
+                        print(f"DEBUG: 地图尺寸更新: {current_width}x{current_height} -> {new_width}x{new_height}")
 
             # 使用防抖机制，避免频繁触发信号
             self._debounce_timer.start()
