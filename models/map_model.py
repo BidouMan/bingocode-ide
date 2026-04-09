@@ -2,7 +2,7 @@ import os
 import json
 import struct
 import numpy as np
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal, QTimer
 
 
 class MapDataModel(QObject):
@@ -16,6 +16,11 @@ class MapDataModel(QObject):
         self.map_data = {}
         self._changed_area = set()  # 变化区域跟踪
         self._initialize_default_data()
+        # 防抖定时器，避免频繁触发信号
+        self._debounce_timer = QTimer(self)
+        self._debounce_timer.setSingleShot(True)
+        self._debounce_timer.setInterval(16)  # 约60fps
+        self._debounce_timer.timeout.connect(self._emit_data_changed)
 
     def _initialize_default_data(self):
         """初始化默认地图数据"""
@@ -60,7 +65,8 @@ class MapDataModel(QObject):
                 # 否则设置瓦片ID
                 layer["tiles"][key] = int(tile_id)
 
-            self.data_changed.emit()
+            # 使用防抖机制，避免频繁触发信号
+            self._debounce_timer.start()
             return True
         return False
 
@@ -79,6 +85,11 @@ class MapDataModel(QObject):
     def clear_changed_area(self):
         """清除变化区域"""
         self._changed_area.clear()
+
+    def _emit_data_changed(self):
+        """防抖处理：在定时器触发时发出数据变化信号"""
+        if self._changed_area:
+            self.data_changed.emit()
 
     def get_layer_count(self):
         """获取图层数量"""
