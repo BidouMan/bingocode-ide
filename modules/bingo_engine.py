@@ -71,6 +71,9 @@ __all__ = [
 
 
 class Sprite:
+    # 类属性：碰撞检测时间控制
+    _last_collision_time = 0
+
     def __init__(self, filename):
         # 1. 基础属性初始化
         self.id = str(id(self))
@@ -80,7 +83,8 @@ class Sprite:
         self._angle = 0
         self._rotation_style = "all"
         self._current_scale_x = 1.0
-        self.hitbox_scale = 0.8
+        self.hitbox_scale = 1.0
+        self.on_ground = False
         self._groups = []
         self._visible = True
         self._is_deleted = False
@@ -162,37 +166,245 @@ class Sprite:
         # 将精灵添加到全局集合
         _SPRITES[self.id] = self
 
+        # 立即调用_setup_hitbox，确保内容尺寸已计算
+        self._setup_hitbox()
+
+        # 输出初始化的debug信息
+        print("=" * 50)
+        print(f"DEBUG: 精灵初始化 - ID: {self.id}")
+        print(f"DEBUG: 图片路径: {self.image}")
+        print(f"DEBUG: 原始尺寸: {self._orig_w}x{self._orig_h}")
+        print(f"DEBUG: 内容尺寸: {self._content_w}x{self._content_h}")
+        print(f"DEBUG: 视觉偏移: ({self._visual_offset_x}, {self._visual_offset_y})")
+
+        # 立即调用_get_hitbox_rect，输出碰撞盒信息
+        rect = self._get_hitbox_rect()
+        print(f"DEBUG: 初始碰撞盒: {[round(x, 2) for x in rect]}")
+        print("=" * 50)
+
     # ---------- 运动模块 ----------
+    def _resolve_collision(self, axis):
+        """
+        处理碰撞检测和位移修正
+        axis: 'x' 或 'y'，指定要处理的轴
+        """
+        global _CURRENT_MAP, _MAP_MODEL
+
+        if not _CURRENT_MAP or not _MAP_MODEL:
+            return
+
+        tile_size = _CURRENT_MAP.get("tile_size", 16)
+
+        # 获取精灵的碰撞盒
+        sprite_rect = self._get_hitbox_rect()
+        if not sprite_rect:
+            return
+
+        # 计算角色的half_width和half_height
+        half_width = (sprite_rect[2] - sprite_rect[0]) / 2
+        half_height = (sprite_rect[3] - sprite_rect[1]) / 2
+
+        # 检测所有图层中的实心图块
+        for layer in _CURRENT_MAP.get("layers", []):
+            tiles = layer.get("tiles", {})
+
+            # 计算精灵覆盖的图块范围
+            # 进一步收缩 X 轴探测盒，彻底不给它碰到地板和天花板的机会
+            if axis == "x":
+                check_rect = [
+                    sprite_rect[0],
+                    sprite_rect[1] + 8,  # 缩进加大到8像素
+                    sprite_rect[2],
+                    sprite_rect[3] - 8,  # 缩进加大到8像素
+                ]
+                min_tile_x = math.floor(check_rect[0] / tile_size)
+                max_tile_x = math.floor(check_rect[2] / tile_size)
+                min_tile_y = math.floor(check_rect[1] / tile_size)
+                max_tile_y = math.floor(check_rect[3] / tile_size)
+            else:
+                # Y轴探测使用完整碰撞盒
+                min_tile_x = math.floor(sprite_rect[0] / tile_size)
+                max_tile_x = math.floor(sprite_rect[2] / tile_size)
+                min_tile_y = math.floor(sprite_rect[1] / tile_size)
+                max_tile_y = math.floor(sprite_rect[3] / tile_size)
+
+            # 检查范围内的每个图块
+            for tile_x in range(min_tile_x, max_tile_x + 1):
+                for tile_y in range(min_tile_y, max_tile_y + 1):
+                    tile_pos = (tile_x, tile_y)
+                    if tile_pos in tiles:
+                        tile_id = tiles[tile_pos]
+                        if tile_id > 0:
+                            # 解析tile_id获取资源索引和图块索引
+                            tile_id_int = int(tile_id)
+                            if tile_id_int < 1000:
+                                resource_index = tile_id_int - 1
+                                tile_index = 0
+                            else:
+                                resource_index = (tile_id_int // 1000) - 1
+                                tile_index = (tile_id_int % 1000) - 1
+
+                            # 获取图块碰撞状态
+                            collision_enabled = _MAP_MODEL.get_tile_collision(
+                                resource_index, tile_index
+                            )
+                            if collision_enabled:
+                                # 计算图块的碰撞盒
+                                tile_left = tile_x * tile_size
+                                tile_top = tile_y * tile_size
+                                tile_right = tile_left + tile_size
+                                tile_bottom = tile_top + tile_size
+
+                                # 计算精灵与图块的重叠
+                                overlap_left = max(sprite_rect[0], tile_left)
+                                overlap_top = max(sprite_rect[1], tile_top)
+                                overlap_right = min(sprite_rect[2], tile_right)
+                                overlap_bottom = min(sprite_rect[3], tile_bottom)
+
+                                # 如果有重叠，进行位移修正
+                                overlap_x = overlap_right - overlap_left
+                                overlap_y = overlap_bottom - overlap_top
+                                # 检测任何微小的重叠，确保角色不会站在砖块内部
+                                if overlap_x > 0 and overlap_y > 0:
+                                    # 仅打印关键信息
+                                    if axis == "x":
+                                        print(
+                                            f"DEBUG: X轴碰撞 - 入墙深度: {overlap_x:.2f} 像素"
+                                        )
+                                    # print(
+                                    #     f"DEBUG: 碰撞检测 - 轴: {axis}, 重叠量: x={overlap_x:.2f}, y={overlap_y:.2f}"
+                                    # )
+                                    # print(
+                                    #     f"DEBUG: 图块位置: [{tile_left:.2f}, {tile_top:.2f}, {tile_right:.2f}, {tile_bottom:.2f}]"
+                                    # )
+                                    # print(
+                                    #     f"DEBUG: 角色碰撞盒: {[round(x, 2) for x in sprite_rect]}"
+                                    # )
+                                    # 绝对边缘对齐 (Snap-to-Edge)
+                                    # 抛弃相对修正，使用绝对坐标赋值
+                                    if axis == "x":
+                                        # 使用重叠深度判断碰撞方向
+                                        # 向左撞墙：角色的左边 < 砖块的右边
+                                        # 向右撞墙：角色的右边 > 砖块的左边
+                                        dist_to_right = abs(sprite_rect[0] - tile_right)
+                                        dist_to_left = abs(sprite_rect[2] - tile_left)
+
+                                        if dist_to_right < dist_to_left:
+                                            # 角色在砖块右侧，撞到了砖块的右边缘 (即向左走撞墙)
+                                            self._x = tile_right + half_width + 0.05
+                                        else:
+                                            # 角色在砖块左侧，撞到了砖块的左边缘 (即向右走撞墙)
+                                            self._x = tile_left - half_width - 0.05
+                                        return  # 修正完 X 必须立即返回，绝对不能再碰 Y 的代码！
+
+                                    elif axis == "y":
+                                        # 不要只看中心点，要看角色是从哪个方向"切入"砖块的
+                                        # 如果角色底边在砖块顶边附近，且正在向下落（或静止）
+                                        if (
+                                            sprite_rect[3] <= tile_top + 10
+                                        ):  # 10是容错值，确保是踩在上面
+                                            # 确定是踩地
+                                            rect = self._get_hitbox_rect()
+                                            if rect:
+                                                print(
+                                                    f"DEBUG: Y轴修正 - 踩地: tile_top={tile_top:.2f}, rect[3]={rect[3]:.2f}"
+                                                )
+                                                self._y = (
+                                                    tile_top
+                                                    - (rect[3] - self._y)
+                                                    - 0.05
+                                                )
+                                                self.on_ground = True
+                                                # self.vy = 0 # 撞地速度归零
+                                        # 如果角色顶边在砖块底边附近
+                                        elif sprite_rect[1] >= tile_bottom - 10:
+                                            # 确定是顶头
+                                            rect = self._get_hitbox_rect()
+                                            if rect:
+                                                print(
+                                                    f"DEBUG: Y轴修正 - 顶头: tile_bottom={tile_bottom:.2f}, rect[1]={rect[1]:.2f}"
+                                                )
+                                                self._y = (
+                                                    tile_bottom
+                                                    + (self._y - rect[1])
+                                                    + 0.05
+                                                )
+                                                # self.vy = 0 # 撞头速度归零
+                                        return  # 立即退出
+                        else:
+                            continue
+                    else:
+                        continue
+                else:
+                    continue
+                break
+            else:
+                continue
+            break
+
     def set_xy(self, x, y):
         """设置坐标"""
         self._x = x
         self._y = y
+        # 分别处理X轴和Y轴的碰撞
+        self._resolve_collision("x")
+        self._resolve_collision("y")
         self._update_transform()
 
     def set_x(self, x):
         self._x = x
+        self._resolve_collision("x")
         self._update_transform()
 
     def set_y(self, y):
         self._y = y
+        self._resolve_collision("y")
         self._update_transform()
 
     def add_x(self, delta_x):
         """将 x 坐标增加（或减少）一定数值"""
         self._x += delta_x
+        self._resolve_collision("x")
         self._update_transform()
 
     def add_y(self, delta_y):
         """将 y 坐标增加（或减少）一定数值"""
         self._y += delta_y
+        self._resolve_collision("y")
         self._update_transform()
 
     def move(self, distance):
         """朝着当前 angle 方向移动 distance 像素"""
         radians = math.radians(self._angle)
-        self._x += distance * math.cos(radians)
-        self._y += distance * math.sin(radians)
-        self._update_transform()  # 🚀 只发送一次指令，性能更高
+
+        # 计算移动分量
+        dx = distance * math.cos(radians)
+        dy = distance * math.sin(radians)
+
+        # print(
+        #     f"DEBUG: 移动前 - 位置: ({self._x:.2f}, {self._y:.2f}), 移动分量: dx={dx:.2f}, dy={dy:.2f}"
+        # )
+
+        # 保存旧的落地状态
+        was_on_floor = self.on_ground
+
+        # 严格的分轴步进 (Atomic Sub-stepping)
+        # 第一步：只处理X轴
+        self._x += dx
+        self._resolve_collision("x")  # 这里修完，X坐标就是绝对安全的
+
+        # 如果只是左右撞墙，不要让角色失去"在地"状态
+        if was_on_floor:
+            self.on_ground = True
+
+        # 第二步：再处理Y轴
+        self._y += dy
+        self._resolve_collision("y")  # 这里修完，Y坐标也是绝对安全的
+
+        # print(f"DEBUG: 移动后 - 位置: ({self._x:.2f}, {self._y:.2f})")
+
+        # 更新变换
+        self._update_transform()
 
     def goto_rand(self):
         """移到随机位置"""
@@ -453,10 +665,10 @@ class Sprite:
                 tile_size = _CURRENT_MAP.get("tile_size", 16)
 
                 # 计算精灵包围盒覆盖的图块范围
-                min_tile_x = int(r1[0] // tile_size)
-                max_tile_x = int(r1[2] // tile_size)
-                min_tile_y = int(r1[1] // tile_size)
-                max_tile_y = int(r1[3] // tile_size)
+                min_tile_x = math.floor(r1[0] // tile_size)
+                max_tile_x = math.floor(r1[2] // tile_size)
+                min_tile_y = math.floor(r1[1] // tile_size)
+                max_tile_y = math.floor(r1[3] // tile_size)
 
                 # 遍历所有图层
                 for layer in _CURRENT_MAP.get("layers", []):
@@ -566,6 +778,61 @@ class Sprite:
         dy = cy1 - cy2
         return math.sqrt(dx**2 + dy**2)
 
+    def is_on_floor(self):
+        """
+        检测角色脚底下方 1-2 像素处是否存在带有碰撞的图块
+        返回: True 如果在地面上，False 否则
+        """
+        if self._is_deleted or not _CURRENT_MAP:
+            return False
+
+        # 获取角色的碰撞盒
+        rect = self._get_hitbox_rect()
+        if not rect:
+            return False
+
+        # 获取角色脚底位置（底部边缘）
+        bottom_y = rect[3]
+        # 检测脚底下方 1-2 像素处的位置
+        check_y = bottom_y + 1.5
+
+        # 获取地图的瓦片大小
+        tile_size = _CURRENT_MAP.get("tile_size", 16)
+
+        # 计算需要检查的图块范围（角色宽度范围内的所有图块）
+        min_tile_x = math.floor(rect[0] // tile_size)
+        max_tile_x = math.floor(rect[2] // tile_size)
+        check_tile_y = math.floor(check_y // tile_size)
+
+        # 遍历所有图层
+        for layer in _CURRENT_MAP.get("layers", []):
+            tiles = layer.get("tiles", {})
+
+            # 检查角色宽度范围内的每个图块
+            for tile_x in range(min_tile_x, max_tile_x + 1):
+                tile_pos = (tile_x, check_tile_y)
+                if tile_pos in tiles:
+                    tile_id = tiles[tile_pos]
+                    if tile_id > 0:
+                        # 解析tile_id获取资源索引和图块索引
+                        tile_id_int = int(tile_id)
+                        if tile_id_int < 1000:
+                            resource_index = tile_id_int - 1
+                            tile_index = 0
+                        else:
+                            resource_index = (tile_id_int // 1000) - 1
+                            tile_index = (tile_id_int % 1000) - 1
+
+                        # 获取图块碰撞状态
+                        if _MAP_MODEL:
+                            collision_enabled = _MAP_MODEL.get_tile_collision(
+                                resource_index, tile_index
+                            )
+                            if collision_enabled:
+                                return True
+
+        return False
+
     # ----------- 属性赋值 ----------
     @property
     def x(self):
@@ -650,11 +917,19 @@ class Sprite:
                     l, t, r, b = bbox
                     self._content_w = r - l
                     self._content_h = b - t
+                    self._content_bbox = bbox  # 保存非透明区域边界
 
                     # 🚀 算法核心：计算内容的中心点相对于图片物理中心的偏移
                     # 例如：128x128的图，内容在左上角，offset会是负值
                     self._visual_offset_x = (l + r) / 2.0 - self._orig_w / 2.0
                     self._visual_offset_y = (t + b) / 2.0 - self._orig_h / 2.0
+
+                    # 添加debug信息（仅在需要时启用）
+                    # print(f"DEBUG: 内容边界框: ({l}, {t}, {r}, {b})")
+                    # print(f"DEBUG: 内容尺寸: {self._content_w}x{self._content_h}")
+                    # print(
+                    #     f"DEBUG: 视觉偏移: ({self._visual_offset_x}, {self._visual_offset_y})"
+                    # )
                 else:
                     # 全透明或无内容图
                     self._content_w, self._content_h = self._orig_w, self._orig_h
@@ -675,21 +950,37 @@ class Sprite:
         """获取当前角色在舞台上的真实内容包围盒 [left, top, right, bottom]"""
         self._setup_hitbox()  # 确保内容宽高和偏移量已算出
 
-        # 1. 基础缩放比 (例如 1.0)
-        base_scale = self._scale / 100.0
+        # 获取非透明区域边界
+        if not hasattr(self, "_content_bbox"):
+            return None
 
-        # 2. 🚀 计算视觉中心 (考虑镜像对偏移的影响)
-        # 如果图片翻转了，偏移量也要跟着翻转
-        cx = self._x + (self._visual_offset_x * base_scale * self._current_scale_x)
-        cy = self._y + (self._visual_offset_y * base_scale)
+        bbox = self._content_bbox
+        if not bbox:
+            return None
 
-        # 3. 计算内容的大小 (必须使用 abs 保证宽高为正数)
-        # 使用 self.hitbox_scale 允许微调，如果你觉得太严了，可以把 self.hitbox_scale 设为 1.0
-        ratio = base_scale * self.hitbox_scale
-        hw = (self._content_w * ratio) / 2.0
-        hh = (self._content_h * ratio) / 2.0
+        # 计算缩放系数
+        s = self._scale / 100.0
 
-        return [cx - hw, cy - hh, cx + hw, cy + hh]
+        # 图片的视觉中心
+        img_w, img_h = self._orig_w, self._orig_h
+        center_x, center_y = self._x, self._y
+
+        # 【核心对齐公式】
+        # 以图片中心为基准，计算非透明内容相对于中心点的偏移，再应用缩放
+        content_left = center_x + (bbox[0] - img_w / 2) * s
+        content_top = center_y + (bbox[1] - img_h / 2) * s
+        content_right = center_x + (bbox[2] - img_w / 2) * s
+        content_bottom = center_y + (bbox[3] - img_h / 2) * s
+
+        rect = [content_left, content_top, content_right, content_bottom]
+
+        # 添加debug信息（仅在需要时启用）
+        # print(f"DEBUG: 图片尺寸: {img_w}x{img_h}")
+        # print(f"DEBUG: 内容边界框: {bbox}")
+        # print(f"DEBUG: 缩放系数: {s}")
+        # print(f"DEBUG: 碰撞盒: {[round(x, 2) for x in rect]}")
+
+        return rect
 
     def _update_transform(self):
         """统一处理旋转、缩放和镜像逻辑"""
@@ -725,6 +1016,10 @@ class Sprite:
             "scale": base_scale,
             "scale_x": final_scale_x,
             "scale_y": final_scale_y,
+            # 添加碰撞盒信息，用于可视化调试
+            "hitbox": self._get_hitbox_rect()
+            if hasattr(self, "_get_hitbox_rect")
+            else None,
             "vox": self._visual_offset_x,
             "voy": self._visual_offset_y,
             "cw": self._content_w,
@@ -1016,6 +1311,24 @@ def _clear_map():
     _RENDERED_TILES.clear()
 
 
+def _handle_physics_collision():
+    """处理物理碰撞检测和位移修正"""
+    global _CURRENT_MAP, _SPRITES, _MAP_MODEL
+
+    if not _CURRENT_MAP or not _MAP_MODEL:
+        return
+
+    # 遍历所有精灵
+    for sprite in _SPRITES.values():
+        if sprite._is_deleted:
+            continue
+
+        # 每帧都进行碰撞检测，确保角色不会站在砖块内部
+        # 这可以解决脚底1-2像素进入砖块的问题
+        sprite._resolve_collision("x")
+        sprite._resolve_collision("y")
+
+
 def _render_map():
     """渲染地图 - 优化版本"""
     global _CURRENT_MAP, _MAP_SPRITES, _RENDERED_TILES, _LAST_RENDER_TIME
@@ -1256,6 +1569,10 @@ def run():
 
         # 执行用户逻辑
         main_module.loop()
+
+        # 物理碰撞检测和位移修正
+        if _CURRENT_MAP:
+            _handle_physics_collision()
 
         # 更新摄像机位置
         if _CURRENT_MAP and _FOLLOW_TARGET:

@@ -230,12 +230,11 @@ class RenderManager(QObject):
         if "image" in data:
             image_path = data["image"]
             pixmap = QPixmap(image_path)
-            if not pixmap.isNull():
-                if isinstance(item, QGraphicsPixmapItem):
-                    item.setPixmap(pixmap)
-                    item.setTransformOriginPoint(
-                        pixmap.width() / 2, pixmap.height() / 2
-                    )
+            if not pixmap.isNull() and isinstance(item, QGraphicsPixmapItem):
+                item.setPixmap(pixmap)
+                item.setTransformOriginPoint(
+                    pixmap.width() / 2, pixmap.height() / 2
+                )
 
         # 1. 基础属性获取 (优先从 data 取，取不到则保持当前状态)
         rect = item.boundingRect()
@@ -285,7 +284,25 @@ class RenderManager(QObject):
         if "opacity" in data:
             item.setOpacity(data["opacity"])
 
-        # 4. 🚀 气泡同步更新
+        # 4. 🚀 绘制碰撞盒（可视化调试）
+        hitbox = data.get("hitbox")
+        if hitbox:
+            # 创建或更新碰撞盒矩形
+            if not hasattr(item, "_hitbox_rect"):
+                item._hitbox_rect = QGraphicsRectItem()
+                item._hitbox_rect.setPen(QPen(QColor(255, 0, 0, 128), 1))
+                item._hitbox_rect.setBrush(Qt.NoBrush)
+                item._hitbox_rect.setZValue(10000)  # 确保在最顶层
+                self.scene.addItem(item._hitbox_rect)
+            
+            # 更新碰撞盒位置和大小
+            left, top, right, bottom = hitbox
+            item._hitbox_rect.setRect(left, top, right - left, bottom - top)
+            item._hitbox_rect.setVisible(True)
+        elif hasattr(item, "_hitbox_rect"):
+            item._hitbox_rect.setVisible(False)
+
+        # 5. 🚀 气泡同步更新
         if hasattr(item, "_bubble"):
             bubble = item._bubble
             if bubble.scene() and bubble.isVisible():
@@ -294,7 +311,13 @@ class RenderManager(QObject):
 
     def remove_sprite(self, sprite_id):
         if sprite_id in self.sprites:
-            self.scene.removeItem(self.sprites[sprite_id])
+            item = self.sprites[sprite_id]
+            # 移除碰撞盒（如果存在）
+            if hasattr(item, "_hitbox_rect"):
+                self.scene.removeItem(item._hitbox_rect)
+                del item._hitbox_rect
+            # 移除精灵
+            self.scene.removeItem(item)
             del self.sprites[sprite_id]
 
     def reset_session(self):

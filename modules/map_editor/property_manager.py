@@ -53,6 +53,14 @@ class PropertyManager(QObject):
                 return self.map_model.get_tile_collision(resource_index, tile_index)
         return False
         
+    def set_tile_collision(self, collision):
+        """设置瓦片碰撞状态"""
+        if self.current_tile:
+            resource_index, tile_index = self.current_tile
+            if self.map_model:
+                self.map_model.set_tile_collision(resource_index, tile_index, collision)
+                self.property_changed.emit(resource_index, tile_index, "collision", collision)
+        
     def get_map_name(self):
         """获取地图名称"""
         if self.map_model:

@@ -22,7 +22,6 @@ from PySide6.QtGui import (
     QImage,
 )
 from models.map_model import MapDataModel
-from .map_resource_import_dialog import MapResourceImportDialog
 from .map_canvas_manager import MapCanvas
 from .collision_manager import CollisionManager
 from .property_manager import PropertyManager
@@ -1534,6 +1533,20 @@ class MapEditorManager(QObject):
                     self.ui.att_tag.blockSignals(True)
                     self.ui.att_tag.setText(tile_tag)
                     self.ui.att_tag.blockSignals(False)
+            
+            # 更新碰撞类型选择框的状态
+            if hasattr(self, "ui") and hasattr(self.ui, "att_col_type"):
+                if self.map_model:
+                    collision_enabled = self.map_model.get_tile_collision(resource_index, tile_index)
+                    # 根据碰撞状态设置碰撞类型
+                    # 墙体 -> 碰撞开启
+                    # 其他类型 -> 碰撞关闭
+                    self.ui.att_col_type.blockSignals(True)
+                    if collision_enabled:
+                        self.ui.att_col_type.setCurrentText("墙体")
+                    else:
+                        self.ui.att_col_type.setCurrentText("背景")
+                    self.ui.att_col_type.blockSignals(False)
 
     def set_collision_enabled(self, enabled):
         """设置碰撞启用状态"""
@@ -1542,6 +1555,23 @@ class MapEditorManager(QObject):
     def _on_tag_changed(self, tag):
         """处理标签变化"""
         self.property_manager.set_tile_tag(tag)
+        
+    def _on_col_type_changed(self):
+        """处理碰撞类型变化"""
+        if not hasattr(self, "ui") or not hasattr(self.ui, "att_col_type"):
+            return
+            
+        # 获取选择的碰撞类型
+        col_type = self.ui.att_col_type.currentText()
+        print(f"碰撞类型变化: {col_type}")
+        
+        # 根据碰撞类型设置碰撞状态
+        # 墙体 -> 碰撞开启
+        # 其他类型 -> 碰撞关闭
+        collision_enabled = col_type == "墙体"
+        
+        # 设置碰撞状态
+        self.property_manager.set_tile_collision(collision_enabled)
         
     def _on_map_name_changed(self, name):
         """处理地图名称变化"""
@@ -2215,6 +2245,9 @@ class MapEditorManager(QObject):
         # 绑定标签输入框
         if hasattr(self.ui, "att_tag"):
             self.ui.att_tag.textChanged.connect(self._on_tag_changed)
+        # 绑定碰撞类型选择框
+        if hasattr(self.ui, "att_col_type"):
+            self.ui.att_col_type.currentTextChanged.connect(self._on_col_type_changed)
         # 绑定地图名称输入框
         if hasattr(self.ui, "att_map_name"):
             self.ui.att_map_name.textChanged.connect(self._on_map_name_changed)

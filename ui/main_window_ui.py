@@ -1195,141 +1195,59 @@ class Ui_Form(object):
         self.gridLayout.setSizeConstraint(QLayout.SizeConstraint.SetDefaultConstraint)
         self.gridLayout.setHorizontalSpacing(-1)
         self.gridLayout.setContentsMargins(4, 0, 4, 0)
-        self.line_2 = QFrame(self.frame_9)
-        self.line_2.setObjectName(u"line_2")
-        self.line_2.setFrameShape(QFrame.Shape.HLine)
-        self.line_2.setFrameShadow(QFrame.Shadow.Sunken)
+        self.label_16 = QLabel(self.frame_9)
+        self.label_16.setObjectName(u"label_16")
 
-        self.gridLayout.addWidget(self.line_2, 7, 0, 1, 3)
+        self.gridLayout.addWidget(self.label_16, 5, 0, 1, 1)
 
-        self.label_12 = QLabel(self.frame_9)
-        self.label_12.setObjectName(u"label_12")
+        self.label_18 = QLabel(self.frame_9)
+        self.label_18.setObjectName(u"label_18")
 
-        self.gridLayout.addWidget(self.label_12, 12, 0, 1, 1)
+        self.gridLayout.addWidget(self.label_18, 25, 0, 1, 1)
 
         self.att_gravity = QCheckBox(self.frame_9)
         self.att_gravity.setObjectName(u"att_gravity")
 
         self.gridLayout.addWidget(self.att_gravity, 5, 2, 1, 1)
 
-        self.att_mark_name = QLineEdit(self.frame_9)
-        self.att_mark_name.setObjectName(u"att_mark_name")
-
-        self.gridLayout.addWidget(self.att_mark_name, 21, 2, 1, 1)
-
-        self.horizontalLayout_13 = QHBoxLayout()
-        self.horizontalLayout_13.setObjectName(u"horizontalLayout_13")
-        self.label_20 = QLabel(self.frame_9)
-        self.label_20.setObjectName(u"label_20")
-
-        self.horizontalLayout_13.addWidget(self.label_20)
-
-        self.att_mapsize_y = QLineEdit(self.frame_9)
-        self.att_mapsize_y.setObjectName(u"att_mapsize_y")
-
-        self.horizontalLayout_13.addWidget(self.att_mapsize_y)
-
-
-        self.gridLayout.addLayout(self.horizontalLayout_13, 3, 2, 1, 1)
-
-        self.horizontalSpacer_12 = QSpacerItem(30, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
-
-        self.gridLayout.addItem(self.horizontalSpacer_12, 1, 1, 1, 1)
-
-        self.att_omboBox = QComboBox(self.frame_9)
-        self.att_omboBox.addItem("")
-        self.att_omboBox.addItem("")
-        self.att_omboBox.addItem("")
-        self.att_omboBox.addItem("")
-        self.att_omboBox.setObjectName(u"att_omboBox")
-        self.att_omboBox.setEditable(True)
-        self.att_omboBox.setDuplicatesEnabled(False)
-
-        self.gridLayout.addWidget(self.att_omboBox, 12, 2, 1, 1)
-
-        self.label_16 = QLabel(self.frame_9)
-        self.label_16.setObjectName(u"label_16")
-
-        self.gridLayout.addWidget(self.label_16, 5, 0, 1, 1)
-
         self.att_tile_name = QLineEdit(self.frame_9)
         self.att_tile_name.setObjectName(u"att_tile_name")
 
         self.gridLayout.addWidget(self.att_tile_name, 9, 2, 1, 1)
 
-        self.horizontalLayout_16 = QHBoxLayout()
-        self.horizontalLayout_16.setObjectName(u"horizontalLayout_16")
-        self.label_22 = QLabel(self.frame_9)
-        self.label_22.setObjectName(u"label_22")
+        self.label_17 = QLabel(self.frame_9)
+        self.label_17.setObjectName(u"label_17")
 
-        self.horizontalLayout_16.addWidget(self.label_22)
+        self.gridLayout.addWidget(self.label_17, 24, 0, 1, 1)
 
-        self.att_mark_pos_x = QLineEdit(self.frame_9)
-        self.att_mark_pos_x.setObjectName(u"att_mark_pos_x")
+        self.att_col_type = QComboBox(self.frame_9)
+        self.att_col_type.addItem("")
+        self.att_col_type.addItem("")
+        self.att_col_type.addItem("")
+        self.att_col_type.addItem("")
+        self.att_col_type.setObjectName(u"att_col_type")
+        self.att_col_type.setEditable(True)
+        self.att_col_type.setDuplicatesEnabled(False)
 
-        self.horizontalLayout_16.addWidget(self.att_mark_pos_x)
-
-
-        self.gridLayout.addLayout(self.horizontalLayout_16, 22, 2, 1, 1)
-
-        self.att_tile_id = QLabel(self.frame_9)
-        self.att_tile_id.setObjectName(u"att_tile_id")
-
-        self.gridLayout.addWidget(self.att_tile_id, 15, 2, 1, 1)
+        self.gridLayout.addWidget(self.att_col_type, 13, 2, 1, 1)
 
         self.att_tag = QLineEdit(self.frame_9)
         self.att_tag.setObjectName(u"att_tag")
         self.att_tag.setEnabled(False)
         self.att_tag.setMaximumSize(QSize(16777215, 0))
 
-        self.gridLayout.addWidget(self.att_tag, 13, 2, 1, 1)
+        self.gridLayout.addWidget(self.att_tag, 15, 2, 1, 1)
 
-        self.horizontalLayout_17 = QHBoxLayout()
-        self.horizontalLayout_17.setObjectName(u"horizontalLayout_17")
-        self.label_23 = QLabel(self.frame_9)
-        self.label_23.setObjectName(u"label_23")
+        self.att_tile_size = QComboBox(self.frame_9)
+        self.att_tile_size.addItem("")
+        self.att_tile_size.addItem("")
+        self.att_tile_size.addItem("")
+        self.att_tile_size.setObjectName(u"att_tile_size")
+        self.att_tile_size.setEditable(True)
+        self.att_tile_size.setDuplicatesEnabled(False)
+        self.att_tile_size.setFrame(True)
 
-        self.horizontalLayout_17.addWidget(self.label_23)
-
-        self.att_mark_pos_y = QLineEdit(self.frame_9)
-        self.att_mark_pos_y.setObjectName(u"att_mark_pos_y")
-
-        self.horizontalLayout_17.addWidget(self.att_mark_pos_y)
-
-
-        self.gridLayout.addLayout(self.horizontalLayout_17, 23, 2, 1, 1)
-
-        self.label_18 = QLabel(self.frame_9)
-        self.label_18.setObjectName(u"label_18")
-
-        self.gridLayout.addWidget(self.label_18, 22, 0, 1, 1)
-
-        self.label_9 = QLabel(self.frame_9)
-        self.label_9.setObjectName(u"label_9")
-
-        self.gridLayout.addWidget(self.label_9, 9, 0, 1, 1)
-
-        self.line_3 = QFrame(self.frame_9)
-        self.line_3.setObjectName(u"line_3")
-        self.line_3.setFrameShape(QFrame.Shape.HLine)
-        self.line_3.setFrameShadow(QFrame.Shadow.Sunken)
-
-        self.gridLayout.addWidget(self.line_3, 20, 0, 1, 3)
-
-        self.label_14 = QLabel(self.frame_9)
-        self.label_14.setObjectName(u"label_14")
-
-        self.gridLayout.addWidget(self.label_14, 2, 0, 1, 1)
-
-        self.att_map_name = QLineEdit(self.frame_9)
-        self.att_map_name.setObjectName(u"att_map_name")
-
-        self.gridLayout.addWidget(self.att_map_name, 1, 2, 1, 1)
-
-        self.map_collision = QCheckBox(self.frame_9)
-        self.map_collision.setObjectName(u"map_collision")
-
-        self.gridLayout.addWidget(self.map_collision, 14, 2, 1, 1)
+        self.gridLayout.addWidget(self.att_tile_size, 10, 2, 1, 1)
 
         self.horizontalLayout_12 = QHBoxLayout()
         self.horizontalLayout_12.setObjectName(u"horizontalLayout_12")
@@ -1346,41 +1264,128 @@ class Ui_Form(object):
 
         self.gridLayout.addLayout(self.horizontalLayout_12, 2, 2, 1, 1)
 
+        self.map_collision = QCheckBox(self.frame_9)
+        self.map_collision.setObjectName(u"map_collision")
+
+        self.gridLayout.addWidget(self.map_collision, 17, 2, 1, 1)
+
+        self.horizontalLayout_13 = QHBoxLayout()
+        self.horizontalLayout_13.setObjectName(u"horizontalLayout_13")
+        self.label_20 = QLabel(self.frame_9)
+        self.label_20.setObjectName(u"label_20")
+
+        self.horizontalLayout_13.addWidget(self.label_20)
+
+        self.att_mapsize_y = QLineEdit(self.frame_9)
+        self.att_mapsize_y.setObjectName(u"att_mapsize_y")
+
+        self.horizontalLayout_13.addWidget(self.att_mapsize_y)
+
+
+        self.gridLayout.addLayout(self.horizontalLayout_13, 3, 2, 1, 1)
+
+        self.line_3 = QFrame(self.frame_9)
+        self.line_3.setObjectName(u"line_3")
+        self.line_3.setFrameShape(QFrame.Shape.HLine)
+        self.line_3.setFrameShadow(QFrame.Shadow.Sunken)
+
+        self.gridLayout.addWidget(self.line_3, 23, 0, 1, 3)
+
+        self.att_map_name = QLineEdit(self.frame_9)
+        self.att_map_name.setObjectName(u"att_map_name")
+
+        self.gridLayout.addWidget(self.att_map_name, 1, 2, 1, 1)
+
         self.att_collision = QLabel(self.frame_9)
         self.att_collision.setObjectName(u"att_collision")
 
-        self.gridLayout.addWidget(self.att_collision, 14, 0, 1, 1)
+        self.gridLayout.addWidget(self.att_collision, 17, 0, 1, 1)
+
+        self.horizontalSpacer_12 = QSpacerItem(30, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        self.gridLayout.addItem(self.horizontalSpacer_12, 1, 1, 1, 1)
+
+        self.label_14 = QLabel(self.frame_9)
+        self.label_14.setObjectName(u"label_14")
+
+        self.gridLayout.addWidget(self.label_14, 2, 0, 1, 1)
 
         self.label_10 = QLabel(self.frame_9)
         self.label_10.setObjectName(u"label_10")
 
-        self.gridLayout.addWidget(self.label_10, 15, 0, 1, 1)
+        self.gridLayout.addWidget(self.label_10, 18, 0, 1, 1)
 
-        self.label_13 = QLabel(self.frame_9)
-        self.label_13.setObjectName(u"label_13")
+        self.label_9 = QLabel(self.frame_9)
+        self.label_9.setObjectName(u"label_9")
 
-        self.gridLayout.addWidget(self.label_13, 1, 0, 1, 1)
+        self.gridLayout.addWidget(self.label_9, 9, 0, 1, 1)
 
-        self.label_17 = QLabel(self.frame_9)
-        self.label_17.setObjectName(u"label_17")
+        self.horizontalLayout_16 = QHBoxLayout()
+        self.horizontalLayout_16.setObjectName(u"horizontalLayout_16")
+        self.label_22 = QLabel(self.frame_9)
+        self.label_22.setObjectName(u"label_22")
 
-        self.gridLayout.addWidget(self.label_17, 21, 0, 1, 1)
+        self.horizontalLayout_16.addWidget(self.label_22)
+
+        self.att_mark_pos_x = QLineEdit(self.frame_9)
+        self.att_mark_pos_x.setObjectName(u"att_mark_pos_x")
+
+        self.horizontalLayout_16.addWidget(self.att_mark_pos_x)
+
+
+        self.gridLayout.addLayout(self.horizontalLayout_16, 25, 2, 1, 1)
+
+        self.line_2 = QFrame(self.frame_9)
+        self.line_2.setObjectName(u"line_2")
+        self.line_2.setFrameShape(QFrame.Shape.HLine)
+        self.line_2.setFrameShadow(QFrame.Shadow.Sunken)
+
+        self.gridLayout.addWidget(self.line_2, 7, 0, 1, 3)
+
+        self.att_mark_name = QLineEdit(self.frame_9)
+        self.att_mark_name.setObjectName(u"att_mark_name")
+
+        self.gridLayout.addWidget(self.att_mark_name, 24, 2, 1, 1)
+
+        self.horizontalLayout_17 = QHBoxLayout()
+        self.horizontalLayout_17.setObjectName(u"horizontalLayout_17")
+        self.label_23 = QLabel(self.frame_9)
+        self.label_23.setObjectName(u"label_23")
+
+        self.horizontalLayout_17.addWidget(self.label_23)
+
+        self.att_mark_pos_y = QLineEdit(self.frame_9)
+        self.att_mark_pos_y.setObjectName(u"att_mark_pos_y")
+
+        self.horizontalLayout_17.addWidget(self.att_mark_pos_y)
+
+
+        self.gridLayout.addLayout(self.horizontalLayout_17, 26, 2, 1, 1)
+
+        self.label_12 = QLabel(self.frame_9)
+        self.label_12.setObjectName(u"label_12")
+
+        self.gridLayout.addWidget(self.label_12, 13, 0, 1, 1)
 
         self.label_15 = QLabel(self.frame_9)
         self.label_15.setObjectName(u"label_15")
 
         self.gridLayout.addWidget(self.label_15, 10, 0, 1, 1)
 
-        self.att_tile_size = QComboBox(self.frame_9)
-        self.att_tile_size.addItem("")
-        self.att_tile_size.addItem("")
-        self.att_tile_size.addItem("")
-        self.att_tile_size.setObjectName(u"att_tile_size")
-        self.att_tile_size.setEditable(True)
-        self.att_tile_size.setDuplicatesEnabled(False)
-        self.att_tile_size.setFrame(True)
+        self.label_13 = QLabel(self.frame_9)
+        self.label_13.setObjectName(u"label_13")
 
-        self.gridLayout.addWidget(self.att_tile_size, 10, 2, 1, 1)
+        self.gridLayout.addWidget(self.label_13, 1, 0, 1, 1)
+
+        self.att_tile_id = QLabel(self.frame_9)
+        self.att_tile_id.setObjectName(u"att_tile_id")
+
+        self.gridLayout.addWidget(self.att_tile_id, 18, 2, 1, 1)
+
+        self.lineEdit = QLineEdit(self.frame_9)
+        self.lineEdit.setObjectName(u"lineEdit")
+
+        self.gridLayout.addWidget(self.lineEdit, 14, 2, 1, 1)
 
 
         self.verticalLayout_23.addWidget(self.frame_9)
@@ -1584,7 +1589,7 @@ class Ui_Form(object):
         self.btn_outline_code.setDefault(False)
         self.outline_stracked.setCurrentIndex(1)
         self.code_stacked.setCurrentIndex(-1)
-        self.att_omboBox.setCurrentIndex(0)
+        self.att_col_type.setCurrentIndex(0)
 
 
         QMetaObject.connectSlotsByName(Form)
@@ -1643,41 +1648,41 @@ class Ui_Form(object):
         self.label_editor_map_size.setText(QCoreApplication.translate("Form", u"\u573a\u666f\u5927\u5c0f:40x20", None))
         self.label_editor_map_pos.setText(QCoreApplication.translate("Form", u"X:187 Y:339", None))
         self.label_8.setText(QCoreApplication.translate("Form", u"\u5c5e\u6027", None))
-        self.label_12.setText(QCoreApplication.translate("Form", u"\u7269\u7406\u5c5e\u6027", None))
-        self.att_gravity.setText(QCoreApplication.translate("Form", u"\u542f\u7528", None))
-        self.att_mark_name.setText(QCoreApplication.translate("Form", u"\u51fa\u751f\u70b9", None))
-        self.label_20.setText(QCoreApplication.translate("Form", u"Y", None))
-        self.att_mapsize_y.setText(QCoreApplication.translate("Form", u"100", None))
-        self.att_omboBox.setItemText(0, QCoreApplication.translate("Form", u"\u5899\u4f53", None))
-        self.att_omboBox.setItemText(1, QCoreApplication.translate("Form", u"\u8df3\u677f", None))
-        self.att_omboBox.setItemText(2, QCoreApplication.translate("Form", u"\u80cc\u666f", None))
-        self.att_omboBox.setItemText(3, QCoreApplication.translate("Form", u"\u81ea\u5b9a\u4e49", None))
-
-        self.att_omboBox.setCurrentText(QCoreApplication.translate("Form", u"\u5899\u4f53", None))
         self.label_16.setText(QCoreApplication.translate("Form", u"\u5730\u56fe\u91cd\u529b", None))
-        self.att_tile_name.setText(QCoreApplication.translate("Form", u"\u5730\u56fe1", None))
-        self.label_22.setText(QCoreApplication.translate("Form", u"X", None))
-        self.att_mark_pos_x.setText(QCoreApplication.translate("Form", u"100", None))
-        self.att_tile_id.setText(QCoreApplication.translate("Form", u"19", None))
-        self.att_tag.setText("")
-        self.label_23.setText(QCoreApplication.translate("Form", u"Y", None))
-        self.att_mark_pos_y.setText(QCoreApplication.translate("Form", u"100", None))
         self.label_18.setText(QCoreApplication.translate("Form", u"\u6807\u8bb0\u4f4d\u7f6e", None))
-        self.label_9.setText(QCoreApplication.translate("Form", u"\u540d\u79f0", None))
-        self.label_14.setText(QCoreApplication.translate("Form", u"\u5730\u56fe\u5c3a\u5bf8", None))
-        self.att_map_name.setText(QCoreApplication.translate("Form", u"\u5730\u56fe1", None))
-        self.map_collision.setText(QCoreApplication.translate("Form", u"\u542f\u7528", None))
-        self.label_19.setText(QCoreApplication.translate("Form", u"X", None))
-        self.att_mapsize_x.setText(QCoreApplication.translate("Form", u"100", None))
-        self.att_collision.setText(QCoreApplication.translate("Form", u"\u78b0\u649e", None))
-        self.label_10.setText(QCoreApplication.translate("Form", u"\u7f16\u53f7", None))
-        self.label_13.setText(QCoreApplication.translate("Form", u"\u5730\u56fe\u540d\u79f0", None))
+        self.att_gravity.setText(QCoreApplication.translate("Form", u"\u542f\u7528", None))
+        self.att_tile_name.setText(QCoreApplication.translate("Form", u"\u5730\u56fe1", None))
         self.label_17.setText(QCoreApplication.translate("Form", u"\u6807\u8bb0\u540d\u79f0", None))
-        self.label_15.setText(QCoreApplication.translate("Form", u"\u56fe\u5757\u5c3a\u5bf8", None))
+        self.att_col_type.setItemText(0, QCoreApplication.translate("Form", u"\u5899\u4f53", None))
+        self.att_col_type.setItemText(1, QCoreApplication.translate("Form", u"\u8df3\u677f", None))
+        self.att_col_type.setItemText(2, QCoreApplication.translate("Form", u"\u80cc\u666f", None))
+        self.att_col_type.setItemText(3, QCoreApplication.translate("Form", u"\u81ea\u5b9a\u4e49", None))
+
+        self.att_col_type.setCurrentText(QCoreApplication.translate("Form", u"\u5899\u4f53", None))
+        self.att_tag.setText("")
         self.att_tile_size.setItemText(0, QCoreApplication.translate("Form", u"16x16", None))
         self.att_tile_size.setItemText(1, QCoreApplication.translate("Form", u"32x32", None))
         self.att_tile_size.setItemText(2, QCoreApplication.translate("Form", u"64x64", None))
 
+        self.label_19.setText(QCoreApplication.translate("Form", u"X", None))
+        self.att_mapsize_x.setText(QCoreApplication.translate("Form", u"100", None))
+        self.map_collision.setText(QCoreApplication.translate("Form", u"\u542f\u7528", None))
+        self.label_20.setText(QCoreApplication.translate("Form", u"Y", None))
+        self.att_mapsize_y.setText(QCoreApplication.translate("Form", u"100", None))
+        self.att_map_name.setText(QCoreApplication.translate("Form", u"\u5730\u56fe1", None))
+        self.att_collision.setText(QCoreApplication.translate("Form", u"\u78b0\u649e", None))
+        self.label_14.setText(QCoreApplication.translate("Form", u"\u5730\u56fe\u5c3a\u5bf8", None))
+        self.label_10.setText(QCoreApplication.translate("Form", u"\u7f16\u53f7", None))
+        self.label_9.setText(QCoreApplication.translate("Form", u"\u540d\u79f0", None))
+        self.label_22.setText(QCoreApplication.translate("Form", u"X", None))
+        self.att_mark_pos_x.setText(QCoreApplication.translate("Form", u"100", None))
+        self.att_mark_name.setText(QCoreApplication.translate("Form", u"\u51fa\u751f\u70b9", None))
+        self.label_23.setText(QCoreApplication.translate("Form", u"Y", None))
+        self.att_mark_pos_y.setText(QCoreApplication.translate("Form", u"100", None))
+        self.label_12.setText(QCoreApplication.translate("Form", u"\u7269\u7406\u5c5e\u6027", None))
+        self.label_15.setText(QCoreApplication.translate("Form", u"\u56fe\u5757\u5c3a\u5bf8", None))
+        self.label_13.setText(QCoreApplication.translate("Form", u"\u5730\u56fe\u540d\u79f0", None))
+        self.att_tile_id.setText(QCoreApplication.translate("Form", u"19", None))
         self.label_24.setText(QCoreApplication.translate("Form", u"\u56fe\u5c42", None))
         ___qtreewidgetitem = self.editor_map_layer_list.headerItem()
         ___qtreewidgetitem.setText(2, QCoreApplication.translate("Form", u"\u9501\u5b9a", None));
