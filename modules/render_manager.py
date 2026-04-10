@@ -336,6 +336,12 @@ class RenderManager(QObject):
         self.static_layers.clear()  # 清空静态图层
         self.layer_counter = 0  # 重置图层
 
+        # 🚀 重新安装事件过滤器
+        if hasattr(self, "view") and self.view and self.view.viewport():
+            self.view.viewport().removeEventFilter(self)
+            self.view.viewport().installEventFilter(self)
+            print("✅ [RenderManager] 事件过滤器已重新安装")
+
         # 🚀 既然 scene 已经干干净净了，直接重新创建 FPS 标签即可
         self._setup_fps_label()
 
@@ -829,3 +835,12 @@ class RenderManager(QObject):
             target_y = 10
 
         bubble.setPos(target_x, target_y)
+
+    def destroy(self):
+        """销毁RenderManager，移除事件过滤器，防止程序关闭时崩溃"""
+        try:
+            if hasattr(self, "view") and self.view and self.view.viewport():
+                self.view.viewport().removeEventFilter(self)
+                print("✅ [RenderManager] 事件过滤器已移除")
+        except Exception as e:
+            print(f"❌ [RenderManager] 移除事件过滤器失败: {e}")

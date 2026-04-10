@@ -2288,3 +2288,16 @@ class MapEditorManager(QObject):
                     # 强制更新预览，即使位置没有变化
                     self.preview_tile_pos = None
                     self._update_preview(cursor_pos)
+
+    def destroy(self):
+        """销毁MapEditorManager，移除事件过滤器"""
+        try:
+            # 移除画布场景的事件过滤器
+            if hasattr(self, 'canvas_scene'):
+                try:
+                    self.canvas_scene.removeEventFilter(self)
+                    print("✅ [MapEditorManager] 事件过滤器已移除")
+                except:
+                    pass
+        except Exception as e:
+            print(f"❌ [MapEditorManager] 移除事件过滤器失败: {e}")

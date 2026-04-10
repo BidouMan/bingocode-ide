@@ -176,6 +176,29 @@ class UploadMenuManager(QWidget):
         except Exception as e:
             print(f"❌ 导入失败: {e}")
 
+    def destroy(self):
+        """销毁UploadMenuManager，移除所有事件过滤器"""
+        try:
+            # 移除按钮的事件过滤器
+            if hasattr(self, 'ui') and self.ui:
+                for btn in [self.ui.btn_import, self.ui.btn_paint, self.ui.btn_open, self.ui.btn_upload]:
+                    try:
+                        btn.removeEventFilter(self)
+                    except:
+                        pass
+            
+            # 移除自身的事件过滤器
+            self.removeEventFilter(self)
+            
+            # 移除父窗口的事件过滤器
+            parent = self.parentWidget()
+            if parent:
+                parent.removeEventFilter(self)
+                
+            print("✅ [UploadMenuManager] 事件过滤器已移除")
+        except Exception as e:
+            print(f"❌ [UploadMenuManager] 移除事件过滤器失败: {e}")
+
 
 class MapUploadMenuManager(QWidget):
     def __init__(self, parent_widget):
@@ -327,3 +350,26 @@ class MapUploadMenuManager(QWidget):
                     
         except Exception as e:
             print(f"❌ 导入失败: {e}")
+
+    def destroy(self):
+        """销毁MapUploadMenuManager，移除所有事件过滤器"""
+        try:
+            # 移除按钮的事件过滤器
+            if hasattr(self, 'ui') and self.ui:
+                for btn in [self.ui.btn_import, self.ui.btn_creat, self.ui.btn_open, self.ui.btn_upload]:
+                    try:
+                        btn.removeEventFilter(self)
+                    except:
+                        pass
+            
+            # 移除自身的事件过滤器
+            self.removeEventFilter(self)
+            
+            # 移除父窗口的事件过滤器
+            parent = self.parentWidget()
+            if parent:
+                parent.removeEventFilter(self)
+                
+            print("✅ [MapUploadMenuManager] 事件过滤器已移除")
+        except Exception as e:
+            print(f"❌ [MapUploadMenuManager] 移除事件过滤器失败: {e}")

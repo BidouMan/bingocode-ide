@@ -1352,3 +1352,50 @@ class ResourceManager(QObject):
 
         # 创建地图卡片
         self.add_map_card(map_name, map_count)
+
+    def destroy(self):
+        """销毁ResourceManager，移除所有事件过滤器"""
+        try:
+            # 移除代码列表的事件过滤器
+            if hasattr(self, 'ui') and self.ui and hasattr(self.ui, 'list_code'):
+                try:
+                    self.ui.list_code.removeEventFilter(self)
+                except:
+                    pass
+            
+            # 移除精灵滚动区域的事件过滤器
+            if hasattr(self, 'scroll_area'):
+                try:
+                    self.scroll_area.removeEventFilter(self)
+                except:
+                    pass
+            
+            # 移除地图滚动区域的事件过滤器
+            if hasattr(self, 'map_scroll_area'):
+                try:
+                    self.map_scroll_area.removeEventFilter(self)
+                except:
+                    pass
+            
+            # 移除所有卡片的事件过滤器
+            if hasattr(self, 'sprite_grid_layout'):
+                for i in range(self.sprite_grid_layout.count()):
+                    item = self.sprite_grid_layout.itemAt(i)
+                    if item and item.widget():
+                        try:
+                            item.widget().removeEventFilter(self)
+                        except:
+                            pass
+            
+            if hasattr(self, 'map_grid_layout'):
+                for i in range(self.map_grid_layout.count()):
+                    item = self.map_grid_layout.itemAt(i)
+                    if item and item.widget():
+                        try:
+                            item.widget().removeEventFilter(self)
+                        except:
+                            pass
+            
+            print("✅ [ResourceManager] 事件过滤器已移除")
+        except Exception as e:
+            print(f"❌ [ResourceManager] 移除事件过滤器失败: {e}")

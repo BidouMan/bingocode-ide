@@ -385,6 +385,40 @@ class AppController:
             except:
                 pass
 
+        # 4. 【销毁渲染管理器】移除事件过滤器，防止程序关闭时崩溃
+        if hasattr(self, "render_manager") and self.render_manager:
+            try:
+                self.render_manager.destroy()
+            except Exception as e:
+                print(f"❌ 销毁渲染管理器失败: {e}")
+
+        # 5. 【销毁资源管理器】移除事件过滤器
+        if hasattr(self, "res_manager") and self.res_manager:
+            try:
+                self.res_manager.destroy()
+            except Exception as e:
+                print(f"❌ 销毁资源管理器失败: {e}")
+
+        # 6. 【销毁地图编辑器】移除事件过滤器
+        if hasattr(self, "map_editor") and self.map_editor:
+            try:
+                self.map_editor.destroy()
+            except Exception as e:
+                print(f"❌ 销毁地图编辑器失败: {e}")
+
+        # 7. 【销毁上传菜单管理器】移除事件过滤器
+        if hasattr(self, "res_manager") and self.res_manager:
+            if hasattr(self.res_manager, "upload_menu") and self.res_manager.upload_menu:
+                try:
+                    self.res_manager.upload_menu.destroy()
+                except Exception as e:
+                    print(f"❌ 销毁上传菜单管理器失败: {e}")
+            if hasattr(self.res_manager, "map_upload_menu") and self.res_manager.map_upload_menu:
+                try:
+                    self.res_manager.map_upload_menu.destroy()
+                except Exception as e:
+                    print(f"❌ 销毁地图上传菜单管理器失败: {e}")
+
         print("🏁 程序已安全关闭。")
 
     def open_file_in_editor(self, file_path):

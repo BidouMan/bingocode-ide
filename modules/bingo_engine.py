@@ -213,10 +213,25 @@ class Sprite:
                 max_tile_y = math.floor(check_rect[3] / tile_size)
             else:
                 # Y轴探测使用完整碰撞盒
-                min_tile_x = math.floor(sprite_rect[0] / tile_size)
-                max_tile_x = math.floor(sprite_rect[2] / tile_size)
+                # 策略：稍微加宽 Y 轴的探测范围（左右各多出 2 像素）
+                # 这样即使 X 轴修正把角色往外推了一点点，也不会导致"踩空"
+                min_tile_x = math.floor((sprite_rect[0] - 2) / tile_size)
+                max_tile_x = math.floor((sprite_rect[2] + 2) / tile_size)
+
+                # 保持原有的 Y 范围不变
                 min_tile_y = math.floor(sprite_rect[1] / tile_size)
                 max_tile_y = math.floor(sprite_rect[3] / tile_size)
+
+                # 添加debug信息（仅保留关键信息）
+                # print(
+                #     f"DEBUG: Y轴探测范围 - 原始: [{sprite_rect[0]:.2f}, {sprite_rect[2]:.2f}]"
+                # )
+                # print(
+                #     f"DEBUG: Y轴探测范围 - 加宽: [{sprite_rect[0] - 2:.2f}, {sprite_rect[2] + 2:.2f}]"
+                # )
+                # print(
+                #     f"DEBUG: Y轴探测图块范围: x=[{min_tile_x}, {max_tile_x}], y=[{min_tile_y}, {max_tile_y}]"
+                # )
 
             # 检查范围内的每个图块
             for tile_x in range(min_tile_x, max_tile_x + 1):
@@ -267,10 +282,14 @@ class Sprite:
 
                                         if dist_to_right < dist_to_left:
                                             # 角色在砖块右侧，撞到了砖块的右边缘 (即向左走撞墙)
-                                            self._x = tile_right + half_width + 0.05
+                                            # 计算角色中心到左边缘的距离
+                                            center_to_left = self._x - sprite_rect[0]
+                                            self._x = tile_right + center_to_left + 0.05
                                         else:
                                             # 角色在砖块左侧，撞到了砖块的左边缘 (即向右走撞墙)
-                                            self._x = tile_left - half_width - 0.05
+                                            # 计算角色中心到右边缘的距离
+                                            center_to_right = sprite_rect[2] - self._x
+                                            self._x = tile_left - center_to_right - 0.05
                                         return  # 修正完 X 必须立即返回，绝对不能再碰 Y 的代码！
 
                                     elif axis == "y":
@@ -347,6 +366,8 @@ class Sprite:
         """处理单步移动和碰撞检测"""
         # 保存旧的落地状态
         was_on_floor = self.on_ground
+        old_x = self._x
+        old_y = self._y
 
         # 严格的分轴步进 (Atomic Sub-stepping)
         # 第一步：只处理X轴
@@ -785,8 +806,10 @@ class Sprite:
         tile_size = _CURRENT_MAP.get("tile_size", 16)
 
         # 计算需要检查的图块范围（角色宽度范围内的所有图块）
-        min_tile_x = math.floor(rect[0] // tile_size)
-        max_tile_x = math.floor(rect[2] // tile_size)
+        # 策略：稍微加宽 Y 轴的探测范围（左右各多出 2 像素）
+        # 这样即使 X 轴修正把角色往外推了一点点，也不会导致"踩空"
+        min_tile_x = math.floor((rect[0] - 2) / tile_size)
+        max_tile_x = math.floor((rect[2] + 2) / tile_size)
         check_tile_y = math.floor(check_y // tile_size)
 
         # 遍历所有图层
