@@ -169,18 +169,8 @@ class Sprite:
         # 立即调用_setup_hitbox，确保内容尺寸已计算
         self._setup_hitbox()
 
-        # 输出初始化的debug信息
-        print("=" * 50)
-        print(f"DEBUG: 精灵初始化 - ID: {self.id}")
-        print(f"DEBUG: 图片路径: {self.image}")
-        print(f"DEBUG: 原始尺寸: {self._orig_w}x{self._orig_h}")
-        print(f"DEBUG: 内容尺寸: {self._content_w}x{self._content_h}")
-        print(f"DEBUG: 视觉偏移: ({self._visual_offset_x}, {self._visual_offset_y})")
-
-        # 立即调用_get_hitbox_rect，输出碰撞盒信息
-        rect = self._get_hitbox_rect()
-        print(f"DEBUG: 初始碰撞盒: {[round(x, 2) for x in rect]}")
-        print("=" * 50)
+        # 立即调用_get_hitbox_rect，确保碰撞盒信息已计算
+        self._get_hitbox_rect()
 
     # ---------- 运动模块 ----------
     def _resolve_collision(self, axis):
@@ -266,20 +256,6 @@ class Sprite:
                                 overlap_y = overlap_bottom - overlap_top
                                 # 检测任何微小的重叠，确保角色不会站在砖块内部
                                 if overlap_x > 0 and overlap_y > 0:
-                                    # 仅打印关键信息
-                                    if axis == "x":
-                                        print(
-                                            f"DEBUG: X轴碰撞 - 入墙深度: {overlap_x:.2f} 像素"
-                                        )
-                                    # print(
-                                    #     f"DEBUG: 碰撞检测 - 轴: {axis}, 重叠量: x={overlap_x:.2f}, y={overlap_y:.2f}"
-                                    # )
-                                    # print(
-                                    #     f"DEBUG: 图块位置: [{tile_left:.2f}, {tile_top:.2f}, {tile_right:.2f}, {tile_bottom:.2f}]"
-                                    # )
-                                    # print(
-                                    #     f"DEBUG: 角色碰撞盒: {[round(x, 2) for x in sprite_rect]}"
-                                    # )
                                     # 绝对边缘对齐 (Snap-to-Edge)
                                     # 抛弃相对修正，使用绝对坐标赋值
                                     if axis == "x":
@@ -306,9 +282,6 @@ class Sprite:
                                             # 确定是踩地
                                             rect = self._get_hitbox_rect()
                                             if rect:
-                                                print(
-                                                    f"DEBUG: Y轴修正 - 踩地: tile_top={tile_top:.2f}, rect[3]={rect[3]:.2f}"
-                                                )
                                                 self._y = (
                                                     tile_top
                                                     - (rect[3] - self._y)
@@ -321,9 +294,6 @@ class Sprite:
                                             # 确定是顶头
                                             rect = self._get_hitbox_rect()
                                             if rect:
-                                                print(
-                                                    f"DEBUG: Y轴修正 - 顶头: tile_bottom={tile_bottom:.2f}, rect[1]={rect[1]:.2f}"
-                                                )
                                                 self._y = (
                                                     tile_bottom
                                                     + (self._y - rect[1])
@@ -373,18 +343,8 @@ class Sprite:
         self._resolve_collision("y")
         self._update_transform()
 
-    def move(self, distance):
-        """朝着当前 angle 方向移动 distance 像素"""
-        radians = math.radians(self._angle)
-
-        # 计算移动分量
-        dx = distance * math.cos(radians)
-        dy = distance * math.sin(radians)
-
-        # print(
-        #     f"DEBUG: 移动前 - 位置: ({self._x:.2f}, {self._y:.2f}), 移动分量: dx={dx:.2f}, dy={dy:.2f}"
-        # )
-
+    def _handle_step_move(self, dx, dy):
+        """处理单步移动和碰撞检测"""
         # 保存旧的落地状态
         was_on_floor = self.on_ground
 
@@ -401,7 +361,32 @@ class Sprite:
         self._y += dy
         self._resolve_collision("y")  # 这里修完，Y坐标也是绝对安全的
 
-        # print(f"DEBUG: 移动后 - 位置: ({self._x:.2f}, {self._y:.2f})")
+    def move(self, distance):
+        """朝着当前 angle 方向移动 distance 像素"""
+        radians = math.radians(self._angle)
+
+        # 计算移动分量
+        dx = distance * math.cos(radians)
+        dy = distance * math.sin(radians)
+
+        # 设置最大步长（防止隧道效应）
+        MAX_STEP = 16.0  # 最大步长为16像素，与图块大小一致
+
+        # 计算总位移长度
+        total_distance = math.sqrt(dx * dx + dy * dy)
+
+        # 如果位移很小，直接移动
+        if total_distance <= MAX_STEP:
+            self._handle_step_move(dx, dy)
+        else:
+            # 将大位移拆分成多个小位移
+            steps = int(math.ceil(total_distance / MAX_STEP))
+            step_dx = dx / steps
+            step_dy = dy / steps
+
+            # 执行步进移动
+            for _ in range(steps):
+                self._handle_step_move(step_dx, step_dy)
 
         # 更新变换
         self._update_transform()
