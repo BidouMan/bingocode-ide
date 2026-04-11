@@ -245,8 +245,7 @@ class MapEditorManager(QObject):
         # 对象池 (Object Pool) —— 老机器的救星
         self._item_pool = []  # 存放闲置的 QGraphicsPixmapItem
 
-        # 信号定义
-        self.tile_selected = Signal(int, int)  # 瓦片选中信号
+        # 移除瓦片选中信号，避免信号错误
 
     def __del__(self):
         """清理资源，避免程序退出时崩溃"""
@@ -863,8 +862,8 @@ class MapEditorManager(QObject):
             resource_type = resource.get("resource_type", "image")
 
             if resource_type == "tileset":
-                # 图块集合模式，图块ID格式：(resource_index + 1) * 1000 + tile_index + 1
-                if (tile_id // 1000) - 1 == resource_index:
+                # 图块集合模式，图块ID格式：resource_index * 1000 + tile_index + 1
+                if tile_id // 1000 == resource_index:
                     # 处理资源路径（转换为绝对路径）
                     image_path = resource["path"]
                     if not os.path.isabs(image_path):
@@ -1514,8 +1513,7 @@ class MapEditorManager(QObject):
             )
             # 调用属性管理器设置当前瓦片
             self.property_manager.set_current_tile(resource_index, tile_index)
-            # 发送瓦片选中信号
-            self.tile_selected.emit(resource_index, tile_index)
+            # 移除瓦片选中信号发送
 
             # 更新map_collision checkbox的状态
             if hasattr(self, "ui") and hasattr(self.ui, "map_collision"):

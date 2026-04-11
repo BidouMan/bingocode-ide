@@ -753,6 +753,26 @@ class MapDataModel(QObject):
             self.data_changed.emit()
             return True
         return False
+    
+    def set_tile_collision_shape(self, tile_set_index, tile_index, shape_data):
+        """设置单个图块的碰撞形状"""
+        if 0 <= tile_set_index < len(self.map_data["tile_sets"]):
+            tile_set = self.map_data["tile_sets"][tile_set_index]
+            # 确保tiles数组足够大
+            while len(tile_set["tiles"]) <= tile_index:
+                tile_set["tiles"].append({"collision": True})
+            tile_set["tiles"][tile_index]["collision_shape"] = shape_data
+            self.data_changed.emit()
+            return True
+        return False
+    
+    def get_tile_collision_shape(self, tile_set_index, tile_index):
+        """获取单个图块的碰撞形状"""
+        if 0 <= tile_set_index < len(self.map_data["tile_sets"]):
+            tile_set = self.map_data["tile_sets"][tile_set_index]
+            if 0 <= tile_index < len(tile_set["tiles"]):
+                return tile_set["tiles"][tile_index].get("collision_shape", None)
+        return None
 
     def get_tile_collision(self, tile_set_index, tile_index):
         """获取单个图块的碰撞状态"""
