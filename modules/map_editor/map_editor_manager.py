@@ -862,8 +862,8 @@ class MapEditorManager(QObject):
             resource_type = resource.get("resource_type", "image")
 
             if resource_type == "tileset":
-                # 图块集合模式，图块ID格式：resource_index * 1000 + tile_index + 1
-                if tile_id // 1000 == resource_index:
+                # 图块集合模式，图块ID格式：(resource_index + 1) * 1000 + tile_index + 1
+                if tile_id // 1000 == resource_index + 1:
                     # 处理资源路径（转换为绝对路径）
                     image_path = resource["path"]
                     if not os.path.isabs(image_path):
@@ -1075,6 +1075,9 @@ class MapEditorManager(QObject):
     def _handle_mouse_press(self, event):
         """处理鼠标按下事件"""
         try:
+            if not self.canvas_manager or not self.map_model:
+                return
+                
             if event.button() == Qt.LeftButton:
                 if self.current_tool == "move":
                     # 移动工具：选择并准备拖拽
@@ -1122,6 +1125,9 @@ class MapEditorManager(QObject):
     def _handle_mouse_move(self, event):
         """处理鼠标移动事件"""
         try:
+            if not self.canvas_manager or not self.map_model:
+                return
+                
             if event.buttons() & Qt.LeftButton:
                 if self.current_tool == "move" and self.selected_item:
                     # 移动工具：拖拽移动选中的图块
@@ -1686,7 +1692,7 @@ class MapEditorManager(QObject):
         # 获取图块图像
         pixmap = None
         if resource["resource_type"] == "tileset":
-            tile_id = resource_index * 1000 + tile_index + 1
+            tile_id = (resource_index + 1) * 1000 + tile_index + 1
             pixmap = self.get_cached_pixmap(tile_id)
         else:
             # 单张图片模式

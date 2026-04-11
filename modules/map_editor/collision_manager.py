@@ -32,6 +32,12 @@ class CollisionManager(QObject):
     def __del__(self):
         """清理资源，避免程序退出时崩溃"""
         try:
+            # 移除事件过滤器
+            if self.col_editor_view and self.col_editor_view.viewport():
+                try:
+                    self.col_editor_view.viewport().removeEventFilter(self)
+                except Exception:
+                    pass
             # 清理场景和视图
             if self.col_editor_scene:
                 self.col_editor_scene.clear()
