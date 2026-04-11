@@ -520,60 +520,61 @@ class MapEditorManager(QObject):
                 tile_sets = self.map_model.get_tile_sets()
 
                 map_dir = os.path.dirname(file_path)
+                # 清空上传资源列表，准备重新加载
+                self.uploaded_resources.clear()
+                
                 for tile_set in tile_sets:
                     resource_name = tile_set.get("name")
                     image_path = tile_set.get("image_path")
-                    if not image_path:
-                        print(f"⚠️ 瓦片集{resource_name}无图片路径，跳过")
-                        continue
-
-                    # 修复：优先使用绝对路径，避免相对路径解析错误
-                    if not os.path.isabs(image_path):
-                        image_path = os.path.join(map_dir, image_path)
-
-                    # 检查文件是否存在
-                    if not os.path.exists(image_path):
-                        print(f"⚠️ 图片文件不存在: {image_path}，跳过")
-                        continue
-
-                    # 加载图片获取真实尺寸
-                    from PySide6.QtGui import QPixmap
-
-                    pixmap = QPixmap(image_path)
-                    if pixmap.isNull():
-                        print(f"⚠️ 图片加载失败: {image_path}，跳过")
-                        continue
-
+                    
                     # 修复：确保tile_width/tile_height有默认值
                     tile_width = tile_set.get("tile_width", 16)
                     tile_height = tile_set.get("tile_height", 16)
                     resource_type = "tileset" if tile_width and tile_height else "image"
-
-                    # 构建资源信息（避免重复添加）
+                    
+                    # 初始化资源信息
                     resource_info = {
                         "name": resource_name,
-                        "path": os.path.relpath(image_path, map_dir),  # 存储相对路径
+                        "path": "",  # 默认空路径
                         "resource_type": resource_type,
                         "tile_width": tile_width,
                         "tile_height": tile_height,
-                        "tile_size": tile_width
-                        if resource_type == "tileset"
-                        else tile_width,
-                        "width": pixmap.width(),
-                        "height": pixmap.height(),
+                        "tile_size": tile_width if resource_type == "tileset" else tile_width,
+                        "width": tile_width,  # 默认宽度
+                        "height": tile_height,  # 默认高度
                         "frames": 1,
                     }
                     if resource_type == "tileset":
                         resource_info["tiles"] = []
+                    
+                    # 尝试加载图片
+                    if image_path:
+                        # 修复：优先使用绝对路径，避免相对路径解析错误
+                        if not os.path.isabs(image_path):
+                            image_path = os.path.join(map_dir, image_path)
 
-                    # 检查重复
-                    if not any(
-                        res["name"] == resource_name for res in self.uploaded_resources
-                    ):
-                        self.uploaded_resources.append(resource_info)
-                        print(
-                            f"✅ 加载资源: {resource_name} | 路径: {resource_info['path']}"
-                        )
+                        # 检查文件是否存在
+                        if os.path.exists(image_path):
+                            # 加载图片获取真实尺寸
+                            from PySide6.QtGui import QPixmap
+
+                            pixmap = QPixmap(image_path)
+                            if not pixmap.isNull():
+                                resource_info["path"] = os.path.relpath(image_path, map_dir)  # 存储相对路径
+                                resource_info["width"] = pixmap.width()
+                                resource_info["height"] = pixmap.height()
+                                print(
+                                    f"✅ 加载资源: {resource_name} | 路径: {resource_info['path']}"
+                                )
+                            else:
+                                print(f"⚠️ 图片加载失败: {image_path}")
+                        else:
+                            print(f"⚠️ 图片文件不存在: {image_path}")
+                    else:
+                        print(f"⚠️ 瓦片集{resource_name}无图片路径")
+                    
+                    # 无论图片是否加载成功，都添加到资源列表中，确保与tile_sets顺序一致
+                    self.uploaded_resources.append(resource_info)
 
                 # 更新资源列表和画布
                 self._update_res_list_display()

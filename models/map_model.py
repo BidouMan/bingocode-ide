@@ -458,7 +458,7 @@ class MapDataModel(QObject):
                 tiles = tile_set.get("tiles", [])
                 f.write(struct.pack("<I", len(tiles)))
 
-                # 保存每个瓦片的属性（碰撞状态和标签）
+                # 保存每个瓦片的属性（碰撞状态、标签和碰撞形状）
                 for tile in tiles:
                     # 写入碰撞状态（1字节）
                     collision = tile.get("collision", True)
@@ -469,6 +469,19 @@ class MapDataModel(QObject):
                     tag_bytes = tag.encode("utf-8")
                     f.write(struct.pack("<I", len(tag_bytes)))
                     f.write(tag_bytes)
+                    
+                    # 写入碰撞形状数据
+                    collision_shape = tile.get("collision_shape", None)
+                    if collision_shape and "points" in collision_shape:
+                        points = collision_shape["points"]
+                        # 写入点的数量
+                        f.write(struct.pack("<I", len(points)))
+                        # 写入每个点的坐标（每个点两个浮点数，共8字节）
+                        for point in points:
+                            f.write(struct.pack("<dd", point[0], point[1]))
+                    else:
+                        # 写入0表示没有碰撞形状
+                        f.write(struct.pack("<I", 0))
 
     def load(self, file_path):
         """从二进制分层文件加载地图数据"""
@@ -695,8 +708,20 @@ class MapDataModel(QObject):
                     # 读取标签
                     tag_length = struct.unpack("<I", f.read(4))[0]
                     tag = f.read(tag_length).decode("utf-8")
+                    
+                    # 读取碰撞形状数据
+                    point_count = struct.unpack("<I", f.read(4))[0]
+                    collision_shape = None
+                    if point_count > 0:
+                        points = []
+                        for _ in range(point_count):
+                            x, y = struct.unpack("<dd", f.read(16))
+                            points.append([x, y])
+                        collision_shape = {"points": points}
 
                     tile = {"collision": collision, "tag": tag}
+                    if collision_shape:
+                        tile["collision_shape"] = collision_shape
                     tiles.append(tile)
 
                 tile_set = {

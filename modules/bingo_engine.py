@@ -254,11 +254,34 @@ class Sprite:
                                 resource_index, tile_index
                             )
                             if collision_enabled:
+                                # 获取图块的碰撞形状
+                                collision_shape = _MAP_MODEL.get_tile_collision_shape(
+                                    resource_index, tile_index
+                                )
+
                                 # 计算图块的碰撞盒
-                                tile_left = tile_x * tile_size
-                                tile_top = tile_y * tile_size
-                                tile_right = tile_left + tile_size
-                                tile_bottom = tile_top + tile_size
+                                if collision_shape and "points" in collision_shape:
+                                    # 使用自定义碰撞形状
+                                    points = collision_shape["points"]
+                                    # 转换为世界坐标
+                                    world_points = [
+                                        (
+                                            tile_x * tile_size + p[0],
+                                            tile_y * tile_size + p[1],
+                                        )
+                                        for p in points
+                                    ]
+                                    # 计算自定义形状的边界盒
+                                    tile_left = min(p[0] for p in world_points)
+                                    tile_top = min(p[1] for p in world_points)
+                                    tile_right = max(p[0] for p in world_points)
+                                    tile_bottom = max(p[1] for p in world_points)
+                                else:
+                                    # 使用默认矩形碰撞盒
+                                    tile_left = tile_x * tile_size
+                                    tile_top = tile_y * tile_size
+                                    tile_right = tile_left + tile_size
+                                    tile_bottom = tile_top + tile_size
 
                                 # 计算精灵与图块的重叠
                                 overlap_left = max(sprite_rect[0], tile_left)
@@ -837,7 +860,44 @@ class Sprite:
                                 resource_index, tile_index
                             )
                             if collision_enabled:
-                                return True
+                                # 获取图块的碰撞形状
+                                collision_shape = _MAP_MODEL.get_tile_collision_shape(
+                                    resource_index, tile_index
+                                )
+
+                                # 计算图块的碰撞盒
+                                tile_size = _CURRENT_MAP.get("tile_size", 16)
+                                if collision_shape and "points" in collision_shape:
+                                    # 使用自定义碰撞形状
+                                    points = collision_shape["points"]
+                                    # 转换为世界坐标
+                                    world_points = [
+                                        (
+                                            tile_x * tile_size + p[0],
+                                            check_tile_y * tile_size + p[1],
+                                        )
+                                        for p in points
+                                    ]
+                                    # 计算自定义形状的边界盒
+                                    tile_left = min(p[0] for p in world_points)
+                                    tile_top = min(p[1] for p in world_points)
+                                    tile_right = max(p[0] for p in world_points)
+                                    tile_bottom = max(p[1] for p in world_points)
+                                else:
+                                    # 使用默认矩形碰撞盒
+                                    tile_left = tile_x * tile_size
+                                    tile_top = check_tile_y * tile_size
+                                    tile_right = tile_left + tile_size
+                                    tile_bottom = tile_top + tile_size
+
+                                # 检查角色脚底是否在图块的碰撞盒内
+                                if (
+                                    rect[0] - 2 <= tile_right
+                                    and rect[2] + 2 >= tile_left
+                                    and check_y >= tile_top
+                                    and check_y <= tile_bottom
+                                ):
+                                    return True
 
         return False
 
