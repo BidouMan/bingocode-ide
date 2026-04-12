@@ -269,6 +269,18 @@ class CollisionManager(QObject):
                 pixmap_item = QGraphicsPixmapItem(pixmap)
                 # 将图块放在场景中心位置，使图块中心点对准场景原点
                 pixmap_item.setPos(-pixmap_width / 2, -pixmap_height / 2)
+                # 设置为最底层
+                pixmap_item.setZValue(-100)
+                # 禁用所有鼠标交互
+                pixmap_item.setAcceptedMouseButtons(Qt.NoButton)
+                pixmap_item.setFlag(QGraphicsPixmapItem.ItemIsSelectable, False)
+                pixmap_item.setFlag(QGraphicsPixmapItem.ItemIsMovable, False)
+                # 禁用图块项的抗锯齿，减少渲染波动
+                pixmap_item.setTransformationMode(Qt.FastTransformation)
+                # 禁用图块项的缓存，确保渲染稳定
+                from PySide6.QtWidgets import QGraphicsItem
+
+                pixmap_item.setCacheMode(QGraphicsItem.NoCache)
                 self.col_editor_scene.addItem(pixmap_item)
                 self.tile_item = pixmap_item  # 保存图块图像项
 
@@ -402,13 +414,17 @@ class CollisionManager(QObject):
 
                 # 应用变换，但确保不会导致画布移动
                 self.col_editor_view.setTransform(transform)
-                
+
                 # 确保场景大小与视图大小匹配，避免滚动
                 # 但是保持图块的居中位置
-                self.col_editor_scene.setSceneRect(-view_width/2, -view_height/2, view_width, view_height)
-                
+                self.col_editor_scene.setSceneRect(
+                    -view_width / 2, -view_height / 2, view_width, view_height
+                )
+
                 # 确保视图不会自动滚动
-                self.col_editor_view.setSceneRect(-view_width/2, -view_height/2, view_width, view_height)
+                self.col_editor_view.setSceneRect(
+                    -view_width / 2, -view_height / 2, view_width, view_height
+                )
 
                 # 显示视图
                 self.col_editor_view.show()
@@ -477,16 +493,25 @@ class CollisionManager(QObject):
             # 确保锚点数量与碰撞点数量一致
             while len(self.anchor_items) < len(self.collision_points):
                 i = len(self.anchor_items)
-                anchor_radius = 1  # 锚点半径，缩小1/2
-                # 创建椭圆，先不设置父项
-                anchor = QGraphicsEllipseItem(
-                    -anchor_radius, -anchor_radius, anchor_radius * 2, anchor_radius * 2
-                )
-                # 然后设置父项
-                anchor.setParentItem(self.tile_item)
-                anchor.setBrush(QBrush(QColor(255, 0, 0)))
-                # 使用抗锯齿笔刷，减少锯齿感
-                pen = QPen(QColor(255, 255, 255), 1.5)  # 增加描边宽度
+                anchor_radius = 4 / 3  # 锚点半径，增加1/3大小
+                # 创建椭圆，设置为场景的直接子项，而不是图块项的子项
+                # 这样当锚点移动时不会影响图块项的边界框，避免图块抖动
+                # 创建菱形锚点，使用多边形而不是椭圆
+                from PySide6.QtWidgets import QGraphicsPolygonItem
+                from PySide6.QtGui import QPolygonF
+
+                diamond = QPolygonF()
+                diamond.append(QPointF(0, -anchor_radius))  # 上顶点
+                diamond.append(QPointF(anchor_radius, 0))  # 右顶点
+                diamond.append(QPointF(0, anchor_radius))  # 下顶点
+                diamond.append(QPointF(-anchor_radius, 0))  # 左顶点
+                anchor = QGraphicsPolygonItem(diamond)
+                # 添加到场景中，而不是作为图块的子项
+                self.col_editor_scene.addItem(anchor)
+                # 设置锚点填充颜色为白色
+                anchor.setBrush(QBrush(QColor(255, 255, 255)))
+                # 设置锚点描边颜色为黑色，线条宽度恢复默认值1.5
+                pen = QPen(QColor(0, 0, 0), 3.5)  # 恢复默认描边宽度
                 pen.setCosmetic(True)  # 线条宽度不随缩放变化
                 anchor.setPen(pen)
                 anchor.setZValue(100)  # 确保在最顶层
@@ -504,9 +529,11 @@ class CollisionManager(QObject):
             for i, point in enumerate(self.collision_points):
                 anchor_name = f"point_{i}"
                 if anchor_name in self.anchor_items:
-                    # 因为anchor是tile_item的子项，所以直接赋值局部坐标点即可
+                    # 因为anchor现在是场景的直接子项，所以需要加上图块的位置
                     anchor = self.anchor_items[anchor_name]
-                    anchor.setPos(point)
+                    tile_pos = self.tile_item.pos() if self.tile_item else QPointF(0, 0)
+                    # 锚点位置 = 图块位置 + 局部坐标点
+                    anchor.setPos(tile_pos.x() + point.x(), tile_pos.y() + point.y())
         except Exception as e:
             print(f"DEBUG: 更新锚点位置错误: {e}")
             import traceback
@@ -520,16 +547,19 @@ class CollisionManager(QObject):
                 return
 
             if not self.collision_shape_item:
-                # 如果还没有创建多边形项，创建一个并设为图块的子项
+                # 如果还没有创建多边形项，创建一个并设为场景的直接子项
+                # 这样当碰撞形状更新时不会影响图块项的边界框，避免图块抖动
                 from PySide6.QtWidgets import QGraphicsPolygonItem
                 from PySide6.QtGui import QPolygonF
 
                 self.collision_shape_item = QGraphicsPolygonItem()
-                self.collision_shape_item.setParentItem(self.tile_item)
+                # 添加到场景中，而不是作为图块的子项
+                self.col_editor_scene.addItem(self.collision_shape_item)
                 self.collision_shape_item.setBrush(
                     QBrush(QColor(100, 149, 237, 100))
                 )  # 半透明淡蓝色
-                self.collision_shape_item.setPen(QPen(QColor(100, 149, 237), 1))
+                # 将碰撞形状的线条宽度改细一点
+                self.collision_shape_item.setPen(QPen(QColor(100, 149, 237), 0.5))
                 # 核心修复：让多边形不响应鼠标，点击事件会直接穿透到下层的锚点
                 self.collision_shape_item.setAcceptedMouseButtons(Qt.NoButton)
                 self.collision_shape_item.setFlag(
@@ -538,6 +568,10 @@ class CollisionManager(QObject):
 
             if self.collision_shape_item:
                 from PySide6.QtGui import QPolygonF
+
+                # 碰撞形状现在是场景的直接子项，所以需要设置其位置为图块的位置
+                if self.tile_item:
+                    self.collision_shape_item.setPos(self.tile_item.pos())
 
                 polygon = QPolygonF(self.collision_points)
                 self.collision_shape_item.setPolygon(polygon)
