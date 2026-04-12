@@ -186,7 +186,7 @@ class MapEditorManager(QObject):
             self._initialize_canvas_manager()
 
         # 初始化碰撞管理器和属性管理器
-        self.collision_manager = CollisionManager(self.map_model)
+        self.collision_manager = CollisionManager(self.map_model, self)
         self.property_manager = PropertyManager(self.map_model)
 
         # 设置图块图像获取函数
@@ -253,8 +253,19 @@ class MapEditorManager(QObject):
             # 移除场景事件过滤器
             if hasattr(self, "canvas_scene") and self.canvas_scene:
                 self.canvas_scene.removeEventFilter(self)
-        except Exception:
-            pass
+            
+            # 清理碰撞编辑器资源
+            if hasattr(self, "collision_manager") and self.collision_manager:
+                # 移除碰撞编辑器的事件过滤器
+                if hasattr(self.collision_manager, "col_editor_view") and self.collision_manager.col_editor_view:
+                    viewport = self.collision_manager.col_editor_view.viewport()
+                    if viewport:
+                        viewport.removeEventFilter(self.collision_manager)
+                # 清空碰撞编辑器的场景
+                if hasattr(self.collision_manager, "col_editor_scene") and self.collision_manager.col_editor_scene:
+                    self.collision_manager.col_editor_scene.clear()
+        except Exception as e:
+            print(f"DEBUG: 清理资源错误: {e}")
 
     def _initialize_map_model(self):
         """初始化地图数据模型"""
@@ -523,7 +534,7 @@ class MapEditorManager(QObject):
                 # 清空上传资源列表，准备重新加载
                 self.uploaded_resources.clear()
                 
-                for tile_set in tile_sets:
+                for i, tile_set in enumerate(tile_sets):
                     resource_name = tile_set.get("name")
                     image_path = tile_set.get("image_path")
                     
@@ -546,6 +557,18 @@ class MapEditorManager(QObject):
                     }
                     if resource_type == "tileset":
                         resource_info["tiles"] = []
+                        # 从tile_set中获取碰撞形状数据
+                        tiles_data = tile_set.get("tiles", [])
+                        # 初始化collisions数组
+                        resource_info["collisions"] = []
+                        for j, tile_data in enumerate(tiles_data):
+                            # 确保collisions数组足够大
+                            while len(resource_info["collisions"]) <= j:
+                                resource_info["collisions"].append({})
+                            # 保存碰撞形状数据
+                            if "collision_shape" in tile_data and tile_data["collision_shape"]:
+                                resource_info["collisions"][j]["points"] = tile_data["collision_shape"].get("points", [])
+                                print(f"DEBUG: 加载碰撞形状数据 - 资源索引: {i}, 图块索引: {j}, 形状: {tile_data['collision_shape']}")
                     
                     # 尝试加载图片
                     if image_path:
@@ -575,6 +598,7 @@ class MapEditorManager(QObject):
                     
                     # 无论图片是否加载成功，都添加到资源列表中，确保与tile_sets顺序一致
                     self.uploaded_resources.append(resource_info)
+                    print(f"DEBUG: 资源 {i} 加载完成: {resource_info['name']}, 索引: {i}")
 
                 # 更新资源列表和画布
                 self._update_res_list_display()
@@ -1513,45 +1537,99 @@ class MapEditorManager(QObject):
 
     def set_current_collision_tile(self, resource_index, tile_index):
         """设置当前选中的碰撞图块"""
-        if resource_index >= 0 and resource_index < len(self.uploaded_resources):
+        try:
+            print(f"DEBUG: 开始设置当前碰撞图块 - 资源索引: {resource_index}, 图块索引: {tile_index}")
+            
+            # 检查参数有效性
+            if resource_index < 0:
+                print("DEBUG: 资源索引无效: {resource_index}")
+                return
+            
+            if not hasattr(self, 'uploaded_resources'):
+                print("DEBUG: uploaded_resources 不存在")
+                return
+            
+            if resource_index >= len(self.uploaded_resources):
+                print(f"DEBUG: 资源索引越界 - 资源索引: {resource_index}, 资源数量: {len(self.uploaded_resources)}")
+                return
+            
             # 调用碰撞管理器设置当前碰撞图块
-            self.collision_manager.set_current_collision_tile(
-                resource_index, tile_index
-            )
+            print(f"DEBUG: 调用 collision_manager.set_current_collision_tile")
+            if hasattr(self, 'collision_manager'):
+                self.collision_manager.set_current_collision_tile(
+                    resource_index, tile_index
+                )
+                print("DEBUG: collision_manager.set_current_collision_tile 调用成功")
+            else:
+                print("DEBUG: collision_manager 不存在")
+            
             # 调用属性管理器设置当前瓦片
-            self.property_manager.set_current_tile(resource_index, tile_index)
-            # 移除瓦片选中信号发送
-
+            print(f"DEBUG: 调用 property_manager.set_current_tile")
+            if hasattr(self, 'property_manager'):
+                self.property_manager.set_current_tile(resource_index, tile_index)
+                print("DEBUG: property_manager.set_current_tile 调用成功")
+            else:
+                print("DEBUG: property_manager 不存在")
+            
             # 更新map_collision checkbox的状态
+            print(f"DEBUG: 更新 map_collision checkbox 状态")
             if hasattr(self, "ui") and hasattr(self.ui, "map_collision"):
                 if self.map_model:
                     collision_enabled = self.map_model.get_tile_collision(
                         resource_index, tile_index
                     )
+                    print(f"DEBUG: 碰撞启用状态: {collision_enabled}")
                     self.ui.map_collision.setChecked(collision_enabled)
+                    print("DEBUG: map_collision checkbox 状态更新成功")
+                else:
+                    print("DEBUG: map_model 不存在")
+            else:
+                print("DEBUG: ui 或 map_collision 不存在")
 
             # 更新标签输入框的状态
+            print(f"DEBUG: 更新标签输入框状态")
             if hasattr(self, "ui") and hasattr(self.ui, "att_tag"):
                 if self.map_model:
                     tile_tag = self.map_model.get_tile_tag(resource_index, tile_index)
+                    print(f"DEBUG: 瓦片标签: {tile_tag}")
                     # 阻塞信号，防止触发标签变化处理
                     self.ui.att_tag.blockSignals(True)
                     self.ui.att_tag.setText(tile_tag)
                     self.ui.att_tag.blockSignals(False)
+                    print("DEBUG: 标签输入框状态更新成功")
+                else:
+                    print("DEBUG: map_model 不存在")
+            else:
+                print("DEBUG: ui 或 att_tag 不存在")
             
             # 更新碰撞类型选择框的状态
+            print(f"DEBUG: 更新碰撞类型选择框状态")
             if hasattr(self, "ui") and hasattr(self.ui, "att_col_type"):
                 if self.map_model:
                     collision_enabled = self.map_model.get_tile_collision(resource_index, tile_index)
+                    print(f"DEBUG: 碰撞启用状态: {collision_enabled}")
                     # 根据碰撞状态设置碰撞类型
                     # 墙体 -> 碰撞开启
                     # 其他类型 -> 碰撞关闭
                     self.ui.att_col_type.blockSignals(True)
                     if collision_enabled:
                         self.ui.att_col_type.setCurrentText("墙体")
+                        print("DEBUG: 碰撞类型设置为: 墙体")
                     else:
                         self.ui.att_col_type.setCurrentText("背景")
+                        print("DEBUG: 碰撞类型设置为: 背景")
                     self.ui.att_col_type.blockSignals(False)
+                    print("DEBUG: 碰撞类型选择框状态更新成功")
+                else:
+                    print("DEBUG: map_model 不存在")
+            else:
+                print("DEBUG: ui 或 att_col_type 不存在")
+                
+            print("DEBUG: 设置当前碰撞图块完成")
+        except Exception as e:
+            print(f"DEBUG: 设置当前碰撞图块错误: {e}")
+            import traceback
+            traceback.print_exc()
 
     def set_collision_enabled(self, enabled):
         """设置碰撞启用状态"""
@@ -2045,27 +2123,77 @@ class MapEditorManager(QObject):
     def select_tile(self, resource_info, tile_index):
         """选择图块"""
         try:
+            print(f"DEBUG: 开始选择图块 - resource_info: {resource_info}, tile_index: {tile_index}")
+            
+            # 检查参数有效性
+            if resource_info is None:
+                print("DEBUG: resource_info 为 None，选择图块失败")
+                return
+            
+            if not hasattr(self, 'uploaded_resources'):
+                print("DEBUG: uploaded_resources 不存在，选择图块失败")
+                return
+            
             # 查找资源索引
             resource_index = -1
+            print(f"DEBUG: uploaded_resources 长度: {len(self.uploaded_resources)}")
             for i, res in enumerate(self.uploaded_resources):
+                print(f"DEBUG: 检查资源 {i}: {res.get('name', 'unknown')}")
                 if res == resource_info:
                     resource_index = i
+                    print(f"DEBUG: 找到资源索引: {resource_index}")
                     break
 
             if resource_index != -1:
                 self.selected_resource_index = resource_index
                 self.selected_tile_index = tile_index
                 print(
-                    f"DEBUG: 选中图块: 资源={resource_info['name']}, 图块索引={tile_index}"
+                    f"DEBUG: 选中图块: 资源={resource_info['name']}, 图块索引={tile_index}, 资源索引={resource_index}"
                 )
+                
+                # 确保资源的碰撞数据结构存在
+                if 'collisions' not in resource_info:
+                    print("DEBUG: 资源中不存在 collisions 字段，创建新的")
+                    resource_info['collisions'] = []
+                # 确保collisions数组足够大
+                while len(resource_info['collisions']) <= tile_index:
+                    print(f"DEBUG: collisions 数组长度不足，添加新元素")
+                    resource_info['collisions'].append({})
+                
+                # 从地图模型获取最新的碰撞形状数据
+                if self.map_model:
+                    print(f"DEBUG: 从地图模型获取碰撞形状 - 资源索引: {resource_index}, 图块索引: {tile_index}")
+                    collision_shape = self.map_model.get_tile_collision_shape(resource_index, tile_index)
+                    print(f"DEBUG: 获取到的碰撞形状: {collision_shape}")
+                    if collision_shape and 'points' in collision_shape:
+                        resource_info['collisions'][tile_index]['points'] = collision_shape['points']
+                        print(f"DEBUG: 从地图模型同步碰撞形状数据: {collision_shape}")
+                else:
+                    print("DEBUG: map_model 不存在")
+                
+                # 打印当前内存中的碰撞形状类型
+                if 'collisions' in resource_info and tile_index < len(resource_info['collisions']):
+                    collision_data = resource_info['collisions'][tile_index]
+                    if 'points' in collision_data:
+                        print(f"DEBUG: 当前内存中的碰撞形状类型是: polygon, 顶点数: {len(collision_data['points'])}")
+                    else:
+                        print(f"DEBUG: 当前内存中的碰撞形状类型是: default rectangle")
+                else:
+                    print("DEBUG: 无法访问碰撞数据")
 
                 # 更新碰撞编辑器显示
+                print(f"DEBUG: 调用 set_current_collision_tile - 资源索引: {resource_index}, 图块索引: {tile_index}")
                 self.set_current_collision_tile(resource_index, tile_index)
-
-                # 更新资源列表显示
-                self._update_res_list_display()
+            else:
+                print(f"DEBUG: 资源未找到 - resource_info: {resource_info}")
+            
+            # 更新资源列表显示
+            print(f"DEBUG: 更新资源列表显示")
+            self._update_res_list_display()
         except Exception as e:
-            print(f"选择图块错误: {e}")
+            print(f"DEBUG: 选择图块错误: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _update_res_list_display(self):
         """更新资源列表显示"""
@@ -2265,20 +2393,58 @@ class MapEditorManager(QObject):
 
     def set_current_tool(self, tool):
         """设置当前工具"""
+        old_tool = self.current_tool
         self.current_tool = tool
-        print(f"当前工具切换为: {tool}")
+        
+        # 当从碰撞模式退出时，强制同步一次模型数据到内存资源池
+        if old_tool == "collision":
+            self.refresh_resources_from_model()
+    
+    def refresh_resources_from_model(self):
+        """强制从 MapDataModel 同步最新的碰撞数据到 UI 缓存"""
+        print("DEBUG: 从地图模型同步资源数据")
+        # 遍历所有资源，从地图模型获取最新的碰撞形状数据并更新到资源池缓存
+        if self.map_model:
+            for resource_index, resource in enumerate(self.uploaded_resources):
+                # 检查资源是否是tileset类型
+                if resource.get("resource_type") == "tileset":
+                    # 从地图模型获取瓦片集
+                    tile_set = self.map_model.get_tile_set(resource_index)
+                    if tile_set:
+                        # 获取瓦片集的瓦片数量
+                        tiles = tile_set.get("tiles", [])
+                        total_tiles = len(tiles)
+                        
+                        # 确保collisions数组存在且足够大
+                        if "collisions" not in resource:
+                            resource["collisions"] = []
+                        while len(resource["collisions"]) < total_tiles:
+                            resource["collisions"].append({})
+                        
+                        # 从地图模型获取每个图块的碰撞形状数据
+                        for tile_index in range(total_tiles):
+                            collision_shape = self.map_model.get_tile_collision_shape(resource_index, tile_index)
+                            if collision_shape and "points" in collision_shape:
+                                resource["collisions"][tile_index]["points"] = collision_shape["points"]
+                                print(f"DEBUG: 同步碰撞形状数据 - 资源索引: {resource_index}, 图块索引: {tile_index}, 形状: {collision_shape}")
+                            else:
+                                # 如果没有碰撞形状，清除缓存中的数据
+                                if "points" in resource["collisions"][tile_index]:
+                                    del resource["collisions"][tile_index]["points"]
+                                    print(f"DEBUG: 清除碰撞形状数据 - 资源索引: {resource_index}, 图块索引: {tile_index}")
+        print("DEBUG: 资源数据同步完成")
 
         # 更新按钮状态
         if hasattr(self, "ui"):
-            self.ui.btn_editor_map_move.setChecked(tool == "move")
-            self.ui.btn_editor_map_draw.setChecked(tool == "draw")
-            self.ui.btn_editor_map_erase.setChecked(tool == "erase")
+            self.ui.btn_editor_map_move.setChecked(self.current_tool == "move")
+            self.ui.btn_editor_map_draw.setChecked(self.current_tool == "draw")
+            self.ui.btn_editor_map_erase.setChecked(self.current_tool == "erase")
 
         # 切换到移动或擦除模式时移除预览图
-        if tool == "erase" or tool == "move":
+        if self.current_tool == "erase" or self.current_tool == "move":
             self._remove_preview()
         # 切换到绘制模式时，如果已选中资源，显示预览
-        elif tool == "draw" and self.selected_resource_index >= 0:
+        elif self.current_tool == "draw" and self.selected_resource_index >= 0:
             # 检查是否需要图块索引
             resource = self.uploaded_resources[self.selected_resource_index]
             resource_type = resource.get("resource_type", "image")

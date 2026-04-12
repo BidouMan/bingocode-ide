@@ -416,6 +416,9 @@ class MapDataModel(QObject):
 
     def _save_map_resources(self, file_path):
         """保存资源引用"""
+        print(f"DEBUG: 开始保存资源引用到: {file_path}")
+        print(f"DEBUG: 瓦片集数量: {len(self.map_data['tile_sets'])}")
+        
         with open(file_path, "wb") as f:
             # 写入文件头（4字节）
             f.write(struct.pack("<I", 0x52455352))  # "RESR"
@@ -428,7 +431,8 @@ class MapDataModel(QObject):
             maps_dir = os.path.dirname(map_dir)
 
             # 保存每个瓦片集
-            for tile_set in self.map_data["tile_sets"]:
+            for i, tile_set in enumerate(self.map_data["tile_sets"]):
+                print(f"DEBUG: 保存瓦片集 {i}: {tile_set.get('name', 'unnamed')}")
                 # 写入瓦片集名称长度（4字节）
                 name_bytes = tile_set.get("name", "").encode("utf-8")
                 f.write(struct.pack("<I", len(name_bytes)))
@@ -456,10 +460,15 @@ class MapDataModel(QObject):
 
                 # 写入瓦片数量（4字节）
                 tiles = tile_set.get("tiles", [])
+                # 确保tiles数组不为空，至少有一个瓦片的数据
+                if len(tiles) == 0:
+                    # 如果tiles数组为空，创建一个默认的瓦片数据
+                    tiles = [{"collision": True, "tag": "", "collision_shape": None}]
+                print(f"DEBUG: 瓦片集 {i} 的瓦片数量: {len(tiles)}")
                 f.write(struct.pack("<I", len(tiles)))
 
                 # 保存每个瓦片的属性（碰撞状态、标签和碰撞形状）
-                for tile in tiles:
+                for j, tile in enumerate(tiles):
                     # 写入碰撞状态（1字节）
                     collision = tile.get("collision", True)
                     f.write(struct.pack("<B", 1 if collision else 0))
@@ -474,6 +483,7 @@ class MapDataModel(QObject):
                     collision_shape = tile.get("collision_shape", None)
                     if collision_shape and "points" in collision_shape:
                         points = collision_shape["points"]
+                        print(f"DEBUG: 保存瓦片 {j} 的碰撞形状，顶点数: {len(points)}, 形状: {collision_shape}")
                         # 写入点的数量
                         f.write(struct.pack("<I", len(points)))
                         # 写入每个点的坐标（每个点两个浮点数，共8字节）
@@ -482,6 +492,8 @@ class MapDataModel(QObject):
                     else:
                         # 写入0表示没有碰撞形状
                         f.write(struct.pack("<I", 0))
+                        print(f"DEBUG: 保存瓦片 {j} 的默认碰撞形状")
+        print(f"DEBUG: 资源引用保存完成")
 
     def load(self, file_path):
         """从二进制分层文件加载地图数据"""
@@ -663,75 +675,92 @@ class MapDataModel(QObject):
 
     def _load_map_resources(self, file_path, tile_set_count):
         """加载资源引用"""
+        print(f"DEBUG: 开始加载资源引用从: {file_path}")
         tile_sets = []
 
-        with open(file_path, "rb") as f:
-            # 读取文件头（4字节）
-            magic = struct.unpack("<I", f.read(4))[0]
-            if magic != 0x52455352:  # "RESR"
-                raise ValueError("Invalid map resources file")
+        try:
+            with open(file_path, "rb") as f:
+                # 读取文件头（4字节）
+                magic = struct.unpack("<I", f.read(4))[0]
+                if magic != 0x52455352:  # "RESR"
+                    raise ValueError("Invalid map resources file")
 
-            # 读取瓦片集数量（4字节）
-            actual_tile_set_count = struct.unpack("<I", f.read(4))[0]
+                # 读取瓦片集数量（4字节）
+                actual_tile_set_count = struct.unpack("<I", f.read(4))[0]
+                print(f"DEBUG: 瓦片集数量: {actual_tile_set_count}")
 
-            # 获取地图文件所在目录（用于解析相对路径）
-            map_dir = os.path.dirname(file_path)
-            maps_dir = os.path.dirname(map_dir)
+                # 获取地图文件所在目录（用于解析相对路径）
+                map_dir = os.path.dirname(file_path)
+                maps_dir = os.path.dirname(map_dir)
 
-            # 加载每个瓦片集
-            for _ in range(actual_tile_set_count):
-                # 读取瓦片集名称
-                name_length = struct.unpack("<I", f.read(4))[0]
-                name = f.read(name_length).decode("utf-8")
+                # 加载每个瓦片集
+                for i in range(actual_tile_set_count):
+                    # 读取瓦片集名称
+                    name_length = struct.unpack("<I", f.read(4))[0]
+                    name = f.read(name_length).decode("utf-8")
 
-                # 读取图片路径
-                path_length = struct.unpack("<I", f.read(4))[0]
-                image_path = f.read(path_length).decode("utf-8")
+                    # 读取图片路径
+                    path_length = struct.unpack("<I", f.read(4))[0]
+                    image_path = f.read(path_length).decode("utf-8")
 
-                # 如果是相对路径，转换为绝对路径
-                if not os.path.isabs(image_path):
-                    # 相对于maps目录的相对路径
-                    image_path = os.path.join(maps_dir, image_path)
+                    # 如果是相对路径，转换为绝对路径
+                    if not os.path.isabs(image_path):
+                        # 相对于maps目录的相对路径
+                        image_path = os.path.join(maps_dir, image_path)
 
-                # 读取瓦片宽度和高度
-                tile_width, tile_height = struct.unpack("<II", f.read(8))
+                    # 读取瓦片宽度和高度
+                    tile_width, tile_height = struct.unpack("<II", f.read(8))
 
-                # 读取瓦片数量
-                tile_count = struct.unpack("<I", f.read(4))[0]
+                    # 读取瓦片数量
+                    tile_count = struct.unpack("<I", f.read(4))[0]
+                    print(f"DEBUG: 加载瓦片集 {i}: {name}, 瓦片数量: {tile_count}")
 
-                # 加载每个瓦片的属性
-                tiles = []
-                for _ in range(tile_count):
-                    # 读取碰撞状态
-                    collision = struct.unpack("<B", f.read(1))[0] == 1
+                    # 加载每个瓦片的属性
+                    tiles = []
+                    for j in range(tile_count):
+                        # 读取碰撞状态
+                        collision = struct.unpack("<B", f.read(1))[0] == 1
 
-                    # 读取标签
-                    tag_length = struct.unpack("<I", f.read(4))[0]
-                    tag = f.read(tag_length).decode("utf-8")
+                        # 读取标签
+                        tag_length = struct.unpack("<I", f.read(4))[0]
+                        tag = f.read(tag_length).decode("utf-8")
+                        
+                        # 读取碰撞形状数据
+                        point_count = struct.unpack("<I", f.read(4))[0]
+                        collision_shape = None
+                        if point_count > 0:
+                            points = []
+                            for _ in range(point_count):
+                                x, y = struct.unpack("<dd", f.read(16))
+                                points.append([x, y])
+                            collision_shape = {"points": points}
+                            print(f"DEBUG: 加载瓦片 {j} 的碰撞形状，顶点数: {len(points)}, 形状: {collision_shape}")
+                        else:
+                            print(f"DEBUG: 加载瓦片 {j} 的默认碰撞形状")
+
+                        tile = {"collision": collision, "tag": tag}
+                        if collision_shape:
+                            tile["collision_shape"] = collision_shape
+                        tiles.append(tile)
                     
-                    # 读取碰撞形状数据
-                    point_count = struct.unpack("<I", f.read(4))[0]
-                    collision_shape = None
-                    if point_count > 0:
-                        points = []
-                        for _ in range(point_count):
-                            x, y = struct.unpack("<dd", f.read(16))
-                            points.append([x, y])
-                        collision_shape = {"points": points}
+                    # 如果瓦片数量为0，创建一个空的tiles数组，以便后续的set_tile_collision_shape方法能够正确修改它
+                    if tile_count == 0:
+                        tiles = []
 
-                    tile = {"collision": collision, "tag": tag}
-                    if collision_shape:
-                        tile["collision_shape"] = collision_shape
-                    tiles.append(tile)
-
-                tile_set = {
-                    "name": name,
-                    "image_path": image_path,
-                    "tile_width": tile_width,
-                    "tile_height": tile_height,
-                    "tiles": tiles,
-                }
-                tile_sets.append(tile_set)
+                    tile_set = {
+                        "name": name,
+                        "image_path": image_path,
+                        "tile_width": tile_width,
+                        "tile_height": tile_height,
+                        "tiles": tiles,
+                    }
+                    tile_sets.append(tile_set)
+                    print(f"DEBUG: 瓦片集 {i} 加载完成")
+            print(f"DEBUG: 资源引用加载完成，共加载 {len(tile_sets)} 个瓦片集")
+        except Exception as e:
+            print(f"DEBUG: 加载资源引用错误: {e}")
+            import traceback
+            traceback.print_exc()
 
         return tile_sets
 
@@ -745,14 +774,27 @@ class MapDataModel(QObject):
 
     def add_tile_set(self, name, image_path, tile_width, tile_height):
         """添加瓦片集"""
+        # 计算瓦片数量
+        tile_count = 0
+        if image_path:
+            from PySide6.QtGui import QPixmap
+            pixmap = QPixmap(image_path)
+            if not pixmap.isNull():
+                tile_count = (pixmap.width() // tile_width) * (pixmap.height() // tile_height)
+        
         tile_set = {
             "name": name,
             "image_path": image_path,
             "tile_width": tile_width,
             "tile_height": tile_height,
-            "tile_count": 0,  # 将在加载图片后计算
+            "tile_count": tile_count,  # 计算瓦片数量
             "tiles": [],  # 每个图块单独的碰撞设置
         }
+        
+        # 初始化tiles数组，确保每个瓦片都有默认的碰撞设置
+        for i in range(tile_count):
+            tile_set["tiles"].append({"collision": True, "tag": "", "collision_shape": None})
+            
         self.map_data["tile_sets"].append(tile_set)
         self.data_changed.emit()
         return len(self.map_data["tile_sets"]) - 1
@@ -769,63 +811,150 @@ class MapDataModel(QObject):
 
     def set_tile_collision(self, tile_set_index, tile_index, collision):
         """设置单个图块的碰撞状态"""
-        if 0 <= tile_set_index < len(self.map_data["tile_sets"]):
-            tile_set = self.map_data["tile_sets"][tile_set_index]
-            # 确保tiles数组足够大
-            while len(tile_set["tiles"]) <= tile_index:
-                tile_set["tiles"].append({"collision": True})  # 默认开启碰撞
-            tile_set["tiles"][tile_index]["collision"] = collision
-            self.data_changed.emit()
-            return True
-        return False
+        # 确保tile_set_index有效，如果无效，自动创建新的tile_set
+        while tile_set_index >= len(self.map_data["tile_sets"]):
+            # 创建一个新的tile_set
+            new_tile_set = {
+                "name": f"tile_set_{len(self.map_data['tile_sets'])}",
+                "image_path": "",
+                "tile_width": 16,
+                "tile_height": 16,
+                "tiles": [],
+                "tile_count": 0
+            }
+            self.map_data["tile_sets"].append(new_tile_set)
+            print(f"DEBUG: 自动创建新的tile_set，索引: {len(self.map_data['tile_sets']) - 1}")
+        
+        tile_set = self.map_data["tile_sets"][tile_set_index]
+        # 确保tiles数组足够大
+        while len(tile_set["tiles"]) <= tile_index:
+            tile_set["tiles"].append({"collision": True})  # 默认开启碰撞
+        tile_set["tiles"][tile_index]["collision"] = collision
+        self.data_changed.emit()
+        print(f"DEBUG: 成功设置碰撞状态 - tile_set_index: {tile_set_index}, tile_index: {tile_index}, collision: {collision}")
+        return True
     
     def set_tile_collision_shape(self, tile_set_index, tile_index, shape_data):
         """设置单个图块的碰撞形状"""
-        if 0 <= tile_set_index < len(self.map_data["tile_sets"]):
-            tile_set = self.map_data["tile_sets"][tile_set_index]
-            # 确保tiles数组足够大
-            while len(tile_set["tiles"]) <= tile_index:
-                tile_set["tiles"].append({"collision": True})
-            tile_set["tiles"][tile_index]["collision_shape"] = shape_data
-            self.data_changed.emit()
-            return True
-        return False
+        # 确保tile_set_index有效，如果无效，自动创建新的tile_set
+        while tile_set_index >= len(self.map_data["tile_sets"]):
+            # 创建一个新的tile_set
+            new_tile_set = {
+                "name": f"tile_set_{len(self.map_data['tile_sets'])}",
+                "image_path": "",
+                "tile_width": 16,
+                "tile_height": 16,
+                "tiles": [],
+                "tile_count": 0
+            }
+            self.map_data["tile_sets"].append(new_tile_set)
+            print(f"DEBUG: 自动创建新的tile_set，索引: {len(self.map_data['tile_sets']) - 1}")
+        
+        tile_set = self.map_data["tile_sets"][tile_set_index]
+        # 确保tiles数组足够大
+        while len(tile_set["tiles"]) <= tile_index:
+            tile_set["tiles"].append({"collision": True, "collision_shape": None})
+        tile_set["tiles"][tile_index]["collision_shape"] = shape_data
+        self.data_changed.emit()
+        print(f"DEBUG: 成功保存碰撞形状 - tile_set_index: {tile_set_index}, tile_index: {tile_index}, shape: {shape_data}")
+        return True
     
     def get_tile_collision_shape(self, tile_set_index, tile_index):
         """获取单个图块的碰撞形状"""
-        if 0 <= tile_set_index < len(self.map_data["tile_sets"]):
-            tile_set = self.map_data["tile_sets"][tile_set_index]
-            if 0 <= tile_index < len(tile_set["tiles"]):
-                return tile_set["tiles"][tile_index].get("collision_shape", None)
-        return None
+        # 确保tile_set_index有效，如果无效，自动创建新的tile_set
+        while tile_set_index >= len(self.map_data["tile_sets"]):
+            # 创建一个新的tile_set
+            new_tile_set = {
+                "name": f"tile_set_{len(self.map_data['tile_sets'])}",
+                "image_path": "",
+                "tile_width": 16,
+                "tile_height": 16,
+                "tiles": [],
+                "tile_count": 0
+            }
+            self.map_data["tile_sets"].append(new_tile_set)
+            print(f"DEBUG: 自动创建新的tile_set，索引: {len(self.map_data['tile_sets']) - 1}")
+        
+        tile_set = self.map_data["tile_sets"][tile_set_index]
+        # 确保tiles数组足够大
+        while len(tile_set["tiles"]) <= tile_index:
+            tile_set["tiles"].append({"collision": True, "collision_shape": None})
+        collision_shape = tile_set["tiles"][tile_index].get("collision_shape", None)
+        print(f"DEBUG: 成功获取碰撞形状 - tile_set_index: {tile_set_index}, tile_index: {tile_index}, shape: {collision_shape}")
+        return collision_shape
 
     def get_tile_collision(self, tile_set_index, tile_index):
         """获取单个图块的碰撞状态"""
-        if 0 <= tile_set_index < len(self.map_data["tile_sets"]):
-            tile_set = self.map_data["tile_sets"][tile_set_index]
-            if 0 <= tile_index < len(tile_set["tiles"]):
-                return tile_set["tiles"][tile_index].get("collision", True)
-        return True
+        # 确保tile_set_index有效，如果无效，自动创建新的tile_set
+        while tile_set_index >= len(self.map_data["tile_sets"]):
+            # 创建一个新的tile_set
+            new_tile_set = {
+                "name": f"tile_set_{len(self.map_data['tile_sets'])}",
+                "image_path": "",
+                "tile_width": 16,
+                "tile_height": 16,
+                "tiles": [],
+                "tile_count": 0
+            }
+            self.map_data["tile_sets"].append(new_tile_set)
+            print(f"DEBUG: 自动创建新的tile_set，索引: {len(self.map_data['tile_sets']) - 1}")
+        
+        tile_set = self.map_data["tile_sets"][tile_set_index]
+        # 确保tiles数组足够大
+        while len(tile_set["tiles"]) <= tile_index:
+            tile_set["tiles"].append({"collision": True})  # 默认开启碰撞
+        collision = tile_set["tiles"][tile_index].get("collision", True)
+        print(f"DEBUG: 成功获取碰撞状态 - tile_set_index: {tile_set_index}, tile_index: {tile_index}, collision: {collision}")
+        return collision
 
     def set_tile_tag(self, tile_set_index, tile_index, tag):
         """设置单个图块的标签"""
-        if 0 <= tile_set_index < len(self.map_data["tile_sets"]):
-            tile_set = self.map_data["tile_sets"][tile_set_index]
-            # 确保tiles数组足够大
-            while len(tile_set["tiles"]) <= tile_index:
-                tile_set["tiles"].append({"collision": True})
-            tile_set["tiles"][tile_index]["tag"] = tag
-            self.data_changed.emit()
-            return True
-        return False
+        # 确保tile_set_index有效，如果无效，自动创建新的tile_set
+        while tile_set_index >= len(self.map_data["tile_sets"]):
+            # 创建一个新的tile_set
+            new_tile_set = {
+                "name": f"tile_set_{len(self.map_data['tile_sets'])}",
+                "image_path": "",
+                "tile_width": 16,
+                "tile_height": 16,
+                "tiles": [],
+                "tile_count": 0
+            }
+            self.map_data["tile_sets"].append(new_tile_set)
+            print(f"DEBUG: 自动创建新的tile_set，索引: {len(self.map_data['tile_sets']) - 1}")
+        
+        tile_set = self.map_data["tile_sets"][tile_set_index]
+        # 确保tiles数组足够大
+        while len(tile_set["tiles"]) <= tile_index:
+            tile_set["tiles"].append({"collision": True})
+        tile_set["tiles"][tile_index]["tag"] = tag
+        self.data_changed.emit()
+        print(f"DEBUG: 成功设置标签 - tile_set_index: {tile_set_index}, tile_index: {tile_index}, tag: {tag}")
+        return True
 
     def get_tile_tag(self, tile_set_index, tile_index):
         """获取单个图块的标签"""
-        if 0 <= tile_set_index < len(self.map_data["tile_sets"]):
-            tile_set = self.map_data["tile_sets"][tile_set_index]
-            if 0 <= tile_index < len(tile_set["tiles"]):
-                return tile_set["tiles"][tile_index].get("tag", "")
-        return ""
+        # 确保tile_set_index有效，如果无效，自动创建新的tile_set
+        while tile_set_index >= len(self.map_data["tile_sets"]):
+            # 创建一个新的tile_set
+            new_tile_set = {
+                "name": f"tile_set_{len(self.map_data['tile_sets'])}",
+                "image_path": "",
+                "tile_width": 16,
+                "tile_height": 16,
+                "tiles": [],
+                "tile_count": 0
+            }
+            self.map_data["tile_sets"].append(new_tile_set)
+            print(f"DEBUG: 自动创建新的tile_set，索引: {len(self.map_data['tile_sets']) - 1}")
+        
+        tile_set = self.map_data["tile_sets"][tile_set_index]
+        # 确保tiles数组足够大
+        while len(tile_set["tiles"]) <= tile_index:
+            tile_set["tiles"].append({"collision": True})
+        tag = tile_set["tiles"][tile_index].get("tag", "")
+        print(f"DEBUG: 成功获取标签 - tile_set_index: {tile_set_index}, tile_index: {tile_index}, tag: {tag}")
+        return tag
 
     def set_tile_set_collision(self, index, collision):
         """设置整个瓦片集的碰撞状态（兼容旧方法）"""
