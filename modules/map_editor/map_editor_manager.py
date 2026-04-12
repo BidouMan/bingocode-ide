@@ -372,8 +372,6 @@ class MapEditorManager(QObject):
         if self.canvas_scene:
             self.canvas_scene.installEventFilter(self)
 
-        print("鼠标事件绑定完成")
-
     def eventFilter(self, obj, event):
         """场景事件过滤器，确保绘制事件被正确处理"""
         try:
@@ -568,7 +566,6 @@ class MapEditorManager(QObject):
                             # 保存碰撞形状数据
                             if "collision_shape" in tile_data and tile_data["collision_shape"]:
                                 resource_info["collisions"][j]["points"] = tile_data["collision_shape"].get("points", [])
-                                print(f"DEBUG: 加载碰撞形状数据 - 资源索引: {i}, 图块索引: {j}, 形状: {tile_data['collision_shape']}")
                     
                     # 尝试加载图片
                     if image_path:
@@ -586,9 +583,6 @@ class MapEditorManager(QObject):
                                 resource_info["path"] = os.path.relpath(image_path, map_dir)  # 存储相对路径
                                 resource_info["width"] = pixmap.width()
                                 resource_info["height"] = pixmap.height()
-                                print(
-                                    f"✅ 加载资源: {resource_name} | 路径: {resource_info['path']}"
-                                )
                             else:
                                 print(f"⚠️ 图片加载失败: {image_path}")
                         else:
@@ -598,7 +592,6 @@ class MapEditorManager(QObject):
                     
                     # 无论图片是否加载成功，都添加到资源列表中，确保与tile_sets顺序一致
                     self.uploaded_resources.append(resource_info)
-                    print(f"DEBUG: 资源 {i} 加载完成: {resource_info['name']}, 索引: {i}")
 
                 # 更新资源列表和画布
                 self._update_res_list_display()
@@ -618,12 +611,10 @@ class MapEditorManager(QObject):
                 # 更新属性面板中的瓦片大小
                 self._update_tile_size_display()
             else:
-                print(f"DEBUG: 地图数据加载失败: {file_path}")
                 self.error_occurred.emit("加载地图失败")
 
     def save_map(self):
         """保存地图"""
-        print("=== 开始保存地图 ===")
         from PySide6.QtWidgets import QFileDialog
 
         # 如果已经有当前地图路径，直接使用
@@ -639,34 +630,16 @@ class MapEditorManager(QObject):
             if not file_path.endswith((".info", ".json")):
                 file_path += ".info"
 
-            print(f"DEBUG: 保存地图到: {file_path}")
-            print(
-                f"DEBUG: 当前地图数据 - 图层数: {len(self.map_model.map_data['layers'])}"
-            )
-
-            # 统计每个图层的瓦片数量
-            total_tiles = 0
-            for i, layer in enumerate(self.map_model.map_data["layers"]):
-                tile_count = len(layer.get("tiles", {}))
-                total_tiles += tile_count
-                print(
-                    f"DEBUG: 图层 {i} ({layer.get('name', 'unnamed')}) 瓦片数: {tile_count}"
-                )
-            print(f"DEBUG: 总瓦片数: {total_tiles}")
-
             # 保存地图数据
             if self.map_model.save(file_path):
                 self.current_map_path = file_path
                 self.is_map_modified = False
                 self.map_saved.emit(file_path)
-                print(f"✅ 地图保存成功: {file_path}")
             else:
                 self.error_occurred.emit("保存地图失败")
-                print(f"❌ 地图保存失败: {file_path}")
 
     def load_map(self):
         """加载地图"""
-        print("=== 开始加载地图 ===")
         from PySide6.QtWidgets import QFileDialog
 
         file_path, _ = QFileDialog.getOpenFileName(
@@ -674,27 +647,12 @@ class MapEditorManager(QObject):
         )
 
         if file_path:
-            print(f"DEBUG: 加载地图: {file_path}")
             if self.map_model.load(file_path):
                 self.current_map_path = file_path
                 self.is_map_modified = False
                 self.map_loaded.emit(file_path)
 
-                # 输出加载后的地图数据信息
-                print(
-                    f"DEBUG: 加载成功 - 图层数: {len(self.map_model.map_data['layers'])}"
-                )
-                total_tiles = 0
-                for i, layer in enumerate(self.map_model.map_data["layers"]):
-                    tile_count = len(layer.get("tiles", {}))
-                    total_tiles += tile_count
-                    print(
-                        f"DEBUG: 图层 {i} ({layer.get('name', 'unnamed')}) 瓦片数: {tile_count}"
-                    )
-                print(f"DEBUG: 总瓦片数: {total_tiles}")
-
                 self._update_canvas()
-                print(f"✅ 地图已从: {file_path} 加载")
             else:
                 self.error_occurred.emit("加载地图失败")
 
@@ -734,14 +692,9 @@ class MapEditorManager(QObject):
 
     def _update_canvas(self):
         """更新画布显示"""
-        print("=== 更新画布显示 ===")
         if self.canvas_manager and self.map_model:
-            print("调用渲染地图")
             # 使用视口裁剪渲染，提高性能
             self._render_map()
-        else:
-            print(f"画布管理器: {self.canvas_manager}")
-            print(f"地图模型: {self.map_model}")
 
     def _erase_tile(self, scene_pos):
         """物理碰撞拾取擦除方法"""
