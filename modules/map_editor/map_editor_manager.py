@@ -1588,6 +1588,10 @@ class MapEditorManager(QObject):
         """设置碰撞启用状态"""
         self.collision_manager.set_collision_enabled(enabled)
 
+    def set_collision_snap_to_pixel(self, enabled):
+        """设置碰撞锚点是否吸附到像素网格"""
+        self.collision_manager.set_snap_to_pixel(enabled)
+
     def _on_tag_changed(self, tag):
         """处理标签变化"""
         self.property_manager.set_tile_tag(tag)
@@ -2328,6 +2332,9 @@ class MapEditorManager(QObject):
         # 绑定碰撞编辑器相关控件
         if hasattr(self.ui, "map_collision"):
             self.ui.map_collision.toggled.connect(self.set_collision_enabled)
+        # 绑定碰撞锚点吸附按钮
+        if hasattr(self.ui, "btn_res_col_snap"):
+            self.ui.btn_res_col_snap.toggled.connect(self.set_collision_snap_to_pixel)
         # 绑定标签输入框
         if hasattr(self.ui, "att_tag"):
             self.ui.att_tag.textChanged.connect(self._on_tag_changed)

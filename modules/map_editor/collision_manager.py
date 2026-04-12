@@ -111,6 +111,7 @@ class CollisionManager(QObject):
         self.dragging_anchor = None  # 当前正在拖动的锚点
         self.drag_start_pos = QPointF()  # 拖动起始位置
         self.collision_points = []  # 当前碰撞多边形的顶点
+        self.snap_to_pixel = True  # 是否吸附到像素网格，默认开启
 
     def __del__(self):
         """清理资源，避免程序退出时崩溃"""
@@ -458,6 +459,11 @@ class CollisionManager(QObject):
         """设置图块图像获取函数"""
         self.tile_pixmap_provider = provider
 
+    def set_snap_to_pixel(self, enabled):
+        """设置是否吸附到像素网格"""
+        self.snap_to_pixel = enabled
+        print(f"碰撞锚点吸附功能: {'开启' if enabled else '关闭'}")
+
     def _get_tile_pixmap(self, resource_index, tile_index):
         """获取图块图像"""
         if self.tile_pixmap_provider:
@@ -650,6 +656,11 @@ class CollisionManager(QObject):
                 tile_item_pos = self.tile_item.pos()
                 local_x = scene_pos.x() - tile_item_pos.x()
                 local_y = scene_pos.y() - tile_item_pos.y()
+
+                # 如果开启了像素吸附功能，将坐标吸附到最近的像素点（整数坐标）
+                if self.snap_to_pixel:
+                    local_x = round(local_x)
+                    local_y = round(local_y)
 
                 # 解析锚点名称，获取顶点索引
                 if self.dragging_anchor.startswith("point_"):

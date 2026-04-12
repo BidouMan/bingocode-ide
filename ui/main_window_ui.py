@@ -939,6 +939,8 @@ class Ui_Form(object):
         self.btn_res_col_snap.setMinimumSize(QSize(0, 30))
         self.btn_res_col_snap.setMaximumSize(QSize(16777215, 30))
         self.btn_res_col_snap.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_res_col_snap.setCheckable(True)
+        self.btn_res_col_snap.setChecked(True)
         self.btn_res_col_snap.setFlat(True)
 
         self.horizontalLayout_15.addWidget(self.btn_res_col_snap)
