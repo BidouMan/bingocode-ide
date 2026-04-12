@@ -10,6 +10,88 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QPixmap, QBrush, QColor, QPen, QCursor
 
 
+class LockedGraphicsView(QGraphicsView):
+    """完全锁定的QGraphicsView，禁止任何形式的画布移动"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # 初始设置
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setDragMode(QGraphicsView.NoDrag)
+        self.setInteractive(False)
+        self.setContextMenuPolicy(Qt.NoContextMenu)
+        self.setMouseTracking(False)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setAlignment(Qt.AlignCenter)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
+        # 禁用滚动条
+        self.horizontalScrollBar().setEnabled(False)
+        self.verticalScrollBar().setEnabled(False)
+        # 禁用自动滚动
+        self.setAutoScroll(False)
+
+    # 重写所有可能导致画布移动的方法
+    def wheelEvent(self, event):
+        event.accept()
+
+    def mousePressEvent(self, event):
+        event.accept()
+
+    def mouseMoveEvent(self, event):
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        event.accept()
+
+    def mouseDoubleClickEvent(self, event):
+        event.accept()
+
+    def keyPressEvent(self, event):
+        event.accept()
+
+    def keyReleaseEvent(self, event):
+        event.accept()
+
+    def dragEnterEvent(self, event):
+        event.accept()
+
+    def dragMoveEvent(self, event):
+        event.accept()
+
+    def dropEvent(self, event):
+        event.accept()
+
+    def focusInEvent(self, event):
+        event.accept()
+
+    def focusOutEvent(self, event):
+        event.accept()
+
+    def enterEvent(self, event):
+        event.accept()
+
+    def leaveEvent(self, event):
+        event.accept()
+
+    # 重写可能导致滚动的方法
+    def scrollContentsBy(self, dx, dy):
+        # 禁止滚动
+        pass
+
+    def ensureVisible(self, item, xmargin=50, ymargin=50, centerOnItem=False):
+        # 禁止自动滚动到项目
+        pass
+
+    def centerOn(self, item_or_point):
+        # 禁止自动居中
+        pass
+
+    def fitInView(self, rect, aspectRatioMode=Qt.AspectRatioMode.IgnoreAspectRatio):
+        # 禁止自动适应视图
+        pass
+
+
 class CollisionManager(QObject):
     """碰撞管理器，负责处理碰撞相关的功能"""
 
@@ -84,34 +166,52 @@ class CollisionManager(QObject):
     def initialize_collision_editor(self, col_editor_view):
         """初始化碰撞编辑器"""
         try:
-            print(f"初始化碰撞编辑器: {col_editor_view}")
             if not col_editor_view:
-                print("DEBUG: 无效的视图，初始化失败")
                 return
-            self.col_editor_view = col_editor_view
-            self.col_editor_scene = QGraphicsScene()
-            self.col_editor_view.setScene(self.col_editor_scene)
 
-            # 禁用滚动条和滚轮滚动
+            # 直接使用传入的视图，不替换为LockedGraphicsView
+            # 因为替换视图可能会导致其他问题，我们通过其他方式确保画布锁定
+            self.col_editor_view = col_editor_view
+
+            # 禁用所有可能导致画布移动的功能
             self.col_editor_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             self.col_editor_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             self.col_editor_view.setDragMode(QGraphicsView.NoDrag)
+            self.col_editor_view.setInteractive(False)
+            self.col_editor_view.setContextMenuPolicy(Qt.NoContextMenu)
+            self.col_editor_view.setMouseTracking(False)
+            self.col_editor_view.setFocusPolicy(Qt.NoFocus)
 
-            # 设置居中对齐
-            self.col_editor_view.setAlignment(Qt.AlignCenter)
-            self.col_editor_view.setTransformationAnchor(
-                QGraphicsView.ViewportAnchor.AnchorViewCenter
-            )
+            # 禁用滚动条
+            if self.col_editor_view.horizontalScrollBar():
+                self.col_editor_view.horizontalScrollBar().setEnabled(False)
+            if self.col_editor_view.verticalScrollBar():
+                self.col_editor_view.verticalScrollBar().setEnabled(False)
+
+            # 重写事件处理方法
+            self.col_editor_view.wheelEvent = lambda event: event.accept()
+            self.col_editor_view.mousePressEvent = lambda event: event.accept()
+            self.col_editor_view.mouseMoveEvent = lambda event: event.accept()
+            self.col_editor_view.mouseReleaseEvent = lambda event: event.accept()
+            self.col_editor_view.mouseDoubleClickEvent = lambda event: event.accept()
+            self.col_editor_view.keyPressEvent = lambda event: event.accept()
+            self.col_editor_view.keyReleaseEvent = lambda event: event.accept()
+
+            # 初始化场景
+            self.col_editor_scene = QGraphicsScene()
+            self.col_editor_view.setScene(self.col_editor_scene)
 
             # 安装事件过滤器
             viewport = self.col_editor_view.viewport()
             if viewport:
                 viewport.installEventFilter(self)
-            print(
-                f"碰撞编辑器初始化完成: scene={self.col_editor_scene}, view={self.col_editor_view}"
-            )
+                # 也为视图本身安装事件过滤器，确保捕获所有事件
+                self.col_editor_view.installEventFilter(self)
         except Exception as e:
             print(f"DEBUG: 初始化碰撞编辑器错误: {e}")
+            import traceback
+
+            traceback.print_exc()
 
     def set_current_collision_tile(self, resource_index, tile_index):
         """设置当前碰撞图块"""
@@ -137,9 +237,6 @@ class CollisionManager(QObject):
             pixmap = self._get_tile_pixmap(resource_index, tile_index)
 
             if pixmap and not pixmap.isNull():
-                # 在更新场景前先隐藏视图，避免闪烁
-                self.col_editor_view.hide()
-
                 # 获取视图大小
                 view_rect = self.col_editor_view.viewport().rect()
                 view_width = view_rect.width()
@@ -303,7 +400,15 @@ class CollisionManager(QObject):
                 # 再平移到视图中心
                 transform.translate(view_width / 2, view_height / 2)
 
+                # 应用变换，但确保不会导致画布移动
                 self.col_editor_view.setTransform(transform)
+                
+                # 确保场景大小与视图大小匹配，避免滚动
+                # 但是保持图块的居中位置
+                self.col_editor_scene.setSceneRect(-view_width/2, -view_height/2, view_width, view_height)
+                
+                # 确保视图不会自动滚动
+                self.col_editor_view.setSceneRect(-view_width/2, -view_height/2, view_width, view_height)
 
                 # 显示视图
                 self.col_editor_view.show()
@@ -451,16 +556,23 @@ class CollisionManager(QObject):
             if obj == self.col_editor_view.viewport():
                 try:
                     if event.type() == QEvent.MouseButtonPress:
-                        return self._handle_mouse_press(event)
+                        # 完全控制鼠标按下事件，防止画布移动
+                        self._handle_mouse_press(event)
+                        return True
                     elif event.type() == QEvent.MouseMove:
-                        return self._handle_mouse_move(event)
+                        # 完全控制鼠标移动事件，防止画布移动
+                        self._handle_mouse_move(event)
+                        return True
                     elif event.type() == QEvent.MouseButtonRelease:
-                        return self._handle_mouse_release(event)
+                        # 完全控制鼠标释放事件，防止画布移动
+                        self._handle_mouse_release(event)
+                        return True
                 except Exception as e:
                     print(f"DEBUG: 处理鼠标事件错误: {e}")
+                    return True  # 即使出错也返回True，防止事件传递
         except Exception as e:
             print(f"DEBUG: 事件过滤器错误: {e}")
-        return super().eventFilter(obj, event)
+        return False  # 其他事件不处理
 
     def _handle_mouse_press(self, event):
         """处理鼠标按下事件"""
@@ -529,12 +641,16 @@ class CollisionManager(QObject):
                                     resource_index, tile_index, {"points": points_data}
                                 )
 
+                            # 完全阻止事件传递，防止画布移动
+                            event.accept()
                             return True
                     except (ValueError, IndexError) as e:
                         print(f"DEBUG: 解析锚点错误: {e}")
         except Exception as e:
             print(f"DEBUG: 鼠标移动事件错误: {e}")
-        return False
+        # 即使没有拖动锚点，也返回True以防止画布移动
+        event.accept()
+        return True
 
     def _handle_mouse_release(self, event):
         """处理鼠标释放事件"""
