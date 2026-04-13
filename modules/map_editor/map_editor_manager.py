@@ -762,6 +762,14 @@ class MapEditorManager(QObject):
                                 for i, res in enumerate(self.layer_resources[layer_id]):
                                     print(f"DEBUG:   资源 {i}: {res.get('name', 'unknown')}, 路径: {res.get('path', 'unknown')}")
 
+                # 更新图层列表组件
+                if hasattr(self, 'editor_map_layer_list') and self.editor_map_layer_list:
+                    self._update_editor_map_layer_list()
+                
+                # 默认选择第一个图层
+                if self.layer_manager.layers:
+                    self.layer_manager.set_current_layer(0)
+                
                 # 更新资源列表和画布
                 self._update_res_list_display()
                 # 地图加载完成后强制完整渲染一次，确保所有瓦片都显示
