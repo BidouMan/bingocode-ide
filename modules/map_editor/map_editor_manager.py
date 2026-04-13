@@ -25,6 +25,8 @@ from models.map_model import MapDataModel
 from .map_canvas_manager import MapCanvas
 from .collision_manager import CollisionManager
 from .property_manager import PropertyManager
+from .layer_manager import LayerManager
+from .layer_list_view import LayerListView
 
 
 class TileItem(QGraphicsRectItem):
@@ -217,6 +219,12 @@ class MapEditorManager(QObject):
         # 初始化碰撞管理器和属性管理器
         self.collision_manager = CollisionManager(self.map_model, self)
         self.property_manager = PropertyManager(self.map_model)
+        
+        # 初始化图层管理器
+        self.layer_manager = LayerManager(self.map_model, self)
+        self.layer_list_view = None
+        # 监听图层变化信号
+        self.layer_manager.current_layer_changed.connect(self._on_layer_changed)
 
         # 设置图块图像获取函数
         self.collision_manager.set_tile_pixmap_provider(
@@ -230,7 +238,8 @@ class MapEditorManager(QObject):
         self.res_list_view = None
         # 按地图路径存储资源，实现资源隔离
         self.map_resources = {}  # {map_path: [resources]}
-        self.uploaded_resources = []  # 当前地图的资源
+        # 图层独立的资源管理
+        self.layer_resources = {}  # {layer_id: [resources]}
         self.selected_resource_index = -1  # 当前选中的资源索引
         self.selected_tile_index = -1  # 当前选中的图块索引
         self.resource_items = []  # 存储资源项的图形项
@@ -255,6 +264,11 @@ class MapEditorManager(QObject):
         self.selected_item = None
         self.drag_start_pos = None
         self.original_tile_pos = None  # 原始瓦片位置
+        
+        # 图像变换相关
+        self.selected_image_data = None  # 当前选中的图像数据
+        self.selected_image_index = -1  # 当前选中的图像索引
+        self.selected_layer_id = -1  # 当前选中的图层ID
 
         # 地图路径相关
         self.current_map_path = None  # 当前地图文件路径
@@ -273,6 +287,9 @@ class MapEditorManager(QObject):
 
         # 对象池 (Object Pool) —— 老机器的救星
         self._item_pool = []  # 存放闲置的 QGraphicsPixmapItem
+        
+        # 图像图层的图像项缓存
+        self._image_items = {}  # 格式：{(layer_id, image_index): QGraphicsPixmapItem}
 
         # 移除瓦片选中信号，避免信号错误
 
@@ -502,9 +519,73 @@ class MapEditorManager(QObject):
 
     def set_current_layer(self, layer_index):
         """设置当前选中的图层"""
-        if 0 <= layer_index < self.map_model.get_layer_count():
+        if self.layer_manager.set_current_layer(layer_index):
             self.current_layer = layer_index
             print(f"当前图层: {layer_index}")
+    
+    def import_image_to_layer(self):
+        """导入图像到当前图像图层"""
+        from PySide6.QtWidgets import QFileDialog
+        
+        # 检查当前图层是否是图像图层
+        current_layer = self.layer_manager.get_current_layer()
+        if not current_layer or current_layer.layer_type != "image":
+            print("错误: 当前图层不是图像图层")
+            return
+        
+        # 打开文件对话框选择图像文件
+        file_path, _ = QFileDialog.getOpenFileName(
+            None, "导入图像", "", "Image Files (*.png *.jpg *.jpeg *.bmp *.gif)"
+        )
+        
+        if file_path:
+            # 创建图像数据对象
+            from .layer_manager import ImageData
+            image_data = ImageData(file_path)
+            
+            # 添加到当前图层
+            current_layer.add_image(image_data)
+            
+            # 更新地图数据模型
+            self.layer_manager.update_map_model()
+            
+            # 渲染图像
+            self._render_image_layer(current_layer)
+            
+            # 设置地图为已修改状态
+            self.is_map_modified = True
+            
+            print(f"成功导入图像: {file_path}")
+    
+    def create_new_layer(self, layer_type):
+        """创建新图层"""
+        layer = self.layer_manager.create_layer(layer_type)
+        print(f"创建新{layer_type}图层: {layer.name}")
+        return layer
+    
+    def delete_current_layer(self):
+        """删除当前图层"""
+        current_index = self.layer_manager.current_layer_index
+        if self.layer_manager.delete_layer(current_index):
+            print(f"删除图层: {current_index}")
+            return True
+        return False
+    
+    def move_layer_up(self):
+        """将当前图层上移"""
+        current_index = self.layer_manager.current_layer_index
+        if self.layer_manager.move_layer_up(current_index):
+            print(f"图层上移: {current_index} -> {current_index - 1}")
+            return True
+        return False
+    
+    def move_layer_down(self):
+        """将当前图层下移"""
+        current_index = self.layer_manager.current_layer_index
+        if self.layer_manager.move_layer_down(current_index):
+            print(f"图层下移: {current_index} -> {current_index + 1}")
+            return True
+        return False
 
     def new_map(self):
         """创建新地图"""
@@ -518,7 +599,7 @@ class MapEditorManager(QObject):
             self.selected_resource_index = -1
             self.selected_tile_index = -1
             self._remove_preview()
-            self.uploaded_resources.clear()
+            self.layer_resources.clear()
 
             # 加载地图数据
             if self.map_model.load(file_path):
@@ -527,7 +608,7 @@ class MapEditorManager(QObject):
                 self.map_loaded.emit(file_path)
 
                 # 清空上传资源列表，准备重新加载
-                self.uploaded_resources.clear()
+                self.layer_resources.clear()
 
                 # 强制清理场景中的所有瓦片项（确保切换地图时彻底清空画布）
                 if self.canvas_manager and self.canvas_manager.scene():
@@ -560,73 +641,126 @@ class MapEditorManager(QObject):
                     self.tile_items.clear()
                     self.resource_items.clear()
 
+                # 初始化图层管理系统
+                self.layer_manager.initialize_from_map_model()
+                
                 # 加载瓦片集资源
                 tile_sets = self.map_model.get_tile_sets()
 
                 map_dir = os.path.dirname(file_path)
                 # 清空上传资源列表，准备重新加载
-                self.uploaded_resources.clear()
+                self.layer_resources.clear()
                 
-                for i, tile_set in enumerate(tile_sets):
-                    resource_name = tile_set.get("name")
-                    image_path = tile_set.get("image_path")
-                    
-                    # 修复：确保tile_width/tile_height有默认值
-                    tile_width = tile_set.get("tile_width", 16)
-                    tile_height = tile_set.get("tile_height", 16)
-                    resource_type = "tileset" if tile_width and tile_height else "image"
-                    
-                    # 初始化资源信息
-                    resource_info = {
-                        "name": resource_name,
-                        "path": "",  # 默认空路径
-                        "resource_type": resource_type,
-                        "tile_width": tile_width,
-                        "tile_height": tile_height,
-                        "tile_size": tile_width if resource_type == "tileset" else tile_width,
-                        "width": tile_width,  # 默认宽度
-                        "height": tile_height,  # 默认高度
-                        "frames": 1,
-                    }
-                    if resource_type == "tileset":
-                        resource_info["tiles"] = []
-                        # 从tile_set中获取碰撞形状数据
-                        tiles_data = tile_set.get("tiles", [])
-                        # 初始化collisions数组
-                        resource_info["collisions"] = []
-                        for j, tile_data in enumerate(tiles_data):
-                            # 确保collisions数组足够大
-                            while len(resource_info["collisions"]) <= j:
-                                resource_info["collisions"].append({})
-                            # 保存碰撞形状数据
-                            if "collision_shape" in tile_data and tile_data["collision_shape"]:
-                                resource_info["collisions"][j]["points"] = tile_data["collision_shape"].get("points", [])
-                    
-                    # 尝试加载图片
-                    if image_path:
-                        # 修复：优先使用绝对路径，避免相对路径解析错误
-                        if not os.path.isabs(image_path):
-                            image_path = os.path.join(map_dir, image_path)
-
-                        # 检查文件是否存在
-                        if os.path.exists(image_path):
-                            # 加载图片获取真实尺寸
-                            from PySide6.QtGui import QPixmap
-
-                            pixmap = QPixmap(image_path)
-                            if not pixmap.isNull():
-                                resource_info["path"] = os.path.relpath(image_path, map_dir)  # 存储相对路径
-                                resource_info["width"] = pixmap.width()
-                                resource_info["height"] = pixmap.height()
-                            else:
-                                print(f"⚠️ 图片加载失败: {image_path}")
+                # 分配资源给图层
+                if "tile_sets" in self.map_model.map_data:
+                    tile_sets = self.map_model.map_data["tile_sets"]
+                    print(f"DEBUG: 加载的瓦片集数量: {len(tile_sets)}")
+                    # 转换资源格式，确保每个资源都有path和resource_type字段
+                    converted_resources = []
+                    for i, resource in enumerate(tile_sets):
+                        # 检查资源格式是否正确
+                        if "image_path" in resource:
+                            # 从加载的格式转换为我们期望的格式
+                            converted_resource = {
+                                "name": resource.get("name", ""),
+                                "path": resource.get("image_path", ""),
+                                "resource_type": "tileset",  # 默认资源类型
+                                "tile_size": resource.get("tile_width", 32),
+                                "tile_width": resource.get("tile_width", 32),
+                                "tile_height": resource.get("tile_height", 32),
+                                "collisions": []  # 初始化碰撞数据
+                            }
+                            # 计算图块数量
+                            if "tiles" in resource:
+                                converted_resource["total_tiles"] = len(resource["tiles"])
+                            converted_resources.append(converted_resource)
+                            print(f"DEBUG: 转换资源 {i}: {converted_resource['name']}, 路径: {converted_resource['path']}")
                         else:
-                            print(f"⚠️ 图片文件不存在: {image_path}")
-                    else:
-                        print(f"⚠️ 瓦片集{resource_name}无图片路径")
+                            # 资源格式已经正确，直接添加
+                            converted_resources.append(resource)
+                            print(f"DEBUG: 直接添加资源 {i}: {resource.get('name', 'unknown')}, 路径: {resource.get('path', 'unknown')}")
                     
-                    # 无论图片是否加载成功，都添加到资源列表中，确保与tile_sets顺序一致
-                    self.uploaded_resources.append(resource_info)
+                    # 为每个图层分配资源
+                    layer_resources_map = self.map_model.map_data.get("layer_resources_map", {})
+                    print(f"DEBUG: 图层资源映射: {layer_resources_map}")
+                    
+                    # 检查layer_resources_map的类型和内容
+                    print(f"DEBUG: layer_resources_map 类型: {type(layer_resources_map)}")
+                    print(f"DEBUG: layer_resources_map 长度: {len(layer_resources_map)}")
+                    print(f"DEBUG: layer_resources_map 内容: {layer_resources_map}")
+                    
+                    # 如果layer_resources_map为空，根据每个图层的瓦片数据来确定需要哪些资源
+                    if not layer_resources_map:
+                        print("DEBUG: layer_resources_map为空，根据瓦片数据确定资源分配")
+                        # 为每个图层收集所需的资源
+                        for layer in self.layer_manager.layers:
+                            layer_id = layer.layer_id
+                            print(f"DEBUG: 处理图层 {layer.name} (ID: {layer_id})")
+                            if layer_id not in self.layer_resources:
+                                self.layer_resources[layer_id] = []
+                            
+                            # 收集该图层需要的资源
+                            required_resources = []
+                            if layer.layer_type == "drawing":
+                                # 检查该图层的瓦片数据
+                                print(f"DEBUG: 图层 {layer.name} 是绘制图层，瓦片数量: {len(layer.tiles)}")
+                                for (x, y), tile_id in layer.tiles.items():
+                                    if tile_id > 0:
+                                        # 解析tile_id获取资源索引
+                                        resource_index = (tile_id // 1000) - 1
+                                        print(f"DEBUG: 瓦片 [{x}, {y}] -> ID: {tile_id}, 资源索引: {resource_index}")
+                                        if 0 <= resource_index < len(converted_resources):
+                                            resource = converted_resources[resource_index]
+                                            print(f"DEBUG: 找到资源: {resource.get('name', 'unknown')}, 路径: {resource.get('path', 'unknown')}")
+                                            # 检查资源是否已经在required_resources中
+                                            if resource not in required_resources:
+                                                required_resources.append(resource)
+                                                print(f"DEBUG: 添加资源到列表: {resource.get('name', 'unknown')}")
+                                for i, ((x, y), tile_id) in enumerate(list(layer.tiles.items())[:3]):
+                                    print(f"DEBUG:   瓦片 {i}: [{x}, {y}] -> ID: {tile_id}, 资源索引: {(tile_id // 1000) - 1}")
+                            
+                            # 分配资源给图层
+                            if required_resources:
+                                self.layer_resources[layer_id] = required_resources
+                                print(f"DEBUG: 为图层 {layer.name} (ID: {layer_id}) 分配资源，数量: {len(required_resources)}")
+                                for i, res in enumerate(self.layer_resources[layer_id]):
+                                    print(f"DEBUG:   资源 {i}: {res.get('name', 'unknown')}, 路径: {res.get('path', 'unknown')}")
+                            else:
+                                # 如果没有需要的资源，分配空列表
+                                self.layer_resources[layer_id] = []
+                                print(f"DEBUG: 为图层 {layer.name} (ID: {layer_id}) 分配空资源列表")
+                    else:
+                        # 如果layer_resources_map不为空，根据保存的资源索引范围分配资源
+                        for layer in self.layer_manager.layers:
+                            layer_id = layer.layer_id
+                            if layer_id not in self.layer_resources:
+                                self.layer_resources[layer_id] = []
+                            # 尝试不同的键类型
+                            layer_id_str = str(layer_id)
+                            found = False
+                            if layer_id_str in layer_resources_map:
+                                start_index, end_index = layer_resources_map[layer_id_str]
+                                self.layer_resources[layer_id] = converted_resources[start_index:end_index]
+                                print(f"DEBUG: 为图层 {layer.name} (ID: {layer_id}) 分配资源，索引范围: {start_index}-{end_index}")
+                                for i, res in enumerate(self.layer_resources[layer_id]):
+                                    print(f"DEBUG:   资源 {i}: {res.get('name', 'unknown')}, 路径: {res.get('path', 'unknown')}")
+                                found = True
+                            else:
+                                # 尝试整数类型的键
+                                if layer_id in layer_resources_map:
+                                    start_index, end_index = layer_resources_map[layer_id]
+                                    self.layer_resources[layer_id] = converted_resources[start_index:end_index]
+                                    print(f"DEBUG: 为图层 {layer.name} (ID: {layer_id}) 分配资源，索引范围: {start_index}-{end_index}")
+                                    for i, res in enumerate(self.layer_resources[layer_id]):
+                                        print(f"DEBUG:   资源 {i}: {res.get('name', 'unknown')}, 路径: {res.get('path', 'unknown')}")
+                                    found = True
+                            
+                            if not found:
+                                # 如果没有保存的资源索引范围，将所有资源分配给所有图层
+                                self.layer_resources[layer_id] = converted_resources
+                                print(f"DEBUG: 为图层 {layer.name} (ID: {layer_id}) 分配所有资源")
+                                for i, res in enumerate(self.layer_resources[layer_id]):
+                                    print(f"DEBUG:   资源 {i}: {res.get('name', 'unknown')}, 路径: {res.get('path', 'unknown')}")
 
                 # 更新资源列表和画布
                 self._update_res_list_display()
@@ -665,6 +799,46 @@ class MapEditorManager(QObject):
             if not file_path.endswith((".info", ".json")):
                 file_path += ".info"
 
+            # 更新图层管理系统数据到地图数据模型
+            self.layer_manager.update_map_model()
+
+            # 收集所有图层的资源，保存到地图模型的tile_sets中
+            all_resources = []
+            resource_path_to_index = {}
+            layer_resources_map = {}
+            
+            # 首先收集所有唯一的资源
+            for layer_id, layer_resources in self.layer_resources.items():
+                for resource in layer_resources:
+                    resource_path = resource.get("path", "")
+                    if resource_path not in resource_path_to_index:
+                        resource_path_to_index[resource_path] = len(all_resources)
+                        all_resources.append(resource)
+            
+            # 为每个图层分配资源索引范围
+            for layer_id, layer_resources in self.layer_resources.items():
+                # 计算该图层的资源在全局资源列表中的索引范围
+                layer_resource_indices = []
+                for resource in layer_resources:
+                    resource_path = resource.get("path", "")
+                    if resource_path in resource_path_to_index:
+                        layer_resource_indices.append(resource_path_to_index[resource_path])
+                
+                if layer_resource_indices:
+                    start_index = min(layer_resource_indices)
+                    end_index = max(layer_resource_indices) + 1
+                else:
+                    start_index = 0
+                    end_index = 0
+                
+                layer_resources_map[str(layer_id)] = (start_index, end_index)
+                print(f"DEBUG: 保存图层 {layer_id} 的资源索引范围: {start_index}-{end_index}")
+            
+            # 更新地图模型的tile_sets
+            self.map_model.map_data["tile_sets"] = all_resources
+            # 保存每个图层的资源索引范围
+            self.map_model.map_data["layer_resources_map"] = layer_resources_map
+
             # 保存地图数据
             if self.map_model.save(file_path):
                 self.current_map_path = file_path
@@ -687,7 +861,123 @@ class MapEditorManager(QObject):
                 self.is_map_modified = False
                 self.map_loaded.emit(file_path)
 
+                # 初始化图层管理系统
+                self.layer_manager.initialize_from_map_model()
+
+                # 分配资源给图层
+                if "tile_sets" in self.map_model.map_data:
+                    tile_sets = self.map_model.map_data["tile_sets"]
+                    print(f"DEBUG: 加载的瓦片集数量: {len(tile_sets)}")
+                    # 转换资源格式，确保每个资源都有path和resource_type字段
+                    converted_resources = []
+                    for i, resource in enumerate(tile_sets):
+                        # 检查资源格式是否正确
+                        if "image_path" in resource:
+                            # 从加载的格式转换为我们期望的格式
+                            converted_resource = {
+                                "name": resource.get("name", ""),
+                                "path": resource.get("image_path", ""),
+                                "resource_type": "tileset",  # 默认资源类型
+                                "tile_size": resource.get("tile_width", 32),
+                                "tile_width": resource.get("tile_width", 32),
+                                "tile_height": resource.get("tile_height", 32),
+                                "collisions": []  # 初始化碰撞数据
+                            }
+                            # 计算图块数量
+                            if "tiles" in resource:
+                                converted_resource["total_tiles"] = len(resource["tiles"])
+                            converted_resources.append(converted_resource)
+                            print(f"DEBUG: 转换资源 {i}: {converted_resource['name']}, 路径: {converted_resource['path']}")
+                        else:
+                            # 资源格式已经正确，直接添加
+                            converted_resources.append(resource)
+                            print(f"DEBUG: 直接添加资源 {i}: {resource.get('name', 'unknown')}, 路径: {resource.get('path', 'unknown')}")
+                    
+                    # 为每个图层分配资源
+                    layer_resources_map = self.map_model.map_data.get("layer_resources_map", {})
+                    print(f"DEBUG: 图层资源映射: {layer_resources_map}")
+                    
+                    # 检查layer_resources_map的类型和内容
+                    print(f"DEBUG: layer_resources_map 类型: {type(layer_resources_map)}")
+                    print(f"DEBUG: layer_resources_map 长度: {len(layer_resources_map)}")
+                    print(f"DEBUG: layer_resources_map 内容: {layer_resources_map}")
+                    
+                    # 如果layer_resources_map为空，根据每个图层的瓦片数据来确定需要哪些资源
+                    if not layer_resources_map:
+                        print("DEBUG: layer_resources_map为空，根据瓦片数据确定资源分配")
+                        # 为每个图层收集所需的资源
+                        for layer in self.layer_manager.layers:
+                            layer_id = layer.layer_id
+                            print(f"DEBUG: 处理图层 {layer.name} (ID: {layer_id})")
+                            if layer_id not in self.layer_resources:
+                                self.layer_resources[layer_id] = []
+                            
+                            # 收集该图层需要的资源
+                            required_resources = []
+                            if layer.layer_type == "drawing":
+                                # 检查该图层的瓦片数据
+                                print(f"DEBUG: 图层 {layer.name} 是绘制图层，瓦片数量: {len(layer.tiles)}")
+                                for (x, y), tile_id in layer.tiles.items():
+                                    if tile_id > 0:
+                                        # 解析tile_id获取资源索引
+                                        resource_index = (tile_id // 1000) - 1
+                                        print(f"DEBUG: 瓦片 [{x}, {y}] -> ID: {tile_id}, 资源索引: {resource_index}")
+                                        if 0 <= resource_index < len(converted_resources):
+                                            resource = converted_resources[resource_index]
+                                            print(f"DEBUG: 找到资源: {resource.get('name', 'unknown')}, 路径: {resource.get('path', 'unknown')}")
+                                            # 检查资源是否已经在required_resources中
+                                            if resource not in required_resources:
+                                                required_resources.append(resource)
+                                                print(f"DEBUG: 添加资源到列表: {resource.get('name', 'unknown')}")
+                                for i, ((x, y), tile_id) in enumerate(list(layer.tiles.items())[:3]):
+                                    print(f"DEBUG:   瓦片 {i}: [{x}, {y}] -> ID: {tile_id}, 资源索引: {(tile_id // 1000) - 1}")
+                            
+                            # 分配资源给图层
+                            if required_resources:
+                                self.layer_resources[layer_id] = required_resources
+                                print(f"DEBUG: 为图层 {layer.name} (ID: {layer_id}) 分配资源，数量: {len(required_resources)}")
+                                for i, res in enumerate(self.layer_resources[layer_id]):
+                                    print(f"DEBUG:   资源 {i}: {res.get('name', 'unknown')}, 路径: {res.get('path', 'unknown')}")
+                            else:
+                                # 如果没有需要的资源，分配空列表
+                                self.layer_resources[layer_id] = []
+                                print(f"DEBUG: 为图层 {layer.name} (ID: {layer_id}) 分配空资源列表")
+                    else:
+                        # 如果layer_resources_map不为空，根据保存的资源索引范围分配资源
+                        for layer in self.layer_manager.layers:
+                            layer_id = layer.layer_id
+                            if layer_id not in self.layer_resources:
+                                self.layer_resources[layer_id] = []
+                            # 尝试不同的键类型
+                            layer_id_str = str(layer_id)
+                            found = False
+                            if layer_id_str in layer_resources_map:
+                                start_index, end_index = layer_resources_map[layer_id_str]
+                                self.layer_resources[layer_id] = converted_resources[start_index:end_index]
+                                print(f"DEBUG: 为图层 {layer.name} (ID: {layer_id}) 分配资源，索引范围: {start_index}-{end_index}")
+                                for i, res in enumerate(self.layer_resources[layer_id]):
+                                    print(f"DEBUG:   资源 {i}: {res.get('name', 'unknown')}, 路径: {res.get('path', 'unknown')}")
+                                found = True
+                            else:
+                                # 尝试整数类型的键
+                                if layer_id in layer_resources_map:
+                                    start_index, end_index = layer_resources_map[layer_id]
+                                    self.layer_resources[layer_id] = converted_resources[start_index:end_index]
+                                    print(f"DEBUG: 为图层 {layer.name} (ID: {layer_id}) 分配资源，索引范围: {start_index}-{end_index}")
+                                    for i, res in enumerate(self.layer_resources[layer_id]):
+                                        print(f"DEBUG:   资源 {i}: {res.get('name', 'unknown')}, 路径: {res.get('path', 'unknown')}")
+                                    found = True
+                            
+                            if not found:
+                                # 如果没有保存的资源索引范围，将所有资源分配给所有图层
+                                self.layer_resources[layer_id] = converted_resources
+                                print(f"DEBUG: 为图层 {layer.name} (ID: {layer_id}) 分配所有资源")
+                                for i, res in enumerate(self.layer_resources[layer_id]):
+                                    print(f"DEBUG:   资源 {i}: {res.get('name', 'unknown')}, 路径: {res.get('path', 'unknown')}")
+
                 self._update_canvas()
+                # 更新资源列表显示
+                self._update_res_list_display()
             else:
                 self.error_occurred.emit("加载地图失败")
 
@@ -728,8 +1018,8 @@ class MapEditorManager(QObject):
     def _update_canvas(self):
         """更新画布显示"""
         if self.canvas_manager and self.map_model:
-            # 使用视口裁剪渲染，提高性能
-            self._render_map()
+            # 渲染所有可见图层
+            self._render_all_layers()
 
     def _erase_tile(self, scene_pos):
         """物理碰撞拾取擦除方法"""
@@ -748,14 +1038,18 @@ class MapEditorManager(QObject):
                         del self.tile_items[(gx, gy)]
 
             # 3. 同步清理数据模型中的数据
-            self.map_model.set_tile(self.current_layer, gx, gy, 0)  # 0 代表空
+            current_layer = self.layer_manager.get_current_layer()
+            if current_layer and current_layer.layer_type == "drawing":
+                current_layer.set_tile(gx, gy, 0)  # 0 代表空
+                # 更新地图数据模型
+                self.layer_manager.update_map_model()
 
-            # 设置地图为已修改状态
-            self.is_map_modified = True
+                # 设置地图为已修改状态
+                self.is_map_modified = True
 
-            # 自动保存地图（如果当前地图有文件路径）
-            if self.current_map_path:
-                save_result = self.map_model.save(self.current_map_path)
+                # 自动保存地图（如果当前地图有文件路径）
+                if self.current_map_path:
+                    save_result = self.map_model.save(self.current_map_path)
 
         except Exception as e:
             print(f"擦除图块错误: {e}")
@@ -783,11 +1077,16 @@ class MapEditorManager(QObject):
                     self._recycle_item(old_item)
                 return
 
-            # 检查是否已有瓦片且瓦片ID相同，如果相同则无需更新
-            if (x, y) in self.tile_items:
+            # 检查是否已有瓦片
+            tile_exists = (x, y) in self.tile_items
+            existing_item = None
+            if tile_exists:
                 existing_item = self.tile_items[(x, y)]
                 existing_tile_id = existing_item.data(1)
-                if existing_tile_id == tile_id:
+                existing_layer_index = existing_item.data(2)
+                
+                # 如果瓦片属于当前图层且ID相同，不需要更新
+                if existing_layer_index == self.current_layer and existing_tile_id == tile_id:
                     return
 
             # 获取图块图像
@@ -795,11 +1094,19 @@ class MapEditorManager(QObject):
             if not pixmap:
                 return
 
-            # 如果位置已有瓦片，更新现有瓦片而不是创建新瓦片
-            if (x, y) in self.tile_items:
-                existing_item = self.tile_items[(x, y)]
+            # 如果位置已有瓦片但不属于当前图层，先移除它
+            if tile_exists and existing_item and existing_item.data(2) != self.current_layer:
+                self.tile_items.pop((x, y))
+                self._recycle_item(existing_item)
+                tile_exists = False
+
+            # 创建或更新瓦片
+            if tile_exists:
+                # 更新现有瓦片
                 existing_item.setPixmap(pixmap)
                 existing_item.setData(1, tile_id)
+                existing_item.setData(2, self.current_layer)
+                existing_item.setZValue(self.current_layer + 10)
             else:
                 # 使用对象池获取图块项
                 item = self._get_item_from_pool(pixmap)
@@ -823,6 +1130,8 @@ class MapEditorManager(QObject):
                 # 给图块打标签，方便擦除时识别
                 item.setData(0, "tile")
                 item.setData(1, tile_id)
+                # 存储图层索引，方便删除图层时清理
+                item.setData(2, self.current_layer)
 
             # 记录渲染时的图块位置（世界网格坐标）
             self._record_coordinates(
@@ -870,8 +1179,13 @@ class MapEditorManager(QObject):
 
     def _generate_pixmap(self, tile_id):
         """解析资源并生成 QPixmap"""
+        # 获取所有图层的资源列表
+        all_resources = []
+        for layer_resources in self.layer_resources.values():
+            all_resources.extend(layer_resources)
+        
         # 查找匹配的资源
-        for resource_index, resource in enumerate(self.uploaded_resources):
+        for resource_index, resource in enumerate(all_resources):
             resource_type = resource.get("resource_type", "image")
 
             if resource_type == "tileset":
@@ -948,6 +1262,60 @@ class MapEditorManager(QObject):
 
     def _render_full_map(self):
         """渲染整个地图，不使用视口裁剪"""
+        # 调用_render_all_layers方法，渲染所有可见图层
+        self._render_all_layers()
+
+    def _render_image_layer(self, layer):
+        """渲染图像图层"""
+        try:
+            if not self.canvas_manager:
+                return
+            
+            scene = self.canvas_manager.scene()
+            if not scene:
+                return
+            
+            # 清理该图层的旧图像项
+            for key in list(self._image_items.keys()):
+                if key[0] == layer.layer_id:
+                    item = self._image_items.pop(key)
+                    try:
+                        scene.removeItem(item)
+                        item.deleteLater()
+                    except Exception as e:
+                        print(f"移除图像项错误: {e}")
+            
+            # 渲染新图像
+            for i, image_data in enumerate(layer.images):
+                if image_data.pixmap:
+                    # 创建图像项
+                    pixmap_item = QGraphicsPixmapItem(image_data.pixmap)
+                    
+                    # 应用变换
+                    transform = image_data.get_transform()
+                    pixmap_item.setTransform(transform)
+                    
+                    # 设置透明度
+                    pixmap_item.setOpacity(image_data.opacity)
+                    
+                    # 设置层级
+                    pixmap_item.setZValue(layer.layer_id + 10)
+                    
+                    # 禁用鼠标事件
+                    pixmap_item.setAcceptedMouseButtons(Qt.NoButton)
+                    
+                    # 添加到场景
+                    scene.addItem(pixmap_item)
+                    
+                    # 添加到缓存
+                    self._image_items[(layer.layer_id, i)] = pixmap_item
+        except Exception as e:
+            print(f"渲染图像图层错误: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _render_all_layers(self):
+        """渲染所有可见图层"""
         try:
             if not self.canvas_manager or not self.map_model:
                 return
@@ -956,29 +1324,40 @@ class MapEditorManager(QObject):
             if not scene:
                 return
 
-            # 获取当前图层数据
-            layer = self.map_model.get_layer(self.current_layer)
-            if not layer or not layer.get("visible", True):
-                print(f"警告: 图层 {self.current_layer} 不可见或不存在")
-                return
-
-            # 清理所有现有的瓦片项
+            # 清理所有瓦片项和图像项
             for item in list(self.tile_items.values()):
                 self._recycle_item(item)
             self.tile_items.clear()
+            
+            for (layer_id, image_index), item in list(self._image_items.items()):
+                try:
+                    scene.removeItem(item)
+                    item.deleteLater()
+                except Exception as e:
+                    pass
+            self._image_items.clear()
 
-            # 获取图层中的所有瓦片数据
-            tiles = layer.get("tiles", {})
+            # 渲染所有可见图层
+            for i, layer in enumerate(self.layer_manager.layers):
+                if layer.visible:
+                    if layer.layer_type == "drawing":
+                        # 渲染绘制图层
+                        tiles = layer.tiles
+                        for (tx, ty), tile_id in tiles.items():
+                            if tile_id > 0:
+                                # 临时设置current_layer为当前图层索引，确保瓦片项的图层索引正确
+                                old_current_layer = self.current_layer
+                                self.current_layer = i
+                                self._update_single_tile(tx, ty, tile_id)
+                                self.current_layer = old_current_layer
+                    elif layer.layer_type == "image":
+                        # 渲染图像图层
+                        self._render_image_layer(layer)
 
-            # 渲染所有瓦片
-            for (tx, ty), tile_id in tiles.items():
-                if tile_id > 0:
-                    self._update_single_tile(tx, ty, tile_id)
-
-            print(f"✅ 完整地图渲染完成，瓦片数量: {len(tiles)}")
+            print(f"✅ 所有图层渲染完成，图层数量: {len(self.layer_manager.layers)}")
 
         except Exception as e:
-            print(f"完整地图渲染失败: {e}")
+            print(f"渲染所有图层失败: {e}")
             import traceback
 
             traceback.print_exc()
@@ -993,9 +1372,9 @@ class MapEditorManager(QObject):
             scene_rect = self.canvas_manager.mapToScene(view_rect).boundingRect()
 
             # 获取当前图层数据
-            layer = self.map_model.get_layer(self.current_layer)
-            if not layer or not layer.get("visible", True):
-                print(f"警告: 图层 {self.current_layer} 不可见或不存在")
+            current_layer = self.layer_manager.get_current_layer()
+            if not current_layer or not current_layer.visible or current_layer.layer_type != "drawing":
+                print(f"警告: 图层 {current_layer.name if current_layer else 'None'} 不可见或不是绘制图层")
                 return
 
             tile_size = self.map_model.get_tile_size()
@@ -1007,7 +1386,7 @@ class MapEditorManager(QObject):
             max_tile_y = int(scene_rect.bottom() // tile_size) + 2  # 扩展一个瓦片边界
 
             # 获取图层中的瓦片数据
-            tiles = layer.get("tiles", {})
+            tiles = current_layer.tiles
 
             # 清理视口外的瓦片项
             tiles_to_remove = []
@@ -1097,20 +1476,39 @@ class MapEditorManager(QObject):
                     scene_pos = self.canvas_manager.mapToScene(event.pos())
                     items = self.canvas_manager.scene().items(scene_pos)
 
-                    # 查找可移动的图块项
+                    # 查找可移动的图块项或图像项
                     for item in items:
-                        if (
-                            isinstance(item, QGraphicsPixmapItem)
-                            and item != self.preview_item
-                        ):
-                            self.selected_item = item
-                            self.drag_start_pos = scene_pos - item.pos()
+                        if isinstance(item, QGraphicsPixmapItem) and item != self.preview_item:
+                            # 检查是否是图像图层的图像项
+                            image_item_found = False
+                            for (layer_id, image_index), image_item in self._image_items.items():
+                                if image_item == item:
+                                    # 找到图像项
+                                    current_layer = self.layer_manager.get_current_layer()
+                                    if current_layer and current_layer.layer_id == layer_id:
+                                        # 从图层中获取图像数据
+                                        for i, image_data in enumerate(current_layer.images):
+                                            if i == image_index:
+                                                self.selected_image_data = image_data
+                                                self.selected_image_index = image_index
+                                                self.selected_layer_id = layer_id
+                                                self.selected_item = item
+                                                self.drag_start_pos = scene_pos - image_data.position
+                                                image_item_found = True
+                                                print(f"选中图像: {image_data.image_path}")
+                                                break
+                                    break
+                            
+                            if not image_item_found:
+                                # 处理图块项
+                                self.selected_item = item
+                                self.drag_start_pos = scene_pos - item.pos()
 
-                            # 保存原始位置
-                            tile_size = self.map_model.get_tile_size()
-                            original_x = int(item.pos().x() / tile_size)
-                            original_y = int(item.pos().y() / tile_size)
-                            self.original_tile_pos = (original_x, original_y)
+                                # 保存原始位置
+                                tile_size = self.map_model.get_tile_size()
+                                original_x = int(item.pos().x() / tile_size)
+                                original_y = int(item.pos().y() / tile_size)
+                                self.original_tile_pos = (original_x, original_y)
                             break
                 elif self.current_tool == "draw":
                     # 绘制工具：绘制瓦片
@@ -1129,6 +1527,30 @@ class MapEditorManager(QObject):
                     # 擦除工具：删除瓦片
                     scene_pos = self.canvas_manager.mapToScene(event.pos())
                     self._erase_tile(scene_pos)
+            elif event.button() == Qt.RightButton:
+                # 右键点击：检查是否点击了图像
+                scene_pos = self.canvas_manager.mapToScene(event.pos())
+                items = self.canvas_manager.scene().items(scene_pos)
+                
+                for item in items:
+                    if isinstance(item, QGraphicsPixmapItem) and item != self.preview_item:
+                        # 检查是否是图像图层的图像项
+                        for (layer_id, image_index), image_item in self._image_items.items():
+                            if image_item == item:
+                                # 找到图像项
+                                current_layer = self.layer_manager.get_current_layer()
+                                if current_layer and current_layer.layer_id == layer_id:
+                                    # 从图层中获取图像数据
+                                    for i, image_data in enumerate(current_layer.images):
+                                        if i == image_index:
+                                            self.selected_image_data = image_data
+                                            self.selected_image_index = image_index
+                                            self.selected_layer_id = layer_id
+                                            self.selected_item = item
+                                            # 保存旋转开始的位置
+                                            self.drag_start_pos = scene_pos
+                                            print(f"开始旋转图像: {image_data.image_path}")
+                                            return
             else:
                 # 其他鼠标按钮（包括中键）交给MapCanvas处理
                 self.original_mousePressEvent(event)
@@ -1143,18 +1565,29 @@ class MapEditorManager(QObject):
                 
             if event.buttons() & Qt.LeftButton:
                 if self.current_tool == "move" and self.selected_item:
-                    # 移动工具：拖拽移动选中的图块
+                    # 移动工具：拖拽移动选中的图块或图像
                     scene_pos = self.canvas_manager.mapToScene(event.pos())
-                    new_pos = scene_pos - self.drag_start_pos
+                    
+                    if self.selected_image_data:
+                        # 移动图像
+                        new_pos = scene_pos - self.drag_start_pos
+                        self.selected_image_data.position = new_pos
+                        
+                        # 更新图像项
+                        transform = self.selected_image_data.get_transform()
+                        self.selected_item.setTransform(transform)
+                    else:
+                        # 移动图块
+                        new_pos = scene_pos - self.drag_start_pos
 
-                    # 获取瓦片大小
-                    tile_size = self.map_model.get_tile_size()
+                        # 获取瓦片大小
+                        tile_size = self.map_model.get_tile_size()
 
-                    # 对齐到网格
-                    aligned_x = round(new_pos.x() / tile_size) * tile_size
-                    aligned_y = round(new_pos.y() / tile_size) * tile_size
+                        # 对齐到网格
+                        aligned_x = round(new_pos.x() / tile_size) * tile_size
+                        aligned_y = round(new_pos.y() / tile_size) * tile_size
 
-                    self.selected_item.setPos(aligned_x, aligned_y)
+                        self.selected_item.setPos(aligned_x, aligned_y)
                 elif self.current_tool == "draw" and self.is_drawing:
                     # 绘制工具：绘制瓦片
                     scene_pos = self.canvas_manager.mapToScene(event.pos())
@@ -1167,6 +1600,37 @@ class MapEditorManager(QObject):
                     # 擦除工具：删除瓦片
                     scene_pos = self.canvas_manager.mapToScene(event.pos())
                     self._erase_tile(scene_pos)
+            elif event.buttons() & Qt.RightButton:
+                # 右键拖动：旋转图像
+                if self.selected_image_data:
+                    scene_pos = self.canvas_manager.mapToScene(event.pos())
+                    
+                    # 计算旋转角度
+                    dx_start = self.drag_start_pos.x() - self.selected_image_data.position.x()
+                    dy_start = self.drag_start_pos.y() - self.selected_image_data.position.y()
+                    dx_current = scene_pos.x() - self.selected_image_data.position.x()
+                    dy_current = scene_pos.y() - self.selected_image_data.position.y()
+                    
+                    # 计算角度（弧度）
+                    import math
+                    angle_start = math.atan2(dy_start, dx_start)
+                    angle_current = math.atan2(dy_current, dx_current)
+                    
+                    # 计算角度差（度）
+                    angle_diff = math.degrees(angle_current - angle_start)
+                    
+                    # 更新图像旋转
+                    new_rotation = self.selected_image_data.rotation + angle_diff
+                    # 归一化到0-360度
+                    new_rotation = new_rotation % 360
+                    self.selected_image_data.rotation = new_rotation
+                    
+                    # 更新图像项
+                    transform = self.selected_image_data.get_transform()
+                    self.selected_item.setTransform(transform)
+                    
+                    # 更新拖拽开始位置
+                    self.drag_start_pos = scene_pos
             else:
                 # 如果是中键拖动，交给MapCanvas处理
                 if event.buttons() & Qt.MiddleButton:
@@ -1185,43 +1649,87 @@ class MapEditorManager(QObject):
             if event.button() == Qt.LeftButton:
                 if self.current_tool == "move":
                     # 移动工具：保存移动后的位置到地图数据模型
-                    if self.selected_item and self.original_tile_pos:
-                        # 获取图块位置并更新地图数据
-                        tile_size = self.map_model.get_tile_size()
-                        new_x = int(self.selected_item.pos().x() / tile_size)
-                        new_y = int(self.selected_item.pos().y() / tile_size)
-                        original_x, original_y = self.original_tile_pos
+                    if self.selected_item:
+                        if self.selected_image_data:
+                            # 移动图像完成
+                            # 更新地图数据模型
+                            current_layer = self.layer_manager.get_current_layer()
+                            if current_layer and current_layer.layer_id == self.selected_layer_id:
+                                self.layer_manager.update_map_model()
+                                
+                                # 重新渲染图像图层
+                                self._render_image_layer(current_layer)
+                                
+                                # 设置地图为已修改状态
+                                self.is_map_modified = True
+                                
+                                # 自动保存地图（如果当前地图有文件路径）
+                                if self.current_map_path:
+                                    save_result = self.map_model.save(self.current_map_path)
+                        elif self.original_tile_pos:
+                            # 移动图块完成
+                            # 获取图块位置并更新地图数据
+                            tile_size = self.map_model.get_tile_size()
+                            new_x = int(self.selected_item.pos().x() / tile_size)
+                            new_y = int(self.selected_item.pos().y() / tile_size)
+                            original_x, original_y = self.original_tile_pos
 
-                        # 获取原始位置的图块ID
-                        tile_id = self.map_model.get_tile(
-                            self.current_layer, original_x, original_y
-                        )
-                        if tile_id > 0:
-                            # 先清除原始位置
-                            self.map_model.set_tile(
-                                self.current_layer, original_x, original_y, 0
-                            )
-                            # 然后设置新位置
-                            self.map_model.set_tile(
-                                self.current_layer, new_x, new_y, tile_id
-                            )
+                            # 获取原始位置的图块ID
+                            current_layer = self.layer_manager.get_current_layer()
+                            if current_layer and current_layer.layer_type == "drawing":
+                                tile_id = current_layer.get_tile(original_x, original_y)
+                                if tile_id > 0:
+                                    # 先清除原始位置
+                                    current_layer.set_tile(original_x, original_y, 0)
+                                    # 然后设置新位置
+                                    current_layer.set_tile(new_x, new_y, tile_id)
 
-                            # 更新tile_items字典，确保擦除功能正常工作
-                            if (original_x, original_y) in self.tile_items:
-                                item = self.tile_items.pop((original_x, original_y))
-                                self.tile_items[(new_x, new_y)] = item
+                                    # 更新地图数据模型
+                                    self.layer_manager.update_map_model()
 
-                            # 设置地图为已修改状态
-                            self.is_map_modified = True
+                                    # 更新tile_items字典，确保擦除功能正常工作
+                                    if (original_x, original_y) in self.tile_items:
+                                        item = self.tile_items.pop((original_x, original_y))
+                                        self.tile_items[(new_x, new_y)] = item
 
-                            # 自动保存地图（如果当前地图有文件路径）
-                            if self.current_map_path:
-                                save_result = self.map_model.save(self.current_map_path)
+                                    # 设置地图为已修改状态
+                                    self.is_map_modified = True
+
+                                    # 自动保存地图（如果当前地图有文件路径）
+                                    if self.current_map_path:
+                                        save_result = self.map_model.save(self.current_map_path)
 
                     # 取消选中状态
                     self.selected_item = None
                     self.drag_start_pos = None
                     self.original_tile_pos = None
+                    self.selected_image_data = None
+                    self.selected_image_index = -1
+                    self.selected_layer_id = -1
+            elif event.button() == Qt.RightButton:
+                # 右键释放：旋转图像完成
+                if self.selected_image_data:
+                    # 更新地图数据模型
+                    current_layer = self.layer_manager.get_current_layer()
+                    if current_layer and current_layer.layer_id == self.selected_layer_id:
+                        self.layer_manager.update_map_model()
+                        
+                        # 重新渲染图像图层
+                        self._render_image_layer(current_layer)
+                        
+                        # 设置地图为已修改状态
+                        self.is_map_modified = True
+                        
+                        # 自动保存地图（如果当前地图有文件路径）
+                        if self.current_map_path:
+                            save_result = self.map_model.save(self.current_map_path)
+                    
+                    # 取消选中状态
+                    self.selected_item = None
+                    self.drag_start_pos = None
+                    self.selected_image_data = None
+                    self.selected_image_index = -1
+                    self.selected_layer_id = -1
                 elif self.current_tool == "draw":
                     # 绘制工具：结束绘制
                     self.is_drawing = False
@@ -1235,23 +1743,62 @@ class MapEditorManager(QObject):
     def _handle_wheel_event(self, event):
         """处理滚轮事件 - 调用原始的wheelEvent方法"""
         try:
-            # 调用原始的wheelEvent方法，让MapCanvas自己处理缩放
-            self.original_wheelEvent(event)
+            # 如果选中了图像，使用滚轮进行缩放
+            if self.selected_image_data:
+                # 获取缩放因子
+                if event.angleDelta().y() > 0:
+                    scale_factor = 1.1
+                else:
+                    scale_factor = 0.9
+                
+                # 更新图像缩放
+                new_scale = self.selected_image_data.scale * scale_factor
+                # 设置缩放范围
+                if 0.1 <= new_scale <= 10.0:
+                    self.selected_image_data.scale = new_scale
+                    
+                    # 更新图像项
+                    transform = self.selected_image_data.get_transform()
+                    self.selected_item.setTransform(transform)
+                    
+                    # 更新地图数据模型
+                    current_layer = self.layer_manager.get_current_layer()
+                    if current_layer and current_layer.layer_id == self.selected_layer_id:
+                        self.layer_manager.update_map_model()
+                        
+                        # 设置地图为已修改状态
+                        self.is_map_modified = True
+                        
+                        # 自动保存地图（如果当前地图有文件路径）
+                        if self.current_map_path:
+                            save_result = self.map_model.save(self.current_map_path)
+            else:
+                # 调用原始的wheelEvent方法，让MapCanvas自己处理缩放
+                self.original_wheelEvent(event)
         except Exception as e:
             print(f"滚轮事件错误: {e}")
 
     def _draw_tile(self, scene_pos):
         """绘制瓦片 - 简化流程版本"""
         try:
+            # 获取当前图层
+            current_layer = self.layer_manager.get_current_layer()
+            if not current_layer:
+                print("DEBUG: 当前图层不存在")
+                return
+            
+            # 获取当前图层的资源列表
+            layer_resources = self.layer_resources.get(current_layer.layer_id, [])
+            
             # 检查必要条件
             if self.selected_resource_index < 0 or self.selected_resource_index >= len(
-                self.uploaded_resources
+                layer_resources
             ):
                 print(f"DEBUG: 资源索引无效: {self.selected_resource_index}")
                 return
 
             # 获取选中的资源
-            resource = self.uploaded_resources[self.selected_resource_index]
+            resource = layer_resources[self.selected_resource_index]
             resource_type = resource.get("resource_type", "image")
             resource_name = resource.get("name", "unknown")
             tile_width = resource.get("tile_width", 0)
@@ -1263,8 +1810,25 @@ class MapEditorManager(QObject):
             print(
                 f"DEBUG: 资源索引: {self.selected_resource_index}, 图块索引: {self.selected_tile_index}"
             )
-            print(f"DEBUG: 资源列表长度: {len(self.uploaded_resources)}")
+            print(f"DEBUG: 资源列表长度: {len(layer_resources)}")
 
+            # 计算全局资源索引
+            # 收集所有图层的资源
+            all_resources = []
+            for layer_resources in self.layer_resources.values():
+                all_resources.extend(layer_resources)
+            
+            # 查找当前资源在全局资源列表中的索引
+            global_resource_index = -1
+            for i, res in enumerate(all_resources):
+                if res.get("path") == resource.get("path"):
+                    global_resource_index = i
+                    break
+            
+            # 如果找不到，使用当前图层中的索引
+            if global_resource_index == -1:
+                global_resource_index = self.selected_resource_index
+            
             # 根据资源类型确定图块ID
             if resource_type == "tileset":
                 # 图块集合模式，使用资源索引和图块索引的组合作为图块ID
@@ -1275,12 +1839,12 @@ class MapEditorManager(QObject):
                 if tile_index < 0:
                     tile_index = 0
 
-                tile_id = (self.selected_resource_index + 1) * 1000 + tile_index + 1
-                print(f"DEBUG: 图块集模式 - 生成tile_id: {tile_id}")
+                tile_id = (global_resource_index + 1) * 1000 + tile_index + 1
+                print(f"DEBUG: 图块集模式 - 生成tile_id: {tile_id}, 全局资源索引: {global_resource_index}")
             else:
                 # 单张图片模式，使用统一的资源ID格式
-                tile_id = (self.selected_resource_index + 1) * 1000 + 1
-                print(f"DEBUG: 单张图片模式 - 生成tile_id: {tile_id}")
+                tile_id = (global_resource_index + 1) * 1000 + 1
+                print(f"DEBUG: 单张图片模式 - 生成tile_id: {tile_id}, 全局资源索引: {global_resource_index}")
 
             # 获取纯粹的网格索引 (0, 1, 2...)
             grid_pos = self._get_grid_pos_from_scene_pos(scene_pos, tile_id)
@@ -1291,14 +1855,14 @@ class MapEditorManager(QObject):
             print(f"DEBUG: 网格坐标: ({gx}, {gy})")
 
             # 检查当前图层是否有效
-            layer_count = self.map_model.get_layer_count()
-            print(f"DEBUG: 当前图层: {self.current_layer}, 图层总数: {layer_count}")
-            if self.current_layer < 0 or self.current_layer >= layer_count:
-                print(f"DEBUG: 图层索引无效，返回")
+            current_layer = self.layer_manager.get_current_layer()
+            print(f"DEBUG: 当前图层: {current_layer.name if current_layer else 'None'}")
+            if not current_layer or current_layer.layer_type != "drawing":
+                print(f"DEBUG: 图层无效或不是绘制图层，返回")
                 return
 
             # 检查是否重复绘制
-            current_tile_id = self.map_model.get_tile(self.current_layer, gx, gy)
+            current_tile_id = current_layer.get_tile(gx, gy)
             print(f"DEBUG: 当前位置图块ID: {current_tile_id}, 新图块ID: {tile_id}")
             if current_tile_id == tile_id:
                 print("DEBUG: 图块ID相同，跳过绘制")
@@ -1307,10 +1871,11 @@ class MapEditorManager(QObject):
             # 记录日志 (使用网格坐标)
             self._record_coordinates("Draw Tile", coordinates=(gx, gy), tile_id=tile_id)
 
-            # 核心修改：在设置模型数据时，暂时阻塞信号，防止触发全量 _render_map
-            self.map_model.blockSignals(True)
-            self.map_model.set_tile(self.current_layer, gx, gy, tile_id)
-            self.map_model.blockSignals(False)
+            # 设置瓦片
+            current_layer.set_tile(gx, gy, tile_id)
+            
+            # 更新地图数据模型
+            self.layer_manager.update_map_model()
 
             # 手动更新这一个瓦片即可，这样速度最快且不会冲突
             self._update_single_tile(gx, gy, tile_id)
@@ -1339,12 +1904,21 @@ class MapEditorManager(QObject):
             if not self.canvas_manager or not self.map_model:
                 return
 
+            # 获取当前图层
+            current_layer = self.layer_manager.get_current_layer()
+            if not current_layer:
+                self._remove_preview()
+                return
+            
+            # 获取当前图层的资源列表
+            layer_resources = self.layer_resources.get(current_layer.layer_id, [])
+            
             # 获取选中的资源
-            if self.selected_resource_index < 0:
+            if self.selected_resource_index < 0 or self.selected_resource_index >= len(layer_resources):
                 self._remove_preview()
                 return
 
-            resource = self.uploaded_resources[self.selected_resource_index]
+            resource = layer_resources[self.selected_resource_index]
             resource_type = resource.get("resource_type", "image")
 
             # 检查是否需要图块索引
@@ -1533,12 +2107,17 @@ class MapEditorManager(QObject):
                 print("DEBUG: 资源索引无效: {resource_index}")
                 return
             
-            if not hasattr(self, 'uploaded_resources'):
-                print("DEBUG: uploaded_resources 不存在")
+            # 获取当前图层
+            current_layer = self.layer_manager.get_current_layer()
+            if not current_layer:
+                print("DEBUG: 当前图层不存在")
                 return
             
-            if resource_index >= len(self.uploaded_resources):
-                print(f"DEBUG: 资源索引越界 - 资源索引: {resource_index}, 资源数量: {len(self.uploaded_resources)}")
+            # 获取当前图层的资源列表
+            layer_resources = self.layer_resources.get(current_layer.layer_id, [])
+            
+            if resource_index >= len(layer_resources):
+                print(f"DEBUG: 资源索引越界 - 资源索引: {resource_index}, 资源数量: {len(layer_resources)}")
                 return
             
             # 调用碰撞管理器设置当前碰撞图块
@@ -1755,10 +2334,18 @@ class MapEditorManager(QObject):
 
     def _get_tile_pixmap_for_collision(self, resource_index, tile_index):
         """为碰撞管理器提供图块图像"""
-        if resource_index < 0 or resource_index >= len(self.uploaded_resources):
+        # 获取当前图层
+        current_layer = self.layer_manager.get_current_layer()
+        if not current_layer:
             return None
 
-        resource = self.uploaded_resources[resource_index]
+        # 获取当前图层的资源列表
+        layer_resources = self.layer_resources.get(current_layer.layer_id, [])
+
+        if resource_index < 0 or resource_index >= len(layer_resources):
+            return None
+
+        resource = layer_resources[resource_index]
         
         # 获取图块图像
         pixmap = None
@@ -1956,10 +2543,175 @@ class MapEditorManager(QObject):
         # 初始化资源列表显示
         self._update_res_list_display()
 
+    def set_layer_list_view(self, layer_list_view):
+        """设置图层列表视图"""
+        self.layer_list_view = layer_list_view
+        # 初始化图层列表显示
+        if self.layer_list_view:
+            self.layer_list_view.set_layer_manager(self.layer_manager)
+
+    def set_editor_map_layer_list(self, tree_widget):
+        """设置editor_map_layer_list组件"""
+        self.editor_map_layer_list = tree_widget
+        # 初始化图层列表显示
+        if self.editor_map_layer_list:
+            # 清空现有项
+            self.editor_map_layer_list.clear()
+            # 设置列数
+            self.editor_map_layer_list.setColumnCount(3)
+            # 设置列标题
+            self.editor_map_layer_list.setHeaderLabels(["可见", "名称", "类型"])
+            # 设置列宽
+            self.editor_map_layer_list.setColumnWidth(0, 40)
+            self.editor_map_layer_list.setColumnWidth(1, 150)
+            self.editor_map_layer_list.setColumnWidth(2, 80)
+            # 连接信号
+            self.editor_map_layer_list.itemClicked.connect(self._on_layer_item_clicked)
+            # 监听图层变化信号
+            self.layer_manager.layers_changed.connect(self._update_editor_map_layer_list)
+            self.layer_manager.current_layer_changed.connect(self._on_layer_changed)
+            # 初始更新
+            self._update_editor_map_layer_list()
+
+    def create_drawing_layer(self):
+        """创建绘制图层"""
+        layer = self.layer_manager.create_layer("drawing")
+        if layer:
+            # 更新图层列表显示
+            if self.layer_list_view:
+                self.layer_list_view.update_layer_list()
+            # 更新editor_map_layer_list组件
+            if hasattr(self, 'editor_map_layer_list') and self.editor_map_layer_list:
+                self._update_editor_map_layer_list()
+
+    def create_image_layer(self):
+        """创建图像图层"""
+        layer = self.layer_manager.create_layer("image")
+        if layer:
+            # 更新图层列表显示
+            if self.layer_list_view:
+                self.layer_list_view.update_layer_list()
+            # 更新editor_map_layer_list组件
+            if hasattr(self, 'editor_map_layer_list') and self.editor_map_layer_list:
+                self._update_editor_map_layer_list()
+
+    def delete_current_layer(self):
+        """删除当前图层"""
+        current_index = self.layer_manager.current_layer_index
+        if self.layer_manager.delete_layer(current_index):
+            # 清理属于该图层的资源
+            for layer_id in list(self.layer_resources.keys()):
+                if layer_id == current_index:
+                    del self.layer_resources[layer_id]
+            
+            # 重新渲染所有可见图层
+            self._render_all_layers()
+            
+            # 更新资源列表显示
+            self._update_res_list_display()
+            
+            # 更新图层列表显示
+            if self.layer_list_view:
+                self.layer_list_view.update_layer_list()
+            # 更新editor_map_layer_list组件
+            if hasattr(self, 'editor_map_layer_list') and self.editor_map_layer_list:
+                self._update_editor_map_layer_list()
+
+    def _move_layer_up(self):
+        """将当前图层上移"""
+        current_index = self.layer_manager.current_layer_index
+        if self.layer_manager.move_layer_up(current_index):
+            # 重新渲染所有可见图层，以更新图层的渲染顺序
+            self._render_all_layers()
+            # 更新图层列表显示
+            if self.layer_list_view:
+                self.layer_list_view.update_layer_list()
+            # 更新editor_map_layer_list组件
+            if hasattr(self, 'editor_map_layer_list') and self.editor_map_layer_list:
+                self._update_editor_map_layer_list()
+
+    def _move_layer_down(self):
+        """将当前图层下移"""
+        current_index = self.layer_manager.current_layer_index
+        if self.layer_manager.move_layer_down(current_index):
+            # 重新渲染所有可见图层，以更新图层的渲染顺序
+            self._render_all_layers()
+            # 更新图层列表显示
+            if self.layer_list_view:
+                self.layer_list_view.update_layer_list()
+            # 更新editor_map_layer_list组件
+            if hasattr(self, 'editor_map_layer_list') and self.editor_map_layer_list:
+                self._update_editor_map_layer_list()
+
+    def _on_layer_changed(self, index):
+        """处理图层切换事件"""
+        print(f"DEBUG: 图层切换到索引: {index}")
+        # 更新当前图层索引
+        self.current_layer = index
+        
+        # 获取当前图层
+        current_layer = self.layer_manager.get_current_layer()
+        if not current_layer:
+            return
+        
+        # 更新资源列表显示（只显示当前图层的资源）
+        self._update_res_list_display()
+        # 清除预览，避免预览干扰
+        self._remove_preview()
+        # 更新editor_map_layer_list组件的当前选中项
+        if hasattr(self, 'editor_map_layer_list') and self.editor_map_layer_list:
+            if 0 <= index < self.editor_map_layer_list.topLevelItemCount():
+                self.editor_map_layer_list.setCurrentItem(self.editor_map_layer_list.topLevelItem(index))
+
+    def _on_layer_item_clicked(self, item, column):
+        """处理图层项点击事件"""
+        if column == 0:
+            # 点击可见性列
+            layer_index = self.editor_map_layer_list.indexOfTopLevelItem(item)
+            if 0 <= layer_index < self.layer_manager.get_layer_count():
+                layer = self.layer_manager.get_layer(layer_index)
+                layer.set_visible(not layer.visible)
+                # 重新渲染所有可见图层
+                self._render_all_layers()
+        else:
+            # 点击其他列，切换当前图层
+            layer_index = self.editor_map_layer_list.indexOfTopLevelItem(item)
+            if 0 <= layer_index < self.layer_manager.get_layer_count():
+                self.layer_manager.set_current_layer(layer_index)
+
+    def _update_editor_map_layer_list(self):
+        """更新editor_map_layer_list组件"""
+        if hasattr(self, 'editor_map_layer_list') and self.editor_map_layer_list:
+            # 清空现有项
+            self.editor_map_layer_list.clear()
+            # 添加图层项
+            for i, layer in enumerate(self.layer_manager.layers):
+                from PySide6.QtWidgets import QTreeWidgetItem, QCheckBox
+                # 创建图层项
+                item = QTreeWidgetItem(["", layer.name, layer.layer_type.capitalize()])
+                # 设置可见性复选框
+                checkbox = QCheckBox()
+                checkbox.setChecked(layer.visible)
+                checkbox.stateChanged.connect(lambda state, layer=layer: layer.set_visible(state == 2))
+                self.editor_map_layer_list.setItemWidget(item, 0, checkbox)
+                # 设置图层索引为数据
+                item.setData(0, 1, i)
+                # 添加到树控件
+                self.editor_map_layer_list.addTopLevelItem(item)
+            # 设置当前选中项
+            current_index = self.layer_manager.current_layer_index
+            if 0 <= current_index < self.editor_map_layer_list.topLevelItemCount():
+                self.editor_map_layer_list.setCurrentItem(self.editor_map_layer_list.topLevelItem(current_index))
+
     def handle_resource_upload(self):
         """处理资源上传按钮点击事件"""
         # 检查资源列表视图是否已初始化
         if not self.res_list_view:
+            return
+        
+        # 获取当前图层
+        current_layer = self.layer_manager.get_current_layer()
+        if not current_layer:
             return
             
         # 直接调用系统文件选择器
@@ -1975,9 +2727,9 @@ class MapEditorManager(QObject):
         if not files:
             return
             
-        # 获取属性面板中选择的瓦片尺寸
+        # 获取属性面板中选择的瓦片尺寸（仅用于绘制图层）
         tile_size = 32  # 默认值
-        if hasattr(self, "ui") and hasattr(self.ui, "att_tile_size"):
+        if current_layer.layer_type == "drawing" and hasattr(self, "ui") and hasattr(self.ui, "att_tile_size"):
             size_text = self.ui.att_tile_size.currentText()
             tile_size = int(size_text.split("x")[0])
         
@@ -2013,7 +2765,7 @@ class MapEditorManager(QObject):
                     # 如果没有项目管理器，使用原始路径
                     relative_path = file_path
 
-                # 获取图片尺寸并进行切割处理
+                # 获取图片尺寸
                 from PySide6.QtGui import QPixmap
                 
                 # 初始化默认值
@@ -2028,6 +2780,10 @@ class MapEditorManager(QObject):
                     original_height = pixmap.height()
                     width = original_width
                     height = original_height
+
+                if current_layer.layer_type == "image":
+                    # 图像图层：使用完整图像
+                    resource_type = "image"
 
                 resource_info = {
                     "name": os.path.basename(file_path),
@@ -2047,11 +2803,15 @@ class MapEditorManager(QObject):
                     f"DEBUG: 资源上传 - 名称: {resource_info['name']}, 类型: {resource_type}, 尺寸: {width}x{height}, tile_width: {resource_info.get('tile_width', 0)}"
                 )
 
-                # 添加到资源列表
-                self.uploaded_resources.append(resource_info)
+                # 确保图层资源字典存在
+                if current_layer.layer_id not in self.layer_resources:
+                    self.layer_resources[current_layer.layer_id] = []
                 
-                # 添加到地图模型的tile_sets中
-                if self.project_manager and self.current_map_path:
+                # 添加到图层资源列表
+                self.layer_resources[current_layer.layer_id].append(resource_info)
+                
+                # 绘制图层：添加到地图模型的tile_sets中
+                if current_layer.layer_type == "drawing" and self.project_manager and self.current_map_path:
                     map_dir = os.path.dirname(self.current_map_path)
                     full_image_path = os.path.join(map_dir, relative_path)
                     # 统一使用用户设置的tile_size作为图块尺寸
@@ -2062,12 +2822,13 @@ class MapEditorManager(QObject):
                         tile_height=tile_size,
                     )
 
-        # 更新地图模型的全局tile_size
-        self.map_model.set_tile_size(tile_size)
+        # 绘制图层：更新地图模型的全局tile_size
+        if current_layer.layer_type == "drawing":
+            self.map_model.set_tile_size(tile_size)
 
-        # 更新画布管理器的tile_size
-        if self.canvas_manager:
-            self.canvas_manager.tile_size = tile_size
+            # 更新画布管理器的tile_size
+            if self.canvas_manager:
+                self.canvas_manager.tile_size = tile_size
 
         # 清理缓存，确保新上传的资源能正确加载
         self._pixmap_cache.clear()
@@ -2088,9 +2849,17 @@ class MapEditorManager(QObject):
     def select_resource(self, index):
         """选择资源"""
         try:
-            if 0 <= index < len(self.uploaded_resources):
+            # 获取当前图层
+            current_layer = self.layer_manager.get_current_layer()
+            if not current_layer:
+                return
+            
+            # 获取当前图层的资源列表
+            layer_resources = self.layer_resources.get(current_layer.layer_id, [])
+            
+            if 0 <= index < len(layer_resources):
                 self.selected_resource_index = index
-                resource = self.uploaded_resources[index]
+                resource = layer_resources[index]
 
                 if resource["resource_type"] == "tileset":
                     # tileset资源默认选择第一个图块
@@ -2122,14 +2891,19 @@ class MapEditorManager(QObject):
                 print("DEBUG: resource_info 为 None，选择图块失败")
                 return
             
-            if not hasattr(self, 'uploaded_resources'):
-                print("DEBUG: uploaded_resources 不存在，选择图块失败")
+            # 获取当前图层
+            current_layer = self.layer_manager.get_current_layer()
+            if not current_layer:
+                print("DEBUG: 当前图层不存在，选择图块失败")
                 return
+            
+            # 获取当前图层的资源列表
+            layer_resources = self.layer_resources.get(current_layer.layer_id, [])
             
             # 查找资源索引
             resource_index = -1
-            print(f"DEBUG: uploaded_resources 长度: {len(self.uploaded_resources)}")
-            for i, res in enumerate(self.uploaded_resources):
+            print(f"DEBUG: layer_resources 长度: {len(layer_resources)}")
+            for i, res in enumerate(layer_resources):
                 print(f"DEBUG: 检查资源 {i}: {res.get('name', 'unknown')}")
                 if res == resource_info:
                     resource_index = i
@@ -2195,6 +2969,19 @@ class MapEditorManager(QObject):
                 print("DEBUG: res_list_view 不存在，返回")
                 return
 
+            # 获取当前图层
+            current_layer = self.layer_manager.get_current_layer()
+            if not current_layer:
+                print("DEBUG: 当前图层不存在，返回")
+                return
+
+            # 获取当前图层的资源列表
+            layer_id = current_layer.layer_id
+            print(f"DEBUG: 当前图层ID: {layer_id}")
+            print(f"DEBUG: layer_resources 字典的键: {list(self.layer_resources.keys())}")
+            layer_resources = self.layer_resources.get(layer_id, [])
+            print(f"DEBUG: 当前图层的资源数量: {len(layer_resources)}")
+
             # 清理旧的资源项和图块项
             print("DEBUG: 清理旧的资源项和图块项")
             self._clear_resource_items()
@@ -2216,9 +3003,9 @@ class MapEditorManager(QObject):
 
             # 添加资源到场景
             y_pos = 0  # 移除顶部边距
-            print(f"DEBUG: 开始添加资源，资源数量: {len(self.uploaded_resources)}")
+            print(f"DEBUG: 开始添加资源，资源数量: {len(layer_resources)}")
 
-            for i, resource in enumerate(self.uploaded_resources):
+            for i, resource in enumerate(layer_resources):
                 try:
                     print(f"DEBUG: 处理资源 {i}: {resource.get('name', 'unknown')}")
                     # 加载原始图片（处理相对路径）
@@ -2420,6 +3207,17 @@ class MapEditorManager(QObject):
         # 绑定瓦片尺寸选择框
         if hasattr(self.ui, "att_tile_size"):
             self.ui.att_tile_size.currentIndexChanged.connect(self._on_tile_size_changed)
+        # 绑定图层管理按钮
+        if hasattr(self.ui, "btn_editor_map_layer_tiled"):
+            self.ui.btn_editor_map_layer_tiled.clicked.connect(self.create_drawing_layer)
+        if hasattr(self.ui, "btn_editor_map_layer_image"):
+            self.ui.btn_editor_map_layer_image.clicked.connect(self.create_image_layer)
+        if hasattr(self.ui, "btn_editor_map_layer_del"):
+            self.ui.btn_editor_map_layer_del.clicked.connect(self.delete_current_layer)
+        if hasattr(self.ui, "btn_editor_map_layer_up"):
+            self.ui.btn_editor_map_layer_up.clicked.connect(self._move_layer_up)
+        if hasattr(self.ui, "btn_editor_map_layer_down"):
+            self.ui.btn_editor_map_layer_down.clicked.connect(self._move_layer_down)
         # 设置初始工具状态
         self.set_current_tool(self.current_tool)
         print("工具按钮绑定完成")
@@ -2436,35 +3234,36 @@ class MapEditorManager(QObject):
     def refresh_resources_from_model(self):
         """强制从 MapDataModel 同步最新的碰撞数据到 UI 缓存"""
         print("DEBUG: 从地图模型同步资源数据")
-        # 遍历所有资源，从地图模型获取最新的碰撞形状数据并更新到资源池缓存
+        # 遍历所有图层的资源，从地图模型获取最新的碰撞形状数据并更新到资源池缓存
         if self.map_model:
-            for resource_index, resource in enumerate(self.uploaded_resources):
-                # 检查资源是否是tileset类型
-                if resource.get("resource_type") == "tileset":
-                    # 从地图模型获取瓦片集
-                    tile_set = self.map_model.get_tile_set(resource_index)
-                    if tile_set:
-                        # 获取瓦片集的瓦片数量
-                        tiles = tile_set.get("tiles", [])
-                        total_tiles = len(tiles)
-                        
-                        # 确保collisions数组存在且足够大
-                        if "collisions" not in resource:
-                            resource["collisions"] = []
-                        while len(resource["collisions"]) < total_tiles:
-                            resource["collisions"].append({})
-                        
-                        # 从地图模型获取每个图块的碰撞形状数据
-                        for tile_index in range(total_tiles):
-                            collision_shape = self.map_model.get_tile_collision_shape(resource_index, tile_index)
-                            if collision_shape and "points" in collision_shape:
-                                resource["collisions"][tile_index]["points"] = collision_shape["points"]
-                                print(f"DEBUG: 同步碰撞形状数据 - 资源索引: {resource_index}, 图块索引: {tile_index}, 形状: {collision_shape}")
-                            else:
-                                # 如果没有碰撞形状，清除缓存中的数据
-                                if "points" in resource["collisions"][tile_index]:
-                                    del resource["collisions"][tile_index]["points"]
-                                    print(f"DEBUG: 清除碰撞形状数据 - 资源索引: {resource_index}, 图块索引: {tile_index}")
+            for layer_id, layer_resources in self.layer_resources.items():
+                for resource_index, resource in enumerate(layer_resources):
+                    # 检查资源是否是tileset类型
+                    if resource.get("resource_type") == "tileset":
+                        # 从地图模型获取瓦片集
+                        tile_set = self.map_model.get_tile_set(resource_index)
+                        if tile_set:
+                            # 获取瓦片集的瓦片数量
+                            tiles = tile_set.get("tiles", [])
+                            total_tiles = len(tiles)
+                            
+                            # 确保collisions数组存在且足够大
+                            if "collisions" not in resource:
+                                resource["collisions"] = []
+                            while len(resource["collisions"]) < total_tiles:
+                                resource["collisions"].append({})
+                            
+                            # 从地图模型获取每个图块的碰撞形状数据
+                            for tile_index in range(total_tiles):
+                                collision_shape = self.map_model.get_tile_collision_shape(resource_index, tile_index)
+                                if collision_shape and "points" in collision_shape:
+                                    resource["collisions"][tile_index]["points"] = collision_shape["points"]
+                                    print(f"DEBUG: 同步碰撞形状数据 - 资源索引: {resource_index}, 图块索引: {tile_index}, 形状: {collision_shape}")
+                                else:
+                                    # 如果没有碰撞形状，清除缓存中的数据
+                                    if "points" in resource["collisions"][tile_index]:
+                                        del resource["collisions"][tile_index]["points"]
+                                        print(f"DEBUG: 清除碰撞形状数据 - 资源索引: {resource_index}, 图块索引: {tile_index}")
         print("DEBUG: 资源数据同步完成")
 
         # 更新按钮状态

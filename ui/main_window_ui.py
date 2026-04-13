@@ -1419,10 +1419,15 @@ class Ui_Form(object):
         self.horizontalLayout_21.setSpacing(1)
         self.horizontalLayout_21.setObjectName(u"horizontalLayout_21")
         self.horizontalLayout_21.setContentsMargins(0, 0, 0, 0)
-        self.btn_editor_map_layer_new = QPushButton(self.layer_editor_toolbar)
-        self.btn_editor_map_layer_new.setObjectName(u"btn_editor_map_layer_new")
+        self.btn_editor_map_layer_tiled = QPushButton(self.layer_editor_toolbar)
+        self.btn_editor_map_layer_tiled.setObjectName(u"btn_editor_map_layer_tiled")
 
-        self.horizontalLayout_21.addWidget(self.btn_editor_map_layer_new)
+        self.horizontalLayout_21.addWidget(self.btn_editor_map_layer_tiled)
+
+        self.btn_editor_map_layer_image = QPushButton(self.layer_editor_toolbar)
+        self.btn_editor_map_layer_image.setObjectName(u"btn_editor_map_layer_image")
+
+        self.horizontalLayout_21.addWidget(self.btn_editor_map_layer_image)
 
         self.btn_editor_map_layer_del = QPushButton(self.layer_editor_toolbar)
         self.btn_editor_map_layer_del.setObjectName(u"btn_editor_map_layer_del")
@@ -1690,7 +1695,8 @@ class Ui_Form(object):
         ___qtreewidgetitem.setText(2, QCoreApplication.translate("Form", u"\u9501\u5b9a", None));
         ___qtreewidgetitem.setText(1, QCoreApplication.translate("Form", u"\u540d\u79f0", None));
         ___qtreewidgetitem.setText(0, QCoreApplication.translate("Form", u"\u663e\u793a", None));
-        self.btn_editor_map_layer_new.setText(QCoreApplication.translate("Form", u"\u65b0", None))
+        self.btn_editor_map_layer_tiled.setText(QCoreApplication.translate("Form", u"Tiled", None))
+        self.btn_editor_map_layer_image.setText(QCoreApplication.translate("Form", u"IMG", None))
         self.btn_editor_map_layer_del.setText(QCoreApplication.translate("Form", u"\u5220", None))
         self.btn_editor_map_layer_up.setText(QCoreApplication.translate("Form", u"\u4e0a", None))
         self.btn_editor_map_layer_down.setText(QCoreApplication.translate("Form", u"\u4e0b", None))

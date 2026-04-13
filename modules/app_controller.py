@@ -53,6 +53,10 @@ class AppController:
         # 初始化地图编辑器的资源列表视图，确保默认页面时上传按钮能工作
         self.map_editor.set_res_list_view(self.ui.res_list_view)
 
+        # 初始化地图编辑器的图层列表视图
+        # 使用现有的editor_map_layer_list控件
+        self.map_editor.set_editor_map_layer_list(self.ui.editor_map_layer_list)
+
         self.file_manager = FileManager(self.window)
         self.console_manager = ConsoleManager(self.ui.splitter, self.ui.console_output)
         self.menu_manager = MenuManager(main_window)
@@ -147,7 +151,7 @@ class AppController:
         self.res_manager.sig_sprite_selected.connect(self._open_and_switch_to_editor)
         # 4. 绑定地图双击信号：双击即加载并切到地图编辑页面
         self.res_manager.sig_map_selected.connect(self._open_and_switch_to_map_editor)
-        
+
         # 5. 绑定地图重命名信号：地图重命名后刷新地图列表
         self.map_editor.map_renamed.connect(self.res_manager.refresh_map_list)
 
@@ -261,8 +265,14 @@ class AppController:
         # 2. 如果已经是正式项目（比如在桌面），执行全量保存
         # 🚀 这一步会把所有新建的 untitled_x.py 都存进项目文件夹
         if em.save_all_opened_files():
+            # 保存地图文件
+            if hasattr(self, "map_editor") and self.map_editor:
+                try:
+                    print("📝 正在保存地图文件...")
+                    self.map_editor.save_map()
+                except Exception as e:
+                    print(f"❌ 保存地图文件失败: {e}")
             # print("✨ 项目所有文件已成功同步到磁盘")
-            pass
         else:
             QMessageBox.warning(
                 self.window, "保存提醒", "部分新标签页保存失败，请检查权限。"
@@ -364,6 +374,14 @@ class AppController:
             except Exception as e:
                 print(f"❌ 静默保存失败: {e}")
 
+        # 2. 【强制保存地图】确保地图文件也被保存
+        if hasattr(self, "map_editor") and self.map_editor:
+            try:
+                print("📝 正在执行静默地图保存...")
+                self.map_editor.save_map()
+            except Exception as e:
+                print(f"❌ 静默保存地图失败: {e}")
+
         # 2. 【停止引擎】防止 Python 进程残留
         if hasattr(self, "script_runner") and self.script_runner:
             try:
@@ -408,12 +426,18 @@ class AppController:
 
         # 7. 【销毁上传菜单管理器】移除事件过滤器
         if hasattr(self, "res_manager") and self.res_manager:
-            if hasattr(self.res_manager, "upload_menu") and self.res_manager.upload_menu:
+            if (
+                hasattr(self.res_manager, "upload_menu")
+                and self.res_manager.upload_menu
+            ):
                 try:
                     self.res_manager.upload_menu.destroy()
                 except Exception as e:
                     print(f"❌ 销毁上传菜单管理器失败: {e}")
-            if hasattr(self.res_manager, "map_upload_menu") and self.res_manager.map_upload_menu:
+            if (
+                hasattr(self.res_manager, "map_upload_menu")
+                and self.res_manager.map_upload_menu
+            ):
                 try:
                     self.res_manager.map_upload_menu.destroy()
                 except Exception as e:
@@ -515,14 +539,14 @@ class AppController:
         # 初始化地图编辑器的画布
         if hasattr(self, "map_editor"):
             print(f"地图编辑器实例: {self.map_editor}")
-            
+
             # 检查控件是否存在且有效
             if hasattr(self.ui, "editor_map_canvas") and self.ui.editor_map_canvas:
                 print(f"画布控件: {self.ui.editor_map_canvas}")
                 print(f"画布控件类型: {type(self.ui.editor_map_canvas)}")
                 print(f"画布控件场景: {self.ui.editor_map_canvas.scene()}")
                 self.map_editor.set_canvas_widget(self.ui.editor_map_canvas)
-            
+
             if hasattr(self.ui, "res_list_view") and self.ui.res_list_view:
                 print(f"资源列表视图: {self.ui.res_list_view}")
                 self.map_editor.set_res_list_view(self.ui.res_list_view)

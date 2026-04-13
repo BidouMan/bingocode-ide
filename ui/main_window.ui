@@ -3238,9 +3238,16 @@
                         <number>0</number>
                        </property>
                        <item>
-                        <widget class="QPushButton" name="btn_editor_map_layer_new">
+                        <widget class="QPushButton" name="btn_editor_map_layer_tiled">
                          <property name="text">
-                          <string>新</string>
+                          <string>Tiled</string>
+                         </property>
+                        </widget>
+                       </item>
+                       <item>
+                        <widget class="QPushButton" name="btn_editor_map_layer_image">
+                         <property name="text">
+                          <string>IMG</string>
                          </property>
                         </widget>
                        </item>

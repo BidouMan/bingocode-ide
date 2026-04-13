@@ -101,7 +101,8 @@ class CollisionManager(QObject):
         self.parent_manager = parent  # 保存父对象引用
         self.col_editor_scene = None
         self.col_editor_view = None
-        self.current_collision_tile = None
+        self.current_collision_tile = None  # 用于绘制图层
+        self.current_collision_image = None  # 用于图像图层
         self.collision_shape_item = None
         self.tile_pixmap_provider = None  # 图块图像获取函数
         self.tile_item = None  # 图块图像项，用于坐标转换
@@ -126,18 +127,23 @@ class CollisionManager(QObject):
             # 移除事件过滤器
             if hasattr(self, "col_editor_view") and self.col_editor_view:
                 try:
-                    # 先移除viewport的事件过滤器
-                    viewport = self.col_editor_view.viewport()
-                    if viewport:
+                    # 检查col_editor_view是否存在且有效
+                    if hasattr(self, "col_editor_view") and self.col_editor_view:
+                        # 先移除viewport的事件过滤器
                         try:
-                            viewport.removeEventFilter(self)
+                            viewport = self.col_editor_view.viewport()
+                            if viewport:
+                                try:
+                                    viewport.removeEventFilter(self)
+                                except Exception as e:
+                                    print(f"DEBUG: 移除viewport事件过滤器错误: {e}")
                         except Exception as e:
-                            print(f"DEBUG: 移除viewport事件过滤器错误: {e}")
-                    # 再移除视图本身的事件过滤器
-                    try:
-                        self.col_editor_view.removeEventFilter(self)
-                    except Exception as e:
-                        print(f"DEBUG: 移除视图事件过滤器错误: {e}")
+                            print(f"DEBUG: 访问viewport错误: {e}")
+                        # 再移除视图本身的事件过滤器
+                        try:
+                            self.col_editor_view.removeEventFilter(self)
+                        except Exception as e:
+                            print(f"DEBUG: 移除视图事件过滤器错误: {e}")
                 except Exception as e:
                     print(f"DEBUG: 访问视图错误: {e}")
 
@@ -227,11 +233,29 @@ class CollisionManager(QObject):
                 f"DEBUG: 开始设置当前碰撞图块 - 资源索引: {resource_index}, 图块索引: {tile_index}"
             )
             self.current_collision_tile = (resource_index, tile_index)
+            self.current_collision_image = None  # 清除当前碰撞图像
             print(f"DEBUG: 当前碰撞图块设置为: {self.current_collision_tile}")
             self._update_collision_display()
             print("DEBUG: 碰撞图块设置完成")
         except Exception as e:
             print(f"DEBUG: 设置碰撞图块错误: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+    def set_current_collision_image(self, layer_id, image_index):
+        """设置当前碰撞图像"""
+        try:
+            print(
+                f"DEBUG: 开始设置当前碰撞图像 - 图层ID: {layer_id}, 图像索引: {image_index}"
+            )
+            self.current_collision_image = (layer_id, image_index)
+            self.current_collision_tile = None  # 清除当前碰撞图块
+            print(f"DEBUG: 当前碰撞图像设置为: {self.current_collision_image}")
+            self._update_collision_display()
+            print("DEBUG: 碰撞图像设置完成")
+        except Exception as e:
+            print(f"DEBUG: 设置碰撞图像错误: {e}")
             import traceback
 
             traceback.print_exc()
@@ -243,25 +267,70 @@ class CollisionManager(QObject):
             if (
                 not self.col_editor_scene
                 or not self.col_editor_view
-                or not self.current_collision_tile
+                or not (self.current_collision_tile or self.current_collision_image)
             ):
                 print("DEBUG: 碰撞编辑器组件不完整，返回")
                 print(f"  col_editor_scene: {self.col_editor_scene}")
                 print(f"  col_editor_view: {self.col_editor_view}")
                 print(f"  current_collision_tile: {self.current_collision_tile}")
+                print(f"  current_collision_image: {self.current_collision_image}")
                 return
 
-            resource_index, tile_index = self.current_collision_tile
-            print(
-                f"DEBUG: 当前碰撞图块 - 资源索引: {resource_index}, 图块索引: {tile_index}"
-            )
+            pixmap = None
+            collision_shape = None
+            collision_enabled = True
 
-            # 获取图块图像
-            print("DEBUG: 获取图块图像")
-            pixmap = self._get_tile_pixmap(resource_index, tile_index)
-            print(
-                f"DEBUG: 图块图像获取结果: {pixmap is not None and not pixmap.isNull()}"
-            )
+            if self.current_collision_tile:
+                # 处理绘制图层
+                resource_index, tile_index = self.current_collision_tile
+                print(
+                    f"DEBUG: 当前碰撞图块 - 资源索引: {resource_index}, 图块索引: {tile_index}"
+                )
+
+                # 获取图块图像
+                print("DEBUG: 获取图块图像")
+                pixmap = self._get_tile_pixmap(resource_index, tile_index)
+                print(
+                    f"DEBUG: 图块图像获取结果: {pixmap is not None and not pixmap.isNull()}"
+                )
+
+                # 从地图模型获取碰撞形状
+                print("DEBUG: 从地图模型获取碰撞形状")
+                collision_shape = self.map_model.get_tile_collision_shape(
+                    resource_index, tile_index
+                )
+                print(f"DEBUG: 获取到的碰撞形状: {collision_shape}")
+
+                # 获取碰撞启用状态
+                collision_enabled = self.map_model.get_tile_collision(
+                    resource_index, tile_index
+                )
+                print(f"DEBUG: 碰撞是否启用: {collision_enabled}")
+            elif self.current_collision_image:
+                # 处理图像图层
+                layer_id, image_index = self.current_collision_image
+                print(
+                    f"DEBUG: 当前碰撞图像 - 图层ID: {layer_id}, 图像索引: {image_index}"
+                )
+
+                # 从图层管理器获取图像数据
+                if self.parent_manager and hasattr(
+                    self.parent_manager, "layer_manager"
+                ):
+                    layer_manager = self.parent_manager.layer_manager
+                    for layer in layer_manager.layers:
+                        if layer.layer_id == layer_id:
+                            if 0 <= image_index < len(layer.images):
+                                image_data = layer.images[image_index]
+                                pixmap = image_data.pixmap
+                                collision_shape = image_data.collision_shape
+                                collision_enabled = image_data.collision_enabled
+                                print(
+                                    f"DEBUG: 图像数据获取结果: {pixmap is not None and not pixmap.isNull()}"
+                                )
+                                print(f"DEBUG: 获取到的碰撞形状: {collision_shape}")
+                                print(f"DEBUG: 碰撞是否启用: {collision_enabled}")
+                            break
 
             if pixmap and not pixmap.isNull():
                 # 获取视图大小
@@ -321,14 +390,7 @@ class CollisionManager(QObject):
                 print("DEBUG: 图块图像项添加完成")
 
                 # 显示碰撞框（多边形）
-                if self.map_model:
-                    print("DEBUG: 从地图模型获取碰撞形状")
-                    # 从地图模型获取碰撞形状（确保使用最新数据）
-                    collision_shape = self.map_model.get_tile_collision_shape(
-                        resource_index, tile_index
-                    )
-                    print(f"DEBUG: 获取到的碰撞形状: {collision_shape}")
-
+                if collision_enabled:
                     # 强化读取逻辑：检查数据格式
                     valid_collision_shape = False
                     if collision_shape and isinstance(collision_shape, dict):
@@ -347,109 +409,34 @@ class CollisionManager(QObject):
                                     valid_collision_shape = True
                     print(f"DEBUG: 碰撞形状是否有效: {valid_collision_shape}")
 
-                    # 同时更新资源池缓存，确保数据一致性
-                    if self.parent_manager and hasattr(
-                        self.parent_manager, "uploaded_resources"
-                    ):
-                        if (
-                            0
-                            <= resource_index
-                            < len(self.parent_manager.uploaded_resources)
-                        ):
-                            resource = self.parent_manager.uploaded_resources[
-                                resource_index
-                            ]
-                            # 确保collisions数组存在且足够大
-                            if "collisions" not in resource:
-                                resource["collisions"] = []
-                            while len(resource["collisions"]) <= tile_index:
-                                resource["collisions"].append({})
-                            # 更新资源池缓存中的碰撞形状数据
-                            if valid_collision_shape:
-                                # 确保数据格式一致，转换为列表格式
-                                points_data = [
-                                    [p[0], p[1]] for p in collision_shape["points"]
-                                ]
-                                resource["collisions"][tile_index]["points"] = (
-                                    points_data
-                                )
-                                print(f"DEBUG: 更新资源池缓存中的碰撞形状数据")
-                            else:
-                                # 如果没有碰撞形状，清除缓存中的数据
-                                if "points" in resource["collisions"][tile_index]:
-                                    del resource["collisions"][tile_index]["points"]
-                                    print(f"DEBUG: 清除资源池缓存中的碰撞形状数据")
+                    if valid_collision_shape:
+                        # 使用自定义多边形碰撞形状（确保是局部坐标）
+                        raw_points = collision_shape["points"]
+                        # 确保存储的是相对于图块左上角的局部坐标
+                        self.collision_points = [
+                            QPointF(p[0], p[1]) for p in raw_points
+                        ]
+                        print(
+                            f"DEBUG: 使用自定义碰撞形状，顶点数: {len(self.collision_points)}"
+                        )
+                    else:
+                        # 使用默认矩形碰撞形状（转换为多边形）
+                        # 使用相对于图块左上角的局部坐标（0到图块大小）
+                        self.collision_points = [
+                            QPointF(0, 0),
+                            QPointF(pixmap.width(), 0),
+                            QPointF(pixmap.width(), pixmap.height()),
+                            QPointF(0, pixmap.height()),
+                        ]
+                        print("DEBUG: 使用默认矩形碰撞形状")
 
-                    # 如果地图模型中没有，从资源池缓存获取（作为后备）
-                    if (
-                        not valid_collision_shape
-                        and self.parent_manager
-                        and hasattr(self.parent_manager, "uploaded_resources")
-                    ):
-                        if (
-                            0
-                            <= resource_index
-                            < len(self.parent_manager.uploaded_resources)
-                        ):
-                            resource = self.parent_manager.uploaded_resources[
-                                resource_index
-                            ]
-                            if "collisions" in resource and 0 <= tile_index < len(
-                                resource["collisions"]
-                            ):
-                                collision_data = resource["collisions"][tile_index]
-                                if "points" in collision_data:
-                                    # 验证资源池缓存中的数据格式
-                                    points = collision_data["points"]
-                                    if isinstance(points, list) and len(points) > 0:
-                                        # 检查每个点的格式
-                                        valid_points = True
-                                        for p in points:
-                                            if not (
-                                                isinstance(p, (list, tuple))
-                                                and len(p) >= 2
-                                            ):
-                                                valid_points = False
-                                                break
-                                        if valid_points:
-                                            collision_shape = {"points": points}
-                                            valid_collision_shape = True
-                                            print(f"DEBUG: 从资源池缓存获取碰撞形状")
+                    # 更新碰撞多边形显示
+                    print("DEBUG: 更新碰撞多边形显示")
+                    self._update_collision_shape()
 
-                    collision_enabled = self.map_model.get_tile_collision(
-                        resource_index, tile_index
-                    )
-                    print(f"DEBUG: 碰撞是否启用: {collision_enabled}")
-
-                    if collision_enabled:
-                        if valid_collision_shape:
-                            # 使用自定义多边形碰撞形状（确保是局部坐标）
-                            raw_points = collision_shape["points"]
-                            # 确保存储的是相对于图块左上角的局部坐标
-                            self.collision_points = [
-                                QPointF(p[0], p[1]) for p in raw_points
-                            ]
-                            print(
-                                f"DEBUG: 使用自定义碰撞形状，顶点数: {len(self.collision_points)}"
-                            )
-                        else:
-                            # 使用默认矩形碰撞形状（转换为多边形）
-                            # 使用相对于图块左上角的局部坐标（0到图块大小）
-                            self.collision_points = [
-                                QPointF(0, 0),
-                                QPointF(pixmap.width(), 0),
-                                QPointF(pixmap.width(), pixmap.height()),
-                                QPointF(0, pixmap.height()),
-                            ]
-                            print("DEBUG: 使用默认矩形碰撞形状")
-
-                        # 更新碰撞多边形显示
-                        print("DEBUG: 更新碰撞多边形显示")
-                        self._update_collision_shape()
-
-                        # 更新碰撞锚点
-                        print("DEBUG: 更新碰撞锚点")
-                        self._update_collision_anchors()
+                    # 更新碰撞锚点
+                    print("DEBUG: 更新碰撞锚点")
+                    self._update_collision_anchors()
 
                 # 重新设计变换逻辑：先缩放，后平移到视图中心
                 print("DEBUG: 设置视图变换")
@@ -510,6 +497,17 @@ class CollisionManager(QObject):
             if self.map_model:
                 self.map_model.set_tile_collision(resource_index, tile_index, enabled)
                 self._update_collision_display()
+        elif self.current_collision_image:
+            layer_id, image_index = self.current_collision_image
+            if self.parent_manager and hasattr(self.parent_manager, "layer_manager"):
+                layer_manager = self.parent_manager.layer_manager
+                for layer in layer_manager.layers:
+                    if layer.layer_id == layer_id:
+                        if 0 <= image_index < len(layer.images):
+                            image_data = layer.images[image_index]
+                            image_data.collision_enabled = enabled
+                            self._update_collision_display()
+                            break
 
     def set_tile_pixmap_provider(self, provider):
         """设置图块图像获取函数"""
@@ -826,6 +824,30 @@ class CollisionManager(QObject):
                                 )
                             except Exception as e:
                                 print(f"DEBUG: 更新数据模型错误: {e}")
+                        elif (
+                            hasattr(self, "current_collision_image")
+                            and self.current_collision_image
+                        ):
+                            try:
+                                layer_id, image_index = self.current_collision_image
+                                if self.parent_manager and hasattr(
+                                    self.parent_manager, "layer_manager"
+                                ):
+                                    layer_manager = self.parent_manager.layer_manager
+                                    for layer in layer_manager.layers:
+                                        if layer.layer_id == layer_id:
+                                            if 0 <= image_index < len(layer.images):
+                                                image_data = layer.images[image_index]
+                                                points_data = [
+                                                    [p.x(), p.y()]
+                                                    for p in self.collision_points
+                                                ]
+                                                image_data.collision_shape = {
+                                                    "points": points_data
+                                                }
+                                                break
+                            except Exception as e:
+                                print(f"DEBUG: 更新图像碰撞数据错误: {e}")
 
                         # 完全阻止事件传递，防止画布移动
                         event.accept()
@@ -847,6 +869,7 @@ class CollisionManager(QObject):
             if event.button() == Qt.LeftButton:
                 if self.dragging_anchor:
                     # 保存碰撞形状到地图模型
+                    # 处理绘制图层的碰撞保存
                     if (
                         self.collision_points
                         and self.current_collision_tile
@@ -894,6 +917,36 @@ class CollisionManager(QObject):
                                 self.map_model.save(
                                     self.parent_manager.current_map_path
                                 )
+                    # 处理图像图层的碰撞保存
+                    elif self.collision_points and self.current_collision_image:
+                        layer_id, image_index = self.current_collision_image
+                        # 将QPointF转换为列表格式
+                        points_data = [
+                            [point.x(), point.y()] for point in self.collision_points
+                        ]
+                        shape_data = {"points": points_data}
+                        if self.parent_manager and hasattr(
+                            self.parent_manager, "layer_manager"
+                        ):
+                            layer_manager = self.parent_manager.layer_manager
+                            for layer in layer_manager.layers:
+                                if layer.layer_id == layer_id:
+                                    if 0 <= image_index < len(layer.images):
+                                        image_data = layer.images[image_index]
+                                        image_data.collision_shape = shape_data
+                                        image_data.collision_enabled = True
+                                        # 自动保存地图数据
+                                        if (
+                                            self.parent_manager
+                                            and hasattr(
+                                                self.parent_manager, "current_map_path"
+                                            )
+                                            and self.parent_manager.current_map_path
+                                        ):
+                                            self.map_model.save(
+                                                self.parent_manager.current_map_path
+                                            )
+                                        break
 
                     self.dragging_anchor = None
                     if self.col_editor_view:
