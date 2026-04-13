@@ -314,7 +314,7 @@ class MapDataModel(QObject):
             f.write(struct.pack("<I", 0x4D415050))  # "MAP_"
 
             # 写入版本号（4字节）
-            f.write(struct.pack("<I", 3))  # 更新版本号以支持地图名称
+            f.write(struct.pack("<I", 4))  # 更新版本号以支持图层资源映射
 
             # 写入地图名称
             map_name = self.map_data.get("name", "")
@@ -337,6 +337,19 @@ class MapDataModel(QObject):
             # 写入瓦片集数量（4字节）
             f.write(struct.pack("<I", len(self.map_data["tile_sets"])))
 
+            # 写入图层资源映射（版本4及以上）
+            layer_resources_map = self.map_data.get("layer_resources_map", {})
+            # 写入映射数量
+            f.write(struct.pack("<I", len(layer_resources_map)))
+            # 写入每个映射项
+            for layer_id, (start, end) in layer_resources_map.items():
+                # 写入图层ID
+                layer_id_bytes = str(layer_id).encode("utf-8")
+                f.write(struct.pack("<I", len(layer_id_bytes)))
+                f.write(layer_id_bytes)
+                # 写入起始和结束索引
+                f.write(struct.pack("<II", start, end))
+
     def _save_map_tiles(self, file_path, width, height, offset_x=0, offset_y=0):
         """保存图块数据（使用numpy批量写入）"""
         with open(file_path, "wb") as f:
@@ -355,6 +368,33 @@ class MapDataModel(QObject):
 
                 # 写入图层可见性（1字节）
                 f.write(struct.pack("<B", 1 if layer["visible"] else 0))
+
+                # 写入图层类型（1字节）
+                layer_type = layer.get("type", "drawing")
+                type_code = 0 if layer_type == "drawing" else 1
+                f.write(struct.pack("<B", type_code))
+
+                # 写入图像数据（如果是图像图层）
+                if layer_type == "image":
+                    images = layer.get("images", [])
+                    # 写入图像数量
+                    f.write(struct.pack("<I", len(images)))
+                    for image in images:
+                        # 写入图像路径
+                        image_path = image.get("image_path", "")
+                        path_bytes = image_path.encode("utf-8")
+                        f.write(struct.pack("<I", len(path_bytes)))
+                        f.write(path_bytes)
+                        # 写入位置
+                        position = image.get("position", [0, 0])
+                        f.write(struct.pack("<dd", position[0], position[1]))
+                        # 写入旋转、缩放和透明度
+                        f.write(struct.pack("<f", image.get("rotation", 0)))
+                        f.write(struct.pack("<f", image.get("scale", 1.0)))
+                        f.write(struct.pack("<f", image.get("opacity", 1.0)))
+                else:
+                    # 非图像图层，写入0表示没有图像
+                    f.write(struct.pack("<I", 0))
 
                 # 创建numpy数组存储图块数据
                 tile_array = np.zeros((height, width), dtype=np.uint16)
@@ -418,7 +458,7 @@ class MapDataModel(QObject):
         """保存资源引用"""
         print(f"DEBUG: 开始保存资源引用到: {file_path}")
         print(f"DEBUG: 瓦片集数量: {len(self.map_data['tile_sets'])}")
-        
+
         with open(file_path, "wb") as f:
             # 写入文件头（4字节）
             f.write(struct.pack("<I", 0x52455352))  # "RESR"
@@ -432,7 +472,10 @@ class MapDataModel(QObject):
 
             # 保存每个瓦片集
             for i, tile_set in enumerate(self.map_data["tile_sets"]):
-                print(f"DEBUG: 保存瓦片集 {i}: {tile_set.get('name', 'unnamed')}")
+                resource_type = tile_set.get("resource_type", "tileset")
+                print(
+                    f"DEBUG: 保存瓦片集 {i}: {tile_set.get('name', 'unnamed')}, 类型: {resource_type}"
+                )
                 # 写入瓦片集名称长度（4字节）
                 name_bytes = tile_set.get("name", "").encode("utf-8")
                 f.write(struct.pack("<I", len(name_bytes)))
@@ -440,11 +483,12 @@ class MapDataModel(QObject):
 
                 # 写入图片路径长度（4字节）
                 image_path = tile_set.get("image_path", "")
-                # 将绝对路径转换为相对于maps目录的相对路径
+                # 将绝对路径转换为相对于地图文件所在目录的相对路径
                 if os.path.isabs(image_path):
                     try:
-                        # 计算相对于maps目录的相对路径
-                        rel_path = os.path.relpath(image_path, maps_dir)
+                        # 计算相对于地图文件所在目录的相对路径
+                        map_dir = os.path.dirname(file_path)
+                        rel_path = os.path.relpath(image_path, map_dir)
                         image_path = rel_path
                     except ValueError:
                         # 如果无法计算相对路径（不同驱动器），保留绝对路径
@@ -452,6 +496,11 @@ class MapDataModel(QObject):
                 path_bytes = image_path.encode("utf-8")
                 f.write(struct.pack("<I", len(path_bytes)))
                 f.write(path_bytes)
+
+                # 写入资源类型（4字节）
+                type_bytes = resource_type.encode("utf-8")
+                f.write(struct.pack("<I", len(type_bytes)))
+                f.write(type_bytes)
 
                 # 写入瓦片宽度和高度（每个4字节）
                 tile_width = tile_set.get("tile_width", 16)
@@ -478,12 +527,14 @@ class MapDataModel(QObject):
                     tag_bytes = tag.encode("utf-8")
                     f.write(struct.pack("<I", len(tag_bytes)))
                     f.write(tag_bytes)
-                    
+
                     # 写入碰撞形状数据
                     collision_shape = tile.get("collision_shape", None)
                     if collision_shape and "points" in collision_shape:
                         points = collision_shape["points"]
-                        print(f"DEBUG: 保存瓦片 {j} 的碰撞形状，顶点数: {len(points)}, 形状: {collision_shape}")
+                        print(
+                            f"DEBUG: 保存瓦片 {j} 的碰撞形状，顶点数: {len(points)}, 形状: {collision_shape}"
+                        )
                         # 写入点的数量
                         f.write(struct.pack("<I", len(points)))
                         # 写入每个点的坐标（每个点两个浮点数，共8字节）
@@ -519,6 +570,7 @@ class MapDataModel(QObject):
                 offset_x,
                 offset_y,
                 map_name,
+                layer_resources_map,
             ) = self._load_map_info(base_name + ".info")
 
             # 2. 加载图块数据 (.tiles)
@@ -548,6 +600,7 @@ class MapDataModel(QObject):
                 "offset_y": offset_y,
                 "layers": layers,
                 "tile_sets": tile_sets,
+                "layer_resources_map": layer_resources_map,
             }
 
             # 打印加载后的地图数据信息
@@ -580,6 +633,7 @@ class MapDataModel(QObject):
 
     def _load_map_info(self, file_path):
         """加载地图元数据"""
+        layer_resources_map = {}
         with open(file_path, "rb") as f:
             # 读取文件头（4字节）
             magic = struct.unpack("<I", f.read(4))[0]
@@ -613,6 +667,20 @@ class MapDataModel(QObject):
             # 读取瓦片集数量（4字节）
             tile_set_count = struct.unpack("<I", f.read(4))[0]
 
+            # 读取图层资源映射（版本4及以上）
+            if version >= 4:
+                try:
+                    map_count = struct.unpack("<I", f.read(4))[0]
+                    for _ in range(map_count):
+                        # 读取图层ID
+                        layer_id_length = struct.unpack("<I", f.read(4))[0]
+                        layer_id = f.read(layer_id_length).decode("utf-8")
+                        # 读取起始和结束索引
+                        start, end = struct.unpack("<II", f.read(8))
+                        layer_resources_map[layer_id] = (start, end)
+                except Exception as e:
+                    print(f"读取图层资源映射错误: {e}")
+
             return (
                 width,
                 height,
@@ -622,6 +690,7 @@ class MapDataModel(QObject):
                 offset_x,
                 offset_y,
                 map_name,
+                layer_resources_map,
             )
 
     def _load_map_tiles(
@@ -640,13 +709,55 @@ class MapDataModel(QObject):
             actual_layer_count = struct.unpack("<I", f.read(4))[0]
 
             # 加载每个图层的数据
-            for _ in range(actual_layer_count):
+            for i in range(actual_layer_count):
                 # 读取图层名称
                 name_length = struct.unpack("<I", f.read(4))[0]
                 name = f.read(name_length).decode("utf-8")
 
                 # 读取图层可见性
                 visible = struct.unpack("<B", f.read(1))[0] == 1
+
+                # 读取图层类型
+                try:
+                    type_code = struct.unpack("<B", f.read(1))[0]
+                    layer_type = "drawing" if type_code == 0 else "image"
+                except:
+                    # 兼容旧版本文件
+                    layer_type = "drawing"
+
+                # 读取图像数据（如果是图像图层）
+                images = []
+                if layer_type == "image":
+                    try:
+                        image_count = struct.unpack("<I", f.read(4))[0]
+                        for _ in range(image_count):
+                            # 读取图像路径
+                            path_length = struct.unpack("<I", f.read(4))[0]
+                            image_path = f.read(path_length).decode("utf-8")
+                            # 读取位置
+                            x, y = struct.unpack("<dd", f.read(16))
+                            # 读取旋转、缩放和透明度
+                            rotation = struct.unpack("<f", f.read(4))[0]
+                            scale = struct.unpack("<f", f.read(4))[0]
+                            opacity = struct.unpack("<f", f.read(4))[0]
+                            # 创建图像数据字典
+                            image_data = {
+                                "image_path": image_path,
+                                "position": [x, y],
+                                "rotation": rotation,
+                                "scale": scale,
+                                "opacity": opacity,
+                            }
+                            images.append(image_data)
+                    except:
+                        # 兼容旧版本文件
+                        pass
+                else:
+                    # 非图像图层，跳过图像数据
+                    try:
+                        f.read(4)  # 读取0表示没有图像
+                    except:
+                        pass
 
                 # 使用numpy一次性加载图块数据
                 tile_data = np.fromfile(f, dtype=np.uint16, count=width * height)
@@ -664,11 +775,15 @@ class MapDataModel(QObject):
                             tiles_dict[(original_x, original_y)] = tile_id
 
                 layer = {
+                    "id": i,  # 使用索引作为ID，确保唯一性
                     "name": name,
                     "visible": visible,
+                    "type": layer_type,
                     "tiles": tiles_dict,
                     "objects": [],
                 }
+                if layer_type == "image" and images:
+                    layer["images"] = images
                 layers.append(layer)
 
         return layers
@@ -703,17 +818,23 @@ class MapDataModel(QObject):
                     path_length = struct.unpack("<I", f.read(4))[0]
                     image_path = f.read(path_length).decode("utf-8")
 
+                    # 读取资源类型
+                    type_length = struct.unpack("<I", f.read(4))[0]
+                    resource_type = f.read(type_length).decode("utf-8")
+
                     # 如果是相对路径，转换为绝对路径
                     if not os.path.isabs(image_path):
-                        # 相对于maps目录的相对路径
-                        image_path = os.path.join(maps_dir, image_path)
+                        # 相对于地图文件所在目录的相对路径
+                        image_path = os.path.join(map_dir, image_path)
 
                     # 读取瓦片宽度和高度
                     tile_width, tile_height = struct.unpack("<II", f.read(8))
 
                     # 读取瓦片数量
                     tile_count = struct.unpack("<I", f.read(4))[0]
-                    print(f"DEBUG: 加载瓦片集 {i}: {name}, 瓦片数量: {tile_count}")
+                    print(
+                        f"DEBUG: 加载瓦片集 {i}: {name}, 瓦片数量: {tile_count}, 类型: {resource_type}"
+                    )
 
                     # 加载每个瓦片的属性
                     tiles = []
@@ -724,7 +845,7 @@ class MapDataModel(QObject):
                         # 读取标签
                         tag_length = struct.unpack("<I", f.read(4))[0]
                         tag = f.read(tag_length).decode("utf-8")
-                        
+
                         # 读取碰撞形状数据
                         point_count = struct.unpack("<I", f.read(4))[0]
                         collision_shape = None
@@ -734,7 +855,9 @@ class MapDataModel(QObject):
                                 x, y = struct.unpack("<dd", f.read(16))
                                 points.append([x, y])
                             collision_shape = {"points": points}
-                            print(f"DEBUG: 加载瓦片 {j} 的碰撞形状，顶点数: {len(points)}, 形状: {collision_shape}")
+                            print(
+                                f"DEBUG: 加载瓦片 {j} 的碰撞形状，顶点数: {len(points)}, 形状: {collision_shape}"
+                            )
                         else:
                             print(f"DEBUG: 加载瓦片 {j} 的默认碰撞形状")
 
@@ -742,7 +865,7 @@ class MapDataModel(QObject):
                         if collision_shape:
                             tile["collision_shape"] = collision_shape
                         tiles.append(tile)
-                    
+
                     # 如果瓦片数量为0，创建一个空的tiles数组，以便后续的set_tile_collision_shape方法能够正确修改它
                     if tile_count == 0:
                         tiles = []
@@ -750,6 +873,7 @@ class MapDataModel(QObject):
                     tile_set = {
                         "name": name,
                         "image_path": image_path,
+                        "resource_type": resource_type,
                         "tile_width": tile_width,
                         "tile_height": tile_height,
                         "tiles": tiles,
@@ -760,6 +884,7 @@ class MapDataModel(QObject):
         except Exception as e:
             print(f"DEBUG: 加载资源引用错误: {e}")
             import traceback
+
             traceback.print_exc()
 
         return tile_sets
@@ -778,10 +903,13 @@ class MapDataModel(QObject):
         tile_count = 0
         if image_path:
             from PySide6.QtGui import QPixmap
+
             pixmap = QPixmap(image_path)
             if not pixmap.isNull():
-                tile_count = (pixmap.width() // tile_width) * (pixmap.height() // tile_height)
-        
+                tile_count = (pixmap.width() // tile_width) * (
+                    pixmap.height() // tile_height
+                )
+
         tile_set = {
             "name": name,
             "image_path": image_path,
@@ -790,11 +918,13 @@ class MapDataModel(QObject):
             "tile_count": tile_count,  # 计算瓦片数量
             "tiles": [],  # 每个图块单独的碰撞设置
         }
-        
+
         # 初始化tiles数组，确保每个瓦片都有默认的碰撞设置
         for i in range(tile_count):
-            tile_set["tiles"].append({"collision": True, "tag": "", "collision_shape": None})
-            
+            tile_set["tiles"].append(
+                {"collision": True, "tag": "", "collision_shape": None}
+            )
+
         self.map_data["tile_sets"].append(tile_set)
         self.data_changed.emit()
         return len(self.map_data["tile_sets"]) - 1
@@ -820,20 +950,24 @@ class MapDataModel(QObject):
                 "tile_width": 16,
                 "tile_height": 16,
                 "tiles": [],
-                "tile_count": 0
+                "tile_count": 0,
             }
             self.map_data["tile_sets"].append(new_tile_set)
-            print(f"DEBUG: 自动创建新的tile_set，索引: {len(self.map_data['tile_sets']) - 1}")
-        
+            print(
+                f"DEBUG: 自动创建新的tile_set，索引: {len(self.map_data['tile_sets']) - 1}"
+            )
+
         tile_set = self.map_data["tile_sets"][tile_set_index]
         # 确保tiles数组足够大
         while len(tile_set["tiles"]) <= tile_index:
             tile_set["tiles"].append({"collision": True})  # 默认开启碰撞
         tile_set["tiles"][tile_index]["collision"] = collision
         self.data_changed.emit()
-        print(f"DEBUG: 成功设置碰撞状态 - tile_set_index: {tile_set_index}, tile_index: {tile_index}, collision: {collision}")
+        print(
+            f"DEBUG: 成功设置碰撞状态 - tile_set_index: {tile_set_index}, tile_index: {tile_index}, collision: {collision}"
+        )
         return True
-    
+
     def set_tile_collision_shape(self, tile_set_index, tile_index, shape_data):
         """设置单个图块的碰撞形状"""
         # 确保tile_set_index有效，如果无效，自动创建新的tile_set
@@ -845,20 +979,24 @@ class MapDataModel(QObject):
                 "tile_width": 16,
                 "tile_height": 16,
                 "tiles": [],
-                "tile_count": 0
+                "tile_count": 0,
             }
             self.map_data["tile_sets"].append(new_tile_set)
-            print(f"DEBUG: 自动创建新的tile_set，索引: {len(self.map_data['tile_sets']) - 1}")
-        
+            print(
+                f"DEBUG: 自动创建新的tile_set，索引: {len(self.map_data['tile_sets']) - 1}"
+            )
+
         tile_set = self.map_data["tile_sets"][tile_set_index]
         # 确保tiles数组足够大
         while len(tile_set["tiles"]) <= tile_index:
             tile_set["tiles"].append({"collision": True, "collision_shape": None})
         tile_set["tiles"][tile_index]["collision_shape"] = shape_data
         self.data_changed.emit()
-        print(f"DEBUG: 成功保存碰撞形状 - tile_set_index: {tile_set_index}, tile_index: {tile_index}, shape: {shape_data}")
+        print(
+            f"DEBUG: 成功保存碰撞形状 - tile_set_index: {tile_set_index}, tile_index: {tile_index}, shape: {shape_data}"
+        )
         return True
-    
+
     def get_tile_collision_shape(self, tile_set_index, tile_index):
         """获取单个图块的碰撞形状"""
         # 确保tile_set_index有效，如果无效，自动创建新的tile_set
@@ -870,17 +1008,21 @@ class MapDataModel(QObject):
                 "tile_width": 16,
                 "tile_height": 16,
                 "tiles": [],
-                "tile_count": 0
+                "tile_count": 0,
             }
             self.map_data["tile_sets"].append(new_tile_set)
-            print(f"DEBUG: 自动创建新的tile_set，索引: {len(self.map_data['tile_sets']) - 1}")
-        
+            print(
+                f"DEBUG: 自动创建新的tile_set，索引: {len(self.map_data['tile_sets']) - 1}"
+            )
+
         tile_set = self.map_data["tile_sets"][tile_set_index]
         # 确保tiles数组足够大
         while len(tile_set["tiles"]) <= tile_index:
             tile_set["tiles"].append({"collision": True, "collision_shape": None})
         collision_shape = tile_set["tiles"][tile_index].get("collision_shape", None)
-        print(f"DEBUG: 成功获取碰撞形状 - tile_set_index: {tile_set_index}, tile_index: {tile_index}, shape: {collision_shape}")
+        print(
+            f"DEBUG: 成功获取碰撞形状 - tile_set_index: {tile_set_index}, tile_index: {tile_index}, shape: {collision_shape}"
+        )
         return collision_shape
 
     def get_tile_collision(self, tile_set_index, tile_index):
@@ -894,17 +1036,24 @@ class MapDataModel(QObject):
                 "tile_width": 16,
                 "tile_height": 16,
                 "tiles": [],
-                "tile_count": 0
+                "tile_count": 0,
             }
             self.map_data["tile_sets"].append(new_tile_set)
-            print(f"DEBUG: 自动创建新的tile_set，索引: {len(self.map_data['tile_sets']) - 1}")
-        
+            print(
+                f"DEBUG: 自动创建新的tile_set，索引: {len(self.map_data['tile_sets']) - 1}"
+            )
+
         tile_set = self.map_data["tile_sets"][tile_set_index]
+        # 确保tile_set有tiles字段
+        if "tiles" not in tile_set:
+            tile_set["tiles"] = []
         # 确保tiles数组足够大
         while len(tile_set["tiles"]) <= tile_index:
             tile_set["tiles"].append({"collision": True})  # 默认开启碰撞
         collision = tile_set["tiles"][tile_index].get("collision", True)
-        print(f"DEBUG: 成功获取碰撞状态 - tile_set_index: {tile_set_index}, tile_index: {tile_index}, collision: {collision}")
+        print(
+            f"DEBUG: 成功获取碰撞状态 - tile_set_index: {tile_set_index}, tile_index: {tile_index}, collision: {collision}"
+        )
         return collision
 
     def set_tile_tag(self, tile_set_index, tile_index, tag):
@@ -918,18 +1067,22 @@ class MapDataModel(QObject):
                 "tile_width": 16,
                 "tile_height": 16,
                 "tiles": [],
-                "tile_count": 0
+                "tile_count": 0,
             }
             self.map_data["tile_sets"].append(new_tile_set)
-            print(f"DEBUG: 自动创建新的tile_set，索引: {len(self.map_data['tile_sets']) - 1}")
-        
+            print(
+                f"DEBUG: 自动创建新的tile_set，索引: {len(self.map_data['tile_sets']) - 1}"
+            )
+
         tile_set = self.map_data["tile_sets"][tile_set_index]
         # 确保tiles数组足够大
         while len(tile_set["tiles"]) <= tile_index:
             tile_set["tiles"].append({"collision": True})
         tile_set["tiles"][tile_index]["tag"] = tag
         self.data_changed.emit()
-        print(f"DEBUG: 成功设置标签 - tile_set_index: {tile_set_index}, tile_index: {tile_index}, tag: {tag}")
+        print(
+            f"DEBUG: 成功设置标签 - tile_set_index: {tile_set_index}, tile_index: {tile_index}, tag: {tag}"
+        )
         return True
 
     def get_tile_tag(self, tile_set_index, tile_index):
@@ -943,17 +1096,21 @@ class MapDataModel(QObject):
                 "tile_width": 16,
                 "tile_height": 16,
                 "tiles": [],
-                "tile_count": 0
+                "tile_count": 0,
             }
             self.map_data["tile_sets"].append(new_tile_set)
-            print(f"DEBUG: 自动创建新的tile_set，索引: {len(self.map_data['tile_sets']) - 1}")
-        
+            print(
+                f"DEBUG: 自动创建新的tile_set，索引: {len(self.map_data['tile_sets']) - 1}"
+            )
+
         tile_set = self.map_data["tile_sets"][tile_set_index]
         # 确保tiles数组足够大
         while len(tile_set["tiles"]) <= tile_index:
             tile_set["tiles"].append({"collision": True})
         tag = tile_set["tiles"][tile_index].get("tag", "")
-        print(f"DEBUG: 成功获取标签 - tile_set_index: {tile_set_index}, tile_index: {tile_index}, tag: {tag}")
+        print(
+            f"DEBUG: 成功获取标签 - tile_set_index: {tile_set_index}, tile_index: {tile_index}, tag: {tag}"
+        )
         return tag
 
     def set_tile_set_collision(self, index, collision):

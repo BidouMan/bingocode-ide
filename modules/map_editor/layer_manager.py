@@ -72,7 +72,21 @@ class Layer(QObject):
     @classmethod
     def from_dict(cls, data, parent=None):
         """从字典创建图层"""
-        layer = cls(data["id"], data["name"], data["type"], parent)
+        layer_id = data.get("id", 0)  # 提供默认值
+        layer_name = data.get("name", "Layer")  # 提供默认值
+        # 对于DrawingLayer和ImageLayer，它们的构造函数不接受layer_type参数
+        if cls.__name__ in ["DrawingLayer", "ImageLayer"]:
+            # 只传递必要的参数，parent是可选的
+            if parent:
+                layer = cls(layer_id, layer_name, parent)
+            else:
+                layer = cls(layer_id, layer_name)
+        else:
+            layer_type = data.get("type", "drawing")  # 提供默认值
+            if parent:
+                layer = cls(layer_id, layer_name, layer_type, parent)
+            else:
+                layer = cls(layer_id, layer_name, layer_type)
         layer.visible = data.get("visible", True)
         layer.locked = data.get("locked", False)
         layer.properties = data.get("properties", {})
@@ -228,6 +242,7 @@ class LayerManager(QObject):
     
     def initialize_from_map_model(self):
         """从地图数据模型初始化图层"""
+        print("=== 开始从地图数据模型初始化图层 ===")
         # 清空现有图层
         self.layers.clear()
         
@@ -236,7 +251,9 @@ class LayerManager(QObject):
         
         # 从地图数据模型加载图层
         map_layers = self.map_model.map_data.get("layers", [])
+        print(f"DEBUG: 地图数据中的图层数量: {len(map_layers)}")
         for i, layer_data in enumerate(map_layers):
+            print(f"DEBUG: 处理图层 {i}: {layer_data.get('name', 'unknown')}, 类型: {layer_data.get('type', 'drawing')}")
             # 使用保存的layer_id，而不是生成新的
             layer_id = layer_data.get("id", self._get_next_layer_id())
             layer_name = layer_data.get("name", f"Layer {i}")
@@ -248,32 +265,27 @@ class LayerManager(QObject):
             layer_type = layer_data.get("type", "drawing")
             
             if layer_type == "drawing":
-                layer = DrawingLayer(layer_id, layer_name)
-                layer.visible = layer_data.get("visible", True)
-                layer.tiles = layer_data.get("tiles", {})
+                layer = DrawingLayer.from_dict(layer_data)
+                layer.layer_id = layer_id  # 确保使用正确的layer_id
+                print(f"DEBUG: 创建绘制图层: {layer.name}, ID: {layer.layer_id}")
             else:
-                layer = ImageLayer(layer_id, layer_name)
-                layer.visible = layer_data.get("visible", True)
-                # 从objects中加载图像数据
-                objects = layer_data.get("objects", [])
-                for obj in objects:
-                    if obj.get("type") == "image":
-                        image_data = ImageData(
-                            obj.get("image_path"),
-                            QPointF(obj.get("x", 0), obj.get("y", 0)),
-                            obj.get("rotation", 0),
-                            obj.get("scale", 1.0),
-                            obj.get("opacity", 1.0)
-                        )
-                        layer.add_image(image_data)
+                layer = ImageLayer.from_dict(layer_data)
+                layer.layer_id = layer_id  # 确保使用正确的layer_id
+                print(f"DEBUG: 创建图像图层: {layer.name}, ID: {layer.layer_id}")
             
             self.layers.append(layer)
         
+        print(f"DEBUG: 初始化完成，图层数量: {len(self.layers)}")
+        for i, layer in enumerate(self.layers):
+            print(f"DEBUG: 图层 {i}: {layer.name}, 类型: {layer.layer_type}, ID: {layer.layer_id}")
+        
         # 如果没有图层，创建一个默认的绘制图层
         if not self.layers:
+            print("DEBUG: 没有图层，创建默认绘制图层")
             self.create_layer("drawing", "Layer 1")
         
         self.layers_changed.emit()
+        print("=== 图层初始化完成 ===")
     
     def create_layer(self, layer_type, name=None):
         """创建新图层"""
@@ -358,8 +370,9 @@ class LayerManager(QObject):
     
     def update_map_model(self):
         """更新地图数据模型"""
+        print("=== 开始更新地图数据模型 ===")
         layers_data = []
-        for layer in self.layers:
+        for i, layer in enumerate(self.layers):
             layer_data = layer.to_dict()
             if layer.layer_type == "drawing":
                 layer_data["tiles"] = layer.tiles
@@ -367,6 +380,9 @@ class LayerManager(QObject):
             else:
                 layer_data["tiles"] = {}
                 layer_data["objects"] = []
+                # 保存图像数据到images字段
+                layer_data["images"] = [img.to_dict() for img in layer.images]
+                # 同时保存到objects字段以保持兼容性
                 for image_data in layer.images:
                     obj = {
                         "type": "image",
@@ -379,9 +395,13 @@ class LayerManager(QObject):
                     }
                     layer_data["objects"].append(obj)
             layers_data.append(layer_data)
+            print(f"DEBUG: 添加图层 {i}: {layer.name}, 类型: {layer.layer_type}, ID: {layer.layer_id}")
         
+        print(f"DEBUG: 总共添加 {len(layers_data)} 个图层到地图数据模型")
         self.map_model.map_data["layers"] = layers_data
+        print(f"DEBUG: 地图数据模型中的图层数量: {len(self.map_model.map_data['layers'])}")
         self.map_model.data_changed.emit()
+        print("=== 地图数据模型更新完成 ===")
     
     def _get_next_layer_id(self):
         """获取下一个图层ID"""

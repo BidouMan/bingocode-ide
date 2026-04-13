@@ -158,20 +158,36 @@ class AppController:
     def _open_and_switch_to_editor(self, path):
         print(f"🛎️ [AppController] 收到编辑请求，目标路径: {path}")
 
-        # 1. 切换页面 (确保这里的 index 是正确的)
+        # 1. 保存当前地图（如果正在编辑地图）
+        if hasattr(self, "map_editor") and self.map_editor:
+            try:
+                print("📝 正在保存地图文件...")
+                self.map_editor.save_map()
+            except Exception as e:
+                print(f"❌ 保存地图文件失败: {e}")
+
+        # 2. 切换页面 (确保这里的 index 是正确的)
         # 这里的 index 1 通常对应你 UI 里的编辑器页面
         self.ui.editor_stacked.setCurrentIndex(1)
 
-        # 2. 通知编辑器加载数据
+        # 3. 通知编辑器加载数据
         self.sprite_editor.load_sprite(path)
 
     def _open_and_switch_to_map_editor(self, path):
         print(f"🛎️ [AppController] 收到地图编辑请求，目标路径: {path}")
 
-        # 1. 切换到地图编辑页面
+        # 1. 保存当前地图（如果正在编辑地图）
+        if hasattr(self, "map_editor") and self.map_editor:
+            try:
+                print("📝 正在保存地图文件...")
+                self.map_editor.save_map()
+            except Exception as e:
+                print(f"❌ 保存地图文件失败: {e}")
+
+        # 2. 切换到地图编辑页面
         self.ui.editor_stacked.setCurrentIndex(2)
 
-        # 2. 初始化地图编辑器的画布
+        # 3. 初始化地图编辑器的画布
         self.map_editor.set_canvas_widget(self.ui.editor_map_canvas)
         self.map_editor.set_res_list_view(self.ui.res_list_view)
 
@@ -179,7 +195,7 @@ class AppController:
         if hasattr(self.ui, "col_editor_view"):
             self.map_editor.initialize_collision_editor(self.ui.col_editor_view)
 
-        # 3. 加载地图文件
+        # 4. 加载地图文件
         self.map_editor.load_map_from_path(path)
 
     def handle_new_project(self):
