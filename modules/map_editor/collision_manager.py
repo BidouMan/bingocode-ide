@@ -126,12 +126,18 @@ class CollisionManager(QObject):
             # 移除事件过滤器
             if hasattr(self, "col_editor_view") and self.col_editor_view:
                 try:
+                    # 先移除viewport的事件过滤器
                     viewport = self.col_editor_view.viewport()
                     if viewport:
                         try:
                             viewport.removeEventFilter(self)
                         except Exception as e:
-                            print(f"DEBUG: 移除事件过滤器错误: {e}")
+                            print(f"DEBUG: 移除viewport事件过滤器错误: {e}")
+                    # 再移除视图本身的事件过滤器
+                    try:
+                        self.col_editor_view.removeEventFilter(self)
+                    except Exception as e:
+                        print(f"DEBUG: 移除视图事件过滤器错误: {e}")
                 except Exception as e:
                     print(f"DEBUG: 访问视图错误: {e}")
 
@@ -217,56 +223,84 @@ class CollisionManager(QObject):
     def set_current_collision_tile(self, resource_index, tile_index):
         """设置当前碰撞图块"""
         try:
+            print(
+                f"DEBUG: 开始设置当前碰撞图块 - 资源索引: {resource_index}, 图块索引: {tile_index}"
+            )
             self.current_collision_tile = (resource_index, tile_index)
+            print(f"DEBUG: 当前碰撞图块设置为: {self.current_collision_tile}")
             self._update_collision_display()
+            print("DEBUG: 碰撞图块设置完成")
         except Exception as e:
             print(f"DEBUG: 设置碰撞图块错误: {e}")
+            import traceback
+
+            traceback.print_exc()
 
     def _update_collision_display(self):
         """更新碰撞编辑器的显示"""
         try:
+            print("DEBUG: 开始更新碰撞编辑器显示")
             if (
                 not self.col_editor_scene
                 or not self.col_editor_view
                 or not self.current_collision_tile
             ):
+                print("DEBUG: 碰撞编辑器组件不完整，返回")
+                print(f"  col_editor_scene: {self.col_editor_scene}")
+                print(f"  col_editor_view: {self.col_editor_view}")
+                print(f"  current_collision_tile: {self.current_collision_tile}")
                 return
 
             resource_index, tile_index = self.current_collision_tile
+            print(
+                f"DEBUG: 当前碰撞图块 - 资源索引: {resource_index}, 图块索引: {tile_index}"
+            )
 
             # 获取图块图像
+            print("DEBUG: 获取图块图像")
             pixmap = self._get_tile_pixmap(resource_index, tile_index)
+            print(
+                f"DEBUG: 图块图像获取结果: {pixmap is not None and not pixmap.isNull()}"
+            )
 
             if pixmap and not pixmap.isNull():
                 # 获取视图大小
                 view_rect = self.col_editor_view.viewport().rect()
                 view_width = view_rect.width()
                 view_height = view_rect.height()
+                print(f"DEBUG: 视图大小: {view_width}x{view_height}")
 
                 # 黄金分割尺寸（大约占视图的61.8%）
                 target_width = view_width * 0.618
                 target_height = view_height * 0.618
+                print(f"DEBUG: 目标尺寸: {target_width}x{target_height}")
 
                 # 计算缩放比例
                 pixmap_width = pixmap.width()
                 pixmap_height = pixmap.height()
+                print(f"DEBUG: 图块原始尺寸: {pixmap_width}x{pixmap_height}")
 
                 # 计算保持比例的缩放因子
                 scale_x = target_width / pixmap_width
                 scale_y = target_height / pixmap_height
                 scale = min(scale_x, scale_y)
+                print(f"DEBUG: 缩放因子 - x: {scale_x}, y: {scale_y}, 最终: {scale}")
 
                 # 最小缩放限制（避免图块太小）
                 min_scale = 2.0  # 至少放大到原始大小的2倍
                 scale = max(scale, min_scale)
+                print(f"DEBUG: 应用最小缩放后: {scale}")
 
                 # 清空场景前，先清理所有引用
+                print("DEBUG: 清理碰撞相关项")
                 self._cleanup_collision_items()
 
                 # 清空场景
+                print("DEBUG: 清空场景")
                 self.col_editor_scene.clear()
 
                 # 显示原图（放在场景中心位置）
+                print("DEBUG: 创建并添加图块图像项")
                 pixmap_item = QGraphicsPixmapItem(pixmap)
                 # 将图块放在场景中心位置，使图块中心点对准场景原点
                 pixmap_item.setPos(-pixmap_width / 2, -pixmap_height / 2)
@@ -284,13 +318,16 @@ class CollisionManager(QObject):
                 pixmap_item.setCacheMode(QGraphicsItem.NoCache)
                 self.col_editor_scene.addItem(pixmap_item)
                 self.tile_item = pixmap_item  # 保存图块图像项
+                print("DEBUG: 图块图像项添加完成")
 
                 # 显示碰撞框（多边形）
                 if self.map_model:
+                    print("DEBUG: 从地图模型获取碰撞形状")
                     # 从地图模型获取碰撞形状（确保使用最新数据）
                     collision_shape = self.map_model.get_tile_collision_shape(
                         resource_index, tile_index
                     )
+                    print(f"DEBUG: 获取到的碰撞形状: {collision_shape}")
 
                     # 强化读取逻辑：检查数据格式
                     valid_collision_shape = False
@@ -308,6 +345,7 @@ class CollisionManager(QObject):
                                         break
                                 if valid_points:
                                     valid_collision_shape = True
+                    print(f"DEBUG: 碰撞形状是否有效: {valid_collision_shape}")
 
                     # 同时更新资源池缓存，确保数据一致性
                     if self.parent_manager and hasattr(
@@ -335,10 +373,12 @@ class CollisionManager(QObject):
                                 resource["collisions"][tile_index]["points"] = (
                                     points_data
                                 )
+                                print(f"DEBUG: 更新资源池缓存中的碰撞形状数据")
                             else:
                                 # 如果没有碰撞形状，清除缓存中的数据
                                 if "points" in resource["collisions"][tile_index]:
                                     del resource["collisions"][tile_index]["points"]
+                                    print(f"DEBUG: 清除资源池缓存中的碰撞形状数据")
 
                     # 如果地图模型中没有，从资源池缓存获取（作为后备）
                     if (
@@ -374,10 +414,12 @@ class CollisionManager(QObject):
                                         if valid_points:
                                             collision_shape = {"points": points}
                                             valid_collision_shape = True
+                                            print(f"DEBUG: 从资源池缓存获取碰撞形状")
 
                     collision_enabled = self.map_model.get_tile_collision(
                         resource_index, tile_index
                     )
+                    print(f"DEBUG: 碰撞是否启用: {collision_enabled}")
 
                     if collision_enabled:
                         if valid_collision_shape:
@@ -387,6 +429,9 @@ class CollisionManager(QObject):
                             self.collision_points = [
                                 QPointF(p[0], p[1]) for p in raw_points
                             ]
+                            print(
+                                f"DEBUG: 使用自定义碰撞形状，顶点数: {len(self.collision_points)}"
+                            )
                         else:
                             # 使用默认矩形碰撞形状（转换为多边形）
                             # 使用相对于图块左上角的局部坐标（0到图块大小）
@@ -396,14 +441,18 @@ class CollisionManager(QObject):
                                 QPointF(pixmap.width(), pixmap.height()),
                                 QPointF(0, pixmap.height()),
                             ]
+                            print("DEBUG: 使用默认矩形碰撞形状")
 
                         # 更新碰撞多边形显示
+                        print("DEBUG: 更新碰撞多边形显示")
                         self._update_collision_shape()
 
                         # 更新碰撞锚点
+                        print("DEBUG: 更新碰撞锚点")
                         self._update_collision_anchors()
 
                 # 重新设计变换逻辑：先缩放，后平移到视图中心
+                print("DEBUG: 设置视图变换")
                 transform = self.col_editor_view.transform()
                 transform.reset()
 
@@ -415,11 +464,15 @@ class CollisionManager(QObject):
 
                 # 应用变换，但确保不会导致画布移动
                 self.col_editor_view.setTransform(transform)
+                print(f"DEBUG: 变换应用完成，缩放: {scale}")
 
                 # 确保场景大小与视图大小匹配，避免滚动
                 # 但是保持图块的居中位置
                 self.col_editor_scene.setSceneRect(
                     -view_width / 2, -view_height / 2, view_width, view_height
+                )
+                print(
+                    f"DEBUG: 设置场景矩形: (-{view_width / 2}, -{view_height / 2}, {view_width}, {view_height})"
                 )
 
                 # 确保视图不会自动滚动
@@ -429,8 +482,10 @@ class CollisionManager(QObject):
 
                 # 显示视图
                 self.col_editor_view.show()
+                print("DEBUG: 碰撞编辑器显示更新完成")
             else:
                 # 如果没有pixmap，清空场景
+                print("DEBUG: 没有图块图像，清空场景")
                 self._cleanup_collision_items()
                 self.col_editor_scene.clear()
                 self.col_editor_view.fitInView(
@@ -446,6 +501,7 @@ class CollisionManager(QObject):
             self._cleanup_collision_items()
             if self.col_editor_scene:
                 self.col_editor_scene.clear()
+            print("DEBUG: 错误处理完成，资源已清理")
 
     def set_collision_enabled(self, enabled):
         """设置碰撞启用状态"""
@@ -473,17 +529,34 @@ class CollisionManager(QObject):
     def _cleanup_collision_items(self):
         """清理碰撞相关的项，避免内存泄漏和程序崩溃"""
         try:
-            # 重置碰撞形状项
+            # 从场景中移除并清理碰撞形状项
+            if self.collision_shape_item and self.col_editor_scene:
+                try:
+                    self.col_editor_scene.removeItem(self.collision_shape_item)
+                except Exception as e:
+                    print(f"DEBUG: 移除碰撞形状项错误: {e}")
             self.collision_shape_item = None
 
+            # 从场景中移除并清理锚点项
+            if self.col_editor_scene:
+                for anchor in self.anchor_items.values():
+                    try:
+                        self.col_editor_scene.removeItem(anchor)
+                    except Exception as e:
+                        print(f"DEBUG: 移除锚点项错误: {e}")
             # 清空锚点项字典
             self.anchor_items.clear()
 
+            # 从场景中移除并清理图块项
+            if self.tile_item and self.col_editor_scene:
+                try:
+                    self.col_editor_scene.removeItem(self.tile_item)
+                except Exception as e:
+                    print(f"DEBUG: 移除图块项错误: {e}")
+            self.tile_item = None
+
             # 清空碰撞点列表
             self.collision_points = []
-
-            # 重置图块项
-            self.tile_item = None
 
             # 重置拖动状态
             self.dragging_anchor = None
@@ -590,10 +663,24 @@ class CollisionManager(QObject):
     def eventFilter(self, obj, event):
         """事件过滤器，处理鼠标事件"""
         try:
-            if not obj or not event or not self.col_editor_view:
-                return super().eventFilter(obj, event)
+            # 检查对象是否有效
+            if not obj or not event:
+                return False
 
-            if obj == self.col_editor_view.viewport():
+            # 检查col_editor_view是否存在且有效
+            if not hasattr(self, "col_editor_view") or not self.col_editor_view:
+                return False
+
+            # 检查viewport是否存在且有效
+            try:
+                viewport = self.col_editor_view.viewport()
+                if not viewport:
+                    return False
+            except Exception as e:
+                print(f"DEBUG: 访问viewport错误: {e}")
+                return False
+
+            if obj == viewport:
                 try:
                     if event.type() == QEvent.MouseButtonPress:
                         # 完全控制鼠标按下事件，防止画布移动
@@ -617,27 +704,45 @@ class CollisionManager(QObject):
     def _handle_mouse_press(self, event):
         """处理鼠标按下事件"""
         try:
-            if not event or not self.col_editor_view:
+            # 检查参数和对象是否有效
+            if not event:
+                return False
+
+            if not hasattr(self, "col_editor_view") or not self.col_editor_view:
+                return False
+
+            if not hasattr(self, "anchor_items"):
                 return False
 
             if event.button() == Qt.LeftButton:
-                scene_pos = self.col_editor_view.mapToScene(event.pos())
+                # 将鼠标位置转换为场景坐标
+                try:
+                    scene_pos = self.col_editor_view.mapToScene(event.pos())
+                except Exception as e:
+                    print(f"DEBUG: 转换鼠标坐标错误: {e}")
+                    return False
 
                 # 检查是否点击了锚点
                 for anchor_name, anchor in self.anchor_items.items():
                     try:
+                        if not anchor:
+                            continue
                         # 扩大点击判定范围，即使鼠标没点进圆圈，只要在圆心附近就能抓取
                         click_rect = anchor.sceneBoundingRect().adjusted(-5, -5, 5, 5)
                         if click_rect.contains(scene_pos):
                             self.dragging_anchor = anchor_name
                             self.drag_start_pos = scene_pos
                             if self.col_editor_view:
-                                self.col_editor_view.setCursor(
-                                    QCursor(Qt.SizeAllCursor)
-                                )
+                                try:
+                                    self.col_editor_view.setCursor(
+                                        QCursor(Qt.SizeAllCursor)
+                                    )
+                                except Exception as e:
+                                    print(f"DEBUG: 设置光标错误: {e}")
                             return True
                     except Exception as e:
                         print(f"DEBUG: 检查锚点点击错误: {e}")
+                        continue
         except Exception as e:
             print(f"DEBUG: 鼠标按下事件错误: {e}")
         return False
@@ -645,39 +750,73 @@ class CollisionManager(QObject):
     def _handle_mouse_move(self, event):
         """处理鼠标移动事件"""
         try:
-            if not event or not self.col_editor_view:
+            # 检查参数和对象是否有效
+            if not event:
                 return False
 
-            if self.dragging_anchor and self.tile_item:
-                # 将鼠标位置转换为场景坐标
-                scene_pos = self.col_editor_view.mapToScene(event.pos())
+            if not hasattr(self, "col_editor_view") or not self.col_editor_view:
+                return False
 
-                # 关键：减去图块在场景中的起始位置，转换为局部坐标
+            # 检查必要的属性是否存在
+            if not hasattr(self, "dragging_anchor") or not self.dragging_anchor:
+                return False
+
+            if not hasattr(self, "tile_item") or not self.tile_item:
+                return False
+
+            # 将鼠标位置转换为场景坐标
+            try:
+                scene_pos = self.col_editor_view.mapToScene(event.pos())
+            except Exception as e:
+                print(f"DEBUG: 转换鼠标坐标错误: {e}")
+                return False
+
+            # 关键：减去图块在场景中的起始位置，转换为局部坐标
+            try:
                 tile_item_pos = self.tile_item.pos()
                 local_x = scene_pos.x() - tile_item_pos.x()
                 local_y = scene_pos.y() - tile_item_pos.y()
+            except Exception as e:
+                print(f"DEBUG: 获取图块位置错误: {e}")
+                return False
 
-                # 如果开启了像素吸附功能，将坐标吸附到最近的像素点（整数坐标）
-                if self.snap_to_pixel:
-                    local_x = round(local_x)
-                    local_y = round(local_y)
+            # 如果开启了像素吸附功能，将坐标吸附到最近的像素点（整数坐标）
+            if hasattr(self, "snap_to_pixel") and self.snap_to_pixel:
+                local_x = round(local_x)
+                local_y = round(local_y)
 
-                # 解析锚点名称，获取顶点索引
-                if self.dragging_anchor.startswith("point_"):
-                    try:
-                        point_index = int(self.dragging_anchor.split("_")[1])
-                        if 0 <= point_index < len(self.collision_points):
-                            # 更新多边形顶点位置（使用局部坐标）
-                            self.collision_points[point_index] = QPointF(
-                                local_x, local_y
-                            )
+            # 解析锚点名称，获取顶点索引
+            if self.dragging_anchor.startswith("point_"):
+                try:
+                    point_index = int(self.dragging_anchor.split("_")[1])
 
-                            # 更新碰撞多边形和锚点
+                    # 检查collision_points是否存在且索引有效
+                    if not hasattr(self, "collision_points"):
+                        return False
+
+                    if 0 <= point_index < len(self.collision_points):
+                        # 更新多边形顶点位置（使用局部坐标）
+                        self.collision_points[point_index] = QPointF(local_x, local_y)
+
+                        # 更新碰撞多边形和锚点
+                        try:
                             self._update_collision_shape()
-                            self._update_collision_anchors()
+                        except Exception as e:
+                            print(f"DEBUG: 更新碰撞形状错误: {e}")
 
-                            # 实时更新数据模型，这样即使程序意外退出，数据也是最新的
-                            if self.current_collision_tile and self.map_model:
+                        try:
+                            self._update_collision_anchors()
+                        except Exception as e:
+                            print(f"DEBUG: 更新锚点位置错误: {e}")
+
+                        # 实时更新数据模型，这样即使程序意外退出，数据也是最新的
+                        if (
+                            hasattr(self, "current_collision_tile")
+                            and self.current_collision_tile
+                            and hasattr(self, "map_model")
+                            and self.map_model
+                        ):
+                            try:
                                 resource_index, tile_index = self.current_collision_tile
                                 points_data = [
                                     [p.x(), p.y()] for p in self.collision_points
@@ -685,12 +824,14 @@ class CollisionManager(QObject):
                                 self.map_model.set_tile_collision_shape(
                                     resource_index, tile_index, {"points": points_data}
                                 )
+                            except Exception as e:
+                                print(f"DEBUG: 更新数据模型错误: {e}")
 
-                            # 完全阻止事件传递，防止画布移动
-                            event.accept()
-                            return True
-                    except (ValueError, IndexError) as e:
-                        print(f"DEBUG: 解析锚点错误: {e}")
+                        # 完全阻止事件传递，防止画布移动
+                        event.accept()
+                        return True
+                except (ValueError, IndexError) as e:
+                    print(f"DEBUG: 解析锚点错误: {e}")
         except Exception as e:
             print(f"DEBUG: 鼠标移动事件错误: {e}")
         # 即使没有拖动锚点，也返回True以防止画布移动

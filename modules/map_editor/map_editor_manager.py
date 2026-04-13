@@ -38,6 +38,11 @@ class TileItem(QGraphicsRectItem):
         self.setAcceptHoverEvents(True)
         self.setFlag(QGraphicsRectItem.ItemIsSelectable)
         self.is_deleted = False
+        self.scene = None
+
+    def setScene(self, scene):
+        """设置场景引用"""
+        self.scene = scene
 
     def mousePressEvent(self, event):
         """处理鼠标点击事件"""
@@ -57,6 +62,7 @@ class TileItem(QGraphicsRectItem):
                 ):
                     # 检查resource_info是否有效
                     if hasattr(self, "resource_info") and self.resource_info:
+                        print(f"DEBUG: TileItem点击 - 资源: {self.resource_info.get('name', 'unknown')}, 图块索引: {self.tile_index}")
                         self.manager.select_tile(self.resource_info, self.tile_index)
             # 调用父类方法，但也要检查父类是否存在
             try:
@@ -65,6 +71,8 @@ class TileItem(QGraphicsRectItem):
                 pass
         except Exception as e:
             print(f"图块点击事件错误: {e}")
+            import traceback
+            traceback.print_exc()
 
     def hoverEnterEvent(self, event):
         """处理鼠标悬停进入事件"""
@@ -88,6 +96,13 @@ class TileItem(QGraphicsRectItem):
         """安全删除对象"""
         self.is_deleted = True
         try:
+            # 先从场景中移除
+            if self.scene:
+                try:
+                    self.scene.removeItem(self)
+                except Exception as e:
+                    print(f"从场景移除TileItem错误: {e}")
+            # 再调用父类方法
             super().deleteLater()
         except Exception as e:
             print(f"图块deleteLater错误: {e}")
@@ -108,9 +123,14 @@ class ResourceItem(QGraphicsRectItem):
         self.setAcceptHoverEvents(True)
         self.setFlag(QGraphicsRectItem.ItemIsSelectable)
         self.is_deleted = False
+        self.scene = None
         # 设置选中状态的样式
         self.setBrush(Qt.NoBrush)
         self.setPen(QPen(QColor(200, 200, 200), 1))
+
+    def setScene(self, scene):
+        """设置场景引用"""
+        self.scene = scene
 
     def mousePressEvent(self, event):
         """处理鼠标点击事件"""
@@ -128,6 +148,7 @@ class ResourceItem(QGraphicsRectItem):
                     and self.manager
                     and not getattr(self.manager, "is_deleted", False)
                 ):
+                    print(f"DEBUG: ResourceItem点击 - 资源索引: {self.index}, 资源: {self.resource_info.get('name', 'unknown')}")
                     self.manager.select_resource(self.index)
             # 调用父类方法，但也要检查父类是否存在
             try:
@@ -136,6 +157,8 @@ class ResourceItem(QGraphicsRectItem):
                 pass
         except Exception as e:
             print(f"资源点击事件错误: {e}")
+            import traceback
+            traceback.print_exc()
 
     def hoverEnterEvent(self, event):
         """处理鼠标悬停进入事件"""
@@ -158,6 +181,12 @@ class ResourceItem(QGraphicsRectItem):
     def delete(self):
         """标记为已删除"""
         self.is_deleted = True
+        # 先从场景中移除
+        if self.scene:
+            try:
+                self.scene.removeItem(self)
+            except Exception as e:
+                print(f"从场景移除ResourceItem错误: {e}")
 
 
 class MapEditorManager(QObject):
@@ -252,18 +281,15 @@ class MapEditorManager(QObject):
         try:
             # 移除场景事件过滤器
             if hasattr(self, "canvas_scene") and self.canvas_scene:
-                self.canvas_scene.removeEventFilter(self)
+                try:
+                    self.canvas_scene.removeEventFilter(self)
+                except Exception as e:
+                    print(f"DEBUG: 移除画布场景事件过滤器错误: {e}")
             
-            # 清理碰撞编辑器资源
-            if hasattr(self, "collision_manager") and self.collision_manager:
-                # 移除碰撞编辑器的事件过滤器
-                if hasattr(self.collision_manager, "col_editor_view") and self.collision_manager.col_editor_view:
-                    viewport = self.collision_manager.col_editor_view.viewport()
-                    if viewport:
-                        viewport.removeEventFilter(self.collision_manager)
-                # 清空碰撞编辑器的场景
-                if hasattr(self.collision_manager, "col_editor_scene") and self.collision_manager.col_editor_scene:
-                    self.collision_manager.col_editor_scene.clear()
+            # 不要在这里清理collision_manager，让它自己的__del__方法处理
+            # 只清除引用，避免重复清理
+            if hasattr(self, "collision_manager"):
+                self.collision_manager = None
         except Exception as e:
             print(f"DEBUG: 清理资源错误: {e}")
 
@@ -413,21 +439,26 @@ class MapEditorManager(QObject):
     def _clear_resource_items(self):
         """清理资源项（只清理资源列表视图中的项，不清理地图画布上的图块）"""
         try:
+            print("DEBUG: 开始清理资源项")
             # 从资源列表视图场景中移除所有资源项
             if self.res_list_view:
+                print("DEBUG: res_list_view 存在")
                 scene = self.res_list_view.scene()
                 if scene:
+                    print(f"DEBUG: 场景存在，资源项数量: {len(self.resource_items)}, 图块项数量: {len(self.resource_tile_items)}")
                     # 从场景中移除所有资源项
-                    for resource_item in self.resource_items:
+                    for i, resource_item in enumerate(self.resource_items):
                         try:
+                            print(f"DEBUG: 移除资源项 {i}")
                             scene.removeItem(resource_item)
                             resource_item.is_deleted = True
                         except Exception as e:
                             print(f"从场景移除资源项错误: {e}")
 
                     # 从场景中移除所有资源列表视图中的图块项
-                    for tile_item in self.resource_tile_items.values():
+                    for i, (key, tile_item) in enumerate(self.resource_tile_items.items()):
                         try:
+                            print(f"DEBUG: 移除图块项 {i}, 键: {key}")
                             scene.removeItem(tile_item)
                             tile_item.is_deleted = True
                         except Exception as e:
@@ -435,10 +466,14 @@ class MapEditorManager(QObject):
 
         except Exception as e:
             print(f"清理资源项和图块项错误: {e}")
+            import traceback
+            traceback.print_exc()
 
         # 清空列表
+        print("DEBUG: 清空资源项和图块项列表")
         self.resource_items.clear()
         self.resource_tile_items.clear()
+        print(f"DEBUG: 清理完成，资源项数量: {len(self.resource_items)}, 图块项数量: {len(self.resource_tile_items)}")
 
     def _setup_key_bindings(self):
         """设置按键绑定"""
@@ -2154,165 +2189,203 @@ class MapEditorManager(QObject):
 
     def _update_res_list_display(self):
         """更新资源列表显示"""
-        if not self.res_list_view:
-            return
+        try:
+            print("DEBUG: 开始更新资源列表显示")
+            if not self.res_list_view:
+                print("DEBUG: res_list_view 不存在，返回")
+                return
 
-        # 清理旧的资源项和图块项
-        self._clear_resource_items()
+            # 清理旧的资源项和图块项
+            print("DEBUG: 清理旧的资源项和图块项")
+            self._clear_resource_items()
 
-        # 创建场景
-        scene = QGraphicsScene()
-        # 设置新场景到资源列表视图
-        self.res_list_view.setScene(scene)
+            # 获取旧场景并清理
+            print("DEBUG: 获取旧场景并清理")
+            old_scene = self.res_list_view.scene()
+            if old_scene:
+                # 清除旧场景中的所有项
+                old_scene.clear()
+                print("DEBUG: 旧场景已清理")
+            
+            # 创建场景
+            print("DEBUG: 创建新场景")
+            scene = QGraphicsScene()
+            # 设置新场景到资源列表视图
+            print("DEBUG: 设置场景到资源列表视图")
+            self.res_list_view.setScene(scene)
 
-        # 添加资源到场景
-        y_pos = 0  # 移除顶部边距
+            # 添加资源到场景
+            y_pos = 0  # 移除顶部边距
+            print(f"DEBUG: 开始添加资源，资源数量: {len(self.uploaded_resources)}")
 
-        for i, resource in enumerate(self.uploaded_resources):
-            try:
-                # 加载原始图片（处理相对路径）
-                image_path = resource["path"]
-                if not os.path.isabs(image_path):
-                    if self.current_map_path:
-                        map_dir = os.path.dirname(self.current_map_path)
-                        image_path = os.path.join(map_dir, image_path)
+            for i, resource in enumerate(self.uploaded_resources):
+                try:
+                    print(f"DEBUG: 处理资源 {i}: {resource.get('name', 'unknown')}")
+                    # 加载原始图片（处理相对路径）
+                    image_path = resource["path"]
+                    if not os.path.isabs(image_path):
+                        if self.current_map_path:
+                            map_dir = os.path.dirname(self.current_map_path)
+                            image_path = os.path.join(map_dir, image_path)
 
-                # 检查文件是否存在
-                if not os.path.exists(image_path):
-                    print(f"⚠️ 资源文件不存在: {image_path}")
-                    continue
+                    # 检查文件是否存在
+                    if not os.path.exists(image_path):
+                        print(f"⚠️ 资源文件不存在: {image_path}")
+                        continue
 
-                original_pixmap = QPixmap(image_path)
-                if original_pixmap.isNull():
-                    print(f"⚠️ 资源图片加载失败: {image_path}")
-                    continue
+                    original_pixmap = QPixmap(image_path)
+                    if original_pixmap.isNull():
+                        print(f"⚠️ 资源图片加载失败: {image_path}")
+                        continue
 
-                # 获取资源类型和图块尺寸
-                resource_type = resource.get("resource_type", "image")
-                tile_size = resource.get("tile_size", resource.get("tile_width", 16))
+                    # 获取资源类型和图块尺寸
+                    resource_type = resource.get("resource_type", "image")
+                    tile_size = resource.get("tile_size", resource.get("tile_width", 16))
 
-                # 计算图块数量（仅图块集合模式）
-                image_width = original_pixmap.width()
-                image_height = original_pixmap.height()
-                tiles_per_row = 0
-                tiles_per_col = 0
+                    # 计算图块数量（仅图块集合模式）
+                    image_width = original_pixmap.width()
+                    image_height = original_pixmap.height()
+                    tiles_per_row = 0
+                    tiles_per_col = 0
 
-                if resource_type == "tileset":
-                    # 修复：兼容图片尺寸小于图块尺寸的情况
-                    tiles_per_row = max(1, image_width // tile_size)
-                    tiles_per_col = max(1, image_height // tile_size)
+                    if resource_type == "tileset":
+                        # 修复：兼容图片尺寸小于图块尺寸的情况
+                        tiles_per_row = max(1, image_width // tile_size)
+                        tiles_per_col = max(1, image_height // tile_size)
+                        print(f"DEBUG: 图块集合 - 行列数: {tiles_per_row}x{tiles_per_col}")
 
-                # 计算显示区域大小 - 撑满256宽度
-                display_width = 256  # 整个视图宽度
-                margin = 0  # 不添加额外边距
+                    # 计算显示区域大小 - 撑满256宽度
+                    display_width = 256  # 整个视图宽度
+                    margin = 0  # 不添加额外边距
 
-                # 计算缩放比例 - 小于256宽度的图片保持原始尺寸
-                if image_width < display_width:
-                    scale = 1.0  # 保持原始尺寸
-                else:
-                    scale = display_width / image_width  # 大于等于256宽度的图片缩放
+                    # 计算缩放比例 - 小于256宽度的图片保持原始尺寸
+                    if image_width < display_width:
+                        scale = 1.0  # 保持原始尺寸
+                    else:
+                        scale = display_width / image_width  # 大于等于256宽度的图片缩放
+                    print(f"DEBUG: 缩放比例: {scale}")
 
-                # 创建缩放后的图片
-                scaled_width = int(image_width * scale)
-                scaled_height = int(image_height * scale)
+                    # 创建缩放后的图片
+                    scaled_width = int(image_width * scale)
+                    scaled_height = int(image_height * scale)
+                    print(f"DEBUG: 缩放后尺寸: {scaled_width}x{scaled_height}")
 
-                scaled_pixmap = original_pixmap.scaled(
-                    scaled_width,
-                    scaled_height,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.FastTransformation,
-                )
-
-                # 计算显示位置
-                pixmap_x = 0
-                pixmap_y = y_pos
-
-                # 添加缩放后的图片
-                pixmap_item = QGraphicsPixmapItem(scaled_pixmap)
-                pixmap_item.setPos(pixmap_x, pixmap_y)
-                scene.addItem(pixmap_item)
-
-                # 绘制图块网格或创建单张图片的可点击区域
-                if resource_type == "tileset":
-                    for row in range(tiles_per_col):
-                        for col in range(tiles_per_row):
-                            tile_index = row * tiles_per_row + col
-
-                            # 计算图块在原始图片中的位置
-                            tile_x = col * tile_size
-                            tile_y = row * tile_size
-
-                            # 计算图块在显示图片中的位置
-                            display_tile_x = pixmap_x + tile_x * scale
-                            display_tile_y = pixmap_y + tile_y * scale
-                            display_tile_width = tile_size * scale
-                            display_tile_height = tile_size * scale
-
-                            # 检查是否是选中的图块
-                            is_tile_selected = (
-                                i == self.selected_resource_index
-                                and self.selected_tile_index == tile_index
-                            )
-
-                            # 创建图块边框（调整坐标避免浮点精度问题）
-                            tile_rect = QGraphicsRectItem(
-                                int(display_tile_x),
-                                int(display_tile_y),
-                                int(display_tile_width),
-                                int(display_tile_height),
-                            )
-
-                            if is_tile_selected:
-                                tile_rect.setBrush(QBrush(QColor(100, 149, 237, 50)))
-                                tile_rect.setPen(Qt.NoPen)
-                            else:
-                                tile_rect.setPen(QPen(QColor(200, 200, 200), 1))
-                                tile_rect.setBrush(Qt.NoBrush)
-
-                            scene.addItem(tile_rect)
-
-                            # 创建图块项（用于点击事件）
-                            tile_item = TileItem(
-                                tile_rect.rect(), resource, tile_index, self
-                            )
-                            scene.addItem(tile_item)
-                            # 添加到资源列表图块项管理列表
-                            self.resource_tile_items[(i, tile_index)] = tile_item
-                else:
-                    # 单张图片模式，创建可点击的资源项
-                    # 直接创建 ResourceItem，不需要额外的 QGraphicsRectItem
-                    resource_item = ResourceItem(
-                        QRectF(pixmap_x, pixmap_y, scaled_width, scaled_height),
-                        resource,
-                        i,
-                        self,
+                    scaled_pixmap = original_pixmap.scaled(
+                        scaled_width,
+                        scaled_height,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.FastTransformation,
                     )
 
-                    # 检查是否是选中的资源
-                    is_resource_selected = i == self.selected_resource_index
-                    if is_resource_selected:
-                        resource_item.setBrush(QBrush(QColor(100, 149, 237, 50)))
-                        resource_item.setPen(Qt.NoPen)
+                    # 计算显示位置
+                    pixmap_x = 0
+                    pixmap_y = y_pos
+                    print(f"DEBUG: 图片位置: ({pixmap_x}, {pixmap_y})")
 
-                    scene.addItem(resource_item)
-                    self.resource_items.append(resource_item)
+                    # 添加缩放后的图片
+                    pixmap_item = QGraphicsPixmapItem(scaled_pixmap)
+                    pixmap_item.setPos(pixmap_x, pixmap_y)
+                    scene.addItem(pixmap_item)
 
-                # 更新位置 - 根据实际图片高度调整间距
-                y_pos += scaled_height
+                    # 绘制图块网格或创建单张图片的可点击区域
+                    if resource_type == "tileset":
+                        for row in range(tiles_per_col):
+                            for col in range(tiles_per_row):
+                                tile_index = row * tiles_per_row + col
+                                print(f"DEBUG: 创建图块 {tile_index} (行: {row}, 列: {col})")
 
-            except Exception as e:
-                print(f"创建资源缩略图失败: {e}")
+                                # 计算图块在原始图片中的位置
+                                tile_x = col * tile_size
+                                tile_y = row * tile_size
 
-        # 设置场景大小
-        scene_height = max(500, y_pos)
-        scene.setSceneRect(0, 0, 256, scene_height)
+                                # 计算图块在显示图片中的位置
+                                display_tile_x = pixmap_x + tile_x * scale
+                                display_tile_y = pixmap_y + tile_y * scale
+                                display_tile_width = tile_size * scale
+                                display_tile_height = tile_size * scale
 
-        # 设置场景到视图
-        self.res_list_view.setScene(scene)
-        self.res_list_view.show()
-        self.res_list_view.update()  # 添加 update() 方法调用，确保视图刷新
-        # 自动滚动到顶部，确保用户可以看到导入的图片
-        self.res_list_view.verticalScrollBar().setValue(0)
+                                # 检查是否是选中的图块
+                                is_tile_selected = (
+                                    i == self.selected_resource_index
+                                    and self.selected_tile_index == tile_index
+                                )
+
+                                # 创建图块边框（调整坐标避免浮点精度问题）
+                                tile_rect = QGraphicsRectItem(
+                                    int(display_tile_x),
+                                    int(display_tile_y),
+                                    int(display_tile_width),
+                                    int(display_tile_height),
+                                )
+
+                                if is_tile_selected:
+                                    tile_rect.setBrush(QBrush(QColor(100, 149, 237, 50)))
+                                    tile_rect.setPen(Qt.NoPen)
+                                    print(f"DEBUG: 图块 {tile_index} 被选中")
+                                else:
+                                    tile_rect.setPen(QPen(QColor(200, 200, 200), 1))
+                                    tile_rect.setBrush(Qt.NoBrush)
+
+                                scene.addItem(tile_rect)
+
+                                # 创建图块项（用于点击事件）
+                                tile_item = TileItem(
+                                    tile_rect.rect(), resource, tile_index, self
+                                )
+                                # 设置场景引用
+                                tile_item.setScene(scene)
+                                scene.addItem(tile_item)
+                                # 添加到资源列表图块项管理列表
+                                self.resource_tile_items[(i, tile_index)] = tile_item
+                                print(f"DEBUG: 添加图块项到管理列表，键: ({i}, {tile_index})")
+                    else:
+                        # 单张图片模式，创建可点击的资源项
+                        # 直接创建 ResourceItem，不需要额外的 QGraphicsRectItem
+                        resource_item = ResourceItem(
+                            QRectF(pixmap_x, pixmap_y, scaled_width, scaled_height),
+                            resource,
+                            i,
+                            self,
+                        )
+                        # 设置场景引用
+                        resource_item.setScene(scene)
+
+                        # 检查是否是选中的资源
+                        is_resource_selected = i == self.selected_resource_index
+                        if is_resource_selected:
+                            resource_item.setBrush(QBrush(QColor(100, 149, 237, 50)))
+                            resource_item.setPen(Qt.NoPen)
+                            print(f"DEBUG: 资源 {i} 被选中")
+
+                        scene.addItem(resource_item)
+                        self.resource_items.append(resource_item)
+                        print(f"DEBUG: 添加资源项到管理列表")
+
+                    # 更新位置 - 根据实际图片高度调整间距
+                    y_pos += scaled_height
+                    print(f"DEBUG: 更新位置到: {y_pos}")
+
+                except Exception as e:
+                    print(f"创建资源缩略图失败: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+            # 设置场景大小
+            scene_height = max(500, y_pos)
+            scene.setSceneRect(0, 0, 256, scene_height)
+            print(f"DEBUG: 设置场景大小: 256x{scene_height}")
+
+            # 设置场景到视图
+            self.res_list_view.setScene(scene)
+            self.res_list_view.show()
+            self.res_list_view.update()  # 添加 update() 方法调用，确保视图刷新
+            # 自动滚动到顶部，确保用户可以看到导入的图片
+            self.res_list_view.verticalScrollBar().setValue(0)
+            print("DEBUG: 资源列表显示更新完成")
+        except Exception as e:
+            print(f"更新资源列表显示错误: {e}")
+            import traceback
+            traceback.print_exc()
 
     def setup_tool_buttons(self, ui):
         """绑定工具按钮到对应的功能"""
@@ -2427,8 +2500,16 @@ class MapEditorManager(QObject):
             if hasattr(self, 'canvas_scene'):
                 try:
                     self.canvas_scene.removeEventFilter(self)
-                    print("✅ [MapEditorManager] 事件过滤器已移除")
+                    print("✅ [MapEditorManager] 画布事件过滤器已移除")
+                except:
+                    pass
+            
+            # 清理collision_manager的引用，让它自己的__del__方法处理
+            if hasattr(self, 'collision_manager'):
+                try:
+                    self.collision_manager = None
+                    print("✅ [MapEditorManager] collision_manager引用已清除")
                 except:
                     pass
         except Exception as e:
-            print(f"❌ [MapEditorManager] 移除事件过滤器失败: {e}")
+            print(f"❌ [MapEditorManager] 清理失败: {e}")
