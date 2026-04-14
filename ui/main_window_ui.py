@@ -1022,34 +1022,34 @@ class Ui_Form(object):
         self.verticalLayout_25.setSpacing(0)
         self.verticalLayout_25.setObjectName(u"verticalLayout_25")
         self.verticalLayout_25.setContentsMargins(0, 0, 0, 0)
-        self.frame_5 = QFrame(self.editor_map_mid)
-        self.frame_5.setObjectName(u"frame_5")
-        sizePolicy11.setHeightForWidth(self.frame_5.sizePolicy().hasHeightForWidth())
-        self.frame_5.setSizePolicy(sizePolicy11)
-        self.frame_5.setMinimumSize(QSize(0, 30))
-        self.frame_5.setMaximumSize(QSize(16777215, 30))
-        self.frame_5.setFrameShape(QFrame.Shape.StyledPanel)
-        self.frame_5.setFrameShadow(QFrame.Shadow.Raised)
-        self.horizontalLayout_18 = QHBoxLayout(self.frame_5)
+        self.editor_map_toolbar = QFrame(self.editor_map_mid)
+        self.editor_map_toolbar.setObjectName(u"editor_map_toolbar")
+        sizePolicy11.setHeightForWidth(self.editor_map_toolbar.sizePolicy().hasHeightForWidth())
+        self.editor_map_toolbar.setSizePolicy(sizePolicy11)
+        self.editor_map_toolbar.setMinimumSize(QSize(0, 30))
+        self.editor_map_toolbar.setMaximumSize(QSize(16777215, 30))
+        self.editor_map_toolbar.setFrameShape(QFrame.Shape.StyledPanel)
+        self.editor_map_toolbar.setFrameShadow(QFrame.Shadow.Raised)
+        self.horizontalLayout_18 = QHBoxLayout(self.editor_map_toolbar)
         self.horizontalLayout_18.setSpacing(1)
         self.horizontalLayout_18.setObjectName(u"horizontalLayout_18")
         self.horizontalLayout_18.setContentsMargins(0, 0, 0, 0)
-        self.btn_editor_map_new = QPushButton(self.frame_5)
+        self.btn_editor_map_new = QPushButton(self.editor_map_toolbar)
         self.btn_editor_map_new.setObjectName(u"btn_editor_map_new")
 
         self.horizontalLayout_18.addWidget(self.btn_editor_map_new)
 
-        self.btn_editor_map_import = QPushButton(self.frame_5)
+        self.btn_editor_map_import = QPushButton(self.editor_map_toolbar)
         self.btn_editor_map_import.setObjectName(u"btn_editor_map_import")
 
         self.horizontalLayout_18.addWidget(self.btn_editor_map_import)
 
-        self.btn_editor_map_export = QPushButton(self.frame_5)
+        self.btn_editor_map_export = QPushButton(self.editor_map_toolbar)
         self.btn_editor_map_export.setObjectName(u"btn_editor_map_export")
 
         self.horizontalLayout_18.addWidget(self.btn_editor_map_export)
 
-        self.btn_editor_map_move = QPushButton(self.frame_5)
+        self.btn_editor_map_move = QPushButton(self.editor_map_toolbar)
         self.buttonGroup = QButtonGroup(Form)
         self.buttonGroup.setObjectName(u"buttonGroup")
         self.buttonGroup.addButton(self.btn_editor_map_move)
@@ -1059,42 +1059,69 @@ class Ui_Form(object):
 
         self.horizontalLayout_18.addWidget(self.btn_editor_map_move)
 
-        self.btn_editor_map_draw = QPushButton(self.frame_5)
+        self.btn_editor_map_draw = QPushButton(self.editor_map_toolbar)
         self.buttonGroup.addButton(self.btn_editor_map_draw)
         self.btn_editor_map_draw.setObjectName(u"btn_editor_map_draw")
         self.btn_editor_map_draw.setCheckable(True)
 
         self.horizontalLayout_18.addWidget(self.btn_editor_map_draw)
 
-        self.btn_editor_map_erase = QPushButton(self.frame_5)
+        self.btn_editor_map_erase = QPushButton(self.editor_map_toolbar)
         self.buttonGroup.addButton(self.btn_editor_map_erase)
         self.btn_editor_map_erase.setObjectName(u"btn_editor_map_erase")
         self.btn_editor_map_erase.setCheckable(True)
 
         self.horizontalLayout_18.addWidget(self.btn_editor_map_erase)
 
-        self.btn_editor_map_select = QPushButton(self.frame_5)
+        self.btn_editor_map_image_move = QPushButton(self.editor_map_toolbar)
+        self.buttonGroup_2 = QButtonGroup(Form)
+        self.buttonGroup_2.setObjectName(u"buttonGroup_2")
+        self.buttonGroup_2.addButton(self.btn_editor_map_image_move)
+        self.btn_editor_map_image_move.setObjectName(u"btn_editor_map_image_move")
+        self.btn_editor_map_image_move.setEnabled(True)
+        self.btn_editor_map_image_move.setCheckable(True)
+        self.btn_editor_map_image_move.setChecked(True)
+
+        self.horizontalLayout_18.addWidget(self.btn_editor_map_image_move)
+
+        self.btn_editor_map_image_rotate = QPushButton(self.editor_map_toolbar)
+        self.buttonGroup_2.addButton(self.btn_editor_map_image_rotate)
+        self.btn_editor_map_image_rotate.setObjectName(u"btn_editor_map_image_rotate")
+        self.btn_editor_map_image_rotate.setEnabled(True)
+        self.btn_editor_map_image_rotate.setCheckable(True)
+
+        self.horizontalLayout_18.addWidget(self.btn_editor_map_image_rotate)
+
+        self.btn_editor_map_image_scale = QPushButton(self.editor_map_toolbar)
+        self.buttonGroup_2.addButton(self.btn_editor_map_image_scale)
+        self.btn_editor_map_image_scale.setObjectName(u"btn_editor_map_image_scale")
+        self.btn_editor_map_image_scale.setEnabled(True)
+        self.btn_editor_map_image_scale.setCheckable(True)
+
+        self.horizontalLayout_18.addWidget(self.btn_editor_map_image_scale)
+
+        self.btn_editor_map_select = QPushButton(self.editor_map_toolbar)
         self.buttonGroup.addButton(self.btn_editor_map_select)
         self.btn_editor_map_select.setObjectName(u"btn_editor_map_select")
         self.btn_editor_map_select.setCheckable(True)
 
         self.horizontalLayout_18.addWidget(self.btn_editor_map_select)
 
-        self.btn_editor_map_mark = QPushButton(self.frame_5)
+        self.btn_editor_map_mark = QPushButton(self.editor_map_toolbar)
         self.buttonGroup.addButton(self.btn_editor_map_mark)
         self.btn_editor_map_mark.setObjectName(u"btn_editor_map_mark")
         self.btn_editor_map_mark.setCheckable(True)
 
         self.horizontalLayout_18.addWidget(self.btn_editor_map_mark)
 
-        self.btn_editor_map_snap = QPushButton(self.frame_5)
+        self.btn_editor_map_snap = QPushButton(self.editor_map_toolbar)
         self.btn_editor_map_snap.setObjectName(u"btn_editor_map_snap")
         self.btn_editor_map_snap.setCheckable(True)
         self.btn_editor_map_snap.setChecked(True)
 
         self.horizontalLayout_18.addWidget(self.btn_editor_map_snap)
 
-        self.btn_editor_map_gird = QPushButton(self.frame_5)
+        self.btn_editor_map_gird = QPushButton(self.editor_map_toolbar)
         self.btn_editor_map_gird.setObjectName(u"btn_editor_map_gird")
         self.btn_editor_map_gird.setCheckable(True)
         self.btn_editor_map_gird.setChecked(True)
@@ -1105,7 +1132,7 @@ class Ui_Form(object):
 
         self.horizontalLayout_18.addItem(self.horizontalSpacer_8)
 
-        self.btn_editor_map_selectmap = QComboBox(self.frame_5)
+        self.btn_editor_map_selectmap = QComboBox(self.editor_map_toolbar)
         self.btn_editor_map_selectmap.addItem("")
         self.btn_editor_map_selectmap.setObjectName(u"btn_editor_map_selectmap")
         self.btn_editor_map_selectmap.setEditable(True)
@@ -1113,7 +1140,7 @@ class Ui_Form(object):
         self.horizontalLayout_18.addWidget(self.btn_editor_map_selectmap)
 
 
-        self.verticalLayout_25.addWidget(self.frame_5)
+        self.verticalLayout_25.addWidget(self.editor_map_toolbar)
 
         self.editor_map_canvas = QGraphicsView(self.editor_map_mid)
         self.editor_map_canvas.setObjectName(u"editor_map_canvas")
@@ -1645,6 +1672,9 @@ class Ui_Form(object):
         self.btn_editor_map_move.setText(QCoreApplication.translate("Form", u"\u79fb\u52a8", None))
         self.btn_editor_map_draw.setText(QCoreApplication.translate("Form", u"\u7ed8\u5236", None))
         self.btn_editor_map_erase.setText(QCoreApplication.translate("Form", u"\u64e6\u9664", None))
+        self.btn_editor_map_image_move.setText(QCoreApplication.translate("Form", u"\u79fb\u52a8", None))
+        self.btn_editor_map_image_rotate.setText(QCoreApplication.translate("Form", u"\u65cb\u8f6c", None))
+        self.btn_editor_map_image_scale.setText(QCoreApplication.translate("Form", u"\u7f29\u653e", None))
         self.btn_editor_map_select.setText(QCoreApplication.translate("Form", u"\u9009\u533a", None))
         self.btn_editor_map_mark.setText(QCoreApplication.translate("Form", u"\u6807\u8bb0", None))
         self.btn_editor_map_snap.setText(QCoreApplication.translate("Form", u"\u5438\u9644", None))

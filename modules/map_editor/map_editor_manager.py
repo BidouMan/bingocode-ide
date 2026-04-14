@@ -3333,6 +3333,49 @@ class MapEditorManager(QObject):
                 )
                 print(f"DEBUG: 更新碰撞编辑器显示，选择图像0")
 
+        # 更新工具栏状态
+        self._update_toolbar_state(current_layer.layer_type)
+
+    def _update_toolbar_state(self, layer_type):
+        """根据图层类型更新工具栏状态"""
+        print(f"DEBUG: 更新工具栏状态，图层类型: {layer_type}")
+
+        # 检查UI元素是否存在
+        if not hasattr(self, "ui"):
+            print("DEBUG: UI对象不存在，跳过工具栏状态更新")
+            return
+
+        # 检查图层类型
+        is_image = layer_type == "image"
+
+        # 瓦片组按钮
+        if hasattr(self.ui, "btn_editor_map_move"):
+            self.ui.btn_editor_map_move.setVisible(not is_image)
+        if hasattr(self.ui, "btn_editor_map_draw"):
+            self.ui.btn_editor_map_draw.setVisible(not is_image)
+        if hasattr(self.ui, "btn_editor_map_erase"):
+            self.ui.btn_editor_map_erase.setVisible(not is_image)
+
+        # 图像组按钮
+        if hasattr(self.ui, "btn_editor_map_image_move"):
+            self.ui.btn_editor_map_image_move.setVisible(is_image)
+        if hasattr(self.ui, "btn_editor_map_image_scale"):
+            self.ui.btn_editor_map_image_scale.setVisible(is_image)
+        if hasattr(self.ui, "btn_editor_map_image_rotate"):
+            self.ui.btn_editor_map_image_rotate.setVisible(is_image)
+
+        # 默认工具激活
+        if is_image:
+            # 切换到图像层时，激活缩放工具
+            if hasattr(self.ui, "btn_editor_map_image_scale"):
+                self.ui.btn_editor_map_image_scale.setChecked(True)
+                self.current_tool = "scale"
+        else:
+            # 切换到绘制层时，激活移动工具
+            if hasattr(self.ui, "btn_editor_map_move"):
+                self.ui.btn_editor_map_move.setChecked(True)
+                self.current_tool = "move"
+
     def _on_layer_item_clicked(self, item, column):
         """处理图层项点击事件"""
         if column == 0:
