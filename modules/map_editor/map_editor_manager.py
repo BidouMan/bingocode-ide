@@ -635,11 +635,34 @@ class MapEditorManager(QObject):
 
     def new_map(self):
         """创建新地图"""
+        import os
+
         self._initialize_map_model()
         # 重新初始化图层管理器，使用新的地图数据模型
         self.layer_manager = LayerManager(self.map_model, self)
         # 重新连接信号
         self.layer_manager.current_layer_changed.connect(self._on_layer_changed)
+
+        # 自动为新地图分配一个默认路径，避免后续自动保存时生成新地图
+        if hasattr(self, "project_manager") and self.project_manager:
+            project_path = self.project_manager.project_root
+            if project_path:
+                maps_dir = os.path.join(project_path, "assets", "maps")
+                os.makedirs(maps_dir, exist_ok=True)
+                # 生成默认地图名称
+                map_name = "地图1"
+                counter = 1
+                while os.path.exists(os.path.join(maps_dir, map_name)):
+                    counter += 1
+                    map_name = f"地图{counter}"
+                # 创建与地图同名的文件夹
+                map_dir = os.path.join(maps_dir, map_name)
+                os.makedirs(map_dir, exist_ok=True)
+                # 文件路径指向文件夹内的.info文件
+                file_path = os.path.join(map_dir, f"{map_name}.info")
+                self.current_map_path = file_path
+                print(f"DEBUG: 为新地图分配默认路径: {file_path}")
+
         self._update_canvas()
 
     def load_map_from_path(self, file_path):
@@ -829,6 +852,21 @@ class MapEditorManager(QObject):
                             for image_data in layer.images:
                                 image_path = image_data.image_path
                                 print(f"DEBUG: 图像路径: {image_path}")
+
+                                # 确保图像路径是完整的绝对路径
+                                if not os.path.isabs(image_path):
+                                    # 如果是相对路径，转换为绝对路径
+                                    image_path = os.path.join(map_dir, image_path)
+                                    image_data.image_path = image_path
+                                    print(f"DEBUG: 转换为绝对路径: {image_path}")
+
+                                # 重新加载图像
+                                image_data._load_pixmap()
+                                if image_data.pixmap:
+                                    print(f"DEBUG: 成功加载图像: {image_path}")
+                                else:
+                                    print(f"DEBUG: 图像加载失败: {image_path}")
+
                                 # 检查该图像资源是否已经在converted_resources中
                                 found = False
                                 for resource in converted_resources:
@@ -1114,37 +1152,14 @@ class MapEditorManager(QObject):
         import os
         from PySide6.QtWidgets import QFileDialog
 
-        # 如果已经有当前地图路径，直接使用
-        if self.current_map_path:
-            file_path = self.current_map_path
-            print(f"DEBUG: 使用现有地图路径: {file_path}")
-        else:
-            # 自动保存到项目目录，不要弹窗
-            if hasattr(self, "project_manager") and self.project_manager:
-                project_path = self.project_manager.project_root
-                if project_path:
-                    maps_dir = os.path.join(project_path, "assets", "maps")
-                    os.makedirs(maps_dir, exist_ok=True)
-                    # 生成默认地图名称
-                    map_name = "地图1"
-                    counter = 1
-                    while os.path.exists(os.path.join(maps_dir, f"{map_name}.info")):
-                        counter += 1
-                        map_name = f"地图{counter}"
-                    file_path = os.path.join(maps_dir, f"{map_name}.info")
-                    print(f"DEBUG: 自动保存到项目目录: {file_path}")
-                else:
-                    # 如果没有项目路径，才弹窗
-                    file_path, _ = QFileDialog.getSaveFileName(
-                        None, "保存地图", "", "Map Files (*.info *.json)"
-                    )
-                    print(f"DEBUG: 选择的地图路径: {file_path}")
-            else:
-                # 如果没有project_manager，才弹窗
-                file_path, _ = QFileDialog.getSaveFileName(
-                    None, "保存地图", "", "Map Files (*.info *.json)"
-                )
-                print(f"DEBUG: 选择的地图路径: {file_path}")
+        # 如果没有正在编辑的地图，直接返回，不创建新地图
+        if not self.current_map_path:
+            print("DEBUG: 没有正在编辑的地图，跳过保存")
+            return False
+
+        # 使用现有地图路径
+        file_path = self.current_map_path
+        print(f"DEBUG: 使用现有地图路径: {file_path}")
 
         if file_path:
             # 如果没有扩展名，添加.info（二进制格式）
@@ -2368,7 +2383,35 @@ class MapEditorManager(QObject):
             # 处理不同类型的图层
             if current_layer.layer_type == "drawing":
                 # 绘制图层：绘制瓦片
-                pass
+                # 检查是否重复绘制
+                current_tile_id = current_layer.get_tile(gx, gy)
+                print(f"DEBUG: 当前位置图块ID: {current_tile_id}, 新图块ID: {tile_id}")
+                if current_tile_id == tile_id:
+                    print("DEBUG: 图块ID相同，跳过绘制")
+                    return
+
+                # 记录日志 (使用网格坐标)
+                self._record_coordinates(
+                    "Draw Tile", coordinates=(gx, gy), tile_id=tile_id
+                )
+
+                # 设置瓦片
+                current_layer.set_tile(gx, gy, tile_id)
+
+                # 更新地图数据模型
+                self.layer_manager.update_map_model()
+
+                # 手动更新这一个瓦片即可，这样速度最快且不会冲突
+                self._update_single_tile(gx, gy, tile_id)
+
+                # 设置地图为已修改状态
+                self.is_map_modified = True
+
+                # 自动保存地图（如果当前地图有文件路径）
+                if self.current_map_path:
+                    save_result = self.map_model.save(self.current_map_path)
+
+                return
             elif current_layer.layer_type == "image":
                 # 图像图层：创建图像
                 # 检查资源是否有效
@@ -2414,31 +2457,6 @@ class MapEditorManager(QObject):
 
                 return
 
-            # 检查是否重复绘制
-            current_tile_id = current_layer.get_tile(gx, gy)
-            print(f"DEBUG: 当前位置图块ID: {current_tile_id}, 新图块ID: {tile_id}")
-            if current_tile_id == tile_id:
-                print("DEBUG: 图块ID相同，跳过绘制")
-                return
-
-            # 记录日志 (使用网格坐标)
-            self._record_coordinates("Draw Tile", coordinates=(gx, gy), tile_id=tile_id)
-
-            # 设置瓦片
-            current_layer.set_tile(gx, gy, tile_id)
-
-            # 更新地图数据模型
-            self.layer_manager.update_map_model()
-
-            # 手动更新这一个瓦片即可，这样速度最快且不会冲突
-            self._update_single_tile(gx, gy, tile_id)
-
-            # 设置地图为已修改状态
-            self.is_map_modified = True
-
-            # 自动保存地图（如果当前地图有文件路径）
-            if self.current_map_path:
-                save_result = self.map_model.save(self.current_map_path)
         except Exception as e:
             print(f"绘制图块错误: {e}")
             import traceback
@@ -2679,7 +2697,22 @@ class MapEditorManager(QObject):
                 )
                 return
 
-            # 调用碰撞管理器设置当前碰撞图块
+            # 计算全局资源索引
+            global_resource_index = 0
+            # 遍历所有图层的资源，找到当前资源的全局索引
+            for layer_id, resources in self.layer_resources.items():
+                if layer_id == current_layer.layer_id:
+                    # 找到当前图层，加上当前资源在图层内的索引
+                    global_resource_index += resource_index
+                    break
+                # 加上其他图层的资源数量
+                global_resource_index += len(resources)
+
+            print(
+                f"DEBUG: 局部资源索引: {resource_index}, 全局资源索引: {global_resource_index}"
+            )
+
+            # 调用碰撞管理器设置当前碰撞图块（传递局部资源索引，碰撞管理器会通过provider获取正确的图像）
             print(f"DEBUG: 调用 collision_manager.set_current_collision_tile")
             if hasattr(self, "collision_manager"):
                 self.collision_manager.set_current_collision_tile(
@@ -2689,35 +2722,45 @@ class MapEditorManager(QObject):
             else:
                 print("DEBUG: collision_manager 不存在")
 
-            # 调用属性管理器设置当前瓦片
+            # 调用属性管理器设置当前瓦片（传递全局资源索引）
             print(f"DEBUG: 调用 property_manager.set_current_tile")
             if hasattr(self, "property_manager"):
-                self.property_manager.set_current_tile(resource_index, tile_index)
+                self.property_manager.set_current_tile(
+                    global_resource_index, tile_index
+                )
                 print("DEBUG: property_manager.set_current_tile 调用成功")
             else:
                 print("DEBUG: property_manager 不存在")
 
-            # 更新map_collision checkbox的状态
+            # 更新map_collision checkbox的状态（使用全局资源索引）
             print(f"DEBUG: 更新 map_collision checkbox 状态")
             if hasattr(self, "ui") and hasattr(self.ui, "map_collision"):
                 if self.map_model:
                     collision_enabled = self.map_model.get_tile_collision(
-                        resource_index, tile_index
+                        global_resource_index, tile_index
                     )
                     print(f"DEBUG: 碰撞启用状态: {collision_enabled}")
                     self.ui.map_collision.setChecked(collision_enabled)
                     print("DEBUG: map_collision checkbox 状态更新成功")
+                    print(
+                        f"DEBUG: 成功获取碰撞状态 - tile_set_index: {global_resource_index}, tile_index: {tile_index}, collision: {collision_enabled}"
+                    )
                 else:
                     print("DEBUG: map_model 不存在")
             else:
                 print("DEBUG: ui 或 map_collision 不存在")
 
-            # 更新标签输入框的状态
+            # 更新标签输入框的状态（使用全局资源索引）
             print(f"DEBUG: 更新标签输入框状态")
             if hasattr(self, "ui") and hasattr(self.ui, "att_tag"):
                 if self.map_model:
-                    tile_tag = self.map_model.get_tile_tag(resource_index, tile_index)
+                    tile_tag = self.map_model.get_tile_tag(
+                        global_resource_index, tile_index
+                    )
                     print(f"DEBUG: 瓦片标签: {tile_tag}")
+                    print(
+                        f"DEBUG: 成功获取标签 - tile_set_index: {global_resource_index}, tile_index: {tile_index}, tag: {tile_tag}"
+                    )
                     # 阻塞信号，防止触发标签变化处理
                     self.ui.att_tag.blockSignals(True)
                     self.ui.att_tag.setText(tile_tag)
@@ -2728,14 +2771,17 @@ class MapEditorManager(QObject):
             else:
                 print("DEBUG: ui 或 att_tag 不存在")
 
-            # 更新碰撞类型选择框的状态
+            # 更新碰撞类型选择框的状态（使用全局资源索引）
             print(f"DEBUG: 更新碰撞类型选择框状态")
             if hasattr(self, "ui") and hasattr(self.ui, "att_col_type"):
                 if self.map_model:
                     collision_enabled = self.map_model.get_tile_collision(
-                        resource_index, tile_index
+                        global_resource_index, tile_index
                     )
                     print(f"DEBUG: 碰撞启用状态: {collision_enabled}")
+                    print(
+                        f"DEBUG: 成功获取碰撞状态 - tile_set_index: {global_resource_index}, tile_index: {tile_index}, collision: {collision_enabled}"
+                    )
                     # 根据碰撞状态设置碰撞类型
                     # 墙体 -> 碰撞开启
                     # 其他类型 -> 碰撞关闭
@@ -2914,7 +2960,19 @@ class MapEditorManager(QObject):
         # 获取图块图像
         pixmap = None
         if resource["resource_type"] == "tileset":
-            tile_id = (resource_index + 1) * 1000 + tile_index + 1
+            # 计算全局资源索引
+            global_resource_index = 0
+            # 遍历所有图层的资源，找到当前资源的全局索引
+            for layer_id, resources in self.layer_resources.items():
+                if layer_id == current_layer.layer_id:
+                    # 找到当前图层，加上当前资源在图层内的索引
+                    global_resource_index += resource_index
+                    break
+                # 加上其他图层的资源数量
+                global_resource_index += len(resources)
+
+            # 使用全局资源索引计算tile_id
+            tile_id = (global_resource_index + 1) * 1000 + tile_index + 1
             pixmap = self.get_cached_pixmap(tile_id)
         else:
             # 单张图片模式
@@ -3261,6 +3319,24 @@ class MapEditorManager(QObject):
                 self.collision_manager.set_collision_enabled(True)
             print("DEBUG: 切换到绘制图层，开启碰撞属性")
 
+        # 更新碰撞编辑器显示，选择当前图层的第一个资源
+        layer_resources = self.layer_resources.get(current_layer.layer_id, [])
+        if layer_resources:
+            # 选择第一个资源和第一个图块
+            self.selected_resource_index = 0
+            self.selected_tile_index = 0
+            # 根据当前图层类型更新碰撞编辑器显示
+            if current_layer.layer_type == "drawing":
+                # 绘制图层：使用碰撞图块
+                self.set_current_collision_tile(0, 0)
+                print(f"DEBUG: 更新碰撞编辑器显示，选择资源0和图块0")
+            elif current_layer.layer_type == "image":
+                # 图像图层：使用碰撞图像
+                self.collision_manager.set_current_collision_image(
+                    current_layer.layer_id, 0
+                )
+                print(f"DEBUG: 更新碰撞编辑器显示，选择图像0")
+
     def _on_layer_item_clicked(self, item, column):
         """处理图层项点击事件"""
         if column == 0:
@@ -3417,6 +3493,20 @@ class MapEditorManager(QObject):
                 # 添加到图层资源列表
                 self.layer_resources[current_layer.layer_id].append(resource_info)
 
+                # 图像图层：添加到图层的images属性中
+                if current_layer.layer_type == "image" and hasattr(
+                    current_layer, "add_image"
+                ):
+                    # 创建ImageData对象
+                    from modules.map_editor.layer_manager import ImageData
+
+                    map_dir = os.path.dirname(self.current_map_path)
+                    full_image_path = os.path.join(map_dir, relative_path)
+                    image_data = ImageData(full_image_path)
+                    # 添加到图像图层
+                    current_layer.add_image(image_data)
+                    print(f"DEBUG: 图像添加到图层 - 路径: {full_image_path}")
+
                 # 绘制图层：添加到地图模型的tile_sets中
                 if (
                     current_layer.layer_type == "drawing"
@@ -3479,8 +3569,15 @@ class MapEditorManager(QObject):
                     # 单张图片模式，设置默认图块索引为0
                     self.selected_tile_index = 0
 
-                # 更新碰撞编辑器显示
-                self.set_current_collision_tile(index, self.selected_tile_index)
+                # 根据当前图层类型更新碰撞编辑器显示
+                if current_layer.layer_type == "drawing":
+                    # 绘制图层：使用碰撞图块
+                    self.set_current_collision_tile(index, self.selected_tile_index)
+                elif current_layer.layer_type == "image":
+                    # 图像图层：使用碰撞图像
+                    self.collision_manager.set_current_collision_image(
+                        current_layer.layer_id, index
+                    )
 
                 # 更新预览
                 self._remove_preview()

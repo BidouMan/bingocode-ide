@@ -121,10 +121,10 @@ class CollisionManager(QObject):
             if hasattr(self, "anchor_items"):
                 try:
                     self.anchor_items.clear()
-                except Exception as e:
-                    print(f"DEBUG: 清空锚点项错误: {e}")
+                except Exception:
+                    pass
 
-            # 移除事件过滤器
+            # 移除事件过滤器（安静模式，不打印调试信息）
             if hasattr(self, "col_editor_view") and self.col_editor_view:
                 try:
                     # 检查col_editor_view是否存在且有效
@@ -135,24 +135,24 @@ class CollisionManager(QObject):
                             if viewport:
                                 try:
                                     viewport.removeEventFilter(self)
-                                except Exception as e:
-                                    print(f"DEBUG: 移除viewport事件过滤器错误: {e}")
-                        except Exception as e:
-                            print(f"DEBUG: 访问viewport错误: {e}")
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
                         # 再移除视图本身的事件过滤器
                         try:
                             self.col_editor_view.removeEventFilter(self)
-                        except Exception as e:
-                            print(f"DEBUG: 移除视图事件过滤器错误: {e}")
-                except Exception as e:
-                    print(f"DEBUG: 访问视图错误: {e}")
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
-            # 清理场景
+            # 清理场景（安静模式，不打印调试信息）
             if hasattr(self, "col_editor_scene") and self.col_editor_scene:
                 try:
                     self.col_editor_scene.clear()
-                except Exception as e:
-                    print(f"DEBUG: 清空场景错误: {e}")
+                except Exception:
+                    pass
 
             # 清除对所有对象的引用
             if hasattr(self, "col_editor_scene"):
@@ -173,8 +173,8 @@ class CollisionManager(QObject):
                 self.map_model = None
             if hasattr(self, "tile_pixmap_provider"):
                 self.tile_pixmap_provider = None
-        except Exception as e:
-            print(f"DEBUG: 清理资源错误: {e}")
+        except Exception:
+            pass
 
     def initialize_collision_editor(self, col_editor_view):
         """初始化碰撞编辑器"""
@@ -294,16 +294,35 @@ class CollisionManager(QObject):
                     f"DEBUG: 图块图像获取结果: {pixmap is not None and not pixmap.isNull()}"
                 )
 
-                # 从地图模型获取碰撞形状
+                # 计算全局资源索引
+                global_resource_index = resource_index
+                if self.parent_manager and hasattr(self.parent_manager, "layer_manager") and hasattr(self.parent_manager, "layer_resources"):
+                    layer_manager = self.parent_manager.layer_manager
+                    current_layer = layer_manager.get_current_layer()
+                    if current_layer:
+                        layer_resources = self.parent_manager.layer_resources
+                        global_resource_index = 0
+                        # 遍历所有图层的资源，找到当前资源的全局索引
+                        for layer_id, resources in layer_resources.items():
+                            if layer_id == current_layer.layer_id:
+                                # 找到当前图层，加上当前资源在图层内的索引
+                                global_resource_index += resource_index
+                                break
+                            # 加上其他图层的资源数量
+                            global_resource_index += len(resources)
+                
+                print(f"DEBUG: 局部资源索引: {resource_index}, 全局资源索引: {global_resource_index}")
+
+                # 从地图模型获取碰撞形状（使用全局资源索引）
                 print("DEBUG: 从地图模型获取碰撞形状")
                 collision_shape = self.map_model.get_tile_collision_shape(
-                    resource_index, tile_index
+                    global_resource_index, tile_index
                 )
                 print(f"DEBUG: 获取到的碰撞形状: {collision_shape}")
 
-                # 获取碰撞启用状态
+                # 获取碰撞启用状态（使用全局资源索引）
                 collision_enabled = self.map_model.get_tile_collision(
-                    resource_index, tile_index
+                    global_resource_index, tile_index
                 )
                 print(f"DEBUG: 碰撞是否启用: {collision_enabled}")
             elif self.current_collision_image:
@@ -318,47 +337,98 @@ class CollisionManager(QObject):
                     self.parent_manager, "layer_manager"
                 ):
                     layer_manager = self.parent_manager.layer_manager
+                    print(f"DEBUG: 图层管理器中的图层数量: {len(layer_manager.layers)}")
+                    
                     for layer in layer_manager.layers:
+                        print(f"DEBUG: 检查图层 - ID: {layer.layer_id}, 类型: {layer.layer_type}")
                         if layer.layer_id == layer_id:
-                            if 0 <= image_index < len(layer.images):
-                                image_data = layer.images[image_index]
-                                pixmap = image_data.pixmap
-                                collision_shape = image_data.collision_shape
-                                collision_enabled = image_data.collision_enabled
-                                print(
-                                    f"DEBUG: 图像数据获取结果: {pixmap is not None and not pixmap.isNull()}"
-                                )
-                                print(f"DEBUG: 获取到的碰撞形状: {collision_shape}")
-                                print(f"DEBUG: 碰撞是否启用: {collision_enabled}")
+                            print(f"DEBUG: 找到目标图层 - ID: {layer.layer_id}, 类型: {layer.layer_type}")
+                            # 检查图层类型是否为图像图层
+                            if hasattr(layer, 'images'):
+                                print(f"DEBUG: 图像数量: {len(layer.images)}")
+                                if 0 <= image_index < len(layer.images):
+                                    image_data = layer.images[image_index]
+                                    print(f"DEBUG: 图像数据 - 存在: {image_data is not None}")
+                                    if image_data:
+                                        pixmap = image_data.pixmap
+                                        print(f"DEBUG: 图像pixmap - 存在: {pixmap is not None}, 非空: {pixmap is not None and not pixmap.isNull()}")
+                                        collision_shape = image_data.collision_shape
+                                        collision_enabled = image_data.collision_enabled
+                                        print(
+                                            f"DEBUG: 图像数据获取结果: {pixmap is not None and not pixmap.isNull()}"
+                                        )
+                                        print(f"DEBUG: 获取到的碰撞形状: {collision_shape}")
+                                        print(f"DEBUG: 碰撞是否启用: {collision_enabled}")
+                                else:
+                                    print(f"DEBUG: 图像索引超出范围 - 索引: {image_index}, 图像数量: {len(layer.images)}")
+                            else:
+                                print(f"DEBUG: 图层类型错误 - 不是图像图层，没有images属性")
                             break
+                else:
+                    print("DEBUG: 父管理器或图层管理器不存在")
 
             if pixmap and not pixmap.isNull():
-                # 获取视图大小
-                view_rect = self.col_editor_view.viewport().rect()
-                view_width = view_rect.width()
-                view_height = view_rect.height()
-                print(f"DEBUG: 视图大小: {view_width}x{view_height}")
-
-                # 黄金分割尺寸（大约占视图的61.8%）
-                target_width = view_width * 0.618
-                target_height = view_height * 0.618
-                print(f"DEBUG: 目标尺寸: {target_width}x{target_height}")
-
-                # 计算缩放比例
+                # 对于图像图层，直接缩放图像本身
                 pixmap_width = pixmap.width()
                 pixmap_height = pixmap.height()
                 print(f"DEBUG: 图块原始尺寸: {pixmap_width}x{pixmap_height}")
 
-                # 计算保持比例的缩放因子
-                scale_x = target_width / pixmap_width
-                scale_y = target_height / pixmap_height
-                scale = min(scale_x, scale_y)
-                print(f"DEBUG: 缩放因子 - x: {scale_x}, y: {scale_y}, 最终: {scale}")
+                # 处理图像
+                if self.current_collision_image:
+                    # 图像图层：直接缩放图像本身
+                    # 使用固定的目标尺寸（256x256的80%）
+                    target_width = 256 * 0.8
+                    target_height = 256 * 0.8
+                    print(f"DEBUG: 目标尺寸: {target_width}x{target_height}")
+                    
+                    # 计算保持比例的缩放因子
+                    scale_x = target_width / pixmap_width
+                    scale_y = target_height / pixmap_height
+                    image_scale = min(scale_x, scale_y)
+                    print(f"DEBUG: 图像缩放因子 - x: {scale_x}, y: {scale_y}, 最终: {image_scale}")
+                    
+                    # 直接缩放图像
+                    scaled_width = int(pixmap_width * image_scale)
+                    scaled_height = int(pixmap_height * image_scale)
+                    display_pixmap = pixmap.scaled(
+                        scaled_width,
+                        scaled_height,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+                    print(f"DEBUG: 图像缩放后尺寸: {scaled_width}x{scaled_height}")
+                    
+                    # 对于图像图层，我们直接缩放图像，所以视图变换不需要缩放
+                    view_scale = 1.0
+                    print(f"DEBUG: 图像图层视图变换缩放: {view_scale}")
+                else:
+                    # 绘制图层：保持原有逻辑，使用视图变换
+                    display_pixmap = pixmap
+                    
+                    # 获取视图大小
+                    view_rect = self.col_editor_view.viewport().rect()
+                    view_width = view_rect.width()
+                    view_height = view_rect.height()
+                    print(f"DEBUG: 视图大小: {view_width}x{view_height}")
 
-                # 最小缩放限制（避免图块太小）
-                min_scale = 2.0  # 至少放大到原始大小的2倍
-                scale = max(scale, min_scale)
-                print(f"DEBUG: 应用最小缩放后: {scale}")
+                    # 黄金分割尺寸（大约占视图的61.8%）
+                    target_width = view_width * 0.618
+                    target_height = view_height * 0.618
+                    print(f"DEBUG: 目标尺寸: {target_width}x{target_height}")
+
+                    # 计算缩放比例
+                    print(f"DEBUG: 图块原始尺寸: {pixmap_width}x{pixmap_height}")
+
+                    # 计算保持比例的缩放因子
+                    scale_x = target_width / pixmap_width
+                    scale_y = target_height / pixmap_height
+                    view_scale = min(scale_x, scale_y)
+                    print(f"DEBUG: 缩放因子 - x: {scale_x}, y: {scale_y}, 最终: {view_scale}")
+
+                    # 最小缩放限制（避免图块太小）
+                    min_scale = 2.0  # 至少放大到原始大小的2倍
+                    view_scale = max(view_scale, min_scale)
+                    print(f"DEBUG: 应用最小缩放后: {view_scale}")
 
                 # 清空场景前，先清理所有引用
                 print("DEBUG: 清理碰撞相关项")
@@ -368,11 +438,16 @@ class CollisionManager(QObject):
                 print("DEBUG: 清空场景")
                 self.col_editor_scene.clear()
 
-                # 显示原图（放在场景中心位置）
+                # 显示图像（放在场景中心位置）
                 print("DEBUG: 创建并添加图块图像项")
-                pixmap_item = QGraphicsPixmapItem(pixmap)
+                pixmap_item = QGraphicsPixmapItem(display_pixmap)
+                
+                # 使用显示图像的尺寸
+                display_pixmap_width = display_pixmap.width()
+                display_pixmap_height = display_pixmap.height()
+                
                 # 将图块放在场景中心位置，使图块中心点对准场景原点
-                pixmap_item.setPos(-pixmap_width / 2, -pixmap_height / 2)
+                pixmap_item.setPos(-display_pixmap_width / 2, -display_pixmap_height / 2)
                 # 设置为最底层
                 pixmap_item.setZValue(-100)
                 # 禁用所有鼠标交互
@@ -412,22 +487,41 @@ class CollisionManager(QObject):
                     if valid_collision_shape:
                         # 使用自定义多边形碰撞形状（确保是局部坐标）
                         raw_points = collision_shape["points"]
-                        # 确保存储的是相对于图块左上角的局部坐标
-                        self.collision_points = [
-                            QPointF(p[0], p[1]) for p in raw_points
-                        ]
+                        # 对于图像图层，需要根据缩放比例调整碰撞点
+                        if self.current_collision_image:
+                            # 计算原始图像到缩放后图像的缩放比例
+                            original_scale = display_pixmap_width / pixmap_width if pixmap_width > 0 else 1.0
+                            # 确保存储的是相对于图块左上角的局部坐标
+                            self.collision_points = [
+                                QPointF(p[0] * original_scale, p[1] * original_scale) for p in raw_points
+                            ]
+                        else:
+                            # 绘制图层，保持原样
+                            self.collision_points = [
+                                QPointF(p[0], p[1]) for p in raw_points
+                            ]
                         print(
                             f"DEBUG: 使用自定义碰撞形状，顶点数: {len(self.collision_points)}"
                         )
                     else:
                         # 使用默认矩形碰撞形状（转换为多边形）
                         # 使用相对于图块左上角的局部坐标（0到图块大小）
-                        self.collision_points = [
-                            QPointF(0, 0),
-                            QPointF(pixmap.width(), 0),
-                            QPointF(pixmap.width(), pixmap.height()),
-                            QPointF(0, pixmap.height()),
-                        ]
+                        if self.current_collision_image:
+                            # 图像图层，使用缩放后的图像尺寸
+                            self.collision_points = [
+                                QPointF(0, 0),
+                                QPointF(display_pixmap_width, 0),
+                                QPointF(display_pixmap_width, display_pixmap_height),
+                                QPointF(0, display_pixmap_height),
+                            ]
+                        else:
+                            # 绘制图层，使用原始图像尺寸
+                            self.collision_points = [
+                                QPointF(0, 0),
+                                QPointF(pixmap.width(), 0),
+                                QPointF(pixmap.width(), pixmap.height()),
+                                QPointF(0, pixmap.height()),
+                            ]
                         print("DEBUG: 使用默认矩形碰撞形状")
 
                     # 更新碰撞多边形显示
@@ -444,28 +538,52 @@ class CollisionManager(QObject):
                 transform.reset()
 
                 # 先缩放
-                transform.scale(scale, scale)
+                transform.scale(view_scale, view_scale)
 
-                # 再平移到视图中心
-                transform.translate(view_width / 2, view_height / 2)
+                # 再平移到视图中心（根据不同图层类型使用不同的尺寸）
+                if self.current_collision_tile:
+                    # 绘制图层：使用动态获取的视图尺寸
+                    view_rect = self.col_editor_view.viewport().rect()
+                    view_width = view_rect.width()
+                    view_height = view_rect.height()
+                    transform.translate(view_width / 2, view_height / 2)
+                else:
+                    # 图像图层：使用固定的256x256尺寸
+                    transform.translate(256 / 2, 256 / 2)
 
                 # 应用变换，但确保不会导致画布移动
                 self.col_editor_view.setTransform(transform)
-                print(f"DEBUG: 变换应用完成，缩放: {scale}")
+                print(f"DEBUG: 变换应用完成，缩放: {view_scale}")
 
                 # 确保场景大小与视图大小匹配，避免滚动
                 # 但是保持图块的居中位置
-                self.col_editor_scene.setSceneRect(
-                    -view_width / 2, -view_height / 2, view_width, view_height
-                )
-                print(
-                    f"DEBUG: 设置场景矩形: (-{view_width / 2}, -{view_height / 2}, {view_width}, {view_height})"
-                )
-
-                # 确保视图不会自动滚动
-                self.col_editor_view.setSceneRect(
-                    -view_width / 2, -view_height / 2, view_width, view_height
-                )
+                if self.current_collision_tile:
+                    # 绘制图层：使用动态获取的视图尺寸
+                    view_rect = self.col_editor_view.viewport().rect()
+                    view_width = view_rect.width()
+                    view_height = view_rect.height()
+                    self.col_editor_scene.setSceneRect(
+                        -view_width / 2, -view_height / 2, view_width, view_height
+                    )
+                    print(
+                        f"DEBUG: 设置场景矩形: (-{view_width / 2}, -{view_height / 2}, {view_width}, {view_height})"
+                    )
+                    # 确保视图不会自动滚动
+                    self.col_editor_view.setSceneRect(
+                        -view_width / 2, -view_height / 2, view_width, view_height
+                    )
+                else:
+                    # 图像图层：使用固定的256x256尺寸
+                    self.col_editor_scene.setSceneRect(
+                        -256 / 2, -256 / 2, 256, 256
+                    )
+                    print(
+                        f"DEBUG: 设置场景矩形: (-{256 / 2}, -{256 / 2}, {256}, {256})"
+                    )
+                    # 确保视图不会自动滚动
+                    self.col_editor_view.setSceneRect(
+                        -256 / 2, -256 / 2, 256, 256
+                    )
 
                 # 显示视图
                 self.col_editor_view.show()
@@ -494,8 +612,26 @@ class CollisionManager(QObject):
         """设置碰撞启用状态"""
         if self.current_collision_tile:
             resource_index, tile_index = self.current_collision_tile
+            
+            # 计算全局资源索引
+            global_resource_index = resource_index
+            if self.parent_manager and hasattr(self.parent_manager, "layer_manager") and hasattr(self.parent_manager, "layer_resources"):
+                layer_manager = self.parent_manager.layer_manager
+                current_layer = layer_manager.get_current_layer()
+                if current_layer:
+                    layer_resources = self.parent_manager.layer_resources
+                    global_resource_index = 0
+                    # 遍历所有图层的资源，找到当前资源的全局索引
+                    for layer_id, resources in layer_resources.items():
+                        if layer_id == current_layer.layer_id:
+                            # 找到当前图层，加上当前资源在图层内的索引
+                            global_resource_index += resource_index
+                            break
+                        # 加上其他图层的资源数量
+                        global_resource_index += len(resources)
+            
             if self.map_model:
-                self.map_model.set_tile_collision(resource_index, tile_index, enabled)
+                self.map_model.set_tile_collision(global_resource_index, tile_index, enabled)
                 self._update_collision_display()
         elif self.current_collision_image:
             layer_id, image_index = self.current_collision_image
@@ -635,8 +771,10 @@ class CollisionManager(QObject):
                 self.collision_shape_item.setBrush(
                     QBrush(QColor(100, 149, 237, 100))
                 )  # 半透明淡蓝色
-                # 将碰撞形状的线条宽度改细一点
-                self.collision_shape_item.setPen(QPen(QColor(100, 149, 237), 0.5))
+                # 设置碰撞形状的线条宽度，并确保不随缩放变化
+                pen = QPen(QColor(100, 149, 237), 1.0)  # 增加线条宽度到1.0
+                pen.setCosmetic(True)  # 线条宽度不随缩放变化
+                self.collision_shape_item.setPen(pen)
                 # 核心修复：让多边形不响应鼠标，点击事件会直接穿透到下层的锚点
                 self.collision_shape_item.setAcceptedMouseButtons(Qt.NoButton)
                 self.collision_shape_item.setFlag(

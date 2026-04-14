@@ -181,7 +181,7 @@ class ImageData:
         self.scale = scale  # 缩放比例
         self.opacity = opacity  # 透明度
         self.pixmap = None  # 缓存的图像
-        self.collision_enabled = True  # 碰撞是否启用
+        self.collision_enabled = False  # 碰撞是否启用（图像图层默认关闭）
         self.collision_shape = None  # 碰撞形状
         self._load_pixmap()
     

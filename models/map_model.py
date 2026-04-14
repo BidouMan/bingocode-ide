@@ -374,6 +374,10 @@ class MapDataModel(QObject):
                 type_code = 0 if layer_type == "drawing" else 1
                 f.write(struct.pack("<B", type_code))
 
+                # 写入图层ID（4字节）
+                layer_id = layer.get("id", layer_idx)
+                f.write(struct.pack("<I", layer_id))
+
                 # 写入图像数据（如果是图像图层）
                 if layer_type == "image":
                     images = layer.get("images", [])
@@ -725,6 +729,13 @@ class MapDataModel(QObject):
                     # 兼容旧版本文件
                     layer_type = "drawing"
 
+                # 读取图层ID
+                try:
+                    layer_id = struct.unpack("<I", f.read(4))[0]
+                except:
+                    # 兼容旧版本文件，使用索引作为ID
+                    layer_id = i
+
                 # 读取图像数据（如果是图像图层）
                 images = []
                 if layer_type == "image":
@@ -775,7 +786,7 @@ class MapDataModel(QObject):
                             tiles_dict[(original_x, original_y)] = tile_id
 
                 layer = {
-                    "id": i,  # 使用索引作为ID，确保唯一性
+                    "id": layer_id,  # 使用从文件中读取的图层ID
                     "name": name,
                     "visible": visible,
                     "type": layer_type,

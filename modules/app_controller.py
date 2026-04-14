@@ -161,8 +161,15 @@ class AppController:
         # 1. 保存当前地图（如果正在编辑地图）
         if hasattr(self, "map_editor") and self.map_editor:
             try:
-                print("📝 正在保存地图文件...")
-                self.map_editor.save_map()
+                # 只有当有正在编辑的地图时才保存
+                if (
+                    hasattr(self.map_editor, "current_map_path")
+                    and self.map_editor.current_map_path
+                ):
+                    print("📝 正在保存地图文件...")
+                    self.map_editor.save_map()
+                else:
+                    print("📝 当前没有正在编辑的地图，跳过保存")
             except Exception as e:
                 print(f"❌ 保存地图文件失败: {e}")
 
@@ -179,8 +186,15 @@ class AppController:
         # 1. 保存当前地图（如果正在编辑地图）
         if hasattr(self, "map_editor") and self.map_editor:
             try:
-                print("📝 正在保存地图文件...")
-                self.map_editor.save_map()
+                # 只有当有正在编辑的地图时才保存
+                if (
+                    hasattr(self.map_editor, "current_map_path")
+                    and self.map_editor.current_map_path
+                ):
+                    print("📝 正在保存地图文件...")
+                    self.map_editor.save_map()
+                else:
+                    print("📝 当前没有正在编辑的地图，跳过保存")
             except Exception as e:
                 print(f"❌ 保存地图文件失败: {e}")
 
@@ -284,8 +298,15 @@ class AppController:
             # 保存地图文件
             if hasattr(self, "map_editor") and self.map_editor:
                 try:
-                    print("📝 正在保存地图文件...")
-                    self.map_editor.save_map()
+                    # 只有当有正在编辑的地图时才保存
+                    if (
+                        hasattr(self.map_editor, "current_map_path")
+                        and self.map_editor.current_map_path
+                    ):
+                        print("📝 正在保存地图文件...")
+                        self.map_editor.save_map()
+                    else:
+                        print("📝 当前没有正在编辑的地图，跳过保存")
                 except Exception as e:
                     print(f"❌ 保存地图文件失败: {e}")
             # print("✨ 项目所有文件已成功同步到磁盘")
@@ -393,8 +414,12 @@ class AppController:
         # 2. 【强制保存地图】确保地图文件也被保存
         if hasattr(self, "map_editor") and self.map_editor:
             try:
-                print("📝 正在执行静默地图保存...")
-                self.map_editor.save_map()
+                # 只有当有正在编辑的地图时才保存
+                if hasattr(self.map_editor, "current_map_path") and self.map_editor.current_map_path:
+                    print("📝 正在执行静默地图保存...")
+                    self.map_editor.save_map()
+                else:
+                    print("📝 当前没有正在编辑的地图，跳过保存")
             except Exception as e:
                 print(f"❌ 静默保存地图失败: {e}")
 
