@@ -396,6 +396,21 @@ class MapDataModel(QObject):
                         f.write(struct.pack("<f", image.get("rotation", 0)))
                         f.write(struct.pack("<f", image.get("scale", 1.0)))
                         f.write(struct.pack("<f", image.get("opacity", 1.0)))
+                        # 写入碰撞数据
+                        f.write(
+                            struct.pack(
+                                "<B", 1 if image.get("collision_enabled", False) else 0
+                            )
+                        )
+                        # 写入碰撞形状
+                        collision_shape = image.get("collision_shape", None)
+                        if collision_shape and "points" in collision_shape:
+                            points = collision_shape["points"]
+                            f.write(struct.pack("<I", len(points)))
+                            for point in points:
+                                f.write(struct.pack("<dd", point[0], point[1]))
+                        else:
+                            f.write(struct.pack("<I", 0))
                 else:
                     # 非图像图层，写入0表示没有图像
                     f.write(struct.pack("<I", 0))
@@ -751,6 +766,17 @@ class MapDataModel(QObject):
                             rotation = struct.unpack("<f", f.read(4))[0]
                             scale = struct.unpack("<f", f.read(4))[0]
                             opacity = struct.unpack("<f", f.read(4))[0]
+                            # 读取碰撞数据
+                            collision_enabled = struct.unpack("<B", f.read(1))[0] == 1
+                            # 读取碰撞形状
+                            point_count = struct.unpack("<I", f.read(4))[0]
+                            collision_shape = None
+                            if point_count > 0:
+                                points = []
+                                for _ in range(point_count):
+                                    px, py = struct.unpack("<dd", f.read(16))
+                                    points.append([px, py])
+                                collision_shape = {"points": points}
                             # 创建图像数据字典
                             image_data = {
                                 "image_path": image_path,
@@ -758,6 +784,8 @@ class MapDataModel(QObject):
                                 "rotation": rotation,
                                 "scale": scale,
                                 "opacity": opacity,
+                                "collision_enabled": collision_enabled,
+                                "collision_shape": collision_shape,
                             }
                             images.append(image_data)
                     except:

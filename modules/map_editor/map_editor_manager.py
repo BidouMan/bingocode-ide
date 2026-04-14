@@ -3306,18 +3306,14 @@ class MapEditorManager(QObject):
                 )
 
         # 检查当前图层的类型，设置碰撞编辑器的碰撞属性
-        if current_layer.layer_type == "image":
-            # 图像图层：关闭碰撞编辑器的碰撞属性
-            if hasattr(self, "ui") and hasattr(self.ui, "map_collision"):
-                self.ui.map_collision.setChecked(False)
-                self.collision_manager.set_collision_enabled(False)
-            print("DEBUG: 切换到图像图层，关闭碰撞属性")
-        else:
-            # 绘制图层：开启碰撞编辑器的碰撞属性
-            if hasattr(self, "ui") and hasattr(self.ui, "map_collision"):
-                self.ui.map_collision.setChecked(True)
-                self.collision_manager.set_collision_enabled(True)
-            print("DEBUG: 切换到绘制图层，开启碰撞属性")
+        if hasattr(self, "ui") and hasattr(self.ui, "map_collision"):
+            # 对于图像图层，默认关闭碰撞属性，但如果用户手动打开过，保持打开状态
+            if current_layer.layer_type == "image":
+                # 图像图层：保持当前的碰撞属性状态
+                print("DEBUG: 切换到图像图层，保持当前碰撞属性状态")
+            else:
+                # 绘制图层：保持当前的碰撞属性状态
+                print("DEBUG: 切换到绘制图层，保持当前碰撞属性状态")
 
         # 更新碰撞编辑器显示，选择当前图层的第一个资源
         layer_resources = self.layer_resources.get(current_layer.layer_id, [])

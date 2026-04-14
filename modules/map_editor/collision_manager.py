@@ -373,12 +373,18 @@ class CollisionManager(QObject):
                 pixmap_height = pixmap.height()
                 print(f"DEBUG: 图块原始尺寸: {pixmap_width}x{pixmap_height}")
 
+                # 获取视图大小
+                view_rect = self.col_editor_view.viewport().rect()
+                view_width = view_rect.width()
+                view_height = view_rect.height()
+                print(f"DEBUG: 视图大小: {view_width}x{view_height}")
+                
                 # 处理图像
                 if self.current_collision_image:
                     # 图像图层：直接缩放图像本身
-                    # 使用固定的目标尺寸（256x256的80%）
-                    target_width = 256 * 0.8
-                    target_height = 256 * 0.8
+                    # 使用基于视图大小的目标尺寸（视图的80%）
+                    target_width = view_width * 0.8
+                    target_height = view_height * 0.8
                     print(f"DEBUG: 目标尺寸: {target_width}x{target_height}")
                     
                     # 计算保持比例的缩放因子
@@ -405,12 +411,6 @@ class CollisionManager(QObject):
                     # 绘制图层：保持原有逻辑，使用视图变换
                     display_pixmap = pixmap
                     
-                    # 获取视图大小
-                    view_rect = self.col_editor_view.viewport().rect()
-                    view_width = view_rect.width()
-                    view_height = view_rect.height()
-                    print(f"DEBUG: 视图大小: {view_width}x{view_height}")
-
                     # 黄金分割尺寸（大约占视图的61.8%）
                     target_width = view_width * 0.618
                     target_height = view_height * 0.618
@@ -490,11 +490,16 @@ class CollisionManager(QObject):
                         # 对于图像图层，需要根据缩放比例调整碰撞点
                         if self.current_collision_image:
                             # 计算原始图像到缩放后图像的缩放比例
-                            original_scale = display_pixmap_width / pixmap_width if pixmap_width > 0 else 1.0
+                            # display_pixmap已经是缩放后的图像，所以这里的缩放比例是 display_pixmap_width / 原始图像宽度
+                            display_scale = display_pixmap_width / pixmap_width if pixmap_width > 0 else 1.0
                             # 确保存储的是相对于图块左上角的局部坐标
                             self.collision_points = [
-                                QPointF(p[0] * original_scale, p[1] * original_scale) for p in raw_points
+                                QPointF(p[0] * display_scale, p[1] * display_scale) for p in raw_points
                             ]
+                            # 对于图像图层，碰撞点已经是相对于图像左上角的局部坐标
+                            # 不需要坐标系转换，直接使用
+                            pass
+                            print(f"DEBUG: 加载碰撞形状 - 原始图像宽度: {pixmap_width}, 显示图像宽度: {display_pixmap_width}, 缩放比例: {display_scale}, 原始碰撞点: {raw_points}, 调整后碰撞点: {[(p.x(), p.y()) for p in self.collision_points]}")
                         else:
                             # 绘制图层，保持原样
                             self.collision_points = [
@@ -540,16 +545,8 @@ class CollisionManager(QObject):
                 # 先缩放
                 transform.scale(view_scale, view_scale)
 
-                # 再平移到视图中心（根据不同图层类型使用不同的尺寸）
-                if self.current_collision_tile:
-                    # 绘制图层：使用动态获取的视图尺寸
-                    view_rect = self.col_editor_view.viewport().rect()
-                    view_width = view_rect.width()
-                    view_height = view_rect.height()
-                    transform.translate(view_width / 2, view_height / 2)
-                else:
-                    # 图像图层：使用固定的256x256尺寸
-                    transform.translate(256 / 2, 256 / 2)
+                # 再平移到视图中心（使用动态获取的视图尺寸）
+                transform.translate(view_width / 2, view_height / 2)
 
                 # 应用变换，但确保不会导致画布移动
                 self.col_editor_view.setTransform(transform)
@@ -557,33 +554,16 @@ class CollisionManager(QObject):
 
                 # 确保场景大小与视图大小匹配，避免滚动
                 # 但是保持图块的居中位置
-                if self.current_collision_tile:
-                    # 绘制图层：使用动态获取的视图尺寸
-                    view_rect = self.col_editor_view.viewport().rect()
-                    view_width = view_rect.width()
-                    view_height = view_rect.height()
-                    self.col_editor_scene.setSceneRect(
-                        -view_width / 2, -view_height / 2, view_width, view_height
-                    )
-                    print(
-                        f"DEBUG: 设置场景矩形: (-{view_width / 2}, -{view_height / 2}, {view_width}, {view_height})"
-                    )
-                    # 确保视图不会自动滚动
-                    self.col_editor_view.setSceneRect(
-                        -view_width / 2, -view_height / 2, view_width, view_height
-                    )
-                else:
-                    # 图像图层：使用固定的256x256尺寸
-                    self.col_editor_scene.setSceneRect(
-                        -256 / 2, -256 / 2, 256, 256
-                    )
-                    print(
-                        f"DEBUG: 设置场景矩形: (-{256 / 2}, -{256 / 2}, {256}, {256})"
-                    )
-                    # 确保视图不会自动滚动
-                    self.col_editor_view.setSceneRect(
-                        -256 / 2, -256 / 2, 256, 256
-                    )
+                self.col_editor_scene.setSceneRect(
+                    -view_width / 2, -view_height / 2, view_width, view_height
+                )
+                print(
+                    f"DEBUG: 设置场景矩形: (-{view_width / 2}, -{view_height / 2}, {view_width}, {view_height})"
+                )
+                # 确保视图不会自动滚动
+                self.col_editor_view.setSceneRect(
+                    -view_width / 2, -view_height / 2, view_width, view_height
+                )
 
                 # 显示视图
                 self.col_editor_view.show()
@@ -706,7 +686,7 @@ class CollisionManager(QObject):
             # 确保锚点数量与碰撞点数量一致
             while len(self.anchor_items) < len(self.collision_points):
                 i = len(self.anchor_items)
-                anchor_radius = 4 / 3  # 锚点半径，增加1/3大小
+                anchor_radius = 6  # 增大锚点半径，使其更明显
                 # 创建椭圆，设置为场景的直接子项，而不是图块项的子项
                 # 这样当锚点移动时不会影响图块项的边界框，避免图块抖动
                 # 创建菱形锚点，使用多边形而不是椭圆
@@ -768,6 +748,8 @@ class CollisionManager(QObject):
                 self.collision_shape_item = QGraphicsPolygonItem()
                 # 添加到场景中，而不是作为图块的子项
                 self.col_editor_scene.addItem(self.collision_shape_item)
+                # 设置Z值，确保碰撞形状在图像上面
+                self.collision_shape_item.setZValue(1)
                 self.collision_shape_item.setBrush(
                     QBrush(QColor(100, 149, 237, 100))
                 )  # 半透明淡蓝色
@@ -976,13 +958,38 @@ class CollisionManager(QObject):
                                         if layer.layer_id == layer_id:
                                             if 0 <= image_index < len(layer.images):
                                                 image_data = layer.images[image_index]
+                                                # 计算缩放比例，将碰撞点转换为相对于原始图像的坐标
+                                                display_to_original_scale = 1.0
+                                                if hasattr(self, "tile_item") and self.tile_item:
+                                                    # 获取原始图像尺寸
+                                                    pixmap = image_data.pixmap
+                                                    if pixmap and not pixmap.isNull():
+                                                        original_width = pixmap.width()
+                                                        original_height = pixmap.height()
+                                                        # 获取显示图像尺寸
+                                                        display_width = self.tile_item.boundingRect().width()
+                                                        display_height = self.tile_item.boundingRect().height()
+                                                        # 计算缩放比例：原始图像尺寸 / 显示图像尺寸
+                                                        if display_width > 0:
+                                                            display_to_original_scale = original_width / display_width
+                                                        elif display_height > 0:
+                                                            display_to_original_scale = original_height / display_height
+                                                        print(f"DEBUG: 保存碰撞形状 - 原始图像尺寸: {original_width}x{original_height}, 显示图像尺寸: {display_width}x{display_height}, 缩放比例: {display_to_original_scale}")
+                                                # 确保缩放比例不为0
+                                                if display_to_original_scale <= 0:
+                                                    display_to_original_scale = 1.0
+                                                # 对于图像图层，碰撞点已经是相对于图像左上角的局部坐标
+                                                # 不需要坐标系转换，直接使用
+                                                adjusted_points = self.collision_points
+                                                # 将碰撞点转换为相对于原始图像的坐标
                                                 points_data = [
-                                                    [p.x(), p.y()]
-                                                    for p in self.collision_points
+                                                    [p.x() * display_to_original_scale, p.y() * display_to_original_scale]
+                                                    for p in adjusted_points
                                                 ]
                                                 image_data.collision_shape = {
                                                     "points": points_data
                                                 }
+                                                print(f"DEBUG: 保存碰撞形状 - 缩放比例: {display_to_original_scale}, 碰撞点: {points_data}")
                                                 break
                             except Exception as e:
                                 print(f"DEBUG: 更新图像碰撞数据错误: {e}")
@@ -1058,11 +1065,6 @@ class CollisionManager(QObject):
                     # 处理图像图层的碰撞保存
                     elif self.collision_points and self.current_collision_image:
                         layer_id, image_index = self.current_collision_image
-                        # 将QPointF转换为列表格式
-                        points_data = [
-                            [point.x(), point.y()] for point in self.collision_points
-                        ]
-                        shape_data = {"points": points_data}
                         if self.parent_manager and hasattr(
                             self.parent_manager, "layer_manager"
                         ):
@@ -1071,8 +1073,35 @@ class CollisionManager(QObject):
                                 if layer.layer_id == layer_id:
                                     if 0 <= image_index < len(layer.images):
                                         image_data = layer.images[image_index]
+                                        # 计算缩放比例，将碰撞点转换为相对于原始图像的坐标
+                                        display_to_original_scale = 1.0
+                                        if hasattr(self, "tile_item") and self.tile_item:
+                                            # 获取原始图像尺寸
+                                            pixmap = image_data.pixmap
+                                            if pixmap and not pixmap.isNull():
+                                                original_width = pixmap.width()
+                                                original_height = pixmap.height()
+                                                # 获取显示图像尺寸
+                                                display_width = self.tile_item.boundingRect().width()
+                                                display_height = self.tile_item.boundingRect().height()
+                                                # 计算缩放比例：原始图像尺寸 / 显示图像尺寸
+                                                if display_width > 0:
+                                                    display_to_original_scale = original_width / display_width
+                                                elif display_height > 0:
+                                                    display_to_original_scale = original_height / display_height
+                                                print(f"DEBUG: 保存碰撞形状(释放鼠标) - 原始图像尺寸: {original_width}x{original_height}, 显示图像尺寸: {display_width}x{display_height}, 缩放比例: {display_to_original_scale}")
+                                        # 确保缩放比例不为0
+                                        if display_to_original_scale <= 0:
+                                            display_to_original_scale = 1.0
+                                        # 将碰撞点转换为相对于原始图像的坐标
+                                        points_data = [
+                                            [p.x() * display_to_original_scale, p.y() * display_to_original_scale]
+                                            for p in self.collision_points
+                                        ]
+                                        shape_data = {"points": points_data}
                                         image_data.collision_shape = shape_data
                                         image_data.collision_enabled = True
+                                        print(f"DEBUG: 保存碰撞形状(释放鼠标) - 缩放比例: {display_to_original_scale}, 碰撞点: {points_data}")
                                         # 自动保存地图数据
                                         if (
                                             self.parent_manager
