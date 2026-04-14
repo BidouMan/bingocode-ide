@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QGraphicsRectItem,
     QGraphicsView,
     QGraphicsEllipseItem,
+    QGraphicsItem,
 )
 from PySide6.QtGui import QPixmap, QBrush, QColor, QPen, QCursor
 
@@ -709,6 +710,8 @@ class CollisionManager(QObject):
                 anchor.setPen(pen)
                 anchor.setZValue(100)  # 确保在最顶层
                 anchor.setData(0, f"point_{i}")  # 存储锚点名称
+                # 设置锚点忽略变换，保持固定大小
+                anchor.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
                 self.anchor_items[f"point_{i}"] = anchor
 
             # 移除多余的锚点
