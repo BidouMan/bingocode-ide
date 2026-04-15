@@ -197,8 +197,9 @@ class MapCanvas(QGraphicsView):
             resource_index = int(event.mimeData().data("application/x-bingo-resource").data().decode())
             # 获取鼠标在场景中的位置
             scene_pos = self.mapToScene(event.pos())
-            # 调用父管理器处理拖拽事件
-            if hasattr(self, "parent_manager") and self.parent_manager:
-                self.parent_manager.handle_drop_resource(resource_index, scene_pos)
-            # 接受事件
-            event.acceptProposedAction()
+
+            # --- 核心改进：调用 Manager 进行实质性添加 ---
+            if self.parent_manager:
+                # 不要在这里直接 addPixmap，让 manager 来处理数据绑定
+                self.parent_manager.add_image_to_layer(resource_index, scene_pos)
+                event.acceptProposedAction()

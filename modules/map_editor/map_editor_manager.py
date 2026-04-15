@@ -3540,28 +3540,28 @@ class MapEditorManager(QObject):
 
     def handle_drop_resource(self, resource_index, scene_pos):
         """处理从资源列表拖拽到画布的事件"""
+        # 调用 add_image_to_layer 方法
+        self.add_image_to_layer(resource_index, scene_pos)
+
+    def add_image_to_layer(self, res_index, pos):
+        """真正将图像添加到当前图层并同步数据模型"""
         try:
             # 获取当前图层
             current_layer = self.layer_manager.get_current_layer()
-            if not current_layer:
-                print("DEBUG: 当前图层不存在")
-                return
-
-            # 检查当前图层是否是图像图层
-            if current_layer.layer_type != "image":
-                print("DEBUG: 当前图层不是图像图层，无法添加图像")
+            if not current_layer or current_layer.layer_type != "image":
+                print("⚠️ 只能向图像图层添加图片")
                 return
 
             # 获取当前图层的资源列表
             layer_resources = self.layer_resources.get(current_layer.layer_id, [])
 
             # 检查资源索引是否有效
-            if resource_index < 0 or resource_index >= len(layer_resources):
-                print(f"DEBUG: 资源索引无效: {resource_index}")
+            if res_index < 0 or res_index >= len(layer_resources):
+                print(f"⚠️ 资源索引无效: {res_index}")
                 return
 
             # 获取选中的资源
-            resource = layer_resources[resource_index]
+            resource = layer_resources[res_index]
 
             # 处理资源路径（转换为绝对路径）
             image_path = resource["path"]
@@ -3572,13 +3572,13 @@ class MapEditorManager(QObject):
 
             # 检查文件是否存在
             if not os.path.exists(image_path):
-                print(f"DEBUG: 资源文件不存在: {image_path}")
+                print(f"⚠️ 资源文件不存在: {image_path}")
                 return
 
             # 创建图像数据
             from .layer_manager import ImageData
 
-            image_data = ImageData(image_path, scene_pos)
+            image_data = ImageData(image_path, pos)
 
             # 设置默认碰撞属性为关闭
             image_data.collision_enabled = False
@@ -3599,7 +3599,7 @@ class MapEditorManager(QObject):
             if self.current_map_path:
                 save_result = self.map_model.save(self.current_map_path)
 
-            print(f"DEBUG: 图像已添加到画布，位置: ({scene_pos.x()}, {scene_pos.y()})")
+            print(f"✅ 资源 {res_index} 已成功持久化到图层 {current_layer.name}")
 
         except Exception as e:
             print(f"处理拖拽资源错误: {e}")

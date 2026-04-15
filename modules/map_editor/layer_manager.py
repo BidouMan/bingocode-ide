@@ -167,8 +167,12 @@ class ImageLayer(Layer):
     def from_dict(cls, data, parent=None):
         """从字典创建图层"""
         layer = super().from_dict(data, parent)
-        # 图像图层不自动加载图像数据，图像通过拖拽功能添加
+        # 从数据中加载图像数据
         layer.images = []
+        if "images" in data:
+            for image_data in data["images"]:
+                image = ImageData.from_dict(image_data)
+                layer.images.append(image)
         return layer
 
 
