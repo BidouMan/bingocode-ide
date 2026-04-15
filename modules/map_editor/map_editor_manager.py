@@ -1873,8 +1873,8 @@ class MapEditorManager(QObject):
                     # 设置层级
                     pixmap_item.setZValue(layer.layer_id + 10)
 
-                    # 禁用鼠标事件
-                    pixmap_item.setAcceptedMouseButtons(Qt.NoButton)
+                    # 允许鼠标事件，以便能够选中图像
+                    pixmap_item.setAcceptedMouseButtons(Qt.LeftButton | Qt.RightButton)
 
                     # 添加到场景
                     scene.addItem(pixmap_item)
@@ -4133,6 +4133,11 @@ class MapEditorManager(QObject):
         self.ui.btn_editor_map_move.clicked.connect(
             lambda: self.set_current_tool("move")
         )
+        # 绑定图像移动工具按钮
+        if hasattr(self.ui, "btn_editor_map_image_move"):
+            self.ui.btn_editor_map_image_move.clicked.connect(
+                lambda: self.set_current_tool("move")
+            )
         # 绑定绘制工具按钮
         self.ui.btn_editor_map_draw.clicked.connect(
             lambda: self.set_current_tool("draw")
