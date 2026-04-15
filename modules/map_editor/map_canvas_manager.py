@@ -33,6 +33,10 @@ class MapCanvas(QGraphicsView):
         self._grid_pixmap = None
         # 初始化网格纹理
         self._init_grid_texture()
+        # 允许接受拖拽事件
+        self.setAcceptDrops(True)
+        # 父管理器引用
+        self.parent_manager = None
 
     def _init_settings(self):
         """性能与交互初始设置"""
@@ -172,3 +176,29 @@ class MapCanvas(QGraphicsView):
             painter.drawRect(rect)
             # 恢复原来的画笔
             painter.setBrush(old_brush)
+
+    def dragEnterEvent(self, event):
+        """处理拖拽进入事件"""
+        # 告诉系统：如果是我们要的数据格式，请变绿灯
+        if event.mimeData().hasFormat("application/x-bingo-resource"):
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event):
+        """处理拖拽移动事件"""
+        # 告诉系统：如果是我们要的数据格式，请变绿灯
+        if event.mimeData().hasFormat("application/x-bingo-resource"):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        """处理拖拽释放事件"""
+        # 检查是否是我们要的数据格式
+        if event.mimeData().hasFormat("application/x-bingo-resource"):
+            # 提取资源索引
+            resource_index = int(event.mimeData().data("application/x-bingo-resource").data().decode())
+            # 获取鼠标在场景中的位置
+            scene_pos = self.mapToScene(event.pos())
+            # 调用父管理器处理拖拽事件
+            if hasattr(self, "parent_manager") and self.parent_manager:
+                self.parent_manager.handle_drop_resource(resource_index, scene_pos)
+            # 接受事件
+            event.acceptProposedAction()

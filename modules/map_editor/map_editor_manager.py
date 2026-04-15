@@ -1,6 +1,6 @@
 import os
 import math
-from PySide6.QtCore import QObject, Signal, Qt, QRectF, QPoint, QPointF
+from PySide6.QtCore import QObject, Signal, Qt, QRectF, QPoint, QPointF, QMimeData
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsScene,
@@ -20,6 +20,7 @@ from PySide6.QtGui import (
     QPainter,
     QCursor,
     QImage,
+    QDrag,
 )
 from models.map_model import MapDataModel
 from .map_canvas_manager import MapCanvas
@@ -127,6 +128,8 @@ class ResourceItem(QGraphicsRectItem):
         self.manager = manager
         self.setAcceptHoverEvents(True)
         self.setFlag(QGraphicsRectItem.ItemIsSelectable)
+        self.setFlag(QGraphicsRectItem.ItemIsMovable, False)
+        self.setFlag(QGraphicsRectItem.ItemSendsScenePositionChanges, True)
         self.is_deleted = False
         self.scene = None
         # 设置选中状态的样式
@@ -147,6 +150,8 @@ class ResourceItem(QGraphicsRectItem):
             if not event:
                 return
             if event.button() == Qt.LeftButton:
+                # 记录起点
+                self.drag_start_pos = event.pos()
                 # 检查manager是否有效
                 if (
                     hasattr(self, "manager")
@@ -157,6 +162,9 @@ class ResourceItem(QGraphicsRectItem):
                         f"DEBUG: ResourceItem点击 - 资源索引: {self.index}, 资源: {self.resource_info.get('name', 'unknown')}"
                     )
                     self.manager.select_resource(self.index)
+                    # 顺便通知 manager 记录当前索引
+                    self.manager.selected_resource_index = self.index
+                    print(f"DEBUG: ResourceItem Press - 准备拖拽索引: {self.index}")
             # 调用父类方法，但也要检查父类是否存在
             try:
                 super().mousePressEvent(event)
@@ -195,6 +203,53 @@ class ResourceItem(QGraphicsRectItem):
                 self.scene.removeItem(self)
             except Exception as e:
                 print(f"从场景移除ResourceItem错误: {e}")
+
+    def mouseMoveEvent(self, event):
+        """处理鼠标移动事件，实现拖拽功能"""
+        try:
+            # 检查对象是否已删除
+            if hasattr(self, "is_deleted") and self.is_deleted:
+                return
+            # 检查事件是否有效
+            if not event:
+                return
+            # 检查是否按下了左键
+            if event.buttons() & Qt.LeftButton:
+                # 1. 检查距离
+                if not hasattr(self, "drag_start_pos"):
+                    return
+                if (
+                    event.pos() - self.drag_start_pos
+                ).manhattanLength() < QApplication.startDragDistance():
+                    return
+
+                # 2. 暴力弹窗确认（这是给老师看的证据）
+                # from PySide6.QtWidgets import QMessageBox
+                # QMessageBox.information(None, "DEBUG", "QDrag 正在启动！")
+
+                # 3. 启动 QDrag
+                print(f"🚀 [REAL START] 正在从 Item 启动拖拽: {self.index}")
+                mime_data = QMimeData()
+                mime_data.setData(
+                    "application/x-bingo-resource", str(self.index).encode()
+                )
+
+                drag = QDrag(event.widget())
+                drag.setMimeData(mime_data)
+                drag.setPixmap(
+                    self.pixmap().scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio)
+                )
+                drag.setHotSpot(QPoint(32, 32))
+
+                drag.exec_(Qt.DropAction.CopyAction)
+                return
+            # 调用父类方法
+            super().mouseMoveEvent(event)
+        except Exception as e:
+            print(f"资源移动事件错误: {e}")
+            import traceback
+
+            traceback.print_exc()
 
 
 class MapEditorManager(QObject):
@@ -332,6 +387,8 @@ class MapEditorManager(QObject):
         parent_layout = parent_widget.layout()
 
         self.canvas_manager = MapCanvas(parent_widget)
+        # 设置父管理器引用
+        self.canvas_manager.parent_manager = self
         parent_layout.replaceWidget(self.canvas_widget, self.canvas_manager)
         old_canvas = self.canvas_widget
         old_canvas.hide()
@@ -421,16 +478,69 @@ class MapEditorManager(QObject):
         if self.canvas_scene:
             self.canvas_scene.installEventFilter(self)
 
-    def eventFilter(self, obj, event):
-        """场景事件过滤器，确保绘制事件被正确处理"""
+        # 为资源列表视图安装事件过滤器
+        if self.res_list_view:
+            self.res_list_view.installEventFilter(self)
+            # 保存拖拽起始位置
+            self.drag_start_pos = None
+
+    def eventFilter(self, watched, event):
         try:
             # 检查对象是否有效
-            if not obj or not event:
-                return super().eventFilter(obj, event)
+            if not watched or not event:
+                return super().eventFilter(watched, event)
 
             from PySide6.QtCore import QEvent
 
-            if obj == self.canvas_scene:
+            # 注意：这里判断的是 viewport 或者 view
+            if hasattr(self, "ui") and hasattr(self.ui, "res_list_view"):
+                if watched in [self.ui.res_list_view, self.ui.res_list_view.viewport()]:
+                    if event.type() == QEvent.MouseButtonPress:
+                        if event.button() == Qt.LeftButton:
+                            self.drag_start_pos = event.pos()
+                            print(f"🎯 [DEBUG] 捕获到按下事件: {self.drag_start_pos}")
+                        return False  # 必须返回 False，让底层的 ResourceItem 还能被选中
+
+                    elif event.type() == QEvent.MouseMove:
+                        if not (event.buttons() & Qt.LeftButton):
+                            return False
+
+                        # 这里的距离判断要稳
+                        pos_diff = (
+                            event.pos() - getattr(self, "drag_start_pos", event.pos())
+                        ).manhattanLength()
+                        if pos_diff < QApplication.startDragDistance():
+                            return False
+
+                        if self.selected_resource_index >= 0:
+                            # 强制弹窗，如果没弹窗，就说明 MouseMove 还是没进来！
+                            # from PySide6.QtWidgets import QMessageBox
+                            # QMessageBox.information(None, "DEBUG", "执行起飞代码")
+
+                            print(
+                                f"🚀 [CRITICAL] 启动拖拽流程，资源: {self.selected_resource_index}"
+                            )
+
+                            drag = QDrag(self.ui.res_list_view)
+                            mime = QMimeData()
+                            mime.setData(
+                                "application/x-bingo-resource",
+                                str(self.selected_resource_index).encode(),
+                            )
+                            drag.setMimeData(mime)
+
+                            # 设置预览图
+                            pix = self.get_resource_pixmap(
+                                self.selected_resource_index
+                            ).scaled(64, 64, Qt.KeepAspectRatio)
+                            drag.setPixmap(pix)
+                            drag.setHotSpot(QPoint(32, 32))
+
+                            drag.exec_(Qt.CopyAction)
+                            return True
+
+            # 处理画布场景的鼠标事件
+            if hasattr(self, "canvas_scene") and watched == self.canvas_scene:
                 if event.type() == QEvent.MouseButtonPress:
                     if event.button() == Qt.LeftButton and self.current_tool == "draw":
                         scene_pos = event.scenePos()
@@ -454,8 +564,9 @@ class MapEditorManager(QObject):
                     if event.button() == Qt.LeftButton and self.current_tool == "draw":
                         self.is_drawing = False
                         return True
-            return super().eventFilter(obj, event)
-        except Exception:
+            return super().eventFilter(watched, event)
+        except Exception as e:
+            print(f"事件过滤器错误: {e}")
             # 避免在程序退出时崩溃
             return False
 
@@ -2004,10 +2115,12 @@ class MapEditorManager(QObject):
                         # 获取网格位置
                         tile_pos = self._get_grid_pos_from_scene_pos(scene_pos)
                         self.last_tile_pos = tile_pos
-                        # 调用绘制函数
-                        self._draw_tile(scene_pos)
-                        # 移除预览
-                        self._remove_preview()
+                        # 调用绘制函数，但只在绘制图层上绘制
+                        current_layer = self.layer_manager.get_current_layer()
+                        if current_layer and current_layer.layer_type == "drawing":
+                            self._draw_tile(scene_pos)
+                            # 移除预览
+                            self._remove_preview()
                 elif self.current_tool == "erase":
                     # 擦除工具：删除瓦片
                     scene_pos = self.canvas_manager.mapToScene(event.pos())
@@ -2089,8 +2202,11 @@ class MapEditorManager(QObject):
                     # 使用从场景坐标获取网格位置的方法
                     tile_pos = self._get_grid_pos_from_scene_pos(scene_pos)
                     if scene_pos and tile_pos and tile_pos != self.last_tile_pos:
-                        self._draw_tile(scene_pos)
-                        self.last_tile_pos = tile_pos
+                        # 只在绘制图层上绘制
+                        current_layer = self.layer_manager.get_current_layer()
+                        if current_layer and current_layer.layer_type == "drawing":
+                            self._draw_tile(scene_pos)
+                            self.last_tile_pos = tile_pos
                 elif self.current_tool == "erase":
                     # 擦除工具：删除瓦片
                     scene_pos = self.canvas_manager.mapToScene(event.pos())
@@ -2413,48 +2529,8 @@ class MapEditorManager(QObject):
 
                 return
             elif current_layer.layer_type == "image":
-                # 图像图层：创建图像
-                # 检查资源是否有效
-                if not resource:
-                    print("DEBUG: 资源无效，返回")
-                    return
-
-                # 处理资源路径（转换为绝对路径）
-                image_path = resource["path"]
-                if not os.path.isabs(image_path):
-                    if self.current_map_path:
-                        map_dir = os.path.dirname(self.current_map_path)
-                        image_path = os.path.join(map_dir, image_path)
-
-                # 检查文件是否存在
-                if not os.path.exists(image_path):
-                    print(f"DEBUG: 资源文件不存在: {image_path}")
-                    return
-
-                # 创建图像数据
-                from .layer_manager import ImageData
-
-                image_data = ImageData(image_path, scene_pos)
-
-                # 设置默认碰撞属性为关闭
-                image_data.collision_enabled = False
-
-                # 添加到当前图层
-                current_layer.add_image(image_data)
-
-                # 重新渲染图像图层
-                self._render_image_layer(current_layer)
-
-                # 更新地图数据模型
-                self.layer_manager.update_map_model()
-
-                # 设置地图为已修改状态
-                self.is_map_modified = True
-
-                # 自动保存地图（如果当前地图有文件路径）
-                if self.current_map_path:
-                    save_result = self.map_model.save(self.current_map_path)
-
+                # 图像图层：不直接创建图像，而是通过拖拽功能创建
+                print("DEBUG: 图像图层不支持直接绘制，使用拖拽功能添加图像")
                 return
 
         except Exception as e:
@@ -2478,6 +2554,11 @@ class MapEditorManager(QObject):
             # 获取当前图层
             current_layer = self.layer_manager.get_current_layer()
             if not current_layer:
+                self._remove_preview()
+                return
+
+            # 图像图层不显示预览
+            if current_layer.layer_type == "image":
                 self._remove_preview()
                 return
 
@@ -3106,6 +3187,37 @@ class MapEditorManager(QObject):
         """获取当前图层"""
         return self.current_layer
 
+    def get_resource_pixmap(self, resource_index):
+        """获取资源的 pixmap"""
+        try:
+            # 获取当前图层
+            current_layer = self.layer_manager.get_current_layer()
+            if not current_layer:
+                return QPixmap()
+
+            # 获取当前图层的资源列表
+            layer_resources = self.layer_resources.get(current_layer.layer_id, [])
+
+            if resource_index < 0 or resource_index >= len(layer_resources):
+                return QPixmap()
+
+            resource = layer_resources[resource_index]
+            image_path = resource["path"]
+
+            # 处理相对路径
+            if not os.path.isabs(image_path):
+                if self.current_map_path:
+                    map_dir = os.path.dirname(self.current_map_path)
+                    image_path = os.path.join(map_dir, image_path)
+
+            # 加载图片
+            if os.path.exists(image_path):
+                return QPixmap(image_path)
+            return QPixmap()
+        except Exception as e:
+            print(f"获取资源 pixmap 错误: {e}")
+            return QPixmap()
+
     def set_canvas_widget(self, canvas_widget):
         """设置画布控件"""
         # 检查传入的canvas_widget是否有效（没有被删除）
@@ -3166,6 +3278,11 @@ class MapEditorManager(QObject):
     def set_res_list_view(self, res_list_view):
         """设置资源列表视图"""
         self.res_list_view = res_list_view
+        # 安装事件过滤器到 viewport
+        if self.res_list_view:
+            self.res_list_view.viewport().installEventFilter(self)  # 必须加 .viewport()
+            # 保存拖拽起始位置
+            self.drag_start_pos = None
         # 初始化资源列表显示
         self._update_res_list_display()
 
@@ -3421,6 +3538,75 @@ class MapEditorManager(QObject):
                     self.editor_map_layer_list.topLevelItem(current_index)
                 )
 
+    def handle_drop_resource(self, resource_index, scene_pos):
+        """处理从资源列表拖拽到画布的事件"""
+        try:
+            # 获取当前图层
+            current_layer = self.layer_manager.get_current_layer()
+            if not current_layer:
+                print("DEBUG: 当前图层不存在")
+                return
+
+            # 检查当前图层是否是图像图层
+            if current_layer.layer_type != "image":
+                print("DEBUG: 当前图层不是图像图层，无法添加图像")
+                return
+
+            # 获取当前图层的资源列表
+            layer_resources = self.layer_resources.get(current_layer.layer_id, [])
+
+            # 检查资源索引是否有效
+            if resource_index < 0 or resource_index >= len(layer_resources):
+                print(f"DEBUG: 资源索引无效: {resource_index}")
+                return
+
+            # 获取选中的资源
+            resource = layer_resources[resource_index]
+
+            # 处理资源路径（转换为绝对路径）
+            image_path = resource["path"]
+            if not os.path.isabs(image_path):
+                if self.current_map_path:
+                    map_dir = os.path.dirname(self.current_map_path)
+                    image_path = os.path.join(map_dir, image_path)
+
+            # 检查文件是否存在
+            if not os.path.exists(image_path):
+                print(f"DEBUG: 资源文件不存在: {image_path}")
+                return
+
+            # 创建图像数据
+            from .layer_manager import ImageData
+
+            image_data = ImageData(image_path, scene_pos)
+
+            # 设置默认碰撞属性为关闭
+            image_data.collision_enabled = False
+
+            # 添加到当前图层
+            current_layer.add_image(image_data)
+
+            # 重新渲染图像图层
+            self._render_image_layer(current_layer)
+
+            # 更新地图数据模型
+            self.layer_manager.update_map_model()
+
+            # 设置地图为已修改状态
+            self.is_map_modified = True
+
+            # 自动保存地图（如果当前地图有文件路径）
+            if self.current_map_path:
+                save_result = self.map_model.save(self.current_map_path)
+
+            print(f"DEBUG: 图像已添加到画布，位置: ({scene_pos.x()}, {scene_pos.y()})")
+
+        except Exception as e:
+            print(f"处理拖拽资源错误: {e}")
+            import traceback
+
+            traceback.print_exc()
+
     def handle_resource_upload(self):
         """处理资源上传按钮点击事件"""
         # 检查资源列表视图是否已初始化
@@ -3532,19 +3718,9 @@ class MapEditorManager(QObject):
                 # 添加到图层资源列表
                 self.layer_resources[current_layer.layer_id].append(resource_info)
 
-                # 图像图层：添加到图层的images属性中
-                if current_layer.layer_type == "image" and hasattr(
-                    current_layer, "add_image"
-                ):
-                    # 创建ImageData对象
-                    from modules.map_editor.layer_manager import ImageData
-
-                    map_dir = os.path.dirname(self.current_map_path)
-                    full_image_path = os.path.join(map_dir, relative_path)
-                    image_data = ImageData(full_image_path)
-                    # 添加到图像图层
-                    current_layer.add_image(image_data)
-                    print(f"DEBUG: 图像添加到图层 - 路径: {full_image_path}")
+                # 图像图层：只添加到资源列表，不自动创建图像
+                if current_layer.layer_type == "image":
+                    print(f"DEBUG: 图像资源添加到图层资源列表 - 路径: {relative_path}")
 
                 # 绘制图层：添加到地图模型的tile_sets中
                 if (
