@@ -1133,13 +1133,8 @@ class MapEditorManager(QObject):
                                     print(
                                         f"DEBUG: 图像图层 {layer.name} 在 layer_resources 中，资源数量: {len(self.layer_resources[layer_id])}"
                                     )
-                                    for resource in self.layer_resources[layer_id]:
-                                        # 检查资源是否已经在required_resources中
-                                        if resource not in required_resources:
-                                            required_resources.append(resource)
-                                            print(
-                                                f"DEBUG: 从layer_resources添加资源到列表: {resource.get('name', 'unknown')}"
-                                            )
+                                    # 注意：这里不再直接添加layer_resources中的资源，因为这些资源会通过图像数据或后续的默认分配来添加
+                                    # 这样可以避免资源重复添加
 
                             # 分配资源给图层
                             if required_resources:
