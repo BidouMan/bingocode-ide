@@ -2050,6 +2050,11 @@ class MapEditorManager(QObject):
                     scene_pos = self.canvas_manager.mapToScene(event.pos())
                     items = self.canvas_manager.scene().items(scene_pos)
 
+                    # 获取当前图层
+                    current_layer = self.layer_manager.get_current_layer()
+                    if not current_layer:
+                        return
+
                     # 查找可移动的图块项或图像项
                     for item in items:
                         if (
@@ -2057,50 +2062,63 @@ class MapEditorManager(QObject):
                             and item != self.preview_item
                         ):
                             # 检查是否是图像图层的图像项
-                            image_item_found = False
-                            for (
-                                layer_id,
-                                image_index,
-                            ), image_item in self._image_items.items():
-                                if image_item == item:
-                                    # 找到图像项
-                                    current_layer = (
-                                        self.layer_manager.get_current_layer()
-                                    )
-                                    if (
-                                        current_layer
-                                        and current_layer.layer_id == layer_id
-                                    ):
-                                        # 从图层中获取图像数据
-                                        for i, image_data in enumerate(
-                                            current_layer.images
-                                        ):
-                                            if i == image_index:
-                                                self.selected_image_data = image_data
-                                                self.selected_image_index = image_index
-                                                self.selected_layer_id = layer_id
-                                                self.selected_item = item
-                                                self.drag_start_pos = (
-                                                    scene_pos - image_data.position
-                                                )
-                                                image_item_found = True
-                                                print(
-                                                    f"选中图像: {image_data.image_path}"
-                                                )
-                                                break
+                            if current_layer.layer_type == "image":
+                                # 图像图层：只选择图像项
+                                image_item_found = False
+                                for (
+                                    layer_id,
+                                    image_index,
+                                ), image_item in self._image_items.items():
+                                    if image_item == item:
+                                        # 找到图像项
+                                        if current_layer.layer_id == layer_id:
+                                            # 从图层中获取图像数据
+                                            for i, image_data in enumerate(
+                                                current_layer.images
+                                            ):
+                                                if i == image_index:
+                                                    self.selected_image_data = (
+                                                        image_data
+                                                    )
+                                                    self.selected_image_index = (
+                                                        image_index
+                                                    )
+                                                    self.selected_layer_id = layer_id
+                                                    self.selected_item = item
+                                                    self.drag_start_pos = (
+                                                        scene_pos - image_data.position
+                                                    )
+                                                    image_item_found = True
+                                                    print(
+                                                        f"选中图像: {image_data.image_path}"
+                                                    )
+                                                    break
+                                        break
+                                if image_item_found:
                                     break
+                            else:
+                                # 绘制图层：只选择图块项
+                                # 检查是否是图块项（不是图像项）
+                                is_image_item = False
+                                for (
+                                    layer_id,
+                                    image_index,
+                                ), image_item in self._image_items.items():
+                                    if image_item == item:
+                                        is_image_item = True
+                                        break
+                                if not is_image_item:
+                                    # 处理图块项
+                                    self.selected_image_data = None
+                                    self.selected_item = item
+                                    self.drag_start_pos = scene_pos - item.pos()
 
-                            if not image_item_found:
-                                # 处理图块项
-                                self.selected_item = item
-                                self.drag_start_pos = scene_pos - item.pos()
-
-                                # 保存原始位置
-                                tile_size = self.map_model.get_tile_size()
-                                original_x = int(item.pos().x() / tile_size)
-                                original_y = int(item.pos().y() / tile_size)
-                                self.original_tile_pos = (original_x, original_y)
-                            break
+                                    # 保存原始位置
+                                    tile_size = self.map_model.get_tile_size()
+                                    original_x = int(item.pos().x() / tile_size)
+                                    original_y = int(item.pos().y() / tile_size)
+                                    self.original_tile_pos = (original_x, original_y)
+                                    break
                 elif self.current_tool == "draw":
                     # 绘制工具：绘制瓦片
                     # 获取场景坐标
@@ -2171,26 +2189,35 @@ class MapEditorManager(QObject):
                     # 移动工具：拖拽移动选中的图块或图像
                     scene_pos = self.canvas_manager.mapToScene(event.pos())
 
-                    if self.selected_image_data:
-                        # 移动图像
-                        new_pos = scene_pos - self.drag_start_pos
-                        self.selected_image_data.position = new_pos
+                    # 获取当前图层
+                    current_layer = self.layer_manager.get_current_layer()
+                    if not current_layer:
+                        return
 
-                        # 更新图像项
-                        transform = self.selected_image_data.get_transform()
-                        self.selected_item.setTransform(transform)
+                    if current_layer.layer_type == "image":
+                        # 图像图层：只移动图像项
+                        if self.selected_image_data:
+                            # 移动图像
+                            new_pos = scene_pos - self.drag_start_pos
+                            self.selected_image_data.position = new_pos
+
+                            # 更新图像项
+                            transform = self.selected_image_data.get_transform()
+                            self.selected_item.setTransform(transform)
                     else:
-                        # 移动图块
-                        new_pos = scene_pos - self.drag_start_pos
+                        # 绘制图层：只移动图块项
+                        if not self.selected_image_data:
+                            # 移动图块
+                            new_pos = scene_pos - self.drag_start_pos
 
-                        # 获取瓦片大小
-                        tile_size = self.map_model.get_tile_size()
+                            # 获取瓦片大小
+                            tile_size = self.map_model.get_tile_size()
 
-                        # 对齐到网格
-                        aligned_x = round(new_pos.x() / tile_size) * tile_size
-                        aligned_y = round(new_pos.y() / tile_size) * tile_size
+                            # 对齐到网格
+                            aligned_x = round(new_pos.x() / tile_size) * tile_size
+                            aligned_y = round(new_pos.y() / tile_size) * tile_size
 
-                        self.selected_item.setPos(aligned_x, aligned_y)
+                            self.selected_item.setPos(aligned_x, aligned_y)
                 elif self.current_tool == "draw" and self.is_drawing:
                     # 绘制工具：绘制瓦片
                     scene_pos = self.canvas_manager.mapToScene(event.pos())
@@ -2261,54 +2288,21 @@ class MapEditorManager(QObject):
                 if self.current_tool == "move":
                     # 移动工具：保存移动后的位置到地图数据模型
                     if self.selected_item:
-                        if self.selected_image_data:
-                            # 移动图像完成
-                            # 更新地图数据模型
-                            current_layer = self.layer_manager.get_current_layer()
-                            if (
-                                current_layer
-                                and current_layer.layer_id == self.selected_layer_id
-                            ):
-                                self.layer_manager.update_map_model()
+                        # 获取当前图层
+                        current_layer = self.layer_manager.get_current_layer()
+                        if not current_layer:
+                            return
 
-                                # 重新渲染图像图层
-                                self._render_image_layer(current_layer)
-
-                                # 设置地图为已修改状态
-                                self.is_map_modified = True
-
-                                # 自动保存地图（如果当前地图有文件路径）
-                                if self.current_map_path:
-                                    save_result = self.map_model.save(
-                                        self.current_map_path
-                                    )
-                        elif self.original_tile_pos:
-                            # 移动图块完成
-                            # 获取图块位置并更新地图数据
-                            tile_size = self.map_model.get_tile_size()
-                            new_x = int(self.selected_item.pos().x() / tile_size)
-                            new_y = int(self.selected_item.pos().y() / tile_size)
-                            original_x, original_y = self.original_tile_pos
-
-                            # 获取原始位置的图块ID
-                            current_layer = self.layer_manager.get_current_layer()
-                            if current_layer and current_layer.layer_type == "drawing":
-                                tile_id = current_layer.get_tile(original_x, original_y)
-                                if tile_id > 0:
-                                    # 先清除原始位置
-                                    current_layer.set_tile(original_x, original_y, 0)
-                                    # 然后设置新位置
-                                    current_layer.set_tile(new_x, new_y, tile_id)
-
-                                    # 更新地图数据模型
+                        if current_layer.layer_type == "image":
+                            # 图像图层：只处理图像项的释放
+                            if self.selected_image_data:
+                                # 移动图像完成
+                                # 更新地图数据模型
+                                if current_layer.layer_id == self.selected_layer_id:
                                     self.layer_manager.update_map_model()
 
-                                    # 更新tile_items字典，确保擦除功能正常工作
-                                    if (original_x, original_y) in self.tile_items:
-                                        item = self.tile_items.pop(
-                                            (original_x, original_y)
-                                        )
-                                        self.tile_items[(new_x, new_y)] = item
+                                    # 重新渲染图像图层
+                                    self._render_image_layer(current_layer)
 
                                     # 设置地图为已修改状态
                                     self.is_map_modified = True
@@ -2318,6 +2312,47 @@ class MapEditorManager(QObject):
                                         save_result = self.map_model.save(
                                             self.current_map_path
                                         )
+                        else:
+                            # 绘制图层：只处理图块项的释放
+                            if self.original_tile_pos and not self.selected_image_data:
+                                # 移动图块完成
+                                # 获取图块位置并更新地图数据
+                                tile_size = self.map_model.get_tile_size()
+                                new_x = int(self.selected_item.pos().x() / tile_size)
+                                new_y = int(self.selected_item.pos().y() / tile_size)
+                                original_x, original_y = self.original_tile_pos
+
+                                # 获取原始位置的图块ID
+                                if current_layer.layer_type == "drawing":
+                                    tile_id = current_layer.get_tile(
+                                        original_x, original_y
+                                    )
+                                    if tile_id > 0:
+                                        # 先清除原始位置
+                                        current_layer.set_tile(
+                                            original_x, original_y, 0
+                                        )
+                                        # 然后设置新位置
+                                        current_layer.set_tile(new_x, new_y, tile_id)
+
+                                        # 更新地图数据模型
+                                        self.layer_manager.update_map_model()
+
+                                        # 更新tile_items字典，确保擦除功能正常工作
+                                        if (original_x, original_y) in self.tile_items:
+                                            item = self.tile_items.pop(
+                                                (original_x, original_y)
+                                            )
+                                            self.tile_items[(new_x, new_y)] = item
+
+                                        # 设置地图为已修改状态
+                                        self.is_map_modified = True
+
+                                        # 自动保存地图（如果当前地图有文件路径）
+                                        if self.current_map_path:
+                                            save_result = self.map_model.save(
+                                                self.current_map_path
+                                            )
 
                     # 取消选中状态
                     self.selected_item = None
