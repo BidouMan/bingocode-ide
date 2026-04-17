@@ -3478,10 +3478,10 @@ class MapEditorManager(QObject):
 
         # 默认工具激活
         if is_image:
-            # 切换到图像层时，激活缩放工具
-            if hasattr(self.ui, "btn_editor_map_image_scale"):
-                self.ui.btn_editor_map_image_scale.setChecked(True)
-                self.current_tool = "scale"
+            # 切换到图像层时，激活移动工具
+            if hasattr(self.ui, "btn_editor_map_image_move"):
+                self.ui.btn_editor_map_image_move.setChecked(True)
+                self.current_tool = "move"
         else:
             # 切换到绘制层时，激活移动工具
             if hasattr(self.ui, "btn_editor_map_move"):
