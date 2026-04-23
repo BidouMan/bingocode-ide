@@ -3002,9 +3002,18 @@ class MapEditorManager(QObject):
                 original_width = self.selected_image_data.pixmap.width()
                 original_height = self.selected_image_data.pixmap.height()
                 if original_width > 0 and original_height > 0:
+                    # 计算宽度的缩放比例
                     new_scale = rect.width() / original_width
                     self.selected_image_data.scale = new_scale
-                    print(f"DEBUG: 更新图像缩放: {new_scale}")
+                    print(
+                        f"DEBUG: 更新图像缩放: {new_scale}, 编辑框宽度: {rect.width()}, 原始宽度: {original_width}"
+                    )
+
+                    # 确保编辑框的尺寸与图像的尺寸一致
+                    new_height = original_height * new_scale
+                    self.transform_box.setRect(0, 0, rect.width(), new_height)
+                    self.transform_box.update_handles_pos()
+                    print(f"DEBUG: 更新编辑框尺寸: {rect.width()}x{new_height}")
 
             # 更新图像项
             # 注意：由于 QGraphicsItem 的变换是相对于 item 原点的，我们需要直接设置 item 的位置
