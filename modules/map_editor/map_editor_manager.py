@@ -21,6 +21,7 @@ from PySide6.QtGui import (
     QCursor,
     QImage,
     QDrag,
+    QTransform,
 )
 from models.map_model import MapDataModel
 from .map_canvas_manager import MapCanvas
@@ -28,6 +29,7 @@ from .collision_manager import CollisionManager
 from .property_manager import PropertyManager
 from .layer_manager import LayerManager
 from .layer_list_view import LayerListView
+from .transform_tool import TransformBoxItem
 
 
 class TileItem(QGraphicsRectItem):
@@ -352,6 +354,9 @@ class MapEditorManager(QObject):
         # 图像图层的图像项缓存
         self._image_items = {}  # 格式：{(layer_id, image_index): QGraphicsPixmapItem}
 
+        # 变换框相关
+        self.transform_box = None  # 当前的变换框
+
         # 移除瓦片选中信号，避免信号错误
 
     def __del__(self):
@@ -461,28 +466,31 @@ class MapEditorManager(QObject):
         self._bind_mouse_events()
 
     def _bind_mouse_events(self):
-        """绑定鼠标事件 - 使用场景事件过滤器"""
-        # 保存原始的鼠标事件处理函数
-        self.original_mousePressEvent = self.canvas_manager.mousePressEvent
-        self.original_mouseMoveEvent = self.canvas_manager.mouseMoveEvent
-        self.original_mouseReleaseEvent = self.canvas_manager.mouseReleaseEvent
-        self.original_wheelEvent = self.canvas_manager.wheelEvent
+        """绑定鼠标事件 - 使用事件过滤器"""
+        # ❶ 移除所有直接重写控件事件方法的代码
+        # 不再直接重写 canvas_manager 的鼠标事件方法
 
-        # 绑定自定义的鼠标事件处理函数
-        self.canvas_manager.mousePressEvent = self._handle_mouse_press
-        self.canvas_manager.mouseMoveEvent = self._handle_mouse_move
-        self.canvas_manager.mouseReleaseEvent = self._handle_mouse_release
-        self.canvas_manager.wheelEvent = self._handle_wheel_event
+        # ❷ 正确安装事件过滤器：给 canvas_manager (QGraphicsView) 安装（而非 scene）
+        if self.canvas_manager:
+            self.canvas_manager.installEventFilter(
+                self
+            )  # 核心修复：绑定到 View 而非 Scene
+            self.canvas_manager.viewport().installEventFilter(
+                self
+            )  # 兼容 Qt 视图port 事件
 
-        # 设置场景事件过滤器
-        if self.canvas_scene:
-            self.canvas_scene.installEventFilter(self)
-
-        # 为资源列表视图安装事件过滤器
+        # ❸ 资源列表的事件过滤器保留
         if self.res_list_view:
             self.res_list_view.installEventFilter(self)
-            # 保存拖拽起始位置
+            self.res_list_view.viewport().installEventFilter(self)
             self.drag_start_pos = None
+
+        # ❹ 保留原生事件的备份（如果后续需要调用）
+        if self.canvas_manager:
+            self.original_canvas_mousePress = self.canvas_manager.mousePressEvent
+            self.original_canvas_mouseMove = self.canvas_manager.mouseMoveEvent
+            self.original_canvas_mouseRelease = self.canvas_manager.mouseReleaseEvent
+            self.original_canvas_wheel = self.canvas_manager.wheelEvent
 
     def eventFilter(self, watched, event):
         try:
@@ -492,9 +500,19 @@ class MapEditorManager(QObject):
 
             from PySide6.QtCore import QEvent
 
+            # ======================
+            # 移除前置判断：锚点显示时放行所有事件
+            # 因为这会导致点击其他图像时无法切换选择
+            # ======================
+
             # 注意：这里判断的是 viewport 或者 view
-            if hasattr(self, "ui") and hasattr(self.ui, "res_list_view"):
-                if watched in [self.ui.res_list_view, self.ui.res_list_view.viewport()]:
+            if (
+                hasattr(self, "ui")
+                and hasattr(self.ui, "res_list_view")
+                and self.ui.res_list_view
+            ):
+                res_list_view = self.ui.res_list_view
+                if watched in [res_list_view, res_list_view.viewport()]:
                     if event.type() == QEvent.MouseButtonPress:
                         if event.button() == Qt.LeftButton:
                             self.drag_start_pos = event.pos()
@@ -539,31 +557,39 @@ class MapEditorManager(QObject):
                             drag.exec_(Qt.CopyAction)
                             return True
 
-            # 处理画布场景的鼠标事件
-            if hasattr(self, "canvas_scene") and watched == self.canvas_scene:
+            # ======================
+            # 2. 画布事件（修复：改用 canvas_manager + 调用原生方法）
+            # ======================
+            if hasattr(self, "canvas_manager") and watched in [
+                self.canvas_manager,
+                self.canvas_manager.viewport(),
+            ]:
+                # 处理所有工具的鼠标按下事件，特别是图像模式下的选择
                 if event.type() == QEvent.MouseButtonPress:
-                    if event.button() == Qt.LeftButton and self.current_tool == "draw":
-                        scene_pos = event.scenePos()
-                        # 调用鼠标按下处理方法，确保逻辑一致
+                    if event.button() == Qt.LeftButton:
+                        # 调用鼠标按下处理方法
                         self._handle_mouse_press(event)
-                        return True
-                elif event.type() == QEvent.MouseMove:
-                    if (
-                        event.buttons() & Qt.LeftButton
-                        and self.current_tool == "draw"
-                        and self.is_drawing
-                    ):
-                        scene_pos = event.scenePos()
-                        # 获取网格位置（从场景坐标）
-                        tile_pos = self._get_grid_pos_from_scene_pos(scene_pos)
-                        if tile_pos and tile_pos != self.last_tile_pos:
-                            self._draw_tile(scene_pos)
-                            self.last_tile_pos = tile_pos
-                        return True
-                elif event.type() == QEvent.MouseButtonRelease:
-                    if event.button() == Qt.LeftButton and self.current_tool == "draw":
-                        self.is_drawing = False
-                        return True
+                        # 只有在绘制模式下才拦截事件，其他模式（如图像模式）放行
+                        if self.current_tool == "draw":
+                            return True
+
+                # 只处理绘制工具的鼠标移动和释放事件
+                elif self.current_tool == "draw":
+                    if event.type() == QEvent.MouseMove:
+                        if self.is_drawing and (event.buttons() & Qt.LeftButton):
+                            scene_pos = self.canvas_manager.mapToScene(event.pos())
+                            tile_pos = self._get_grid_pos_from_scene_pos(scene_pos)
+                            if tile_pos and tile_pos != self.last_tile_pos:
+                                self._draw_tile(scene_pos)
+                                self.last_tile_pos = tile_pos
+                            return True
+
+                    elif event.type() == QEvent.MouseButtonRelease:
+                        if event.button() == Qt.LeftButton:
+                            self.is_drawing = False
+                            return True
+
+            # 所有未匹配的事件，调用原生逻辑并放行
             return super().eventFilter(watched, event)
         except Exception as e:
             print(f"事件过滤器错误: {e}")
@@ -1853,14 +1879,31 @@ class MapEditorManager(QObject):
                         print(f"移除图像项错误: {e}")
 
             # 渲染新图像
+            print(f"DEBUG: 开始渲染图像图层，图像数量: {len(layer.images)}")
             for i, image_data in enumerate(layer.images):
+                print(
+                    f"DEBUG: 处理图像 {i}: 路径={image_data.image_path}, pixmap={image_data.pixmap}"
+                )
                 if image_data.pixmap:
+                    print(
+                        f"DEBUG: 图像 {i} 的 pixmap 尺寸: {image_data.pixmap.width()}x{image_data.pixmap.height()}"
+                    )
                     # 创建图像项
                     pixmap_item = QGraphicsPixmapItem(image_data.pixmap)
 
                     # 应用变换
-                    transform = image_data.get_transform()
+                    # 注意：由于 QGraphicsItem 的变换是相对于 item 原点的，我们需要直接设置 item 的位置
+                    # 而不是通过变换来设置位置
+                    print(
+                        f"DEBUG: 渲染图像 - 位置: {image_data.position}, 缩放: {image_data.scale}"
+                    )
+                    pixmap_item.setPos(image_data.position)
+                    # 然后应用缩放和旋转
+                    transform = QTransform()
+                    transform.scale(image_data.scale, image_data.scale)
+                    transform.rotate(image_data.rotation)
                     pixmap_item.setTransform(transform)
+                    print(f"DEBUG: 图像项场景位置: {pixmap_item.scenePos()}")
 
                     # 设置透明度
                     pixmap_item.setOpacity(image_data.opacity)
@@ -1876,6 +1919,8 @@ class MapEditorManager(QObject):
 
                     # 添加到缓存
                     self._image_items[(layer.layer_id, i)] = pixmap_item
+                else:
+                    print(f"DEBUG: 图像 {i} 的 pixmap 为 None")
         except Exception as e:
             print(f"渲染图像图层错误: {e}")
             import traceback
@@ -2044,60 +2089,138 @@ class MapEditorManager(QObject):
             if not self.canvas_manager or not self.map_model:
                 return
 
+            # 确保事件有 button() 和 pos() 方法
+            if not hasattr(event, "button") or not hasattr(event, "pos"):
+                return
+
             if event.button() == Qt.LeftButton:
-                if self.current_tool == "move":
-                    # 移动工具：选择并准备拖拽
-                    scene_pos = self.canvas_manager.mapToScene(event.pos())
-                    items = self.canvas_manager.scene().items(scene_pos)
+                # 获取当前图层
+                current_layer = self.layer_manager.get_current_layer()
+                if not current_layer:
+                    return
 
-                    # 获取当前图层
-                    current_layer = self.layer_manager.get_current_layer()
-                    if not current_layer:
-                        return
+                # 获取场景坐标
+                scene_pos = self.canvas_manager.mapToScene(event.pos())
+                items = self.canvas_manager.scene().items(scene_pos)
 
-                    # 查找可移动的图块项或图像项
+                # 检查是否点击了变换框或其锚点
+                clicked_transform_box = False
+                transform_box_item = None
+                if self.transform_box:
                     for item in items:
+                        if item == self.transform_box or (
+                            hasattr(self.transform_box, "handles")
+                            and item in self.transform_box.handles.values()
+                        ):
+                            clicked_transform_box = True
+                            transform_box_item = item
+                            break
+
+                # 检查点击的是否是其他图像
+                clicked_other_image = False
+                for item in items:
+                    if (
+                        isinstance(item, QGraphicsPixmapItem)
+                        and item != self.preview_item
+                        and item != self.selected_item
+                    ):
+                        # 找到了其他图像，继续执行选择逻辑
+                        clicked_other_image = True
+                        break
+
+                if clicked_transform_box and not clicked_other_image:
+                    # 只点击了变换框，没有点击其他图像
+                    if hasattr(self, "original_canvas_mousePress"):
+                        self.original_canvas_mousePress(event)  # 调用原生方法
+                    return
+
+                # 检查是否在图像模式下
+                if current_layer.layer_type == "image":
+                    # 图像模式：处理图像选择
+                    item_found = False
+                    print(f"DEBUG: 点击位置的项数量: {len(items)}")
+                    for i, item in enumerate(items):
+                        print(
+                            f"DEBUG: 项 {i}: {type(item).__name__}, zValue: {item.zValue()}"
+                        )
                         if (
                             isinstance(item, QGraphicsPixmapItem)
                             and item != self.preview_item
                         ):
-                            # 检查是否是图像图层的图像项
-                            if current_layer.layer_type == "image":
-                                # 图像图层：只选择图像项
-                                image_item_found = False
-                                for (
-                                    layer_id,
-                                    image_index,
-                                ), image_item in self._image_items.items():
-                                    if image_item == item:
-                                        # 找到图像项
-                                        if current_layer.layer_id == layer_id:
-                                            # 从图层中获取图像数据
-                                            for i, image_data in enumerate(
-                                                current_layer.images
-                                            ):
-                                                if i == image_index:
-                                                    self.selected_image_data = (
-                                                        image_data
-                                                    )
-                                                    self.selected_image_index = (
-                                                        image_index
-                                                    )
-                                                    self.selected_layer_id = layer_id
-                                                    self.selected_item = item
-                                                    self.drag_start_pos = (
-                                                        scene_pos - image_data.position
-                                                    )
-                                                    image_item_found = True
-                                                    print(
-                                                        f"选中图像: {image_data.image_path}"
-                                                    )
-                                                    break
+                            # 查找图像项
+                            print(f"DEBUG: 找到 QGraphicsPixmapItem: {item}")
+                            print(
+                                f"DEBUG: _image_items 中的项数量: {len(self._image_items)}"
+                            )
+                            for j, ((layer_id, image_index), image_item) in enumerate(
+                                self._image_items.items()
+                            ):
+                                print(
+                                    f"DEBUG: _image_items[{j}]: (layer_id={layer_id}, image_index={image_index}), item={image_item}"
+                                )
+                                if image_item == item:
+                                    # 找到图像项
+                                    print(
+                                        f"DEBUG: 找到匹配的图像项: layer_id={layer_id}, image_index={image_index}"
+                                    )
+                                    if current_layer.layer_id == layer_id:
+                                        # 从图层中获取图像数据
+                                        print(
+                                            f"DEBUG: 图层 ID 匹配: {current_layer.layer_id}"
+                                        )
+                                        for i, image_data in enumerate(
+                                            current_layer.images
+                                        ):
+                                            if i == image_index:
+                                                # 清除之前的变换框
+                                                print(f"DEBUG: 清除之前的变换框")
+                                                self._remove_transform_box()
+
+                                                # 设置选中状态
+                                                self.selected_image_data = image_data
+                                                self.selected_image_index = image_index
+                                                self.selected_layer_id = layer_id
+                                                self.selected_item = item
+                                                # 注意：这里不再设置 drag_start_pos，因为变换框会处理拖动
+                                                item_found = True
+                                                print(
+                                                    f"选中图像: {image_data.image_path}"
+                                                )
+
+                                                # 创建变换框
+                                                print(f"DEBUG: 创建变换框")
+                                                self._create_transform_box(
+                                                    image_data, item
+                                                )
+                                                break
                                         break
-                                if image_item_found:
+                                if item_found:
                                     break
-                            else:
-                                # 绘制图层：只选择图块项
+                            if item_found:
+                                break
+
+                    # 如果没有找到任何项，清除选中状态和变换框
+                    if not item_found:
+                        # 移除变换框
+                        self._remove_transform_box()
+
+                        # 取消选中状态
+                        self.selected_item = None
+                        self.drag_start_pos = None
+                        self.original_tile_pos = None
+                        self.selected_image_data = None
+                        self.selected_image_index = -1
+                        self.selected_layer_id = -1
+                else:
+                    # 绘制模式：处理图块选择
+                    if self.current_tool == "move":
+                        # 查找可移动的图块项
+                        item_found = False
+                        for item in items:
+                            if (
+                                isinstance(item, QGraphicsPixmapItem)
+                                and item != self.preview_item
+                            ):
                                 # 检查是否是图块项（不是图像项）
                                 is_image_item = False
                                 for (
@@ -2118,26 +2241,35 @@ class MapEditorManager(QObject):
                                     original_x = int(item.pos().x() / tile_size)
                                     original_y = int(item.pos().y() / tile_size)
                                     self.original_tile_pos = (original_x, original_y)
+                                    item_found = True
                                     break
-                elif self.current_tool == "draw":
-                    # 绘制工具：绘制瓦片
-                    # 获取场景坐标
-                    scene_pos = self.canvas_manager.mapToScene(event.pos())
-                    if scene_pos:
-                        self.is_drawing = True
-                        # 获取网格位置
-                        tile_pos = self._get_grid_pos_from_scene_pos(scene_pos)
-                        self.last_tile_pos = tile_pos
-                        # 调用绘制函数，但只在绘制图层上绘制
-                        current_layer = self.layer_manager.get_current_layer()
-                        if current_layer and current_layer.layer_type == "drawing":
-                            self._draw_tile(scene_pos)
-                            # 移除预览
-                            self._remove_preview()
-                elif self.current_tool == "erase":
-                    # 擦除工具：删除瓦片
-                    scene_pos = self.canvas_manager.mapToScene(event.pos())
-                    self._erase_tile(scene_pos)
+
+                        # 清除变换框（绘制模式不需要）
+                        self._remove_transform_box()
+
+                        # 取消选中状态（绘制模式只在拖动时保持选中）
+                        if not item_found:
+                            self.selected_item = None
+                            self.drag_start_pos = None
+                            self.original_tile_pos = None
+                            self.selected_image_data = None
+                            self.selected_image_index = -1
+                            self.selected_layer_id = -1
+                    elif self.current_tool == "draw":
+                        # 绘制工具：绘制瓦片
+                        if scene_pos:
+                            self.is_drawing = True
+                            # 获取网格位置
+                            tile_pos = self._get_grid_pos_from_scene_pos(scene_pos)
+                            self.last_tile_pos = tile_pos
+                            # 调用绘制函数，但只在绘制图层上绘制
+                            if current_layer and current_layer.layer_type == "drawing":
+                                self._draw_tile(scene_pos)
+                                # 移除预览
+                                self._remove_preview()
+                    elif self.current_tool == "erase":
+                        # 擦除工具：删除瓦片
+                        self._erase_tile(scene_pos)
             elif event.button() == Qt.RightButton:
                 # 右键点击：检查是否点击了图像
                 scene_pos = self.canvas_manager.mapToScene(event.pos())
@@ -2177,6 +2309,9 @@ class MapEditorManager(QObject):
                 self.original_mousePressEvent(event)
         except Exception as e:
             print(f"鼠标按下事件错误: {e}")
+            import traceback
+
+            traceback.print_exc()
 
     def _handle_mouse_move(self, event):
         """处理鼠标移动事件"""
@@ -2184,40 +2319,48 @@ class MapEditorManager(QObject):
             if not self.canvas_manager or not self.map_model:
                 return
 
+            # 确保事件有 buttons() 方法
+            if not hasattr(event, "buttons"):
+                return
+
+            # 锚点显示时，直接调用原生方法并返回
+            if (
+                hasattr(self, "transform_box")
+                and self.transform_box
+                and self.transform_box.isVisible()
+            ):
+                if hasattr(self, "original_canvas_mouseMove"):
+                    self.original_canvas_mouseMove(event)
+                return
+
+            # 获取当前图层
+            current_layer = self.layer_manager.get_current_layer()
+            if not current_layer:
+                return
+
             if event.buttons() & Qt.LeftButton:
-                if self.current_tool == "move" and self.selected_item:
-                    # 移动工具：拖拽移动选中的图块或图像
+                # 检查是否在图像模式下且选中了图像
+                if current_layer.layer_type == "image" and self.selected_image_data:
+                    # 图像模式：不处理图像移动，因为变换框会处理
+                    # 所有的移动和缩放都由变换框的回调函数处理
+                    pass
+                elif (
+                    self.current_tool == "move"
+                    and self.selected_item
+                    and not self.selected_image_data
+                ):
+                    # 绘制模式：移动图块项
                     scene_pos = self.canvas_manager.mapToScene(event.pos())
+                    new_pos = scene_pos - self.drag_start_pos
 
-                    # 获取当前图层
-                    current_layer = self.layer_manager.get_current_layer()
-                    if not current_layer:
-                        return
+                    # 获取瓦片大小
+                    tile_size = self.map_model.get_tile_size()
 
-                    if current_layer.layer_type == "image":
-                        # 图像图层：只移动图像项
-                        if self.selected_image_data:
-                            # 移动图像
-                            new_pos = scene_pos - self.drag_start_pos
-                            self.selected_image_data.position = new_pos
+                    # 对齐到网格
+                    aligned_x = round(new_pos.x() / tile_size) * tile_size
+                    aligned_y = round(new_pos.y() / tile_size) * tile_size
 
-                            # 更新图像项
-                            transform = self.selected_image_data.get_transform()
-                            self.selected_item.setTransform(transform)
-                    else:
-                        # 绘制图层：只移动图块项
-                        if not self.selected_image_data:
-                            # 移动图块
-                            new_pos = scene_pos - self.drag_start_pos
-
-                            # 获取瓦片大小
-                            tile_size = self.map_model.get_tile_size()
-
-                            # 对齐到网格
-                            aligned_x = round(new_pos.x() / tile_size) * tile_size
-                            aligned_y = round(new_pos.y() / tile_size) * tile_size
-
-                            self.selected_item.setPos(aligned_x, aligned_y)
+                    self.selected_item.setPos(aligned_x, aligned_y)
                 elif self.current_tool == "draw" and self.is_drawing:
                     # 绘制工具：绘制瓦片
                     scene_pos = self.canvas_manager.mapToScene(event.pos())
@@ -2225,8 +2368,7 @@ class MapEditorManager(QObject):
                     tile_pos = self._get_grid_pos_from_scene_pos(scene_pos)
                     if scene_pos and tile_pos and tile_pos != self.last_tile_pos:
                         # 只在绘制图层上绘制
-                        current_layer = self.layer_manager.get_current_layer()
-                        if current_layer and current_layer.layer_type == "drawing":
+                        if current_layer.layer_type == "drawing":
                             self._draw_tile(scene_pos)
                             self.last_tile_pos = tile_pos
                 elif self.current_tool == "erase":
@@ -2280,87 +2422,104 @@ class MapEditorManager(QObject):
 
         except Exception as e:
             print(f"鼠标移动事件错误: {e}")
+            import traceback
+
+            traceback.print_exc()
 
     def _handle_mouse_release(self, event):
         """处理鼠标释放事件"""
         try:
+            # 确保事件有 button() 方法
+            if not hasattr(event, "button"):
+                return
+
+            # 锚点显示时，直接调用原生方法并返回
+            if (
+                hasattr(self, "transform_box")
+                and self.transform_box
+                and self.transform_box.isVisible()
+            ):
+                if hasattr(self, "original_canvas_mouseRelease"):
+                    self.original_canvas_mouseRelease(event)
+                return
+
             if event.button() == Qt.LeftButton:
-                if self.current_tool == "move":
-                    # 移动工具：保存移动后的位置到地图数据模型
-                    if self.selected_item:
-                        # 获取当前图层
-                        current_layer = self.layer_manager.get_current_layer()
-                        if not current_layer:
-                            return
+                # 获取当前图层
+                current_layer = self.layer_manager.get_current_layer()
+                if not current_layer:
+                    return
 
-                        if current_layer.layer_type == "image":
-                            # 图像图层：只处理图像项的释放
-                            if self.selected_image_data:
-                                # 移动图像完成
+                if current_layer.layer_type == "image":
+                    # 图像模式：处理图像释放
+                    if self.selected_image_data:
+                        # 移动图像完成
+                        # 更新地图数据模型
+                        if current_layer.layer_id == self.selected_layer_id:
+                            self.layer_manager.update_map_model()
+
+                            # 重新渲染图像图层
+                            self._render_image_layer(current_layer)
+
+                            # 设置地图为已修改状态
+                            self.is_map_modified = True
+
+                            # 自动保存地图（如果当前地图有文件路径）
+                            if self.current_map_path:
+                                save_result = self.map_model.save(self.current_map_path)
+
+                    # 对于图像图层，保持选中状态和变换框
+                    if self.selected_image_data:
+                        # 保持选中状态，不移除变换框
+                        pass
+                else:
+                    # 绘制模式：处理图块释放
+                    if (
+                        self.current_tool == "move"
+                        and self.selected_item
+                        and not self.selected_image_data
+                    ):
+                        # 移动图块完成
+                        # 获取图块位置并更新地图数据
+                        tile_size = self.map_model.get_tile_size()
+                        new_x = int(self.selected_item.pos().x() / tile_size)
+                        new_y = int(self.selected_item.pos().y() / tile_size)
+                        original_x, original_y = self.original_tile_pos
+
+                        # 获取原始位置的图块ID
+                        if current_layer.layer_type == "drawing":
+                            tile_id = current_layer.get_tile(original_x, original_y)
+                            if tile_id > 0:
+                                # 先清除原始位置
+                                current_layer.set_tile(original_x, original_y, 0)
+                                # 然后设置新位置
+                                current_layer.set_tile(new_x, new_y, tile_id)
+
                                 # 更新地图数据模型
-                                if current_layer.layer_id == self.selected_layer_id:
-                                    self.layer_manager.update_map_model()
+                                self.layer_manager.update_map_model()
 
-                                    # 重新渲染图像图层
-                                    self._render_image_layer(current_layer)
+                                # 更新tile_items字典，确保擦除功能正常工作
+                                if (original_x, original_y) in self.tile_items:
+                                    item = self.tile_items.pop((original_x, original_y))
+                                    self.tile_items[(new_x, new_y)] = item
 
-                                    # 设置地图为已修改状态
-                                    self.is_map_modified = True
+                                # 设置地图为已修改状态
+                                self.is_map_modified = True
 
-                                    # 自动保存地图（如果当前地图有文件路径）
-                                    if self.current_map_path:
-                                        save_result = self.map_model.save(
-                                            self.current_map_path
-                                        )
-                        else:
-                            # 绘制图层：只处理图块项的释放
-                            if self.original_tile_pos and not self.selected_image_data:
-                                # 移动图块完成
-                                # 获取图块位置并更新地图数据
-                                tile_size = self.map_model.get_tile_size()
-                                new_x = int(self.selected_item.pos().x() / tile_size)
-                                new_y = int(self.selected_item.pos().y() / tile_size)
-                                original_x, original_y = self.original_tile_pos
-
-                                # 获取原始位置的图块ID
-                                if current_layer.layer_type == "drawing":
-                                    tile_id = current_layer.get_tile(
-                                        original_x, original_y
+                                # 自动保存地图（如果当前地图有文件路径）
+                                if self.current_map_path:
+                                    save_result = self.map_model.save(
+                                        self.current_map_path
                                     )
-                                    if tile_id > 0:
-                                        # 先清除原始位置
-                                        current_layer.set_tile(
-                                            original_x, original_y, 0
-                                        )
-                                        # 然后设置新位置
-                                        current_layer.set_tile(new_x, new_y, tile_id)
 
-                                        # 更新地图数据模型
-                                        self.layer_manager.update_map_model()
-
-                                        # 更新tile_items字典，确保擦除功能正常工作
-                                        if (original_x, original_y) in self.tile_items:
-                                            item = self.tile_items.pop(
-                                                (original_x, original_y)
-                                            )
-                                            self.tile_items[(new_x, new_y)] = item
-
-                                        # 设置地图为已修改状态
-                                        self.is_map_modified = True
-
-                                        # 自动保存地图（如果当前地图有文件路径）
-                                        if self.current_map_path:
-                                            save_result = self.map_model.save(
-                                                self.current_map_path
-                                            )
-
-                    # 取消选中状态
+                    # 对于绘制图层，取消选中状态
                     self.selected_item = None
                     self.drag_start_pos = None
                     self.original_tile_pos = None
                     self.selected_image_data = None
                     self.selected_image_index = -1
                     self.selected_layer_id = -1
+                    # 移除变换框
+                    self._remove_transform_box()
             elif event.button() == Qt.RightButton:
                 # 右键释放：旋转图像完成
                 if self.selected_image_data:
@@ -2388,6 +2547,8 @@ class MapEditorManager(QObject):
                     self.selected_image_data = None
                     self.selected_image_index = -1
                     self.selected_layer_id = -1
+                    # 移除变换框
+                    self._remove_transform_box()
                 elif self.current_tool == "draw":
                     # 绘制工具：结束绘制
                     self.is_drawing = False
@@ -2397,6 +2558,9 @@ class MapEditorManager(QObject):
                 self.original_mouseReleaseEvent(event)
         except Exception as e:
             print(f"鼠标释放事件错误: {e}")
+            import traceback
+
+            traceback.print_exc()
 
     def _handle_wheel_event(self, event):
         """处理滚轮事件 - 调用原始的wheelEvent方法"""
@@ -2776,6 +2940,97 @@ class MapEditorManager(QObject):
                         scene.removeItem(item)
         except Exception as e:
             print(f"移除预览图块错误: {e}")
+
+    def _create_transform_box(self, image_data, image_item):
+        """创建变换框"""
+        # 移除之前的变换框
+        self._remove_transform_box()
+
+        # 获取图像的实际尺寸
+        if image_data.pixmap:
+            width = image_data.pixmap.width() * image_data.scale
+            height = image_data.pixmap.height() * image_data.scale
+        else:
+            # 如果没有 pixmap，使用默认尺寸
+            width = 100
+            height = 100
+
+        # 创建变换框，使用图像的实际尺寸
+        rect = QRectF(0, 0, width, height)
+        self.transform_box = TransformBoxItem(
+            rect, transform_callback=self._on_transform_changed
+        )
+
+        # 设置变换框的位置为图像的实际位置
+        # 注意：由于图像的变换顺序是 "缩放 -> 旋转 -> 平移"，所以变换框的位置应该与图像的位置一致
+        # 但是，由于 QGraphicsItem 的变换是相对于 item 原点的，所以我们需要确保变换框的位置与图像的实际位置一致
+        # 为了简单起见，我们直接使用图像项的场景位置
+        if image_item:
+            scene_pos = image_item.scenePos()
+            self.transform_box.setPos(scene_pos)
+            print(f"DEBUG: 图像项的场景位置: {scene_pos}")
+        else:
+            self.transform_box.setPos(image_data.position)
+
+        # 添加到场景
+        if self.canvas_manager:
+            self.canvas_manager.scene().addItem(self.transform_box)
+
+    def _remove_transform_box(self):
+        """移除变换框"""
+        if self.transform_box and self.canvas_manager:
+            try:
+                self.canvas_manager.scene().removeItem(self.transform_box)
+                self.transform_box = None
+            except Exception as e:
+                pass
+
+    def _on_transform_changed(self, rect):
+        """处理变换框的变换"""
+        if self.selected_image_data and self.selected_item and self.transform_box:
+            print(
+                f"DEBUG: _on_transform_changed - rect={rect}, transform_box.pos={self.transform_box.pos()}"
+            )
+
+            # 更新图像的位置
+            new_pos = self.transform_box.pos()
+            self.selected_image_data.position = new_pos
+            print(f"DEBUG: 更新图像位置: {new_pos}")
+
+            # 更新图像的缩放
+            if self.selected_image_data.pixmap:
+                original_width = self.selected_image_data.pixmap.width()
+                original_height = self.selected_image_data.pixmap.height()
+                if original_width > 0 and original_height > 0:
+                    new_scale = rect.width() / original_width
+                    self.selected_image_data.scale = new_scale
+                    print(f"DEBUG: 更新图像缩放: {new_scale}")
+
+            # 更新图像项
+            # 注意：由于 QGraphicsItem 的变换是相对于 item 原点的，我们需要直接设置 item 的位置
+            # 而不是通过变换来设置位置
+            self.selected_item.setPos(new_pos)
+            # 然后应用缩放和旋转
+            transform = QTransform()
+            transform.scale(
+                self.selected_image_data.scale, self.selected_image_data.scale
+            )
+            transform.rotate(self.selected_image_data.rotation)
+            self.selected_item.setTransform(transform)
+            print(
+                f"DEBUG: 更新图像位置: {new_pos}, 缩放: {self.selected_image_data.scale}"
+            )
+            print(f"DEBUG: 更新图像变换: {transform}")
+
+            # 更新地图数据模型
+            current_layer = self.layer_manager.get_current_layer()
+            if current_layer and current_layer.layer_id == self.selected_layer_id:
+                self.layer_manager.update_map_model()
+                self.is_map_modified = True
+
+                # 自动保存地图（如果当前地图有文件路径）
+                if self.current_map_path:
+                    self.map_model.save(self.current_map_path)
 
     def initialize_collision_editor(self, col_editor_view):
         """初始化碰撞编辑器"""
@@ -3576,14 +3831,19 @@ class MapEditorManager(QObject):
     def add_image_to_layer(self, res_index, pos):
         """真正将图像添加到当前图层并同步数据模型"""
         try:
+            print(f"DEBUG: 开始添加图像到图层 - 资源索引: {res_index}, 位置: {pos}")
             # 获取当前图层
             current_layer = self.layer_manager.get_current_layer()
+            print(
+                f"DEBUG: 当前图层: {current_layer}, 图层类型: {current_layer.layer_type if current_layer else 'None'}"
+            )
             if not current_layer or current_layer.layer_type != "image":
                 print("⚠️ 只能向图像图层添加图片")
                 return
 
             # 获取当前图层的资源列表
             layer_resources = self.layer_resources.get(current_layer.layer_id, [])
+            print(f"DEBUG: 图层资源数量: {len(layer_resources)}")
 
             # 检查资源索引是否有效
             if res_index < 0 or res_index >= len(layer_resources):
@@ -3592,15 +3852,19 @@ class MapEditorManager(QObject):
 
             # 获取选中的资源
             resource = layer_resources[res_index]
+            print(f"DEBUG: 选中的资源: {resource}")
 
             # 处理资源路径（转换为绝对路径）
             image_path = resource["path"]
+            print(f"DEBUG: 资源路径: {image_path}")
             if not os.path.isabs(image_path):
                 if self.current_map_path:
                     map_dir = os.path.dirname(self.current_map_path)
                     image_path = os.path.join(map_dir, image_path)
+                    print(f"DEBUG: 转换为绝对路径: {image_path}")
 
             # 检查文件是否存在
+            print(f"DEBUG: 检查文件是否存在: {image_path}")
             if not os.path.exists(image_path):
                 print(f"⚠️ 资源文件不存在: {image_path}")
                 return
@@ -3608,15 +3872,20 @@ class MapEditorManager(QObject):
             # 创建图像数据
             from .layer_manager import ImageData
 
+            print(f"DEBUG: 创建 ImageData - 路径: {image_path}, 位置: {pos}")
             image_data = ImageData(image_path, pos)
+            print(f"DEBUG: ImageData 创建成功, pixmap: {image_data.pixmap}")
 
             # 设置默认碰撞属性为关闭
             image_data.collision_enabled = False
 
             # 添加到当前图层
+            print(f"DEBUG: 添加图像到图层前, 图层图像数量: {len(current_layer.images)}")
             current_layer.add_image(image_data)
+            print(f"DEBUG: 添加图像到图层后, 图层图像数量: {len(current_layer.images)}")
 
             # 重新渲染图像图层
+            print(f"DEBUG: 开始渲染图像图层")
             self._render_image_layer(current_layer)
 
             # 更新地图数据模型
@@ -3628,6 +3897,7 @@ class MapEditorManager(QObject):
             # 自动保存地图（如果当前地图有文件路径）
             if self.current_map_path:
                 save_result = self.map_model.save(self.current_map_path)
+                print(f"DEBUG: 自动保存地图结果: {save_result}")
 
             print(f"✅ 资源 {res_index} 已成功持久化到图层 {current_layer.name}")
 

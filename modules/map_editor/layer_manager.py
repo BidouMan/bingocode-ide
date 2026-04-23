@@ -198,9 +198,10 @@ class ImageData:
     def get_transform(self):
         """获取变换矩阵"""
         transform = QTransform()
-        transform.translate(self.position.x(), self.position.y())
-        transform.rotate(self.rotation)
+        # 变换顺序：缩放 -> 旋转
+        # 注意：位置通过 setPos 直接设置，不包含在变换中
         transform.scale(self.scale, self.scale)
+        transform.rotate(self.rotation)
         return transform
     
     def to_dict(self):
