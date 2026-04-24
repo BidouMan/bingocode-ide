@@ -767,10 +767,18 @@ class MapDataModel(QObject):
                             # 读取旋转、缩放和透明度
                             rotation = struct.unpack("<f", f.read(4))[0]
                             scale = struct.unpack("<f", f.read(4))[0]
-                            # 读取scale_x和scale_y
-                            scale_x = struct.unpack("<f", f.read(4))[0]
-                            scale_y = struct.unpack("<f", f.read(4))[0]
-                            opacity = struct.unpack("<f", f.read(4))[0]
+                            # 尝试读取scale_x和scale_y，如果失败则使用scale值
+                            try:
+                                # 读取scale_x和scale_y
+                                scale_x = struct.unpack("<f", f.read(4))[0]
+                                scale_y = struct.unpack("<f", f.read(4))[0]
+                                opacity = struct.unpack("<f", f.read(4))[0]
+                            except:
+                                # 旧版本文件没有scale_x和scale_y，使用scale值
+                                scale_x = scale
+                                scale_y = scale
+                                # 读取透明度
+                                opacity = struct.unpack("<f", f.read(4))[0]
                             # 读取碰撞数据
                             collision_enabled = struct.unpack("<B", f.read(1))[0] == 1
                             # 读取碰撞形状

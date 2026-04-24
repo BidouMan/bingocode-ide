@@ -202,7 +202,7 @@ class ImageData:
         transform = QTransform()
         # 变换顺序：缩放 -> 旋转
         # 注意：位置通过 setPos 直接设置，不包含在变换中
-        transform.scale(self.scale, self.scale)
+        transform.scale(self.scale_x, self.scale_y)
         transform.rotate(self.rotation)
         return transform
     

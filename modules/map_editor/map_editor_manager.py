@@ -687,6 +687,15 @@ class MapEditorManager(QObject):
             # 移除预览
             self._remove_preview()
 
+            # 清理编辑框
+            self._remove_transform_box()
+
+            # 重置图像选择状态
+            self.selected_image_data = None
+            self.selected_image_index = -1
+            self.selected_layer_id = None
+            self.selected_item = None
+
     def import_image_to_layer(self):
         """导入图像到当前图像图层"""
         from PySide6.QtWidgets import QFileDialog
@@ -1919,7 +1928,7 @@ class MapEditorManager(QObject):
                     pixmap_item.setPos(image_data.position)
                     # 然后应用缩放和旋转
                     transform = QTransform()
-                    transform.scale(image_data.scale, image_data.scale)
+                    transform.scale(image_data.scale_x, image_data.scale_y)
                     transform.rotate(image_data.rotation)
                     pixmap_item.setTransform(transform)
                     print(f"DEBUG: 图像项场景位置: {pixmap_item.scenePos()}")
@@ -2986,13 +2995,9 @@ class MapEditorManager(QObject):
         # 设置变换框的位置为图像的实际位置
         # 注意：由于图像的变换顺序是 "缩放 -> 旋转 -> 平移"，所以变换框的位置应该与图像的位置一致
         # 但是，由于 QGraphicsItem 的变换是相对于 item 原点的，所以我们需要确保变换框的位置与图像的实际位置一致
-        # 为了简单起见，我们直接使用图像项的场景位置
-        if image_item:
-            scene_pos = image_item.scenePos()
-            self.transform_box.setPos(scene_pos)
-            print(f"DEBUG: 图像项的场景位置: {scene_pos}")
-        else:
-            self.transform_box.setPos(image_data.position)
+        # 使用 image_data.position 来设置变换框的位置，确保与图像数据一致
+        self.transform_box.setPos(image_data.position)
+        print(f"DEBUG: 图像数据位置: {image_data.position}")
 
         # 添加到场景
         if self.canvas_manager:
@@ -3768,6 +3773,13 @@ class MapEditorManager(QObject):
         self._update_res_list_display()
         # 清除预览，避免预览干扰
         self._remove_preview()
+        # 清理编辑框
+        self._remove_transform_box()
+        # 重置图像选择状态
+        self.selected_image_data = None
+        self.selected_image_index = -1
+        self.selected_layer_id = None
+        self.selected_item = None
         # 更新editor_map_layer_list组件的当前选中项
         if hasattr(self, "editor_map_layer_list") and self.editor_map_layer_list:
             if 0 <= index < self.editor_map_layer_list.topLevelItemCount():
