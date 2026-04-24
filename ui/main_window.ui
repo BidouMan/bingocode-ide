@@ -405,7 +405,7 @@
        <item>
         <widget class="QStackedWidget" name="editor_stacked">
          <property name="currentIndex">
-          <number>2</number>
+          <number>0</number>
          </property>
          <widget class="QWidget" name="editor_code_web">
           <layout class="QVBoxLayout" name="verticalLayout_5">
@@ -2566,57 +2566,6 @@
                       </property>
                       <attribute name="buttonGroup">
                        <string notr="true">buttonGroup</string>
-                      </attribute>
-                     </widget>
-                    </item>
-                    <item>
-                     <widget class="QPushButton" name="btn_editor_map_image_move">
-                      <property name="enabled">
-                       <bool>true</bool>
-                      </property>
-                      <property name="text">
-                       <string>移动</string>
-                      </property>
-                      <property name="checkable">
-                       <bool>true</bool>
-                      </property>
-                      <property name="checked">
-                       <bool>true</bool>
-                      </property>
-                      <attribute name="buttonGroup">
-                       <string notr="true">buttonGroup_2</string>
-                      </attribute>
-                     </widget>
-                    </item>
-                    <item>
-                     <widget class="QPushButton" name="btn_editor_map_image_rotate">
-                      <property name="enabled">
-                       <bool>true</bool>
-                      </property>
-                      <property name="text">
-                       <string>旋转</string>
-                      </property>
-                      <property name="checkable">
-                       <bool>true</bool>
-                      </property>
-                      <attribute name="buttonGroup">
-                       <string notr="true">buttonGroup_2</string>
-                      </attribute>
-                     </widget>
-                    </item>
-                    <item>
-                     <widget class="QPushButton" name="btn_editor_map_image_scale">
-                      <property name="enabled">
-                       <bool>true</bool>
-                      </property>
-                      <property name="text">
-                       <string>缩放</string>
-                      </property>
-                      <property name="checkable">
-                       <bool>true</bool>
-                      </property>
-                      <attribute name="buttonGroup">
-                       <string notr="true">buttonGroup_2</string>
                       </attribute>
                      </widget>
                     </item>

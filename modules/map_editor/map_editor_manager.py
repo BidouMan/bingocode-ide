@@ -3830,33 +3830,11 @@ class MapEditorManager(QObject):
         # 检查图层类型
         is_image = layer_type == "image"
 
-        # 瓦片组按钮
-        if hasattr(self.ui, "btn_editor_map_move"):
-            self.ui.btn_editor_map_move.setVisible(not is_image)
-        if hasattr(self.ui, "btn_editor_map_draw"):
-            self.ui.btn_editor_map_draw.setVisible(not is_image)
-        if hasattr(self.ui, "btn_editor_map_erase"):
-            self.ui.btn_editor_map_erase.setVisible(not is_image)
+        # 所有工具按钮始终可见，不根据图层类型切换
+        # 移动工具会根据当前图层类型自动切换处理逻辑
 
-        # 图像组按钮
-        if hasattr(self.ui, "btn_editor_map_image_move"):
-            self.ui.btn_editor_map_image_move.setVisible(is_image)
-        if hasattr(self.ui, "btn_editor_map_image_scale"):
-            self.ui.btn_editor_map_image_scale.setVisible(is_image)
-        if hasattr(self.ui, "btn_editor_map_image_rotate"):
-            self.ui.btn_editor_map_image_rotate.setVisible(is_image)
-
-        # 默认工具激活
-        if is_image:
-            # 切换到图像层时，激活移动工具
-            if hasattr(self.ui, "btn_editor_map_image_move"):
-                self.ui.btn_editor_map_image_move.setChecked(True)
-                self.current_tool = "move"
-        else:
-            # 切换到绘制层时，激活移动工具
-            if hasattr(self.ui, "btn_editor_map_move"):
-                self.ui.btn_editor_map_move.setChecked(True)
-                self.current_tool = "move"
+        # 移除默认工具激活，保持当前工具不变
+        # 这样用户在切换图层时，当前选中的工具会保持不变
 
     def _on_layer_item_clicked(self, item, column):
         """处理图层项点击事件"""
@@ -4516,11 +4494,6 @@ class MapEditorManager(QObject):
         self.ui.btn_editor_map_move.clicked.connect(
             lambda: self.set_current_tool("move")
         )
-        # 绑定图像移动工具按钮
-        if hasattr(self.ui, "btn_editor_map_image_move"):
-            self.ui.btn_editor_map_image_move.clicked.connect(
-                lambda: self.set_current_tool("move")
-            )
         # 绑定绘制工具按钮
         self.ui.btn_editor_map_draw.clicked.connect(
             lambda: self.set_current_tool("draw")

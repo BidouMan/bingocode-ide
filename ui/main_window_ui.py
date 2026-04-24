@@ -1073,33 +1073,6 @@ class Ui_Form(object):
 
         self.horizontalLayout_18.addWidget(self.btn_editor_map_erase)
 
-        self.btn_editor_map_image_move = QPushButton(self.editor_map_toolbar)
-        self.buttonGroup_2 = QButtonGroup(Form)
-        self.buttonGroup_2.setObjectName(u"buttonGroup_2")
-        self.buttonGroup_2.addButton(self.btn_editor_map_image_move)
-        self.btn_editor_map_image_move.setObjectName(u"btn_editor_map_image_move")
-        self.btn_editor_map_image_move.setEnabled(True)
-        self.btn_editor_map_image_move.setCheckable(True)
-        self.btn_editor_map_image_move.setChecked(True)
-
-        self.horizontalLayout_18.addWidget(self.btn_editor_map_image_move)
-
-        self.btn_editor_map_image_rotate = QPushButton(self.editor_map_toolbar)
-        self.buttonGroup_2.addButton(self.btn_editor_map_image_rotate)
-        self.btn_editor_map_image_rotate.setObjectName(u"btn_editor_map_image_rotate")
-        self.btn_editor_map_image_rotate.setEnabled(True)
-        self.btn_editor_map_image_rotate.setCheckable(True)
-
-        self.horizontalLayout_18.addWidget(self.btn_editor_map_image_rotate)
-
-        self.btn_editor_map_image_scale = QPushButton(self.editor_map_toolbar)
-        self.buttonGroup_2.addButton(self.btn_editor_map_image_scale)
-        self.btn_editor_map_image_scale.setObjectName(u"btn_editor_map_image_scale")
-        self.btn_editor_map_image_scale.setEnabled(True)
-        self.btn_editor_map_image_scale.setCheckable(True)
-
-        self.horizontalLayout_18.addWidget(self.btn_editor_map_image_scale)
-
         self.btn_editor_map_select = QPushButton(self.editor_map_toolbar)
         self.buttonGroup.addButton(self.btn_editor_map_select)
         self.btn_editor_map_select.setObjectName(u"btn_editor_map_select")
@@ -1672,9 +1645,6 @@ class Ui_Form(object):
         self.btn_editor_map_move.setText(QCoreApplication.translate("Form", u"\u79fb\u52a8", None))
         self.btn_editor_map_draw.setText(QCoreApplication.translate("Form", u"\u7ed8\u5236", None))
         self.btn_editor_map_erase.setText(QCoreApplication.translate("Form", u"\u64e6\u9664", None))
-        self.btn_editor_map_image_move.setText(QCoreApplication.translate("Form", u"\u79fb\u52a8", None))
-        self.btn_editor_map_image_rotate.setText(QCoreApplication.translate("Form", u"\u65cb\u8f6c", None))
-        self.btn_editor_map_image_scale.setText(QCoreApplication.translate("Form", u"\u7f29\u653e", None))
         self.btn_editor_map_select.setText(QCoreApplication.translate("Form", u"\u9009\u533a", None))
         self.btn_editor_map_mark.setText(QCoreApplication.translate("Form", u"\u6807\u8bb0", None))
         self.btn_editor_map_snap.setText(QCoreApplication.translate("Form", u"\u5438\u9644", None))
