@@ -94,9 +94,9 @@ class RenderManager(QObject):
                 self.view.viewport().installEventFilter(self)
 
     def apply_fit(self):
-        # 保持场景的逻辑大小不变，不缩放场景中的元素
-        # 只调整视图的大小，确保场景完全可见
-        self.view.setSceneRect(self.scene.sceneRect())
+        # 缩放场景以适应视图的大小，保持宽高比
+        # 这样在编辑器模式下，当窗口尺寸较小时，游戏内容会被缩放到窗口大小
+        self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
 
     def handle_instruction(self, instruction_json):
         try:
