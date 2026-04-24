@@ -395,6 +395,8 @@ class MapDataModel(QObject):
                         # 写入旋转、缩放和透明度
                         f.write(struct.pack("<f", image.get("rotation", 0)))
                         f.write(struct.pack("<f", image.get("scale", 1.0)))
+                        f.write(struct.pack("<f", image.get("scale_x", image.get("scale", 1.0))))
+                        f.write(struct.pack("<f", image.get("scale_y", image.get("scale", 1.0))))
                         f.write(struct.pack("<f", image.get("opacity", 1.0)))
                         # 写入碰撞数据
                         f.write(
@@ -765,6 +767,9 @@ class MapDataModel(QObject):
                             # 读取旋转、缩放和透明度
                             rotation = struct.unpack("<f", f.read(4))[0]
                             scale = struct.unpack("<f", f.read(4))[0]
+                            # 读取scale_x和scale_y
+                            scale_x = struct.unpack("<f", f.read(4))[0]
+                            scale_y = struct.unpack("<f", f.read(4))[0]
                             opacity = struct.unpack("<f", f.read(4))[0]
                             # 读取碰撞数据
                             collision_enabled = struct.unpack("<B", f.read(1))[0] == 1
@@ -783,6 +788,8 @@ class MapDataModel(QObject):
                                 "position": [x, y],
                                 "rotation": rotation,
                                 "scale": scale,
+                                "scale_x": scale_x,
+                                "scale_y": scale_y,
                                 "opacity": opacity,
                                 "collision_enabled": collision_enabled,
                                 "collision_shape": collision_shape,
