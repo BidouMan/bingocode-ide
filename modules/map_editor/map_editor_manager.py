@@ -2985,11 +2985,11 @@ class MapEditorManager(QObject):
             except Exception as e:
                 pass
 
-    def _on_transform_changed(self, rect):
+    def _on_transform_changed(self, rect, is_shift_pressed=False):
         """处理变换框的变换"""
         if self.selected_image_data and self.selected_item and self.transform_box:
             print(
-                f"DEBUG: _on_transform_changed - rect={rect}, transform_box.pos={self.transform_box.pos()}"
+                f"DEBUG: _on_transform_changed - rect={rect}, transform_box.pos={self.transform_box.pos()}, is_shift_pressed={is_shift_pressed}"
             )
 
             # 更新图像的位置
@@ -3003,12 +3003,31 @@ class MapEditorManager(QObject):
                 original_width = self.selected_image_data.pixmap.width()
                 original_height = self.selected_image_data.pixmap.height()
                 if original_width > 0 and original_height > 0:
-                    # 计算宽度的缩放比例
-                    new_scale = rect.width() / original_width
-                    self.selected_image_data.scale = new_scale
-                    print(
-                        f"DEBUG: 更新图像缩放: {new_scale}, 编辑框宽度: {rect.width()}, 原始宽度: {original_width}"
-                    )
+                    if is_shift_pressed:
+                        # 按住Shift键时，等比缩放图像
+                        # 计算宽度的缩放比例
+                        new_scale = rect.width() / original_width
+                        self.selected_image_data.scale = new_scale
+                        print(
+                            f"DEBUG: 更新图像缩放: {new_scale}, 编辑框宽度: {rect.width()}, 原始宽度: {original_width}"
+                        )
+
+                        # 确保编辑框的尺寸与图像的尺寸一致
+                        new_height = original_height * new_scale
+                        self.transform_box.setRect(0, 0, rect.width(), new_height)
+                        self.transform_box.update_handles_pos()
+                        print(f"DEBUG: 更新编辑框尺寸: {rect.width()}x{new_height}")
+                    else:
+                        # 不按Shift键时，自由缩放图像，与编辑框比例一致
+                        # 计算宽度和高度的缩放比例
+                        width_scale = rect.width() / original_width
+                        height_scale = rect.height() / original_height
+
+                        # 分别应用宽度和高度的缩放比例
+                        self.selected_image_data.scale = 1.0  # 重置缩放比例
+                        print(
+                            f"DEBUG: 图像缩放: 宽度缩放={width_scale}, 高度缩放={height_scale}, 编辑框宽度: {rect.width()}, 编辑框高度: {rect.height()}, 原始宽度: {original_width}, 原始高度: {original_height}"
+                        )
 
             # 更新图像项
             # 注意：由于 QGraphicsItem 的变换是相对于 item 原点的，我们需要直接设置 item 的位置
@@ -3016,14 +3035,29 @@ class MapEditorManager(QObject):
             self.selected_item.setPos(new_pos)
             # 然后应用缩放和旋转
             transform = QTransform()
-            transform.scale(
-                self.selected_image_data.scale, self.selected_image_data.scale
-            )
+            if self.selected_image_data.pixmap:
+                original_width = self.selected_image_data.pixmap.width()
+                original_height = self.selected_image_data.pixmap.height()
+                if original_width > 0 and original_height > 0:
+                    if not is_shift_pressed:
+                        # 不按Shift键时，自由缩放图像，与编辑框比例一致
+                        width_scale = rect.width() / original_width
+                        height_scale = rect.height() / original_height
+                        transform.scale(width_scale, height_scale)
+                    else:
+                        # 按住Shift键时，等比缩放图像
+                        transform.scale(
+                            self.selected_image_data.scale,
+                            self.selected_image_data.scale,
+                        )
+            else:
+                # 如果没有pixmap，使用默认缩放
+                transform.scale(
+                    self.selected_image_data.scale, self.selected_image_data.scale
+                )
             transform.rotate(self.selected_image_data.rotation)
             self.selected_item.setTransform(transform)
-            print(
-                f"DEBUG: 更新图像位置: {new_pos}, 缩放: {self.selected_image_data.scale}"
-            )
+            print(f"DEBUG: 更新图像位置: {new_pos}")
             print(f"DEBUG: 更新图像变换: {transform}")
 
             # 更新地图数据模型

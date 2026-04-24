@@ -72,6 +72,8 @@ class TransformHandle(QGraphicsRectItem):
             from PySide6.QtWidgets import QApplication
 
             is_shift_pressed = QApplication.keyboardModifiers() & Qt.ShiftModifier
+            # 更新父项的is_shift_pressed属性
+            self.parentItem().is_shift_pressed = is_shift_pressed
 
             # 根据不同位置的手柄限制移动方向
             if self.pos_key == "tl":  # 左上角：可以调整宽高
@@ -192,6 +194,9 @@ class TransformBoxItem(QGraphicsRectItem):
         self._is_dragging = False
         self._drag_start_pos = QPointF()
 
+        # 记录是否按住了Shift键
+        self.is_shift_pressed = False
+
     def update_handles_pos(self):
         """根据当前矩形位置，将4个手柄对齐到顶点"""
         r = self.rect()
@@ -210,7 +215,7 @@ class TransformBoxItem(QGraphicsRectItem):
     def update_transform(self):
         """实时更新图像变换"""
         if self.transform_callback:
-            self.transform_callback(self.rect())
+            self.transform_callback(self.rect(), self.is_shift_pressed)
 
     def hoverEnterEvent(self, event):
         """鼠标进入时改变光标样式"""
