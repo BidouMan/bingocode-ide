@@ -2433,7 +2433,8 @@ class MapEditorManager(QObject):
             else:
                 # 如果是中键拖动，交给MapCanvas处理
                 if event.buttons() & Qt.MiddleButton:
-                    self.original_mouseMoveEvent(event)
+                    if hasattr(self, "original_canvas_mouseMove"):
+                        self.original_canvas_mouseMove(event)
                 else:
                     # 显示预览图块（仅绘制工具）
                     if self.current_tool == "draw":
@@ -2574,7 +2575,8 @@ class MapEditorManager(QObject):
                     self.last_tile_pos = None
             else:
                 # 其他鼠标按钮交给MapCanvas处理
-                self.original_mouseReleaseEvent(event)
+                if hasattr(self, "original_canvas_mouseRelease"):
+                    self.original_canvas_mouseRelease(event)
         except Exception as e:
             print(f"鼠标释放事件错误: {e}")
             import traceback

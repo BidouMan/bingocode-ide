@@ -193,6 +193,8 @@ class TransformBoxItem(QGraphicsRectItem):
         # 鼠标移动相关
         self._is_dragging = False
         self._drag_start_pos = QPointF()
+        self._drag_start_scene_pos = None
+        self._drag_start_mouse_pos = None
 
         # 记录是否按住了Shift键
         self.is_shift_pressed = False
@@ -231,15 +233,22 @@ class TransformBoxItem(QGraphicsRectItem):
         """开始拖动"""
         if event.button() == Qt.MouseButton.LeftButton:
             self._is_dragging = True
-            self._drag_start_pos = event.pos()
+            # 记录拖动开始时的场景位置
+            self._drag_start_scene_pos = self.scenePos()
+            # 记录鼠标在场景坐标系中的初始位置
+            self._drag_start_mouse_pos = event.scenePos()
             event.accept()
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         """拖动过程中"""
         if self._is_dragging:
-            delta = event.pos() - self._drag_start_pos
-            new_pos = self.pos() + delta
+            # 获取鼠标在场景坐标系中的当前位置
+            current_mouse_pos = event.scenePos()
+            # 计算鼠标在场景坐标系中的位移
+            delta = current_mouse_pos - self._drag_start_mouse_pos
+            # 计算新的场景位置
+            new_pos = self._drag_start_scene_pos + delta
 
             # 像素吸附：将位置对齐到整数像素
             new_pos = QPointF(round(new_pos.x()), round(new_pos.y()))
@@ -259,6 +268,8 @@ class TransformBoxItem(QGraphicsRectItem):
         """结束拖动"""
         if event.button() == Qt.MouseButton.LeftButton:
             self._is_dragging = False
+            self._drag_start_scene_pos = None
+            self._drag_start_mouse_pos = None
             event.accept()
         super().mouseReleaseEvent(event)
 
