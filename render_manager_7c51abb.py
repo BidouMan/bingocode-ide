@@ -240,11 +240,11 @@ class RenderManager(QObject):
 
         # 1. 基础属性获取 (优先从 data 取，取不到则保持当前状态)
         rect = item.boundingRect()
-        w, h = rect.width(), rect.height()
+        original_w, original_h = rect.width(), rect.height()
 
         # 核心坐标：data 传的是中心点坐标
-        x = data.get("x", item.x() + w / 2)
-        y = data.get("y", item.y() + h / 2)
+        x = data.get("x", item.x() + original_w / 2)
+        y = data.get("y", item.y() + original_h / 2)
 
         # 旋转与缩放
         angle = data.get("angle", getattr(item, "_last_angle", 0.0))
@@ -261,18 +261,26 @@ class RenderManager(QObject):
         # 2. 🚀 统一变换矩阵 (处理 旋转 + 缩放 + 镜像)
         # 我们绕着 boundingRect 的中心进行变换
         transform = QTransform()
-        transform.translate(w / 2, h / 2)  # 移到中心
-        transform.scale(sx * scale, sy * scale)  # 应用镜像缩放和整体缩放
+        transform.translate(original_w / 2, original_h / 2)  # 移到中心
+        transform.scale(sx, sy)  # 只使用scale_x和scale_y，不与scale相乘
         transform.rotate(angle)  # 应用旋转
-        transform.translate(-w / 2, -h / 2)  # 移回原点
+        transform.translate(-original_w / 2, -original_h / 2)  # 移回原点
 
         item.setTransform(transform)
 
         # 注意：使用了 Transform 后，不要再直接用 setRotation，否则会叠加
         item.setRotation(0)
 
+        # 计算缩放后的尺寸
+        scaled_w = original_w * sx
+        scaled_h = original_h * sy
+
         # 设置位置：将逻辑中心点对齐到物理左上角
-        item.setPos(x - w / 2, y - h / 2)
+        item.setPos(x - scaled_w / 2, y - scaled_h / 2)
+        print(
+            f"DEBUG: 渲染图像位置 - 原始位置: ({x}, {y}), 缩放后尺寸: ({scaled_w}, {scaled_h}), 最终位置: ({x - scaled_w / 2}, {y - scaled_h / 2})"
+        )
+        print(f"DEBUG: 渲染图像缩放值 - scale: {scale}, scale_x: {sx}, scale_y: {sy}")
         item._vox = data.get("vox", getattr(item, "_vox", 0))
         item._voy = data.get("voy", getattr(item, "_voy", 0))
         item._raw_cw = data.get("raw_cw", getattr(item, "_raw_cw", 0))
@@ -291,6 +299,7 @@ class RenderManager(QObject):
         if hitbox:
             # 创建或更新碰撞盒矩形
             if not hasattr(item, "_hitbox_rect"):
+                # 创建碰撞盒作为场景的直接子项
                 item._hitbox_rect = QGraphicsRectItem()
                 item._hitbox_rect.setPen(QPen(QColor(255, 0, 0, 128), 1))
                 item._hitbox_rect.setBrush(Qt.NoBrush)
@@ -298,6 +307,7 @@ class RenderManager(QObject):
                 self.scene.addItem(item._hitbox_rect)
 
             # 更新碰撞盒位置和大小
+            # 直接使用碰撞盒的绝对位置
             left, top, right, bottom = hitbox
             item._hitbox_rect.setRect(left, top, right - left, bottom - top)
             item._hitbox_rect.setVisible(True)
@@ -568,67 +578,6 @@ class RenderManager(QObject):
         item.animation_timer.setInterval(int(1000 / fps))
         item.animation_timer.start()
 
-    def update_map_image(self, sprite_id, data):
-        """
-        更新地图图像精灵（与角色精灵的update_sprite方法彻底隔离）
-        地图图像使用图像自己的scale_x和scale_y进行缩放
-        """
-        item = self.sprites.get(sprite_id)
-        if not item:
-            return
-
-        # 处理图像更新
-        if "image_path" in data:
-            image_path = data["image_path"]
-            pixmap = QPixmap(image_path)
-            if not pixmap.isNull() and isinstance(item, QGraphicsPixmapItem):
-                item.setPixmap(pixmap)
-                item.setTransformOriginPoint(pixmap.width() / 2, pixmap.height() / 2)
-
-        # 1. 基础属性获取 (优先从 data 取，取不到则保持当前状态)
-        rect = item.boundingRect()
-        original_w, original_h = rect.width(), rect.height()
-
-        # 核心坐标：data 传的是左上角坐标
-        x = data.get("x", item.x())
-        y = data.get("y", item.y())
-
-        # 旋转与缩放
-        angle = data.get("angle", getattr(item, "_last_angle", 0.0))
-        scale = data.get("scale", getattr(item, "_last_scale", 1.0))
-        sx = data.get("scale_x", getattr(item, "_last_sx", 1.0))
-        sy = data.get("scale_y", getattr(item, "_last_sy", 1.0))
-
-        # 缓存当前状态以便下次增量更新
-        item._last_angle = angle
-        item._last_scale = scale
-        item._last_sx = sx
-        item._last_sy = sy
-
-        # 2. 🚀 统一变换矩阵 (处理 旋转 + 缩放 + 镜像)
-        # 我们绕着 boundingRect 的中心进行变换
-        transform = QTransform()
-        transform.translate(original_w / 2, original_h / 2)  # 移到中心
-        transform.scale(sx, sy)  # 只使用scale_x和scale_y，不与scale相乘
-        transform.rotate(angle)  # 应用旋转
-        transform.translate(-original_w / 2, -original_h / 2)  # 移回原点
-
-        item.setTransform(transform)
-
-        # 注意：使用了 Transform 后，不要再直接用 setRotation，否则会叠加
-        item.setRotation(0)
-
-        # 设置位置：直接使用左上角坐标
-        item.setPos(x, y)
-
-        # 3. 辅助属性更新
-        if "visible" in data:
-            item.setVisible(data["visible"])
-        if "layer" in data:
-            item.setZValue(data["layer"])
-        if "opacity" in data:
-            item.setOpacity(data["opacity"])
-
     def create_batch_tiles(self, data):
         """批量创建瓦片精灵和图像精灵 - 静态图层烘焙模式"""
         tiles = data.get("tiles", [])
@@ -647,21 +596,24 @@ class RenderManager(QObject):
 
                 # 检查精灵是否已存在
                 if sprite_id in self.sprites:
-                    # 更新现有精灵（使用专用于地图图像的方法）
-                    self.update_map_image(sprite_id, image_data)
+                    # 更新现有精灵
+                    self.update_sprite(sprite_id, image_data)
                 else:
-                    # 创建新的图像精灵
-                    image_path = image_data.get("image_path", "")
-                    pixmap = QPixmap(image_path)
-                    if not pixmap.isNull():
-                        item = QGraphicsPixmapItem(pixmap)
-                        item.setTransformOriginPoint(
-                            pixmap.width() / 2, pixmap.height() / 2
-                        )
-                        self.sprites[sprite_id] = item
-                        self.scene.addItem(item)
-                        # 直接使用update_map_image方法来更新精灵，确保缩放逻辑一致
-                        self.update_map_image(sprite_id, image_data)
+                    # 创建新精灵
+                    # 转换数据格式以匹配create_sprite的预期格式
+                    create_data = {
+                        "image": image_data.get("image_path", ""),
+                        "x": image_data.get("x", 0),
+                        "y": image_data.get("y", 0),
+                        "angle": image_data.get("angle", 0),
+                        "scale": image_data.get("scale", 1.0),
+                        "scale_x": image_data.get("scale_x", 1.0),
+                        "scale_y": image_data.get("scale_y", 1.0),
+                        "opacity": image_data.get("opacity", 1.0),
+                        "type": "image",
+                        "layer": image_data.get("layer", 0),
+                    }
+                    self.create_sprite(sprite_id, create_data)
 
             print(f"✅ [RenderManager] 处理了 {len(image_tiles)} 个图像精灵")
 

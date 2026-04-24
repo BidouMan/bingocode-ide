@@ -1027,9 +1027,7 @@ class Sprite:
             return None
 
         # 计算缩放系数
-        base_scale = self._scale / 100.0
-        # 考虑水平翻转的影响
-        scale_x = base_scale * self._current_scale_x
+        s = self._scale / 100.0
 
         # 图片的视觉中心
         img_w, img_h = self._orig_w, self._orig_h
@@ -1037,25 +1035,17 @@ class Sprite:
 
         # 【核心对齐公式】
         # 以图片中心为基准，计算非透明内容相对于中心点的偏移，再应用缩放
-        # 对于水平翻转的情况，需要调整左右边界的计算
-        if self._current_scale_x == 1.0:
-            # 正常方向
-            content_left = center_x + (bbox[0] - img_w / 2) * scale_x
-            content_right = center_x + (bbox[2] - img_w / 2) * scale_x
-        else:
-            # 水平翻转
-            content_left = center_x + (img_w / 2 - bbox[2]) * base_scale
-            content_right = center_x + (img_w / 2 - bbox[0]) * base_scale
-
-        content_top = center_y + (bbox[1] - img_h / 2) * base_scale
-        content_bottom = center_y + (bbox[3] - img_h / 2) * base_scale
+        content_left = center_x + (bbox[0] - img_w / 2) * s
+        content_top = center_y + (bbox[1] - img_h / 2) * s
+        content_right = center_x + (bbox[2] - img_w / 2) * s
+        content_bottom = center_y + (bbox[3] - img_h / 2) * s
 
         rect = [content_left, content_top, content_right, content_bottom]
 
         # 添加debug信息（仅在需要时启用）
         # print(f"DEBUG: 图片尺寸: {img_w}x{img_h}")
         # print(f"DEBUG: 内容边界框: {bbox}")
-        # print(f"DEBUG: 缩放系数: {base_scale}, scale_x: {scale_x}")
+        # print(f"DEBUG: 缩放系数: {s}")
         # print(f"DEBUG: 碰撞盒: {[round(x, 2) for x in rect]}")
 
         return rect
@@ -1488,9 +1478,9 @@ def _render_map():
                     except:
                         pass
 
-                # 计算中心点位置（因为update_sprite方法需要中心点坐标）
-                center_x = screen_x + (original_width * scale_x) / 2
-                center_y = screen_y + (original_height * scale_y) / 2
+                # 直接使用左上角坐标，因为update_map_image方法会处理中心点计算
+                center_x = screen_x
+                center_y = screen_y
 
                 # 添加到批量渲染列表
                 image_data = {
