@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """
-完整的变换工具
-参考Photoshop的操作逻辑实现
+测试变换工具，参考Photoshop的操作逻辑
 """
 
 from PySide6.QtWidgets import (
     QApplication,
-    QGraphicsItem,
+    QGraphicsView,
+    QGraphicsScene,
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
     QGraphicsRectItem,
+    QGraphicsItem,
+    QGraphicsPixmapItem,
 )
 from PySide6.QtCore import Qt, QRectF, QPointF
-from PySide6.QtGui import QColor, QPen, QPainter
+from PySide6.QtGui import QColor, QPen, QPainter, QPixmap
+import sys
 
 
 class TransformHandle(QGraphicsRectItem):
@@ -64,15 +70,14 @@ class TransformHandle(QGraphicsRectItem):
             new_pos = value
             rect = self.parentItem().rect()
             original_rect = QRectF(rect)
-
+            
             # 获取父项的初始宽高比（用于等比缩放）
             initial_ratio = self.parentItem().initial_ratio
-
+            
             # 检查是否按下了Shift键
             from PySide6.QtWidgets import QApplication
-
             is_shift_pressed = QApplication.keyboardModifiers() & Qt.ShiftModifier
-
+            
             # 根据不同位置的手柄限制移动方向
             if self.pos_key == "tl":  # 左上角：可以调整宽高
                 if rect.right() - new_pos.x() > 5 and rect.bottom() - new_pos.y() > 5:
@@ -80,9 +85,7 @@ class TransformHandle(QGraphicsRectItem):
                         # 等比缩放：保持初始宽高比
                         new_width = rect.right() - new_pos.x()
                         new_height = new_width / initial_ratio
-                        rect.setTopLeft(
-                            QPointF(new_pos.x(), rect.bottom() - new_height)
-                        )
+                        rect.setTopLeft(QPointF(new_pos.x(), rect.bottom() - new_height))
                     else:
                         rect.setTopLeft(new_pos)
             elif self.pos_key == "tr":  # 右上角：可以调整宽高
@@ -91,9 +94,7 @@ class TransformHandle(QGraphicsRectItem):
                         # 等比缩放：保持初始宽高比
                         new_width = new_pos.x() - rect.left()
                         new_height = new_width / initial_ratio
-                        rect.setTopRight(
-                            QPointF(new_pos.x(), rect.bottom() - new_height)
-                        )
+                        rect.setTopRight(QPointF(new_pos.x(), rect.bottom() - new_height))
                     else:
                         rect.setTopRight(new_pos)
             elif self.pos_key == "bl":  # 左下角：可以调整宽高
@@ -102,9 +103,7 @@ class TransformHandle(QGraphicsRectItem):
                         # 等比缩放：保持初始宽高比
                         new_height = new_pos.y() - rect.top()
                         new_width = new_height * initial_ratio
-                        rect.setBottomLeft(
-                            QPointF(rect.right() - new_width, new_pos.y())
-                        )
+                        rect.setBottomLeft(QPointF(rect.right() - new_width, new_pos.y()))
                     else:
                         rect.setBottomLeft(new_pos)
             elif self.pos_key == "br":  # 右下角：可以调整宽高
@@ -113,9 +112,7 @@ class TransformHandle(QGraphicsRectItem):
                         # 等比缩放：保持初始宽高比
                         new_width = new_pos.x() - rect.left()
                         new_height = new_width / initial_ratio
-                        rect.setBottomRight(
-                            QPointF(new_pos.x(), rect.top() + new_height)
-                        )
+                        rect.setBottomRight(QPointF(new_pos.x(), rect.top() + new_height))
                     else:
                         rect.setBottomRight(new_pos)
 
@@ -136,15 +133,15 @@ class TransformHandle(QGraphicsRectItem):
                 round(rect.left()),
                 round(rect.top()),
                 round(rect.width()),
-                round(rect.height()),
+                round(rect.height())
             )
             self.parentItem().setRect(aligned_rect)
             self.parentItem().update_handles_pos()
-
+            
             # 实时更新图像变换
-            if hasattr(self.parentItem(), "update_transform"):
+            if hasattr(self.parentItem(), 'update_transform'):
                 self.parentItem().update_transform()
-
+                
             # 返回手柄的新位置（应该是矩形的角落）
             if self.pos_key == "tl":
                 return rect.topLeft()
@@ -154,11 +151,12 @@ class TransformHandle(QGraphicsRectItem):
                 return rect.bottomLeft()
             elif self.pos_key == "br":
                 return rect.bottomRight()
-
+            
         return super().itemChange(change, value)
 
 
 class TransformBoxItem(QGraphicsRectItem):
+    
     def __init__(self, initial_rect, parent_item=None, transform_callback=None):
         super().__init__(initial_rect, parent_item)
         pen = QPen(QColor("#61afef"), 1.5)  # 1.5 像素宽，蓝白色
@@ -167,13 +165,11 @@ class TransformBoxItem(QGraphicsRectItem):
         self.setPen(pen)
         self.setZValue(1000)
         self.transform_callback = transform_callback  # 添加回调函数
-
+        
         # 保存初始宽高比，用于等比缩放
         self.initial_width = initial_rect.width()
         self.initial_height = initial_rect.height()
-        self.initial_ratio = (
-            self.initial_width / self.initial_height if self.initial_height > 0 else 1
-        )
+        self.initial_ratio = self.initial_width / self.initial_height if self.initial_height > 0 else 1
 
         # 设置可移动和鼠标事件
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
@@ -187,7 +183,7 @@ class TransformBoxItem(QGraphicsRectItem):
             self.handles[key] = handle
 
         self.update_handles_pos()
-
+        
         # 鼠标移动相关
         self._is_dragging = False
         self._drag_start_pos = QPointF()
@@ -235,17 +231,17 @@ class TransformBoxItem(QGraphicsRectItem):
         if self._is_dragging:
             delta = event.pos() - self._drag_start_pos
             new_pos = self.pos() + delta
-
+            
             # 像素吸附：将位置对齐到整数像素
             new_pos = QPointF(round(new_pos.x()), round(new_pos.y()))
             self.setPos(new_pos)
-
+            
             # 更新手柄位置
             self.update_handles_pos()
-
+            
             # 实时更新图像变换
             self.update_transform()
-
+            
             event.accept()
         else:
             super().mouseMoveEvent(event)
@@ -274,3 +270,62 @@ class TransformBoxItem(QGraphicsRectItem):
         painter.drawRect(r)
 
         painter.restore()
+
+
+class TestWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Transform Tool Test (Photoshop Style)")
+        self.setGeometry(100, 100, 800, 600)
+
+        # 创建主部件和布局
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        layout = QVBoxLayout(central_widget)
+
+        # 创建场景和视图
+        self.scene = QGraphicsScene()
+        self.scene.setSceneRect(0, 0, 700, 500)
+
+        self.view = QGraphicsView(self.scene)
+        self.view.setRenderHint(QPainter.RenderHint.Antialiasing)
+        layout.addWidget(self.view)
+
+        # 创建一个绿色的矩形作为测试对象
+        self.test_rect = QGraphicsRectItem(100, 100, 200, 150)
+        self.test_rect.setBrush(QColor("#98c379"))
+        self.test_rect.setZValue(1)
+        self.scene.addItem(self.test_rect)
+
+        # 创建变换框
+        initial_rect = QRectF(0, 0, 200, 150)
+        self.transform_box = TransformBoxItem(
+            initial_rect, transform_callback=self.on_transform_changed
+        )
+        self.transform_box.setPos(100, 100)
+        self.scene.addItem(self.transform_box)
+
+        # 显示窗口
+        self.show()
+
+    def on_transform_changed(self, rect):
+        """处理变换变化"""
+        print(f"Transform changed: {rect}")
+        print(f"Transform box pos: {self.transform_box.pos()}")
+
+        # 更新绿色矩形的位置和大小
+        # 绿色矩形的位置应该是变换框的位置加上矩形的左上角位置
+        # 因为变换框的矩形是相对于变换框自身的坐标系
+        self.test_rect.setPos(self.transform_box.pos() + rect.topLeft())
+        self.test_rect.setRect(0, 0, rect.width(), rect.height())
+
+        # 打印调试信息
+        print(f"Image pos: {self.test_rect.pos()}, Image bounding rect: {self.test_rect.boundingRect()}")
+        print(f"Transform box rect: {rect}, Transform box pos: {self.transform_box.pos()}")
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = TestWindow()
+    print("Test window shown")
+    sys.exit(app.exec())

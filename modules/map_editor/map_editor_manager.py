@@ -2993,7 +2993,8 @@ class MapEditorManager(QObject):
             )
 
             # 更新图像的位置
-            new_pos = self.transform_box.pos()
+            # 图像的位置应该是变换框的位置加上矩形的左上角位置
+            new_pos = self.transform_box.pos() + rect.topLeft()
             self.selected_image_data.position = new_pos
             print(f"DEBUG: 更新图像位置: {new_pos}")
 
@@ -3008,12 +3009,6 @@ class MapEditorManager(QObject):
                     print(
                         f"DEBUG: 更新图像缩放: {new_scale}, 编辑框宽度: {rect.width()}, 原始宽度: {original_width}"
                     )
-
-                    # 确保编辑框的尺寸与图像的尺寸一致
-                    new_height = original_height * new_scale
-                    self.transform_box.setRect(0, 0, rect.width(), new_height)
-                    self.transform_box.update_handles_pos()
-                    print(f"DEBUG: 更新编辑框尺寸: {rect.width()}x{new_height}")
 
             # 更新图像项
             # 注意：由于 QGraphicsItem 的变换是相对于 item 原点的，我们需要直接设置 item 的位置
