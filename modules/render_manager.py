@@ -87,12 +87,16 @@ class RenderManager(QObject):
         self.fps_label.setPos(10, 10)
 
         # 🚀 新增：启用鼠标追踪
-        self.view.setMouseTracking(True)
-        # 🚀 新增：安装事件过滤器
-        self.view.viewport().installEventFilter(self)
+        if hasattr(self, "view") and self.view:
+            self.view.setMouseTracking(True)
+            # 🚀 新增：安装事件过滤器
+            if self.view.viewport():
+                self.view.viewport().installEventFilter(self)
 
     def apply_fit(self):
-        self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+        # 保持场景的逻辑大小不变，不缩放场景中的元素
+        # 只调整视图的大小，确保场景完全可见
+        self.view.setSceneRect(self.scene.sceneRect())
 
     def handle_instruction(self, instruction_json):
         try:
@@ -232,9 +236,7 @@ class RenderManager(QObject):
             pixmap = QPixmap(image_path)
             if not pixmap.isNull() and isinstance(item, QGraphicsPixmapItem):
                 item.setPixmap(pixmap)
-                item.setTransformOriginPoint(
-                    pixmap.width() / 2, pixmap.height() / 2
-                )
+                item.setTransformOriginPoint(pixmap.width() / 2, pixmap.height() / 2)
 
         # 1. 基础属性获取 (优先从 data 取，取不到则保持当前状态)
         rect = item.boundingRect()
@@ -294,7 +296,7 @@ class RenderManager(QObject):
                 item._hitbox_rect.setBrush(Qt.NoBrush)
                 item._hitbox_rect.setZValue(10000)  # 确保在最顶层
                 self.scene.addItem(item._hitbox_rect)
-            
+
             # 更新碰撞盒位置和大小
             left, top, right, bottom = hitbox
             item._hitbox_rect.setRect(left, top, right - left, bottom - top)
@@ -455,13 +457,17 @@ class RenderManager(QObject):
 
     def handle_scene_update(self, data):
         """处理场景更新指令，更新SceneRect"""
-        width = data.get("width", 640)
-        height = data.get("height", 480)
+        # 保持逻辑尺寸为640*480，无论地图大小如何
+        width = 640
+        height = 480
 
         # 更新场景大小
         self.scene.setSceneRect(0, 0, width, height)
         print(f"✅ [RenderManager] 场景更新 - 尺寸: {width}x{height}")
         print(f"   - 场景边界: {self.scene.sceneRect()}")
+
+        # 应用适配，确保视图大小与场景大小匹配
+        self.apply_fit()
 
         # 确保视图可以滚动到新的边界
         self.view.ensureVisible(self.scene.sceneRect())
@@ -563,182 +569,240 @@ class RenderManager(QObject):
         item.animation_timer.start()
 
     def create_batch_tiles(self, data):
-        """批量创建瓦片精灵 - 静态图层烘焙模式"""
+        """批量创建瓦片精灵和图像精灵 - 静态图层烘焙模式"""
         tiles = data.get("tiles", [])
         tile_size = data.get("tile_size", 16)
 
         if not tiles:
             return
 
-        # 获取所有瓦片集信息
-        tile_sets = data.get("tile_sets", [])
-        if not tile_sets:
-            return
+        # 处理图像精灵
+        image_tiles = [tile for tile in tiles if tile.get("type") == "image"]
+        if image_tiles:
+            for image_data in image_tiles:
+                sprite_id = image_data.get("id")
+                if not sprite_id:
+                    continue
 
-        # 创建瓦片集字典，用于快速查找
-        tile_set_dict = {}
-        for i, tile_set in enumerate(tile_sets):
-            tile_set_dict[i] = {
-                "image_path": tile_set.get("image_path", ""),
-                "tile_width": tile_set.get("tile_width", 16),
-                "tile_height": tile_set.get("tile_height", 16),
-                "pixmap": None,
-                "cols": 0,
-                "rows": 0,
-            }
+                # 检查精灵是否已存在
+                if sprite_id in self.sprites:
+                    # 更新现有精灵
+                    self.update_sprite(sprite_id, image_data)
+                else:
+                    # 创建新精灵
+                    # 转换数据格式以匹配create_sprite的预期格式
+                    create_data = {
+                        "image": image_data.get("image_path", ""),
+                        "x": image_data.get("x", 0),
+                        "y": image_data.get("y", 0),
+                        "angle": image_data.get("angle", 0),
+                        "scale": image_data.get("scale", 1.0),
+                        "scale_x": image_data.get("scale_x", 1.0),
+                        "scale_y": image_data.get("scale_y", 1.0),
+                        "opacity": image_data.get("opacity", 1.0),
+                        "type": "image",
+                        "layer": image_data.get("layer", 0),
+                    }
+                    self.create_sprite(sprite_id, create_data)
 
-        # 加载所有瓦片集图片
-        for tile_set_index, tile_set_info in tile_set_dict.items():
-            image_path = tile_set_info["image_path"]
-            if image_path:
-                # 如果是相对路径，转换为绝对路径
-                if not os.path.isabs(image_path):
-                    # 获取项目路径
+            print(f"✅ [RenderManager] 处理了 {len(image_tiles)} 个图像精灵")
+
+        # 处理瓦片精灵
+        tile_tiles = [tile for tile in tiles if tile.get("type") == "tile"]
+        if tile_tiles:
+            # 获取所有瓦片集信息
+            tile_sets = data.get("tile_sets", [])
+            if not tile_sets:
+                return
+
+            # 创建瓦片集字典，用于快速查找
+            tile_set_dict = {}
+            for i, tile_set in enumerate(tile_sets):
+                tile_set_dict[i] = {
+                    "image_path": tile_set.get("image_path", ""),
+                    "tile_width": tile_set.get("tile_width", 16),
+                    "tile_height": tile_set.get("tile_height", 16),
+                    "pixmap": None,
+                    "cols": 0,
+                    "rows": 0,
+                }
+
+            # 加载所有瓦片集图片
+            for tile_set_index, tile_set_info in tile_set_dict.items():
+                image_path = tile_set_info["image_path"]
+                if image_path:
+                    # 初始化project_path变量
                     project_path = ""
-                    if self.app_controller and hasattr(
-                        self.app_controller, "project_manager"
-                    ):
-                        project_path = self.app_controller.project_manager.project_root
+                    # 如果是相对路径，转换为绝对路径
+                    if not os.path.isabs(image_path):
+                        # 获取项目路径
+                        if self.app_controller and hasattr(
+                            self.app_controller, "project_manager"
+                        ):
+                            project_path = (
+                                self.app_controller.project_manager.project_root
+                            )
 
                     if project_path:
                         image_path = os.path.join(project_path, image_path)
 
-                pixmap = QPixmap(image_path)
-                if not pixmap.isNull():
-                    tile_set_info["pixmap"] = pixmap
-                    tile_set_info["cols"] = (
-                        pixmap.width() // tile_set_info["tile_width"]
-                    )
-                    tile_set_info["rows"] = (
-                        pixmap.height() // tile_set_info["tile_height"]
-                    )
-                    print(
-                        f"✅ [RenderManager] 加载瓦片集 {tile_set_index}: {image_path}"
-                    )
-                    print(f"   - 尺寸: {pixmap.size()}")
-                    print(
-                        f"   - 瓦片大小: {tile_set_info['tile_width']}x{tile_set_info['tile_height']}"
-                    )
-                    print(
-                        f"   - 行列数: {tile_set_info['cols']}x{tile_set_info['rows']}"
-                    )
-                else:
-                    print(f"❌ [RenderManager] 瓦片集加载失败: {image_path}")
+                    # 检查路径是否为目录，如果是，则尝试使用瓦片集名称作为文件名
+                    if os.path.isdir(image_path):
+                        # 获取瓦片集名称
+                        tile_set_name = tile_sets[tile_set_index].get("name", "")
+                        if tile_set_name:
+                            # 构建完整的文件路径，确保包含tilesets目录
+                            # 首先尝试在目录中查找tilesets子目录
+                            tilesets_dir = os.path.join(image_path, "tilesets")
+                            if os.path.isdir(tilesets_dir):
+                                # 如果存在tilesets目录，则使用它
+                                image_path = os.path.join(tilesets_dir, tile_set_name)
+                                print(
+                                    f"⚠️ [RenderManager] 瓦片集路径是目录，尝试使用tilesets子目录: {image_path}"
+                                )
+                            else:
+                                # 否则直接使用目录路径
+                                image_path = os.path.join(image_path, tile_set_name)
+                                print(
+                                    f"⚠️ [RenderManager] 瓦片集路径是目录，尝试使用文件名: {image_path}"
+                                )
 
-        # 按图层分组瓦片
-        tiles_by_layer = {}
+                    pixmap = QPixmap(image_path)
+                    if not pixmap.isNull():
+                        tile_set_info["pixmap"] = pixmap
+                        tile_set_info["cols"] = (
+                            pixmap.width() // tile_set_info["tile_width"]
+                        )
+                        tile_set_info["rows"] = (
+                            pixmap.height() // tile_set_info["tile_height"]
+                        )
+                        print(
+                            f"✅ [RenderManager] 加载瓦片集 {tile_set_index}: {image_path}"
+                        )
+                        print(f"   - 尺寸: {pixmap.size()}")
+                        print(
+                            f"   - 瓦片大小: {tile_set_info['tile_width']}x{tile_set_info['tile_height']}"
+                        )
+                        print(
+                            f"   - 行列数: {tile_set_info['cols']}x{tile_set_info['rows']}"
+                        )
+                    else:
+                        print(f"❌ [RenderManager] 瓦片集加载失败: {image_path}")
 
-        # 找到所有瓦片的最小和最大坐标
-        min_x = float("inf")
-        max_x = -float("inf")
-        min_y = float("inf")
-        max_y = -float("inf")
+            # 按图层分组瓦片
+            tiles_by_layer = {}
 
-        for tile_data in tiles:
-            layer = tile_data.get("layer", 0)
-            if layer not in tiles_by_layer:
-                tiles_by_layer[layer] = []
-            tiles_by_layer[layer].append(tile_data)
+            # 找到所有瓦片的最小和最大坐标
+            min_x = float("inf")
+            max_x = -float("inf")
+            min_y = float("inf")
+            max_y = -float("inf")
 
-            # 更新地图尺寸
-            x = tile_data.get("x", 0)
-            y = tile_data.get("y", 0)
-            min_x = min(min_x, x - tile_size)
-            max_x = max(max_x, x + tile_size)
-            min_y = min(min_y, y - tile_size)
-            max_y = max(max_y, y + tile_size)
+            for tile_data in tile_tiles:
+                layer = tile_data.get("layer", 0)
+                if layer not in tiles_by_layer:
+                    tiles_by_layer[layer] = []
+                tiles_by_layer[layer].append(tile_data)
 
-        # 确保图层大小至少为场景大小
-        scene_rect = self.scene.sceneRect()
-        min_x = min(min_x, scene_rect.left())
-        max_x = max(max_x, scene_rect.right())
-        min_y = min(min_y, scene_rect.top())
-        max_y = max(max_y, scene_rect.bottom())
-
-        # 为每个图层创建静态烘焙图
-        for layer, layer_tiles in tiles_by_layer.items():
-            # 创建图层的像素图，使用整个地图的大小
-            layer_width = max_x - min_x
-            layer_height = max_y - min_y
-            layer_pixmap = QPixmap(layer_width, layer_height)
-            layer_pixmap.fill(Qt.transparent)
-
-            # 创建画家
-            painter = QPainter(layer_pixmap)
-
-            # 绘制所有瓦片到图层像素图
-            for tile_data in layer_tiles:
-                tile_id = tile_data.get("tile_id", 0)
-                if tile_id <= 0:
-                    continue
-
-                # 获取瓦片集索引（默认为0）
-                tile_set_index = tile_data.get("tile_set_index", 0)
-
-                # 检查瓦片集是否存在
-                if tile_set_index not in tile_set_dict:
-                    continue
-
-                tile_set_info = tile_set_dict[tile_set_index]
-                pixmap = tile_set_info.get("pixmap")
-
-                if not pixmap:
-                    continue
-
-                # 计算瓦片在瓦片集中的位置
-                tile_index = tile_id - 1
-                tile_col = tile_index % tile_set_info["cols"]
-                tile_row = tile_index // tile_set_info["cols"]
-
-                # 检查瓦片索引是否有效
-                if tile_row >= tile_set_info["rows"]:
-                    continue
-
-                # 从瓦片集中裁剪出单个瓦片
-                tile_rect = QtCore_QRect(
-                    tile_col * tile_set_info["tile_width"],
-                    tile_row * tile_set_info["tile_height"],
-                    tile_set_info["tile_width"],
-                    tile_set_info["tile_height"],
-                )
-                tile_pixmap = pixmap.copy(tile_rect)
-
-                if tile_pixmap.isNull():
-                    continue
-
-                # 计算绘制位置（使用相对坐标）
+                # 更新地图尺寸
                 x = tile_data.get("x", 0)
                 y = tile_data.get("y", 0)
-                draw_x = x - min_x - tile_size // 2
-                draw_y = y - min_y - tile_size // 2
+                min_x = min(min_x, x - tile_size)
+                max_x = max(max_x, x + tile_size)
+                min_y = min(min_y, y - tile_size)
+                max_y = max(max_y, y + tile_size)
 
-                # 绘制瓦片到图层像素图
-                painter.drawPixmap(draw_x, draw_y, tile_pixmap)
+            # 确保图层大小至少为场景大小
+            scene_rect = self.scene.sceneRect()
+            min_x = min(min_x, scene_rect.left())
+            max_x = max(max_x, scene_rect.right())
+            min_y = min(min_y, scene_rect.top())
+            max_y = max(max_y, scene_rect.bottom())
 
-            painter.end()
+            # 为每个图层创建静态烘焙图
+            for layer, layer_tiles in tiles_by_layer.items():
+                # 创建图层的像素图，使用整个地图的大小
+                layer_width = max_x - min_x
+                layer_height = max_y - min_y
+                layer_pixmap = QPixmap(layer_width, layer_height)
+                layer_pixmap.fill(Qt.transparent)
 
-            # 移除旧的图层（如果存在）
-            if layer in self.static_layers:
-                old_item = self.static_layers[layer]
-                self.scene.removeItem(old_item)
-                del old_item
+                # 创建画家
+                painter = QPainter(layer_pixmap)
 
-            # 创建图层精灵
-            layer_item = QGraphicsPixmapItem(layer_pixmap)
-            layer_item.setZValue(layer)
+                # 绘制所有瓦片到图层像素图
+                for tile_data in layer_tiles:
+                    tile_id = tile_data.get("tile_id", 0)
+                    if tile_id <= 0:
+                        continue
 
-            # 设置图层位置（使用最小坐标作为偏移）
-            layer_item.setPos(min_x, min_y)
+                    # 获取瓦片集索引（默认为0）
+                    tile_set_index = tile_data.get("tile_set_index", 0)
 
-            # 存储图层
-            self.static_layers[layer] = layer_item
-            self.scene.addItem(layer_item)
+                    # 检查瓦片集是否存在
+                    if tile_set_index not in tile_set_dict:
+                        continue
 
-            print(
-                f"✅ [RenderManager] 创建静态图层 {layer}，包含 {len(layer_tiles)} 个瓦片"
-            )
+                    tile_set_info = tile_set_dict[tile_set_index]
+                    pixmap = tile_set_info.get("pixmap")
 
-        print(f"✅ [RenderManager] 静态图层烘焙完成，总瓦片数: {len(tiles)}")
+                    if not pixmap:
+                        continue
+
+                    # 计算瓦片在瓦片集中的位置
+                    tile_index = tile_id - 1
+                    tile_col = tile_index % tile_set_info["cols"]
+                    tile_row = tile_index // tile_set_info["cols"]
+
+                    # 检查瓦片索引是否有效
+                    if tile_row >= tile_set_info["rows"]:
+                        continue
+
+                    # 从瓦片集中裁剪出单个瓦片
+                    tile_rect = QtCore_QRect(
+                        tile_col * tile_set_info["tile_width"],
+                        tile_row * tile_set_info["tile_height"],
+                        tile_set_info["tile_width"],
+                        tile_set_info["tile_height"],
+                    )
+                    tile_pixmap = pixmap.copy(tile_rect)
+
+                    if tile_pixmap.isNull():
+                        continue
+
+                    # 计算绘制位置（使用相对坐标）
+                    x = tile_data.get("x", 0)
+                    y = tile_data.get("y", 0)
+                    draw_x = x - min_x - tile_size // 2
+                    draw_y = y - min_y - tile_size // 2
+
+                    # 绘制瓦片到图层像素图
+                    painter.drawPixmap(draw_x, draw_y, tile_pixmap)
+
+                painter.end()
+
+                # 移除旧的图层（如果存在）
+                if layer in self.static_layers:
+                    old_item = self.static_layers[layer]
+                    self.scene.removeItem(old_item)
+                    del old_item
+
+                # 创建图层精灵
+                layer_item = QGraphicsPixmapItem(layer_pixmap)
+                layer_item.setZValue(layer)
+
+                # 设置图层位置（使用最小坐标作为偏移）
+                layer_item.setPos(min_x, min_y)
+
+                # 存储图层
+                self.static_layers[layer] = layer_item
+                self.scene.addItem(layer_item)
+
+                print(
+                    f"✅ [RenderManager] 创建静态图层 {layer}，包含 {len(layer_tiles)} 个瓦片"
+                )
+
+            print(f"✅ [RenderManager] 静态图层烘焙完成，总瓦片数: {len(tile_tiles)}")
 
     # ---------- 内部函数 ----------
     def _setup_fps_label(self):

@@ -384,8 +384,14 @@ class MapDataModel(QObject):
                     # 写入图像数量
                     f.write(struct.pack("<I", len(images)))
                     for image in images:
-                        # 写入图像路径
+                        # 写入图像路径（使用相对路径）
                         image_path = image.get("image_path", "")
+                        # 转换为相对路径
+                        if os.path.isabs(image_path):
+                            # 获取地图文件所在目录
+                            map_dir = os.path.dirname(file_path)
+                            # 计算相对路径
+                            image_path = os.path.relpath(image_path, map_dir)
                         path_bytes = image_path.encode("utf-8")
                         f.write(struct.pack("<I", len(path_bytes)))
                         f.write(path_bytes)
@@ -762,6 +768,12 @@ class MapDataModel(QObject):
                             # 读取图像路径
                             path_length = struct.unpack("<I", f.read(4))[0]
                             image_path = f.read(path_length).decode("utf-8")
+                            # 转换为绝对路径
+                            if not os.path.isabs(image_path):
+                                # 获取地图文件所在目录
+                                map_dir = os.path.dirname(file_path)
+                                # 计算绝对路径
+                                image_path = os.path.join(map_dir, image_path)
                             # 读取位置
                             x, y = struct.unpack("<dd", f.read(16))
                             # 读取旋转、缩放和透明度
@@ -814,8 +826,22 @@ class MapDataModel(QObject):
                         pass
 
                 # 使用numpy一次性加载图块数据
-                tile_data = np.fromfile(f, dtype=np.uint16, count=width * height)
-                tile_grid = tile_data.reshape((height, width))
+                try:
+                    tile_data = np.fromfile(f, dtype=np.uint16, count=width * height)
+                    if len(tile_data) != width * height:
+                        print(f"DEBUG: 图块数据长度不匹配: 预期 {width * height}, 实际 {len(tile_data)}")
+                        # 尝试调整数据大小
+                        if len(tile_data) < width * height:
+                            # 数据不足，填充零
+                            tile_data = np.pad(tile_data, (0, width * height - len(tile_data)), 'constant')
+                        else:
+                            # 数据过多，截断
+                            tile_data = tile_data[:width * height]
+                    tile_grid = tile_data.reshape((height, width))
+                except Exception as e:
+                    print(f"DEBUG: 加载图块数据失败: {e}")
+                    # 创建一个空的图块网格
+                    tile_grid = np.zeros((height, width), dtype=np.uint16)
 
                 # 转换为字典格式（只保存非零图块，应用偏移量）
                 tiles_dict = {}

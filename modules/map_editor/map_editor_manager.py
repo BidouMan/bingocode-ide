@@ -4089,8 +4089,8 @@ class MapEditorManager(QObject):
                     and self.project_manager
                     and self.current_map_path
                 ):
-                    map_dir = os.path.dirname(self.current_map_path)
-                    full_image_path = os.path.join(map_dir, relative_path)
+                    # 直接使用dest_path作为full_image_path，因为dest_path已经是资源文件的完整路径
+                    full_image_path = dest_path
                     # 统一使用用户设置的tile_size作为图块尺寸
                     self.map_model.add_tile_set(
                         name=resource_info["name"],

@@ -1292,9 +1292,10 @@ def load_map(map_name):
     _clear_map()
 
     try:
-        # 从当前工作目录的assets/maps文件夹读取地图文件
+        # 从项目根目录的assets/maps文件夹读取地图文件
         # 尝试加载二进制文件（通过检查.info文件），如果不存在再回退到JSON文件
-        map_dir = os.path.join("assets", "maps", map_name)
+        # 使用当前工作目录（项目根目录）
+        map_dir = os.path.join(os.getcwd(), "assets", "maps", map_name)
         map_file = os.path.join(map_dir, f"{map_name}.info")
 
         print(f"✅ [BingoEngine] 加载地图: {map_name}")
@@ -1320,9 +1321,11 @@ def load_map(map_name):
             f"   - 偏移量: ({_CURRENT_MAP.get('offset_x', 0)}, {_CURRENT_MAP.get('offset_y', 0)})"
         )
 
-        # 打印图层瓦片信息
+        # 打印图层信息
         for i, layer in enumerate(_CURRENT_MAP["layers"]):
             print(f"   - 图层 {i} ({layer['name']}): {len(layer['tiles'])} 个瓦片")
+            if layer.get("type") == "image" and "images" in layer:
+                print(f"     图像数量: {len(layer['images'])}")
             # 打印前5个瓦片的坐标和ID
             tile_count = 0
             for (x, y), tile_id in list(layer["tiles"].items())[:5]:
@@ -1417,90 +1420,165 @@ def _render_map():
     rendered_count = 0
     visible_count = 0
 
-    # 获取瓦片集信息
-    tile_set_info = None
-    if "tile_sets" in _CURRENT_MAP and _CURRENT_MAP["tile_sets"]:
-        tile_set_info = _CURRENT_MAP["tile_sets"][0]
-
     # 遍历所有图层
     for layer_idx, layer in enumerate(_CURRENT_MAP["layers"]):
         if not layer["visible"]:
             continue
 
-        # 遍历图层中的所有瓦片（静态图层烘焙模式下渲染所有瓦片）
-        for (x, y), tile_id in layer["tiles"].items():
-            if tile_id <= 0:
-                continue
+        # 处理图像图层
+        if layer.get("type") == "image" and "images" in layer:
+            for image_idx, image in enumerate(layer["images"]):
+                # 生成唯一的图像ID
+                sprite_id = f"image_{layer_idx}_{image_idx}"
 
-            # 解析tile_id：格式为 resource_index * 1000 + tile_index + 1（图块集模式）
-            # 或 resource_index + 1（单张图片模式）
-            # 确保转换为Python原生类型，避免numpy类型导致JSON序列化失败
-            tile_id_int = int(tile_id)
+                # 获取图像位置
+                position = image.get("position", [0, 0])
+                screen_x = position[0]
+                screen_y = position[1]
 
-            # 判断是图块集模式还是单张图片模式
-            if tile_id_int < 1000:
-                # 单张图片模式：tile_id = resource_index + 1（旧格式兼容）
-                resource_index = tile_id_int - 1
-                actual_tile_index = 0
-            else:
-                # 图块集模式：tile_id = (resource_index + 1) * 1000 + tile_index + 1
-                resource_index = (tile_id_int // 1000) - 1
-                actual_tile_index = (tile_id_int % 1000) - 1
+                # 获取图像旋转、缩放和透明度
+                rotation = image.get("rotation", 0)
+                scale = image.get("scale", 1.0)
+                scale_x = image.get("scale_x", scale)
+                scale_y = image.get("scale_y", scale)
+                opacity = image.get("opacity", 1.0)
 
-            # 调试信息
-            if resource_index >= len(_CURRENT_MAP["tile_sets"]):
-                print(
-                    f"DEBUG: 资源索引超出范围: {resource_index}, 瓦片集数量: {len(_CURRENT_MAP['tile_sets'])}"
-                )
-                print(
-                    f"DEBUG: 瓦片ID: {tile_id_int}, 实际瓦片索引: {actual_tile_index}"
-                )
+                # 获取图像路径并转换为绝对路径
+                image_path = image.get("image_path", "")
+                if image_path:
+                    # 如果是相对路径，转换为绝对路径
+                    if not os.path.isabs(image_path):
+                        # 尝试相对于地图文件所在目录的路径
+                        map_dir = os.path.dirname(map_file)
+                        absolute_path = os.path.join(map_dir, image_path)
+                        if os.path.exists(absolute_path):
+                            image_path = absolute_path
+                        else:
+                            # 尝试相对于项目根目录的路径
+                            project_root = os.path.dirname(
+                                os.path.dirname(os.path.abspath(__file__))
+                            )
+                            absolute_path = os.path.join(project_root, image_path)
+                            if os.path.exists(absolute_path):
+                                image_path = absolute_path
+                            else:
+                                # 尝试相对于当前工作目录的路径
+                                absolute_path = os.path.join(os.getcwd(), image_path)
+                                if os.path.exists(absolute_path):
+                                    image_path = absolute_path
 
-            # 生成唯一的瓦片ID
-            sprite_id = f"tile_{layer_idx}_{x}_{y}"
-            tile_key = (layer_idx, x, y)
+                # 添加到批量渲染列表
+                image_data = {
+                    "id": sprite_id,
+                    "x": screen_x,
+                    "y": screen_y,
+                    "angle": rotation,
+                    "scale": scale,
+                    "scale_x": scale_x,
+                    "scale_y": scale_y,
+                    "opacity": opacity,
+                    "type": "image",
+                    "image_path": image_path,
+                    "layer": layer_idx,
+                }
 
-            # 获取瓦片集的具体瓦片大小（图块实际大小）
-            tile_set_size = tile_size  # 默认使用地图的全局tile_size
-            if resource_index < len(_CURRENT_MAP["tile_sets"]):
-                tile_set = _CURRENT_MAP["tile_sets"][resource_index]
-                tile_set_size = tile_set.get("tile_width", tile_size)
+                batch_commands.append(image_data)
+                rendered_count += 1
 
-            # 计算瓦片在屏幕上的位置 - 使用地图的全局tile_size（格子大小）
-            # 这样图块始终在原来的格子位置上，不受图块大小变化影响
-            screen_x = x * tile_size + tile_size // 2
-            screen_y = y * tile_size + tile_size // 2
+        # 处理绘制图层的瓦片
+        if "tiles" in layer:
+            # 遍历图层中的所有瓦片（静态图层烘焙模式下渲染所有瓦片）
+            for (x, y), tile_id in layer["tiles"].items():
+                if tile_id <= 0:
+                    continue
 
-            # 添加到批量渲染列表
-            tile_data = {
-                "id": sprite_id,
-                "x": screen_x,
-                "y": screen_y,
-                "angle": 0,
-                "scale": 1.0,
-                "scale_x": 1.0,
-                "scale_y": 1.0,
-                "type": "tile",
-                "tile_id": actual_tile_index + 1,  # 恢复为从1开始的索引
-                "tile_set_index": resource_index,
-                "layer": layer_idx,
-                "tile_size": tile_set_size,
-            }
+                # 解析tile_id：格式为 resource_index * 1000 + tile_index + 1（图块集模式）
+                # 或 resource_index + 1（单张图片模式）
+                # 确保转换为Python原生类型，避免numpy类型导致JSON序列化失败
+                tile_id_int = int(tile_id)
 
-            batch_commands.append(tile_data)
-            _RENDERED_TILES.add(tile_key)
-            rendered_count += 1
+                # 判断是图块集模式还是单张图片模式
+                if tile_id_int < 1000:
+                    # 单张图片模式：tile_id = resource_index + 1（旧格式兼容）
+                    resource_index = tile_id_int - 1
+                    actual_tile_index = 0
+                else:
+                    # 图块集模式：tile_id = (resource_index + 1) * 1000 + tile_index + 1
+                    resource_index = (tile_id_int // 1000) - 1
+                    actual_tile_index = (tile_id_int % 1000) - 1
 
-    # 批量渲染：一次性发送所有可见瓦片的渲染指令
-    if batch_commands and _CURRENT_MAP.get("tile_sets"):
+                # 调试信息
+                if resource_index >= len(_CURRENT_MAP["tile_sets"]):
+                    print(
+                        f"DEBUG: 资源索引超出范围: {resource_index}, 瓦片集数量: {len(_CURRENT_MAP['tile_sets'])}"
+                    )
+                    print(
+                        f"DEBUG: 瓦片ID: {tile_id_int}, 实际瓦片索引: {actual_tile_index}"
+                    )
+                    continue
+
+                # 生成唯一的瓦片ID
+                sprite_id = f"tile_{layer_idx}_{x}_{y}"
+                tile_key = (layer_idx, x, y)
+
+                # 获取瓦片集的具体瓦片大小（图块实际大小）
+                tile_set_size = tile_size  # 默认使用地图的全局tile_size
+                if resource_index < len(_CURRENT_MAP["tile_sets"]):
+                    tile_set = _CURRENT_MAP["tile_sets"][resource_index]
+                    tile_set_size = tile_set.get("tile_width", tile_size)
+
+                # 计算瓦片在屏幕上的位置 - 使用地图的全局tile_size（格子大小）
+                # 这样图块始终在原来的格子位置上，不受图块大小变化影响
+                screen_x = x * tile_size + tile_size // 2
+                screen_y = y * tile_size + tile_size // 2
+
+                # 添加到批量渲染列表
+                tile_data = {
+                    "id": sprite_id,
+                    "x": screen_x,
+                    "y": screen_y,
+                    "angle": 0,
+                    "scale": 1.0,
+                    "scale_x": 1.0,
+                    "scale_y": 1.0,
+                    "type": "tile",
+                    "tile_id": actual_tile_index + 1,  # 恢复为从1开始的索引
+                    "tile_set_index": resource_index,
+                    "layer": layer_idx,
+                    "tile_size": tile_set_size,
+                }
+
+                batch_commands.append(tile_data)
+                _RENDERED_TILES.add(tile_key)
+                rendered_count += 1
+
+    # 批量渲染：一次性发送所有可见瓦片和图像的渲染指令
+    if batch_commands:
         # 处理瓦片集信息，确保包含完整的图片路径
         processed_tile_sets = []
-        for tile_set in _CURRENT_MAP["tile_sets"]:
-            processed_tile_set = tile_set.copy()
-            # 确保image_path字段存在（兼容二进制格式）
-            if "image_path" in processed_tile_set:
-                processed_tile_set["image"] = processed_tile_set["image_path"]
-            processed_tile_sets.append(processed_tile_set)
+        if _CURRENT_MAP.get("tile_sets"):
+            for tile_set in _CURRENT_MAP["tile_sets"]:
+                processed_tile_set = tile_set.copy()
+                # 确保image_path字段存在（兼容二进制格式）
+                if "image_path" in processed_tile_set:
+                    # 转换图像路径为绝对路径
+                    image_path = processed_tile_set["image_path"]
+                    if not os.path.isabs(image_path):
+                        # 尝试相对于项目根目录的路径
+                        project_root = os.path.dirname(
+                            os.path.dirname(os.path.abspath(__file__))
+                        )
+                        absolute_path = os.path.join(project_root, image_path)
+                        if os.path.exists(absolute_path):
+                            image_path = absolute_path
+                        else:
+                            # 尝试相对于当前工作目录的路径
+                            absolute_path = os.path.join(os.getcwd(), image_path)
+                            if os.path.exists(absolute_path):
+                                image_path = absolute_path
+                    processed_tile_set["image_path"] = image_path
+                    processed_tile_set["image"] = image_path
+                processed_tile_sets.append(processed_tile_set)
 
         # 使用地图的全局tile_size作为数据包的tile_size（格子大小）
         # 这样图块始终在原来的格子位置上
@@ -1529,9 +1607,12 @@ def _render_map():
 
     print(f"DEBUG: BingoEngine - 地图渲染完成:")
     print(f"DEBUG:   总瓦片数: {rendered_count}")
-    print(
-        f"DEBUG:   视口可见: {visible_count} ({visible_count / rendered_count * 100:.1f}%)"
-    )
+    if rendered_count > 0:
+        print(
+            f"DEBUG:   视口可见: {visible_count} ({visible_count / rendered_count * 100:.1f}%)"
+        )
+    else:
+        print(f"DEBUG:   视口可见: {visible_count} (0%)")
     print(f"DEBUG:   实际渲染: {len(batch_commands)}")
     print(f"DEBUG:   渲染时间: {render_time:.2f}ms")
 
