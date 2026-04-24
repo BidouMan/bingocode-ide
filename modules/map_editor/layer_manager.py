@@ -183,7 +183,9 @@ class ImageData:
         self.image_path = image_path  # 图像路径
         self.position = position or QPointF(0, 0)  # 位置
         self.rotation = rotation  # 旋转角度（度）
-        self.scale = scale  # 缩放比例
+        self.scale = scale  # 缩放比例（向后兼容）
+        self.scale_x = scale  # 宽度缩放比例
+        self.scale_y = scale  # 高度缩放比例
         self.opacity = opacity  # 透明度
         self.pixmap = None  # 缓存的图像
         self.collision_enabled = False  # 碰撞是否启用（图像图层默认关闭）
@@ -211,6 +213,8 @@ class ImageData:
             "position": [self.position.x(), self.position.y()],
             "rotation": self.rotation,
             "scale": self.scale,
+            "scale_x": self.scale_x,
+            "scale_y": self.scale_y,
             "opacity": self.opacity,
             "collision_enabled": self.collision_enabled,
             "collision_shape": self.collision_shape
@@ -220,13 +224,17 @@ class ImageData:
     def from_dict(cls, data):
         """从字典创建图像数据"""
         position = QPointF(data["position"][0], data["position"][1])
+        scale = data.get("scale", 1.0)
         image_data = cls(
             data["image_path"],
             position,
             data.get("rotation", 0),
-            data.get("scale", 1.0),
+            scale,
             data.get("opacity", 1.0)
         )
+        # 加载scale_x和scale_y属性，如果没有则使用scale值
+        image_data.scale_x = data.get("scale_x", scale)
+        image_data.scale_y = data.get("scale_y", scale)
         image_data.collision_enabled = data.get("collision_enabled", True)
         image_data.collision_shape = data.get("collision_shape", None)
         return image_data
