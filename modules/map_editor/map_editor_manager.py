@@ -573,21 +573,25 @@ class MapEditorManager(QObject):
                         if self.current_tool == "draw":
                             return True
 
-                # 只处理绘制工具的鼠标移动和释放事件
-                elif self.current_tool == "draw":
-                    if event.type() == QEvent.MouseMove:
-                        if self.is_drawing and (event.buttons() & Qt.LeftButton):
-                            scene_pos = self.canvas_manager.mapToScene(event.pos())
-                            tile_pos = self._get_grid_pos_from_scene_pos(scene_pos)
-                            if tile_pos and tile_pos != self.last_tile_pos:
-                                self._draw_tile(scene_pos)
-                                self.last_tile_pos = tile_pos
-                            return True
+                # 处理所有工具的鼠标移动事件
+                elif event.type() == QEvent.MouseMove:
+                    # 调用鼠标移动处理方法
+                    self._handle_mouse_move(event)
+                    # 只在绘制模式下且正在绘制时拦截事件
+                    if (
+                        self.current_tool == "draw"
+                        and self.is_drawing
+                        and (event.buttons() & Qt.LeftButton)
+                    ):
+                        return True
 
-                    elif event.type() == QEvent.MouseButtonRelease:
-                        if event.button() == Qt.LeftButton:
-                            self.is_drawing = False
-                            return True
+                # 处理所有工具的鼠标释放事件
+                elif event.type() == QEvent.MouseButtonRelease:
+                    # 调用鼠标释放处理方法
+                    self._handle_mouse_release(event)
+                    # 只在绘制模式下拦截事件
+                    if self.current_tool == "draw" and event.button() == Qt.LeftButton:
+                        return True
 
             # 所有未匹配的事件，调用原生逻辑并放行
             return super().eventFilter(watched, event)
@@ -672,6 +676,16 @@ class MapEditorManager(QObject):
         if self.layer_manager.set_current_layer(layer_index):
             self.current_layer = layer_index
             print(f"当前图层: {layer_index}")
+
+            # 重置资源选择状态
+            self.selected_resource_index = -1
+            self.selected_tile_index = -1
+
+            # 更新资源列表显示
+            self._update_res_list_display()
+
+            # 移除预览
+            self._remove_preview()
 
     def import_image_to_layer(self):
         """导入图像到当前图像图层"""
@@ -902,6 +916,7 @@ class MapEditorManager(QObject):
                 map_dir = os.path.dirname(file_path)
                 # 清空上传资源列表，准备重新加载
                 self.layer_resources.clear()
+                self.uploaded_resources.clear()
 
                 # 分配资源给图层
                 if "tile_sets" in self.map_model.map_data:
@@ -1254,6 +1269,10 @@ class MapEditorManager(QObject):
                 if self.layer_manager.layers:
                     print(f"DEBUG: 默认选择第一个图层，索引: 0")
                     self.layer_manager.set_current_layer(0)
+
+                # 将转换后的资源添加到上传资源列表
+                self.uploaded_resources.extend(converted_resources)
+                print(f"DEBUG: 上传资源列表数量: {len(self.uploaded_resources)}")
 
                 # 更新资源列表和画布
                 print("DEBUG: 更新资源列表和画布")
@@ -2757,7 +2776,8 @@ class MapEditorManager(QObject):
                 return
 
             # 获取当前图层的资源列表
-            layer_resources = self.layer_resources.get(current_layer.layer_id, [])
+            layer_id = current_layer.layer_id
+            layer_resources = self.layer_resources.get(layer_id, [])
 
             # 获取选中的资源
             if self.selected_resource_index < 0 or self.selected_resource_index >= len(
@@ -4056,6 +4076,9 @@ class MapEditorManager(QObject):
                 # 添加到图层资源列表
                 self.layer_resources[current_layer.layer_id].append(resource_info)
 
+                # 添加到上传资源列表
+                self.uploaded_resources.append(resource_info)
+
                 # 图像图层：只添加到资源列表，不自动创建图像
                 if current_layer.layer_type == "image":
                     print(f"DEBUG: 图像资源添加到图层资源列表 - 路径: {relative_path}")
@@ -4586,8 +4609,15 @@ class MapEditorManager(QObject):
             self._remove_preview()
         # 切换到绘制模式时，如果已选中资源，显示预览
         elif self.current_tool == "draw" and self.selected_resource_index >= 0:
+            # 获取当前图层的资源列表
+            current_layer = self.layer_manager.get_current_layer()
+            if not current_layer:
+                return
+            layer_id = current_layer.layer_id
+            layer_resources = self.layer_resources.get(layer_id, [])
+
             # 检查是否需要图块索引
-            resource = self.uploaded_resources[self.selected_resource_index]
+            resource = layer_resources[self.selected_resource_index]
             resource_type = resource.get("resource_type", "image")
             # 图块集合需要选中图块，单张图片不需要
             if (
