@@ -240,11 +240,11 @@ class RenderManager(QObject):
 
         # 1. 基础属性获取 (优先从 data 取，取不到则保持当前状态)
         rect = item.boundingRect()
-        w, h = rect.width(), rect.height()
+        original_w, original_h = rect.width(), rect.height()
 
         # 核心坐标：data 传的是中心点坐标
-        x = data.get("x", item.x() + w / 2)
-        y = data.get("y", item.y() + h / 2)
+        x = data.get("x", item.x() + original_w / 2)
+        y = data.get("y", item.y() + original_h / 2)
 
         # 旋转与缩放
         angle = data.get("angle", getattr(item, "_last_angle", 0.0))
@@ -261,18 +261,26 @@ class RenderManager(QObject):
         # 2. 🚀 统一变换矩阵 (处理 旋转 + 缩放 + 镜像)
         # 我们绕着 boundingRect 的中心进行变换
         transform = QTransform()
-        transform.translate(w / 2, h / 2)  # 移到中心
-        transform.scale(sx * scale, sy * scale)  # 应用镜像缩放和整体缩放
+        transform.translate(original_w / 2, original_h / 2)  # 移到中心
+        transform.scale(sx, sy)  # 只使用scale_x和scale_y，不与scale相乘
         transform.rotate(angle)  # 应用旋转
-        transform.translate(-w / 2, -h / 2)  # 移回原点
+        transform.translate(-original_w / 2, -original_h / 2)  # 移回原点
 
         item.setTransform(transform)
 
         # 注意：使用了 Transform 后，不要再直接用 setRotation，否则会叠加
         item.setRotation(0)
 
+        # 计算缩放后的尺寸
+        scaled_w = original_w * sx
+        scaled_h = original_h * sy
+
         # 设置位置：将逻辑中心点对齐到物理左上角
-        item.setPos(x - w / 2, y - h / 2)
+        item.setPos(x - scaled_w / 2, y - scaled_h / 2)
+        print(
+            f"DEBUG: 渲染图像位置 - 原始位置: ({x}, {y}), 缩放后尺寸: ({scaled_w}, {scaled_h}), 最终位置: ({x - scaled_w / 2}, {y - scaled_h / 2})"
+        )
+        print(f"DEBUG: 渲染图像缩放值 - scale: {scale}, scale_x: {sx}, scale_y: {sy}")
         item._vox = data.get("vox", getattr(item, "_vox", 0))
         item._voy = data.get("voy", getattr(item, "_voy", 0))
         item._raw_cw = data.get("raw_cw", getattr(item, "_raw_cw", 0))
@@ -291,6 +299,7 @@ class RenderManager(QObject):
         if hitbox:
             # 创建或更新碰撞盒矩形
             if not hasattr(item, "_hitbox_rect"):
+                # 创建碰撞盒作为场景的直接子项
                 item._hitbox_rect = QGraphicsRectItem()
                 item._hitbox_rect.setPen(QPen(QColor(255, 0, 0, 128), 1))
                 item._hitbox_rect.setBrush(Qt.NoBrush)
@@ -298,6 +307,7 @@ class RenderManager(QObject):
                 self.scene.addItem(item._hitbox_rect)
 
             # 更新碰撞盒位置和大小
+            # 直接使用碰撞盒的绝对位置
             left, top, right, bottom = hitbox
             item._hitbox_rect.setRect(left, top, right - left, bottom - top)
             item._hitbox_rect.setVisible(True)

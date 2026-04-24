@@ -2918,7 +2918,7 @@
                          </item>
                          <item>
                           <property name="text">
-                           <string>背景</string>
+                           <string>图像</string>
                           </property>
                          </item>
                          <item>
@@ -3618,7 +3618,6 @@
  </resources>
  <connections/>
  <buttongroups>
-  <buttongroup name="buttonGroup_2"/>
   <buttongroup name="buttonGroup"/>
  </buttongroups>
 </ui>

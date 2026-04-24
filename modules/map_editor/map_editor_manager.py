@@ -2215,6 +2215,39 @@ class MapEditorManager(QObject):
                                                     f"选中图像: {image_data.image_path}"
                                                 )
 
+                                                # 更新属性面板中的碰撞类型和碰撞状态
+                                                if hasattr(self, "ui"):
+                                                    # 更新碰撞类型选择框
+                                                    if hasattr(self.ui, "att_col_type"):
+                                                        self.ui.att_col_type.blockSignals(
+                                                            True
+                                                        )
+                                                        # 默认情况下，图像的att_col_type类型切换为'图像'
+                                                        self.ui.att_col_type.setCurrentText(
+                                                            "图像"
+                                                        )
+                                                        self.ui.att_col_type.blockSignals(
+                                                            False
+                                                        )
+                                                        print(
+                                                            "DEBUG: 碰撞类型设置为: 图像"
+                                                        )
+
+                                                    # 更新碰撞复选框
+                                                    if hasattr(
+                                                        self.ui, "map_collision"
+                                                    ):
+                                                        # 当att_col_type为'图像'选项时，map_collision默认为灰色禁用状态，不勾选
+                                                        self.ui.map_collision.setChecked(
+                                                            False
+                                                        )
+                                                        self.ui.map_collision.setEnabled(
+                                                            False
+                                                        )
+                                                        print(
+                                                            "DEBUG: map_collision设置为: 未勾选且禁用"
+                                                        )
+
                                                 # 创建变换框
                                                 print(f"DEBUG: 创建变换框")
                                                 self._create_transform_box(
@@ -3024,6 +3057,7 @@ class MapEditorManager(QObject):
             new_pos = self.transform_box.pos() + rect.topLeft()
             self.selected_image_data.position = new_pos
             print(f"DEBUG: 更新图像位置: {new_pos}")
+            print(f"DEBUG: 图像缩放值 - scale: {self.selected_image_data.scale}, scale_x: {self.selected_image_data.scale_x}, scale_y: {self.selected_image_data.scale_y}")
 
             # 更新图像的缩放
             if self.selected_image_data.pixmap:
@@ -3266,13 +3300,27 @@ class MapEditorManager(QObject):
         col_type = self.ui.att_col_type.currentText()
         print(f"碰撞类型变化: {col_type}")
 
-        # 根据碰撞类型设置碰撞状态
-        # 墙体 -> 碰撞开启
-        # 其他类型 -> 碰撞关闭
-        collision_enabled = col_type == "墙体"
+        # 根据碰撞类型设置碰撞状态和map_collision复选框
+        if col_type == "墙体":
+            # 当用户将'图像'切换为墙体时，则激活map_collision并勾选
+            collision_enabled = True
+            if hasattr(self.ui, "map_collision"):
+                self.ui.map_collision.setEnabled(True)
+                self.ui.map_collision.setChecked(True)
+                print("DEBUG: map_collision设置为: 勾选且启用")
+        else:
+            # 其他类型 -> 碰撞关闭
+            collision_enabled = False
+            if col_type == "图像":
+                # 当att_col_type为'图像'选项时，map_collision默认为灰色禁用状态，不勾选
+                if hasattr(self.ui, "map_collision"):
+                    self.ui.map_collision.setChecked(False)
+                    self.ui.map_collision.setEnabled(False)
+                    print("DEBUG: map_collision设置为: 未勾选且禁用")
 
         # 设置碰撞状态
-        self.property_manager.set_tile_collision(collision_enabled)
+        if hasattr(self, "property_manager"):
+            self.property_manager.set_tile_collision(collision_enabled)
 
     def _on_map_name_changed(self, name):
         """处理地图名称变化"""
@@ -4154,6 +4202,23 @@ class MapEditorManager(QObject):
                     self.collision_manager.set_current_collision_image(
                         current_layer.layer_id, index
                     )
+                    
+                    # 更新属性面板中的碰撞类型和碰撞状态
+                    if hasattr(self, "ui"):
+                        # 更新碰撞类型选择框
+                        if hasattr(self.ui, "att_col_type"):
+                            self.ui.att_col_type.blockSignals(True)
+                            # 默认情况下，图像的att_col_type类型切换为'图像'
+                            self.ui.att_col_type.setCurrentText("图像")
+                            self.ui.att_col_type.blockSignals(False)
+                            print("DEBUG: 碰撞类型设置为: 图像")
+                        
+                        # 更新碰撞复选框
+                        if hasattr(self.ui, "map_collision"):
+                            # 当att_col_type为'图像'选项时，map_collision默认为灰色禁用状态，不勾选
+                            self.ui.map_collision.setChecked(False)
+                            self.ui.map_collision.setEnabled(False)
+                            print("DEBUG: map_collision设置为: 未勾选且禁用")
 
                 # 更新预览
                 self._remove_preview()
