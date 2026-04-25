@@ -948,38 +948,11 @@ class MapEditorManager(QObject):
             self.selected_tile_index = -1
             self._remove_preview()
             self.layer_resources.clear()
-            print("DEBUG: 清除之前的状态")
-
             # 加载地图数据
-            print("DEBUG: 开始加载地图数据")
             if self.map_model.load(file_path):
                 self.current_map_path = file_path
                 self.is_map_modified = False
                 self.map_loaded.emit(file_path)
-                print(f"DEBUG: 地图加载成功: {file_path}")
-                print(
-                    f"DEBUG: 地图数据 - 图层数: {len(self.map_model.map_data.get('layers', []))}"
-                )
-                print(
-                    f"DEBUG: 地图数据 - 瓦片集数: {len(self.map_model.map_data.get('tile_sets', []))}"
-                )
-                print(
-                    f"DEBUG: 地图数据 - 图层资源映射: {self.map_model.map_data.get('layer_resources_map', {})}"
-                )
-
-                # 打印图层详细信息
-                for i, layer in enumerate(self.map_model.map_data.get("layers", [])):
-                    print(
-                        f"DEBUG: 图层 {i}: {layer.get('name', 'unknown')}, 类型: {layer.get('type', 'drawing')}, 可见: {layer.get('visible', True)}"
-                    )
-                    if "images" in layer:
-                        print(f"DEBUG:   图像数量: {len(layer['images'])}")
-                        for j, image in enumerate(layer["images"]):
-                            print(
-                                f"DEBUG:   图像 {j}: {image.get('image_path', 'unknown')}"
-                            )
-                    if "tiles" in layer:
-                        print(f"DEBUG:   瓦片数量: {len(layer['tiles'])}")
 
                 # 清空上传资源列表，准备重新加载
                 self.layer_resources.clear()
@@ -1453,29 +1426,16 @@ class MapEditorManager(QObject):
                 print(f"DEBUG: 添加扩展名后的路径: {file_path}")
 
             # 更新图层管理系统数据到地图数据模型
-            print("DEBUG: 更新图层数据到地图模型")
             self.layer_manager.update_map_model()
-            print(f"DEBUG: 图层数量: {len(self.layer_manager.layers)}")
-            for i, layer in enumerate(self.layer_manager.layers):
-                print(
-                    f"DEBUG: 图层 {i}: {layer.name}, 类型: {layer.layer_type}, ID: {layer.layer_id}"
-                )
-                if hasattr(layer, "images"):
-                    print(f"DEBUG:   图像数量: {len(layer.images)}")
-                if hasattr(layer, "tiles"):
-                    print(f"DEBUG:   瓦片数量: {len(layer.tiles)}")
 
             # 收集所有图层的资源，保存到地图模型的tile_sets中
-            print("DEBUG: 收集所有图层的资源")
             all_resources = []
             resource_path_to_index = {}
             layer_resources_map = {}
 
             # 首先收集所有唯一的资源
             # 1. 从layer_resources中收集所有类型的资源（包括绘制图层和图像图层）
-            print("DEBUG: 1. 从layer_resources中收集所有类型的资源")
             for layer_id, layer_resources in self.layer_resources.items():
-                print(f"DEBUG: 图层 ID: {layer_id}, 资源数量: {len(layer_resources)}")
                 for i, resource in enumerate(layer_resources):
                     resource_path = resource.get("path", "")
                     resource_type = resource.get("resource_type", "tileset")
@@ -1636,58 +1596,36 @@ class MapEditorManager(QObject):
 
             print(f"DEBUG: 收集到的唯一资源总数: {len(all_resources)}")
             for i, res in enumerate(all_resources):
-                print(
-                    f"DEBUG:   唯一资源 {i}: {res.get('name', 'unknown')}, 路径: {res.get('path', 'unknown')}, 类型: {res.get('resource_type', 'unknown')}"
-                )
+                pass  # reserved
 
             # 为每个图层分配资源索引范围
-            print("DEBUG: 为每个图层分配资源索引范围")
             for layer in self.layer_manager.layers:
                 layer_id = layer.layer_id
                 layer_resource_indices = []
 
                 # 1. 为绘制图层添加资源索引
                 if layer.layer_type == "drawing":
-                    print(f"DEBUG: 处理绘制图层: {layer.name}, ID: {layer_id}")
                     if layer_id in self.layer_resources:
                         for resource in self.layer_resources[layer_id]:
                             resource_path = resource.get("path", "")
                             if resource_path in resource_path_to_index:
                                 index = resource_path_to_index[resource_path]
                                 layer_resource_indices.append(index)
-                                print(
-                                    f"DEBUG:   资源: {resource.get('name', 'unknown')}, 索引: {index}"
-                                )
-                    else:
-                        print(f"DEBUG: 绘制图层 {layer.name} 不在 layer_resources 中")
 
                 # 2. 为图像图层添加资源索引
                 elif layer.layer_type == "image":
-                    print(f"DEBUG: 处理图像图层: {layer.name}, ID: {layer_id}")
-                    # 首先检查layer_resources中是否有该图层的资源
                     if layer_id in self.layer_resources:
-                        print(
-                            f"DEBUG: 图像图层 {layer.name} 在 layer_resources 中，资源数量: {len(self.layer_resources[layer_id])}"
-                        )
                         for resource in self.layer_resources[layer_id]:
                             resource_path = resource.get("path", "")
                             if resource_path in resource_path_to_index:
                                 index = resource_path_to_index[resource_path]
                                 layer_resource_indices.append(index)
-                                print(
-                                    f"DEBUG:   资源: {resource.get('name', 'unknown')}, 索引: {index}"
-                                )
                     else:
-                        print(
-                            f"DEBUG: 图像图层 {layer.name} 不在 layer_resources 中，检查图像数据"
-                        )
-                        # 如果layer_resources中没有，检查图像数据
                         for image_data in layer.images:
                             image_path = image_data.image_path
                             if image_path in resource_path_to_index:
                                 index = resource_path_to_index[image_path]
                                 layer_resource_indices.append(index)
-                                print(f"DEBUG:   图像: {image_path}, 索引: {index}")
 
                 # 计算索引范围
                 if layer_resource_indices:
@@ -3317,98 +3255,50 @@ class MapEditorManager(QObject):
             )
 
             # 调用碰撞管理器设置当前碰撞图块（传递局部资源索引，碰撞管理器会通过provider获取正确的图像）
-            print(f"DEBUG: 调用 collision_manager.set_current_collision_tile")
             if hasattr(self, "collision_manager"):
                 self.collision_manager.set_current_collision_tile(
                     resource_index, tile_index
                 )
-                print("DEBUG: collision_manager.set_current_collision_tile 调用成功")
-            else:
-                print("DEBUG: collision_manager 不存在")
 
             # 调用属性管理器设置当前瓦片（传递全局资源索引）
-            print(f"DEBUG: 调用 property_manager.set_current_tile")
             if hasattr(self, "property_manager"):
                 self.property_manager.set_current_tile(
                     global_resource_index, tile_index
                 )
-                print("DEBUG: property_manager.set_current_tile 调用成功")
-            else:
-                print("DEBUG: property_manager 不存在")
 
             # 更新map_collision checkbox的状态（使用全局资源索引）
-            print(f"DEBUG: 更新 map_collision checkbox 状态")
             if hasattr(self, "ui") and hasattr(self.ui, "map_collision"):
                 if self.map_model:
                     collision_enabled = self.map_model.get_tile_collision(
                         global_resource_index, tile_index
                     )
-                    print(f"DEBUG: 碰撞启用状态: {collision_enabled}")
                     self.ui.map_collision.setChecked(collision_enabled)
-                    print("DEBUG: map_collision checkbox 状态更新成功")
-                    print(
-                        f"DEBUG: 成功获取碰撞状态 - tile_set_index: {global_resource_index}, tile_index: {tile_index}, collision: {collision_enabled}"
-                    )
-                else:
-                    print("DEBUG: map_model 不存在")
-            else:
-                print("DEBUG: ui 或 map_collision 不存在")
 
             # 更新标签输入框的状态（使用全局资源索引）
-            print(f"DEBUG: 更新标签输入框状态")
             if hasattr(self, "ui") and hasattr(self.ui, "att_tag"):
                 if self.map_model:
                     tile_tag = self.map_model.get_tile_tag(
                         global_resource_index, tile_index
                     )
-                    print(f"DEBUG: 瓦片标签: {tile_tag}")
-                    print(
-                        f"DEBUG: 成功获取标签 - tile_set_index: {global_resource_index}, tile_index: {tile_index}, tag: {tile_tag}"
-                    )
-                    # 阻塞信号，防止触发标签变化处理
                     self.ui.att_tag.blockSignals(True)
                     self.ui.att_tag.setText(tile_tag)
                     self.ui.att_tag.blockSignals(False)
-                    print("DEBUG: 标签输入框状态更新成功")
-                else:
-                    print("DEBUG: map_model 不存在")
-            else:
-                print("DEBUG: ui 或 att_tag 不存在")
 
             # 更新碰撞类型选择框的状态（使用全局资源索引）
-            print(f"DEBUG: 更新碰撞类型选择框状态")
             if hasattr(self, "ui") and hasattr(self.ui, "att_col_type"):
                 if self.map_model:
                     collision_enabled = self.map_model.get_tile_collision(
                         global_resource_index, tile_index
                     )
-                    print(f"DEBUG: 碰撞启用状态: {collision_enabled}")
-                    print(
-                        f"DEBUG: 成功获取碰撞状态 - tile_set_index: {global_resource_index}, tile_index: {tile_index}, collision: {collision_enabled}"
-                    )
-                    # 根据碰撞状态设置碰撞类型
-                    # 墙体 -> 碰撞开启
-                    # 其他类型 -> 碰撞关闭
                     self.ui.att_col_type.blockSignals(True)
                     if collision_enabled:
                         self.ui.att_col_type.setCurrentText("墙体")
-                        print("DEBUG: 碰撞类型设置为: 墙体")
                     else:
                         self.ui.att_col_type.setCurrentText("背景")
-                        print("DEBUG: 碰撞类型设置为: 背景")
                     self.ui.att_col_type.blockSignals(False)
-                    print("DEBUG: 碰撞类型选择框状态更新成功")
-                else:
-                    print("DEBUG: map_model 不存在")
-            else:
-                print("DEBUG: ui 或 att_col_type 不存在")
 
-            print("DEBUG: 设置当前碰撞图块完成")
         except Exception as e:
             print(f"DEBUG: 设置当前碰撞图块错误: {e}")
-            import traceback
-
-            traceback.print_exc()
 
     def set_collision_enabled(self, enabled):
         """设置碰撞启用状态"""

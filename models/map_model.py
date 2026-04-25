@@ -1168,9 +1168,6 @@ class MapDataModel(QObject):
         while len(tile_set["tiles"]) <= tile_index:
             tile_set["tiles"].append({"collision": True, "collision_shape": None})
         collision_shape = tile_set["tiles"][tile_index].get("collision_shape", None)
-        print(
-            f"DEBUG: 成功获取碰撞形状 - tile_set_index: {tile_set_index}, tile_index: {tile_index}, shape: {collision_shape}"
-        )
         return collision_shape
 
     def get_tile_collision(self, tile_set_index, tile_index):
@@ -1199,9 +1196,6 @@ class MapDataModel(QObject):
         while len(tile_set["tiles"]) <= tile_index:
             tile_set["tiles"].append({"collision": True})  # 默认开启碰撞
         collision = tile_set["tiles"][tile_index].get("collision", True)
-        print(
-            f"DEBUG: 成功获取碰撞状态 - tile_set_index: {tile_set_index}, tile_index: {tile_index}, collision: {collision}"
-        )
         return collision
 
     def set_tile_tag(self, tile_set_index, tile_index, tag):

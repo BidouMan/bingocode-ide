@@ -94,9 +94,8 @@ class RenderManager(QObject):
                 self.view.viewport().installEventFilter(self)
 
     def apply_fit(self):
-        # 缩放场景以适应视图的大小，保持宽高比
-        # 这样在编辑器模式下，当窗口尺寸较小时，游戏内容会被缩放到窗口大小
-        self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+        # 始终以 640x480 逻辑摄像机窗口进行适配，不缩放整个地图
+        self.view.fitInView(0, 0, 640, 480, Qt.KeepAspectRatio)
 
     def handle_instruction(self, instruction_json):
         try:
@@ -457,20 +456,19 @@ class RenderManager(QObject):
 
     def handle_scene_update(self, data):
         """处理场景更新指令，更新SceneRect"""
-        # 保持逻辑尺寸为640*480，无论地图大小如何
-        width = 640
-        height = 480
+        width = data.get("width", 640)
+        height = data.get("height", 480)
 
-        # 更新场景大小
+        print(f"[IDE_SCENE] sceneRect=({width},{height}) vp={self.view.viewport().width()}x{self.view.viewport().height()}")
+
+        # 更新场景大小为实际地图像素尺寸，让摄像机 centerOn 有完整滚动范围
         self.scene.setSceneRect(0, 0, width, height)
-        print(f"✅ [RenderManager] 场景更新 - 尺寸: {width}x{height}")
-        print(f"   - 场景边界: {self.scene.sceneRect()}")
 
-        # 应用适配，确保视图大小与场景大小匹配
+        # 重新计算适配（640x480 窗口缩放到视口尺寸）
         self.apply_fit()
 
-        # 确保视图可以滚动到新的边界
-        self.view.ensureVisible(self.scene.sceneRect())
+        # 初始摄像机居中
+        self.view.centerOn(width / 2, height / 2)
 
     def handle_camera_update(self, data):
         """处理摄像机更新指令"""

@@ -25,6 +25,7 @@ _GROUPS = {}
 _MOUSE_STATE = {"down": False, "last_down": False, "x": 0, "y": 0}  # 用字典包装鼠标状态
 _SPRITES = {}  # 存储所有精灵实例
 _CURRENT_MAP = None  # 当前加载的地图数据
+_MAP_DIR = None  # 当前地图所在目录
 _MAP_SPRITES = {}  # 地图瓦片精灵
 _MAP_MODEL = None  # 当前地图模型实例
 
@@ -1428,6 +1429,10 @@ def _send_camera_update(x, y, map_w, map_h, tile_size=16):
             "tile_size": tile_size,
         },
     }
+    print(
+        f"[CAMERA] x={x:.1f} y={y:.1f} map_w={map_w} map_h={map_h} tile={tile_size}",
+        flush=True,
+    )
     print(json.dumps(camera_packet), flush=True)
 
 
@@ -1449,7 +1454,7 @@ def load_map(map_name):
     Args:
         map_name: 地图名称（不含扩展名）
     """
-    global _CURRENT_MAP, _MAP_SPRITES, _MAP_MODEL
+    global _CURRENT_MAP, _MAP_SPRITES, _MAP_MODEL, _MAP_DIR
 
     # 清理之前的地图
     _clear_map()
@@ -1459,6 +1464,7 @@ def load_map(map_name):
         # 尝试加载二进制文件（通过检查.info文件），如果不存在再回退到JSON文件
         # 使用当前工作目录（项目根目录）
         map_dir = os.path.join(os.getcwd(), "assets", "maps", map_name)
+        _MAP_DIR = map_dir
         map_file = os.path.join(map_dir, f"{map_name}.info")
 
         print(f"✅ [BingoEngine] 加载地图: {map_name}")
@@ -1483,6 +1489,7 @@ def load_map(map_name):
         print(
             f"   - 偏移量: ({_CURRENT_MAP.get('offset_x', 0)}, {_CURRENT_MAP.get('offset_y', 0)})"
         )
+        print(f"   - 重力: {_CURRENT_MAP.get('gravity', False)}")
 
         # 打印图层信息
         for i, layer in enumerate(_CURRENT_MAP["layers"]):
@@ -1502,14 +1509,8 @@ def load_map(map_name):
         map_width_px = _CURRENT_MAP["width"] * tile_size
         map_height_px = _CURRENT_MAP["height"] * tile_size
 
-        print(f"DEBUG: BingoEngine - 地图渲染前信息:")
-        print(f"DEBUG:   tile_size: {tile_size}")
         print(
-            f"DEBUG:   map_width: {_CURRENT_MAP['width']}, map_height: {_CURRENT_MAP['height']}"
-        )
-        print(f"DEBUG:   map_width_px: {map_width_px}, map_height_px: {map_height_px}")
-        print(
-            f"DEBUG:   offset_x: {_CURRENT_MAP.get('offset_x', 0)}, offset_y: {_CURRENT_MAP.get('offset_y', 0)}"
+            f"[SCENE] map_tiles=({_CURRENT_MAP['width']},{_CURRENT_MAP['height']}) map_px=({map_width_px},{map_height_px}) ts={tile_size}"
         )
 
         scene_update_packet = {
@@ -1532,7 +1533,7 @@ def load_map(map_name):
 
 def _clear_map():
     """清理地图资源"""
-    global _CURRENT_MAP, _MAP_SPRITES, _RENDERED_TILES
+    global _CURRENT_MAP, _MAP_SPRITES, _RENDERED_TILES, _MAP_DIR
 
     # 删除地图瓦片精灵
     for sprite_id in list(_MAP_SPRITES.keys()):
@@ -1541,6 +1542,7 @@ def _clear_map():
         del _MAP_SPRITES[sprite_id]
 
     _CURRENT_MAP = None
+    _MAP_DIR = None
     _MAP_SPRITES = {}
     _RENDERED_TILES.clear()
 
@@ -1589,7 +1591,7 @@ def _handle_physics_collision():
 
 def _render_map():
     """渲染地图 - 优化版本"""
-    global _CURRENT_MAP, _MAP_SPRITES, _RENDERED_TILES, _LAST_RENDER_TIME
+    global _CURRENT_MAP, _MAP_SPRITES, _RENDERED_TILES, _LAST_RENDER_TIME, _MAP_DIR
 
     if not _CURRENT_MAP:
         return
@@ -1597,11 +1599,6 @@ def _render_map():
     start_time = time.time()
 
     tile_size = _CURRENT_MAP["tile_size"]
-
-    print(f"DEBUG: BingoEngine - 开始渲染地图:")
-    print(f"DEBUG:   tile_size: {tile_size}")
-    print(f"DEBUG:   图层数: {len(_CURRENT_MAP.get('layers', []))}")
-    print(f"DEBUG:   瓦片集数: {len(_CURRENT_MAP.get('tile_sets', []))}")
 
     batch_commands = []
     rendered_count = 0
@@ -1636,7 +1633,7 @@ def _render_map():
                     # 如果是相对路径，转换为绝对路径
                     if not os.path.isabs(image_path):
                         # 尝试相对于地图文件所在目录的路径
-                        map_dir = os.path.dirname(map_file)
+                        map_dir = _MAP_DIR if _MAP_DIR else os.getcwd()
                         absolute_path = os.path.join(map_dir, image_path)
                         if os.path.exists(absolute_path):
                             image_path = absolute_path
@@ -1811,31 +1808,9 @@ def _render_map():
     render_time = (time.time() - start_time) * 1000  # 转换为毫秒
     _LAST_RENDER_TIME = render_time
 
-    print(f"DEBUG: BingoEngine - 地图渲染完成:")
-    print(f"DEBUG:   总瓦片数: {rendered_count}")
-    if rendered_count > 0:
-        print(
-            f"DEBUG:   视口可见: {visible_count} ({visible_count / rendered_count * 100:.1f}%)"
-        )
-    else:
-        print(f"DEBUG:   视口可见: {visible_count} (0%)")
-    print(f"DEBUG:   实际渲染: {len(batch_commands)}")
-    print(f"DEBUG:   渲染时间: {render_time:.2f}ms")
-
-    # 输出性能统计
-    total_tiles = sum(
-        len(layer["tiles"]) for layer in _CURRENT_MAP["layers"] if layer["visible"]
+    print(
+        f"[RENDER] tiles_visible={visible_count} tiles_rendered={rendered_count} batch={len(batch_commands)} time={render_time:.1f}ms"
     )
-    print(f"✅ [BingoEngine] 地图渲染完成")
-    print(f"   - 总瓦片数: {total_tiles}")
-    if total_tiles > 0:
-        print(
-            f"   - 视口可见: {visible_count} ({visible_count / total_tiles * 100:.1f}%)"
-        )
-    else:
-        print(f"   - 视口可见: {visible_count} (0%)")
-    print(f"   - 实际渲染: {rendered_count}")
-    print(f"   - 渲染时间: {render_time:.2f}ms")
 
 
 def run():
@@ -1931,24 +1906,22 @@ def run():
 
         # 更新摄像机位置
         if _CURRENT_MAP and _FOLLOW_TARGET:
-            # 1. 获取地图尺寸
+            # 地图像素尺寸
+            tile_size = _CURRENT_MAP["tile_size"]
             mw = _CURRENT_MAP.get("width", 0)
             mh = _CURRENT_MAP.get("height", 0)
 
-            # 2. 更新摄像机位置
+            # 更新摄像机位置
             global _CAMERA_X, _CAMERA_Y
             old_camera_x = _CAMERA_X
             old_camera_y = _CAMERA_Y
             _CAMERA_X = _FOLLOW_TARGET.x
             _CAMERA_Y = _FOLLOW_TARGET.y
 
-            # 3. 使用跟随目标更新摄像机
-            tile_size = _CURRENT_MAP["tile_size"]
-            _send_camera_update(_FOLLOW_TARGET.x, _FOLLOW_TARGET.y, mw, mh, tile_size)
+            # 使用跟随目标更新摄像机（IDE 端期望 tile 数量）
+            _send_camera_update(_CAMERA_X, _CAMERA_Y, mw, mh, tile_size)
 
-            # 4. 只在摄像机位置变化较大时重新渲染地图，避免频繁渲染
-            # 计算摄像机移动距离，如果超过半个瓦片大小则重新渲染
-            tile_size = _CURRENT_MAP["tile_size"]
+            # 只在摄像机位置变化较大时重新渲染地图，避免频繁渲染
             if (
                 abs(_CAMERA_X - old_camera_x) >= tile_size // 2
                 or abs(_CAMERA_Y - old_camera_y) >= tile_size // 2

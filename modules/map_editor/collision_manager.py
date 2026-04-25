@@ -264,17 +264,11 @@ class CollisionManager(QObject):
     def _update_collision_display(self):
         """更新碰撞编辑器的显示"""
         try:
-            print("DEBUG: 开始更新碰撞编辑器显示")
             if (
                 not self.col_editor_scene
                 or not self.col_editor_view
                 or not (self.current_collision_tile or self.current_collision_image)
             ):
-                print("DEBUG: 碰撞编辑器组件不完整，返回")
-                print(f"  col_editor_scene: {self.col_editor_scene}")
-                print(f"  col_editor_view: {self.col_editor_view}")
-                print(f"  current_collision_tile: {self.current_collision_tile}")
-                print(f"  current_collision_image: {self.current_collision_image}")
                 return
 
             pixmap = None
@@ -289,11 +283,7 @@ class CollisionManager(QObject):
                 )
 
                 # 获取图块图像
-                print("DEBUG: 获取图块图像")
                 pixmap = self._get_tile_pixmap(resource_index, tile_index)
-                print(
-                    f"DEBUG: 图块图像获取结果: {pixmap is not None and not pixmap.isNull()}"
-                )
 
                 # 计算全局资源索引
                 global_resource_index = resource_index
@@ -312,20 +302,15 @@ class CollisionManager(QObject):
                             # 加上其他图层的资源数量
                             global_resource_index += len(resources)
                 
-                print(f"DEBUG: 局部资源索引: {resource_index}, 全局资源索引: {global_resource_index}")
-
                 # 从地图模型获取碰撞形状（使用全局资源索引）
-                print("DEBUG: 从地图模型获取碰撞形状")
                 collision_shape = self.map_model.get_tile_collision_shape(
                     global_resource_index, tile_index
                 )
-                print(f"DEBUG: 获取到的碰撞形状: {collision_shape}")
 
                 # 获取碰撞启用状态（使用全局资源索引）
                 collision_enabled = self.map_model.get_tile_collision(
                     global_resource_index, tile_index
                 )
-                print(f"DEBUG: 碰撞是否启用: {collision_enabled}")
             elif self.current_collision_image:
                 # 处理图像图层
                 layer_id, image_index = self.current_collision_image
@@ -338,10 +323,8 @@ class CollisionManager(QObject):
                     self.parent_manager, "layer_manager"
                 ):
                     layer_manager = self.parent_manager.layer_manager
-                    print(f"DEBUG: 图层管理器中的图层数量: {len(layer_manager.layers)}")
                     
                     for layer in layer_manager.layers:
-                        print(f"DEBUG: 检查图层 - ID: {layer.layer_id}, 类型: {layer.layer_type}")
                         if layer.layer_id == layer_id:
                             print(f"DEBUG: 找到目标图层 - ID: {layer.layer_id}, 类型: {layer.layer_type}")
                             # 检查图层类型是否为图像图层
