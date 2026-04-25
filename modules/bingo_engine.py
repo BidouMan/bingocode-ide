@@ -276,13 +276,13 @@ class Sprite:
                             return
 
                         elif axis == "y":
-                            if sprite_rect[3] <= img_top + 10:
+                            if sprite_rect[3] <= img_top + tile_size:
                                 rect = self._get_hitbox_rect()
                                 if rect:
                                     self._y = img_top - (rect[3] - self._y) - 0.05
                                     self.on_ground = True
                                     self.vy = 0
-                            elif sprite_rect[1] >= img_bottom - 10:
+                            elif sprite_rect[1] >= img_bottom - tile_size:
                                 rect = self._get_hitbox_rect()
                                 if rect:
                                     self._y = img_bottom + (self._y - rect[1]) + 0.05
@@ -410,10 +410,7 @@ class Sprite:
                                     elif axis == "y":
                                         # 不要只看中心点，要看角色是从哪个方向"切入"砖块的
                                         # 如果角色底边在砖块顶边附近，且正在向下落（或静止）
-                                        if (
-                                            sprite_rect[3] <= tile_top + 10
-                                        ):  # 10是容错值，确保是踩在上面
-                                            # 确定是踩地
+                                        if sprite_rect[3] <= tile_top + tile_size:
                                             rect = self._get_hitbox_rect()
                                             if rect:
                                                 self._y = (
@@ -424,7 +421,7 @@ class Sprite:
                                                 self.on_ground = True
                                                 self.vy = 0
                                         # 如果角色顶边在砖块底边附近
-                                        elif sprite_rect[1] >= tile_bottom - 10:
+                                        elif sprite_rect[1] >= tile_bottom - tile_size:
                                             # 确定是顶头
                                             rect = self._get_hitbox_rect()
                                             if rect:
@@ -496,6 +493,16 @@ class Sprite:
         # 第二步：再处理Y轴
         self._y += dy
         self._resolve_collision("y")  # 这里修完，Y坐标也是绝对安全的
+
+    def jump(self, power=10):
+        """角色跳跃
+
+        Args:
+            power: 跳跃力度（默认10，越大跳得越高）
+        """
+        if self.on_ground:
+            self.vy = -power
+            self.on_ground = False
 
     def move(self, distance):
         """朝着当前 angle 方向移动 distance 像素"""
@@ -1538,8 +1545,8 @@ def _handle_physics_collision():
         sprite.on_ground = False
         sprite.vy = min(sprite.vy + 0.5, 12)
         sprite._y += sprite.vy
-        sprite._resolve_collision("x")
         sprite._resolve_collision("y")
+        sprite._resolve_collision("x")
         if sprite.on_ground:
             sprite.vy = 0
         sprite._update_transform()
