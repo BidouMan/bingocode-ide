@@ -188,6 +188,7 @@ class ImageData:
         self.scale_y = scale  # 高度缩放比例
         self.opacity = opacity  # 透明度
         self.pixmap = None  # 缓存的图像
+        self.collision_type = "图像"  # 碰撞类型：图像/墙体/跳板/背景/自定义
         self.collision_enabled = False  # 碰撞是否启用（图像图层默认关闭）
         self.collision_shape = None  # 碰撞形状
         self._load_pixmap()
@@ -216,6 +217,7 @@ class ImageData:
             "scale_x": self.scale_x,
             "scale_y": self.scale_y,
             "opacity": self.opacity,
+            "collision_type": self.collision_type,
             "collision_enabled": self.collision_enabled,
             "collision_shape": self.collision_shape
         }
@@ -235,7 +237,8 @@ class ImageData:
         # 加载scale_x和scale_y属性，如果没有则使用scale值
         image_data.scale_x = data.get("scale_x", scale)
         image_data.scale_y = data.get("scale_y", scale)
-        image_data.collision_enabled = data.get("collision_enabled", True)
+        image_data.collision_type = data.get("collision_type", "图像")
+        image_data.collision_enabled = data.get("collision_enabled", False)
         image_data.collision_shape = data.get("collision_shape", None)
         return image_data
 

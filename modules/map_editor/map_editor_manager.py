@@ -966,6 +966,12 @@ class MapEditorManager(QObject):
                                 "tile_size": resource.get("tile_width", 32),
                                 "tile_width": resource.get("tile_width", 32),
                                 "tile_height": resource.get("tile_height", 32),
+                                "collision_type": resource.get(
+                                    "collision_type", "图像"
+                                ),
+                                "collision_enabled": resource.get(
+                                    "collision_enabled", False
+                                ),
                                 "collisions": [],  # 初始化碰撞数据
                             }
                             # 计算图块数量
@@ -1394,6 +1400,8 @@ class MapEditorManager(QObject):
                             resource_path = relative_path
 
                         resource_path_to_index[resource_path] = len(all_resources)
+                        # 确保 image_path 键存在（与 path 值一致）
+                        resource["image_path"] = resource["path"]
                         all_resources.append(resource)
                         print(
                             f"DEBUG:   添加到唯一资源列表，索引: {resource_path_to_index[resource_path]}"
@@ -1409,7 +1417,18 @@ class MapEditorManager(QObject):
                     for i, image_data in enumerate(layer.images):
                         image_path = image_data.image_path
                         print(f"DEBUG:   图像 {i}: 路径: {image_path}")
-                        if image_path and image_path not in resource_path_to_index:
+                        # 将绝对路径标准化为相对路径（与第一步的路径格式一致）
+                        normalized_path = image_path
+                        if self.current_map_path and os.path.isabs(image_path):
+                            map_dir = os.path.dirname(self.current_map_path)
+                            try:
+                                normalized_path = os.path.relpath(image_path, map_dir)
+                            except ValueError:
+                                pass
+                        if (
+                            normalized_path
+                            and normalized_path not in resource_path_to_index
+                        ):
                             # 处理资源路径，确保文件被复制到tilesets目录
                             processed_path = image_path
                             if self.current_map_path:
@@ -1441,19 +1460,25 @@ class MapEditorManager(QObject):
                             image_resource = {
                                 "name": os.path.basename(image_path),
                                 "path": processed_path,
+                                "image_path": processed_path,
                                 "resource_type": "image",
                                 "tile_width": 1,  # 图像资源不需要瓦片大小
                                 "tile_height": 1,  # 图像资源不需要瓦片大小
                                 "tiles": [],  # 图像资源不需要瓦片数据
+                                "collision_type": image_data.collision_type,  # 从ImageData读取碰撞类型
+                                "collision_enabled": image_data.collision_enabled,  # 从ImageData读取碰撞状态
                             }
                             resource_path_to_index[processed_path] = len(all_resources)
                             all_resources.append(image_resource)
                             print(
                                 f"DEBUG:   添加到唯一资源列表，索引: {resource_path_to_index[processed_path]}"
                             )
-                        elif image_path and image_path in resource_path_to_index:
+                        elif (
+                            normalized_path
+                            and normalized_path in resource_path_to_index
+                        ):
                             print(
-                                f"DEBUG:   图像资源已存在，索引: {resource_path_to_index[image_path]}"
+                                f"DEBUG:   图像资源已存在，索引: {resource_path_to_index[normalized_path]}"
                             )
                 # 检查绘制图层的资源
                 elif layer.layer_type == "drawing":
@@ -2214,39 +2239,6 @@ class MapEditorManager(QObject):
                                                 print(
                                                     f"选中图像: {image_data.image_path}"
                                                 )
-
-                                                # 更新属性面板中的碰撞类型和碰撞状态
-                                                if hasattr(self, "ui"):
-                                                    # 更新碰撞类型选择框
-                                                    if hasattr(self.ui, "att_col_type"):
-                                                        self.ui.att_col_type.blockSignals(
-                                                            True
-                                                        )
-                                                        # 默认情况下，图像的att_col_type类型切换为'图像'
-                                                        self.ui.att_col_type.setCurrentText(
-                                                            "图像"
-                                                        )
-                                                        self.ui.att_col_type.blockSignals(
-                                                            False
-                                                        )
-                                                        print(
-                                                            "DEBUG: 碰撞类型设置为: 图像"
-                                                        )
-
-                                                    # 更新碰撞复选框
-                                                    if hasattr(
-                                                        self.ui, "map_collision"
-                                                    ):
-                                                        # 当att_col_type为'图像'选项时，map_collision默认为灰色禁用状态，不勾选
-                                                        self.ui.map_collision.setChecked(
-                                                            False
-                                                        )
-                                                        self.ui.map_collision.setEnabled(
-                                                            False
-                                                        )
-                                                        print(
-                                                            "DEBUG: map_collision设置为: 未勾选且禁用"
-                                                        )
 
                                                 # 创建变换框
                                                 print(f"DEBUG: 创建变换框")
@@ -3057,7 +3049,9 @@ class MapEditorManager(QObject):
             new_pos = self.transform_box.pos() + rect.topLeft()
             self.selected_image_data.position = new_pos
             print(f"DEBUG: 更新图像位置: {new_pos}")
-            print(f"DEBUG: 图像缩放值 - scale: {self.selected_image_data.scale}, scale_x: {self.selected_image_data.scale_x}, scale_y: {self.selected_image_data.scale_y}")
+            print(
+                f"DEBUG: 图像缩放值 - scale: {self.selected_image_data.scale}, scale_x: {self.selected_image_data.scale_x}, scale_y: {self.selected_image_data.scale_y}"
+            )
 
             # 更新图像的缩放
             if self.selected_image_data.pixmap:
@@ -3283,6 +3277,23 @@ class MapEditorManager(QObject):
         """设置碰撞启用状态"""
         self.collision_manager.set_collision_enabled(enabled)
 
+        # 同时保存到资源数据（图像图层）
+        current_layer = self.layer_manager.get_current_layer()
+        if current_layer and current_layer.layer_type == "image":
+            layer_resources = self.layer_resources.get(current_layer.layer_id, [])
+            if 0 <= self.selected_resource_index < len(layer_resources):
+                resource = layer_resources[self.selected_resource_index]
+                resource["collision_enabled"] = enabled
+            # 同步更新 ImageData 对象（持久化到文件）
+            if 0 <= self.selected_resource_index < len(current_layer.images):
+                image_data = current_layer.images[self.selected_resource_index]
+                image_data.collision_enabled = enabled
+                # 同步到 map_data 并自动保存
+                self.layer_manager.update_map_model()
+                self.is_map_modified = True
+                if self.current_map_path:
+                    self.map_model.save(self.current_map_path)
+
     def set_collision_snap_to_pixel(self, enabled):
         """设置碰撞锚点是否吸附到像素网格"""
         self.collision_manager.set_snap_to_pixel(enabled)
@@ -3296,30 +3307,71 @@ class MapEditorManager(QObject):
         if not hasattr(self, "ui") or not hasattr(self.ui, "att_col_type"):
             return
 
-        # 获取选择的碰撞类型
         col_type = self.ui.att_col_type.currentText()
         print(f"碰撞类型变化: {col_type}")
 
+        # 判断当前是否为图像图层
+        current_layer = self.layer_manager.get_current_layer()
+        is_image_layer = current_layer and current_layer.layer_type == "image"
+
         # 根据碰撞类型设置碰撞状态和map_collision复选框
         if col_type == "墙体":
-            # 当用户将'图像'切换为墙体时，则激活map_collision并勾选
             collision_enabled = True
             if hasattr(self.ui, "map_collision"):
+                self.ui.map_collision.blockSignals(True)
                 self.ui.map_collision.setEnabled(True)
                 self.ui.map_collision.setChecked(True)
-                print("DEBUG: map_collision设置为: 勾选且启用")
+                self.ui.map_collision.blockSignals(False)
         else:
-            # 其他类型 -> 碰撞关闭
             collision_enabled = False
             if col_type == "图像":
-                # 当att_col_type为'图像'选项时，map_collision默认为灰色禁用状态，不勾选
                 if hasattr(self.ui, "map_collision"):
+                    self.ui.map_collision.blockSignals(True)
                     self.ui.map_collision.setChecked(False)
                     self.ui.map_collision.setEnabled(False)
-                    print("DEBUG: map_collision设置为: 未勾选且禁用")
+                    self.ui.map_collision.blockSignals(False)
+            else:
+                # 图像图层下，非"图像"非"墙体"类型也禁用碰撞
+                if hasattr(self.ui, "map_collision"):
+                    self.ui.map_collision.blockSignals(True)
+                    self.ui.map_collision.setChecked(False)
+                    self.ui.map_collision.setEnabled(True)
+                    self.ui.map_collision.blockSignals(False)
 
-        # 设置碰撞状态
-        if hasattr(self, "property_manager"):
+        # 保存到选中资源数据（图像图层）
+        if is_image_layer:
+            layer_resources = self.layer_resources.get(current_layer.layer_id, [])
+            if 0 <= self.selected_resource_index < len(layer_resources):
+                resource = layer_resources[self.selected_resource_index]
+                print(
+                    f"DEBUG[_on_col_type_changed]: 保存资源 index={self.selected_resource_index}"
+                )
+                print(
+                    f"DEBUG[_on_col_type_changed]: collision_type='{col_type}' -> '{col_type}', collision_enabled={collision_enabled}"
+                )
+                print(
+                    f"DEBUG[_on_col_type_changed]: 资源 dict keys before={list(resource.keys())}"
+                )
+                resource["collision_type"] = col_type
+                resource["collision_enabled"] = collision_enabled
+                print(
+                    f"DEBUG[_on_col_type_changed]: 资源 dict keys after={list(resource.keys())}"
+                )
+                # 同步更新对应的 ImageData 对象（持久化到文件）
+                if 0 <= self.selected_resource_index < len(current_layer.images):
+                    image_data = current_layer.images[self.selected_resource_index]
+                    image_data.collision_type = col_type
+                    image_data.collision_enabled = collision_enabled
+                # 同步到 map_data 并自动保存
+                self.layer_manager.update_map_model()
+                self.is_map_modified = True
+                if self.current_map_path:
+                    self.map_model.save(self.current_map_path)
+                # 同步更新碰撞管理器
+                self.collision_manager.set_collision_enabled(collision_enabled)
+
+        # 设置碰撞状态（兼容绘制图层）
+        if hasattr(self, "property_manager") and not is_image_layer:
             self.property_manager.set_tile_collision(collision_enabled)
 
     def _on_map_name_changed(self, name):
@@ -3861,6 +3913,8 @@ class MapEditorManager(QObject):
                 self.collision_manager.set_current_collision_image(
                     current_layer.layer_id, 0
                 )
+                # 调用 select_resource 更新属性面板显示
+                self.select_resource(0)
                 print(f"DEBUG: 更新碰撞编辑器显示，选择图像0")
 
         # 更新工具栏状态
@@ -3982,8 +4036,8 @@ class MapEditorManager(QObject):
             image_data = ImageData(image_path, pos)
             print(f"DEBUG: ImageData 创建成功, pixmap: {image_data.pixmap}")
 
-            # 设置默认碰撞属性为关闭
-            image_data.collision_enabled = False
+            # 从资源数据继承碰撞设置
+            image_data.collision_enabled = resource.get("collision_enabled", False)
 
             # 添加到当前图层
             print(f"DEBUG: 添加图像到图层前, 图层图像数量: {len(current_layer.images)}")
@@ -4202,23 +4256,49 @@ class MapEditorManager(QObject):
                     self.collision_manager.set_current_collision_image(
                         current_layer.layer_id, index
                     )
-                    
-                    # 更新属性面板中的碰撞类型和碰撞状态
+
+                    # 从资源数据读取碰撞设置
+                    resource = layer_resources[index]
+                    col_type = resource.get("collision_type", None)
+                    col_enabled = resource.get("collision_enabled", None)
+
+                    # 如果资源 dict 没有 collision_type（来自 .resources 文件），从 ImageData 读取
+                    if col_type is None and index < len(current_layer.images):
+                        image_data = current_layer.images[index]
+                        col_type = getattr(image_data, "collision_type", "图像")
+                        col_enabled = getattr(image_data, "collision_enabled", False)
+                        resource["collision_type"] = col_type
+                        resource["collision_enabled"] = col_enabled
+
+                    # 最终 fallback：如果仍然为 None，使用默认值
+                    if col_type is None:
+                        col_type = "图像"
+                    if col_enabled is None:
+                        col_enabled = False
+
+                    print(
+                        f"DEBUG[select_resource]: 读取资源 index={index}, collision_type='{col_type}', collision_enabled={col_enabled}"
+                    )
+                    print(
+                        f"DEBUG[select_resource]: 资源 dict keys={list(resource.keys())}"
+                    )
+
+                    # 更新属性面板
                     if hasattr(self, "ui"):
-                        # 更新碰撞类型选择框
                         if hasattr(self.ui, "att_col_type"):
                             self.ui.att_col_type.blockSignals(True)
-                            # 默认情况下，图像的att_col_type类型切换为'图像'
-                            self.ui.att_col_type.setCurrentText("图像")
+                            self.ui.att_col_type.setCurrentText(col_type)
                             self.ui.att_col_type.blockSignals(False)
-                            print("DEBUG: 碰撞类型设置为: 图像")
-                        
-                        # 更新碰撞复选框
+
                         if hasattr(self.ui, "map_collision"):
-                            # 当att_col_type为'图像'选项时，map_collision默认为灰色禁用状态，不勾选
-                            self.ui.map_collision.setChecked(False)
-                            self.ui.map_collision.setEnabled(False)
-                            print("DEBUG: map_collision设置为: 未勾选且禁用")
+                            self.ui.map_collision.blockSignals(True)
+                            if col_type == "图像":
+                                self.ui.map_collision.setChecked(False)
+                                self.ui.map_collision.setEnabled(False)
+                            else:
+                                self.ui.map_collision.setChecked(col_enabled)
+                                self.ui.map_collision.setEnabled(True)
+                            self.ui.map_collision.blockSignals(False)
 
                 # 更新预览
                 self._remove_preview()

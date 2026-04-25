@@ -401,9 +401,22 @@ class MapDataModel(QObject):
                         # 写入旋转、缩放和透明度
                         f.write(struct.pack("<f", image.get("rotation", 0)))
                         f.write(struct.pack("<f", image.get("scale", 1.0)))
-                        f.write(struct.pack("<f", image.get("scale_x", image.get("scale", 1.0))))
-                        f.write(struct.pack("<f", image.get("scale_y", image.get("scale", 1.0))))
+                        f.write(
+                            struct.pack(
+                                "<f", image.get("scale_x", image.get("scale", 1.0))
+                            )
+                        )
+                        f.write(
+                            struct.pack(
+                                "<f", image.get("scale_y", image.get("scale", 1.0))
+                            )
+                        )
                         f.write(struct.pack("<f", image.get("opacity", 1.0)))
+                        # 写入碰撞类型（字符串长度+内容）
+                        col_type = image.get("collision_type", "图像")
+                        col_type_bytes = col_type.encode("utf-8")
+                        f.write(struct.pack("<I", len(col_type_bytes)))
+                        f.write(col_type_bytes)
                         # 写入碰撞数据
                         f.write(
                             struct.pack(
@@ -509,7 +522,7 @@ class MapDataModel(QObject):
                 f.write(name_bytes)
 
                 # 写入图片路径长度（4字节）
-                image_path = tile_set.get("image_path", "")
+                image_path = tile_set.get("image_path", "") or tile_set.get("path", "")
                 # 将绝对路径转换为相对于地图文件所在目录的相对路径
                 if os.path.isabs(image_path):
                     try:
@@ -533,6 +546,18 @@ class MapDataModel(QObject):
                 tile_width = tile_set.get("tile_width", 16)
                 tile_height = tile_set.get("tile_height", 16)
                 f.write(struct.pack("<II", tile_width, tile_height))
+
+                # 写入碰撞类型（字符串长度+内容）
+                col_type = tile_set.get("collision_type", "图像")
+                col_type_bytes = col_type.encode("utf-8")
+                f.write(struct.pack("<I", len(col_type_bytes)))
+                f.write(col_type_bytes)
+                # 写入碰撞启用状态（1字节）
+                f.write(
+                    struct.pack(
+                        "<B", 1 if tile_set.get("collision_enabled", False) else 0
+                    )
+                )
 
                 # 写入瓦片数量（4字节）
                 tiles = tile_set.get("tiles", [])
@@ -792,7 +817,16 @@ class MapDataModel(QObject):
                                 # 读取透明度
                                 opacity = struct.unpack("<f", f.read(4))[0]
                             # 读取碰撞数据
-                            collision_enabled = struct.unpack("<B", f.read(1))[0] == 1
+                            # 尝试读取碰撞类型（兼容旧版本文件）
+                            try:
+                                col_type_length = struct.unpack("<I", f.read(4))[0]
+                                collision_type = f.read(col_type_length).decode("utf-8")
+                                collision_enabled = (
+                                    struct.unpack("<B", f.read(1))[0] == 1
+                                )
+                            except:
+                                collision_type = "图像"
+                                collision_enabled = False
                             # 读取碰撞形状
                             point_count = struct.unpack("<I", f.read(4))[0]
                             collision_shape = None
@@ -811,6 +845,7 @@ class MapDataModel(QObject):
                                 "scale_x": scale_x,
                                 "scale_y": scale_y,
                                 "opacity": opacity,
+                                "collision_type": collision_type,
                                 "collision_enabled": collision_enabled,
                                 "collision_shape": collision_shape,
                             }
@@ -829,14 +864,20 @@ class MapDataModel(QObject):
                 try:
                     tile_data = np.fromfile(f, dtype=np.uint16, count=width * height)
                     if len(tile_data) != width * height:
-                        print(f"DEBUG: 图块数据长度不匹配: 预期 {width * height}, 实际 {len(tile_data)}")
+                        print(
+                            f"DEBUG: 图块数据长度不匹配: 预期 {width * height}, 实际 {len(tile_data)}"
+                        )
                         # 尝试调整数据大小
                         if len(tile_data) < width * height:
                             # 数据不足，填充零
-                            tile_data = np.pad(tile_data, (0, width * height - len(tile_data)), 'constant')
+                            tile_data = np.pad(
+                                tile_data,
+                                (0, width * height - len(tile_data)),
+                                "constant",
+                            )
                         else:
                             # 数据过多，截断
-                            tile_data = tile_data[:width * height]
+                            tile_data = tile_data[: width * height]
                     tile_grid = tile_data.reshape((height, width))
                 except Exception as e:
                     print(f"DEBUG: 加载图块数据失败: {e}")
@@ -910,6 +951,15 @@ class MapDataModel(QObject):
                     # 读取瓦片宽度和高度
                     tile_width, tile_height = struct.unpack("<II", f.read(8))
 
+                    # 尝试读取碰撞类型和启用状态（兼容旧版本文件）
+                    try:
+                        col_type_length = struct.unpack("<I", f.read(4))[0]
+                        collision_type = f.read(col_type_length).decode("utf-8")
+                        collision_enabled = struct.unpack("<B", f.read(1))[0] == 1
+                    except:
+                        collision_type = "图像"
+                        collision_enabled = False
+
                     # 读取瓦片数量
                     tile_count = struct.unpack("<I", f.read(4))[0]
                     print(
@@ -956,6 +1006,8 @@ class MapDataModel(QObject):
                         "resource_type": resource_type,
                         "tile_width": tile_width,
                         "tile_height": tile_height,
+                        "collision_type": collision_type,
+                        "collision_enabled": collision_enabled,
                         "tiles": tiles,
                     }
                     tile_sets.append(tile_set)

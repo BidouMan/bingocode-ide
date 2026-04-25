@@ -1662,7 +1662,7 @@ class Ui_Form(object):
         self.label_17.setText(QCoreApplication.translate("Form", u"\u6807\u8bb0\u540d\u79f0", None))
         self.att_col_type.setItemText(0, QCoreApplication.translate("Form", u"\u5899\u4f53", None))
         self.att_col_type.setItemText(1, QCoreApplication.translate("Form", u"\u8df3\u677f", None))
-        self.att_col_type.setItemText(2, QCoreApplication.translate("Form", u"\u80cc\u666f", None))
+        self.att_col_type.setItemText(2, QCoreApplication.translate("Form", u"\u56fe\u50cf", None))
         self.att_col_type.setItemText(3, QCoreApplication.translate("Form", u"\u81ea\u5b9a\u4e49", None))
 
         self.att_col_type.setCurrentText(QCoreApplication.translate("Form", u"\u5899\u4f53", None))
