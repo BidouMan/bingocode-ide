@@ -196,6 +196,61 @@ class Sprite:
 
         # 检测所有图层中的实心图块
         for layer in _CURRENT_MAP.get("layers", []):
+            # --- 图像图层碰撞检测（优先于瓦片碰撞） ---
+            if layer.get("type") == "image" and "images" in layer:
+                for image in layer["images"]:
+                    collision_enabled = image.get("collision_enabled", False)
+                    if not collision_enabled:
+                        continue
+
+                    pos = image.get("position", [0, 0])
+                    img_left = pos[0]
+                    img_top = pos[1]
+
+                    scale = image.get("scale", 1.0)
+                    scale_x = image.get("scale_x", scale)
+                    scale_y = image.get("scale_y", scale)
+
+                    img_w = image.get("_cache_w", 0)
+                    img_h = image.get("_cache_h", 0)
+                    if img_w <= 0 or img_h <= 0:
+                        continue
+
+                    img_right = img_left + img_w * abs(scale_x)
+                    img_bottom = img_top + img_h * abs(scale_y)
+
+                    overlap_left = max(sprite_rect[0], img_left)
+                    overlap_top = max(sprite_rect[1], img_top)
+                    overlap_right = min(sprite_rect[2], img_right)
+                    overlap_bottom = min(sprite_rect[3], img_bottom)
+
+                    overlap_x = overlap_right - overlap_left
+                    overlap_y = overlap_bottom - overlap_top
+                    if overlap_x > 0 and overlap_y > 0:
+                        if axis == "x":
+                            dist_to_right = abs(sprite_rect[0] - img_right)
+                            dist_to_left = abs(sprite_rect[2] - img_left)
+
+                            if dist_to_right < dist_to_left:
+                                center_to_left = self._x - sprite_rect[0]
+                                self._x = img_right + center_to_left + 0.05
+                            else:
+                                center_to_right = sprite_rect[2] - self._x
+                                self._x = img_left - center_to_right - 0.05
+                            return
+
+                        elif axis == "y":
+                            if sprite_rect[3] <= img_top + 10:
+                                rect = self._get_hitbox_rect()
+                                if rect:
+                                    self._y = img_top - (rect[3] - self._y) - 0.05
+                                    self.on_ground = True
+                            elif sprite_rect[1] >= img_bottom - 10:
+                                rect = self._get_hitbox_rect()
+                                if rect:
+                                    self._y = img_bottom + (self._y - rect[1]) + 0.05
+                            return
+
             tiles = layer.get("tiles", {})
 
             # 计算精灵覆盖的图块范围
@@ -837,6 +892,36 @@ class Sprite:
 
         # 遍历所有图层
         for layer in _CURRENT_MAP.get("layers", []):
+            # --- 图像图层地面检测 ---
+            if layer.get("type") == "image" and "images" in layer:
+                for image in layer["images"]:
+                    collision_enabled = image.get("collision_enabled", False)
+                    if not collision_enabled:
+                        continue
+
+                    pos = image.get("position", [0, 0])
+                    scale = image.get("scale", 1.0)
+                    scale_x = image.get("scale_x", scale)
+                    scale_y = image.get("scale_y", scale)
+
+                    img_w = image.get("_cache_w", 0)
+                    img_h = image.get("_cache_h", 0)
+                    if img_w <= 0 or img_h <= 0:
+                        continue
+
+                    img_left = pos[0]
+                    img_top = pos[1]
+                    img_right = img_left + img_w * abs(scale_x)
+                    img_bottom = img_top + img_h * abs(scale_y)
+
+                    if (
+                        rect[0] - 2 <= img_right
+                        and rect[2] + 2 >= img_left
+                        and check_y >= img_top
+                        and check_y <= img_bottom
+                    ):
+                        return True
+
             tiles = layer.get("tiles", {})
 
             # 检查角色宽度范围内的每个图块
@@ -1481,6 +1566,10 @@ def _render_map():
                 # 直接使用左上角坐标，因为update_map_image方法会处理中心点计算
                 center_x = screen_x
                 center_y = screen_y
+
+                # 缓存图像原始尺寸到 image dict（用于运行时碰撞检测）
+                image["_cache_w"] = original_width
+                image["_cache_h"] = original_height
 
                 # 添加到批量渲染列表
                 image_data = {
