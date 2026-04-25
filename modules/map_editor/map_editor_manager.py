@@ -724,7 +724,8 @@ class MapEditorManager(QObject):
             self.layer_manager.update_map_model()
 
             # 渲染图像
-            self._render_image_layer(current_layer)
+            layer_index = self.layer_manager.layers.index(current_layer)
+            self._render_image_layer(current_layer, layer_index)
 
             # 设置地图为已修改状态
             self.is_map_modified = True
@@ -1911,7 +1912,7 @@ class MapEditorManager(QObject):
         # 调用_render_all_layers方法，渲染所有可见图层
         self._render_all_layers()
 
-    def _render_image_layer(self, layer):
+    def _render_image_layer(self, layer, layer_index=0):
         """渲染图像图层"""
         try:
             if not self.canvas_manager:
@@ -1961,8 +1962,8 @@ class MapEditorManager(QObject):
                     # 设置透明度
                     pixmap_item.setOpacity(image_data.opacity)
 
-                    # 设置层级
-                    pixmap_item.setZValue(layer.layer_id + 10)
+                    # 设置层级（使用图层索引，与瓦片一致）
+                    pixmap_item.setZValue(layer_index + 10)
 
                     # 允许鼠标事件，以便能够选中图像
                     pixmap_item.setAcceptedMouseButtons(Qt.LeftButton | Qt.RightButton)
@@ -2018,7 +2019,7 @@ class MapEditorManager(QObject):
                                 self.current_layer = old_current_layer
                     elif layer.layer_type == "image":
                         # 渲染图像图层
-                        self._render_image_layer(layer)
+                        self._render_image_layer(layer, i)
 
             print(f"✅ 所有图层渲染完成，图层数量: {len(self.layer_manager.layers)}")
 
@@ -2512,7 +2513,8 @@ class MapEditorManager(QObject):
                             self.layer_manager.update_map_model()
 
                             # 重新渲染图像图层
-                            self._render_image_layer(current_layer)
+                            layer_index = self.layer_manager.layers.index(current_layer)
+                            self._render_image_layer(current_layer, layer_index)
 
                             # 设置地图为已修改状态
                             self.is_map_modified = True
@@ -2586,7 +2588,8 @@ class MapEditorManager(QObject):
                         self.layer_manager.update_map_model()
 
                         # 重新渲染图像图层
-                        self._render_image_layer(current_layer)
+                        layer_index = self.layer_manager.layers.index(current_layer)
+                        self._render_image_layer(current_layer, layer_index)
 
                         # 设置地图为已修改状态
                         self.is_map_modified = True
@@ -4053,7 +4056,8 @@ class MapEditorManager(QObject):
 
             # 重新渲染图像图层
             print(f"DEBUG: 开始渲染图像图层")
-            self._render_image_layer(current_layer)
+            layer_index = self.layer_manager.layers.index(current_layer)
+            self._render_image_layer(current_layer, layer_index)
 
             # 更新地图数据模型
             self.layer_manager.update_map_model()

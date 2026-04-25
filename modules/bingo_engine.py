@@ -150,6 +150,7 @@ class Sprite:
             "scale_x": 1.0,
             "scale_y": 1.0,
             "type": "image",
+            "layer": 1000,  # 默认在图层之上（地图图层 z=0~N）
             "vox": self._visual_offset_x,
             "voy": self._visual_offset_y,
             "raw_cw": self._content_w,
