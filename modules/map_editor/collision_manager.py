@@ -352,16 +352,26 @@ class CollisionManager(QObject):
                                     print(f"DEBUG: 图像数据 - 存在: {image_data is not None}")
                                     if image_data:
                                         pixmap = image_data.pixmap
-                                        print(f"DEBUG: 图像pixmap - 存在: {pixmap is not None}, 非空: {pixmap is not None and not pixmap.isNull()}")
                                         collision_shape = image_data.collision_shape
                                         collision_enabled = image_data.collision_enabled
-                                        print(
-                                            f"DEBUG: 图像数据获取结果: {pixmap is not None and not pixmap.isNull()}"
-                                        )
-                                        print(f"DEBUG: 获取到的碰撞形状: {collision_shape}")
-                                        print(f"DEBUG: 碰撞是否启用: {collision_enabled}")
                                 else:
-                                    print(f"DEBUG: 图像索引超出范围 - 索引: {image_index}, 图像数量: {len(layer.images)}")
+                                    print(f"DEBUG: 图像索引超出范围 - 索引: {image_index}, 图像数量: {len(layer.images)}, 从资源路径加载图像")
+                                    # 从 layer_resources 加载图像
+                                    if hasattr(self.parent_manager, "layer_resources"):
+                                        layer_resources = self.parent_manager.layer_resources.get(layer_id, [])
+                                        if 0 <= image_index < len(layer_resources):
+                                            resource = layer_resources[image_index]
+                                            resource_path = resource.get("path", "")
+                                            # 处理相对路径
+                                            if resource_path and not os.path.isabs(resource_path) and hasattr(self.parent_manager, "current_map_path") and self.parent_manager.current_map_path:
+                                                map_dir = os.path.dirname(self.parent_manager.current_map_path)
+                                                resource_path = os.path.join(map_dir, resource_path)
+                                            if resource_path and os.path.exists(resource_path):
+                                                loaded_pixmap = QPixmap(resource_path)
+                                                if not loaded_pixmap.isNull():
+                                                    pixmap = loaded_pixmap
+                                            collision_shape = resource.get("collision_shape", None)
+                                            collision_enabled = resource.get("collision_enabled", False)
                             else:
                                 print(f"DEBUG: 图层类型错误 - 不是图像图层，没有images属性")
                             break

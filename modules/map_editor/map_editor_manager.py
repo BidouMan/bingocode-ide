@@ -3369,6 +3369,8 @@ class MapEditorManager(QObject):
                     self.map_model.save(self.current_map_path)
                 # 同步更新碰撞管理器
                 self.collision_manager.set_collision_enabled(collision_enabled)
+                # 刷新碰撞编辑器显示
+                self.collision_manager._update_collision_display()
 
         # 设置碰撞状态（兼容绘制图层）
         if hasattr(self, "property_manager") and not is_image_layer:
