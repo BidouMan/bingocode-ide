@@ -85,6 +85,7 @@ class Sprite:
         self._current_scale_x = 1.0
         self.hitbox_scale = 1.0
         self.on_ground = False
+        self.vy = 0
         self._groups = []
         self._visible = True
         self._is_deleted = False
@@ -280,6 +281,7 @@ class Sprite:
                                 if rect:
                                     self._y = img_top - (rect[3] - self._y) - 0.05
                                     self.on_ground = True
+                                    self.vy = 0
                             elif sprite_rect[1] >= img_bottom - 10:
                                 rect = self._get_hitbox_rect()
                                 if rect:
@@ -420,7 +422,7 @@ class Sprite:
                                                     - 0.05
                                                 )
                                                 self.on_ground = True
-                                                # self.vy = 0 # 撞地速度归零
+                                                self.vy = 0
                                         # 如果角色顶边在砖块底边附近
                                         elif sprite_rect[1] >= tile_bottom - 10:
                                             # 确定是顶头
@@ -431,7 +433,7 @@ class Sprite:
                                                     + (self._y - rect[1])
                                                     + 0.05
                                                 )
-                                                # self.vy = 0 # 撞头速度归零
+                                                self.vy = 0  # 撞头速度归零
                                         return  # 立即退出
                         else:
                             continue
@@ -1533,10 +1535,14 @@ def _handle_physics_collision():
         if sprite._is_deleted:
             continue
 
-        # 每帧都进行碰撞检测，确保角色不会站在砖块内部
-        # 这可以解决脚底1-2像素进入砖块的问题
+        sprite.on_ground = False
+        sprite.vy = min(sprite.vy + 0.5, 12)
+        sprite._y += sprite.vy
         sprite._resolve_collision("x")
         sprite._resolve_collision("y")
+        if sprite.on_ground:
+            sprite.vy = 0
+        sprite._update_transform()
 
 
 def _render_map():

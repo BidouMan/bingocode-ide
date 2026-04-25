@@ -1414,6 +1414,13 @@ class MapEditorManager(QObject):
                     self.ui.att_map_name.setText(map_name)
                     self.ui.att_map_name.blockSignals(False)
 
+                # 更新属性面板中的重力开关
+                if hasattr(self, "ui") and hasattr(self.ui, "att_gravity"):
+                    gravity_enabled = self.map_model.map_data.get("gravity", False)
+                    self.ui.att_gravity.blockSignals(True)
+                    self.ui.att_gravity.setChecked(gravity_enabled)
+                    self.ui.att_gravity.blockSignals(False)
+
                 # 更新属性面板中的地图尺寸
                 self._update_map_size_display()
 
@@ -3542,6 +3549,13 @@ class MapEditorManager(QObject):
             # 发出地图重命名完成信号，通知资源管理器刷新地图列表
             self.map_renamed.emit()
 
+    def _on_gravity_changed(self, enabled):
+        """处理重力开关变化"""
+        self.map_model.map_data["gravity"] = enabled
+        self.is_map_modified = True
+        if self.current_map_path:
+            self.map_model.save(self.current_map_path)
+
     def _update_map_size_display(self):
         """更新属性面板中的地图尺寸显示"""
         if hasattr(self, "ui"):
@@ -4828,6 +4842,9 @@ class MapEditorManager(QObject):
         # 绑定碰撞编辑器相关控件
         if hasattr(self.ui, "map_collision"):
             self.ui.map_collision.toggled.connect(self.set_collision_enabled)
+        # 绑定重力开关
+        if hasattr(self.ui, "att_gravity"):
+            self.ui.att_gravity.toggled.connect(self._on_gravity_changed)
         # 绑定碰撞锚点吸附按钮
         if hasattr(self.ui, "btn_res_col_snap"):
             self.ui.btn_res_col_snap.toggled.connect(self.set_collision_snap_to_pixel)

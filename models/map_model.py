@@ -31,6 +31,7 @@ class MapDataModel(QObject):
             "tile_size": 16,  # 瓦片大小（像素）
             "offset_x": 0,  # 坐标偏移量
             "offset_y": 0,  # 坐标偏移量
+            "gravity": False,  # 地图重力开关
             "layers": [  # 地图图层
                 {
                     "name": "ground",
@@ -314,7 +315,7 @@ class MapDataModel(QObject):
             f.write(struct.pack("<I", 0x4D415050))  # "MAP_"
 
             # 写入版本号（4字节）
-            f.write(struct.pack("<I", 4))  # 更新版本号以支持图层资源映射
+            f.write(struct.pack("<I", 5))  # 更新版本号以支持重力开关
 
             # 写入地图名称
             map_name = self.map_data.get("name", "")
@@ -349,6 +350,9 @@ class MapDataModel(QObject):
                 f.write(layer_id_bytes)
                 # 写入起始和结束索引
                 f.write(struct.pack("<II", start, end))
+
+            # 写入重力开关（版本5及以上，1字节）
+            f.write(struct.pack("<B", 1 if self.map_data.get("gravity", False) else 0))
 
     def _save_map_tiles(self, file_path, width, height, offset_x=0, offset_y=0):
         """保存图块数据（使用numpy批量写入）"""
@@ -623,6 +627,7 @@ class MapDataModel(QObject):
                 offset_y,
                 map_name,
                 layer_resources_map,
+                gravity,
             ) = self._load_map_info(base_name + ".info")
 
             # 2. 加载图块数据 (.tiles)
@@ -650,6 +655,7 @@ class MapDataModel(QObject):
                 "tile_size": tile_size,
                 "offset_x": offset_x,
                 "offset_y": offset_y,
+                "gravity": gravity,
                 "layers": layers,
                 "tile_sets": tile_sets,
                 "layer_resources_map": layer_resources_map,
@@ -733,6 +739,14 @@ class MapDataModel(QObject):
                 except Exception as e:
                     print(f"读取图层资源映射错误: {e}")
 
+            # 读取重力开关（版本5及以上，1字节）
+            gravity = False
+            if version >= 5:
+                try:
+                    gravity = struct.unpack("<B", f.read(1))[0] == 1
+                except Exception:
+                    gravity = False
+
             return (
                 width,
                 height,
@@ -743,6 +757,7 @@ class MapDataModel(QObject):
                 offset_y,
                 map_name,
                 layer_resources_map,
+                gravity,
             )
 
     def _load_map_tiles(
