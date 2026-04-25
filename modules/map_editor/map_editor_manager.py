@@ -3440,6 +3440,12 @@ class MapEditorManager(QObject):
         col_type = self.ui.att_col_type.currentText()
         print(f"碰撞类型变化: {col_type}")
 
+        # 自定义模式下显示标记名称输入框，其他模式隐藏
+        if hasattr(self.ui, "att_tag"):
+            self.ui.att_tag.setVisible(col_type == "自定义")
+        if hasattr(self.ui, "label_17"):
+            self.ui.label_17.setVisible(col_type == "自定义")
+
         # 判断当前是否为图像图层
         current_layer = self.layer_manager.get_current_layer()
         is_image_layer = current_layer and current_layer.layer_type == "image"
@@ -4831,6 +4837,12 @@ class MapEditorManager(QObject):
         # 绑定碰撞类型选择框
         if hasattr(self.ui, "att_col_type"):
             self.ui.att_col_type.currentTextChanged.connect(self._on_col_type_changed)
+            # 初始化标记名称可见性（默认隐藏）
+            col_type = self.ui.att_col_type.currentText()
+            if hasattr(self.ui, "att_tag"):
+                self.ui.att_tag.setVisible(col_type == "自定义")
+            if hasattr(self.ui, "label_17"):
+                self.ui.label_17.setVisible(col_type == "自定义")
         # 绑定地图名称输入框
         if hasattr(self.ui, "att_map_name"):
             self.ui.att_map_name.textChanged.connect(self._on_map_name_changed)
