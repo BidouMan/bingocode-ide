@@ -1826,10 +1826,15 @@ class MapEditorManager(QObject):
 
     def _generate_pixmap(self, tile_id):
         """解析资源并生成 QPixmap"""
-        # 获取所有图层的资源列表
-        all_resources = []
-        for layer_resources in self.layer_resources.values():
-            all_resources.extend(layer_resources)
+        # 使用 map_model 中的 tile_sets（与保存/加载时顺序完全一致）
+        tile_sets = self.map_model.map_data.get("tile_sets", [])
+        if tile_sets:
+            all_resources = tile_sets
+        else:
+            # 降级：从 layer_resources 构建（仅在 tile_sets 不存在时）
+            all_resources = []
+            for layer_resources in self.layer_resources.values():
+                all_resources.extend(layer_resources)
 
         # 查找匹配的资源
         for resource_index, resource in enumerate(all_resources):
@@ -1839,7 +1844,7 @@ class MapEditorManager(QObject):
                 # 图块集合模式，图块ID格式：(resource_index + 1) * 1000 + tile_index + 1
                 if tile_id // 1000 == resource_index + 1:
                     # 处理资源路径（转换为绝对路径）
-                    image_path = resource["path"]
+                    image_path = resource.get("path") or resource.get("image_path", "")
                     if not os.path.isabs(image_path):
                         if self.current_map_path:
                             map_dir = os.path.dirname(self.current_map_path)
@@ -1887,7 +1892,7 @@ class MapEditorManager(QObject):
                 # 单张图片模式，图块ID格式：(resource_index + 1) * 1000 + 1
                 if tile_id == (resource_index + 1) * 1000 + 1:
                     # 处理资源路径（转换为绝对路径）
-                    image_path = resource["path"]
+                    image_path = resource.get("path") or resource.get("image_path", "")
                     if not os.path.isabs(image_path):
                         if self.current_map_path:
                             map_dir = os.path.dirname(self.current_map_path)
