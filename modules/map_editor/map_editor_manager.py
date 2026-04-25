@@ -803,6 +803,8 @@ class MapEditorManager(QObject):
         self.layer_manager = LayerManager(self.map_model, self)
         # 重新连接信号
         self.layer_manager.current_layer_changed.connect(self._on_layer_changed)
+        # 从地图模型同步默认图层（如 ground）
+        self.layer_manager.initialize_from_map_model()
 
         # 自动为新地图分配一个默认路径，避免后续自动保存时生成新地图
         if hasattr(self, "project_manager") and self.project_manager:
@@ -3973,23 +3975,6 @@ class MapEditorManager(QObject):
         # 移除默认工具激活，保持当前工具不变
         # 这样用户在切换图层时，当前选中的工具会保持不变
 
-    def _on_visibility_btn_clicked(self, layer, btn):
-        """处理图层可见性按钮点击"""
-        if hasattr(self, "_updating_visibility"):
-            return
-        self._updating_visibility = True
-        try:
-            new_visible = not layer.visible
-            layer.set_visible(new_visible)
-            btn.setText("V" if new_visible else "-")
-            self._render_all_layers()
-            self.layer_manager.update_map_model()
-            self.is_map_modified = True
-            if self.current_map_path:
-                self.map_model.save(self.current_map_path)
-        finally:
-            self._updating_visibility = False
-
     def _on_layer_item_clicked(self, item, column):
         """处理图层项点击事件"""
         layer_count = self.layer_manager.get_layer_count()
@@ -4000,7 +3985,14 @@ class MapEditorManager(QObject):
             # 点击可见性列
             if 0 <= layer_index < layer_count:
                 layer = self.layer_manager.get_layer(layer_index)
-                layer.set_visible(not layer.visible)
+                new_visible = not layer.visible
+                layer.set_visible(new_visible)
+                # 更新图标的文本符号和颜色
+                from PySide6.QtGui import QColor, QBrush
+
+                item.setText(0, "●" if new_visible else "○")
+                color = QColor("#2a7") if new_visible else QColor("#888")
+                item.setForeground(0, QBrush(color))
                 # 重新渲染所有可见图层
                 self._render_all_layers()
                 # 保存可见性状态
@@ -4019,24 +4011,28 @@ class MapEditorManager(QObject):
             # 清空现有项
             self.editor_map_layer_list.clear()
             # 添加图层项（反转顺序：最新创建的放在最上面，类似Photoshop）
+            from PySide6.QtGui import QColor, QBrush
+
             layer_count = len(self.layer_manager.layers)
             for display_idx, i in enumerate(range(layer_count - 1, -1, -1)):
                 layer = self.layer_manager.layers[i]
-                from PySide6.QtWidgets import QTreeWidgetItem, QPushButton
+                from PySide6.QtWidgets import QTreeWidgetItem
 
-                # 创建图层项
-                item = QTreeWidgetItem(["", layer.name, layer.layer_type.capitalize()])
-                # 设置可见性图标按钮
-                btn_visible = QPushButton()
-                btn_visible.setText("V" if layer.visible else "-")
-                btn_visible.setFixedSize(24, 24)
-                btn_visible.setToolTip("点击切换显示/隐藏")
-                btn_visible.clicked.connect(
-                    lambda checked, lyr=layer, btn=btn_visible: (
-                        self._on_visibility_btn_clicked(lyr, btn)
-                    )
+                # 创建图层项，在列0用文本符号表示可见性
+                vis_symbol = "●" if layer.visible else "○"
+                item = QTreeWidgetItem(
+                    [vis_symbol, layer.name, layer.layer_type.capitalize()]
                 )
-                self.editor_map_layer_list.setItemWidget(item, 0, btn_visible)
+                # 列0颜色：可见=绿色，隐藏=灰色
+                color = QColor("#2a7") if layer.visible else QColor("#888")
+                item.setForeground(0, QBrush(color))
+                # 设置字体大小
+                font = item.font(0)
+                font.setPointSize(14)
+                font.setBold(True)
+                item.setFont(0, font)
+                # 居中显示
+                item.setTextAlignment(0, Qt.AlignCenter)
                 # 设置图层索引为数据（存储实际图层索引）
                 item.setData(0, 1, i)
                 # 添加到树控件
