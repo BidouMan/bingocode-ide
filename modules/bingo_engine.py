@@ -86,6 +86,9 @@ class Sprite:
         self.hitbox_scale = 1.0
         self.on_ground = False
         self.vy = 0
+        self._jump_cut = False
+        self._coyote_counter = 0
+        self._jump_buffer = 0
         self._groups = []
         self._visible = True
         self._is_deleted = False
@@ -500,9 +503,18 @@ class Sprite:
         Args:
             power: 跳跃力度（默认10，越大跳得越高）
         """
-        if self.on_ground:
+        if self.on_ground or self._coyote_counter > 0:
             self.vy = -power
             self.on_ground = False
+            self._coyote_counter = 0
+            self._jump_cut = False
+        elif self._jump_buffer <= 0:
+            self._jump_buffer = 8
+
+    def cut_jump(self):
+        """截断跳跃（松开跳跃键时调用），使角色提前下落"""
+        if self.vy < 0:
+            self._jump_cut = True
 
     def move(self, distance):
         """朝着当前 angle 方向移动 distance 像素"""
@@ -1542,13 +1554,33 @@ def _handle_physics_collision():
         if sprite._is_deleted:
             continue
 
+        last_on_ground = sprite.on_ground
         sprite.on_ground = False
-        sprite.vy = min(sprite.vy + 0.5, 12)
+
+        if sprite._jump_buffer > 0:
+            sprite._jump_buffer -= 1
+
+        sprite.vy = min(sprite.vy + 0.8, 12)
+        if sprite.vy < 0 and sprite._jump_cut:
+            sprite.vy *= 0.45
+
         sprite._y += sprite.vy
         sprite._resolve_collision("y")
         sprite._resolve_collision("x")
         if sprite.on_ground:
             sprite.vy = 0
+            sprite._jump_cut = False
+            if sprite._jump_buffer > 0:
+                sprite.vy = -10
+                sprite.on_ground = False
+                sprite._jump_buffer = 0
+                sprite._coyote_counter = 0
+
+        if not sprite.on_ground and last_on_ground:
+            sprite._coyote_counter = 8
+        elif not sprite.on_ground:
+            sprite._coyote_counter = max(0, sprite._coyote_counter - 1)
+
         sprite._update_transform()
 
 
