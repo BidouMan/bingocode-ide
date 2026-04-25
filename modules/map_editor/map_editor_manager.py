@@ -3821,15 +3821,13 @@ class MapEditorManager(QObject):
             # 更新editor_map_layer_list组件
             if hasattr(self, "editor_map_layer_list") and self.editor_map_layer_list:
                 self._update_editor_map_layer_list()
-                # 更新当前选中项
+                # 更新当前选中项（转换为显示索引）
                 new_current_index = self.layer_manager.current_layer_index
-                if (
-                    0
-                    <= new_current_index
-                    < self.editor_map_layer_list.topLevelItemCount()
-                ):
+                layer_count = self.layer_manager.get_layer_count()
+                display_index = layer_count - 1 - new_current_index
+                if 0 <= display_index < self.editor_map_layer_list.topLevelItemCount():
                     self.editor_map_layer_list.setCurrentItem(
-                        self.editor_map_layer_list.topLevelItem(new_current_index)
+                        self.editor_map_layer_list.topLevelItem(display_index)
                     )
                     # 触发图层切换事件，确保碰撞编辑器状态更新
                     self._on_layer_changed(new_current_index)
@@ -3884,9 +3882,11 @@ class MapEditorManager(QObject):
         self.selected_item = None
         # 更新editor_map_layer_list组件的当前选中项
         if hasattr(self, "editor_map_layer_list") and self.editor_map_layer_list:
-            if 0 <= index < self.editor_map_layer_list.topLevelItemCount():
+            layer_count = self.layer_manager.get_layer_count()
+            display_index = layer_count - 1 - index
+            if 0 <= display_index < self.editor_map_layer_list.topLevelItemCount():
                 self.editor_map_layer_list.setCurrentItem(
-                    self.editor_map_layer_list.topLevelItem(index)
+                    self.editor_map_layer_list.topLevelItem(display_index)
                 )
 
         # 检查当前图层的类型，设置碰撞编辑器的碰撞属性
@@ -3942,18 +3942,20 @@ class MapEditorManager(QObject):
 
     def _on_layer_item_clicked(self, item, column):
         """处理图层项点击事件"""
+        layer_count = self.layer_manager.get_layer_count()
+        display_index = self.editor_map_layer_list.indexOfTopLevelItem(item)
+        # 显示索引转换为实际图层索引（因为列表是反转显示的）
+        layer_index = layer_count - 1 - display_index
         if column == 0:
             # 点击可见性列
-            layer_index = self.editor_map_layer_list.indexOfTopLevelItem(item)
-            if 0 <= layer_index < self.layer_manager.get_layer_count():
+            if 0 <= layer_index < layer_count:
                 layer = self.layer_manager.get_layer(layer_index)
                 layer.set_visible(not layer.visible)
                 # 重新渲染所有可见图层
                 self._render_all_layers()
         else:
             # 点击其他列，切换当前图层
-            layer_index = self.editor_map_layer_list.indexOfTopLevelItem(item)
-            if 0 <= layer_index < self.layer_manager.get_layer_count():
+            if 0 <= layer_index < layer_count:
                 self.layer_manager.set_current_layer(layer_index)
 
     def _update_editor_map_layer_list(self):
@@ -3961,8 +3963,10 @@ class MapEditorManager(QObject):
         if hasattr(self, "editor_map_layer_list") and self.editor_map_layer_list:
             # 清空现有项
             self.editor_map_layer_list.clear()
-            # 添加图层项
-            for i, layer in enumerate(self.layer_manager.layers):
+            # 添加图层项（反转顺序：最新创建的放在最上面，类似Photoshop）
+            layer_count = len(self.layer_manager.layers)
+            for display_idx, i in enumerate(range(layer_count - 1, -1, -1)):
+                layer = self.layer_manager.layers[i]
                 from PySide6.QtWidgets import QTreeWidgetItem, QCheckBox
 
                 # 创建图层项
@@ -3974,15 +3978,16 @@ class MapEditorManager(QObject):
                     lambda state, layer=layer: layer.set_visible(state == 2)
                 )
                 self.editor_map_layer_list.setItemWidget(item, 0, checkbox)
-                # 设置图层索引为数据
+                # 设置图层索引为数据（存储实际图层索引）
                 item.setData(0, 1, i)
                 # 添加到树控件
                 self.editor_map_layer_list.addTopLevelItem(item)
-            # 设置当前选中项
+            # 设置当前选中项（需要转换为显示索引）
             current_index = self.layer_manager.current_layer_index
-            if 0 <= current_index < self.editor_map_layer_list.topLevelItemCount():
+            display_index = layer_count - 1 - current_index
+            if 0 <= display_index < self.editor_map_layer_list.topLevelItemCount():
                 self.editor_map_layer_list.setCurrentItem(
-                    self.editor_map_layer_list.topLevelItem(current_index)
+                    self.editor_map_layer_list.topLevelItem(display_index)
                 )
 
     def handle_drop_resource(self, resource_index, scene_pos):
