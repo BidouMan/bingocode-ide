@@ -1,6 +1,15 @@
 import os
 import math
-from PySide6.QtCore import QObject, Signal, Qt, QRectF, QPoint, QPointF, QMimeData
+from PySide6.QtCore import (
+    QObject,
+    Signal,
+    Qt,
+    QRectF,
+    QPoint,
+    QPointF,
+    QMimeData,
+    QSize,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsScene,
@@ -9,6 +18,10 @@ from PySide6.QtWidgets import (
     QGraphicsRectItem,
     QGraphicsLineItem,
     QDialog,
+    QWidget,
+    QHBoxLayout,
+    QPushButton,
+    QLabel,
 )
 from PySide6.QtGui import (
     QPixmap,
@@ -22,6 +35,7 @@ from PySide6.QtGui import (
     QImage,
     QDrag,
     QTransform,
+    QIcon,
 )
 from models.map_model import MapDataModel
 from .map_canvas_manager import MapCanvas
@@ -254,6 +268,94 @@ class ResourceItem(QGraphicsRectItem):
             traceback.print_exc()
 
 
+# ── 图层图标缓存 ──────────────────────────────────────────────
+_layer_icon_cache = {}
+
+
+def _get_layer_pixmap(name):
+    """从 SVG 资源渲染 QPixmap 并缓存（保持原始宽高比）"""
+    if name not in _layer_icon_cache:
+        from PySide6.QtSvg import QSvgRenderer
+
+        renderer = QSvgRenderer(f":/icons/{name}.svg")
+        default_size = renderer.defaultSize()
+        if (
+            default_size.isValid()
+            and default_size.width() > 0
+            and default_size.height() > 0
+        ):
+            w, h = default_size.width(), default_size.height()
+            scale = min(16 / w, 16 / h)
+            pw = max(1, int(w * scale))
+            ph = max(1, int(h * scale))
+        else:
+            pw = ph = 14
+        pm = QPixmap(16, 16)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        x = (16 - pw) // 2
+        y = (16 - ph) // 2
+        renderer.render(p, QRectF(x, y, pw, ph))
+        p.end()
+        _layer_icon_cache[name] = pm
+    return _layer_icon_cache[name]
+
+
+class LayerItemWidget(QWidget):
+    """图层列表项组件：左侧显示/隐藏按钮 + 右侧图层名称"""
+
+    visibility_toggled = Signal(int)  # 参数：实际图层索引
+
+    def __init__(self, layer_index, layer_name, is_visible, parent=None):
+        super().__init__(parent)
+        self._layer_index = layer_index
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(4)
+
+        self.vis_button = QPushButton()
+        self.vis_button.setFixedSize(20, 20)
+        self.vis_button.setIconSize(QSize(14, 14))
+        self.vis_button.setFlat(True)
+        self.vis_button.setCursor(Qt.PointingHandCursor)
+        self.vis_button.setToolTip("点击切换显示/隐藏")
+        self.vis_button.clicked.connect(self._on_button_clicked)
+
+        self.name_label = QLabel(layer_name)
+        self.name_label.setCursor(Qt.PointingHandCursor)
+
+        layout.addWidget(self.vis_button)
+        layout.addWidget(self.name_label, 1)
+
+        self.set_visible_state(is_visible)
+        self._selected = False
+
+    def set_visible_state(self, visible):
+        self.vis_button.setIcon(
+            QIcon(_get_layer_pixmap("icon_show" if visible else "icon_hide"))
+        )
+
+    def set_selected(self, selected):
+        self._selected = selected
+        if selected:
+            self.setStyleSheet(
+                "LayerItemWidget { background-color: palette(highlight); }"
+                "QLabel { color: palette(highlighted-text); }"
+            )
+        else:
+            self.setStyleSheet("")
+
+    def set_layer_name(self, name):
+        self.name_label.setText(name)
+
+    def set_layer_index(self, index):
+        self._layer_index = index
+
+    def _on_button_clicked(self):
+        self.visibility_toggled.emit(self._layer_index)
+
+
 class MapEditorManager(QObject):
     """地图编辑器管理器，负责地图编辑的核心逻辑"""
 
@@ -270,7 +372,7 @@ class MapEditorManager(QObject):
         self.canvas_manager = None
         self.current_tool = "move"  # 当前工具：draw, eraser, move
         self.current_tile_id = 1  # 当前选中的瓦片ID
-        self.current_layer = 0  # 当前选中的图层
+        self.current_layer = -1  # 当前选中的图层（-1表示未初始化）
 
         # 初始化地图模型
         self._initialize_map_model()
@@ -1845,6 +1947,9 @@ class MapEditorManager(QObject):
             if resource_type == "tileset":
                 # 图块集合模式，图块ID格式：(resource_index + 1) * 1000 + tile_index + 1
                 if tile_id // 1000 == resource_index + 1:
+                    print(
+                        f"DEBUG[generate]: 匹配tileset资源[resource_index={resource_index}], tile_id={tile_id}"
+                    )
                     # 处理资源路径（转换为绝对路径）
                     image_path = resource.get("path") or resource.get("image_path", "")
                     if not os.path.isabs(image_path):
@@ -1889,7 +1994,11 @@ class MapEditorManager(QObject):
                             tile_width_resource,
                             tile_height_resource,
                         )
-                        return pixmap.copy(tile_rect.toRect())
+                        cropped = pixmap.copy(tile_rect.toRect())
+                        print(
+                            f"DEBUG[generate]: 裁剪结果尺寸={cropped.width()}x{cropped.height()}, 图块索引={tile_index}, 行列=[{tile_row},{tile_col}]"
+                        )
+                        return cropped
             else:
                 # 单张图片模式，图块ID格式：(resource_index + 1) * 1000 + 1
                 if tile_id == (resource_index + 1) * 1000 + 1:
@@ -3533,7 +3642,16 @@ class MapEditorManager(QObject):
 
             # 使用全局资源索引计算tile_id
             tile_id = (global_resource_index + 1) * 1000 + tile_index + 1
+            print(
+                f"DEBUG[collision_pixmap]: 全局资源索引={global_resource_index}, tile_index={tile_index}, tile_id={tile_id}"
+            )
             pixmap = self.get_cached_pixmap(tile_id)
+            if pixmap:
+                print(
+                    f"DEBUG[collision_pixmap]: 返回的pixmap尺寸={pixmap.width()}x{pixmap.height()}"
+                )
+            else:
+                print(f"DEBUG[collision_pixmap]: get_cached_pixmap 返回 None")
         else:
             # 单张图片模式
             image_path = resource["path"]
@@ -3772,29 +3890,24 @@ class MapEditorManager(QObject):
         if self.layer_list_view:
             self.layer_list_view.set_layer_manager(self.layer_manager)
 
-    def set_editor_map_layer_list(self, tree_widget):
-        """设置editor_map_layer_list组件"""
-        self.editor_map_layer_list = tree_widget
-        # 初始化图层列表显示
+    def set_editor_map_layer_list(self, list_widget):
+        """设置editor_map_layer_list组件（QListWidget）"""
+        self.editor_map_layer_list = list_widget
         if self.editor_map_layer_list:
-            # 清空现有项
             self.editor_map_layer_list.clear()
-            # 设置列数
-            self.editor_map_layer_list.setColumnCount(3)
-            # 设置列标题
-            self.editor_map_layer_list.setHeaderLabels(["可见", "名称", "类型"])
-            # 设置列宽
-            self.editor_map_layer_list.setColumnWidth(0, 40)
-            self.editor_map_layer_list.setColumnWidth(1, 150)
-            self.editor_map_layer_list.setColumnWidth(2, 80)
-            # 连接信号
+            self.editor_map_layer_list.setIconSize(QSize(16, 16))
+            self.editor_map_layer_list.setStyleSheet(
+                "QListWidget::item:selected { background: transparent; }"
+                "QListWidget::item:selected:active { background: transparent; }"
+            )
             self.editor_map_layer_list.itemClicked.connect(self._on_layer_item_clicked)
-            # 监听图层变化信号
+            self.editor_map_layer_list.currentItemChanged.connect(
+                self._on_layer_current_item_changed
+            )
             self.layer_manager.layers_changed.connect(
                 self._update_editor_map_layer_list
             )
             self.layer_manager.current_layer_changed.connect(self._on_layer_changed)
-            # 初始更新
             self._update_editor_map_layer_list()
 
     def create_drawing_layer(self):
@@ -3844,9 +3957,9 @@ class MapEditorManager(QObject):
                 new_current_index = self.layer_manager.current_layer_index
                 layer_count = self.layer_manager.get_layer_count()
                 display_index = layer_count - 1 - new_current_index
-                if 0 <= display_index < self.editor_map_layer_list.topLevelItemCount():
+                if 0 <= display_index < self.editor_map_layer_list.count():
                     self.editor_map_layer_list.setCurrentItem(
-                        self.editor_map_layer_list.topLevelItem(display_index)
+                        self.editor_map_layer_list.item(display_index)
                     )
                     # 触发图层切换事件，确保碰撞编辑器状态更新
                     self._on_layer_changed(new_current_index)
@@ -3896,65 +4009,51 @@ class MapEditorManager(QObject):
     def _on_layer_changed(self, index):
         """处理图层切换事件"""
         print(f"DEBUG: 图层切换到索引: {index}")
-        # 更新当前图层索引
+        same_layer = self.current_layer == index
         self.current_layer = index
 
-        # 获取当前图层
         current_layer = self.layer_manager.get_current_layer()
         if not current_layer:
             return
 
-        # 更新资源列表显示（只显示当前图层的资源）
         self._update_res_list_display()
-        # 清除预览，避免预览干扰
         self._remove_preview()
-        # 清理编辑框
         self._remove_transform_box()
-        # 重置图像选择状态
         self.selected_image_data = None
         self.selected_image_index = -1
         self.selected_layer_id = None
         self.selected_item = None
-        # 更新editor_map_layer_list组件的当前选中项
+
         if hasattr(self, "editor_map_layer_list") and self.editor_map_layer_list:
             layer_count = self.layer_manager.get_layer_count()
             display_index = layer_count - 1 - index
-            if 0 <= display_index < self.editor_map_layer_list.topLevelItemCount():
+            if 0 <= display_index < self.editor_map_layer_list.count():
                 self.editor_map_layer_list.setCurrentItem(
-                    self.editor_map_layer_list.topLevelItem(display_index)
+                    self.editor_map_layer_list.item(display_index)
                 )
+            self._sync_layer_selection_style()
 
-        # 检查当前图层的类型，设置碰撞编辑器的碰撞属性
         if hasattr(self, "ui") and hasattr(self.ui, "map_collision"):
-            # 对于图像图层，默认关闭碰撞属性，但如果用户手动打开过，保持打开状态
             if current_layer.layer_type == "image":
-                # 图像图层：保持当前的碰撞属性状态
                 print("DEBUG: 切换到图像图层，保持当前碰撞属性状态")
             else:
-                # 绘制图层：保持当前的碰撞属性状态
                 print("DEBUG: 切换到绘制图层，保持当前碰撞属性状态")
 
-        # 更新碰撞编辑器显示，选择当前图层的第一个资源
-        layer_resources = self.layer_resources.get(current_layer.layer_id, [])
-        if layer_resources:
-            # 选择第一个资源和第一个图块
-            self.selected_resource_index = 0
-            self.selected_tile_index = 0
-            # 根据当前图层类型更新碰撞编辑器显示
-            if current_layer.layer_type == "drawing":
-                # 绘制图层：使用碰撞图块
-                self.set_current_collision_tile(0, 0)
-                print(f"DEBUG: 更新碰撞编辑器显示，选择资源0和图块0")
-            elif current_layer.layer_type == "image":
-                # 图像图层：使用碰撞图像
-                self.collision_manager.set_current_collision_image(
-                    current_layer.layer_id, 0
-                )
-                # 调用 select_resource 更新属性面板显示
-                self.select_resource(0)
-                print(f"DEBUG: 更新碰撞编辑器显示，选择图像0")
+        if not same_layer:
+            layer_resources = self.layer_resources.get(current_layer.layer_id, [])
+            if layer_resources:
+                self.selected_resource_index = 0
+                self.selected_tile_index = 0
+                if current_layer.layer_type == "drawing":
+                    self.set_current_collision_tile(0, 0)
+                    print(f"DEBUG: 更新碰撞编辑器显示，选择资源0和图块0")
+                elif current_layer.layer_type == "image":
+                    self.collision_manager.set_current_collision_image(
+                        current_layer.layer_id, 0
+                    )
+                    self.select_resource(0)
+                    print(f"DEBUG: 更新碰撞编辑器显示，选择图像0")
 
-        # 更新工具栏状态
         self._update_toolbar_state(current_layer.layer_type)
 
     def _update_toolbar_state(self, layer_type):
@@ -3975,75 +4074,78 @@ class MapEditorManager(QObject):
         # 移除默认工具激活，保持当前工具不变
         # 这样用户在切换图层时，当前选中的工具会保持不变
 
-    def _on_layer_item_clicked(self, item, column):
-        """处理图层项点击事件"""
-        layer_count = self.layer_manager.get_layer_count()
-        display_index = self.editor_map_layer_list.indexOfTopLevelItem(item)
-        # 显示索引转换为实际图层索引（因为列表是反转显示的）
-        layer_index = layer_count - 1 - display_index
-        if column == 0:
-            # 点击可见性列
-            if 0 <= layer_index < layer_count:
-                layer = self.layer_manager.get_layer(layer_index)
-                new_visible = not layer.visible
-                layer.set_visible(new_visible)
-                # 更新图标的文本符号和颜色
-                from PySide6.QtGui import QColor, QBrush
+    def _sync_layer_selection_style(self):
+        """同步所有图层的选中高亮样式"""
+        if not hasattr(self, "editor_map_layer_list") or not self.editor_map_layer_list:
+            return
+        current = self.editor_map_layer_list.currentItem()
+        for i in range(self.editor_map_layer_list.count()):
+            item = self.editor_map_layer_list.item(i)
+            w = self.editor_map_layer_list.itemWidget(item)
+            if isinstance(w, LayerItemWidget):
+                w.set_selected(item is current)
 
-                item.setText(0, "●" if new_visible else "○")
-                color = QColor("#2a7") if new_visible else QColor("#888")
-                item.setForeground(0, QBrush(color))
-                # 重新渲染所有可见图层
-                self._render_all_layers()
-                # 保存可见性状态
-                self.layer_manager.update_map_model()
-                self.is_map_modified = True
-                if self.current_map_path:
-                    self.map_model.save(self.current_map_path)
-        else:
-            # 点击其他列，切换当前图层
-            if 0 <= layer_index < layer_count:
-                self.layer_manager.set_current_layer(layer_index)
+    def _on_layer_current_item_changed(self, current, previous):
+        """QListWidget选中项变化时更新高亮样式"""
+        w_prev = self.editor_map_layer_list.itemWidget(previous) if previous else None
+        if isinstance(w_prev, LayerItemWidget):
+            w_prev.set_selected(False)
+        w_curr = self.editor_map_layer_list.itemWidget(current) if current else None
+        if isinstance(w_curr, LayerItemWidget):
+            w_curr.set_selected(True)
+
+    def _on_layer_item_clicked(self, item):
+        """点击图层项时选中该图层"""
+        layer_index = item.data(Qt.UserRole)
+        if layer_index is None or layer_index == self.layer_manager.current_layer_index:
+            return
+        if 0 <= layer_index < self.layer_manager.get_layer_count():
+            self.layer_manager.set_current_layer(layer_index)
+
+    def _on_layer_visibility_toggled(self, layer_index):
+        """点击显示/隐藏按钮时切换图层可见性"""
+        layer = self.layer_manager.get_layer(layer_index)
+        if not layer:
+            return
+        new_visible = not layer.visible
+        layer.set_visible(new_visible)
+        widget = self.editor_map_layer_list.itemWidget(
+            self.editor_map_layer_list.item(
+                self.editor_map_layer_list.count() - 1 - layer_index
+            )
+        )
+        if isinstance(widget, LayerItemWidget):
+            widget.set_visible_state(new_visible)
+        self._render_all_layers()
+        self.layer_manager.update_map_model()
+        self.is_map_modified = True
+        if self.current_map_path:
+            self.map_model.save(self.current_map_path)
 
     def _update_editor_map_layer_list(self):
         """更新editor_map_layer_list组件"""
         if hasattr(self, "editor_map_layer_list") and self.editor_map_layer_list:
-            # 清空现有项
             self.editor_map_layer_list.clear()
-            # 添加图层项（反转顺序：最新创建的放在最上面，类似Photoshop）
-            from PySide6.QtGui import QColor, QBrush
+            from PySide6.QtWidgets import QListWidgetItem
 
             layer_count = len(self.layer_manager.layers)
             for display_idx, i in enumerate(range(layer_count - 1, -1, -1)):
                 layer = self.layer_manager.layers[i]
-                from PySide6.QtWidgets import QTreeWidgetItem
+                item = QListWidgetItem()
+                widget = LayerItemWidget(i, layer.name, layer.visible)
+                widget.visibility_toggled.connect(self._on_layer_visibility_toggled)
+                item.setSizeHint(widget.sizeHint())
+                item.setData(Qt.UserRole, i)
+                self.editor_map_layer_list.addItem(item)
+                self.editor_map_layer_list.setItemWidget(item, widget)
 
-                # 创建图层项，在列0用文本符号表示可见性
-                vis_symbol = "●" if layer.visible else "○"
-                item = QTreeWidgetItem(
-                    [vis_symbol, layer.name, layer.layer_type.capitalize()]
-                )
-                # 列0颜色：可见=绿色，隐藏=灰色
-                color = QColor("#2a7") if layer.visible else QColor("#888")
-                item.setForeground(0, QBrush(color))
-                # 设置字体大小
-                font = item.font(0)
-                font.setPointSize(14)
-                font.setBold(True)
-                item.setFont(0, font)
-                # 居中显示
-                item.setTextAlignment(0, Qt.AlignCenter)
-                # 设置图层索引为数据（存储实际图层索引）
-                item.setData(0, 1, i)
-                # 添加到树控件
-                self.editor_map_layer_list.addTopLevelItem(item)
-            # 设置当前选中项（需要转换为显示索引）
             current_index = self.layer_manager.current_layer_index
             display_index = layer_count - 1 - current_index
-            if 0 <= display_index < self.editor_map_layer_list.topLevelItemCount():
+            if 0 <= display_index < self.editor_map_layer_list.count():
                 self.editor_map_layer_list.setCurrentItem(
-                    self.editor_map_layer_list.topLevelItem(display_index)
+                    self.editor_map_layer_list.item(display_index)
                 )
+            self._sync_layer_selection_style()
 
     def handle_drop_resource(self, resource_index, scene_pos):
         """处理从资源列表拖拽到画布的事件"""

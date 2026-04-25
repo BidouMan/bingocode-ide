@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="100%" height="100%" viewBox="0 0 14 11" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:serif="http://www.serif.com/" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;">
+    <g transform="matrix(1,0,0,1,-1,-2.5)">
+        <g id="Page-1">
+            <g id="show-icon-active">
+                <g transform="matrix(1,0,0,1,1,2)">
+                    <path id="Combined-Shape" d="M13.509,4.365C14.151,5.268 14.177,6.753 13.509,7.635C13.509,7.635 11.474,11.5 7,11.5C2.526,11.5 0.491,7.635 0.491,7.635C-0.151,6.732 -0.177,5.247 0.491,4.365C0.491,4.365 2.526,0.5 7,0.5C11.474,0.5 13.509,4.365 13.509,4.365ZM6.999,9.999C9.208,9.999 10.998,8.208 10.998,5.999C10.998,3.791 9.208,2 6.999,2C4.79,2 2.999,3.791 2.999,5.999C2.999,8.208 4.79,9.999 6.999,9.999Z" style="fill:rgb(227,227,227);fill-rule:nonzero;"/>
+                    <circle id="Oval" cx="7" cy="6" r="2" style="fill:rgb(227,227,227);"/>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

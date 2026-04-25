@@ -1045,6 +1045,7 @@ class MapDataModel(QObject):
         tile_set = {
             "name": name,
             "image_path": image_path,
+            "resource_type": "tileset",
             "tile_width": tile_width,
             "tile_height": tile_height,
             "tile_count": tile_count,  # 计算瓦片数量
