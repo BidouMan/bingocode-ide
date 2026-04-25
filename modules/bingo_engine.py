@@ -204,33 +204,67 @@ class Sprite:
                         continue
 
                     pos = image.get("position", [0, 0])
-                    img_left = pos[0]
-                    img_top = pos[1]
-
                     scale = image.get("scale", 1.0)
                     scale_x = image.get("scale_x", scale)
                     scale_y = image.get("scale_y", scale)
 
-                    img_w = image.get("_cache_w", 0)
-                    img_h = image.get("_cache_h", 0)
-                    if img_w <= 0 or img_h <= 0:
-                        continue
+                    # 计算图像碰撞包围盒（世界坐标）
+                    collision_shape = image.get("collision_shape", None)
+                    if (
+                        collision_shape
+                        and "points" in collision_shape
+                        and len(collision_shape["points"]) >= 2
+                    ):
+                        points = collision_shape["points"]
+                        world_points = [
+                            (
+                                pos[0] + p[0] * abs(scale_x),
+                                pos[1] + p[1] * abs(scale_y),
+                            )
+                            for p in points
+                        ]
+                        img_left = min(p[0] for p in world_points)
+                        img_top = min(p[1] for p in world_points)
+                        img_right = max(p[0] for p in world_points)
+                        img_bottom = max(p[1] for p in world_points)
+                    else:
+                        img_w = image.get("_cache_w", 0)
+                        img_h = image.get("_cache_h", 0)
+                        if img_w <= 0 or img_h <= 0:
+                            continue
+                        img_left = pos[0]
+                        img_top = pos[1]
+                        img_right = img_left + img_w * abs(scale_x)
+                        img_bottom = img_top + img_h * abs(scale_y)
 
-                    img_right = img_left + img_w * abs(scale_x)
-                    img_bottom = img_top + img_h * abs(scale_y)
+                    # === 与瓦片碰撞一致的检测策略 ===
+                    # X 轴：垂直收缩检测区域，避免头顶/脚底误触发 X 碰撞
+                    # Y 轴：水平加宽检测区域，避免边缘踩空
+                    check_overlap_x = min(img_right, sprite_rect[2]) - max(
+                        img_left, sprite_rect[0]
+                    )
+                    if axis == "x":
+                        check_top = sprite_rect[1] + 8
+                        check_bottom = sprite_rect[3] - 8
+                        if check_top >= check_bottom:
+                            continue
+                        check_overlap_y = min(img_bottom, check_bottom) - max(
+                            img_top, check_top
+                        )
+                    else:
+                        check_left = sprite_rect[0] - 2
+                        check_right = sprite_rect[2] + 2
+                        check_overlap_x = min(img_right, check_right) - max(
+                            img_left, check_left
+                        )
+                        check_overlap_y = min(img_bottom, sprite_rect[3]) - max(
+                            img_top, sprite_rect[1]
+                        )
 
-                    overlap_left = max(sprite_rect[0], img_left)
-                    overlap_top = max(sprite_rect[1], img_top)
-                    overlap_right = min(sprite_rect[2], img_right)
-                    overlap_bottom = min(sprite_rect[3], img_bottom)
-
-                    overlap_x = overlap_right - overlap_left
-                    overlap_y = overlap_bottom - overlap_top
-                    if overlap_x > 0 and overlap_y > 0:
+                    if check_overlap_x > 0 and check_overlap_y > 0:
                         if axis == "x":
                             dist_to_right = abs(sprite_rect[0] - img_right)
                             dist_to_left = abs(sprite_rect[2] - img_left)
-
                             if dist_to_right < dist_to_left:
                                 center_to_left = self._x - sprite_rect[0]
                                 self._x = img_right + center_to_left + 0.05
@@ -904,15 +938,34 @@ class Sprite:
                     scale_x = image.get("scale_x", scale)
                     scale_y = image.get("scale_y", scale)
 
-                    img_w = image.get("_cache_w", 0)
-                    img_h = image.get("_cache_h", 0)
-                    if img_w <= 0 or img_h <= 0:
-                        continue
-
-                    img_left = pos[0]
-                    img_top = pos[1]
-                    img_right = img_left + img_w * abs(scale_x)
-                    img_bottom = img_top + img_h * abs(scale_y)
+                    # 检查是否有自定义碰撞形状
+                    collision_shape = image.get("collision_shape", None)
+                    if (
+                        collision_shape
+                        and "points" in collision_shape
+                        and len(collision_shape["points"]) >= 2
+                    ):
+                        points = collision_shape["points"]
+                        world_points = [
+                            (
+                                pos[0] + p[0] * abs(scale_x),
+                                pos[1] + p[1] * abs(scale_y),
+                            )
+                            for p in points
+                        ]
+                        img_left = min(p[0] for p in world_points)
+                        img_top = min(p[1] for p in world_points)
+                        img_right = max(p[0] for p in world_points)
+                        img_bottom = max(p[1] for p in world_points)
+                    else:
+                        img_w = image.get("_cache_w", 0)
+                        img_h = image.get("_cache_h", 0)
+                        if img_w <= 0 or img_h <= 0:
+                            continue
+                        img_left = pos[0]
+                        img_top = pos[1]
+                        img_right = img_left + img_w * abs(scale_x)
+                        img_bottom = img_top + img_h * abs(scale_y)
 
                     if (
                         rect[0] - 2 <= img_right

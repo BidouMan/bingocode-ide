@@ -1113,6 +1113,9 @@ class CollisionManager(QObject):
                                             )
                                             and self.parent_manager.current_map_path
                                         ):
+                                            # 同步 ImageData 到 map_data 再保存
+                                            if hasattr(self.parent_manager, "layer_manager"):
+                                                self.parent_manager.layer_manager.update_map_model()
                                             self.map_model.save(
                                                 self.parent_manager.current_map_path
                                             )
