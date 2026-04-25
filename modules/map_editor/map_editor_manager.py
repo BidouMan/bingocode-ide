@@ -3836,9 +3836,17 @@ class MapEditorManager(QObject):
                     self._on_layer_changed(new_current_index)
 
     def _move_layer_up(self):
-        """将当前图层上移"""
+        """将当前图层上移（Photoshop风格：向上=在列表中更靠上=更高z值）"""
         current_index = self.layer_manager.current_layer_index
-        if self.layer_manager.move_layer_up(current_index):
+        # 显示反转：显示向上 = 实际列表索引增大（更高z值）
+        if self.layer_manager.move_layer_down(current_index):
+            # 同步到地图数据模型
+            self.layer_manager.update_map_model()
+            # 设置地图为已修改状态
+            self.is_map_modified = True
+            # 自动保存地图
+            if self.current_map_path:
+                self.map_model.save(self.current_map_path)
             # 重新渲染所有可见图层，以更新图层的渲染顺序
             self._render_all_layers()
             # 更新图层列表显示
@@ -3849,9 +3857,17 @@ class MapEditorManager(QObject):
                 self._update_editor_map_layer_list()
 
     def _move_layer_down(self):
-        """将当前图层下移"""
+        """将当前图层下移（Photoshop风格：向下=在列表中更靠下=更低z值）"""
         current_index = self.layer_manager.current_layer_index
-        if self.layer_manager.move_layer_down(current_index):
+        # 显示反转：显示向下 = 实际列表索引减小（更低z值）
+        if self.layer_manager.move_layer_up(current_index):
+            # 同步到地图数据模型
+            self.layer_manager.update_map_model()
+            # 设置地图为已修改状态
+            self.is_map_modified = True
+            # 自动保存地图
+            if self.current_map_path:
+                self.map_model.save(self.current_map_path)
             # 重新渲染所有可见图层，以更新图层的渲染顺序
             self._render_all_layers()
             # 更新图层列表显示
