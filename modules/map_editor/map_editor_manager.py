@@ -309,10 +309,12 @@ class LayerItemWidget(QWidget):
     def __init__(self, layer_index, layer_name, is_visible, parent=None):
         super().__init__(parent)
         self._layer_index = layer_index
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setAutoFillBackground(True)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 2, 4, 2)
-        layout.setSpacing(4)
+        layout.setContentsMargins(8, 2, 8, 2)
+        layout.setSpacing(8)
 
         self.vis_button = QPushButton()
         self.vis_button.setFixedSize(20, 20)
@@ -320,6 +322,11 @@ class LayerItemWidget(QWidget):
         self.vis_button.setFlat(True)
         self.vis_button.setCursor(Qt.PointingHandCursor)
         self.vis_button.setToolTip("点击切换显示/隐藏")
+        self.vis_button.setStyleSheet(
+            "QPushButton { background: transparent; border: none; }"
+            "QPushButton:hover { background: transparent; border: none; }"
+            "QPushButton:pressed { background: transparent; border: none; }"
+        )
         self.vis_button.clicked.connect(self._on_button_clicked)
 
         self.name_label = QLabel(layer_name)
@@ -340,8 +347,8 @@ class LayerItemWidget(QWidget):
         self._selected = selected
         if selected:
             self.setStyleSheet(
-                "LayerItemWidget { background-color: palette(highlight); }"
-                "QLabel { color: palette(highlighted-text); }"
+                "LayerItemWidget { background-color: #3D6BE5; }"
+                "QLabel { background: transparent; color: white; }"
             )
         else:
             self.setStyleSheet("")
