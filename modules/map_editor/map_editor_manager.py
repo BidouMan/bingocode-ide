@@ -2701,10 +2701,14 @@ class MapEditorManager(QObject):
             print(f"DEBUG: 资源列表长度: {len(layer_resources)}")
 
             # 计算全局资源索引
-            # 收集所有图层的资源
-            all_resources = []
-            for layer_resources in self.layer_resources.values():
-                all_resources.extend(layer_resources)
+            # 使用 tile_sets（与 _generate_pixmap 一致）
+            tile_sets = self.map_model.map_data.get("tile_sets", [])
+            if tile_sets:
+                all_resources = tile_sets
+            else:
+                all_resources = []
+                for layer_res in self.layer_resources.values():
+                    all_resources.extend(layer_res)
 
             # 查找当前资源在全局资源列表中的索引
             global_resource_index = -1
@@ -3509,16 +3513,21 @@ class MapEditorManager(QObject):
         # 获取图块图像
         pixmap = None
         if resource["resource_type"] == "tileset":
-            # 计算全局资源索引
-            global_resource_index = 0
-            # 遍历所有图层的资源，找到当前资源的全局索引
-            for layer_id, resources in self.layer_resources.items():
-                if layer_id == current_layer.layer_id:
-                    # 找到当前图层，加上当前资源在图层内的索引
-                    global_resource_index += resource_index
+            # 计算全局资源索引（使用 tile_sets，与 _generate_pixmap 一致）
+            tile_sets = self.map_model.map_data.get("tile_sets", [])
+            if tile_sets:
+                all_res = tile_sets
+            else:
+                all_res = []
+                for layer_res in self.layer_resources.values():
+                    all_res.extend(layer_res)
+            global_resource_index = -1
+            for i, res in enumerate(all_res):
+                if res.get("path") == resource.get("path"):
+                    global_resource_index = i
                     break
-                # 加上其他图层的资源数量
-                global_resource_index += len(resources)
+            if global_resource_index == -1:
+                global_resource_index = resource_index
 
             # 使用全局资源索引计算tile_id
             tile_id = (global_resource_index + 1) * 1000 + tile_index + 1
@@ -3964,6 +3973,23 @@ class MapEditorManager(QObject):
         # 移除默认工具激活，保持当前工具不变
         # 这样用户在切换图层时，当前选中的工具会保持不变
 
+    def _on_visibility_btn_clicked(self, layer, btn):
+        """处理图层可见性按钮点击"""
+        if hasattr(self, "_updating_visibility"):
+            return
+        self._updating_visibility = True
+        try:
+            new_visible = not layer.visible
+            layer.set_visible(new_visible)
+            btn.setText("V" if new_visible else "-")
+            self._render_all_layers()
+            self.layer_manager.update_map_model()
+            self.is_map_modified = True
+            if self.current_map_path:
+                self.map_model.save(self.current_map_path)
+        finally:
+            self._updating_visibility = False
+
     def _on_layer_item_clicked(self, item, column):
         """处理图层项点击事件"""
         layer_count = self.layer_manager.get_layer_count()
@@ -3977,6 +4003,11 @@ class MapEditorManager(QObject):
                 layer.set_visible(not layer.visible)
                 # 重新渲染所有可见图层
                 self._render_all_layers()
+                # 保存可见性状态
+                self.layer_manager.update_map_model()
+                self.is_map_modified = True
+                if self.current_map_path:
+                    self.map_model.save(self.current_map_path)
         else:
             # 点击其他列，切换当前图层
             if 0 <= layer_index < layer_count:
@@ -3991,17 +4022,21 @@ class MapEditorManager(QObject):
             layer_count = len(self.layer_manager.layers)
             for display_idx, i in enumerate(range(layer_count - 1, -1, -1)):
                 layer = self.layer_manager.layers[i]
-                from PySide6.QtWidgets import QTreeWidgetItem, QCheckBox
+                from PySide6.QtWidgets import QTreeWidgetItem, QPushButton
 
                 # 创建图层项
                 item = QTreeWidgetItem(["", layer.name, layer.layer_type.capitalize()])
-                # 设置可见性复选框
-                checkbox = QCheckBox()
-                checkbox.setChecked(layer.visible)
-                checkbox.stateChanged.connect(
-                    lambda state, layer=layer: layer.set_visible(state == 2)
+                # 设置可见性图标按钮
+                btn_visible = QPushButton()
+                btn_visible.setText("V" if layer.visible else "-")
+                btn_visible.setFixedSize(24, 24)
+                btn_visible.setToolTip("点击切换显示/隐藏")
+                btn_visible.clicked.connect(
+                    lambda checked, lyr=layer, btn=btn_visible: (
+                        self._on_visibility_btn_clicked(lyr, btn)
+                    )
                 )
-                self.editor_map_layer_list.setItemWidget(item, 0, checkbox)
+                self.editor_map_layer_list.setItemWidget(item, 0, btn_visible)
                 # 设置图层索引为数据（存储实际图层索引）
                 item.setData(0, 1, i)
                 # 添加到树控件
