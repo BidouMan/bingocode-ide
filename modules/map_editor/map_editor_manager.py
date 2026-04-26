@@ -712,10 +712,8 @@ class MapEditorManager(QObject):
     def _clear_resource_items(self):
         """清理资源项（只清理资源列表视图中的项，不清理地图画布上的图块）"""
         try:
-            print("DEBUG: 开始清理资源项")
             # 从资源列表视图场景中移除所有资源项
             if self.res_list_view:
-                print("DEBUG: res_list_view 存在")
                 scene = self.res_list_view.scene()
                 if scene:
                     print(
@@ -748,7 +746,7 @@ class MapEditorManager(QObject):
             traceback.print_exc()
 
         # 清空列表
-        print("DEBUG: 清空资源项和图块项列表")
+
         self.resource_items.clear()
         self.resource_tile_items.clear()
         print(
@@ -989,7 +987,7 @@ class MapEditorManager(QObject):
                     self.resource_items.clear()
 
                 # 初始化图层管理系统
-                print("DEBUG: 初始化图层管理系统")
+
                 self.layer_manager.initialize_from_map_model()
                 print(
                     f"DEBUG: 图层管理系统初始化完成，图层数量: {len(self.layer_manager.layers)}"
@@ -1095,12 +1093,10 @@ class MapEditorManager(QObject):
                             )
 
                     # 添加图像图层的图像资源
-                    print("DEBUG: 检查图像图层的图像资源")
+
                     for layer in self.layer_manager.layers:
                         if layer.layer_type == "image":
-                            print(
-                                f"DEBUG: 处理图像图层: {layer.name}, 图像数量: {len(layer.images)}"
-                            )
+                            print()
                             for image_data in layer.images:
                                 image_path = image_data.image_path
                                 print(f"DEBUG: 图像路径: {image_path}")
@@ -1362,7 +1358,6 @@ class MapEditorManager(QObject):
                     hasattr(self, "editor_map_layer_list")
                     and self.editor_map_layer_list
                 ):
-                    print("DEBUG: 更新图层列表组件")
                     self._update_editor_map_layer_list()
 
                 # 默认选择第一个图层
@@ -1375,7 +1370,7 @@ class MapEditorManager(QObject):
                 print(f"DEBUG: 上传资源列表数量: {len(self.uploaded_resources)}")
 
                 # 更新资源列表和画布
-                print("DEBUG: 更新资源列表和画布")
+
                 self._update_res_list_display()
                 # 地图加载完成后强制完整渲染一次，确保所有瓦片都显示
                 self._render_full_map()
@@ -1401,7 +1396,6 @@ class MapEditorManager(QObject):
                 self._update_tile_size_display()
                 print("=== 地图加载完成 ===")
             else:
-                print("DEBUG: 加载地图失败")
                 self.error_occurred.emit("加载地图失败")
 
     def save_map(self):
@@ -1412,7 +1406,6 @@ class MapEditorManager(QObject):
 
         # 如果没有正在编辑的地图，直接返回，不创建新地图
         if not self.current_map_path:
-            print("DEBUG: 没有正在编辑的地图，跳过保存")
             return False
 
         # 使用现有地图路径
@@ -1487,7 +1480,7 @@ class MapEditorManager(QObject):
                         )
 
             # 2. 从图像图层中收集图像资源
-            print("DEBUG: 2. 从图像图层中收集图像资源")
+
             for layer in self.layer_manager.layers:
                 if layer.layer_type == "image":
                     print(
@@ -1641,10 +1634,10 @@ class MapEditorManager(QObject):
                 )
 
             # 更新地图模型的tile_sets
-            print("DEBUG: 更新地图模型的tile_sets")
+
             self.map_model.map_data["tile_sets"] = all_resources
             # 保存每个图层的资源索引范围
-            print("DEBUG: 保存每个图层的资源索引范围")
+
             self.map_model.map_data["layer_resources_map"] = layer_resources_map
             # 确保layers字段存在
             if "layers" not in self.map_model.map_data:
@@ -1668,10 +1661,11 @@ class MapEditorManager(QObject):
                     f"DEBUG: 保存后地图数据 - 图层资源映射: {self.map_model.map_data.get('layer_resources_map', {})}"
                 )
             else:
-                print("DEBUG: 保存地图失败")
                 self.error_occurred.emit("保存地图失败")
         else:
-            print("DEBUG: 取消保存")
+            # 取消保存
+            pass
+
         print("=== 保存地图操作完成 ===")
 
     def undo(self):
@@ -2001,31 +1995,24 @@ class MapEditorManager(QObject):
                         print(f"移除图像项错误: {e}")
 
             # 渲染新图像
-            print(f"DEBUG: 开始渲染图像图层，图像数量: {len(layer.images)}")
+
             for i, image_data in enumerate(layer.images):
-                print(
-                    f"DEBUG: 处理图像 {i}: 路径={image_data.image_path}, pixmap={image_data.pixmap}"
-                )
+                print()
                 if image_data.pixmap:
-                    print(
-                        f"DEBUG: 图像 {i} 的 pixmap 尺寸: {image_data.pixmap.width()}x{image_data.pixmap.height()}"
-                    )
+                    print()
                     # 创建图像项
                     pixmap_item = QGraphicsPixmapItem(image_data.pixmap)
 
                     # 应用变换
                     # 注意：由于 QGraphicsItem 的变换是相对于 item 原点的，我们需要直接设置 item 的位置
                     # 而不是通过变换来设置位置
-                    print(
-                        f"DEBUG: 渲染图像 - 位置: {image_data.position}, 缩放: {image_data.scale}"
-                    )
+                    print()
                     pixmap_item.setPos(image_data.position)
                     # 然后应用缩放和旋转
                     transform = QTransform()
                     transform.scale(image_data.scale_x, image_data.scale_y)
                     transform.rotate(image_data.rotation)
                     pixmap_item.setTransform(transform)
-                    print(f"DEBUG: 图像项场景位置: {pixmap_item.scenePos()}")
 
                     # 设置透明度
                     pixmap_item.setOpacity(image_data.opacity)
@@ -2735,7 +2722,6 @@ class MapEditorManager(QObject):
             # 获取当前图层
             current_layer = self.layer_manager.get_current_layer()
             if not current_layer:
-                print("DEBUG: 当前图层不存在")
                 return
 
             # 获取当前图层的资源列表
@@ -2808,7 +2794,6 @@ class MapEditorManager(QObject):
             # 获取纯粹的网格索引 (0, 1, 2...)
             grid_pos = self._get_grid_pos_from_scene_pos(scene_pos, tile_id)
             if grid_pos is None:
-                print("DEBUG: 无法获取网格位置")
                 return
             gx, gy = grid_pos
             print(f"DEBUG: 网格坐标: ({gx}, {gy})")
@@ -2827,7 +2812,6 @@ class MapEditorManager(QObject):
                 current_tile_id = current_layer.get_tile(gx, gy)
                 print(f"DEBUG: 当前位置图块ID: {current_tile_id}, 新图块ID: {tile_id}")
                 if current_tile_id == tile_id:
-                    print("DEBUG: 图块ID相同，跳过绘制")
                     return
 
                 # 记录日志 (使用网格坐标)
@@ -2854,7 +2838,7 @@ class MapEditorManager(QObject):
                 return
             elif current_layer.layer_type == "image":
                 # 图像图层：不直接创建图像，而是通过拖拽功能创建
-                print("DEBUG: 图像图层不支持直接绘制，使用拖拽功能添加图像")
+
                 return
 
         except Exception as e:
@@ -3221,13 +3205,11 @@ class MapEditorManager(QObject):
 
             # 检查参数有效性
             if resource_index < 0:
-                print("DEBUG: 资源索引无效: {resource_index}")
                 return
 
             # 获取当前图层
             current_layer = self.layer_manager.get_current_layer()
             if not current_layer:
-                print("DEBUG: 当前图层不存在")
                 return
 
             # 获取当前图层的资源列表
@@ -3952,9 +3934,11 @@ class MapEditorManager(QObject):
 
         if hasattr(self, "ui") and hasattr(self.ui, "map_collision"):
             if current_layer.layer_type == "image":
-                print("DEBUG: 切换到图像图层，保持当前碰撞属性状态")
+                # 切换到图像图层，保持当前碰撞属性状态
+                pass
             else:
-                print("DEBUG: 切换到绘制图层，保持当前碰撞属性状态")
+                # 切换到绘制图层，保持当前碰撞属性状态
+                pass
 
         if not same_layer:
             layer_resources = self.layer_resources.get(current_layer.layer_id, [])
@@ -3979,7 +3963,6 @@ class MapEditorManager(QObject):
 
         # 检查UI元素是否存在
         if not hasattr(self, "ui"):
-            print("DEBUG: UI对象不存在，跳过工具栏状态更新")
             return
 
         # 检查图层类型
@@ -4126,7 +4109,7 @@ class MapEditorManager(QObject):
             print(f"DEBUG: 添加图像到图层后, 图层图像数量: {len(current_layer.images)}")
 
             # 重新渲染图像图层
-            print(f"DEBUG: 开始渲染图像图层")
+
             layer_index = self.layer_manager.layers.index(current_layer)
             self._render_image_layer(current_layer, layer_index)
 
@@ -4401,13 +4384,11 @@ class MapEditorManager(QObject):
 
             # 检查参数有效性
             if resource_info is None:
-                print("DEBUG: resource_info 为 None，选择图块失败")
                 return
 
             # 获取当前图层
             current_layer = self.layer_manager.get_current_layer()
             if not current_layer:
-                print("DEBUG: 当前图层不存在，选择图块失败")
                 return
 
             # 获取当前图层的资源列表
@@ -4432,7 +4413,6 @@ class MapEditorManager(QObject):
 
                 # 确保资源的碰撞数据结构存在
                 if "collisions" not in resource_info:
-                    print("DEBUG: 资源中不存在 collisions 字段，创建新的")
                     resource_info["collisions"] = []
                 # 确保collisions数组足够大
                 while len(resource_info["collisions"]) <= tile_index:
@@ -4454,7 +4434,8 @@ class MapEditorManager(QObject):
                         )
                         print(f"DEBUG: 从地图模型同步碰撞形状数据: {collision_shape}")
                 else:
-                    print("DEBUG: map_model 不存在")
+                    # map_model 不存在
+                    pass
 
                 # 打印当前内存中的碰撞形状类型
                 if "collisions" in resource_info and tile_index < len(
@@ -4468,7 +4449,8 @@ class MapEditorManager(QObject):
                     else:
                         print(f"DEBUG: 当前内存中的碰撞形状类型是: default rectangle")
                 else:
-                    print("DEBUG: 无法访问碰撞数据")
+                    # 无法访问碰撞数据
+                    pass
 
                 # 更新碰撞编辑器显示
                 print(
@@ -4490,15 +4472,12 @@ class MapEditorManager(QObject):
     def _update_res_list_display(self):
         """更新资源列表显示"""
         try:
-            print("DEBUG: 开始更新资源列表显示")
             if not self.res_list_view:
-                print("DEBUG: res_list_view 不存在，返回")
                 return
 
             # 获取当前图层
             current_layer = self.layer_manager.get_current_layer()
             if not current_layer:
-                print("DEBUG: 当前图层不存在，返回")
                 return
 
             # 获取当前图层的资源列表
@@ -4511,22 +4490,21 @@ class MapEditorManager(QObject):
             print(f"DEBUG: 当前图层的资源数量: {len(layer_resources)}")
 
             # 清理旧的资源项和图块项
-            print("DEBUG: 清理旧的资源项和图块项")
+
             self._clear_resource_items()
 
             # 获取旧场景并清理
-            print("DEBUG: 获取旧场景并清理")
+
             old_scene = self.res_list_view.scene()
             if old_scene:
                 # 清除旧场景中的所有项
                 old_scene.clear()
-                print("DEBUG: 旧场景已清理")
 
             # 创建场景
-            print("DEBUG: 创建新场景")
+
             scene = QGraphicsScene()
             # 设置新场景到资源列表视图
-            print("DEBUG: 设置场景到资源列表视图")
+
             self.res_list_view.setScene(scene)
 
             # 添加资源到场景
@@ -4569,9 +4547,7 @@ class MapEditorManager(QObject):
                         # 修复：兼容图片尺寸小于图块尺寸的情况
                         tiles_per_row = max(1, image_width // tile_size)
                         tiles_per_col = max(1, image_height // tile_size)
-                        print(
-                            f"DEBUG: 图块集合 - 行列数: {tiles_per_row}x{tiles_per_col}"
-                        )
+                        print()
 
                     # 计算显示区域大小 - 撑满256宽度
                     display_width = 256  # 整个视图宽度
@@ -4582,12 +4558,10 @@ class MapEditorManager(QObject):
                         scale = 1.0  # 保持原始尺寸
                     else:
                         scale = display_width / image_width  # 大于等于256宽度的图片缩放
-                    print(f"DEBUG: 缩放比例: {scale}")
 
                     # 创建缩放后的图片
                     scaled_width = int(image_width * scale)
                     scaled_height = int(image_height * scale)
-                    print(f"DEBUG: 缩放后尺寸: {scaled_width}x{scaled_height}")
 
                     scaled_pixmap = original_pixmap.scaled(
                         scaled_width,
@@ -4599,7 +4573,6 @@ class MapEditorManager(QObject):
                     # 计算显示位置
                     pixmap_x = 0
                     pixmap_y = y_pos
-                    print(f"DEBUG: 图片位置: ({pixmap_x}, {pixmap_y})")
 
                     # 添加缩放后的图片
                     pixmap_item = QGraphicsPixmapItem(scaled_pixmap)
@@ -4611,9 +4584,7 @@ class MapEditorManager(QObject):
                         for row in range(tiles_per_col):
                             for col in range(tiles_per_row):
                                 tile_index = row * tiles_per_row + col
-                                print(
-                                    f"DEBUG: 创建图块 {tile_index} (行: {row}, 列: {col})"
-                                )
+                                print()
 
                                 # 计算图块在原始图片中的位置
                                 tile_x = col * tile_size
@@ -4644,7 +4615,7 @@ class MapEditorManager(QObject):
                                         QBrush(QColor(100, 149, 237, 50))
                                     )
                                     tile_rect.setPen(Qt.NoPen)
-                                    print(f"DEBUG: 图块 {tile_index} 被选中")
+
                                 else:
                                     tile_rect.setPen(QPen(QColor(200, 200, 200), 1))
                                     tile_rect.setBrush(Qt.NoBrush)
@@ -4660,9 +4631,7 @@ class MapEditorManager(QObject):
                                 scene.addItem(tile_item)
                                 # 添加到资源列表图块项管理列表
                                 self.resource_tile_items[(i, tile_index)] = tile_item
-                                print(
-                                    f"DEBUG: 添加图块项到管理列表，键: ({i}, {tile_index})"
-                                )
+                                print()
                     else:
                         # 单张图片模式，创建可点击的资源项
                         # 直接创建 ResourceItem，不需要额外的 QGraphicsRectItem
@@ -4688,7 +4657,6 @@ class MapEditorManager(QObject):
 
                     # 更新位置 - 根据实际图片高度调整间距
                     y_pos += scaled_height
-                    print(f"DEBUG: 更新位置到: {y_pos}")
 
                 except Exception as e:
                     print(f"创建资源缩略图失败: {e}")
@@ -4699,7 +4667,6 @@ class MapEditorManager(QObject):
             # 设置场景大小
             scene_height = max(500, y_pos)
             scene.setSceneRect(0, 0, 256, scene_height)
-            print(f"DEBUG: 设置场景大小: 256x{scene_height}")
 
             # 设置场景到视图
             self.res_list_view.setScene(scene)
@@ -4707,7 +4674,7 @@ class MapEditorManager(QObject):
             self.res_list_view.update()  # 添加 update() 方法调用，确保视图刷新
             # 自动滚动到顶部，确保用户可以看到导入的图片
             self.res_list_view.verticalScrollBar().setValue(0)
-            print("DEBUG: 资源列表显示更新完成")
+
         except Exception as e:
             print(f"更新资源列表显示错误: {e}")
             import traceback
@@ -4786,7 +4753,7 @@ class MapEditorManager(QObject):
 
     def refresh_resources_from_model(self):
         """强制从 MapDataModel 同步最新的碰撞数据到 UI 缓存"""
-        print("DEBUG: 从地图模型同步资源数据")
+
         # 遍历所有图层的资源，从地图模型获取最新的碰撞形状数据并更新到资源池缓存
         if self.map_model:
             for layer_id, layer_resources in self.layer_resources.items():
@@ -4827,7 +4794,6 @@ class MapEditorManager(QObject):
                                         print(
                                             f"DEBUG: 清除碰撞形状数据 - 资源索引: {resource_index}, 图块索引: {tile_index}"
                                         )
-        print("DEBUG: 资源数据同步完成")
 
         # 更新按钮状态
         if hasattr(self, "ui"):

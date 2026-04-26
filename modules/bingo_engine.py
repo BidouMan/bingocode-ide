@@ -320,6 +320,7 @@ class Sprite:
                 max_tile_y = math.floor(sprite_rect[3] / tile_size)
 
             # 检查范围内的每个图块
+            collision_found = False
             for tile_x in range(min_tile_x, max_tile_x + 1):
                 for tile_y in range(min_tile_y, max_tile_y + 1):
                     tile_pos = (tile_x, tile_y)
@@ -426,16 +427,41 @@ class Sprite:
                                                 )
                                                 self.vy = 0  # 撞头速度归零
                                         return  # 立即退出
-                        else:
-                            continue
-                    else:
-                        continue
-                else:
-                    continue
-                break
-            else:
-                continue
-            break
+
+        # 地图边界碰撞检测
+        map_width = _CURRENT_MAP.get(
+            "width_px", _CURRENT_MAP.get("width", 0) * tile_size
+        )
+        map_height = _CURRENT_MAP.get(
+            "height_px", _CURRENT_MAP.get("height", 0) * tile_size
+        )
+
+        # 获取精灵的碰撞盒
+        sprite_rect = self._get_hitbox_rect()
+        if sprite_rect:
+            # 计算精灵的半宽和半高
+            half_width = (sprite_rect[2] - sprite_rect[0]) / 2
+            half_height = (sprite_rect[3] - sprite_rect[1]) / 2
+
+            # 检查地图边界
+            if axis == "x":
+                # 左边界
+                if sprite_rect[0] < 0:
+                    center_to_left = self._x - sprite_rect[0]
+                    self._x = 0 + center_to_left + 0.05
+                # 右边界
+                elif sprite_rect[2] > map_width:
+                    center_to_right = sprite_rect[2] - self._x
+                    self._x = map_width - center_to_right - 0.05
+            elif axis == "y":
+                # 上边界
+                if sprite_rect[1] < 0:
+                    center_to_top = self._y - sprite_rect[1]
+                    self._y = 0 + center_to_top + 0.05
+                # 下边界
+                elif sprite_rect[3] > map_height:
+                    center_to_bottom = sprite_rect[3] - self._y
+                    self._y = map_height - center_to_bottom - 0.05
 
     def set_xy(self, x, y):
         """设置坐标"""
@@ -1442,7 +1468,6 @@ def load_map(map_name):
 
         print(f"✅ [BingoEngine] 加载地图: {map_name}")
         print(f"   - 地图文件: {map_file}")
-        print(f"   - 文件存在: {os.path.exists(map_file)}")
 
         if not os.path.exists(map_file):
             print(f"❌ [BingoEngine] 地图文件不存在: {map_file}")
@@ -1457,7 +1482,10 @@ def load_map(map_name):
         _CURRENT_MAP = map_model.map_data
         _MAP_MODEL = map_model
         print(f"✅ [BingoEngine] 地图加载成功: {map_name}")
-        print(f"   - 尺寸: {_CURRENT_MAP['width']}x{_CURRENT_MAP['height']}")
+        print(f"   - 实际尺寸: {_CURRENT_MAP['width']}x{_CURRENT_MAP['height']} 瓦片")
+        print(
+            f"   - 实际像素尺寸: {_CURRENT_MAP['width'] * _CURRENT_MAP.get('tile_size', 16)}x{_CURRENT_MAP['height'] * _CURRENT_MAP.get('tile_size', 16)} 像素"
+        )
         print(f"   - 图层数: {len(_CURRENT_MAP['layers'])}")
         print(
             f"   - 偏移量: ({_CURRENT_MAP.get('offset_x', 0)}, {_CURRENT_MAP.get('offset_y', 0)})"
@@ -1467,20 +1495,8 @@ def load_map(map_name):
         # 打印图层信息
         for i, layer in enumerate(_CURRENT_MAP["layers"]):
             print(f"   - 图层 {i} ({layer['name']}): {len(layer['tiles'])} 个瓦片")
-            print(f"     图层类型: {layer.get('type', 'drawing')}")
-            print(f"     图像字段: {'images' in layer}")
             if "images" in layer:
                 print(f"     图像数量: {len(layer['images'])}")
-                for img in layer["images"]:
-                    print(
-                        f"     img pos=({img.get('position')}) w={img.get('width', '?')} h={img.get('height', '?')}"
-                    )
-            # 打印 y 坐标范围
-            if layer["tiles"]:
-                all_y = [y for (x, y) in layer["tiles"].keys()]
-                print(
-                    f"     tiles y range: [{min(all_y)}, {max(all_y)}], count={len(all_y)}"
-                )
 
         # 发送场景更新指令，更新SceneRect
         tile_size = _CURRENT_MAP.get("tile_size", 16)
@@ -1893,8 +1909,24 @@ def run():
             global _CAMERA_X, _CAMERA_Y
             old_camera_x = _CAMERA_X
             old_camera_y = _CAMERA_Y
-            _CAMERA_X = _FOLLOW_TARGET.x
-            _CAMERA_Y = _FOLLOW_TARGET.y
+
+            # 计算地图的像素尺寸，优先使用实际像素尺寸
+            map_width_px = _CURRENT_MAP.get("width_px", mw * tile_size)
+            map_height_px = _CURRENT_MAP.get("height_px", mh * tile_size)
+
+            # 计算屏幕的半宽和半高（640x480）
+            screen_half_width = 640 // 2
+            screen_half_height = 480 // 2
+
+            # 限制摄像机位置，确保摄像机不会移动到地图边界之外
+            _CAMERA_X = max(
+                screen_half_width,
+                min(_FOLLOW_TARGET.x, map_width_px - screen_half_width),
+            )
+            _CAMERA_Y = max(
+                screen_half_height,
+                min(_FOLLOW_TARGET.y, map_height_px - screen_half_height),
+            )
 
             # 使用跟随目标更新摄像机（IDE 端期望 tile 数量）
             _send_camera_update(_CAMERA_X, _CAMERA_Y, mw, mh, tile_size)

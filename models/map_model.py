@@ -184,24 +184,28 @@ class MapDataModel(QObject):
                 total_tiles += tile_count
             print(f"[SAVE] layers={len(self.map_data['layers'])} tiles={total_tiles}")
 
-            # 动态计算地图尺寸：根据所有图层中实际绘制的图块位置
-            min_x = float("inf")
-            max_x = -float("inf")
-            min_y = float("inf")
-            max_y = -float("inf")
+            # 动态计算地图尺寸：根据所有图层中实际绘制的图块位置（基于像素）
+            min_x_px = float("inf")
+            max_x_px = -float("inf")
+            min_y_px = float("inf")
+            max_y_px = -float("inf")
 
+            tile_size = self.map_data["tile_size"]
             for layer in self.map_data["layers"]:
                 ltype = layer.get("type", "drawing")
                 if ltype == "drawing":
                     for (x, y), tile_id in layer["tiles"].items():
                         if tile_id != 0:
-                            min_x = min(min_x, x)
-                            max_x = max(max_x, x)
-                            min_y = min(min_y, y)
-                            max_y = max(max_y, y)
+                            # 绘制图层：瓦片坐标转换为像素坐标
+                            px = x * tile_size
+                            py = y * tile_size
+                            min_x_px = min(min_x_px, px)
+                            max_x_px = max(max_x_px, px + tile_size)
+                            min_y_px = min(min_y_px, py)
+                            max_y_px = max(max_y_px, py + tile_size)
                 elif ltype == "image" and "images" in layer:
-                    tile_size = self.map_data["tile_size"]
                     for image in layer["images"]:
+                        # 图像图层：直接使用像素坐标
                         pos = image.get("position", [0, 0])
                         w = image.get("width", tile_size)
                         h = image.get("height", tile_size)
@@ -210,27 +214,31 @@ class MapDataModel(QObject):
                         scale_y = image.get("scale_y", scale)
                         img_right = pos[0] + w * abs(scale_x)
                         img_bottom = pos[1] + h * abs(scale_y)
-                        right_tile = int(math.ceil(img_right / tile_size))
-                        bottom_tile = int(math.ceil(img_bottom / tile_size))
-                        min_x = min(min_x, int(pos[0] // tile_size))
-                        max_x = max(max_x, right_tile)
-                        min_y = min(min_y, int(pos[1] // tile_size))
-                        max_y = max(max_y, bottom_tile)
+                        min_x_px = min(min_x_px, pos[0])
+                        max_x_px = max(max_x_px, img_right)
+                        min_y_px = min(min_y_px, pos[1])
+                        max_y_px = max(max_y_px, img_bottom)
 
-            print(f"[BOUNDS] drawing: x=[{min_x},{max_x}] y=[{min_y},{max_y}]")
+            print(
+                f"[BOUNDS] pixels: x=[{min_x_px},{max_x_px}] y=[{min_y_px},{max_y_px}]"
+            )
 
             # 如果没有绘制任何图块且没有图像，使用默认尺寸
-            if min_x == float("inf"):
+            if min_x_px == float("inf"):
                 map_width = self.map_data["width"]
                 map_height = self.map_data["height"]
                 offset_x = 0
                 offset_y = 0
             else:
-                # 地图尺寸 = 最大坐标 - 最小坐标 + 1（确保包含所有元素）
-                map_width = max_x - min_x + 1
-                map_height = max_y - min_y + 1
-                offset_x = min_x
-                offset_y = min_y
+                # 计算地图尺寸（像素）
+                map_width_px = max_x_px - min_x_px
+                map_height_px = max_y_px - min_y_px
+                # 转换为瓦片数（向上取整）
+                map_width = int(math.ceil(map_width_px / tile_size))
+                map_height = int(math.ceil(map_height_px / tile_size))
+                # 计算偏移量（瓦片坐标）
+                offset_x = int(math.floor(min_x_px / tile_size))
+                offset_y = int(math.floor(min_y_px / tile_size))
                 print(
                     f"  [SAVE] 尺寸: {map_width}x{map_height} tiles 偏移量: ({offset_x}, {offset_y})"
                 )
