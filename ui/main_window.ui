@@ -405,7 +405,7 @@
        <item>
         <widget class="QStackedWidget" name="editor_stacked">
          <property name="currentIndex">
-          <number>0</number>
+          <number>2</number>
          </property>
          <widget class="QWidget" name="editor_code_web">
           <layout class="QVBoxLayout" name="verticalLayout_5">

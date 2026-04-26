@@ -209,6 +209,8 @@ class ImageData:
     
     def to_dict(self):
         """将图像数据转换为字典"""
+        w = self.pixmap.width() if self.pixmap else 1
+        h = self.pixmap.height() if self.pixmap else 1
         return {
             "image_path": self.image_path,
             "position": [self.position.x(), self.position.y()],
@@ -217,6 +219,8 @@ class ImageData:
             "scale_x": self.scale_x,
             "scale_y": self.scale_y,
             "opacity": self.opacity,
+            "width": w,
+            "height": h,
             "collision_type": self.collision_type,
             "collision_enabled": self.collision_enabled,
             "collision_shape": self.collision_shape

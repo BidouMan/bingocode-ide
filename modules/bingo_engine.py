@@ -319,17 +319,6 @@ class Sprite:
                 min_tile_y = math.floor(sprite_rect[1] / tile_size)
                 max_tile_y = math.floor(sprite_rect[3] / tile_size)
 
-                # 添加debug信息（仅保留关键信息）
-                # print(
-                #     f"DEBUG: Y轴探测范围 - 原始: [{sprite_rect[0]:.2f}, {sprite_rect[2]:.2f}]"
-                # )
-                # print(
-                #     f"DEBUG: Y轴探测范围 - 加宽: [{sprite_rect[0] - 2:.2f}, {sprite_rect[2] + 2:.2f}]"
-                # )
-                # print(
-                #     f"DEBUG: Y轴探测图块范围: x=[{min_tile_x}, {max_tile_x}], y=[{min_tile_y}, {max_tile_y}]"
-                # )
-
             # 检查范围内的每个图块
             for tile_x in range(min_tile_x, max_tile_x + 1):
                 for tile_y in range(min_tile_y, max_tile_y + 1):
@@ -1156,12 +1145,6 @@ class Sprite:
                     self._visual_offset_x = (l + r) / 2.0 - self._orig_w / 2.0
                     self._visual_offset_y = (t + b) / 2.0 - self._orig_h / 2.0
 
-                    # 添加debug信息（仅在需要时启用）
-                    # print(f"DEBUG: 内容边界框: ({l}, {t}, {r}, {b})")
-                    # print(f"DEBUG: 内容尺寸: {self._content_w}x{self._content_h}")
-                    # print(
-                    #     f"DEBUG: 视觉偏移: ({self._visual_offset_x}, {self._visual_offset_y})"
-                    # )
                 else:
                     # 全透明或无内容图
                     self._content_w, self._content_h = self._orig_w, self._orig_h
@@ -1205,12 +1188,6 @@ class Sprite:
         content_bottom = center_y + (bbox[3] - img_h / 2) * s
 
         rect = [content_left, content_top, content_right, content_bottom]
-
-        # 添加debug信息（仅在需要时启用）
-        # print(f"DEBUG: 图片尺寸: {img_w}x{img_h}")
-        # print(f"DEBUG: 内容边界框: {bbox}")
-        # print(f"DEBUG: 缩放系数: {s}")
-        # print(f"DEBUG: 碰撞盒: {[round(x, 2) for x in rect]}")
 
         return rect
 
@@ -1429,10 +1406,6 @@ def _send_camera_update(x, y, map_w, map_h, tile_size=16):
             "tile_size": tile_size,
         },
     }
-    print(
-        f"[CAMERA] x={x:.1f} y={y:.1f} map_w={map_w} map_h={map_h} tile={tile_size}",
-        flush=True,
-    )
     print(json.dumps(camera_packet), flush=True)
 
 
@@ -1494,15 +1467,20 @@ def load_map(map_name):
         # 打印图层信息
         for i, layer in enumerate(_CURRENT_MAP["layers"]):
             print(f"   - 图层 {i} ({layer['name']}): {len(layer['tiles'])} 个瓦片")
-            if layer.get("type") == "image" and "images" in layer:
+            print(f"     图层类型: {layer.get('type', 'drawing')}")
+            print(f"     图像字段: {'images' in layer}")
+            if "images" in layer:
                 print(f"     图像数量: {len(layer['images'])}")
-            # 打印前5个瓦片的坐标和ID
-            tile_count = 0
-            for (x, y), tile_id in list(layer["tiles"].items())[:5]:
-                print(f"     [{x}, {y}] -> ID: {tile_id}")
-                tile_count += 1
-            if tile_count > 0 and len(layer["tiles"]) > 5:
-                print(f"     ... 还有 {len(layer['tiles']) - 5} 个瓦片")
+                for img in layer["images"]:
+                    print(
+                        f"     img pos=({img.get('position')}) w={img.get('width', '?')} h={img.get('height', '?')}"
+                    )
+            # 打印 y 坐标范围
+            if layer["tiles"]:
+                all_y = [y for (x, y) in layer["tiles"].keys()]
+                print(
+                    f"     tiles y range: [{min(all_y)}, {max(all_y)}], count={len(all_y)}"
+                )
 
         # 发送场景更新指令，更新SceneRect
         tile_size = _CURRENT_MAP.get("tile_size", 16)
