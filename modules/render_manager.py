@@ -461,60 +461,39 @@ class RenderManager(QObject):
 
         print(f"[IDE_SCENE] sceneRect=({width},{height}) vp={self.view.viewport().width()}x{self.view.viewport().height()}")
 
-        # 更新场景大小为实际地图像素尺寸，让摄像机 centerOn 有完整滚动范围
-        self.scene.setSceneRect(0, 0, width, height)
+        # 使用 world_bounds 设置场景范围，支持负坐标区域
+        world_bounds = data.get("world_bounds", {"left": 0, "top": 0, "right": width, "bottom": height})
+        margin = max(640, 480)
+        self.scene.setSceneRect(
+            world_bounds["left"] - margin,
+            world_bounds["top"] - margin,
+            world_bounds["right"] - world_bounds["left"] + margin * 2,
+            world_bounds["bottom"] - world_bounds["top"] + margin * 2
+        )
 
         # 重新计算适配（640x480 窗口缩放到视口尺寸）
         self.apply_fit()
 
-        # 初始摄像机居中
-        self.view.centerOn(width / 2, height / 2)
+        # 初始摄像机居中到地图中心
+        cx = (world_bounds["left"] + world_bounds["right"]) / 2
+        cy = (world_bounds["top"] + world_bounds["bottom"]) / 2
+        self.view.centerOn(cx, cy)
 
     def handle_camera_update(self, data):
         """处理摄像机更新指令"""
         x = data.get("x", 320)
         y = data.get("y", 240)
-        map_width = data.get("map_width", 0)
-        map_height = data.get("map_height", 0)
-        tile_size = data.get("tile_size", 16)
 
-        # 调用高性能摄像机更新方法
-        self.update_camera(x, y, map_width, map_height, tile_size)
+        # 调用摄像机更新方法（边界夹紧已在引擎端完成）
+        self.update_camera(x, y)
 
-    def update_camera(self, target_x, target_y, map_w_tiles, map_h_tiles, tile_size=16):
+    def update_camera(self, target_x, target_y):
         """
         高性能摄像机更新
-        :param target_x, target_y: 玩家当前的像素坐标
-        :param map_w_tiles, map_h_tiles: 地图总行列数（用于动态计算边界）
-        :param tile_size: 图块尺寸，默认值为16
+        边界夹紧已在引擎端完成，渲染端只负责 centerOn
+        :param target_x, target_y: 摄像机中心的世界像素坐标
         """
-        map_px_w = map_w_tiles * tile_size
-        map_px_h = map_h_tiles * tile_size
-
-        view_w, view_h = 640, 480
-
-        # 1. 计算摄像机中心点允许滑动的极限区间
-        # 当地图小于等于窗口时，摄像机可以自由跟随玩家
-        if map_px_w <= view_w:
-            limit_min_x = 0
-            limit_max_x = map_px_w
-        else:
-            limit_min_x = view_w / 2
-            limit_max_x = map_px_w - view_w / 2
-
-        if map_px_h <= view_h:
-            limit_min_y = 0
-            limit_max_y = map_px_h
-        else:
-            limit_min_y = view_h / 2
-            limit_max_y = map_px_h - view_h / 2
-
-        # 2. 限制计算 (Clamping)
-        cam_x = max(limit_min_x, min(target_x, limit_max_x))
-        cam_y = max(limit_min_y, min(target_y, limit_max_y))
-
-        # 3. 执行底层视口居中（由 Qt C++ 内核处理，对老电脑极其友好）
-        self.view.centerOn(cam_x, cam_y)
+        self.view.centerOn(target_x, target_y)
 
     def play_animation(self, sprite_id, data):
         """播放动画"""
@@ -763,9 +742,9 @@ class RenderManager(QObject):
                 # 更新地图尺寸
                 x = tile_data.get("x", 0)
                 y = tile_data.get("y", 0)
-                min_x = min(min_x, x - tile_size)
+                min_x = min(min_x, x)
                 max_x = max(max_x, x + tile_size)
-                min_y = min(min_y, y - tile_size)
+                min_y = min(min_y, y)
                 max_y = max(max_y, y + tile_size)
 
             # 确保图层大小至少为场景大小
@@ -826,11 +805,11 @@ class RenderManager(QObject):
                     if tile_pixmap.isNull():
                         continue
 
-                    # 计算绘制位置（使用相对坐标）
+                    # 计算绘制位置（使用相对坐标，左上角定位）
                     x = tile_data.get("x", 0)
                     y = tile_data.get("y", 0)
-                    draw_x = x - min_x - tile_size // 2
-                    draw_y = y - min_y - tile_size // 2
+                    draw_x = x - min_x
+                    draw_y = y - min_y
 
                     # 绘制瓦片到图层像素图
                     painter.drawPixmap(draw_x, draw_y, tile_pixmap)

@@ -429,11 +429,8 @@ class Sprite:
                                         return  # 立即退出
 
         # 地图边界碰撞检测
-        map_width = _CURRENT_MAP.get(
-            "width_px", _CURRENT_MAP.get("width", 0) * tile_size
-        )
-        map_height = _CURRENT_MAP.get(
-            "height_px", _CURRENT_MAP.get("height", 0) * tile_size
+        bounds = _CURRENT_MAP.get(
+            "world_bounds", {"left": 0, "top": 0, "right": 640, "bottom": 480}
         )
 
         # 获取精灵的碰撞盒
@@ -443,25 +440,25 @@ class Sprite:
             half_width = (sprite_rect[2] - sprite_rect[0]) / 2
             half_height = (sprite_rect[3] - sprite_rect[1]) / 2
 
-            # 检查地图边界
+            # 检查地图边界（使用 world_bounds，支持负坐标）
             if axis == "x":
                 # 左边界
-                if sprite_rect[0] < 0:
+                if sprite_rect[0] < bounds["left"]:
                     center_to_left = self._x - sprite_rect[0]
-                    self._x = 0 + center_to_left + 0.05
+                    self._x = bounds["left"] + center_to_left + 0.05
                 # 右边界
-                elif sprite_rect[2] > map_width:
+                elif sprite_rect[2] > bounds["right"]:
                     center_to_right = sprite_rect[2] - self._x
-                    self._x = map_width - center_to_right - 0.05
+                    self._x = bounds["right"] - center_to_right - 0.05
             elif axis == "y":
                 # 上边界
-                if sprite_rect[1] < 0:
+                if sprite_rect[1] < bounds["top"]:
                     center_to_top = self._y - sprite_rect[1]
-                    self._y = 0 + center_to_top + 0.05
+                    self._y = bounds["top"] + center_to_top + 0.05
                 # 下边界
-                elif sprite_rect[3] > map_height:
+                elif sprite_rect[3] > bounds["bottom"]:
                     center_to_bottom = sprite_rect[3] - self._y
-                    self._y = map_height - center_to_bottom - 0.05
+                    self._y = bounds["bottom"] - center_to_bottom - 0.05
 
     def set_xy(self, x, y):
         """设置坐标"""
@@ -1420,17 +1417,20 @@ def get_main_player():
     return None
 
 
-def _send_camera_update(x, y, map_w, map_h, tile_size=16):
+def _send_camera_update(x, y, world_bounds=None):
     """发送摄像机更新指令到IDE"""
+    data = {
+        "x": x,
+        "y": y,
+    }
+    if world_bounds:
+        data["limit_left"] = world_bounds["left"]
+        data["limit_right"] = world_bounds["right"]
+        data["limit_top"] = world_bounds["top"]
+        data["limit_bottom"] = world_bounds["bottom"]
     camera_packet = {
         "type": "CAMERA_UPDATE",
-        "data": {
-            "x": x,
-            "y": y,
-            "map_width": map_w,
-            "map_height": map_h,
-            "tile_size": tile_size,
-        },
+        "data": data,
     }
     print(json.dumps(camera_packet), flush=True)
 
@@ -1503,13 +1503,62 @@ def load_map(map_name):
         map_width_px = _CURRENT_MAP["width"] * tile_size
         map_height_px = _CURRENT_MAP["height"] * tile_size
 
+        # 计算地图的世界像素边界（world_bounds）
+        all_tile_positions = []
+        all_image_bounds = []
+        for layer in _CURRENT_MAP.get("layers", []):
+            for (x, y), tile_id in layer.get("tiles", {}).items():
+                if tile_id > 0:
+                    all_tile_positions.append((x, y))
+            if layer.get("type") == "image" and "images" in layer:
+                for image in layer["images"]:
+                    pos = image.get("position", [0, 0])
+                    w = image.get("width", tile_size)
+                    h = image.get("height", tile_size)
+                    all_image_bounds.append((pos[0], pos[1], pos[0] + w, pos[1] + h))
+
+        if all_tile_positions:
+            min_gx = min(p[0] for p in all_tile_positions)
+            max_gx = max(p[0] for p in all_tile_positions)
+            min_gy = min(p[1] for p in all_tile_positions)
+            max_gy = max(p[1] for p in all_tile_positions)
+            tile_bounds_left = min_gx * tile_size
+            tile_bounds_top = min_gy * tile_size
+            tile_bounds_right = (max_gx + 1) * tile_size
+            tile_bounds_bottom = (max_gy + 1) * tile_size
+        else:
+            tile_bounds_left = 0
+            tile_bounds_top = 0
+            tile_bounds_right = 640
+            tile_bounds_bottom = 480
+
+        all_left = [tile_bounds_left] + [b[0] for b in all_image_bounds]
+        all_top = [tile_bounds_top] + [b[1] for b in all_image_bounds]
+        all_right = [tile_bounds_right] + [b[2] for b in all_image_bounds]
+        all_bottom = [tile_bounds_bottom] + [b[3] for b in all_image_bounds]
+
+        # world_bounds 必须包含 (0,0) 到 (640,480) 的区域
+        # 因为编辑器中游戏窗口参考框从 (0,0) 开始
+        # 摄像机需要能显示这个区域
+        world_bounds = {
+            "left": min(min(all_left), 0),
+            "top": min(min(all_top), 0),
+            "right": max(max(all_right), 640),
+            "bottom": max(max(all_bottom), 480),
+        }
+        _CURRENT_MAP["world_bounds"] = world_bounds
+
         print(
-            f"[SCENE] map_tiles=({_CURRENT_MAP['width']},{_CURRENT_MAP['height']}) map_px=({map_width_px},{map_height_px}) ts={tile_size}"
+            f"[SCENE] map_tiles=({_CURRENT_MAP['width']},{_CURRENT_MAP['height']}) map_px=({map_width_px},{map_height_px}) ts={tile_size} bounds=({world_bounds['left']},{world_bounds['top']},{world_bounds['right']},{world_bounds['bottom']})"
         )
 
         scene_update_packet = {
             "type": "SCENE_UPDATE",
-            "data": {"width": map_width_px, "height": map_height_px},
+            "data": {
+                "width": map_width_px,
+                "height": map_height_px,
+                "world_bounds": world_bounds,
+            },
         }
         print(json.dumps(scene_update_packet), flush=True)
 
@@ -1724,16 +1773,16 @@ def _render_map():
                     tile_set = _CURRENT_MAP["tile_sets"][resource_index]
                     tile_set_size = tile_set.get("tile_width", tile_size)
 
-                # 计算瓦片在屏幕上的位置 - 使用地图的全局tile_size（格子大小）
-                # 这样图块始终在原来的格子位置上，不受图块大小变化影响
-                screen_x = x * tile_size + tile_size // 2
-                screen_y = y * tile_size + tile_size // 2
+                # 计算瓦片在世界坐标中的位置 - 左上角定位
+                # 与编辑器画布一致：setPos(x * tile_size, y * tile_size)
+                world_x = x * tile_size
+                world_y = y * tile_size
 
                 # 添加到批量渲染列表
                 tile_data = {
                     "id": sprite_id,
-                    "x": screen_x,
-                    "y": screen_y,
+                    "x": world_x,
+                    "y": world_y,
                     "angle": 0,
                     "scale": 1.0,
                     "scale_x": 1.0,
@@ -1900,38 +1949,32 @@ def run():
 
         # 更新摄像机位置
         if _CURRENT_MAP and _FOLLOW_TARGET:
-            # 地图像素尺寸
-            tile_size = _CURRENT_MAP["tile_size"]
-            mw = _CURRENT_MAP.get("width", 0)
-            mh = _CURRENT_MAP.get("height", 0)
-
             # 更新摄像机位置
             global _CAMERA_X, _CAMERA_Y
             old_camera_x = _CAMERA_X
             old_camera_y = _CAMERA_Y
 
-            # 计算地图的像素尺寸，优先使用实际像素尺寸
-            map_width_px = _CURRENT_MAP.get("width_px", mw * tile_size)
-            map_height_px = _CURRENT_MAP.get("height_px", mh * tile_size)
+            # 获取地图的世界像素边界
+            bounds = _CURRENT_MAP.get(
+                "world_bounds", {"left": 0, "top": 0, "right": 640, "bottom": 480}
+            )
+            view_w, view_h = 640, 480
 
-            # 计算屏幕的半宽和半高（640x480）
-            screen_half_width = 640 // 2
-            screen_half_height = 480 // 2
-
-            # 限制摄像机位置，确保摄像机不会移动到地图边界之外
+            # 边界夹紧（参考 Godot Camera2D）
             _CAMERA_X = max(
-                screen_half_width,
-                min(_FOLLOW_TARGET.x, map_width_px - screen_half_width),
+                bounds["left"] + view_w / 2,
+                min(_FOLLOW_TARGET.x, bounds["right"] - view_w / 2),
             )
             _CAMERA_Y = max(
-                screen_half_height,
-                min(_FOLLOW_TARGET.y, map_height_px - screen_half_height),
+                bounds["top"] + view_h / 2,
+                min(_FOLLOW_TARGET.y, bounds["bottom"] - view_h / 2),
             )
 
-            # 使用跟随目标更新摄像机（IDE 端期望 tile 数量）
-            _send_camera_update(_CAMERA_X, _CAMERA_Y, mw, mh, tile_size)
+            # 使用跟随目标更新摄像机
+            _send_camera_update(_CAMERA_X, _CAMERA_Y, bounds)
 
             # 只在摄像机位置变化较大时重新渲染地图，避免频繁渲染
+            tile_size = _CURRENT_MAP.get("tile_size", 16)
             if (
                 abs(_CAMERA_X - old_camera_x) >= tile_size // 2
                 or abs(_CAMERA_Y - old_camera_y) >= tile_size // 2
