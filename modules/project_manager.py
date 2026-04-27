@@ -16,13 +16,9 @@ class ProjectManager:
 
     def mark_code_dirty(self, dirty=True):
         self._code_dirty = dirty
-        if dirty:
-            print("📝 [ProjectManager] 代码状态已变脏")
 
     def mark_resource_dirty(self, dirty=True):
         self._resource_dirty = dirty
-        if dirty:
-            print("📦 [ProjectManager] 资源状态已变脏")
         
     def reset_dirty(self):
         self._code_dirty = False

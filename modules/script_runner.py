@@ -49,27 +49,21 @@ class ScriptRunner:
 
     def stop_script(self,is_exiting=False):
         """强制停止并收回控制台"""
-       
-        # 1. 停止数据拉取
-        if self.console_mgr.pull_timer.isActive():
-            self.console_mgr.pull_timer.stop()
 
-        # 2. 强杀进程
+        # 1. 强杀进程
         if self.console_mgr.process and self.console_mgr.process.state() != QProcess.NotRunning:
-            self.console_mgr.process.kill() 
+            self.console_mgr.process.kill()
             self.console_mgr.process.waitForFinished(300)
-        # 🚀 如果是正在退出程序，跳过所有 UI 动画和属性设置
         if is_exiting:
             return
-            
-        # 3. 🚀 【新增】命令控制台执行收回动画
-        # 这样点击 stop 后，控制台会自动滑回去
+
+        # 2. 命令控制台执行收回动画
         self.console_mgr.anim_console(show=False)
-        
-        # 4. 🚀 【新增】清空控制台内容 (如果你希望停止后立即清空的话)
+
+        # 3. 清空控制台内容
         self.console_mgr.output.clear()
 
-        # 5. 恢复按钮状态
+        # 4. 恢复按钮状态
         self.set_run_btn_visual(False)
 
     def cleanup_temp_files(self):

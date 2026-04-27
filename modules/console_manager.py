@@ -22,13 +22,9 @@ class ConsoleManager(QObject):
         self.console_container.setMinimumHeight(0)
 
         self.process = QProcess(self) 
-        # 🚀 增加标准错误捕获
         self.process.readyReadStandardError.connect(self.handle_stderr)
+        self.process.readyReadStandardOutput.connect(self._pull_output)
         self.process.finished.connect(self._on_process_finished)
-
-        self.pull_timer = QTimer(self)
-        self.pull_timer.setInterval(16)
-        self.pull_timer.timeout.connect(self._pull_output)
 
     def run_file(self, file_path):
         """统一后的文件运行入口"""
@@ -59,14 +55,7 @@ class ConsoleManager(QObject):
         self.process.setProcessEnvironment(env)
         
         python_path = sys.executable
-        # 🚀 使用 -u 强制无缓冲输出
         self.process.start(python_path, ["-u", file_path])
-        
-        if hasattr(self, 'pull_timer'):
-            self.pull_timer.start()
-            # 🚀 增强：立刻尝试拉取，防止瞬间崩溃被遗漏
-            QTimer.singleShot(10, self._pull_output)
-            QTimer.singleShot(100, self._pull_output)
 
     def _pull_output(self):
         if not self.process: return
@@ -106,16 +95,10 @@ class ConsoleManager(QObject):
             self.append_text(f"❌ [ERROR] {text}")
 
     def _on_process_finished(self):
-        if hasattr(self, 'pull_timer'):
-            self.pull_timer.stop()
-            
-        # 🚀 检查一次是否有残留数据，但不要在死循环被杀后处理太多
-        # 我们只做最后一次轻量拉取
         try:
-            self._pull_output() 
+            self._pull_output()
         except:
             pass
-            
         self.process_finished.emit()
 
 

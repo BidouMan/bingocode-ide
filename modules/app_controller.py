@@ -503,13 +503,10 @@ class AppController:
     def _send_to_engine(self, msg):
         """发送消息到子进程"""
         process = self.console_manager.process
-        # 🚀 增加 check: 确保 process 存在且通道未关闭
         if process and process.state() == QProcess.Running:
             try:
                 full_msg = f"{msg}\n"
                 process.write(full_msg.encode("utf-8"))
-                # 必须 flush，否则数据只在内存里
-                process.waitForBytesWritten(5)
             except Exception as e:
                 pass
 

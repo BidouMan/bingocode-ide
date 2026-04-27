@@ -7,7 +7,7 @@ from PySide6.QtGui import (QColor, QFont, QSyntaxHighlighter, QTextCharFormat,
                            QPainter, QStandardItemModel, 
                            QStandardItem, QKeyEvent, QTextCursor, QTextBlockFormat,QPalette,
                            QFontDatabase, QPen,QIcon)
-from PySide6.QtCore import Qt, QRect, Property,QTimer,QPoint
+from PySide6.QtCore import Qt, QRect, Property,QTimer,QPoint,QThread,Signal
 
 def get_bingo_apis():
     try:
@@ -44,6 +44,52 @@ def get_resource_path(relative_path):
     if hasattr(sys, '_MEIPASS'):
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.join(os.path.abspath("."), relative_path)
+
+class JediWorker(QThread):
+    completion_ready = Signal(list)
+    names_ready = Signal(set)
+
+    def __init__(self):
+        super().__init__()
+        self._task = None
+
+    def request_completion(self, code, line, col):
+        self._task = ("completion", code, line, col)
+        if not self.isRunning():
+            self.start()
+
+    def request_names(self, code):
+        self._task = ("names", code)
+        if not self.isRunning():
+            self.start()
+
+    def run(self):
+        if not self._task:
+            return
+        task_type = self._task[0]
+        code = self._task[1]
+        try:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            modules_path = os.path.join(current_dir, "modules")
+            project = jedi.Project(current_dir, sys_path=sys.path + [modules_path])
+
+            if task_type == "completion":
+                prefix = "from bingo_engine import *\n"
+                full_code = prefix + code
+                line_adj = self._task[2] + 1 + 1
+                col = self._task[3]
+                script = jedi.Script(full_code, path="main.py", project=project)
+                comps = script.complete(line_adj, col)
+                filtered = [c for c in comps[:20] if not c.name.startswith('__')]
+                self.completion_ready.emit(filtered)
+            elif task_type == "names":
+                script = jedi.Script(code, path="main.py", project=project)
+                jedi_names = {n.name for n in script.get_names(all_scopes=True)}
+                self.names_ready.emit(jedi_names)
+        except:
+            pass
+        finally:
+            self._task = None
 
 # --- 语法高亮逻辑 (保留) ---
 class PygmentsHighlighter(QSyntaxHighlighter):
@@ -269,6 +315,12 @@ class QCodeEditor(QTextEdit):
         self.analyze_timer.setSingleShot(True)
         self.analyze_timer.timeout.connect(self.check_all_errors)
 
+        # Jedi 后台分析线程
+        self._jedi_worker = JediWorker()
+        self._jedi_worker.completion_ready.connect(self._on_completion_ready)
+        self._jedi_worker.names_ready.connect(self._on_names_ready)
+        self._pending_jedi_names = None
+
         # 初始化
         self.setup_font()
         self.update_font_metrics_cache()
@@ -291,6 +343,7 @@ class QCodeEditor(QTextEdit):
         self.error_lines.clear()
         raw_code = self.toPlainText()
         if not raw_code.strip():
+            self.line_number_area.set_blink_active(False)
             self.line_number_area.update()
             self.viewport().update()
             return
@@ -302,6 +355,9 @@ class QCodeEditor(QTextEdit):
         self._check_colon_and_indent(lines, current_line)
         # 2. 检查未定义变量（排除内部库）
         self._check_undefined_variable(lines, current_line, raw_code)
+
+        # 按需启停闪烁定时器
+        self.line_number_area.set_blink_active(bool(self.error_lines))
 
         # 刷新显示
         self.line_number_area.update()
@@ -394,18 +450,16 @@ class QCodeEditor(QTextEdit):
                 break  # 每行只报一个变量错误
 
     def _extract_defined_names(self, raw_code):
-        """提取代码中定义的变量/函数/导入的模块（新增：提取for循环迭代变量）"""
+        """提取代码中定义的变量/函数/导入的模块（新增：提取for循环迭代变量 + 跨文件扫描）"""
         defined_names = set()
         # 1. 提取导入的模块/变量
         import_pattern = re.compile(r'(?:from|import)\s+([\w\.]+)')
         from_import_pattern = re.compile(r'import\s+([\w\s,]+)')
         for line in raw_code.split('\n'):
             line = line.split('#')[0].strip()
-            # 提取 import xxx 或 from xxx import xxx 中的模块名
             import_matches = import_pattern.findall(line)
             for m in import_matches:
                 defined_names.update(m.split('.'))
-            # 提取 import a, b, c 中的变量名
             from_matches = from_import_pattern.findall(line)
             for names in from_matches:
                 for name in names.split(','):
@@ -415,7 +469,6 @@ class QCodeEditor(QTextEdit):
         assign_pattern = re.compile(r'\b([a-zA-Z_]\w*)\s*=')
         def_pattern = re.compile(r'def\s+([a-zA-Z_]\w*)')
         class_pattern = re.compile(r'class\s+([a-zA-Z_]\w*)')
-        # 新增：提取for循环迭代变量（匹配 for x in ...: / for x,y in ...: 等场景）
         for_pattern = re.compile(r'for\s+([\w,\s]+)\s+in\s+')
         for line in raw_code.split('\n'):
             line = line.split('#')[0].strip()
@@ -423,32 +476,57 @@ class QCodeEditor(QTextEdit):
             defined_names.update(def_pattern.findall(line))
             defined_names.update(class_pattern.findall(line))
             
-            # 处理for循环迭代变量
             for_match = for_pattern.search(line)
             if for_match:
-                # 拆分多变量场景（如 for x,y in ...）
                 var_part = for_match.group(1).strip()
                 for var in var_part.split(','):
                     var = var.strip()
-                    if var and var.isidentifier():  # 确保是合法变量名
+                    if var and var.isidentifier():
                         defined_names.add(var)
 
-        # 3. 补充Jedi分析（增强准确性，兼容复杂场景）
-        try:
-            import jedi
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            modules_path = os.path.join(current_dir, "modules")
-            
-            project = jedi.Project(current_dir, sys_path=sys.path + [modules_path])
-            script = jedi.Script(raw_code, path="main.py", project=project)
-            
-            # 提取所有可识别的名字
-            jedi_names = {n.name for n in script.get_names(all_scopes=True)}
-            defined_names.update(jedi_names)
-        except:
-            pass
+        # 3. 扫描同目录下其他 .py 文件的顶层变量/函数/类定义
+        if self.file_path:
+            try:
+                project_dir = os.path.dirname(os.path.abspath(self.file_path))
+                for fname in os.listdir(project_dir):
+                    if not fname.endswith('.py') or fname.startswith('.'):
+                        continue
+                    fpath = os.path.join(project_dir, fname)
+                    if os.path.abspath(fpath) == os.path.abspath(self.file_path):
+                        continue
+                    try:
+                        with open(fpath, 'r', encoding='utf-8') as f:
+                            other_code = f.read()
+                        for line in other_code.split('\n'):
+                            line = line.split('#')[0].strip()
+                            if not line:
+                                continue
+                            defined_names.update(assign_pattern.findall(line))
+                            defined_names.update(def_pattern.findall(line))
+                            defined_names.update(class_pattern.findall(line))
+                            for_match = for_pattern.search(line)
+                            if for_match:
+                                var_part = for_match.group(1).strip()
+                                for var in var_part.split(','):
+                                    var = var.strip()
+                                    if var and var.isidentifier():
+                                        defined_names.add(var)
+                    except:
+                        pass
+            except:
+                pass
+
+        # 4. 补充Jedi分析（异步：通过后台线程获取，结果暂存）
+        if self._pending_jedi_names is not None:
+            defined_names.update(self._pending_jedi_names)
+            self._pending_jedi_names = None
+        self._jedi_worker.request_names(raw_code)
             
         return defined_names
+
+    def _on_names_ready(self, names):
+        """后台线程 Jedi 名称分析结果回调"""
+        self._pending_jedi_names = names
 
     def _clean_line_for_var_check(self, line):
         """清理行内容：移除注释、字符串，避免误判"""
@@ -461,10 +539,9 @@ class QCodeEditor(QTextEdit):
         return line
 
     def handle_line_validation(self):
-        """光标行切换时触发检查"""
+        """光标行切换时只记录行号，不触发错误检查"""
         curr_line = self.textCursor().blockNumber()
         if curr_line != self.last_line_idx:
-            self.check_all_errors()
             self.last_line_idx = curr_line
 
     # --- 保留原有UI/交互逻辑 ---
@@ -607,7 +684,6 @@ class QCodeEditor(QTextEdit):
                 return
             if key in (Qt.Key_Enter, Qt.Key_Return, Qt.Key_Tab):
                 self.insert_completion()
-                QTimer.singleShot(50, self.check_all_errors)
                 return
             if key == Qt.Key_Escape:
                 self.completer.hide()
@@ -637,12 +713,12 @@ class QCodeEditor(QTextEdit):
                 return
             if key == Qt.Key_V:
                 super().keyPressEvent(event)
-                QTimer.singleShot(50, self.check_all_errors)
                 return
 
         # 自动补全括号/引号
         bracket_pairs = {'(': ')', '[': ']', '{': '}', '"': '"', "'": "'"}
         if char in bracket_pairs:
+            self.completer.hide()
             cursor = self.textCursor()
             if cursor.hasSelection():
                 cursor.insertText(f"{char}{cursor.selectedText()}{bracket_pairs[char]}")
@@ -662,7 +738,6 @@ class QCodeEditor(QTextEdit):
                     cursor.beginEditBlock()
                     for _ in range(4): cursor.deletePreviousChar()
                     cursor.endEditBlock()
-                    QTimer.singleShot(50, self.check_all_errors)
                     return
 
         # 换行自动缩进
@@ -673,7 +748,6 @@ class QCodeEditor(QTextEdit):
                 indent += 4
             super().keyPressEvent(event) 
             self.insertPlainText(" " * indent)
-            self.check_all_errors()
             return
 
         # 块缩进/反缩进
@@ -681,24 +755,21 @@ class QCodeEditor(QTextEdit):
         if cursor.hasSelection():
             if key in (Qt.Key_Tab, Qt.Key_Backtab):
                 self._handle_block_indent(key == Qt.Key_Backtab)
-                QTimer.singleShot(50, self.check_all_errors)
                 return
         else:
             if key == Qt.Key_Tab:
                 self.insertPlainText("    ")
-                QTimer.singleShot(50, self.check_all_errors)
                 return
             if key == Qt.Key_Backtab:
                 super().keyPressEvent(event)
-                QTimer.singleShot(50, self.check_all_errors)
                 return
 
         # 默认处理
         super().keyPressEvent(event)
-        self.check_all_errors()
-        # 触发代码补全
         if char.isalnum() or char == ".":
             self.trigger_completion()
+        elif char and not char.isspace():
+            self.completer.hide()
 
     def _handle_block_indent(self, is_unindent):
         cursor = self.textCursor()
@@ -736,19 +807,32 @@ class QCodeEditor(QTextEdit):
         cursor.setPosition(start); start_block = cursor.blockNumber()
         cursor.setPosition(end, QTextCursor.KeepAnchor); end_block = cursor.blockNumber()
         if cursor.columnNumber() == 0 and cursor.hasSelection(): end_block -= 1
-        
+
+        all_commented = True
+        for i in range(start_block, end_block + 1):
+            block = self.document().findBlockByNumber(i)
+            text = block.text()
+            if text.strip() and not text.lstrip().startswith('#'):
+                all_commented = False
+                break
+
         cursor.beginEditBlock()
         for i in range(start_block, end_block + 1):
             block = self.document().findBlockByNumber(i)
             cursor.setPosition(block.position())
             text = block.text()
-            if text.lstrip().startswith('#'):
-                hash_pos = text.find('#')
-                num = 2 if len(text.lstrip()) > 1 and text.lstrip()[1] == ' ' else 1
-                cursor.movePosition(QTextCursor.Right, QTextCursor.MoveAnchor, hash_pos)
-                cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, num)
-                cursor.removeSelectedText()
-            else: cursor.insertText("# ")
+            if all_commented:
+                if text.lstrip().startswith('#'):
+                    hash_pos = text.find('#')
+                    num = 2 if len(text.lstrip()) > 1 and text.lstrip()[1] == ' ' else 1
+                    cursor.movePosition(QTextCursor.Right, QTextCursor.MoveAnchor, hash_pos)
+                    cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, num)
+                    cursor.removeSelectedText()
+            else:
+                if text.strip() and not text.lstrip().startswith('#'):
+                    indent = len(text) - len(text.lstrip())
+                    cursor.movePosition(QTextCursor.Right, QTextCursor.MoveAnchor, indent)
+                    cursor.insertText("# ")
         cursor.endEditBlock()
 
     def format_code(self):
@@ -764,50 +848,23 @@ class QCodeEditor(QTextEdit):
         except: pass
 
     def trigger_completion(self):
-        """适配 Jedi 0.19.2：使用 Project 注入路径并触发补全"""
-        try:
-            user_code = self.toPlainText()
-            # 🚀 核心改进：注入隐式星号导入
-            prefix = "from bingo_engine import *\n"
-            full_code = prefix + user_code
-            
-            cursor = self.textCursor()
-            # 💡 别忘了行号补偿：prefix 占了 1 行
-            line = cursor.blockNumber() + 1 + 1 
-            col = cursor.columnNumber()
+        """异步触发代码补全：通过后台线程执行 Jedi 分析"""
+        user_code = self.toPlainText()
+        cursor = self.textCursor()
+        line = cursor.blockNumber()
+        col = cursor.columnNumber()
+        self._jedi_worker.request_completion(user_code, line, col)
 
-            import jedi
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            # 确保 Jedi 的搜索路径包含 modules
-            project = jedi.Project(current_dir, sys_path=sys.path + [os.path.join(current_dir, "modules")])
-            script = jedi.Script(full_code, path="main.py", project=project)
-            
-            # 4. 获取补全项
-            comps = script.complete(line, col)
-
-            if not comps:
-                self.completer.hide()
-                return
-
-            # 5. 过滤掉私有变量，防止干扰
-            filtered_comps = []
-            for comp in comps[:20]:
-                if not comp.name.startswith('__'):
-                    filtered_comps.append(comp)
-
-            if filtered_comps:
-                self.completer.update_completions(filtered_comps)
-                # 定位补全框
-                crect = self.cursorRect()
-                popup_x = crect.left() + self.line_number_area.width()
-                popup_y = crect.bottom() + 2
-                self.completer.move(popup_x, popup_y)
-            else:
-                self.completer.hide()
-        except Exception as e:
-            # 静默处理或打印调试
-            print(f"Jedi 补全错误: {e}")
+    def _on_completion_ready(self, comps):
+        """后台线程补全结果回调"""
+        if not comps:
             self.completer.hide()
+            return
+        self.completer.update_completions(comps)
+        crect = self.cursorRect()
+        popup_x = crect.left() + self.line_number_area.width()
+        popup_y = crect.bottom() + 2
+        self.completer.move(popup_x, popup_y)
 
     def insert_completion(self, index=None):
         if not index: index = self.completer.currentIndex()
@@ -874,7 +931,6 @@ class LineNumberArea(QWidget):
         self.error_icon = QIcon(":/icons/error_1.svg")
         self.blink_timer = QTimer(self)
         self.blink_timer.timeout.connect(self.update_blink)
-        self.blink_timer.start(50)
         self.blink_alpha = 255
         self.blink_dir = -1
 
@@ -883,6 +939,12 @@ class LineNumberArea(QWidget):
         if self.blink_alpha <= 100: self.blink_dir = 1
         if self.blink_alpha >= 255: self.blink_dir = -1
         self.update()
+
+    def set_blink_active(self, active):
+        if active and not self.blink_timer.isActive():
+            self.blink_timer.start(50)
+        elif not active and self.blink_timer.isActive():
+            self.blink_timer.stop()
 
     def paintEvent(self, event):
         painter = QPainter(self)
