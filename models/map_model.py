@@ -574,7 +574,14 @@ class MapDataModel(QObject):
                 # 确保tiles数组不为空，至少有一个瓦片的数据
                 if len(tiles) == 0:
                     # 如果tiles数组为空，创建一个默认的瓦片数据
-                    tiles = [{"collision": True, "tag": "", "collision_shape": None, "collision_type": "图像"}]
+                    tiles = [
+                        {
+                            "collision": True,
+                            "tag": "",
+                            "collision_shape": None,
+                            "collision_type": "图像",
+                        }
+                    ]
                 f.write(struct.pack("<I", len(tiles)))
 
                 # 保存每个瓦片的属性（碰撞状态、标签和碰撞形状）
@@ -977,7 +984,9 @@ class MapDataModel(QObject):
 
                         try:
                             tile_col_type_length = struct.unpack("<I", f.read(4))[0]
-                            tile_collision_type = f.read(tile_col_type_length).decode("utf-8")
+                            tile_collision_type = f.read(tile_col_type_length).decode(
+                                "utf-8"
+                            )
                         except:
                             tile_collision_type = ""
 
@@ -990,7 +999,11 @@ class MapDataModel(QObject):
                                 points.append([x, y])
                             collision_shape = {"points": points}
 
-                        tile = {"collision": collision, "tag": tag, "collision_type": tile_collision_type}
+                        tile = {
+                            "collision": collision,
+                            "tag": tag,
+                            "collision_type": tile_collision_type,
+                        }
                         if collision_shape:
                             tile["collision_shape"] = collision_shape
                         tiles.append(tile)
@@ -1034,7 +1047,9 @@ class MapDataModel(QObject):
             return os.path.join(maps_dir, "map.json")
         return "map.json"
 
-    def add_tile_set(self, name, image_path, tile_width, tile_height, collision_type="图像"):
+    def add_tile_set(
+        self, name, image_path, tile_width, tile_height, collision_type="图像"
+    ):
         """添加瓦片集"""
         # 计算瓦片数量
         tile_count = 0
@@ -1062,7 +1077,12 @@ class MapDataModel(QObject):
         # 初始化tiles数组，确保每个瓦片都有默认的碰撞设置
         for i in range(tile_count):
             tile_set["tiles"].append(
-                {"collision": True, "tag": "", "collision_shape": None, "collision_type": collision_type}
+                {
+                    "collision": True,
+                    "tag": "",
+                    "collision_shape": None,
+                    "collision_type": collision_type,
+                }
             )
 
         self.map_data["tile_sets"].append(tile_set)
@@ -1072,6 +1092,19 @@ class MapDataModel(QObject):
     def get_tile_sets(self):
         """获取所有瓦片集"""
         return self.map_data["tile_sets"]
+
+    def remove_tile_set(self, index):
+        """删除指定瓦片集"""
+        if 0 <= index < len(self.map_data["tile_sets"]):
+            del self.map_data["tile_sets"][index]
+            self.data_changed.emit()
+            return True
+        return False
+
+    def clear_tile_sets(self):
+        """清空所有瓦片集"""
+        self.map_data["tile_sets"].clear()
+        self.data_changed.emit()
 
     def get_tile_set(self, index):
         """获取指定瓦片集"""
@@ -1097,7 +1130,14 @@ class MapDataModel(QObject):
         tile_set = self.map_data["tile_sets"][tile_set_index]
         # 确保tiles数组足够大
         while len(tile_set["tiles"]) <= tile_index:
-            tile_set["tiles"].append({"collision": True, "tag": "", "collision_shape": None, "collision_type": "图像"})
+            tile_set["tiles"].append(
+                {
+                    "collision": True,
+                    "tag": "",
+                    "collision_shape": None,
+                    "collision_type": "图像",
+                }
+            )
         tile_set["tiles"][tile_index]["collision"] = collision
         self.data_changed.emit()
         return True
@@ -1120,7 +1160,14 @@ class MapDataModel(QObject):
         tile_set = self.map_data["tile_sets"][tile_set_index]
         # 确保tiles数组足够大
         while len(tile_set["tiles"]) <= tile_index:
-            tile_set["tiles"].append({"collision": True, "tag": "", "collision_shape": None, "collision_type": "图像"})
+            tile_set["tiles"].append(
+                {
+                    "collision": True,
+                    "tag": "",
+                    "collision_shape": None,
+                    "collision_type": "图像",
+                }
+            )
         tile_set["tiles"][tile_index]["collision_shape"] = shape_data
         self.data_changed.emit()
         return True
@@ -1143,7 +1190,14 @@ class MapDataModel(QObject):
         tile_set = self.map_data["tile_sets"][tile_set_index]
         # 确保tiles数组足够大
         while len(tile_set["tiles"]) <= tile_index:
-            tile_set["tiles"].append({"collision": True, "tag": "", "collision_shape": None, "collision_type": "图像"})
+            tile_set["tiles"].append(
+                {
+                    "collision": True,
+                    "tag": "",
+                    "collision_shape": None,
+                    "collision_type": "图像",
+                }
+            )
         collision_shape = tile_set["tiles"][tile_index].get("collision_shape", None)
         return collision_shape
 
@@ -1168,7 +1222,14 @@ class MapDataModel(QObject):
             tile_set["tiles"] = []
         # 确保tiles数组足够大
         while len(tile_set["tiles"]) <= tile_index:
-            tile_set["tiles"].append({"collision": True, "tag": "", "collision_shape": None, "collision_type": "图像"})
+            tile_set["tiles"].append(
+                {
+                    "collision": True,
+                    "tag": "",
+                    "collision_shape": None,
+                    "collision_type": "图像",
+                }
+            )
         collision = tile_set["tiles"][tile_index].get("collision", True)
         return collision
 
@@ -1192,7 +1253,14 @@ class MapDataModel(QObject):
         tile_set = self.map_data["tile_sets"][tile_set_index]
         tiles = tile_set.get("tiles", [])
         while len(tiles) <= tile_index:
-            tiles.append({"collision": True, "tag": "", "collision_shape": None, "collision_type": "图像"})
+            tiles.append(
+                {
+                    "collision": True,
+                    "tag": "",
+                    "collision_shape": None,
+                    "collision_type": "图像",
+                }
+            )
         tiles[tile_index]["collision_type"] = collision_type
         self.data_changed.emit()
         return True
@@ -1215,7 +1283,14 @@ class MapDataModel(QObject):
         tile_set = self.map_data["tile_sets"][tile_set_index]
         # 确保tiles数组足够大
         while len(tile_set["tiles"]) <= tile_index:
-            tile_set["tiles"].append({"collision": True, "tag": "", "collision_shape": None, "collision_type": "图像"})
+            tile_set["tiles"].append(
+                {
+                    "collision": True,
+                    "tag": "",
+                    "collision_shape": None,
+                    "collision_type": "图像",
+                }
+            )
         tile_set["tiles"][tile_index]["tag"] = tag
         self.data_changed.emit()
         return True
@@ -1238,7 +1313,14 @@ class MapDataModel(QObject):
         tile_set = self.map_data["tile_sets"][tile_set_index]
         # 确保tiles数组足够大
         while len(tile_set["tiles"]) <= tile_index:
-            tile_set["tiles"].append({"collision": True, "tag": "", "collision_shape": None, "collision_type": "图像"})
+            tile_set["tiles"].append(
+                {
+                    "collision": True,
+                    "tag": "",
+                    "collision_shape": None,
+                    "collision_type": "图像",
+                }
+            )
         tag = tile_set["tiles"][tile_index].get("tag", "")
         return tag
 

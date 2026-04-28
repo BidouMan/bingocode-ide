@@ -4461,6 +4461,207 @@ class MapEditorManager(QObject):
             save_result = self.map_model.save(self.current_map_path)
             print(f"DEBUG: 保存结果: {save_result}")
 
+    def delete_selected_resource(self):
+        """删除res_list_view中选中的资源"""
+        try:
+            current_layer = self.layer_manager.get_current_layer()
+            if not current_layer:
+                return
+
+            layer_id = current_layer.layer_id
+            layer_resources = self.layer_resources.get(layer_id, [])
+
+            if self.selected_resource_index < 0 or self.selected_resource_index >= len(
+                layer_resources
+            ):
+                return
+
+            resource = layer_resources[self.selected_resource_index]
+            resource_path = resource.get("path", "")
+
+            # 1. 从画布上删除该资源的所有图块/图像
+            if current_layer.layer_type == "drawing":
+                # 绘制图层：删除属于该资源的所有瓦片
+                global_resource_index = self._get_global_resource_index(
+                    self.selected_resource_index
+                )
+                if global_resource_index >= 0:
+                    tile_id_prefix = (global_resource_index + 1) * 1000
+                    keys_to_remove = []
+                    for (x, y), item in self.tile_items.items():
+                        item_tile_id = item.data(1)
+                        if item_tile_id and (item_tile_id // 1000) == (
+                            global_resource_index + 1
+                        ):
+                            keys_to_remove.append((x, y))
+                    for key in keys_to_remove:
+                        item = self.tile_items.pop(key)
+                        self._recycle_item(item)
+                        current_layer.set_tile(key[0], key[1], 0)
+            elif current_layer.layer_type == "image":
+                # 图像图层：删除匹配的图像
+                keys_to_remove = []
+                for (lid, img_idx), item in self._image_items.items():
+                    if lid == layer_id:
+                        if img_idx < len(current_layer.images):
+                            image_data = current_layer.images[img_idx]
+                            img_basename = os.path.basename(image_data.image_path)
+                            res_basename = os.path.basename(resource_path)
+                            if img_basename == res_basename:
+                                keys_to_remove.append((lid, img_idx))
+                for lid, img_idx in reversed(keys_to_remove):
+                    item = self._image_items.pop((lid, img_idx))
+                    scene = self.canvas_manager.scene()
+                    if scene:
+                        scene.removeItem(item)
+                    if img_idx < len(current_layer.images):
+                        current_layer.remove_image(current_layer.images[img_idx])
+
+            # 2. 从项目目录中删除资源文件
+            abs_path = resource_path
+            if not os.path.isabs(abs_path) and self.current_map_path:
+                map_dir = os.path.dirname(self.current_map_path)
+                abs_path = os.path.join(map_dir, abs_path)
+            if abs_path and os.path.exists(abs_path):
+                try:
+                    os.remove(abs_path)
+                except Exception as e:
+                    print(f"删除资源文件失败: {e}")
+
+            # 3. 从 map_model 的 tile_sets 中删除
+            if current_layer.layer_type == "drawing":
+                global_resource_index = self._get_global_resource_index(
+                    self.selected_resource_index
+                )
+                if global_resource_index >= 0:
+                    self.map_model.remove_tile_set(global_resource_index)
+
+            # 4. 从 layer_resources 中删除
+            layer_resources.pop(self.selected_resource_index)
+
+            # 5. 从 uploaded_resources 中删除
+            for i, res in enumerate(self.uploaded_resources):
+                if res is resource:
+                    self.uploaded_resources.pop(i)
+                    break
+
+            # 6. 重置选中索引
+            self.selected_resource_index = -1
+            self.selected_tile_index = -1
+
+            # 7. 清理缓存
+            self._pixmap_cache.clear()
+            self._source_image_cache.clear()
+
+            # 8. 重新渲染和更新
+            self._render_full_map()
+            self._update_res_list_display()
+
+            # 9. 自动保存
+            if self.current_map_path:
+                self.map_model.save(self.current_map_path)
+
+        except Exception as e:
+            print(f"删除选中资源错误: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+    def clear_current_layer_resources(self):
+        """清空当前图层的所有资源"""
+        try:
+            current_layer = self.layer_manager.get_current_layer()
+            if not current_layer:
+                return
+
+            layer_id = current_layer.layer_id
+            layer_resources = self.layer_resources.get(layer_id, [])
+
+            if not layer_resources:
+                return
+
+            # 1. 从画布上删除该图层所有图块/图像
+            if current_layer.layer_type == "drawing":
+                keys_to_remove = []
+                for (x, y), item in self.tile_items.items():
+                    if item.data(2) == self.layer_manager.current_layer_index:
+                        keys_to_remove.append((x, y))
+                for key in keys_to_remove:
+                    item = self.tile_items.pop(key)
+                    self._recycle_item(item)
+                current_layer.clear_tiles()
+            elif current_layer.layer_type == "image":
+                keys_to_remove = []
+                for (lid, img_idx), item in self._image_items.items():
+                    if lid == layer_id:
+                        keys_to_remove.append((lid, img_idx))
+                for lid, img_idx in reversed(keys_to_remove):
+                    item = self._image_items.pop((lid, img_idx))
+                    scene = self.canvas_manager.scene()
+                    if scene:
+                        scene.removeItem(item)
+                current_layer.clear_images()
+
+            # 2. 从项目目录中删除所有资源文件
+            for resource in layer_resources:
+                resource_path = resource.get("path", "")
+                abs_path = resource_path
+                if not os.path.isabs(abs_path) and self.current_map_path:
+                    map_dir = os.path.dirname(self.current_map_path)
+                    abs_path = os.path.join(map_dir, abs_path)
+                if abs_path and os.path.exists(abs_path):
+                    try:
+                        os.remove(abs_path)
+                    except Exception as e:
+                        print(f"删除资源文件失败: {e}")
+
+            # 3. 从 map_model 的 tile_sets 中删除该图层的所有资源
+            if current_layer.layer_type == "drawing":
+                paths_to_remove = set()
+                for resource in layer_resources:
+                    resource_path = resource.get("path", "")
+                    if resource_path:
+                        paths_to_remove.add(os.path.basename(resource_path))
+                tile_sets = self.map_model.map_data.get("tile_sets", [])
+                indices_to_remove = []
+                for i, ts in enumerate(tile_sets):
+                    ts_path = ts.get("path", "") or ts.get("image_path", "")
+                    if ts_path and os.path.basename(ts_path) in paths_to_remove:
+                        indices_to_remove.append(i)
+                for i in reversed(indices_to_remove):
+                    self.map_model.remove_tile_set(i)
+
+            # 4. 清空 layer_resources
+            if layer_id in self.layer_resources:
+                self.layer_resources[layer_id].clear()
+
+            # 5. 从 uploaded_resources 中删除匹配的资源
+            self.uploaded_resources = [
+                res for res in self.uploaded_resources if res not in layer_resources
+            ]
+
+            # 6. 重置选中索引
+            self.selected_resource_index = -1
+            self.selected_tile_index = -1
+
+            # 7. 清理缓存
+            self._pixmap_cache.clear()
+            self._source_image_cache.clear()
+
+            # 8. 重新渲染和更新
+            self._render_full_map()
+            self._update_res_list_display()
+
+            # 9. 自动保存
+            if self.current_map_path:
+                self.map_model.save(self.current_map_path)
+
+        except Exception as e:
+            print(f"清空图层资源错误: {e}")
+            import traceback
+
+            traceback.print_exc()
+
     def select_resource(self, index):
         """选择资源"""
         try:

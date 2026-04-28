@@ -854,6 +854,11 @@ class Ui_Form(object):
 
         self.horizontalLayout_14.addWidget(self.btn_res_list_upload)
 
+        self.btn_res_list_del = QPushButton(self.res_list_toobar)
+        self.btn_res_list_del.setObjectName(u"btn_res_list_del")
+
+        self.horizontalLayout_14.addWidget(self.btn_res_list_del)
+
         self.btn_res_list_clear = QPushButton(self.res_list_toobar)
         self.btn_res_list_clear.setObjectName(u"btn_res_list_clear")
 
@@ -862,11 +867,6 @@ class Ui_Form(object):
         self.horizontalSpacer_13 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
         self.horizontalLayout_14.addItem(self.horizontalSpacer_13)
-
-        self.res_list_search = QLineEdit(self.res_list_toobar)
-        self.res_list_search.setObjectName(u"res_list_search")
-
-        self.horizontalLayout_14.addWidget(self.res_list_search)
 
 
         self.verticalLayout_26.addWidget(self.res_list_toobar)
@@ -899,37 +899,49 @@ class Ui_Form(object):
         self.horizontalLayout_15.setObjectName(u"horizontalLayout_15")
         self.horizontalLayout_15.setContentsMargins(0, 0, 0, 0)
         self.btn_res_col_move = QPushButton(self.res_col_toolbar)
+        self.buttonGroup_2 = QButtonGroup(Form)
+        self.buttonGroup_2.setObjectName(u"buttonGroup_2")
+        self.buttonGroup_2.addButton(self.btn_res_col_move)
         self.btn_res_col_move.setObjectName(u"btn_res_col_move")
         self.btn_res_col_move.setMinimumSize(QSize(0, 30))
         self.btn_res_col_move.setMaximumSize(QSize(16777215, 30))
         self.btn_res_col_move.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_res_col_move.setCheckable(True)
+        self.btn_res_col_move.setChecked(True)
         self.btn_res_col_move.setFlat(True)
 
         self.horizontalLayout_15.addWidget(self.btn_res_col_move)
 
         self.btn_res_col_add = QPushButton(self.res_col_toolbar)
+        self.buttonGroup_2.addButton(self.btn_res_col_add)
         self.btn_res_col_add.setObjectName(u"btn_res_col_add")
         self.btn_res_col_add.setMinimumSize(QSize(0, 30))
         self.btn_res_col_add.setMaximumSize(QSize(16777215, 30))
         self.btn_res_col_add.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_res_col_add.setCheckable(True)
         self.btn_res_col_add.setFlat(True)
 
         self.horizontalLayout_15.addWidget(self.btn_res_col_add)
 
         self.btn_res_col_del = QPushButton(self.res_col_toolbar)
+        self.buttonGroup_2.addButton(self.btn_res_col_del)
         self.btn_res_col_del.setObjectName(u"btn_res_col_del")
         self.btn_res_col_del.setMinimumSize(QSize(0, 30))
         self.btn_res_col_del.setMaximumSize(QSize(16777215, 30))
         self.btn_res_col_del.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_res_col_del.setCheckable(True)
         self.btn_res_col_del.setFlat(True)
 
         self.horizontalLayout_15.addWidget(self.btn_res_col_del)
 
         self.btn_res_col_reset = QPushButton(self.res_col_toolbar)
+        self.buttonGroup_2.addButton(self.btn_res_col_reset)
         self.btn_res_col_reset.setObjectName(u"btn_res_col_reset")
         self.btn_res_col_reset.setMinimumSize(QSize(0, 30))
         self.btn_res_col_reset.setMaximumSize(QSize(16777215, 30))
         self.btn_res_col_reset.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_res_col_reset.setCheckable(True)
+        self.btn_res_col_reset.setChecked(False)
         self.btn_res_col_reset.setFlat(True)
 
         self.horizontalLayout_15.addWidget(self.btn_res_col_reset)
@@ -1086,13 +1098,6 @@ class Ui_Form(object):
         self.btn_editor_map_mark.setCheckable(True)
 
         self.horizontalLayout_18.addWidget(self.btn_editor_map_mark)
-
-        self.btn_editor_map_snap = QPushButton(self.editor_map_toolbar)
-        self.btn_editor_map_snap.setObjectName(u"btn_editor_map_snap")
-        self.btn_editor_map_snap.setCheckable(True)
-        self.btn_editor_map_snap.setChecked(True)
-
-        self.horizontalLayout_18.addWidget(self.btn_editor_map_snap)
 
         self.btn_editor_map_gird = QPushButton(self.editor_map_toolbar)
         self.btn_editor_map_gird.setObjectName(u"btn_editor_map_gird")
@@ -1596,9 +1601,10 @@ class Ui_Form(object):
         self.btn_preview_scale.setText("")
         self.btn_preview_change_bg.setText("")
         self.btn_preview_add.setText("")
-        self.btn_res_list_open.setText(QCoreApplication.translate("Form", u"\u9009\u62e9", None))
-        self.btn_res_list_upload.setText(QCoreApplication.translate("Form", u"\u4e0a\u4f20", None))
-        self.btn_res_list_clear.setText(QCoreApplication.translate("Form", u"\u6e05\u7a7a", None))
+        self.btn_res_list_open.setText(QCoreApplication.translate("Form", u"\u9009", None))
+        self.btn_res_list_upload.setText(QCoreApplication.translate("Form", u"\u4e0a", None))
+        self.btn_res_list_del.setText(QCoreApplication.translate("Form", u"\u5220", None))
+        self.btn_res_list_clear.setText(QCoreApplication.translate("Form", u"\u6e05", None))
         self.btn_res_col_move.setText(QCoreApplication.translate("Form", u"\u79fb", None))
         self.btn_res_col_add.setText(QCoreApplication.translate("Form", u"\u52a0", None))
         self.btn_res_col_del.setText(QCoreApplication.translate("Form", u"\u5220", None))
@@ -1615,7 +1621,6 @@ class Ui_Form(object):
         self.btn_editor_map_erase.setText(QCoreApplication.translate("Form", u"\u64e6\u9664", None))
         self.btn_editor_map_select.setText(QCoreApplication.translate("Form", u"\u9009\u533a", None))
         self.btn_editor_map_mark.setText(QCoreApplication.translate("Form", u"\u6807\u8bb0", None))
-        self.btn_editor_map_snap.setText(QCoreApplication.translate("Form", u"\u5438\u9644", None))
         self.btn_editor_map_gird.setText(QCoreApplication.translate("Form", u"\u7f51", None))
         self.btn_editor_map_selectmap.setItemText(0, QCoreApplication.translate("Form", u"\u65b0\u5efa\u9879\u76ee", None))
 

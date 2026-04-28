@@ -95,6 +95,14 @@ class AppController:
             self.map_editor.handle_resource_upload
         )
 
+        # 地图编辑器删除/清空资源按钮
+        self.ui.btn_res_list_del.clicked.connect(
+            self.map_editor.delete_selected_resource
+        )
+        self.ui.btn_res_list_clear.clicked.connect(
+            self.map_editor.clear_current_layer_resources
+        )
+
         # 地图编辑器网格显示/隐藏按钮
         self.ui.btn_editor_map_gird.toggled.connect(
             self.map_editor.toggle_grid_visibility
@@ -415,7 +423,10 @@ class AppController:
         if hasattr(self, "map_editor") and self.map_editor:
             try:
                 # 只有当有正在编辑的地图时才保存
-                if hasattr(self.map_editor, "current_map_path") and self.map_editor.current_map_path:
+                if (
+                    hasattr(self.map_editor, "current_map_path")
+                    and self.map_editor.current_map_path
+                ):
                     print("📝 正在执行静默地图保存...")
                     self.map_editor.save_map()
                 else:
