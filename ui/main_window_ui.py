@@ -935,12 +935,11 @@ class Ui_Form(object):
         self.horizontalLayout_15.addWidget(self.btn_res_col_del)
 
         self.btn_res_col_reset = QPushButton(self.res_col_toolbar)
-        self.buttonGroup_2.addButton(self.btn_res_col_reset)
         self.btn_res_col_reset.setObjectName(u"btn_res_col_reset")
         self.btn_res_col_reset.setMinimumSize(QSize(0, 30))
         self.btn_res_col_reset.setMaximumSize(QSize(16777215, 30))
         self.btn_res_col_reset.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_res_col_reset.setCheckable(True)
+        self.btn_res_col_reset.setCheckable(False)
         self.btn_res_col_reset.setChecked(False)
         self.btn_res_col_reset.setFlat(True)
 

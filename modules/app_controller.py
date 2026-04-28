@@ -103,6 +103,32 @@ class AppController:
             self.map_editor.clear_current_layer_resources
         )
 
+        # 碰撞编辑器工具按钮
+        self.ui.btn_res_col_add.toggled.connect(
+            lambda checked: (
+                self.map_editor.collision_manager.set_collision_tool("add")
+                if checked
+                else None
+            )
+        )
+        self.ui.btn_res_col_del.toggled.connect(
+            lambda checked: (
+                self.map_editor.collision_manager.set_collision_tool("delete")
+                if checked
+                else None
+            )
+        )
+        self.ui.btn_res_col_move.toggled.connect(
+            lambda checked: (
+                self.map_editor.collision_manager.set_collision_tool("move")
+                if checked
+                else None
+            )
+        )
+        self.ui.btn_res_col_reset.clicked.connect(
+            self.map_editor.collision_manager.reset_collision_shape
+        )
+
         # 地图编辑器网格显示/隐藏按钮
         self.ui.btn_editor_map_gird.toggled.connect(
             self.map_editor.toggle_grid_visibility

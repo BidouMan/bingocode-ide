@@ -114,6 +114,8 @@ class CollisionManager(QObject):
         self.drag_start_pos = QPointF()  # 拖动起始位置
         self.collision_points = []  # 当前碰撞多边形的顶点
         self.snap_to_pixel = True  # 是否吸附到像素网格，默认开启
+        self.collision_tool = "move"  # 碰撞编辑工具: "move", "add", "delete"
+        self.polygon_closed = True  # 碰撞多边形是否已闭合
 
     def __del__(self):
         """清理资源，避免程序退出时崩溃"""
@@ -451,6 +453,7 @@ class CollisionManager(QObject):
                         self.collision_points = [
                             QPointF(p[0], p[1]) for p in raw_points
                         ]
+                        self.polygon_closed = True
                     else:
                         self.collision_points = [
                             QPointF(0, 0),
@@ -458,6 +461,7 @@ class CollisionManager(QObject):
                             QPointF(pixmap.width(), pixmap.height()),
                             QPointF(0, pixmap.height()),
                         ]
+                        self.polygon_closed = True
 
                     # 更新碰撞多边形显示
                     self._update_collision_shape()
@@ -562,6 +566,229 @@ class CollisionManager(QObject):
             return self.tile_pixmap_provider(resource_index, tile_index)
         return None
 
+    def set_collision_tool(self, tool_name):
+        """设置碰撞编辑工具"""
+        if tool_name != self.collision_tool:
+            if (
+                tool_name != "add"
+                and not self.polygon_closed
+                and len(self.collision_points) >= 3
+            ):
+                self.polygon_closed = True
+                self._update_collision_shape()
+                self._save_collision_data()
+            self.collision_tool = tool_name
+
+    def reset_collision_shape(self):
+        """重置碰撞形状为默认矩形"""
+        try:
+            if not self.tile_item or not self.col_editor_scene:
+                return
+            pixmap = self.tile_item.pixmap()
+            if not pixmap or pixmap.isNull():
+                return
+            w = pixmap.width()
+            h = pixmap.height()
+            self.collision_points = [
+                QPointF(0, 0),
+                QPointF(w, 0),
+                QPointF(w, h),
+                QPointF(0, h),
+            ]
+            self.polygon_closed = True
+            self._rebuild_anchor_items()
+            self._update_collision_shape()
+            self._update_collision_anchors()
+            self._save_collision_data()
+        except Exception as e:
+            print(f"重置碰撞形状错误: {e}")
+
+    def _point_to_segment_distance(self, px, py, x1, y1, x2, y2):
+        """计算点到线段的距离，返回 (距离, 最近点x, 最近点y)"""
+        dx = x2 - x1
+        dy = y2 - y1
+        length_sq = dx * dx + dy * dy
+        if length_sq < 1e-10:
+            dist = ((px - x1) ** 2 + (py - y1) ** 2) ** 0.5
+            return dist, x1, y1
+        t = max(0, min(1, ((px - x1) * dx + (py - y1) * dy) / length_sq))
+        closest_x = x1 + t * dx
+        closest_y = y1 + t * dy
+        dist = ((px - closest_x) ** 2 + (py - closest_y) ** 2) ** 0.5
+        return dist, closest_x, closest_y
+
+    def _find_nearest_edge(self, local_x, local_y, threshold=5.0):
+        """找到最近的边框线段，返回 (线段索引, 插入位置x, 插入位置y) 或 None"""
+        if len(self.collision_points) < 2:
+            return None
+        min_dist = float("inf")
+        best_edge = -1
+        best_pos = None
+        n = len(self.collision_points)
+        edge_count = n if self.polygon_closed else n - 1
+        for i in range(edge_count):
+            p1 = self.collision_points[i]
+            p2 = self.collision_points[(i + 1) % n]
+            dist, cx, cy = self._point_to_segment_distance(
+                local_x, local_y, p1.x(), p1.y(), p2.x(), p2.y()
+            )
+            if dist < min_dist:
+                min_dist = dist
+                best_edge = i
+                best_pos = QPointF(cx, cy)
+        if min_dist <= threshold and best_edge >= 0:
+            return best_edge, best_pos
+        return None
+
+    def _is_click_on_first_anchor(self, scene_pos, pixel_threshold=15):
+        """检测点击是否在第一个锚点附近（用于闭合多边形）"""
+        if not self.collision_points or not self.anchor_items:
+            return False
+        first_anchor = self.anchor_items.get("point_0")
+        if not first_anchor:
+            return False
+        anchor_screen = self.col_editor_view.mapFromScene(first_anchor.pos())
+        click_screen = self.col_editor_view.mapFromScene(scene_pos)
+        dx = anchor_screen.x() - click_screen.x()
+        dy = anchor_screen.y() - click_screen.y()
+        return (dx * dx + dy * dy) <= pixel_threshold * pixel_threshold
+
+    def _find_clicked_anchor(self, scene_pos, pixel_threshold=15):
+        """找到被点击的锚点名称，使用屏幕像素距离检测"""
+        if not self.col_editor_view:
+            return None
+        best_name = None
+        best_dist_sq = pixel_threshold * pixel_threshold
+        for anchor_name, anchor in self.anchor_items.items():
+            if not anchor:
+                continue
+            try:
+                anchor_screen = self.col_editor_view.mapFromScene(anchor.pos())
+                click_screen = self.col_editor_view.mapFromScene(scene_pos)
+                dx = anchor_screen.x() - click_screen.x()
+                dy = anchor_screen.y() - click_screen.y()
+                dist_sq = dx * dx + dy * dy
+                if dist_sq < best_dist_sq:
+                    best_dist_sq = dist_sq
+                    best_name = anchor_name
+            except Exception:
+                continue
+        return best_name
+
+    def _add_point_on_edge(self, edge_index, point):
+        """在指定边的位置插入新锚点"""
+        self.collision_points.insert(edge_index + 1, point)
+        self._rebuild_anchor_items()
+        self._update_collision_shape()
+        self._update_collision_anchors()
+        self._save_collision_data()
+
+    def _add_point_create(self, point):
+        """创建新锚点（不自动闭合）"""
+        if len(self.collision_points) == 0:
+            self.polygon_closed = False
+        self.collision_points.append(point)
+        self._rebuild_anchor_items()
+        if self.polygon_closed and len(self.collision_points) >= 3:
+            self._update_collision_shape()
+        elif not self.polygon_closed and len(self.collision_points) >= 2:
+            self._update_collision_shape()
+        self._update_collision_anchors()
+        self._save_collision_data()
+
+    def _delete_anchor_point(self, anchor_name):
+        """删除指定锚点"""
+        if not anchor_name.startswith("point_"):
+            return
+        try:
+            point_index = int(anchor_name.split("_")[1])
+        except (ValueError, IndexError):
+            return
+        if point_index < 0 or point_index >= len(self.collision_points):
+            return
+        self.collision_points.pop(point_index)
+        if len(self.collision_points) < 3:
+            self.collision_points.clear()
+            self.polygon_closed = False
+            self._clear_collision_shape()
+            if self.parent_manager and hasattr(self.parent_manager, "ui"):
+                ui = self.parent_manager.ui
+                if hasattr(ui, "btn_res_col_add"):
+                    ui.btn_res_col_add.setChecked(True)
+                if hasattr(ui, "btn_res_col_del"):
+                    ui.btn_res_col_del.setChecked(False)
+            self.collision_tool = "add"
+        self._rebuild_anchor_items()
+        if len(self.collision_points) >= 3 and self.polygon_closed:
+            self._update_collision_shape()
+        self._update_collision_anchors()
+        self._save_collision_data()
+
+    def _rebuild_anchor_items(self):
+        """重建所有锚点项"""
+        if not self.col_editor_scene:
+            return
+        for anchor_name, anchor in list(self.anchor_items.items()):
+            try:
+                self.col_editor_scene.removeItem(anchor)
+            except Exception:
+                pass
+        self.anchor_items.clear()
+
+    def _clear_collision_shape(self):
+        """清空碰撞形状显示"""
+        if self.collision_shape_item and self.col_editor_scene:
+            try:
+                self.col_editor_scene.removeItem(self.collision_shape_item)
+            except Exception:
+                pass
+            self.collision_shape_item = None
+
+    def _save_collision_data(self):
+        """保存碰撞数据到模型"""
+        try:
+            if not self.collision_points:
+                return
+            if self.current_collision_tile and self.map_model:
+                resource_index, tile_index = self.current_collision_tile
+                points_data = [[p.x(), p.y()] for p in self.collision_points]
+                self.map_model.set_tile_collision_shape(
+                    resource_index, tile_index, {"points": points_data}
+                )
+                if (
+                    self.parent_manager
+                    and hasattr(self.parent_manager, "current_map_path")
+                    and self.parent_manager.current_map_path
+                ):
+                    self.map_model.save(self.parent_manager.current_map_path)
+            elif self.current_collision_image:
+                layer_id, image_index = self.current_collision_image
+                if self.parent_manager and hasattr(
+                    self.parent_manager, "layer_manager"
+                ):
+                    layer_manager = self.parent_manager.layer_manager
+                    for layer in layer_manager.layers:
+                        if layer.layer_id == layer_id:
+                            if 0 <= image_index < len(layer.images):
+                                image_data = layer.images[image_index]
+                                points_data = [
+                                    [p.x(), p.y()] for p in self.collision_points
+                                ]
+                                image_data.collision_shape = {"points": points_data}
+                                image_data.collision_enabled = True
+                                if (
+                                    self.parent_manager
+                                    and hasattr(self.parent_manager, "current_map_path")
+                                    and self.parent_manager.current_map_path
+                                ):
+                                    self.parent_manager.layer_manager.update_map_model()
+                                    self.map_model.save(
+                                        self.parent_manager.current_map_path
+                                    )
+                            break
+        except Exception as e:
+            print(f"保存碰撞数据错误: {e}")
+
     def _cleanup_collision_items(self):
         """清理碰撞相关的项，避免内存泄漏和程序崩溃"""
         try:
@@ -591,8 +818,8 @@ class CollisionManager(QObject):
                     pass
             self.tile_item = None
 
-            # 清空碰撞点列表
             self.collision_points = []
+            self.polygon_closed = True
 
             # 重置拖动状态
             self.dragging_anchor = None
@@ -602,54 +829,57 @@ class CollisionManager(QObject):
     def _update_collision_anchors(self):
         """更新碰撞锚点位置"""
         try:
-            if not self.collision_points or not self.tile_item:
+            if not self.tile_item:
                 return
 
-            # 确保锚点数量与碰撞点数量一致
+            if not self.collision_points:
+                for anchor_name, anchor in list(self.anchor_items.items()):
+                    try:
+                        if anchor and self.col_editor_scene:
+                            self.col_editor_scene.removeItem(anchor)
+                    except Exception:
+                        pass
+                self.anchor_items.clear()
+                return
+
             while len(self.anchor_items) < len(self.collision_points):
                 i = len(self.anchor_items)
-                anchor_radius = 6  # 增大锚点半径，使其更明显
-                # 创建椭圆，设置为场景的直接子项，而不是图块项的子项
-                # 这样当锚点移动时不会影响图块项的边界框，避免图块抖动
-                # 创建菱形锚点，使用多边形而不是椭圆
+                anchor_radius = 6
                 from PySide6.QtWidgets import QGraphicsPolygonItem
                 from PySide6.QtGui import QPolygonF
 
                 diamond = QPolygonF()
-                diamond.append(QPointF(0, -anchor_radius))  # 上顶点
-                diamond.append(QPointF(anchor_radius, 0))  # 右顶点
-                diamond.append(QPointF(0, anchor_radius))  # 下顶点
-                diamond.append(QPointF(-anchor_radius, 0))  # 左顶点
+                diamond.append(QPointF(0, -anchor_radius))
+                diamond.append(QPointF(anchor_radius, 0))
+                diamond.append(QPointF(0, anchor_radius))
+                diamond.append(QPointF(-anchor_radius, 0))
                 anchor = QGraphicsPolygonItem(diamond)
-                # 添加到场景中，而不是作为图块的子项
                 self.col_editor_scene.addItem(anchor)
-                # 设置锚点填充颜色为白色
                 anchor.setBrush(QBrush(QColor(255, 255, 255)))
-                # 设置锚点描边颜色为黑色，线条宽度恢复默认值1.5
-                pen = QPen(QColor(0, 0, 0), 3.5)  # 恢复默认描边宽度
-                pen.setCosmetic(True)  # 线条宽度不随缩放变化
+                pen = QPen(QColor(0, 0, 0), 3.5)
+                pen.setCosmetic(True)
                 anchor.setPen(pen)
-                anchor.setZValue(100)  # 确保在最顶层
-                anchor.setData(0, f"point_{i}")  # 存储锚点名称
-                # 设置锚点忽略变换，保持固定大小
+                anchor.setZValue(100)
+                anchor.setData(0, f"point_{i}")
                 anchor.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
                 self.anchor_items[f"point_{i}"] = anchor
 
-            # 移除多余的锚点
             while len(self.anchor_items) > len(self.collision_points):
                 i = len(self.collision_points)
                 anchor_name = f"point_{i}"
                 if anchor_name in self.anchor_items:
-                    del self.anchor_items[anchor_name]
+                    anchor = self.anchor_items.pop(anchor_name)
+                    try:
+                        if anchor and self.col_editor_scene:
+                            self.col_editor_scene.removeItem(anchor)
+                    except Exception:
+                        pass
 
-            # 每一帧只需要更新它们的位置
             for i, point in enumerate(self.collision_points):
                 anchor_name = f"point_{i}"
                 if anchor_name in self.anchor_items:
-                    # 因为anchor现在是场景的直接子项，所以需要加上图块的位置
                     anchor = self.anchor_items[anchor_name]
                     tile_pos = self.tile_item.pos() if self.tile_item else QPointF(0, 0)
-                    # 锚点位置 = 图块位置 + 局部坐标点
                     anchor.setPos(tile_pos.x() + point.x(), tile_pos.y() + point.y())
         except Exception:
             pass
@@ -661,24 +891,15 @@ class CollisionManager(QObject):
                 return
 
             if not self.collision_shape_item:
-                # 如果还没有创建多边形项，创建一个并设为场景的直接子项
-                # 这样当碰撞形状更新时不会影响图块项的边界框，避免图块抖动
                 from PySide6.QtWidgets import QGraphicsPolygonItem
                 from PySide6.QtGui import QPolygonF
 
                 self.collision_shape_item = QGraphicsPolygonItem()
-                # 添加到场景中，而不是作为图块的子项
                 self.col_editor_scene.addItem(self.collision_shape_item)
-                # 设置Z值，确保碰撞形状在图像上面
                 self.collision_shape_item.setZValue(1)
-                self.collision_shape_item.setBrush(
-                    QBrush(QColor(100, 149, 237, 100))
-                )  # 半透明淡蓝色
-                # 设置碰撞形状的线条宽度，并确保不随缩放变化
-                pen = QPen(QColor(100, 149, 237), 1.0)  # 增加线条宽度到1.0
-                pen.setCosmetic(True)  # 线条宽度不随缩放变化
+                pen = QPen(QColor(100, 149, 237), 1.0)
+                pen.setCosmetic(True)
                 self.collision_shape_item.setPen(pen)
-                # 核心修复：让多边形不响应鼠标，点击事件会直接穿透到下层的锚点
                 self.collision_shape_item.setAcceptedMouseButtons(Qt.NoButton)
                 self.collision_shape_item.setFlag(
                     QGraphicsPolygonItem.ItemIsSelectable, False
@@ -687,12 +908,17 @@ class CollisionManager(QObject):
             if self.collision_shape_item:
                 from PySide6.QtGui import QPolygonF
 
-                # 碰撞形状现在是场景的直接子项，所以需要设置其位置为图块的位置
                 if self.tile_item:
                     self.collision_shape_item.setPos(self.tile_item.pos())
 
                 polygon = QPolygonF(self.collision_points)
                 self.collision_shape_item.setPolygon(polygon)
+                if self.polygon_closed:
+                    self.collision_shape_item.setBrush(
+                        QBrush(QColor(100, 149, 237, 100))
+                    )
+                else:
+                    self.collision_shape_item.setBrush(Qt.NoBrush)
         except Exception:
             pass
 
@@ -738,7 +964,6 @@ class CollisionManager(QObject):
     def _handle_mouse_press(self, event):
         """处理鼠标按下事件"""
         try:
-            # 检查参数和对象是否有效
             if not event:
                 return False
 
@@ -748,33 +973,60 @@ class CollisionManager(QObject):
             if not hasattr(self, "anchor_items"):
                 return False
 
+            if not hasattr(self, "tile_item") or not self.tile_item:
+                return False
+
             if event.button() == Qt.LeftButton:
-                # 将鼠标位置转换为场景坐标
                 try:
                     scene_pos = self.col_editor_view.mapToScene(event.pos())
                 except Exception:
                     return False
 
-                # 检查是否点击了锚点
-                for anchor_name, anchor in self.anchor_items.items():
-                    try:
-                        if not anchor:
-                            continue
-                        # 扩大点击判定范围，即使鼠标没点进圆圈，只要在圆心附近就能抓取
-                        click_rect = anchor.sceneBoundingRect().adjusted(-5, -5, 5, 5)
-                        if click_rect.contains(scene_pos):
-                            self.dragging_anchor = anchor_name
-                            self.drag_start_pos = scene_pos
-                            if self.col_editor_view:
-                                try:
-                                    self.col_editor_view.setCursor(
-                                        QCursor(Qt.SizeAllCursor)
-                                    )
-                                except Exception:
-                                    pass
+                tile_item_pos = self.tile_item.pos()
+                local_x = scene_pos.x() - tile_item_pos.x()
+                local_y = scene_pos.y() - tile_item_pos.y()
+
+                if self.snap_to_pixel:
+                    local_x = round(local_x)
+                    local_y = round(local_y)
+
+                if self.collision_tool == "add":
+                    if not self.polygon_closed and len(self.collision_points) >= 3:
+                        if self._is_click_on_first_anchor(scene_pos):
+                            self.polygon_closed = True
+                            self._update_collision_shape()
+                            self._update_collision_anchors()
+                            self._save_collision_data()
                             return True
-                    except Exception:
-                        continue
+
+                    if not self.polygon_closed:
+                        self._add_point_create(QPointF(local_x, local_y))
+                    else:
+                        result = self._find_nearest_edge(local_x, local_y)
+                        if result:
+                            edge_index, insert_pos = result
+                            self._add_point_on_edge(edge_index, insert_pos)
+                    return True
+
+                elif self.collision_tool == "delete":
+                    clicked_anchor = self._find_clicked_anchor(scene_pos)
+                    if clicked_anchor:
+                        self._delete_anchor_point(clicked_anchor)
+                    return True
+
+                else:
+                    clicked_anchor = self._find_clicked_anchor(scene_pos)
+                    if clicked_anchor:
+                        self.dragging_anchor = clicked_anchor
+                        self.drag_start_pos = scene_pos
+                        if self.col_editor_view:
+                            try:
+                                self.col_editor_view.setCursor(
+                                    QCursor(Qt.SizeAllCursor)
+                                )
+                            except Exception:
+                                pass
+                        return True
         except Exception:
             pass
         return False
