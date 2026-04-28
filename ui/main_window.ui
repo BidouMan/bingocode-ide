@@ -405,7 +405,7 @@
        <item>
         <widget class="QStackedWidget" name="editor_stacked">
          <property name="currentIndex">
-          <number>2</number>
+          <number>0</number>
          </property>
          <widget class="QWidget" name="editor_code_web">
           <layout class="QVBoxLayout" name="verticalLayout_5">
@@ -2055,21 +2055,28 @@
                        <item>
                         <widget class="QPushButton" name="btn_res_list_open">
                          <property name="text">
-                          <string>选择</string>
+                          <string>选</string>
                          </property>
                         </widget>
                        </item>
                        <item>
                         <widget class="QPushButton" name="btn_res_list_upload">
                          <property name="text">
-                          <string>上传</string>
+                          <string>上</string>
+                         </property>
+                        </widget>
+                       </item>
+                       <item>
+                        <widget class="QPushButton" name="btn_res_list_del">
+                         <property name="text">
+                          <string>删</string>
                          </property>
                         </widget>
                        </item>
                        <item>
                         <widget class="QPushButton" name="btn_res_list_clear">
                          <property name="text">
-                          <string>清空</string>
+                          <string>清</string>
                          </property>
                         </widget>
                        </item>
@@ -2085,9 +2092,6 @@
                           </size>
                          </property>
                         </spacer>
-                       </item>
-                       <item>
-                        <widget class="QLineEdit" name="res_list_search"/>
                        </item>
                       </layout>
                      </widget>
@@ -2185,9 +2189,18 @@
                          <property name="text">
                           <string>移</string>
                          </property>
+                         <property name="checkable">
+                          <bool>true</bool>
+                         </property>
+                         <property name="checked">
+                          <bool>true</bool>
+                         </property>
                          <property name="flat">
                           <bool>true</bool>
                          </property>
+                         <attribute name="buttonGroup">
+                          <string notr="true">buttonGroup_2</string>
+                         </attribute>
                         </widget>
                        </item>
                        <item>
@@ -2210,9 +2223,15 @@
                          <property name="text">
                           <string>加</string>
                          </property>
+                         <property name="checkable">
+                          <bool>true</bool>
+                         </property>
                          <property name="flat">
                           <bool>true</bool>
                          </property>
+                         <attribute name="buttonGroup">
+                          <string notr="true">buttonGroup_2</string>
+                         </attribute>
                         </widget>
                        </item>
                        <item>
@@ -2235,9 +2254,15 @@
                          <property name="text">
                           <string>删</string>
                          </property>
+                         <property name="checkable">
+                          <bool>true</bool>
+                         </property>
                          <property name="flat">
                           <bool>true</bool>
                          </property>
+                         <attribute name="buttonGroup">
+                          <string notr="true">buttonGroup_2</string>
+                         </attribute>
                         </widget>
                        </item>
                        <item>
@@ -2260,9 +2285,18 @@
                          <property name="text">
                           <string>重</string>
                          </property>
+                         <property name="checkable">
+                          <bool>true</bool>
+                         </property>
+                         <property name="checked">
+                          <bool>false</bool>
+                         </property>
                          <property name="flat">
                           <bool>true</bool>
                          </property>
+                         <attribute name="buttonGroup">
+                          <string notr="true">buttonGroup_2</string>
+                         </attribute>
                         </widget>
                        </item>
                        <item>
@@ -2593,32 +2627,6 @@
                       <attribute name="buttonGroup">
                        <string notr="true">buttonGroup</string>
                       </attribute>
-                     </widget>
-                    </item>
-                    <item>
-                     <widget class="QPushButton" name="btn_editor_map_snap">
-                      <property name="text">
-                       <string>吸附</string>
-                      </property>
-                      <property name="checkable">
-                       <bool>true</bool>
-                      </property>
-                      <property name="checked">
-                       <bool>true</bool>
-                      </property>
-                     </widget>
-                    </item>
-                    <item>
-                     <widget class="QPushButton" name="btn_editor_map_gird">
-                      <property name="text">
-                       <string>网</string>
-                      </property>
-                      <property name="checkable">
-                       <bool>true</bool>
-                      </property>
-                      <property name="checked">
-                       <bool>true</bool>
-                      </property>
                      </widget>
                     </item>
                     <item>
@@ -3544,5 +3552,6 @@
  <connections/>
  <buttongroups>
   <buttongroup name="buttonGroup"/>
+  <buttongroup name="buttonGroup_2"/>
  </buttongroups>
 </ui>

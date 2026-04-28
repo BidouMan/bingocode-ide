@@ -94,8 +94,23 @@ class RenderManager(QObject):
                 self.view.viewport().installEventFilter(self)
 
     def apply_fit(self):
-        # 始终以 640x480 逻辑摄像机窗口进行适配，不缩放整个地图
-        self.view.fitInView(0, 0, 640, 480, Qt.KeepAspectRatio)
+        vp = self.view.viewport()
+        if not vp:
+            return
+        vp_w = vp.width()
+        vp_h = vp.height()
+        if vp_w <= 0 or vp_h <= 0:
+            return
+
+        scale_x = vp_w / self.logic_w
+        scale_y = vp_h / self.logic_h
+        scale = min(scale_x, scale_y)
+
+        transform = QTransform()
+        transform.scale(scale, scale)
+        self.view.setTransform(transform)
+
+        self.view.setAlignment(Qt.AlignCenter)
 
     def handle_instruction(self, instruction_json):
         try:
@@ -459,16 +474,20 @@ class RenderManager(QObject):
         width = data.get("width", 640)
         height = data.get("height", 480)
 
-        print(f"[IDE_SCENE] sceneRect=({width},{height}) vp={self.view.viewport().width()}x{self.view.viewport().height()}")
+        print(
+            f"[IDE_SCENE] sceneRect=({width},{height}) vp={self.view.viewport().width()}x{self.view.viewport().height()}"
+        )
 
         # 使用 world_bounds 设置场景范围，支持负坐标区域
-        world_bounds = data.get("world_bounds", {"left": 0, "top": 0, "right": width, "bottom": height})
+        world_bounds = data.get(
+            "world_bounds", {"left": 0, "top": 0, "right": width, "bottom": height}
+        )
         margin = max(640, 480)
         self.scene.setSceneRect(
             world_bounds["left"] - margin,
             world_bounds["top"] - margin,
             world_bounds["right"] - world_bounds["left"] + margin * 2,
-            world_bounds["bottom"] - world_bounds["top"] + margin * 2
+            world_bounds["bottom"] - world_bounds["top"] + margin * 2,
         )
 
         # 重新计算适配（640x480 窗口缩放到视口尺寸）

@@ -55,7 +55,6 @@ class TileItem(QGraphicsRectItem):
         self.tile_index = tile_index
         self.manager = manager
         self.setAcceptHoverEvents(True)
-        self.setFlag(QGraphicsRectItem.ItemIsSelectable)
         self.is_deleted = False
         self.scene = None
 
@@ -66,30 +65,28 @@ class TileItem(QGraphicsRectItem):
     def mousePressEvent(self, event):
         """处理鼠标点击事件"""
         try:
-            # 检查对象是否已删除
             if getattr(self, "is_deleted", True):
                 return
-            # 检查事件是否有效
             if not event:
                 return
             if event.button() == Qt.LeftButton:
-                # 检查manager是否有效
                 if (
                     hasattr(self, "manager")
                     and self.manager
                     and not getattr(self.manager, "is_deleted", False)
                 ):
-                    # 检查resource_info是否有效
                     if hasattr(self, "resource_info") and self.resource_info:
                         print(
                             f"DEBUG: TileItem点击 - 资源: {self.resource_info.get('name', 'unknown')}, 图块索引: {self.tile_index}"
                         )
                         self.manager.select_tile(self.resource_info, self.tile_index)
-            # 调用父类方法，但也要检查父类是否存在
-            try:
-                super().mousePressEvent(event)
-            except Exception:
-                pass
+                        if getattr(self, "is_deleted", True):
+                            return
+            if not getattr(self, "is_deleted", True):
+                try:
+                    super().mousePressEvent(event)
+                except Exception:
+                    pass
         except Exception as e:
             print(f"图块点击事件错误: {e}")
             import traceback
@@ -143,14 +140,12 @@ class ResourceItem(QGraphicsRectItem):
         self.index = index
         self.manager = manager
         self.setAcceptHoverEvents(True)
-        self.setFlag(QGraphicsRectItem.ItemIsSelectable)
         self.setFlag(QGraphicsRectItem.ItemIsMovable, False)
         self.setFlag(QGraphicsRectItem.ItemSendsScenePositionChanges, True)
         self.is_deleted = False
         self.scene = None
-        # 设置选中状态的样式
         self.setBrush(Qt.NoBrush)
-        self.setPen(QPen(QColor(200, 200, 200), 1))
+        self.setPen(Qt.NoPen)
 
     def setScene(self, scene):
         """设置场景引用"""
@@ -159,16 +154,12 @@ class ResourceItem(QGraphicsRectItem):
     def mousePressEvent(self, event):
         """处理鼠标点击事件"""
         try:
-            # 检查对象是否已删除
             if getattr(self, "is_deleted", True):
                 return
-            # 检查事件是否有效
             if not event:
                 return
             if event.button() == Qt.LeftButton:
-                # 记录起点
                 self.drag_start_pos = event.pos()
-                # 检查manager是否有效
                 if (
                     hasattr(self, "manager")
                     and self.manager
@@ -178,14 +169,15 @@ class ResourceItem(QGraphicsRectItem):
                         f"DEBUG: ResourceItem点击 - 资源索引: {self.index}, 资源: {self.resource_info.get('name', 'unknown')}"
                     )
                     self.manager.select_resource(self.index)
-                    # 顺便通知 manager 记录当前索引
                     self.manager.selected_resource_index = self.index
                     print(f"DEBUG: ResourceItem Press - 准备拖拽索引: {self.index}")
-            # 调用父类方法，但也要检查父类是否存在
-            try:
-                super().mousePressEvent(event)
-            except Exception:
-                pass
+                    if getattr(self, "is_deleted", True):
+                        return
+            if not getattr(self, "is_deleted", True):
+                try:
+                    super().mousePressEvent(event)
+                except Exception:
+                    pass
         except Exception as e:
             print(f"资源点击事件错误: {e}")
             import traceback
@@ -1044,13 +1036,17 @@ class MapEditorManager(QObject):
                             for tile in resource.get("tiles", []):
                                 collision_data = {}
                                 if "collision_type" in tile:
-                                    collision_data["collision_type"] = tile["collision_type"]
+                                    collision_data["collision_type"] = tile[
+                                        "collision_type"
+                                    ]
                                 if "collision" in tile:
                                     collision_data["collision"] = tile["collision"]
                                 if "tag" in tile:
                                     collision_data["tag"] = tile["tag"]
                                 if "collision_shape" in tile:
-                                    collision_data["collision_shape"] = tile["collision_shape"]
+                                    collision_data["collision_shape"] = tile[
+                                        "collision_shape"
+                                    ]
                                 collisions.append(collision_data)
                             converted_resource = {
                                 "name": resource.get("name", ""),
@@ -1472,12 +1468,22 @@ class MapEditorManager(QObject):
                                 resource["tile_width"] = 1
                             if "tile_height" not in resource:
                                 resource["tile_height"] = 1
-                            if "collision_type" not in resource or resource.get("collision_type") is None:
+                            if (
+                                "collision_type" not in resource
+                                or resource.get("collision_type") is None
+                            ):
                                 for layer in self.layer_manager.layers:
-                                    if layer.layer_id == layer_id and layer.layer_type == "image":
+                                    if (
+                                        layer.layer_id == layer_id
+                                        and layer.layer_type == "image"
+                                    ):
                                         if i < len(layer.images):
-                                            resource["collision_type"] = layer.images[i].collision_type
-                                            resource["collision_enabled"] = layer.images[i].collision_enabled
+                                            resource["collision_type"] = layer.images[
+                                                i
+                                            ].collision_type
+                                            resource["collision_enabled"] = (
+                                                layer.images[i].collision_enabled
+                                            )
                                         break
                         if "tiles" not in resource:
                             resource["tiles"] = []
@@ -1670,7 +1676,9 @@ class MapEditorManager(QObject):
 
             # 将旧tile_sets中的per-tile数据合并到all_resources中
             for resource in all_resources:
-                resource_path = resource.get("path", "") or resource.get("image_path", "")
+                resource_path = resource.get("path", "") or resource.get(
+                    "image_path", ""
+                )
                 old_data = None
                 if resource_path and resource_path in old_tiles_by_path:
                     old_data = old_tiles_by_path[resource_path]
@@ -1689,9 +1697,15 @@ class MapEditorManager(QObject):
                                         resource["tiles"][idx][key] = tile[key]
                             else:
                                 resource["tiles"].append(tile)
-                    if "collision_type" not in resource or resource.get("collision_type") is None:
+                    if (
+                        "collision_type" not in resource
+                        or resource.get("collision_type") is None
+                    ):
                         resource["collision_type"] = old_data["collision_type"]
-                    if "collision_enabled" not in resource or resource.get("collision_enabled") is None:
+                    if (
+                        "collision_enabled" not in resource
+                        or resource.get("collision_enabled") is None
+                    ):
                         resource["collision_enabled"] = old_data["collision_enabled"]
 
             # 更新地图模型的tile_sets
@@ -3361,7 +3375,8 @@ class MapEditorManager(QObject):
                 for image_data in current_layer.images:
                     if image_data.image_path == resource_path or (
                         resource_path
-                        and os.path.basename(image_data.image_path) == os.path.basename(resource_path)
+                        and os.path.basename(image_data.image_path)
+                        == os.path.basename(resource_path)
                     ):
                         image_data.collision_enabled = enabled
                 self.layer_manager.update_map_model()
@@ -3375,7 +3390,9 @@ class MapEditorManager(QObject):
                 collisions[self.selected_tile_index]["collision"] = enabled
             global_index = self._get_global_resource_index()
             if global_index >= 0:
-                self.map_model.set_tile_collision(global_index, self.selected_tile_index, enabled)
+                self.map_model.set_tile_collision(
+                    global_index, self.selected_tile_index, enabled
+                )
 
         self.is_map_modified = True
         if self.current_map_path:
@@ -3411,9 +3428,13 @@ class MapEditorManager(QObject):
         tile_sets = self.map_model.map_data.get("tile_sets", [])
         for i, ts in enumerate(tile_sets):
             ts_path = ts.get("path", "") or ts.get("image_path", "")
-            if ts_path and resource_path and (
-                ts_path == resource_path
-                or os.path.basename(ts_path) == os.path.basename(resource_path)
+            if (
+                ts_path
+                and resource_path
+                and (
+                    ts_path == resource_path
+                    or os.path.basename(ts_path) == os.path.basename(resource_path)
+                )
             ):
                 return i
 
@@ -3493,7 +3514,8 @@ class MapEditorManager(QObject):
                 for image_data in current_layer.images:
                     if image_data.image_path == resource_path or (
                         resource_path
-                        and os.path.basename(image_data.image_path) == os.path.basename(resource_path)
+                        and os.path.basename(image_data.image_path)
+                        == os.path.basename(resource_path)
                     ):
                         image_data.collision_type = col_type
                         image_data.collision_enabled = collision_enabled
@@ -4360,7 +4382,9 @@ class MapEditorManager(QObject):
                     # 图像图层：使用完整图像
                     resource_type = "image"
 
-                default_col_type = "墙体" if current_layer.layer_type == "drawing" else "图像"
+                default_col_type = (
+                    "墙体" if current_layer.layer_type == "drawing" else "图像"
+                )
                 default_col_enabled = current_layer.layer_type == "drawing"
                 resource_info = {
                     "name": os.path.basename(file_path),
@@ -4480,10 +4504,13 @@ class MapEditorManager(QObject):
                         for img_data in current_layer.images:
                             if img_data.image_path == resource_path or (
                                 resource_path
-                                and os.path.basename(img_data.image_path) == os.path.basename(resource_path)
+                                and os.path.basename(img_data.image_path)
+                                == os.path.basename(resource_path)
                             ):
                                 col_type = getattr(img_data, "collision_type", "图像")
-                                col_enabled = getattr(img_data, "collision_enabled", False)
+                                col_enabled = getattr(
+                                    img_data, "collision_enabled", False
+                                )
                                 resource["collision_type"] = col_type
                                 resource["collision_enabled"] = col_enabled
                                 break
@@ -4626,13 +4653,19 @@ class MapEditorManager(QObject):
                     global_index = self._get_global_resource_index(resource_index)
                     if col_type is None:
                         if global_index >= 0:
-                            col_type = self.map_model.get_tile_collision_type(global_index, tile_index)
+                            col_type = self.map_model.get_tile_collision_type(
+                                global_index, tile_index
+                            )
                         else:
                             col_type = "图像"
                     if global_index >= 0:
-                        collision_enabled = self.map_model.get_tile_collision(global_index, tile_index)
+                        collision_enabled = self.map_model.get_tile_collision(
+                            global_index, tile_index
+                        )
                     else:
-                        collision_enabled = self.map_model.get_tile_collision(resource_index, tile_index)
+                        collision_enabled = self.map_model.get_tile_collision(
+                            resource_index, tile_index
+                        )
                     if hasattr(self.ui, "att_col_type"):
                         self.ui.att_col_type.blockSignals(True)
                         self.ui.att_col_type.setCurrentText(col_type)
@@ -4800,20 +4833,37 @@ class MapEditorManager(QObject):
                                 )
 
                                 if is_tile_selected:
-                                    tile_rect.setBrush(
-                                        QBrush(QColor(100, 149, 237, 50))
+                                    pen_width = 2
+                                    half_pen = pen_width / 2
+                                    tile_rect.setRect(
+                                        int(display_tile_x) + half_pen,
+                                        int(display_tile_y) + half_pen,
+                                        int(display_tile_width) - pen_width,
+                                        int(display_tile_height) - pen_width,
                                     )
-                                    tile_rect.setPen(Qt.NoPen)
-
+                                    tile_rect.setBrush(
+                                        QBrush(QColor(255, 255, 255, 40))
+                                    )
+                                    tile_rect.setPen(
+                                        QPen(QColor(91, 251, 132), pen_width)
+                                    )
                                 else:
-                                    tile_rect.setPen(QPen(QColor(200, 200, 200), 1))
+                                    tile_rect.setPen(Qt.NoPen)
                                     tile_rect.setBrush(Qt.NoBrush)
 
                                 scene.addItem(tile_rect)
 
                                 # 创建图块项（用于点击事件）
                                 tile_item = TileItem(
-                                    tile_rect.rect(), resource, tile_index, self
+                                    QRectF(
+                                        display_tile_x,
+                                        display_tile_y,
+                                        display_tile_width,
+                                        display_tile_height,
+                                    ),
+                                    resource,
+                                    tile_index,
+                                    self,
                                 )
                                 # 设置场景引用
                                 tile_item.setScene(scene)
@@ -4836,9 +4886,20 @@ class MapEditorManager(QObject):
                         # 检查是否是选中的资源
                         is_resource_selected = i == self.selected_resource_index
                         if is_resource_selected:
-                            resource_item.setBrush(QBrush(QColor(100, 149, 237, 50)))
-                            resource_item.setPen(Qt.NoPen)
+                            pen_width = 2
+                            half_pen = pen_width / 2
+                            resource_item.setRect(
+                                pixmap_x + half_pen,
+                                pixmap_y + half_pen,
+                                scaled_width - pen_width,
+                                scaled_height - pen_width,
+                            )
+                            resource_item.setBrush(QBrush(QColor(255, 255, 255, 40)))
+                            resource_item.setPen(QPen(QColor(91, 251, 132), pen_width))
                             print(f"DEBUG: 资源 {i} 被选中")
+                        else:
+                            resource_item.setBrush(Qt.NoBrush)
+                            resource_item.setPen(Qt.NoPen)
 
                         scene.addItem(resource_item)
                         self.resource_items.append(resource_item)
