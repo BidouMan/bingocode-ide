@@ -3357,9 +3357,13 @@ class MapEditorManager(QObject):
             if 0 <= self.selected_resource_index < len(layer_resources):
                 resource = layer_resources[self.selected_resource_index]
                 resource["collision_enabled"] = enabled
-            if 0 <= self.selected_resource_index < len(current_layer.images):
-                image_data = current_layer.images[self.selected_resource_index]
-                image_data.collision_enabled = enabled
+                resource_path = resource.get("path", "")
+                for image_data in current_layer.images:
+                    if image_data.image_path == resource_path or (
+                        resource_path
+                        and os.path.basename(image_data.image_path) == os.path.basename(resource_path)
+                    ):
+                        image_data.collision_enabled = enabled
                 self.layer_manager.update_map_model()
         elif current_layer.layer_type == "drawing":
             if 0 <= self.selected_resource_index < len(layer_resources):
@@ -3483,11 +3487,20 @@ class MapEditorManager(QObject):
                 print(
                     f"DEBUG[_on_col_type_changed]: 资源 dict keys after={list(resource.keys())}"
                 )
-                # 同步更新对应的 ImageData 对象（持久化到文件）
-                if 0 <= self.selected_resource_index < len(current_layer.images):
-                    image_data = current_layer.images[self.selected_resource_index]
-                    image_data.collision_type = col_type
-                    image_data.collision_enabled = collision_enabled
+                # 同步更新对应的 ImageData 对象（按资源路径匹配，而非索引）
+                resource_path = resource.get("path", "")
+                updated_count = 0
+                for image_data in current_layer.images:
+                    if image_data.image_path == resource_path or (
+                        resource_path
+                        and os.path.basename(image_data.image_path) == os.path.basename(resource_path)
+                    ):
+                        image_data.collision_type = col_type
+                        image_data.collision_enabled = collision_enabled
+                        updated_count += 1
+                print(
+                    f"DEBUG[_on_col_type_changed]: 按路径匹配更新了 {updated_count} 个 ImageData (path={resource_path})"
+                )
                 # 同步到 map_data 并自动保存
                 self.layer_manager.update_map_model()
                 self.is_map_modified = True
@@ -4230,6 +4243,7 @@ class MapEditorManager(QObject):
 
             # 从资源数据继承碰撞设置
             image_data.collision_enabled = resource.get("collision_enabled", False)
+            image_data.collision_type = resource.get("collision_type", "图像")
 
             # 添加到当前图层
             print(f"DEBUG: 添加图像到图层前, 图层图像数量: {len(current_layer.images)}")
@@ -4346,6 +4360,8 @@ class MapEditorManager(QObject):
                     # 图像图层：使用完整图像
                     resource_type = "image"
 
+                default_col_type = "墙体" if current_layer.layer_type == "drawing" else "图像"
+                default_col_enabled = current_layer.layer_type == "drawing"
                 resource_info = {
                     "name": os.path.basename(file_path),
                     "path": relative_path,
@@ -4354,8 +4370,8 @@ class MapEditorManager(QObject):
                     "width": width,
                     "height": height,
                     "frames": 1,
-                    "collision_type": "图像",
-                    "collision_enabled": False,
+                    "collision_type": default_col_type,
+                    "collision_enabled": default_col_enabled,
                 }
 
                 # 添加图块尺寸信息
@@ -4394,6 +4410,7 @@ class MapEditorManager(QObject):
                         image_path=full_image_path,
                         tile_width=tile_size,
                         tile_height=tile_size,
+                        collision_type=default_col_type,
                     )
 
         # 绘制图层：更新地图模型的全局tile_size
@@ -4457,13 +4474,19 @@ class MapEditorManager(QObject):
                     col_type = resource.get("collision_type", None)
                     col_enabled = resource.get("collision_enabled", None)
 
-                    # 如果资源 dict 没有 collision_type（来自 .resources 文件），从 ImageData 读取
-                    if col_type is None and index < len(current_layer.images):
-                        image_data = current_layer.images[index]
-                        col_type = getattr(image_data, "collision_type", "图像")
-                        col_enabled = getattr(image_data, "collision_enabled", False)
-                        resource["collision_type"] = col_type
-                        resource["collision_enabled"] = col_enabled
+                    # 如果资源 dict 没有 collision_type，从匹配路径的 ImageData 读取
+                    if col_type is None:
+                        resource_path = resource.get("path", "")
+                        for img_data in current_layer.images:
+                            if img_data.image_path == resource_path or (
+                                resource_path
+                                and os.path.basename(img_data.image_path) == os.path.basename(resource_path)
+                            ):
+                                col_type = getattr(img_data, "collision_type", "图像")
+                                col_enabled = getattr(img_data, "collision_enabled", False)
+                                resource["collision_type"] = col_type
+                                resource["collision_enabled"] = col_enabled
+                                break
 
                     # 最终 fallback：如果仍然为 None，使用默认值
                     if col_type is None:

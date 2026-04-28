@@ -1034,7 +1034,7 @@ class MapDataModel(QObject):
             return os.path.join(maps_dir, "map.json")
         return "map.json"
 
-    def add_tile_set(self, name, image_path, tile_width, tile_height):
+    def add_tile_set(self, name, image_path, tile_width, tile_height, collision_type="图像"):
         """添加瓦片集"""
         # 计算瓦片数量
         tile_count = 0
@@ -1054,15 +1054,15 @@ class MapDataModel(QObject):
             "tile_width": tile_width,
             "tile_height": tile_height,
             "tile_count": tile_count,
-            "collision_type": "图像",
-            "collision_enabled": False,
+            "collision_type": collision_type,
+            "collision_enabled": collision_type != "图像",
             "tiles": [],
         }
 
         # 初始化tiles数组，确保每个瓦片都有默认的碰撞设置
         for i in range(tile_count):
             tile_set["tiles"].append(
-                {"collision": True, "tag": "", "collision_shape": None, "collision_type": "图像"}
+                {"collision": True, "tag": "", "collision_shape": None, "collision_type": collision_type}
             )
 
         self.map_data["tile_sets"].append(tile_set)
