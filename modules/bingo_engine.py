@@ -92,6 +92,8 @@ class Sprite:
         self._coyote_counter = 0
         self._jump_buffer = 0
         self._jump_buffered = False
+        self._drop_through = False
+        self._drop_through_timer = 0
         self._groups = []
         self._visible = True
         self._is_deleted = False
@@ -251,6 +253,9 @@ class Sprite:
                     if is_one_way and axis == "x":
                         continue
 
+                    if is_one_way and self._drop_through:
+                        continue
+
                     check_overlap_x = min(img_right, sprite_rect[2]) - max(
                         img_left, sprite_rect[0]
                     )
@@ -361,6 +366,9 @@ class Sprite:
                                 is_one_way = col_type == "跳板"
 
                                 if is_one_way and axis == "x":
+                                    continue
+
+                                if is_one_way and self._drop_through:
                                     continue
 
                                 collision_shape = _MAP_MODEL.get_tile_collision_shape(
@@ -552,6 +560,14 @@ class Sprite:
         if self.vy < 0:
             self._jump_cut = True
         self._jump_buffered = False
+
+    def drop_through(self):
+        """从跳板下穿：角色站在跳板上时，按下键可穿过跳板下落"""
+        if self.on_ground:
+            self._drop_through = True
+            self._drop_through_timer = 10
+            self.on_ground = False
+            self.vy = 2
 
     def move(self, distance):
         """朝着当前 angle 方向移动 distance 像素"""
@@ -1031,6 +1047,9 @@ class Sprite:
                     if is_one_way and self._prev_bottom_y > img_top:
                         continue
 
+                    if is_one_way and self._drop_through:
+                        continue
+
                     if (
                         rect[0] - 2 <= img_right
                         and rect[2] + 2 >= img_left
@@ -1098,6 +1117,9 @@ class Sprite:
                                     tile_bottom = tile_top + tile_size
 
                                 if is_one_way and self._prev_bottom_y > tile_top:
+                                    continue
+
+                                if is_one_way and self._drop_through:
                                     continue
 
                                 # 检查角色脚底是否在图块的碰撞盒内
@@ -1639,6 +1661,11 @@ def _handle_physics_collision():
     for sprite in _SPRITES.values():
         if sprite._is_deleted:
             continue
+
+        if sprite._drop_through:
+            sprite._drop_through_timer -= 1
+            if sprite._drop_through_timer <= 0:
+                sprite._drop_through = False
 
         last_on_ground = sprite.on_ground
         sprite.on_ground = False
