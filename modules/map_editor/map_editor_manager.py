@@ -4461,6 +4461,36 @@ class MapEditorManager(QObject):
             save_result = self.map_model.save(self.current_map_path)
             print(f"DEBUG: 保存结果: {save_result}")
 
+    def _is_resource_file_used_by_other_layers(self, resource_path, exclude_layer_id):
+        """检查资源文件是否被其他图层引用"""
+        if not resource_path:
+            return False
+        res_basename = os.path.basename(resource_path)
+        for lid, resources in self.layer_resources.items():
+            if lid == exclude_layer_id:
+                continue
+            for res in resources:
+                other_path = res.get("path", "")
+                if other_path and os.path.basename(other_path) == res_basename:
+                    return True
+        return False
+
+    def _safe_delete_resource_file(self, resource_path, current_layer_id):
+        """安全删除资源文件：仅当没有其他图层引用时才删除磁盘文件"""
+        if not resource_path:
+            return
+        if self._is_resource_file_used_by_other_layers(resource_path, current_layer_id):
+            return
+        abs_path = resource_path
+        if not os.path.isabs(abs_path) and self.current_map_path:
+            map_dir = os.path.dirname(self.current_map_path)
+            abs_path = os.path.join(map_dir, abs_path)
+        if abs_path and os.path.exists(abs_path):
+            try:
+                os.remove(abs_path)
+            except Exception as e:
+                print(f"删除资源文件失败: {e}")
+
     def delete_selected_resource(self):
         """删除res_list_view中选中的资源"""
         try:
@@ -4517,16 +4547,8 @@ class MapEditorManager(QObject):
                     if img_idx < len(current_layer.images):
                         current_layer.remove_image(current_layer.images[img_idx])
 
-            # 2. 从项目目录中删除资源文件
-            abs_path = resource_path
-            if not os.path.isabs(abs_path) and self.current_map_path:
-                map_dir = os.path.dirname(self.current_map_path)
-                abs_path = os.path.join(map_dir, abs_path)
-            if abs_path and os.path.exists(abs_path):
-                try:
-                    os.remove(abs_path)
-                except Exception as e:
-                    print(f"删除资源文件失败: {e}")
+            # 2. 安全删除资源文件（仅当没有其他图层引用时才删除磁盘文件）
+            self._safe_delete_resource_file(resource_path, layer_id)
 
             # 3. 从 map_model 的 tile_sets 中删除
             if current_layer.layer_type == "drawing":
@@ -4602,18 +4624,10 @@ class MapEditorManager(QObject):
                         scene.removeItem(item)
                 current_layer.clear_images()
 
-            # 2. 从项目目录中删除所有资源文件
+            # 2. 安全删除资源文件（仅当没有其他图层引用时才删除磁盘文件）
             for resource in layer_resources:
                 resource_path = resource.get("path", "")
-                abs_path = resource_path
-                if not os.path.isabs(abs_path) and self.current_map_path:
-                    map_dir = os.path.dirname(self.current_map_path)
-                    abs_path = os.path.join(map_dir, abs_path)
-                if abs_path and os.path.exists(abs_path):
-                    try:
-                        os.remove(abs_path)
-                    except Exception as e:
-                        print(f"删除资源文件失败: {e}")
+                self._safe_delete_resource_file(resource_path, layer_id)
 
             # 3. 从 map_model 的 tile_sets 中删除该图层的所有资源
             if current_layer.layer_type == "drawing":
