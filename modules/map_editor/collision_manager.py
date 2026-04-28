@@ -224,7 +224,6 @@ class CollisionManager(QObject):
         except Exception as e:
             pass
 
-
     def set_current_collision_tile(self, resource_index, tile_index):
         """设置当前碰撞图块"""
         try:
@@ -266,7 +265,11 @@ class CollisionManager(QObject):
 
                 # 计算全局资源索引
                 global_resource_index = resource_index
-                if self.parent_manager and hasattr(self.parent_manager, "layer_manager") and hasattr(self.parent_manager, "layer_resources"):
+                if (
+                    self.parent_manager
+                    and hasattr(self.parent_manager, "layer_manager")
+                    and hasattr(self.parent_manager, "layer_resources")
+                ):
                     layer_manager = self.parent_manager.layer_manager
                     current_layer = layer_manager.get_current_layer()
                     if current_layer:
@@ -280,7 +283,7 @@ class CollisionManager(QObject):
                                 break
                             # 加上其他图层的资源数量
                             global_resource_index += len(resources)
-                
+
                 # 从地图模型获取碰撞形状（使用全局资源索引）
                 collision_shape = self.map_model.get_tile_collision_shape(
                     global_resource_index, tile_index
@@ -299,11 +302,11 @@ class CollisionManager(QObject):
                     self.parent_manager, "layer_manager"
                 ):
                     layer_manager = self.parent_manager.layer_manager
-                    
+
                     for layer in layer_manager.layers:
                         if layer.layer_id == layer_id:
                             # 检查图层类型是否为图像图层
-                            if hasattr(layer, 'images'):
+                            if hasattr(layer, "images"):
                                 if 0 <= image_index < len(layer.images):
                                     image_data = layer.images[image_index]
                                     if image_data:
@@ -313,24 +316,45 @@ class CollisionManager(QObject):
                                 else:
                                     # 从 layer_resources 加载图像
                                     if hasattr(self.parent_manager, "layer_resources"):
-                                        layer_resources = self.parent_manager.layer_resources.get(layer_id, [])
+                                        layer_resources = (
+                                            self.parent_manager.layer_resources.get(
+                                                layer_id, []
+                                            )
+                                        )
                                         if 0 <= image_index < len(layer_resources):
                                             resource = layer_resources[image_index]
                                             resource_path = resource.get("path", "")
                                             # 处理相对路径
-                                            if resource_path and not os.path.isabs(resource_path) and hasattr(self.parent_manager, "current_map_path") and self.parent_manager.current_map_path:
-                                                map_dir = os.path.dirname(self.parent_manager.current_map_path)
-                                                resource_path = os.path.join(map_dir, resource_path)
-                                            if resource_path and os.path.exists(resource_path):
+                                            if (
+                                                resource_path
+                                                and not os.path.isabs(resource_path)
+                                                and hasattr(
+                                                    self.parent_manager,
+                                                    "current_map_path",
+                                                )
+                                                and self.parent_manager.current_map_path
+                                            ):
+                                                map_dir = os.path.dirname(
+                                                    self.parent_manager.current_map_path
+                                                )
+                                                resource_path = os.path.join(
+                                                    map_dir, resource_path
+                                                )
+                                            if resource_path and os.path.exists(
+                                                resource_path
+                                            ):
                                                 loaded_pixmap = QPixmap(resource_path)
                                                 if not loaded_pixmap.isNull():
                                                     pixmap = loaded_pixmap
-                                            collision_shape = resource.get("collision_shape", None)
-                                            collision_enabled = resource.get("collision_enabled", False)
+                                            collision_shape = resource.get(
+                                                "collision_shape", None
+                                            )
+                                            collision_enabled = resource.get(
+                                                "collision_enabled", False
+                                            )
                             break
 
             if pixmap and not pixmap.isNull():
-                # 对于图像图层，直接缩放图像本身
                 pixmap_width = pixmap.width()
                 pixmap_height = pixmap.height()
 
@@ -338,35 +362,26 @@ class CollisionManager(QObject):
                 view_rect = self.col_editor_view.viewport().rect()
                 view_width = view_rect.width()
                 view_height = view_rect.height()
-                
+
                 # 处理图像
                 if self.current_collision_image:
-                    # 图像图层：直接缩放图像本身
-                    # 使用基于视图大小的目标尺寸（视图的80%）
+                    # 图像图层：自适应缩放，大图缩小适配视图，小图适当放大
+                    display_pixmap = pixmap
+
                     target_width = view_width * 0.8
                     target_height = view_height * 0.8
-                    
-                    # 计算保持比例的缩放因子
+
                     scale_x = target_width / pixmap_width
                     scale_y = target_height / pixmap_height
-                    image_scale = min(scale_x, scale_y)
-                    
-                    # 直接缩放图像
-                    scaled_width = int(pixmap_width * image_scale)
-                    scaled_height = int(pixmap_height * image_scale)
-                    display_pixmap = pixmap.scaled(
-                        scaled_width,
-                        scaled_height,
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation
-                    )
-                    
-                    # 对于图像图层，我们直接缩放图像，所以视图变换不需要缩放
-                    view_scale = 1.0
+                    view_scale = min(scale_x, scale_y)
+
+                    # 小图像适当放大，但不超过原始尺寸的4倍
+                    max_scale = 4.0
+                    view_scale = min(view_scale, max_scale)
                 else:
                     # 绘制图层：保持原有逻辑，使用视图变换
                     display_pixmap = pixmap
-                    
+
                     # 黄金分割尺寸（大约占视图的61.8%）
                     target_width = view_width * 0.618
                     target_height = view_height * 0.618
@@ -388,13 +403,15 @@ class CollisionManager(QObject):
 
                 # 显示图像（放在场景中心位置）
                 pixmap_item = QGraphicsPixmapItem(display_pixmap)
-                
+
                 # 使用显示图像的尺寸
                 display_pixmap_width = display_pixmap.width()
                 display_pixmap_height = display_pixmap.height()
-                
+
                 # 将图块放在场景中心位置，使图块中心点对准场景原点
-                pixmap_item.setPos(-display_pixmap_width / 2, -display_pixmap_height / 2)
+                pixmap_item.setPos(
+                    -display_pixmap_width / 2, -display_pixmap_height / 2
+                )
                 # 设置为最底层
                 pixmap_item.setZValue(-100)
                 # 禁用所有鼠标交互
@@ -430,44 +447,17 @@ class CollisionManager(QObject):
                                     valid_collision_shape = True
 
                     if valid_collision_shape:
-                        # 使用自定义多边形碰撞形状（确保是局部坐标）
                         raw_points = collision_shape["points"]
-                        # 对于图像图层，需要根据缩放比例调整碰撞点
-                        if self.current_collision_image:
-                            # 计算原始图像到缩放后图像的缩放比例
-                            # display_pixmap已经是缩放后的图像，所以这里的缩放比例是 display_pixmap_width / 原始图像宽度
-                            display_scale = display_pixmap_width / pixmap_width if pixmap_width > 0 else 1.0
-                            # 确保存储的是相对于图块左上角的局部坐标
-                            self.collision_points = [
-                                QPointF(p[0] * display_scale, p[1] * display_scale) for p in raw_points
-                            ]
-                            # 对于图像图层，碰撞点已经是相对于图像左上角的局部坐标
-                            # 不需要坐标系转换，直接使用
-                            pass
-                        else:
-                            # 绘制图层，保持原样
-                            self.collision_points = [
-                                QPointF(p[0], p[1]) for p in raw_points
-                            ]
+                        self.collision_points = [
+                            QPointF(p[0], p[1]) for p in raw_points
+                        ]
                     else:
-                        # 使用默认矩形碰撞形状（转换为多边形）
-                        # 使用相对于图块左上角的局部坐标（0到图块大小）
-                        if self.current_collision_image:
-                            # 图像图层，使用缩放后的图像尺寸
-                            self.collision_points = [
-                                QPointF(0, 0),
-                                QPointF(display_pixmap_width, 0),
-                                QPointF(display_pixmap_width, display_pixmap_height),
-                                QPointF(0, display_pixmap_height),
-                            ]
-                        else:
-                            # 绘制图层，使用原始图像尺寸
-                            self.collision_points = [
-                                QPointF(0, 0),
-                                QPointF(pixmap.width(), 0),
-                                QPointF(pixmap.width(), pixmap.height()),
-                                QPointF(0, pixmap.height()),
-                            ]
+                        self.collision_points = [
+                            QPointF(0, 0),
+                            QPointF(pixmap.width(), 0),
+                            QPointF(pixmap.width(), pixmap.height()),
+                            QPointF(0, pixmap.height()),
+                        ]
 
                     # 更新碰撞多边形显示
                     self._update_collision_shape()
@@ -518,10 +508,14 @@ class CollisionManager(QObject):
         """设置碰撞启用状态"""
         if self.current_collision_tile:
             resource_index, tile_index = self.current_collision_tile
-            
+
             # 计算全局资源索引
             global_resource_index = resource_index
-            if self.parent_manager and hasattr(self.parent_manager, "layer_manager") and hasattr(self.parent_manager, "layer_resources"):
+            if (
+                self.parent_manager
+                and hasattr(self.parent_manager, "layer_manager")
+                and hasattr(self.parent_manager, "layer_resources")
+            ):
                 layer_manager = self.parent_manager.layer_manager
                 current_layer = layer_manager.get_current_layer()
                 if current_layer:
@@ -535,9 +529,11 @@ class CollisionManager(QObject):
                             break
                         # 加上其他图层的资源数量
                         global_resource_index += len(resources)
-            
+
             if self.map_model:
-                self.map_model.set_tile_collision(global_resource_index, tile_index, enabled)
+                self.map_model.set_tile_collision(
+                    global_resource_index, tile_index, enabled
+                )
                 self._update_collision_display()
         elif self.current_collision_image:
             layer_id, image_index = self.current_collision_image
@@ -874,32 +870,9 @@ class CollisionManager(QObject):
                                         if layer.layer_id == layer_id:
                                             if 0 <= image_index < len(layer.images):
                                                 image_data = layer.images[image_index]
-                                                # 计算缩放比例，将碰撞点转换为相对于原始图像的坐标
-                                                display_to_original_scale = 1.0
-                                                if hasattr(self, "tile_item") and self.tile_item:
-                                                    # 获取原始图像尺寸
-                                                    pixmap = image_data.pixmap
-                                                    if pixmap and not pixmap.isNull():
-                                                        original_width = pixmap.width()
-                                                        original_height = pixmap.height()
-                                                        # 获取显示图像尺寸
-                                                        display_width = self.tile_item.boundingRect().width()
-                                                        display_height = self.tile_item.boundingRect().height()
-                                                        # 计算缩放比例：原始图像尺寸 / 显示图像尺寸
-                                                        if display_width > 0:
-                                                            display_to_original_scale = original_width / display_width
-                                                        elif display_height > 0:
-                                                            display_to_original_scale = original_height / display_height
-                                                # 确保缩放比例不为0
-                                                if display_to_original_scale <= 0:
-                                                    display_to_original_scale = 1.0
-                                                # 对于图像图层，碰撞点已经是相对于图像左上角的局部坐标
-                                                # 不需要坐标系转换，直接使用
-                                                adjusted_points = self.collision_points
-                                                # 将碰撞点转换为相对于原始图像的坐标
                                                 points_data = [
-                                                    [p.x() * display_to_original_scale, p.y() * display_to_original_scale]
-                                                    for p in adjusted_points
+                                                    [p.x(), p.y()]
+                                                    for p in self.collision_points
                                                 ]
                                                 image_data.collision_shape = {
                                                     "points": points_data
@@ -987,36 +960,13 @@ class CollisionManager(QObject):
                                 if layer.layer_id == layer_id:
                                     if 0 <= image_index < len(layer.images):
                                         image_data = layer.images[image_index]
-                                        # 计算缩放比例，将碰撞点转换为相对于原始图像的坐标
-                                        display_to_original_scale = 1.0
-                                        if hasattr(self, "tile_item") and self.tile_item:
-                                            # 获取原始图像尺寸
-                                            pixmap = image_data.pixmap
-                                            if pixmap and not pixmap.isNull():
-                                                original_width = pixmap.width()
-                                                original_height = pixmap.height()
-                                                # 获取显示图像尺寸
-                                                display_width = self.tile_item.boundingRect().width()
-                                                display_height = self.tile_item.boundingRect().height()
-                                                # 计算缩放比例：原始图像尺寸 / 显示图像尺寸
-                                                if display_width > 0:
-                                                    display_to_original_scale = original_width / display_width
-                                                elif display_height > 0:
-                                                    display_to_original_scale = original_height / display_height
-                                                print(f"DEBUG: 保存碰撞形状(释放鼠标) - 原始图像尺寸: {original_width}x{original_height}, 显示图像尺寸: {display_width}x{display_height}, 缩放比例: {display_to_original_scale}")
-                                        # 确保缩放比例不为0
-                                        if display_to_original_scale <= 0:
-                                            display_to_original_scale = 1.0
-                                        # 将碰撞点转换为相对于原始图像的坐标
                                         points_data = [
-                                            [p.x() * display_to_original_scale, p.y() * display_to_original_scale]
+                                            [p.x(), p.y()]
                                             for p in self.collision_points
                                         ]
                                         shape_data = {"points": points_data}
                                         image_data.collision_shape = shape_data
                                         image_data.collision_enabled = True
-                                        print(f"DEBUG: 保存碰撞形状(释放鼠标) - 缩放比例: {display_to_original_scale}, 碰撞点: {points_data}")
-                                        # 自动保存地图数据
                                         if (
                                             self.parent_manager
                                             and hasattr(
@@ -1025,7 +975,9 @@ class CollisionManager(QObject):
                                             and self.parent_manager.current_map_path
                                         ):
                                             # 同步 ImageData 到 map_data 再保存
-                                            if hasattr(self.parent_manager, "layer_manager"):
+                                            if hasattr(
+                                                self.parent_manager, "layer_manager"
+                                            ):
                                                 self.parent_manager.layer_manager.update_map_model()
                                             self.map_model.save(
                                                 self.parent_manager.current_map_path

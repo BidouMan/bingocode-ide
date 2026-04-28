@@ -4842,10 +4842,10 @@ class MapEditorManager(QObject):
                                         int(display_tile_height) - pen_width,
                                     )
                                     tile_rect.setBrush(
-                                        QBrush(QColor(255, 255, 255, 40))
+                                        QBrush(QColor(100, 180, 255, 80))
                                     )
                                     tile_rect.setPen(
-                                        QPen(QColor(91, 251, 132), pen_width)
+                                        QPen(QColor(0, 220, 255), pen_width)
                                     )
                                 else:
                                     tile_rect.setPen(Qt.NoPen)
@@ -4894,8 +4894,8 @@ class MapEditorManager(QObject):
                                 scaled_width - pen_width,
                                 scaled_height - pen_width,
                             )
-                            resource_item.setBrush(QBrush(QColor(255, 255, 255, 40)))
-                            resource_item.setPen(QPen(QColor(91, 251, 132), pen_width))
+                            resource_item.setBrush(QBrush(QColor(100, 180, 255, 80)))
+                            resource_item.setPen(QPen(QColor(0, 220, 255), pen_width))
                             print(f"DEBUG: 资源 {i} 被选中")
                         else:
                             resource_item.setBrush(Qt.NoBrush)
