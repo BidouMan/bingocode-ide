@@ -87,6 +87,7 @@ class Sprite:
         self.hitbox_scale = 1.0
         self.on_ground = False
         self.vy = 0
+        self._prev_bottom_y = 0
         self._jump_cut = False
         self._coyote_counter = 0
         self._jump_buffer = 0
@@ -210,6 +211,9 @@ class Sprite:
                     if not collision_enabled:
                         continue
 
+                    col_type = image.get("collision_type", "图像")
+                    is_one_way = col_type == "跳板"
+
                     pos = image.get("position", [0, 0])
                     scale = image.get("scale", 1.0)
                     scale_x = image.get("scale_x", scale)
@@ -244,9 +248,9 @@ class Sprite:
                         img_right = img_left + img_w * abs(scale_x)
                         img_bottom = img_top + img_h * abs(scale_y)
 
-                    # === 与瓦片碰撞一致的检测策略 ===
-                    # X 轴：垂直收缩检测区域，避免头顶/脚底误触发 X 碰撞
-                    # Y 轴：水平加宽检测区域，避免边缘踩空
+                    if is_one_way and axis == "x":
+                        continue
+
                     check_overlap_x = min(img_right, sprite_rect[2]) - max(
                         img_left, sprite_rect[0]
                     )
@@ -269,6 +273,16 @@ class Sprite:
                         )
 
                     if check_overlap_x > 0 and check_overlap_y > 0:
+                        if is_one_way and axis == "y":
+                            if self._prev_bottom_y <= img_top:
+                                rect = self._get_hitbox_rect()
+                                if rect:
+                                    self._y = img_top - (rect[3] - self._y) - 0.05
+                                    self.on_ground = True
+                                    self.vy = 0
+                                return
+                            continue
+
                         if axis == "x":
                             dist_to_right = abs(sprite_rect[0] - img_right)
                             dist_to_left = abs(sprite_rect[2] - img_left)
@@ -341,16 +355,20 @@ class Sprite:
                                 resource_index, tile_index
                             )
                             if collision_enabled:
-                                # 获取图块的碰撞形状
+                                col_type = _MAP_MODEL.get_tile_collision_type(
+                                    resource_index, tile_index
+                                )
+                                is_one_way = col_type == "跳板"
+
+                                if is_one_way and axis == "x":
+                                    continue
+
                                 collision_shape = _MAP_MODEL.get_tile_collision_shape(
                                     resource_index, tile_index
                                 )
 
-                                # 计算图块的碰撞盒
                                 if collision_shape and "points" in collision_shape:
-                                    # 使用自定义碰撞形状
                                     points = collision_shape["points"]
-                                    # 转换为世界坐标
                                     world_points = [
                                         (
                                             tile_x * tile_size + p[0],
@@ -358,53 +376,51 @@ class Sprite:
                                         )
                                         for p in points
                                     ]
-                                    # 计算自定义形状的边界盒
                                     tile_left = min(p[0] for p in world_points)
                                     tile_top = min(p[1] for p in world_points)
                                     tile_right = max(p[0] for p in world_points)
                                     tile_bottom = max(p[1] for p in world_points)
                                 else:
-                                    # 使用默认矩形碰撞盒
                                     tile_left = tile_x * tile_size
                                     tile_top = tile_y * tile_size
                                     tile_right = tile_left + tile_size
                                     tile_bottom = tile_top + tile_size
 
-                                # 计算精灵与图块的重叠
                                 overlap_left = max(sprite_rect[0], tile_left)
                                 overlap_top = max(sprite_rect[1], tile_top)
                                 overlap_right = min(sprite_rect[2], tile_right)
                                 overlap_bottom = min(sprite_rect[3], tile_bottom)
 
-                                # 如果有重叠，进行位移修正
                                 overlap_x = overlap_right - overlap_left
                                 overlap_y = overlap_bottom - overlap_top
-                                # 检测任何微小的重叠，确保角色不会站在砖块内部
                                 if overlap_x > 0 and overlap_y > 0:
-                                    # 绝对边缘对齐 (Snap-to-Edge)
-                                    # 抛弃相对修正，使用绝对坐标赋值
+                                    if is_one_way and axis == "y":
+                                        if self._prev_bottom_y <= tile_top:
+                                            rect = self._get_hitbox_rect()
+                                            if rect:
+                                                self._y = (
+                                                    tile_top
+                                                    - (rect[3] - self._y)
+                                                    - 0.05
+                                                )
+                                                self.on_ground = True
+                                                self.vy = 0
+                                            return
+                                        continue
+
                                     if axis == "x":
-                                        # 使用重叠深度判断碰撞方向
-                                        # 向左撞墙：角色的左边 < 砖块的右边
-                                        # 向右撞墙：角色的右边 > 砖块的左边
                                         dist_to_right = abs(sprite_rect[0] - tile_right)
                                         dist_to_left = abs(sprite_rect[2] - tile_left)
 
                                         if dist_to_right < dist_to_left:
-                                            # 角色在砖块右侧，撞到了砖块的右边缘 (即向左走撞墙)
-                                            # 计算角色中心到左边缘的距离
                                             center_to_left = self._x - sprite_rect[0]
                                             self._x = tile_right + center_to_left + 0.05
                                         else:
-                                            # 角色在砖块左侧，撞到了砖块的左边缘 (即向右走撞墙)
-                                            # 计算角色中心到右边缘的距离
                                             center_to_right = sprite_rect[2] - self._x
                                             self._x = tile_left - center_to_right - 0.05
-                                        return  # 修正完 X 必须立即返回，绝对不能再碰 Y 的代码！
+                                        return
 
                                     elif axis == "y":
-                                        # 不要只看中心点，要看角色是从哪个方向"切入"砖块的
-                                        # 如果角色底边在砖块顶边附近，且正在向下落（或静止）
                                         if sprite_rect[3] <= tile_top + tile_size:
                                             rect = self._get_hitbox_rect()
                                             if rect:
@@ -415,9 +431,7 @@ class Sprite:
                                                 )
                                                 self.on_ground = True
                                                 self.vy = 0
-                                        # 如果角色顶边在砖块底边附近
                                         elif sprite_rect[1] >= tile_bottom - tile_size:
-                                            # 确定是顶头
                                             rect = self._get_hitbox_rect()
                                             if rect:
                                                 self._y = (
@@ -425,8 +439,8 @@ class Sprite:
                                                     + (self._y - rect[1])
                                                     + 0.05
                                                 )
-                                                self.vy = 0  # 撞头速度归零
-                                        return  # 立即退出
+                                                self.vy = 0
+                                        return
 
         # 地图边界碰撞检测
         bounds = _CURRENT_MAP.get(
@@ -462,9 +476,11 @@ class Sprite:
 
     def set_xy(self, x, y):
         """设置坐标"""
+        hitbox = self._get_hitbox_rect()
+        if hitbox:
+            self._prev_bottom_y = hitbox[3]
         self._x = x
         self._y = y
-        # 分别处理X轴和Y轴的碰撞
         self._resolve_collision("x")
         self._resolve_collision("y")
         self._update_transform()
@@ -475,6 +491,9 @@ class Sprite:
         self._update_transform()
 
     def set_y(self, y):
+        hitbox = self._get_hitbox_rect()
+        if hitbox:
+            self._prev_bottom_y = hitbox[3]
         self._y = y
         self._resolve_collision("y")
         self._update_transform()
@@ -487,29 +506,31 @@ class Sprite:
 
     def add_y(self, delta_y):
         """将 y 坐标增加（或减少）一定数值"""
+        hitbox = self._get_hitbox_rect()
+        if hitbox:
+            self._prev_bottom_y = hitbox[3]
         self._y += delta_y
         self._resolve_collision("y")
         self._update_transform()
 
     def _handle_step_move(self, dx, dy):
         """处理单步移动和碰撞检测"""
-        # 保存旧的落地状态
         was_on_floor = self.on_ground
         old_x = self._x
         old_y = self._y
 
-        # 严格的分轴步进 (Atomic Sub-stepping)
-        # 第一步：只处理X轴
-        self._x += dx
-        self._resolve_collision("x")  # 这里修完，X坐标就是绝对安全的
+        hitbox = self._get_hitbox_rect()
+        if hitbox:
+            self._prev_bottom_y = hitbox[3]
 
-        # 如果只是左右撞墙，不要让角色失去"在地"状态
+        self._x += dx
+        self._resolve_collision("x")
+
         if was_on_floor:
             self.on_ground = True
 
-        # 第二步：再处理Y轴
         self._y += dy
-        self._resolve_collision("y")  # 这里修完，Y坐标也是绝对安全的
+        self._resolve_collision("y")
 
     def jump(self, power=10):
         """角色跳跃
@@ -971,12 +992,14 @@ class Sprite:
                     if not collision_enabled:
                         continue
 
+                    col_type = image.get("collision_type", "图像")
+                    is_one_way = col_type == "跳板"
+
                     pos = image.get("position", [0, 0])
                     scale = image.get("scale", 1.0)
                     scale_x = image.get("scale_x", scale)
                     scale_y = image.get("scale_y", scale)
 
-                    # 检查是否有自定义碰撞形状
                     collision_shape = image.get("collision_shape", None)
                     if (
                         collision_shape
@@ -1004,6 +1027,9 @@ class Sprite:
                         img_top = pos[1]
                         img_right = img_left + img_w * abs(scale_x)
                         img_bottom = img_top + img_h * abs(scale_y)
+
+                    if is_one_way and self._prev_bottom_y > img_top:
+                        continue
 
                     if (
                         rect[0] - 2 <= img_right
@@ -1036,6 +1062,11 @@ class Sprite:
                                 resource_index, tile_index
                             )
                             if collision_enabled:
+                                col_type = _MAP_MODEL.get_tile_collision_type(
+                                    resource_index, tile_index
+                                )
+                                is_one_way = col_type == "跳板"
+
                                 # 获取图块的碰撞形状
                                 collision_shape = _MAP_MODEL.get_tile_collision_shape(
                                     resource_index, tile_index
@@ -1065,6 +1096,9 @@ class Sprite:
                                     tile_top = check_tile_y * tile_size
                                     tile_right = tile_left + tile_size
                                     tile_bottom = tile_top + tile_size
+
+                                if is_one_way and self._prev_bottom_y > tile_top:
+                                    continue
 
                                 # 检查角色脚底是否在图块的碰撞盒内
                                 if (
@@ -1497,6 +1531,10 @@ def load_map(map_name):
             print(f"   - 图层 {i} ({layer['name']}): {len(layer['tiles'])} 个瓦片")
             if "images" in layer:
                 print(f"     图像数量: {len(layer['images'])}")
+                for j, img in enumerate(layer["images"]):
+                    print(
+                        f"     图像 {j}: collision_type={img.get('collision_type', 'N/A')}, collision_enabled={img.get('collision_enabled', False)}, pos={img.get('position', 'N/A')}"
+                    )
 
         # 发送场景更新指令，更新SceneRect
         tile_size = _CURRENT_MAP.get("tile_size", 16)
@@ -1604,6 +1642,10 @@ def _handle_physics_collision():
 
         last_on_ground = sprite.on_ground
         sprite.on_ground = False
+
+        hitbox = sprite._get_hitbox_rect()
+        if hitbox:
+            sprite._prev_bottom_y = hitbox[3]
 
         if sprite._jump_buffer > 0:
             sprite._jump_buffer -= 1

@@ -574,35 +574,31 @@ class MapDataModel(QObject):
                 # 确保tiles数组不为空，至少有一个瓦片的数据
                 if len(tiles) == 0:
                     # 如果tiles数组为空，创建一个默认的瓦片数据
-                    tiles = [{"collision": True, "tag": "", "collision_shape": None}]
+                    tiles = [{"collision": True, "tag": "", "collision_shape": None, "collision_type": "图像"}]
                 f.write(struct.pack("<I", len(tiles)))
 
                 # 保存每个瓦片的属性（碰撞状态、标签和碰撞形状）
                 for j, tile in enumerate(tiles):
-                    # 写入碰撞状态（1字节）
                     collision = tile.get("collision", True)
                     f.write(struct.pack("<B", 1 if collision else 0))
 
-                    # 写入标签长度（4字节）和标签内容
                     tag = tile.get("tag", "")
                     tag_bytes = tag.encode("utf-8")
                     f.write(struct.pack("<I", len(tag_bytes)))
                     f.write(tag_bytes)
 
-                    # 写入碰撞形状数据
+                    tile_col_type = tile.get("collision_type", "")
+                    tile_col_type_bytes = tile_col_type.encode("utf-8")
+                    f.write(struct.pack("<I", len(tile_col_type_bytes)))
+                    f.write(tile_col_type_bytes)
+
                     collision_shape = tile.get("collision_shape", None)
                     if collision_shape and "points" in collision_shape:
                         points = collision_shape["points"]
-                        print(
-                            f"DEBUG: 保存瓦片 {j} 的碰撞形状，顶点数: {len(points)}, 形状: {collision_shape}"
-                        )
-                        # 写入点的数量
                         f.write(struct.pack("<I", len(points)))
-                        # 写入每个点的坐标（每个点两个浮点数，共8字节）
                         for point in points:
                             f.write(struct.pack("<dd", point[0], point[1]))
                     else:
-                        # 写入0表示没有碰撞形状
                         f.write(struct.pack("<I", 0))
         print(f"[BINARY] resources saved")
 
@@ -974,14 +970,17 @@ class MapDataModel(QObject):
                     # 加载每个瓦片的属性
                     tiles = []
                     for j in range(tile_count):
-                        # 读取碰撞状态
                         collision = struct.unpack("<B", f.read(1))[0] == 1
 
-                        # 读取标签
                         tag_length = struct.unpack("<I", f.read(4))[0]
                         tag = f.read(tag_length).decode("utf-8")
 
-                        # 读取碰撞形状数据
+                        try:
+                            tile_col_type_length = struct.unpack("<I", f.read(4))[0]
+                            tile_collision_type = f.read(tile_col_type_length).decode("utf-8")
+                        except:
+                            tile_collision_type = ""
+
                         point_count = struct.unpack("<I", f.read(4))[0]
                         collision_shape = None
                         if point_count > 0:
@@ -990,10 +989,8 @@ class MapDataModel(QObject):
                                 x, y = struct.unpack("<dd", f.read(16))
                                 points.append([x, y])
                             collision_shape = {"points": points}
-                        else:
-                            pass
 
-                        tile = {"collision": collision, "tag": tag}
+                        tile = {"collision": collision, "tag": tag, "collision_type": tile_collision_type}
                         if collision_shape:
                             tile["collision_shape"] = collision_shape
                         tiles.append(tile)
@@ -1013,6 +1010,13 @@ class MapDataModel(QObject):
                         "tiles": tiles,
                     }
                     tile_sets.append(tile_set)
+
+            for ts in tile_sets:
+                ts_col_type = ts.get("collision_type", "图像")
+                for tile in ts.get("tiles", []):
+                    if not tile.get("collision_type"):
+                        tile["collision_type"] = ts_col_type
+
             print(f"[BINARY] resources loaded: {len(tile_sets)} tilesets")
         except Exception as e:
             print(f"DEBUG: 加载资源引用错误: {e}")
@@ -1049,14 +1053,16 @@ class MapDataModel(QObject):
             "resource_type": "tileset",
             "tile_width": tile_width,
             "tile_height": tile_height,
-            "tile_count": tile_count,  # 计算瓦片数量
-            "tiles": [],  # 每个图块单独的碰撞设置
+            "tile_count": tile_count,
+            "collision_type": "图像",
+            "collision_enabled": False,
+            "tiles": [],
         }
 
         # 初始化tiles数组，确保每个瓦片都有默认的碰撞设置
         for i in range(tile_count):
             tile_set["tiles"].append(
-                {"collision": True, "tag": "", "collision_shape": None}
+                {"collision": True, "tag": "", "collision_shape": None, "collision_type": "图像"}
             )
 
         self.map_data["tile_sets"].append(tile_set)
@@ -1091,7 +1097,7 @@ class MapDataModel(QObject):
         tile_set = self.map_data["tile_sets"][tile_set_index]
         # 确保tiles数组足够大
         while len(tile_set["tiles"]) <= tile_index:
-            tile_set["tiles"].append({"collision": True})  # 默认开启碰撞
+            tile_set["tiles"].append({"collision": True, "tag": "", "collision_shape": None, "collision_type": "图像"})
         tile_set["tiles"][tile_index]["collision"] = collision
         self.data_changed.emit()
         return True
@@ -1114,7 +1120,7 @@ class MapDataModel(QObject):
         tile_set = self.map_data["tile_sets"][tile_set_index]
         # 确保tiles数组足够大
         while len(tile_set["tiles"]) <= tile_index:
-            tile_set["tiles"].append({"collision": True, "collision_shape": None})
+            tile_set["tiles"].append({"collision": True, "tag": "", "collision_shape": None, "collision_type": "图像"})
         tile_set["tiles"][tile_index]["collision_shape"] = shape_data
         self.data_changed.emit()
         return True
@@ -1137,7 +1143,7 @@ class MapDataModel(QObject):
         tile_set = self.map_data["tile_sets"][tile_set_index]
         # 确保tiles数组足够大
         while len(tile_set["tiles"]) <= tile_index:
-            tile_set["tiles"].append({"collision": True, "collision_shape": None})
+            tile_set["tiles"].append({"collision": True, "tag": "", "collision_shape": None, "collision_type": "图像"})
         collision_shape = tile_set["tiles"][tile_index].get("collision_shape", None)
         return collision_shape
 
@@ -1162,9 +1168,34 @@ class MapDataModel(QObject):
             tile_set["tiles"] = []
         # 确保tiles数组足够大
         while len(tile_set["tiles"]) <= tile_index:
-            tile_set["tiles"].append({"collision": True})  # 默认开启碰撞
+            tile_set["tiles"].append({"collision": True, "tag": "", "collision_shape": None, "collision_type": "图像"})
         collision = tile_set["tiles"][tile_index].get("collision", True)
         return collision
+
+    def get_tile_collision_type(self, tile_set_index, tile_index=None):
+        """获取图块的碰撞类型（墙体/跳板/图像/自定义）"""
+        if tile_set_index < 0 or tile_set_index >= len(self.map_data["tile_sets"]):
+            return "图像"
+        tile_set = self.map_data["tile_sets"][tile_set_index]
+        if tile_index is not None:
+            tiles = tile_set.get("tiles", [])
+            if 0 <= tile_index < len(tiles):
+                tile_col_type = tiles[tile_index].get("collision_type", None)
+                if tile_col_type:
+                    return tile_col_type
+        return tile_set.get("collision_type", "图像")
+
+    def set_tile_collision_type(self, tile_set_index, tile_index, collision_type):
+        """设置单个图块的碰撞类型"""
+        if tile_set_index < 0 or tile_set_index >= len(self.map_data["tile_sets"]):
+            return False
+        tile_set = self.map_data["tile_sets"][tile_set_index]
+        tiles = tile_set.get("tiles", [])
+        while len(tiles) <= tile_index:
+            tiles.append({"collision": True, "tag": "", "collision_shape": None, "collision_type": "图像"})
+        tiles[tile_index]["collision_type"] = collision_type
+        self.data_changed.emit()
+        return True
 
     def set_tile_tag(self, tile_set_index, tile_index, tag):
         """设置单个图块的标签"""
@@ -1184,7 +1215,7 @@ class MapDataModel(QObject):
         tile_set = self.map_data["tile_sets"][tile_set_index]
         # 确保tiles数组足够大
         while len(tile_set["tiles"]) <= tile_index:
-            tile_set["tiles"].append({"collision": True})
+            tile_set["tiles"].append({"collision": True, "tag": "", "collision_shape": None, "collision_type": "图像"})
         tile_set["tiles"][tile_index]["tag"] = tag
         self.data_changed.emit()
         return True
@@ -1207,7 +1238,7 @@ class MapDataModel(QObject):
         tile_set = self.map_data["tile_sets"][tile_set_index]
         # 确保tiles数组足够大
         while len(tile_set["tiles"]) <= tile_index:
-            tile_set["tiles"].append({"collision": True})
+            tile_set["tiles"].append({"collision": True, "tag": "", "collision_shape": None, "collision_type": "图像"})
         tag = tile_set["tiles"][tile_index].get("tag", "")
         return tag
 

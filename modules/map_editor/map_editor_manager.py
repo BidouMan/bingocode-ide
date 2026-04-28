@@ -1040,12 +1040,24 @@ class MapEditorManager(QObject):
                                 image_path = os.path.join(
                                     tilesets_path, resource.get("name", "")
                                 )
+                            collisions = []
+                            for tile in resource.get("tiles", []):
+                                collision_data = {}
+                                if "collision_type" in tile:
+                                    collision_data["collision_type"] = tile["collision_type"]
+                                if "collision" in tile:
+                                    collision_data["collision"] = tile["collision"]
+                                if "tag" in tile:
+                                    collision_data["tag"] = tile["tag"]
+                                if "collision_shape" in tile:
+                                    collision_data["collision_shape"] = tile["collision_shape"]
+                                collisions.append(collision_data)
                             converted_resource = {
                                 "name": resource.get("name", ""),
                                 "path": image_path,
                                 "resource_type": resource.get(
                                     "resource_type", "tileset"
-                                ),  # 保留原始资源类型
+                                ),
                                 "tile_size": resource.get("tile_width", 32),
                                 "tile_width": resource.get("tile_width", 32),
                                 "tile_height": resource.get("tile_height", 32),
@@ -1055,7 +1067,7 @@ class MapEditorManager(QObject):
                                 "collision_enabled": resource.get(
                                     "collision_enabled", False
                                 ),
-                                "collisions": [],  # 初始化碰撞数据
+                                "collisions": collisions,
                             }
                             # 计算图块数量
                             if "tiles" in resource:
@@ -1137,6 +1149,8 @@ class MapEditorManager(QObject):
                                         "tile_size": 1,
                                         "tile_width": 1,
                                         "tile_height": 1,
+                                        "collision_type": image_data.collision_type,
+                                        "collision_enabled": image_data.collision_enabled,
                                         "collisions": [],
                                     }
                                     converted_resources.append(image_resource)
@@ -1421,6 +1435,23 @@ class MapEditorManager(QObject):
             # 更新图层管理系统数据到地图数据模型
             self.layer_manager.update_map_model()
 
+            # 保存旧的tile_sets中的per-tile数据，防止被layer_resources覆盖丢失
+            old_tile_sets = self.map_model.map_data.get("tile_sets", [])
+            old_tiles_by_path = {}
+            old_tiles_by_basename = {}
+            for ts in old_tile_sets:
+                ts_path = ts.get("path", "") or ts.get("image_path", "")
+                ts_data = {
+                    "tiles": ts.get("tiles", []),
+                    "collision_type": ts.get("collision_type", "图像"),
+                    "collision_enabled": ts.get("collision_enabled", False),
+                }
+                if ts_path:
+                    old_tiles_by_path[ts_path] = ts_data
+                    basename = os.path.basename(ts_path)
+                    if basename not in old_tiles_by_basename:
+                        old_tiles_by_basename[basename] = ts_data
+
             # 收集所有图层的资源，保存到地图模型的tile_sets中
             all_resources = []
             resource_path_to_index = {}
@@ -1436,14 +1467,18 @@ class MapEditorManager(QObject):
                         f"DEBUG:   资源 {i}: {resource.get('name', 'unknown')}, 路径: {resource_path}, 类型: {resource_type}"
                     )
                     if resource_path not in resource_path_to_index:
-                        # 确保资源对象有正确的字段
                         if resource_type == "image":
-                            # 确保图像资源有tile_width和tile_height字段
                             if "tile_width" not in resource:
                                 resource["tile_width"] = 1
                             if "tile_height" not in resource:
                                 resource["tile_height"] = 1
-                        # 确保所有资源都有tiles字段
+                            if "collision_type" not in resource or resource.get("collision_type") is None:
+                                for layer in self.layer_manager.layers:
+                                    if layer.layer_id == layer_id and layer.layer_type == "image":
+                                        if i < len(layer.images):
+                                            resource["collision_type"] = layer.images[i].collision_type
+                                            resource["collision_enabled"] = layer.images[i].collision_enabled
+                                        break
                         if "tiles" not in resource:
                             resource["tiles"] = []
 
@@ -1632,6 +1667,32 @@ class MapEditorManager(QObject):
                 print(
                     f"DEBUG: 保存图层 {layer_id} ({layer.name}, {layer.layer_type}) 的资源索引范围: {start_index}-{end_index}"
                 )
+
+            # 将旧tile_sets中的per-tile数据合并到all_resources中
+            for resource in all_resources:
+                resource_path = resource.get("path", "") or resource.get("image_path", "")
+                old_data = None
+                if resource_path and resource_path in old_tiles_by_path:
+                    old_data = old_tiles_by_path[resource_path]
+                elif resource_path:
+                    basename = os.path.basename(resource_path)
+                    if basename in old_tiles_by_basename:
+                        old_data = old_tiles_by_basename[basename]
+                if old_data:
+                    if old_data["tiles"] and not resource.get("tiles"):
+                        resource["tiles"] = old_data["tiles"]
+                    elif old_data["tiles"] and resource.get("tiles"):
+                        for idx, tile in enumerate(old_data["tiles"]):
+                            if idx < len(resource["tiles"]):
+                                for key in tile:
+                                    if key not in resource["tiles"][idx]:
+                                        resource["tiles"][idx][key] = tile[key]
+                            else:
+                                resource["tiles"].append(tile)
+                    if "collision_type" not in resource or resource.get("collision_type") is None:
+                        resource["collision_type"] = old_data["collision_type"]
+                    if "collision_enabled" not in resource or resource.get("collision_enabled") is None:
+                        resource["collision_enabled"] = old_data["collision_enabled"]
 
             # 更新地图模型的tile_sets
 
@@ -3286,22 +3347,35 @@ class MapEditorManager(QObject):
         """设置碰撞启用状态"""
         self.collision_manager.set_collision_enabled(enabled)
 
-        # 同时保存到资源数据（图像图层）
         current_layer = self.layer_manager.get_current_layer()
-        if current_layer and current_layer.layer_type == "image":
-            layer_resources = self.layer_resources.get(current_layer.layer_id, [])
+        if not current_layer:
+            return
+
+        layer_resources = self.layer_resources.get(current_layer.layer_id, [])
+
+        if current_layer.layer_type == "image":
             if 0 <= self.selected_resource_index < len(layer_resources):
                 resource = layer_resources[self.selected_resource_index]
                 resource["collision_enabled"] = enabled
-            # 同步更新 ImageData 对象（持久化到文件）
             if 0 <= self.selected_resource_index < len(current_layer.images):
                 image_data = current_layer.images[self.selected_resource_index]
                 image_data.collision_enabled = enabled
-                # 同步到 map_data 并自动保存
                 self.layer_manager.update_map_model()
-                self.is_map_modified = True
-                if self.current_map_path:
-                    self.map_model.save(self.current_map_path)
+        elif current_layer.layer_type == "drawing":
+            if 0 <= self.selected_resource_index < len(layer_resources):
+                resource = layer_resources[self.selected_resource_index]
+                resource["collision_enabled"] = enabled
+                collisions = resource.get("collisions", [])
+                while len(collisions) <= self.selected_tile_index:
+                    collisions.append({})
+                collisions[self.selected_tile_index]["collision"] = enabled
+            global_index = self._get_global_resource_index()
+            if global_index >= 0:
+                self.map_model.set_tile_collision(global_index, self.selected_tile_index, enabled)
+
+        self.is_map_modified = True
+        if self.current_map_path:
+            self.map_model.save(self.current_map_path)
 
     def set_collision_snap_to_pixel(self, enabled):
         """设置碰撞锚点是否吸附到像素网格"""
@@ -3310,6 +3384,36 @@ class MapEditorManager(QObject):
     def _on_tag_changed(self, tag):
         """处理标签变化"""
         self.property_manager.set_tile_tag(tag)
+
+    def _get_global_resource_index(self, local_resource_index=None):
+        """将图层内局部资源索引映射为 tile_sets 全局索引"""
+        if local_resource_index is None:
+            local_resource_index = self.selected_resource_index
+
+        if local_resource_index < 0:
+            return -1
+
+        current_layer = self.layer_manager.get_current_layer()
+        if not current_layer:
+            return -1
+
+        layer_resources = self.layer_resources.get(current_layer.layer_id, [])
+        if local_resource_index >= len(layer_resources):
+            return -1
+
+        resource = layer_resources[local_resource_index]
+        resource_path = resource.get("path", "")
+
+        tile_sets = self.map_model.map_data.get("tile_sets", [])
+        for i, ts in enumerate(tile_sets):
+            ts_path = ts.get("path", "") or ts.get("image_path", "")
+            if ts_path and resource_path and (
+                ts_path == resource_path
+                or os.path.basename(ts_path) == os.path.basename(resource_path)
+            ):
+                return i
+
+        return -1
 
     def _on_col_type_changed(self):
         """处理碰撞类型变化"""
@@ -3331,6 +3435,13 @@ class MapEditorManager(QObject):
 
         # 根据碰撞类型设置碰撞状态和map_collision复选框
         if col_type == "墙体":
+            collision_enabled = True
+            if hasattr(self.ui, "map_collision"):
+                self.ui.map_collision.blockSignals(True)
+                self.ui.map_collision.setEnabled(True)
+                self.ui.map_collision.setChecked(True)
+                self.ui.map_collision.blockSignals(False)
+        elif col_type == "跳板":
             collision_enabled = True
             if hasattr(self.ui, "map_collision"):
                 self.ui.map_collision.blockSignals(True)
@@ -3387,9 +3498,26 @@ class MapEditorManager(QObject):
                 # 刷新碰撞编辑器显示
                 self.collision_manager._update_collision_display()
 
-        # 设置碰撞状态（兼容绘制图层）
         if hasattr(self, "property_manager") and not is_image_layer:
             self.property_manager.set_tile_collision(collision_enabled)
+            layer_resources = self.layer_resources.get(current_layer.layer_id, [])
+            if 0 <= self.selected_resource_index < len(layer_resources):
+                resource = layer_resources[self.selected_resource_index]
+                collisions = resource.get("collisions", [])
+                while len(collisions) <= self.selected_tile_index:
+                    collisions.append({})
+                collisions[self.selected_tile_index]["collision_type"] = col_type
+                collisions[self.selected_tile_index]["collision"] = collision_enabled
+                resource["collision_enabled"] = collision_enabled
+            if self.map_model and self.selected_resource_index >= 0:
+                global_index = self._get_global_resource_index()
+                if global_index >= 0:
+                    self.map_model.set_tile_collision_type(
+                        global_index, self.selected_tile_index, col_type
+                    )
+                self.is_map_modified = True
+                if self.current_map_path:
+                    self.map_model.save(self.current_map_path)
 
     def _on_map_name_changed(self, name):
         """处理地图名称变化"""
@@ -4226,6 +4354,8 @@ class MapEditorManager(QObject):
                     "width": width,
                     "height": height,
                     "frames": 1,
+                    "collision_type": "图像",
+                    "collision_enabled": False,
                 }
 
                 # 添加图块尺寸信息
@@ -4421,12 +4551,18 @@ class MapEditorManager(QObject):
 
                 # 从地图模型获取最新的碰撞形状数据
                 if self.map_model:
+                    global_idx = self._get_global_resource_index(resource_index)
                     print(
-                        f"DEBUG: 从地图模型获取碰撞形状 - 资源索引: {resource_index}, 图块索引: {tile_index}"
+                        f"DEBUG: 从地图模型获取碰撞形状 - 资源索引: {resource_index}, 全局索引: {global_idx}, 图块索引: {tile_index}"
                     )
-                    collision_shape = self.map_model.get_tile_collision_shape(
-                        resource_index, tile_index
-                    )
+                    if global_idx >= 0:
+                        collision_shape = self.map_model.get_tile_collision_shape(
+                            global_idx, tile_index
+                        )
+                    else:
+                        collision_shape = self.map_model.get_tile_collision_shape(
+                            resource_index, tile_index
+                        )
                     print(f"DEBUG: 获取到的碰撞形状: {collision_shape}")
                     if collision_shape and "points" in collision_shape:
                         resource_info["collisions"][tile_index]["points"] = (
@@ -4457,6 +4593,36 @@ class MapEditorManager(QObject):
                     f"DEBUG: 调用 set_current_collision_tile - 资源索引: {resource_index}, 图块索引: {tile_index}"
                 )
                 self.set_current_collision_tile(resource_index, tile_index)
+
+                # 恢复碰撞类型到属性面板
+                if self.map_model and hasattr(self, "ui"):
+                    col_type = None
+                    collisions = resource_info.get("collisions", [])
+                    if tile_index < len(collisions):
+                        col_type = collisions[tile_index].get("collision_type", None)
+                    global_index = self._get_global_resource_index(resource_index)
+                    if col_type is None:
+                        if global_index >= 0:
+                            col_type = self.map_model.get_tile_collision_type(global_index, tile_index)
+                        else:
+                            col_type = "图像"
+                    if global_index >= 0:
+                        collision_enabled = self.map_model.get_tile_collision(global_index, tile_index)
+                    else:
+                        collision_enabled = self.map_model.get_tile_collision(resource_index, tile_index)
+                    if hasattr(self.ui, "att_col_type"):
+                        self.ui.att_col_type.blockSignals(True)
+                        self.ui.att_col_type.setCurrentText(col_type)
+                        self.ui.att_col_type.blockSignals(False)
+                    if hasattr(self.ui, "map_collision"):
+                        self.ui.map_collision.blockSignals(True)
+                        if col_type == "图像":
+                            self.ui.map_collision.setChecked(False)
+                            self.ui.map_collision.setEnabled(False)
+                        else:
+                            self.ui.map_collision.setChecked(collision_enabled)
+                            self.ui.map_collision.setEnabled(True)
+                        self.ui.map_collision.blockSignals(False)
             else:
                 print(f"DEBUG: 资源未找到 - resource_info: {resource_info}")
 
