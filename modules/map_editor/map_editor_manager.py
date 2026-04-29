@@ -898,29 +898,36 @@ class MapEditorManager(QObject):
         import os
 
         self._initialize_map_model()
-        # 重新初始化图层管理器，使用新的地图数据模型
         self.layer_manager = LayerManager(self.map_model, self)
-        # 重新连接信号
         self.layer_manager.current_layer_changed.connect(self._on_layer_changed)
-        # 从地图模型同步默认图层（如 ground）
         self.layer_manager.initialize_from_map_model()
 
-        # 自动为新地图分配一个默认路径，避免后续自动保存时生成新地图
+        self.layer_resources.clear()
+        self.uploaded_resources.clear()
+        self.selected_resource_index = -1
+        self.selected_tile_index = -1
+        self._remove_preview()
+        self._pixmap_cache.clear()
+        self._source_image_cache.clear()
+
+        tile_size = self.map_model.get_tile_size()
+        if self.canvas_manager:
+            self.canvas_manager.tile_size = tile_size
+            self.canvas_manager._init_grid_texture()
+        self._update_tile_size_display()
+
         if hasattr(self, "project_manager") and self.project_manager:
             project_path = self.project_manager.project_root
             if project_path:
                 maps_dir = os.path.join(project_path, "assets", "maps")
                 os.makedirs(maps_dir, exist_ok=True)
-                # 生成默认地图名称
                 map_name = "地图1"
                 counter = 1
                 while os.path.exists(os.path.join(maps_dir, map_name)):
                     counter += 1
                     map_name = f"地图{counter}"
-                # 创建与地图同名的文件夹
                 map_dir = os.path.join(maps_dir, map_name)
                 os.makedirs(map_dir, exist_ok=True)
-                # 文件路径指向文件夹内的.info文件
                 file_path = os.path.join(map_dir, f"{map_name}.info")
                 self.current_map_path = file_path
                 print(f"DEBUG: 为新地图分配默认路径: {file_path}")
@@ -2851,25 +2858,10 @@ class MapEditorManager(QObject):
             )
             print(f"DEBUG: 资源列表长度: {len(layer_resources)}")
 
-            # 计算全局资源索引
-            # 使用 tile_sets（与 _generate_pixmap 一致）
-            tile_sets = self.map_model.map_data.get("tile_sets", [])
-            if tile_sets:
-                all_resources = tile_sets
-            else:
-                all_resources = []
-                for layer_res in self.layer_resources.values():
-                    all_resources.extend(layer_res)
-
-            # 查找当前资源在全局资源列表中的索引
-            global_resource_index = -1
-            for i, res in enumerate(all_resources):
-                if res.get("path") == resource.get("path"):
-                    global_resource_index = i
-                    break
-
-            # 如果找不到，使用当前图层中的索引
-            if global_resource_index == -1:
+            global_resource_index = self._get_global_resource_index(
+                self.selected_resource_index
+            )
+            if global_resource_index < 0:
                 global_resource_index = self.selected_resource_index
 
             # 根据资源类型确定图块ID
@@ -3326,16 +3318,9 @@ class MapEditorManager(QObject):
                 )
                 return
 
-            # 计算全局资源索引
-            global_resource_index = 0
-            # 遍历所有图层的资源，找到当前资源的全局索引
-            for layer_id, resources in self.layer_resources.items():
-                if layer_id == current_layer.layer_id:
-                    # 找到当前图层，加上当前资源在图层内的索引
-                    global_resource_index += resource_index
-                    break
-                # 加上其他图层的资源数量
-                global_resource_index += len(resources)
+            global_resource_index = self._get_global_resource_index(resource_index)
+            if global_resource_index < 0:
+                global_resource_index = resource_index
 
             print(
                 f"DEBUG: 局部资源索引: {resource_index}, 全局资源索引: {global_resource_index}"
@@ -3809,20 +3794,8 @@ class MapEditorManager(QObject):
         # 获取图块图像
         pixmap = None
         if resource["resource_type"] == "tileset":
-            # 计算全局资源索引（使用 tile_sets，与 _generate_pixmap 一致）
-            tile_sets = self.map_model.map_data.get("tile_sets", [])
-            if tile_sets:
-                all_res = tile_sets
-            else:
-                all_res = []
-                for layer_res in self.layer_resources.values():
-                    all_res.extend(layer_res)
-            global_resource_index = -1
-            for i, res in enumerate(all_res):
-                if res.get("path") == resource.get("path"):
-                    global_resource_index = i
-                    break
-            if global_resource_index == -1:
+            global_resource_index = self._get_global_resource_index(resource_index)
+            if global_resource_index < 0:
                 global_resource_index = resource_index
 
             # 使用全局资源索引计算tile_id
@@ -4240,6 +4213,9 @@ class MapEditorManager(QObject):
                     )
                     self.select_resource(0)
                     print(f"DEBUG: 更新碰撞编辑器显示，选择图像0")
+            else:
+                self.selected_resource_index = -1
+                self.selected_tile_index = -1
 
         self._update_toolbar_state(current_layer.layer_type)
 
@@ -4579,7 +4555,14 @@ class MapEditorManager(QObject):
         self._pixmap_cache.clear()
         self._source_image_cache.clear()
 
-        # 更新资源列表显示
+        if self.selected_resource_index < 0:
+            current_layer = self.layer_manager.get_current_layer()
+            if current_layer:
+                layer_res = self.layer_resources.get(current_layer.layer_id, [])
+                if layer_res:
+                    self.selected_resource_index = len(layer_res) - 1
+                    self.selected_tile_index = 0
+
         self._update_res_list_display()
 
         # 强制重新渲染地图，确保新上传的图块能正常显示
