@@ -272,6 +272,7 @@ class ResourceManager(QObject):
     sig_sprite_selected = Signal(str)  # 双击卡片时：发送文件夹绝对路径
     sig_sprite_imported = Signal(str)  # 导入成功时：发送文件夹绝对路径
     sig_map_selected = Signal(str)  # 双击地图卡片时：发送地图文件绝对路径
+    sig_map_created = Signal()  # 创建新地图后通知
 
     def __init__(self, main_ui, parent_window, app_controller):
         super().__init__()
@@ -1352,6 +1353,7 @@ class ResourceManager(QObject):
 
         # 创建地图卡片
         self.add_map_card(map_name, map_count)
+        self.sig_map_created.emit()
 
     def destroy(self):
         """销毁ResourceManager，移除所有事件过滤器"""

@@ -198,6 +198,17 @@ class AppController:
         self.map_editor.map_renamed.connect(self.res_manager.refresh_map_list)
         self.map_editor.map_imported.connect(self.res_manager.refresh_map_list)
 
+        # 6. 地图选择下拉框
+        self.ui.btn_editor_map_selectmap.setEditable(False)
+        self.ui.btn_editor_map_selectmap.currentIndexChanged.connect(
+            self._on_map_selector_changed
+        )
+        self.map_editor.map_renamed.connect(self._refresh_map_selector)
+        self.map_editor.map_imported.connect(self._refresh_map_selector)
+        self.map_editor.map_loaded.connect(self._sync_map_selector)
+        self.res_manager.sig_map_created.connect(self._refresh_map_selector)
+        self._refresh_map_selector()
+
     def _open_and_switch_to_editor(self, path):
         print(f"🛎️ [AppController] 收到编辑请求，目标路径: {path}")
 
@@ -255,6 +266,69 @@ class AppController:
         # 4. 加载地图文件
         self.map_editor.load_map_from_path(path)
 
+    def _refresh_map_selector(self):
+        self.ui.btn_editor_map_selectmap.blockSignals(True)
+        current_text = self.ui.btn_editor_map_selectmap.currentText()
+        self.ui.btn_editor_map_selectmap.clear()
+
+        project_root = self.project_manager.project_root
+        if project_root:
+            maps_dir = os.path.join(project_root, "assets", "maps")
+            if os.path.exists(maps_dir):
+                map_folders = sorted(
+                    d
+                    for d in os.listdir(maps_dir)
+                    if not d.startswith(".")
+                    and os.path.isdir(os.path.join(maps_dir, d))
+                )
+                for folder in map_folders:
+                    info_path = os.path.join(maps_dir, folder, f"{folder}.info")
+                    json_path = os.path.join(maps_dir, folder, f"{folder}.json")
+                    if os.path.exists(info_path) or os.path.exists(json_path):
+                        self.ui.btn_editor_map_selectmap.addItem(folder)
+
+        if self.ui.btn_editor_map_selectmap.count() == 0:
+            self.ui.btn_editor_map_selectmap.addItem("空")
+
+        idx = self.ui.btn_editor_map_selectmap.findText(current_text)
+        if idx >= 0:
+            self.ui.btn_editor_map_selectmap.setCurrentIndex(idx)
+        self.ui.btn_editor_map_selectmap.blockSignals(False)
+
+    def _sync_map_selector(self, map_path):
+        if not map_path:
+            return
+        map_name = os.path.splitext(os.path.basename(map_path))[0]
+        idx = self.ui.btn_editor_map_selectmap.findText(map_name)
+        if idx >= 0:
+            self.ui.btn_editor_map_selectmap.blockSignals(True)
+            self.ui.btn_editor_map_selectmap.setCurrentIndex(idx)
+            self.ui.btn_editor_map_selectmap.blockSignals(False)
+
+    def _on_map_selector_changed(self, index):
+        if index < 0:
+            return
+        map_name = self.ui.btn_editor_map_selectmap.itemText(index)
+        if map_name == "空":
+            return
+
+        project_root = self.project_manager.project_root
+        if not project_root:
+            return
+
+        maps_dir = os.path.join(project_root, "assets", "maps")
+        info_path = os.path.join(maps_dir, map_name, f"{map_name}.info")
+        json_path = os.path.join(maps_dir, map_name, f"{map_name}.json")
+
+        map_path = None
+        if os.path.exists(info_path):
+            map_path = info_path
+        elif os.path.exists(json_path):
+            map_path = json_path
+
+        if map_path:
+            self._open_and_switch_to_map_editor(map_path)
+
     def handle_new_project(self):
         """新建项目：重置并初始化运行目标"""
         self.project_manager.new_project()
@@ -287,6 +361,7 @@ class AppController:
             self.res_manager.refresh_code_list()
             self.res_manager.refresh_sprite_grid()
             self.res_manager.refresh_map_list()
+            self._refresh_map_selector()
             # 2. 获取目录下所有 py 文件
             all_files = [
                 f
