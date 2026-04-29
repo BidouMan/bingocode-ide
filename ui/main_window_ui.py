@@ -995,16 +995,6 @@ class Ui_Form(object):
 
         self.horizontalLayout_23.addWidget(self.label_res_list_name)
 
-        self.label_res_list_id = QLabel(self.res_info)
-        self.label_res_list_id.setObjectName(u"label_res_list_id")
-
-        self.horizontalLayout_23.addWidget(self.label_res_list_id)
-
-        self.label_res_list_size = QLabel(self.res_info)
-        self.label_res_list_size.setObjectName(u"label_res_list_size")
-
-        self.horizontalLayout_23.addWidget(self.label_res_list_size)
-
         self.horizontalSpacer_9 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
         self.horizontalLayout_23.addItem(self.horizontalSpacer_9)
@@ -1128,19 +1118,17 @@ class Ui_Form(object):
 
         self.verticalLayout_25.addWidget(self.editor_map_canvas)
 
-        self.editor_map_info = QFrame(self.editor_map_mid)
+        self.editor_map_info = QWidget(self.editor_map_mid)
         self.editor_map_info.setObjectName(u"editor_map_info")
         self.editor_map_info.setMinimumSize(QSize(0, 30))
         self.editor_map_info.setMaximumSize(QSize(16777215, 30))
-        self.editor_map_info.setFrameShape(QFrame.Shape.StyledPanel)
-        self.editor_map_info.setFrameShadow(QFrame.Shadow.Raised)
         self.horizontalLayout_19 = QHBoxLayout(self.editor_map_info)
         self.horizontalLayout_19.setSpacing(20)
         self.horizontalLayout_19.setObjectName(u"horizontalLayout_19")
         self.horizontalLayout_19.setContentsMargins(0, 0, 0, 0)
-        self.horizontalSpacer_14 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.horizontalSpacer_16 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
-        self.horizontalLayout_19.addItem(self.horizontalSpacer_14)
+        self.horizontalLayout_19.addItem(self.horizontalSpacer_16)
 
         self.label_editor_map_name = QLabel(self.editor_map_info)
         self.label_editor_map_name.setObjectName(u"label_editor_map_name")
@@ -1156,6 +1144,11 @@ class Ui_Form(object):
         self.label_editor_map_pos.setObjectName(u"label_editor_map_pos")
 
         self.horizontalLayout_19.addWidget(self.label_editor_map_pos)
+
+        self.label_res_list_size = QLabel(self.editor_map_info)
+        self.label_res_list_size.setObjectName(u"label_res_list_size")
+
+        self.horizontalLayout_19.addWidget(self.label_res_list_size)
 
         self.horizontalSpacer_10 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
@@ -1376,11 +1369,6 @@ class Ui_Form(object):
 
         self.verticalLayout_23.addWidget(self.label_24)
 
-        self.editor_map_layer_list = QListWidget(self.editor_map_right_bg)
-        self.editor_map_layer_list.setObjectName(u"editor_map_layer_list")
-
-        self.verticalLayout_23.addWidget(self.editor_map_layer_list)
-
         self.layer_editor_toolbar = QFrame(self.editor_map_right_bg)
         self.layer_editor_toolbar.setObjectName(u"layer_editor_toolbar")
         self.layer_editor_toolbar.setMinimumSize(QSize(0, 30))
@@ -1418,6 +1406,34 @@ class Ui_Form(object):
 
 
         self.verticalLayout_23.addWidget(self.layer_editor_toolbar)
+
+        self.editor_map_layer_list = QListWidget(self.editor_map_right_bg)
+        self.editor_map_layer_list.setObjectName(u"editor_map_layer_list")
+
+        self.verticalLayout_23.addWidget(self.editor_map_layer_list)
+
+        self.widget_3 = QWidget(self.editor_map_right_bg)
+        self.widget_3.setObjectName(u"widget_3")
+        self.widget_3.setMinimumSize(QSize(0, 30))
+        self.widget_3.setMaximumSize(QSize(16777215, 30))
+        self.horizontalLayout_20 = QHBoxLayout(self.widget_3)
+        self.horizontalLayout_20.setObjectName(u"horizontalLayout_20")
+        self.horizontalLayout_20.setContentsMargins(0, 0, 0, 0)
+        self.horizontalSpacer_14 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        self.horizontalLayout_20.addItem(self.horizontalSpacer_14)
+
+        self.label_map_layer_mode = QLabel(self.widget_3)
+        self.label_map_layer_mode.setObjectName(u"label_map_layer_mode")
+
+        self.horizontalLayout_20.addWidget(self.label_map_layer_mode)
+
+        self.horizontalSpacer_15 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        self.horizontalLayout_20.addItem(self.horizontalSpacer_15)
+
+
+        self.verticalLayout_23.addWidget(self.widget_3)
 
 
         self.verticalLayout_28.addWidget(self.editor_map_right_bg)
@@ -1609,9 +1625,7 @@ class Ui_Form(object):
         self.btn_res_col_del.setText(QCoreApplication.translate("Form", u"\u5220", None))
         self.btn_res_col_reset.setText(QCoreApplication.translate("Form", u"\u91cd", None))
         self.btn_res_col_snap.setText(QCoreApplication.translate("Form", u"\u5438", None))
-        self.label_res_list_name.setText(QCoreApplication.translate("Form", u"\u8d44\u6e90:foreasdnew", None))
-        self.label_res_list_id.setText(QCoreApplication.translate("Form", u"ID:12", None))
-        self.label_res_list_size.setText(QCoreApplication.translate("Form", u"\u5c3a\u5bf8:16x16", None))
+        self.label_res_list_name.setText(QCoreApplication.translate("Form", u"\u8d44\u6e90:--", None))
         self.btn_editor_map_new.setText(QCoreApplication.translate("Form", u"\u65b0\u5efa", None))
         self.btn_editor_map_import.setText(QCoreApplication.translate("Form", u"\u5bfc\u5165", None))
         self.btn_editor_map_export.setText(QCoreApplication.translate("Form", u"\u5bfc\u51fa", None))
@@ -1623,9 +1637,10 @@ class Ui_Form(object):
         self.btn_editor_map_gird.setText(QCoreApplication.translate("Form", u"\u7f51", None))
         self.btn_editor_map_selectmap.setItemText(0, QCoreApplication.translate("Form", u"\u65b0\u5efa\u9879\u76ee", None))
 
-        self.label_editor_map_name.setText(QCoreApplication.translate("Form", u"\u5730\u56fe1", None))
-        self.label_editor_map_size.setText(QCoreApplication.translate("Form", u"\u573a\u666f\u5927\u5c0f:40x20", None))
-        self.label_editor_map_pos.setText(QCoreApplication.translate("Form", u"X:187 Y:339", None))
+        self.label_editor_map_name.setText(QCoreApplication.translate("Form", u"ID:--", None))
+        self.label_editor_map_size.setText(QCoreApplication.translate("Form", u"\u573a\u666f\u5927\u5c0f:--", None))
+        self.label_editor_map_pos.setText(QCoreApplication.translate("Form", u"\u5750\u6807:--", None))
+        self.label_res_list_size.setText(QCoreApplication.translate("Form", u"\u8d44\u6e90\u5c3a\u5bf8:--", None))
         self.label_8.setText(QCoreApplication.translate("Form", u"\u5c5e\u6027", None))
         self.label_20.setText(QCoreApplication.translate("Form", u"Y", None))
         self.att_mapsize_y.setText(QCoreApplication.translate("Form", u"100", None))
@@ -1663,6 +1678,7 @@ class Ui_Form(object):
         self.btn_editor_map_layer_del.setText(QCoreApplication.translate("Form", u"\u5220", None))
         self.btn_editor_map_layer_up.setText(QCoreApplication.translate("Form", u"\u4e0a", None))
         self.btn_editor_map_layer_down.setText(QCoreApplication.translate("Form", u"\u4e0b", None))
+        self.label_map_layer_mode.setText(QCoreApplication.translate("Form", u"\u6a21\u5f0f--", None))
         self.fullscreen_btn_run.setText("")
         self.fullscreen_btn_stop.setText("")
         self.fullscreen_btn_unfull.setText("")

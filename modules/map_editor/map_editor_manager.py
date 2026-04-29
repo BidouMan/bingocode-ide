@@ -1402,6 +1402,20 @@ class MapEditorManager(QObject):
                 # 更新属性面板中的地图尺寸
                 self._update_map_size_display()
 
+                # 更新图层模式标签
+                current_layer = self.layer_manager.get_current_layer()
+                if (
+                    current_layer
+                    and hasattr(self, "ui")
+                    and hasattr(self.ui, "label_map_layer_mode")
+                ):
+                    mode_text = (
+                        "绘制模式"
+                        if current_layer.layer_type == "drawing"
+                        else "图像模式"
+                    )
+                    self.ui.label_map_layer_mode.setText(f"模式:{mode_text}")
+
                 # 更新属性面板中的瓦片大小
                 self._update_tile_size_display()
                 print("=== 地图加载完成 ===")
@@ -2506,6 +2520,16 @@ class MapEditorManager(QObject):
             if not self.canvas_manager or not self.map_model:
                 return
 
+            # 更新鼠标坐标显示
+            if hasattr(self, "ui") and hasattr(self.ui, "label_editor_map_pos"):
+                try:
+                    scene_pos = self.canvas_manager.mapToScene(event.pos())
+                    px = int(scene_pos.x())
+                    py = int(scene_pos.y())
+                    self.ui.label_editor_map_pos.setText(f"坐标:X{px} Y{py}")
+                except Exception:
+                    pass
+
             # 确保事件有 buttons() 方法
             if not hasattr(event, "buttons"):
                 return
@@ -3457,8 +3481,6 @@ class MapEditorManager(QObject):
         # 自定义模式下显示标记名称输入框，其他模式隐藏
         if hasattr(self.ui, "att_tag"):
             self.ui.att_tag.setVisible(col_type == "自定义")
-        if hasattr(self.ui, "label_17"):
-            self.ui.label_17.setVisible(col_type == "自定义")
 
         # 判断当前是否为图像图层
         current_layer = self.layer_manager.get_current_layer()
@@ -3569,6 +3591,10 @@ class MapEditorManager(QObject):
         self.property_manager.set_map_name(name)
         print(f"地图模型名称已更新: {self.property_manager.get_map_name()}")
 
+        # 更新地图名称标签
+        if hasattr(self, "ui") and hasattr(self.ui, "label_editor_map_name"):
+            self.ui.label_editor_map_name.setText(f"地图名称:{name}")
+
         # 如果有当前地图路径，更新目录名称
         if self.current_map_path:
             print(f"开始重命名目录...")
@@ -3596,6 +3622,42 @@ class MapEditorManager(QObject):
         self.is_map_modified = True
         if self.current_map_path:
             self.map_model.save(self.current_map_path)
+
+    def _update_resource_info_labels(self, resource):
+        """更新资源信息标签：名称和尺寸"""
+        if not hasattr(self, "ui") or not resource:
+            return
+        resource_path = resource.get("path", "")
+        resource_name = os.path.splitext(os.path.basename(resource_path))[0]
+        if hasattr(self.ui, "label_res_list_name"):
+            self.ui.label_res_list_name.setText(f"资源:{resource_name}")
+
+        if hasattr(self.ui, "label_res_list_size"):
+            resource_type = resource.get("resource_type", "image")
+            if resource_type == "tileset":
+                tw = resource.get("tile_width", 0)
+                th = resource.get("tile_height", 0)
+                self.ui.label_res_list_size.setText(f"资源尺寸:{tw}x{th}")
+            else:
+                abs_path = resource_path
+                if not os.path.isabs(abs_path) and self.current_map_path:
+                    map_dir = os.path.dirname(self.current_map_path)
+                    abs_path = os.path.join(map_dir, abs_path)
+                if abs_path in self._source_image_cache:
+                    pixmap = self._source_image_cache[abs_path]
+                    self.ui.label_res_list_size.setText(
+                        f"资源尺寸:{pixmap.width()}x{pixmap.height()}"
+                    )
+                elif os.path.exists(abs_path):
+                    from PySide6.QtGui import QPixmap
+
+                    pixmap = QPixmap(abs_path)
+                    self._source_image_cache[abs_path] = pixmap
+                    self.ui.label_res_list_size.setText(
+                        f"资源尺寸:{pixmap.width()}x{pixmap.height()}"
+                    )
+                else:
+                    self.ui.label_res_list_size.setText("资源尺寸:--")
 
     def _update_map_size_display(self):
         """更新属性面板中的地图尺寸显示（实际像素，从瓦片数据实时计算）"""
@@ -3645,6 +3707,20 @@ class MapEditorManager(QObject):
             tiles_h = max(tiles_h, min_height_tiles)
             pixel_width = tiles_w * tile_size
             pixel_height = tiles_h * tile_size
+
+            if hasattr(self.ui, "label_editor_map_name"):
+                if self.current_map_path:
+                    map_name = os.path.splitext(
+                        os.path.basename(self.current_map_path)
+                    )[0]
+                    self.ui.label_editor_map_name.setText(f"地图名称:{map_name}")
+                else:
+                    self.ui.label_editor_map_name.setText("地图名称:未打开")
+
+            if hasattr(self.ui, "label_editor_map_size"):
+                self.ui.label_editor_map_size.setText(
+                    f"场景尺寸:{pixel_width}x{pixel_height}"
+                )
 
             if hasattr(self.ui, "att_mapsize_x"):
                 self.ui.att_mapsize_x.blockSignals(True)
@@ -4166,6 +4242,13 @@ class MapEditorManager(QObject):
                     print(f"DEBUG: 更新碰撞编辑器显示，选择图像0")
 
         self._update_toolbar_state(current_layer.layer_type)
+
+        # 更新图层模式标签
+        if hasattr(self, "ui") and hasattr(self.ui, "label_map_layer_mode"):
+            mode_text = (
+                "绘制模式" if current_layer.layer_type == "drawing" else "图像模式"
+            )
+            self.ui.label_map_layer_mode.setText(f"模式:{mode_text}")
 
     def _update_toolbar_state(self, layer_type):
         """根据图层类型更新工具栏状态"""
@@ -4813,6 +4896,9 @@ class MapEditorManager(QObject):
                     cursor_pos = self.canvas_manager.mapFromGlobal(QCursor.pos())
                     self._update_preview(cursor_pos)
 
+                # 更新资源信息标签
+                self._update_resource_info_labels(resource)
+
                 self._update_res_list_display()
         except Exception as e:
             print(f"选择资源错误: {e}")
@@ -4943,6 +5029,10 @@ class MapEditorManager(QObject):
                         self.ui.map_collision.blockSignals(False)
             else:
                 print(f"DEBUG: 资源未找到 - resource_info: {resource_info}")
+
+            # 更新资源信息标签
+            if resource_info:
+                self._update_resource_info_labels(resource_info)
 
             # 更新资源列表显示
             print(f"DEBUG: 更新资源列表显示")
@@ -5227,8 +5317,6 @@ class MapEditorManager(QObject):
             col_type = self.ui.att_col_type.currentText()
             if hasattr(self.ui, "att_tag"):
                 self.ui.att_tag.setVisible(col_type == "自定义")
-            if hasattr(self.ui, "label_17"):
-                self.ui.label_17.setVisible(col_type == "自定义")
         # 绑定地图名称输入框
         if hasattr(self.ui, "att_map_name"):
             self.ui.att_map_name.textChanged.connect(self._on_map_name_changed)

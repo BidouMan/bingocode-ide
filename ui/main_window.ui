@@ -2428,21 +2428,7 @@
                           <item>
                            <widget class="QLabel" name="label_res_list_name">
                             <property name="text">
-                             <string>资源:foreasdnew</string>
-                            </property>
-                           </widget>
-                          </item>
-                          <item>
-                           <widget class="QLabel" name="label_res_list_id">
-                            <property name="text">
-                             <string>ID:12</string>
-                            </property>
-                           </widget>
-                          </item>
-                          <item>
-                           <widget class="QLabel" name="label_res_list_size">
-                            <property name="text">
-                             <string>尺寸:16x16</string>
+                             <string>资源:--</string>
                             </property>
                            </widget>
                           </item>
@@ -2687,7 +2673,7 @@
                   </widget>
                  </item>
                  <item>
-                  <widget class="QFrame" name="editor_map_info">
+                  <widget class="QWidget" name="editor_map_info" native="true">
                    <property name="minimumSize">
                     <size>
                      <width>0</width>
@@ -2699,12 +2685,6 @@
                      <width>16777215</width>
                      <height>30</height>
                     </size>
-                   </property>
-                   <property name="frameShape">
-                    <enum>QFrame::Shape::StyledPanel</enum>
-                   </property>
-                   <property name="frameShadow">
-                    <enum>QFrame::Shadow::Raised</enum>
                    </property>
                    <layout class="QHBoxLayout" name="horizontalLayout_19">
                     <property name="spacing">
@@ -2723,7 +2703,7 @@
                      <number>0</number>
                     </property>
                     <item>
-                     <spacer name="horizontalSpacer_14">
+                     <spacer name="horizontalSpacer_16">
                       <property name="orientation">
                        <enum>Qt::Orientation::Horizontal</enum>
                       </property>
@@ -2738,21 +2718,28 @@
                     <item>
                      <widget class="QLabel" name="label_editor_map_name">
                       <property name="text">
-                       <string>地图1</string>
+                       <string>ID:--</string>
                       </property>
                      </widget>
                     </item>
                     <item>
                      <widget class="QLabel" name="label_editor_map_size">
                       <property name="text">
-                       <string>场景大小:40x20</string>
+                       <string>场景大小:--</string>
                       </property>
                      </widget>
                     </item>
                     <item>
                      <widget class="QLabel" name="label_editor_map_pos">
                       <property name="text">
-                       <string>X:187 Y:339</string>
+                       <string>坐标:--</string>
+                      </property>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QLabel" name="label_res_list_size">
+                      <property name="text">
+                       <string>资源尺寸:--</string>
                       </property>
                      </widget>
                     </item>
@@ -3142,9 +3129,6 @@
                      </widget>
                     </item>
                     <item>
-                     <widget class="QListWidget" name="editor_map_layer_list"/>
-                    </item>
-                    <item>
                      <widget class="QFrame" name="layer_editor_toolbar">
                       <property name="minimumSize">
                        <size>
@@ -3214,6 +3198,72 @@
                           <string>下</string>
                          </property>
                         </widget>
+                       </item>
+                      </layout>
+                     </widget>
+                    </item>
+                    <item>
+                     <widget class="QListWidget" name="editor_map_layer_list"/>
+                    </item>
+                    <item>
+                     <widget class="QWidget" name="widget_3" native="true">
+                      <property name="minimumSize">
+                       <size>
+                        <width>0</width>
+                        <height>30</height>
+                       </size>
+                      </property>
+                      <property name="maximumSize">
+                       <size>
+                        <width>16777215</width>
+                        <height>30</height>
+                       </size>
+                      </property>
+                      <layout class="QHBoxLayout" name="horizontalLayout_20">
+                       <property name="leftMargin">
+                        <number>0</number>
+                       </property>
+                       <property name="topMargin">
+                        <number>0</number>
+                       </property>
+                       <property name="rightMargin">
+                        <number>0</number>
+                       </property>
+                       <property name="bottomMargin">
+                        <number>0</number>
+                       </property>
+                       <item>
+                        <spacer name="horizontalSpacer_14">
+                         <property name="orientation">
+                          <enum>Qt::Orientation::Horizontal</enum>
+                         </property>
+                         <property name="sizeHint" stdset="0">
+                          <size>
+                           <width>40</width>
+                           <height>20</height>
+                          </size>
+                         </property>
+                        </spacer>
+                       </item>
+                       <item>
+                        <widget class="QLabel" name="label_map_layer_mode">
+                         <property name="text">
+                          <string>模式--</string>
+                         </property>
+                        </widget>
+                       </item>
+                       <item>
+                        <spacer name="horizontalSpacer_15">
+                         <property name="orientation">
+                          <enum>Qt::Orientation::Horizontal</enum>
+                         </property>
+                         <property name="sizeHint" stdset="0">
+                          <size>
+                           <width>40</width>
+                           <height>20</height>
+                          </size>
+                         </property>
+                        </spacer>
                        </item>
                       </layout>
                      </widget>
