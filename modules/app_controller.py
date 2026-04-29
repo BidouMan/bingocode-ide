@@ -196,6 +196,7 @@ class AppController:
 
         # 5. 绑定地图重命名信号：地图重命名后刷新地图列表
         self.map_editor.map_renamed.connect(self.res_manager.refresh_map_list)
+        self.map_editor.map_imported.connect(self.res_manager.refresh_map_list)
 
     def _open_and_switch_to_editor(self, path):
         print(f"🛎️ [AppController] 收到编辑请求，目标路径: {path}")
@@ -285,6 +286,7 @@ class AppController:
             self.editor_manager._clear_initial_state()
             self.res_manager.refresh_code_list()
             self.res_manager.refresh_sprite_grid()
+            self.res_manager.refresh_map_list()
             # 2. 获取目录下所有 py 文件
             all_files = [
                 f

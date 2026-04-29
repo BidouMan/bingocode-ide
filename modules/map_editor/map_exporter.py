@@ -38,7 +38,7 @@ class MapExporter:
 
         try:
             self._create_bgm(map_dir, save_path, original_name, export_name)
-            QMessageBox.information(None, "导出成功", f"地图已成功导出至:\n{save_path}")
+            # QMessageBox.information(None, "导出成功", f"地图已成功导出至:\n{save_path}")
         except Exception as e:
             QMessageBox.critical(None, "导出失败", f"导出地图时发生错误:\n{str(e)}")
 
@@ -93,11 +93,8 @@ class MapExporter:
 
             if os.path.exists(info_path):
                 self.manager.load_map_from_path(info_path)
-                QMessageBox.information(None, "导入成功", f"地图已成功导入并加载。")
-            else:
-                QMessageBox.warning(
-                    None, "导入警告", "地图文件已解压，但未找到有效的地图数据文件。"
-                )
+                self.manager.map_imported.emit()
+
         except Exception as e:
             QMessageBox.critical(None, "导入失败", f"导入地图时发生错误:\n{str(e)}")
 

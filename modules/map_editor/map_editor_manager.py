@@ -363,6 +363,7 @@ class MapEditorManager(QObject):
     map_loaded = Signal(str)  # 地图加载完成信号
     map_saved = Signal(str)  # 地图保存完成信号
     map_renamed = Signal()  # 地图重命名完成信号
+    map_imported = Signal()  # 地图导入完成信号
     error_occurred = Signal(str)  # 错误发生信号
 
     def __init__(self, canvas_widget=None, parent=None):
