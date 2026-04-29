@@ -1812,6 +1812,9 @@ class MapEditorManager(QObject):
                 # 设置地图为已修改状态
                 self.is_map_modified = True
 
+                # 实时更新地图尺寸显示
+                self._update_map_size_display()
+
                 # 自动保存地图（如果当前地图有文件路径）
                 if self.current_map_path:
                     save_result = self.map_model.save(self.current_map_path)
@@ -2906,6 +2909,9 @@ class MapEditorManager(QObject):
                 # 设置地图为已修改状态
                 self.is_map_modified = True
 
+                # 实时更新地图尺寸显示
+                self._update_map_size_display()
+
                 # 自动保存地图（如果当前地图有文件路径）
                 if self.current_map_path:
                     save_result = self.map_model.save(self.current_map_path)
@@ -3592,22 +3598,46 @@ class MapEditorManager(QObject):
             self.map_model.save(self.current_map_path)
 
     def _update_map_size_display(self):
-        """更新属性面板中的地图尺寸显示"""
+        """更新属性面板中的地图尺寸显示（实际像素，从瓦片数据实时计算）"""
         if hasattr(self, "ui"):
-            # 获取地图尺寸
-            width, height = self.map_model.get_map_size()
+            tile_size = self.map_model.get_tile_size()
+            max_x = 0
+            max_y = 0
+            for layer in self.layer_manager.layers:
+                if layer.layer_type == "drawing" and layer.tiles:
+                    for tx, ty in layer.tiles.keys():
+                        if tx + 1 > max_x:
+                            max_x = tx + 1
+                        if ty + 1 > max_y:
+                            max_y = ty + 1
+                elif layer.layer_type == "image" and layer.images:
+                    for img in layer.images:
+                        img_w = img.pixmap.width() if img.pixmap else tile_size
+                        img_h = img.pixmap.height() if img.pixmap else tile_size
+                        ix = int(img.position.x() / tile_size) + int(img_w / tile_size)
+                        iy = int(img.position.y() / tile_size) + int(img_h / tile_size)
+                        if ix > max_x:
+                            max_x = ix
+                        if iy > max_y:
+                            max_y = iy
+            model_w, model_h = self.map_model.get_map_size()
+            max_x = max(max_x, model_w)
+            max_y = max(max_y, model_h)
+            pixel_width = max_x * tile_size
+            pixel_height = max_y * tile_size
+            print(
+                f"DEBUG: _update_map_size_display - 瓦片范围: {max_x}x{max_y}, 像素: {pixel_width}x{pixel_height}, tile_size: {tile_size}"
+            )
 
-            # 更新地图宽度显示
             if hasattr(self.ui, "att_mapsize_x"):
                 self.ui.att_mapsize_x.blockSignals(True)
-                self.ui.att_mapsize_x.setText(str(width))
+                self.ui.att_mapsize_x.setText(str(pixel_width))
                 self.ui.att_mapsize_x.setReadOnly(True)
                 self.ui.att_mapsize_x.blockSignals(False)
 
-            # 更新地图高度显示
             if hasattr(self.ui, "att_mapsize_y"):
                 self.ui.att_mapsize_y.blockSignals(True)
-                self.ui.att_mapsize_y.setText(str(height))
+                self.ui.att_mapsize_y.setText(str(pixel_height))
                 self.ui.att_mapsize_y.setReadOnly(True)
                 self.ui.att_mapsize_y.blockSignals(False)
 
