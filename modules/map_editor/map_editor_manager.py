@@ -3601,33 +3601,50 @@ class MapEditorManager(QObject):
         """更新属性面板中的地图尺寸显示（实际像素，从瓦片数据实时计算）"""
         if hasattr(self, "ui"):
             tile_size = self.map_model.get_tile_size()
-            max_x = 0
-            max_y = 0
+            min_tx = 0
+            max_tx = -1
+            min_ty = 0
+            max_ty = -1
             for layer in self.layer_manager.layers:
                 if layer.layer_type == "drawing" and layer.tiles:
                     for tx, ty in layer.tiles.keys():
-                        if tx + 1 > max_x:
-                            max_x = tx + 1
-                        if ty + 1 > max_y:
-                            max_y = ty + 1
+                        if tx < min_tx:
+                            min_tx = tx
+                        if tx > max_tx:
+                            max_tx = tx
+                        if ty < min_ty:
+                            min_ty = ty
+                        if ty > max_ty:
+                            max_ty = ty
                 elif layer.layer_type == "image" and layer.images:
                     for img in layer.images:
                         img_w = img.pixmap.width() if img.pixmap else tile_size
                         img_h = img.pixmap.height() if img.pixmap else tile_size
-                        ix = int(img.position.x() / tile_size) + int(img_w / tile_size)
-                        iy = int(img.position.y() / tile_size) + int(img_h / tile_size)
-                        if ix > max_x:
-                            max_x = ix
-                        if iy > max_y:
-                            max_y = iy
-            model_w, model_h = self.map_model.get_map_size()
-            max_x = max(max_x, model_w)
-            max_y = max(max_y, model_h)
-            pixel_width = max_x * tile_size
-            pixel_height = max_y * tile_size
-            print(
-                f"DEBUG: _update_map_size_display - 瓦片范围: {max_x}x{max_y}, 像素: {pixel_width}x{pixel_height}, tile_size: {tile_size}"
-            )
+                        ix_start = int(img.position.x() / tile_size)
+                        iy_start = int(img.position.y() / tile_size)
+                        ix_end = ix_start + int(img_w / tile_size)
+                        iy_end = iy_start + int(img_h / tile_size)
+                        if ix_start < min_tx:
+                            min_tx = ix_start
+                        if ix_end > max_tx:
+                            max_tx = ix_end
+                        if iy_start < min_ty:
+                            min_ty = iy_start
+                        if iy_end > max_ty:
+                            max_ty = iy_end
+            has_content = max_tx >= min_tx
+            if has_content:
+                tiles_w = max_tx - min_tx + 1
+                tiles_h = max_ty - min_ty + 1
+            else:
+                tiles_w = 0
+                tiles_h = 0
+            min_width_tiles = 640 // tile_size
+            min_height_tiles = 480 // tile_size
+            tiles_w = max(tiles_w, min_width_tiles)
+            tiles_h = max(tiles_h, min_height_tiles)
+            pixel_width = tiles_w * tile_size
+            pixel_height = tiles_h * tile_size
 
             if hasattr(self.ui, "att_mapsize_x"):
                 self.ui.att_mapsize_x.blockSignals(True)
