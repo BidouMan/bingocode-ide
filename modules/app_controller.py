@@ -206,8 +206,11 @@ class AppController:
         self.map_editor.map_renamed.connect(self._refresh_map_selector)
         self.map_editor.map_imported.connect(self._refresh_map_selector)
         self.map_editor.map_loaded.connect(self._sync_map_selector)
-        self.res_manager.sig_map_created.connect(self._refresh_map_selector)
+        self.res_manager.sig_map_created.connect(self._on_map_created)
         self._refresh_map_selector()
+
+        # 7. 地图编辑器新建地图按钮
+        self.ui.btn_editor_map_new.clicked.connect(self._on_btn_new_map)
 
     def _open_and_switch_to_editor(self, path):
         print(f"🛎️ [AppController] 收到编辑请求，目标路径: {path}")
@@ -328,6 +331,14 @@ class AppController:
 
         if map_path:
             self._open_and_switch_to_map_editor(map_path)
+
+    def _on_map_created(self, map_path):
+        self._refresh_map_selector()
+        if map_path and os.path.exists(map_path):
+            self._open_and_switch_to_map_editor(map_path)
+
+    def _on_btn_new_map(self):
+        self.res_manager.handle_create_map()
 
     def handle_new_project(self):
         """新建项目：重置并初始化运行目标"""

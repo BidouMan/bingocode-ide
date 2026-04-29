@@ -272,7 +272,7 @@ class ResourceManager(QObject):
     sig_sprite_selected = Signal(str)  # 双击卡片时：发送文件夹绝对路径
     sig_sprite_imported = Signal(str)  # 导入成功时：发送文件夹绝对路径
     sig_map_selected = Signal(str)  # 双击地图卡片时：发送地图文件绝对路径
-    sig_map_created = Signal()  # 创建新地图后通知
+    sig_map_created = Signal(str)  # 创建新地图后通知，传递地图路径
 
     def __init__(self, main_ui, parent_window, app_controller):
         super().__init__()
@@ -1325,35 +1325,29 @@ class ResourceManager(QObject):
 
     def handle_create_map(self):
         """处理创建地图的回调"""
-        # 获取当前地图数量，生成默认名字
         map_count = self.map_grid_layout.count()
         map_name = f"地图{map_count + 1}"
 
-        # 保存地图数据到文件 - 每个地图一个独立文件夹
+        map_file_path = None
         project_root = self.app_controller.project_manager.project_root
         if project_root:
             maps_dir = os.path.join(project_root, "assets", "maps")
             map_folder = os.path.join(maps_dir, map_name)
             tilesets_dir = os.path.join(map_folder, "tilesets")
 
-            # 创建必要的目录结构 - 每个地图有独立文件夹
             os.makedirs(map_folder, exist_ok=True)
             os.makedirs(tilesets_dir, exist_ok=True)
-            # 创建地图文件路径 - 使用二进制格式（.info作为入口文件）
             map_file_path = os.path.join(map_folder, f"{map_name}.info")
 
-            # 创建新的空地图模型来保存新地图数据
             from models.map_model import MapDataModel
 
             new_map_model = MapDataModel()
-            # 设置地图名称
             new_map_model.set_map_name(map_name)
             save_result = new_map_model.save(map_file_path)
             print(f"DEBUG: 新地图已保存到: {map_file_path}, 结果: {save_result}")
 
-        # 创建地图卡片
         self.add_map_card(map_name, map_count)
-        self.sig_map_created.emit()
+        self.sig_map_created.emit(map_file_path or "")
 
     def destroy(self):
         """销毁ResourceManager，移除所有事件过滤器"""
