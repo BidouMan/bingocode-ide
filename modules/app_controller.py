@@ -134,6 +134,14 @@ class AppController:
             self.map_editor.toggle_grid_visibility
         )
 
+        # 地图编辑器导出/导入按钮
+        self.ui.btn_editor_map_export.clicked.connect(
+            self.map_editor.map_exporter.export_map
+        )
+        self.ui.btn_editor_map_import.clicked.connect(
+            self.map_editor.map_exporter.import_map
+        )
+
         # 绑定地图编辑器工具按钮
         self.map_editor.setup_tool_buttons(self.ui)
 

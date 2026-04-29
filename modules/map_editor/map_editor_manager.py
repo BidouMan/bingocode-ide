@@ -44,6 +44,7 @@ from .property_manager import PropertyManager
 from .layer_manager import LayerManager
 from .layer_list_view import LayerListView
 from .transform_tool import TransformBoxItem
+from .map_exporter import MapExporter
 
 
 class TileItem(QGraphicsRectItem):
@@ -383,6 +384,7 @@ class MapEditorManager(QObject):
         # 初始化碰撞管理器和属性管理器
         self.collision_manager = CollisionManager(self.map_model, self)
         self.property_manager = PropertyManager(self.map_model)
+        self.map_exporter = MapExporter(self)
 
         # 初始化图层管理器
         self.layer_manager = LayerManager(self.map_model, self)
