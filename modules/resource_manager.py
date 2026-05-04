@@ -1005,12 +1005,16 @@ class ResourceManager(QObject):
         # card.mouseDoubleClickEvent = lambda event: self.start_sprite_rename(card, name)
         def on_double_click(event):
             project_root = self.app_controller.project_manager.project_root
-            # 每个地图有独立文件夹，路径格式：maps/地图名称/地图名称.info（二进制格式）
-            full_path = os.path.join(
-                project_root, "assets", "maps", name, f"{name}.info"
-            )
-            # 🚀 发射选中信号，通知 AppController 切换页面并加载地图
-            self.sig_map_selected.emit(full_path)
+            if card.objectName() == "mapCard":
+                full_path = os.path.join(
+                    project_root, "assets", "maps", name, f"{name}.info"
+                )
+                self.sig_map_selected.emit(full_path)
+            else:
+                full_path = os.path.join(
+                    project_root, "assets", "sprites", name
+                )
+                self.sig_sprite_selected.emit(full_path)
 
         card.mouseDoubleClickEvent = on_double_click
 
