@@ -15,6 +15,7 @@ class UploadMenuManager(QWidget):
         # 🚀 外部回调接口：由 ResourceManager 在初始化时绑定
         self.on_import_finished = None
         self.on_create_map = None
+        self.on_open_lib = None
         
         # 1. 基础属性
         self.setFixedSize(50, 226)
@@ -121,9 +122,11 @@ class UploadMenuManager(QWidget):
         if action_name == "从文件导入":
             self.import_assets()
         elif action_name == "创建地图":
-            # 触发创建地图的回调
             if self.on_create_map:
                 self.on_create_map()
+        elif action_name == "选择库文件":
+            if self.on_open_lib:
+                self.on_open_lib()
         self.anim_menu(False)
 
 
@@ -314,21 +317,22 @@ class MapUploadMenuManager(QWidget):
         if action_name == "从文件导入":
             self.import_assets()
         elif action_name == "创建地图":
-            # 触发创建地图的回调
             if self.on_create_map:
                 self.on_create_map()
+        elif action_name == "选择库文件":
+            if self.on_open_lib:
+                self.on_open_lib()
         self.anim_menu(False)
 
 
     def import_assets(self):
         """弹出文件对话框：支持地图资源"""
         files, _ = QFileDialog.getOpenFileNames(
-            self, "选择地图资源", "", 
+            self, "选择地图资源", "",
             "地图文件 (*.json);;所有文件 (*)"
         )
-        
+
         if files:
-            # 🚀 修复焦点丢失问题：强制主窗口重新获取焦点
             self.activateWindow()
             self.raise_()
             

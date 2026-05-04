@@ -328,6 +328,7 @@ class ResourceManager(QObject):
         self.map_upload_menu = MapUploadMenuManager(self.ui.page_map)
         self.map_upload_menu.on_import_finished = self.handle_map_import_success
         self.map_upload_menu.on_create_map = self.handle_create_map
+        self.map_upload_menu.on_open_lib = self.app_controller.open_map_lib
 
     def setup_list_styles(self):
         lw = self.ui.list_code

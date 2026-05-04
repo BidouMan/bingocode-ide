@@ -27,6 +27,7 @@ from modules.upload_menu_manager import UploadMenuManager
 from models.sprite_model import SpriteDataModel
 from modules.sprite_editor_manager import SpriteEditorManager
 from modules.map_editor.map_editor_manager import MapEditorManager
+from modules.map_lib_manager import MapLibManager
 
 
 class AppController:
@@ -68,6 +69,8 @@ class AppController:
         )
         self.script_runner = ScriptRunner(self)
         self.res_manager = ResourceManager(self.ui, self.window, self)
+
+        self.map_lib_manager = MapLibManager(self.ui, self)
 
         # 4. 绑定信号 (保持原有业务连接)
         self.setup_connections()
@@ -136,9 +139,7 @@ class AppController:
         self.ui.btn_editor_map_export.clicked.connect(
             self.map_editor.map_exporter.export_map
         )
-        self.ui.btn_editor_map_import.clicked.connect(
-            self.map_editor.map_exporter.import_map
-        )
+        self.ui.btn_editor_map_import.clicked.connect(self.open_map_lib)
 
         # 绑定地图编辑器工具按钮
         self.map_editor.setup_tool_buttons(self.ui)
@@ -209,6 +210,9 @@ class AppController:
 
         # 7. 地图编辑器新建地图按钮
         self.ui.btn_editor_map_new.clicked.connect(self._on_btn_new_map)
+
+        # 8. 地图库导入信号
+        self.map_lib_manager.sig_map_imported.connect(self._on_map_lib_imported)
 
     def _open_and_switch_to_editor(self, path):
         print(f"🛎️ [AppController] 收到编辑请求，目标路径: {path}")
@@ -346,6 +350,14 @@ class AppController:
 
     def _on_btn_new_map(self):
         self.res_manager.handle_create_map()
+
+    def open_map_lib(self):
+        self.map_lib_manager.load_map_lib()
+        self.ui.change_page.setCurrentIndex(2)
+
+    def _on_map_lib_imported(self, map_path):
+        self.res_manager.refresh_map_list()
+        self._refresh_map_selector()
 
     def handle_new_project(self):
         """新建项目：重置并初始化运行目标"""
