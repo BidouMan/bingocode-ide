@@ -50,7 +50,7 @@
       </size>
      </property>
      <property name="currentIndex">
-      <number>2</number>
+      <number>0</number>
      </property>
      <widget class="QWidget" name="edit_stage_frame">
       <layout class="QVBoxLayout" name="verticalLayout_19">
@@ -3543,7 +3543,7 @@
         <number>0</number>
        </property>
        <item>
-        <widget class="QFrame" name="frame_2">
+        <widget class="QFrame" name="map_lib_toolbar_frame">
          <property name="frameShape">
           <enum>QFrame::Shape::StyledPanel</enum>
          </property>
@@ -3567,7 +3567,7 @@
            <number>0</number>
           </property>
           <item>
-           <widget class="QLineEdit" name="lineEdit">
+           <widget class="QLineEdit" name="mab_lib_search">
             <property name="minimumSize">
              <size>
               <width>200</width>
@@ -3632,7 +3632,7 @@
            </widget>
           </item>
           <item>
-           <widget class="QPushButton" name="pushButton">
+           <widget class="QPushButton" name="mab_lib_return_btn">
             <property name="maximumSize">
              <size>
               <width>80</width>
@@ -3648,7 +3648,7 @@
         </widget>
        </item>
        <item>
-        <widget class="QWidget" name="widget_4" native="true">
+        <widget class="QWidget" name="map_lib_list_frame" native="true">
          <layout class="QVBoxLayout" name="verticalLayout_27">
           <property name="leftMargin">
            <number>0</number>
@@ -3663,7 +3663,7 @@
            <number>0</number>
           </property>
           <item>
-           <widget class="QListWidget" name="listWidget_2"/>
+           <widget class="QListWidget" name="map_lib_list"/>
           </item>
          </layout>
         </widget>

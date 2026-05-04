@@ -259,12 +259,28 @@ class AppController:
         self.ui.editor_stacked.setCurrentIndex(2)
 
         # 3. 初始化地图编辑器的画布
-        self.map_editor.set_canvas_widget(self.ui.editor_map_canvas)
-        self.map_editor.set_res_list_view(self.ui.res_list_view)
+        try:
+            if hasattr(self.ui, "editor_map_canvas") and self.ui.editor_map_canvas:
+                try:
+                    self.ui.editor_map_canvas.parentWidget()
+                except RuntimeError:
+                    self.ui.editor_map_canvas = None
+                if self.ui.editor_map_canvas:
+                    self.map_editor.set_canvas_widget(self.ui.editor_map_canvas)
+        except Exception:
+            pass
 
-        # 初始化碰撞编辑器
-        if hasattr(self.ui, "col_editor_view"):
-            self.map_editor.initialize_collision_editor(self.ui.col_editor_view)
+        try:
+            if hasattr(self.ui, "res_list_view") and self.ui.res_list_view:
+                self.map_editor.set_res_list_view(self.ui.res_list_view)
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self.ui, "col_editor_view") and self.ui.col_editor_view:
+                self.map_editor.initialize_collision_editor(self.ui.col_editor_view)
+        except Exception:
+            pass
 
         # 4. 加载地图文件
         self.map_editor.load_map_from_path(path)
@@ -702,29 +718,33 @@ class AppController:
 
     def handle_switch_to_map_editor(self):
         """切换到地图编辑页面"""
-        print("=== 切换到地图编辑页面 ===")
-        print(f"当前页面索引: {self.ui.editor_stacked.currentIndex()}")
         self.ui.editor_stacked.setCurrentIndex(2)
-        print(f"切换后页面索引: {self.ui.editor_stacked.currentIndex()}")
 
-        # 初始化地图编辑器的画布
-        if hasattr(self, "map_editor"):
-            print(f"地图编辑器实例: {self.map_editor}")
+        if not hasattr(self, "map_editor"):
+            return
 
-            # 检查控件是否存在且有效
+        try:
             if hasattr(self.ui, "editor_map_canvas") and self.ui.editor_map_canvas:
-                print(f"画布控件: {self.ui.editor_map_canvas}")
-                print(f"画布控件类型: {type(self.ui.editor_map_canvas)}")
-                print(f"画布控件场景: {self.ui.editor_map_canvas.scene()}")
-                self.map_editor.set_canvas_widget(self.ui.editor_map_canvas)
+                try:
+                    self.ui.editor_map_canvas.parentWidget()
+                except RuntimeError:
+                    self.ui.editor_map_canvas = None
+                if self.ui.editor_map_canvas:
+                    self.map_editor.set_canvas_widget(self.ui.editor_map_canvas)
+        except Exception:
+            pass
 
+        try:
             if hasattr(self.ui, "res_list_view") and self.ui.res_list_view:
-                print(f"资源列表视图: {self.ui.res_list_view}")
                 self.map_editor.set_res_list_view(self.ui.res_list_view)
+        except Exception:
+            pass
 
-            # 初始化碰撞编辑器
+        try:
             if hasattr(self.ui, "col_editor_view") and self.ui.col_editor_view:
                 self.map_editor.initialize_collision_editor(self.ui.col_editor_view)
+        except Exception:
+            pass
 
     def request_exit(self):
         """

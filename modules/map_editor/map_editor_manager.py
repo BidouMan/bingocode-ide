@@ -616,7 +616,7 @@ class MapEditorManager(QObject):
                 and self.ui.res_list_view
             ):
                 res_list_view = self.ui.res_list_view
-                if watched in [res_list_view, res_list_view.viewport()]:
+                if watched is res_list_view or watched is res_list_view.viewport():
                     if event.type() == QEvent.MouseButtonPress:
                         if event.button() == Qt.LeftButton:
                             self.drag_start_pos = event.pos()
@@ -664,10 +664,14 @@ class MapEditorManager(QObject):
             # ======================
             # 2. 画布事件（修复：改用 canvas_manager + 调用原生方法）
             # ======================
-            if hasattr(self, "canvas_manager") and watched in [
-                self.canvas_manager,
-                self.canvas_manager.viewport(),
-            ]:
+            if (
+                hasattr(self, "canvas_manager")
+                and self.canvas_manager is not None
+                and (
+                    watched is self.canvas_manager
+                    or watched is self.canvas_manager.viewport()
+                )
+            ):
                 # 处理所有工具的鼠标按下事件，特别是图像模式下的选择
                 if event.type() == QEvent.MouseButtonPress:
                     if event.button() == Qt.LeftButton:
@@ -700,8 +704,10 @@ class MapEditorManager(QObject):
             # 所有未匹配的事件，调用原生逻辑并放行
             return super().eventFilter(watched, event)
         except Exception as e:
+            import traceback
+
             print(f"事件过滤器错误: {e}")
-            # 避免在程序退出时崩溃
+            traceback.print_exc()
             return False
 
     def _clear_resource_items(self):
@@ -3978,36 +3984,18 @@ class MapEditorManager(QObject):
 
     def set_canvas_widget(self, canvas_widget):
         """设置画布控件"""
-        # 检查传入的canvas_widget是否有效（没有被删除）
         try:
-            # 尝试访问对象的属性来检查是否已删除
             if canvas_widget is None or not hasattr(canvas_widget, "parentWidget"):
                 return
-
-            # 尝试调用一个方法来进一步验证
             canvas_widget.parentWidget()
         except RuntimeError:
             return
 
-        # 如果画布管理器已经初始化，需要重新初始化以确保地图数据正确切换
         if hasattr(self, "canvas_manager") and self.canvas_manager:
-            # 清理旧的瓦片项
-            if hasattr(self, "tile_items") and self.canvas_manager:
-                old_scene = self.canvas_manager.scene()
-                if old_scene:
-                    for item in list(self.tile_items.values()):
-                        try:
-                            old_scene.removeItem(item)
-                        except:
-                            pass
-                self.tile_items.clear()
-            # 清理旧的画布管理器
-            self.canvas_manager = None
-            self.canvas_scene = None
+            return
 
         self.canvas_widget = canvas_widget
         self._initialize_canvas_manager()
-        # 不再立即渲染地图，由load_map_from_path方法调用
 
     def update_map_size(self, width, height):
         """更新地图尺寸"""
@@ -4035,11 +4023,11 @@ class MapEditorManager(QObject):
 
     def set_res_list_view(self, res_list_view):
         """设置资源列表视图"""
+        if hasattr(self, "res_list_view") and self.res_list_view is res_list_view:
+            return
         self.res_list_view = res_list_view
-        # 安装事件过滤器到 viewport
         if self.res_list_view:
-            self.res_list_view.viewport().installEventFilter(self)  # 必须加 .viewport()
-            # 保存拖拽起始位置
+            self.res_list_view.viewport().installEventFilter(self)
             self.drag_start_pos = None
         # 初始化资源列表显示
         self._update_res_list_display()
