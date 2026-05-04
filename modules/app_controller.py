@@ -733,7 +733,6 @@ class AppController:
                         self.res_manager.last_selected_sprite_path = sprite_path
 
     def handle_switch_to_map_editor(self):
-        """切换到地图编辑页面"""
         self.ui.editor_stacked.setCurrentIndex(2)
 
         if not hasattr(self, "map_editor"):
@@ -761,6 +760,55 @@ class AppController:
                 self.map_editor.initialize_collision_editor(self.ui.col_editor_view)
         except Exception:
             pass
+
+        self._load_current_or_last_map()
+
+    def _load_current_or_last_map(self):
+        self._refresh_map_selector()
+
+        selector = self.ui.btn_editor_map_selectmap
+        if (
+            selector.count() == 0
+            or selector.itemText(0) == "空"
+            and selector.count() == 1
+        ):
+            return
+
+        current_idx = selector.currentIndex()
+        if current_idx < 0 or selector.itemText(current_idx) == "空":
+            last_idx = selector.count() - 1
+            if last_idx >= 0 and selector.itemText(last_idx) != "空":
+                selector.blockSignals(True)
+                selector.setCurrentIndex(last_idx)
+                selector.blockSignals(False)
+                current_idx = last_idx
+
+        map_name = selector.itemText(current_idx)
+        if not map_name or map_name == "空":
+            return
+
+        project_root = self.project_manager.project_root
+        if not project_root:
+            return
+
+        maps_dir = os.path.join(project_root, "assets", "maps")
+        info_path = os.path.join(maps_dir, map_name, f"{map_name}.info")
+        json_path = os.path.join(maps_dir, map_name, f"{map_name}.json")
+
+        map_path = None
+        if os.path.exists(info_path):
+            map_path = info_path
+        elif os.path.exists(json_path):
+            map_path = json_path
+
+        if map_path:
+            if (
+                hasattr(self.map_editor, "current_map_path")
+                and self.map_editor.current_map_path == map_path
+            ):
+                return
+            self.map_editor.load_map_from_path(map_path)
+            self._sync_map_selector(map_path)
 
     def request_exit(self):
         """
