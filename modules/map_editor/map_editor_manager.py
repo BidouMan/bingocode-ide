@@ -616,7 +616,11 @@ class MapEditorManager(QObject):
                 and self.ui.res_list_view
             ):
                 res_list_view = self.ui.res_list_view
-                if watched is res_list_view or watched is res_list_view.viewport():
+                try:
+                    is_res_view = watched is res_list_view or watched is res_list_view.viewport()
+                except RuntimeError:
+                    is_res_view = False
+                if is_res_view:
                     if event.type() == QEvent.MouseButtonPress:
                         if event.button() == Qt.LeftButton:
                             self.drag_start_pos = event.pos()
@@ -667,39 +671,31 @@ class MapEditorManager(QObject):
             if (
                 hasattr(self, "canvas_manager")
                 and self.canvas_manager is not None
-                and (
-                    watched is self.canvas_manager
-                    or watched is self.canvas_manager.viewport()
-                )
             ):
-                # 处理所有工具的鼠标按下事件，特别是图像模式下的选择
-                if event.type() == QEvent.MouseButtonPress:
-                    if event.button() == Qt.LeftButton:
-                        # 调用鼠标按下处理方法
-                        self._handle_mouse_press(event)
-                        # 只有在绘制模式下才拦截事件，其他模式（如图像模式）放行
-                        if self.current_tool == "draw":
+                try:
+                    is_canvas = watched is self.canvas_manager or watched is self.canvas_manager.viewport()
+                except RuntimeError:
+                    is_canvas = False
+                if is_canvas:
+                    if event.type() == QEvent.MouseButtonPress:
+                        if event.button() == Qt.LeftButton:
+                            self._handle_mouse_press(event)
+                            if self.current_tool == "draw":
+                                return True
+
+                    elif event.type() == QEvent.MouseMove:
+                        self._handle_mouse_move(event)
+                        if (
+                            self.current_tool == "draw"
+                            and self.is_drawing
+                            and (event.buttons() & Qt.LeftButton)
+                        ):
                             return True
 
-                # 处理所有工具的鼠标移动事件
-                elif event.type() == QEvent.MouseMove:
-                    # 调用鼠标移动处理方法
-                    self._handle_mouse_move(event)
-                    # 只在绘制模式下且正在绘制时拦截事件
-                    if (
-                        self.current_tool == "draw"
-                        and self.is_drawing
-                        and (event.buttons() & Qt.LeftButton)
-                    ):
-                        return True
-
-                # 处理所有工具的鼠标释放事件
-                elif event.type() == QEvent.MouseButtonRelease:
-                    # 调用鼠标释放处理方法
-                    self._handle_mouse_release(event)
-                    # 只在绘制模式下拦截事件
-                    if self.current_tool == "draw" and event.button() == Qt.LeftButton:
-                        return True
+                    elif event.type() == QEvent.MouseButtonRelease:
+                        self._handle_mouse_release(event)
+                        if self.current_tool == "draw" and event.button() == Qt.LeftButton:
+                            return True
 
             # 所有未匹配的事件，调用原生逻辑并放行
             return super().eventFilter(watched, event)

@@ -419,7 +419,6 @@ class ResourceManager(QObject):
             me = getattr(self.app_controller, "map_editor", None)
             if me and hasattr(me, "current_map_path") and me.current_map_path:
                 me.save_map()
-                self.refresh_map_list()
         except Exception:
             pass
 
@@ -1419,14 +1418,15 @@ class ResourceManager(QObject):
         try:
             maps_dir = os.path.join(project_root, "assets", "maps")
             if os.path.exists(maps_dir):
-                # 扫描所有子文件夹，每个地图有独立文件夹
                 map_folders = [
                     d
                     for d in os.listdir(maps_dir)
                     if not d.startswith(".")
                     and os.path.isdir(os.path.join(maps_dir, d))
                 ]
-                map_folders.sort()
+                map_folders.sort(
+                    key=lambda d: os.path.getmtime(os.path.join(maps_dir, d))
+                )
 
                 for i, folder_name in enumerate(map_folders):
                     # 每个地图文件夹内有对应的文件（支持二进制和JSON格式）

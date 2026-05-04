@@ -65,27 +65,21 @@ class MapExporter:
             )
             os.makedirs(maps_dir, exist_ok=True)
 
-            map_name = self._read_map_name_from_bgm(open_path)
-            if not map_name:
-                map_name = os.path.splitext(os.path.basename(open_path))[0]
+            original_name = self._read_map_name_from_bgm(open_path)
+            if not original_name:
+                original_name = os.path.splitext(os.path.basename(open_path))[0]
 
+            map_name = original_name
             target_dir = os.path.join(maps_dir, map_name)
             if os.path.exists(target_dir):
-                info_path = os.path.join(target_dir, f"{map_name}.info")
-                if os.path.exists(info_path):
-                    reply = QMessageBox.question(
-                        None,
-                        "地图已存在",
-                        f'地图 "{map_name}" 已存在，是否覆盖？',
-                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                        QMessageBox.StandardButton.No,
-                    )
-                    if reply == QMessageBox.StandardButton.No:
-                        return
-                    shutil.rmtree(target_dir)
+                map_name = self._get_safe_map_name(maps_dir, map_name)
+                target_dir = os.path.join(maps_dir, map_name)
 
             os.makedirs(target_dir, exist_ok=True)
             self._extract_bgm(open_path, target_dir)
+
+            if map_name != original_name:
+                self._rename_map_files(target_dir, original_name, map_name)
 
             info_path = os.path.join(target_dir, f"{map_name}.info")
             if not os.path.exists(info_path):
@@ -195,6 +189,25 @@ class MapExporter:
         except Exception:
             pass
         return None
+
+    def _get_safe_map_name(self, maps_dir, base_name):
+        target = os.path.join(maps_dir, base_name)
+        if not os.path.exists(target):
+            return base_name
+        counter = 1
+        while True:
+            new_name = f"{base_name}_{counter}"
+            target = os.path.join(maps_dir, new_name)
+            if not os.path.exists(target):
+                return new_name
+            counter += 1
+
+    def _rename_map_files(self, target_dir, old_name, new_name):
+        for ext in (".info", ".tiles", ".collision", ".resources"):
+            old_path = os.path.join(target_dir, f"{old_name}{ext}")
+            if os.path.exists(old_path):
+                new_path = os.path.join(target_dir, f"{new_name}{ext}")
+                os.rename(old_path, new_path)
 
     def _generate_thumbnail_png(self, map_dir, thumb_size=320):
         try:

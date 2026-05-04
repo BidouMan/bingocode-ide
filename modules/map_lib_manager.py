@@ -151,11 +151,11 @@ class MapLibManager(QObject):
         if not bgm_path or not os.path.exists(bgm_path):
             return
 
-        map_name = item.data(Qt.ItemDataRole.DisplayRole)
-        if not map_name:
-            map_name = self._read_map_name_from_bgm(bgm_path)
-        if not map_name:
-            map_name = os.path.splitext(os.path.basename(bgm_path))[0]
+        self._save_current_map()
+
+        original_name = self._read_map_name_from_bgm(bgm_path)
+        if not original_name:
+            original_name = os.path.splitext(os.path.basename(bgm_path))[0]
 
         project_root = self.app_controller.project_manager.project_root
         if not project_root:
@@ -164,20 +164,11 @@ class MapLibManager(QObject):
         maps_dir = os.path.join(project_root, "assets", "maps")
         os.makedirs(maps_dir, exist_ok=True)
 
+        map_name = original_name
         target_dir = os.path.join(maps_dir, map_name)
         if os.path.exists(target_dir):
-            info_path = os.path.join(target_dir, f"{map_name}.info")
-            if os.path.exists(info_path):
-                reply = QMessageBox.question(
-                    None,
-                    "地图已存在",
-                    f'地图 "{map_name}" 已存在，是否覆盖？',
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No,
-                )
-                if reply == QMessageBox.StandardButton.No:
-                    return
-                shutil.rmtree(target_dir)
+            map_name = self._get_safe_map_name(maps_dir, map_name)
+            target_dir = os.path.join(maps_dir, map_name)
 
         os.makedirs(target_dir, exist_ok=True)
 
@@ -186,6 +177,9 @@ class MapLibManager(QObject):
         except Exception as e:
             QMessageBox.critical(None, "导入失败", f"导入地图时发生错误:\n{str(e)}")
             return
+
+        if map_name != original_name:
+            self._rename_map_files(target_dir, original_name, map_name)
 
         info_path = os.path.join(target_dir, f"{map_name}.info")
         if not os.path.exists(info_path):
@@ -201,8 +195,35 @@ class MapLibManager(QObject):
         else:
             self.sig_map_imported.emit("")
 
+    def _save_current_map(self):
+        try:
+            me = getattr(self.app_controller, "map_editor", None)
+            if me and hasattr(me, "current_map_path") and me.current_map_path:
+                me.save_map()
+        except Exception:
+            pass
+
     def _on_return(self):
         self.ui.change_page.setCurrentIndex(0)
+
+    def _get_safe_map_name(self, maps_dir, base_name):
+        target = os.path.join(maps_dir, base_name)
+        if not os.path.exists(target):
+            return base_name
+        counter = 1
+        while True:
+            new_name = f"{base_name}_{counter}"
+            target = os.path.join(maps_dir, new_name)
+            if not os.path.exists(target):
+                return new_name
+            counter += 1
+
+    def _rename_map_files(self, target_dir, old_name, new_name):
+        for ext in (".info", ".tiles", ".collision", ".resources"):
+            old_path = os.path.join(target_dir, f"{old_name}{ext}")
+            if os.path.exists(old_path):
+                new_path = os.path.join(target_dir, f"{new_name}{ext}")
+                os.rename(old_path, new_path)
 
     def _load_thumbnail_from_bgm(self, bgm_path):
         cache_key = f"map_lib_thumb:{bgm_path}"

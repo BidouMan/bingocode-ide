@@ -289,11 +289,14 @@ class AppController:
         if project_root:
             maps_dir = os.path.join(project_root, "assets", "maps")
             if os.path.exists(maps_dir):
-                map_folders = sorted(
+                map_folders = [
                     d
                     for d in os.listdir(maps_dir)
                     if not d.startswith(".")
                     and os.path.isdir(os.path.join(maps_dir, d))
+                ]
+                map_folders.sort(
+                    key=lambda d: os.path.getmtime(os.path.join(maps_dir, d))
                 )
                 for folder in map_folders:
                     info_path = os.path.join(maps_dir, folder, f"{folder}.info")
@@ -358,6 +361,13 @@ class AppController:
     def _on_map_lib_imported(self, map_path):
         self.res_manager.refresh_map_list()
         self._refresh_map_selector()
+        if map_path and os.path.exists(map_path):
+            map_name = os.path.splitext(os.path.basename(map_path))[0]
+            idx = self.ui.btn_editor_map_selectmap.findText(map_name)
+            if idx >= 0:
+                self.ui.btn_editor_map_selectmap.blockSignals(True)
+                self.ui.btn_editor_map_selectmap.setCurrentIndex(idx)
+                self.ui.btn_editor_map_selectmap.blockSignals(False)
 
     def handle_new_project(self):
         """新建项目：重置并初始化运行目标"""
