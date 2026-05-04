@@ -1,7 +1,7 @@
 import os, shutil
 import zipfile
 import json
-from PySide6.QtCore import QObject, Qt, QSize, QEvent, QRect, QTimer, Signal
+from PySide6.QtCore import QObject, Qt, QSize, QEvent, QRect, QRectF, QTimer, Signal
 from PySide6.QtWidgets import (
     QListWidgetItem,
     QStyle,
@@ -27,7 +27,9 @@ from PySide6.QtGui import (
     QColor,
     QPainter,
     QPen,
+    QBrush,
 )
+from PySide6.QtWidgets import QGraphicsScene, QGraphicsRectItem
 from modules.upload_menu_manager import UploadMenuManager, MapUploadMenuManager
 
 
@@ -394,18 +396,31 @@ class ResourceManager(QObject):
             btn.clicked.connect(lambda checked=False, b=btn: self.switch_page(b))
 
     def switch_page(self, btn):
-        """切换页面逻辑"""
         target_page = self.nav_map.get(btn)
         if target_page:
+            self._save_current_map_if_active()
             self.ui.outline_stracked.setCurrentWidget(target_page)
 
-            # 🚀 谁的页面被打开，就刷新谁
             if target_page == self.ui.page_code:
                 self.refresh_code_list()
             elif target_page == self.ui.page_sprite:
                 self.refresh_sprite_grid()
             elif target_page == self.ui.page_map:
                 self.refresh_map_list()
+
+    def _save_current_map_if_active(self):
+        try:
+            if not hasattr(self, "app_controller") or not self.app_controller:
+                return
+            stacked = self.app_controller.ui.editor_stacked
+            if stacked.currentIndex() != 2:
+                return
+            me = getattr(self.app_controller, "map_editor", None)
+            if me and hasattr(me, "current_map_path") and me.current_map_path:
+                me.save_map()
+                self.refresh_map_list()
+        except Exception:
+            pass
 
     def refresh_code_list(self):
         if not hasattr(self.ui, "list_code"):
@@ -803,11 +818,10 @@ class ResourceManager(QObject):
 
         return card
 
-    def add_map_card(self, name, index, icon_path=None):
+    def add_map_card(self, name, index, icon_path=None, map_path=None):
         """核心入口：负责地图卡片的创建与网格定位"""
         from PySide6.QtCore import QTimer
 
-        # 1. 创建基础容器
         card = QWidget()
         card.setFixedSize(74, 74)
         card.setObjectName("mapCard")
@@ -815,12 +829,10 @@ class ResourceManager(QObject):
         card.setProperty("selected", "false")
         card.installEventFilter(self)
 
-        # 2. 调用内部构建逻辑
-        self._build_map_card_ui(card, name, icon_path)
+        self._build_map_card_ui(card, name, icon_path, map_path)
         self._build_card_delete_button(card, name)
         self._setup_card_interactions(card, name)
 
-        # 3. 网格布局定位 (保持 4 列布局)
         row, col = index // 4, index % 4
         self.map_grid_layout.addWidget(card, row, col, Qt.AlignmentFlag.AlignCenter)
 
@@ -891,7 +903,7 @@ class ResourceManager(QObject):
         icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         name_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
-    def _build_map_card_ui(self, card, name, icon_path):
+    def _build_map_card_ui(self, card, name, icon_path, map_path=None):
         """负责地图卡片的视觉样式、图标处理和文字"""
         card.setStyleSheet("""
             #mapCard {
@@ -910,43 +922,27 @@ class ResourceManager(QObject):
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(2)
 
-        # --- 图标处理 (像素风格缩放) ---
         icon_label = QLabel()
-        icon_label.setFixedSize(40, 40)
-        if icon_path and os.path.exists(icon_path):
-            # 检查缓存中是否已有该图片
-            if icon_path in self._pixmap_cache:
-                target_pix = self._pixmap_cache[icon_path]
-            else:
-                pix = QPixmap(icon_path)
-                if not pix.isNull():
-                    mode = (
-                        Qt.TransformationMode.FastTransformation
-                        if pix.width() < 100
-                        else Qt.TransformationMode.SmoothTransformation
-                    )
-                    target_pix = pix.scaled(
-                        80, 80, Qt.AspectRatioMode.KeepAspectRatio, mode
-                    )
-                    # 缓存缩放后的图片
-                    self._pixmap_cache[icon_path] = target_pix
-                else:
-                    target_pix = None
+        icon_label.setFixedSize(53, 40)
 
-            if target_pix:
-                icon_label.setPixmap(target_pix)
-                icon_label.setScaledContents(True)
+        thumb_pix = None
+        if map_path:
+            cache_key = f"map_thumb:{map_path}"
+            if cache_key in self._pixmap_cache:
+                thumb_pix = self._pixmap_cache[cache_key]
             else:
-                # 地图用绿色方块
-                icon_label.setStyleSheet(
-                    "background-color: #5bc772; border-radius: 4px;"
-                )
+                thumb_pix = self.generate_map_thumbnail(map_path, thumb_size=106)
+                if thumb_pix:
+                    self._pixmap_cache[cache_key] = thumb_pix
+
+        if thumb_pix and not thumb_pix.isNull():
+            icon_label.setPixmap(thumb_pix)
+            icon_label.setScaledContents(True)
         else:
-            # 地图用绿色方块
-            icon_label.setStyleSheet("background-color: #5bc772; border-radius: 4px;")
+            icon_label.setStyleSheet("background-color: #3D3D3D; border-radius: 4px;")
+
         layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignCenter)
 
-        # --- 名字处理 (字体与颜色) ---
         name_label = QLabel(name)
         name_label.setObjectName("mapNameLabel")
         if hasattr(self, "custom_font_family"):
@@ -954,7 +950,6 @@ class ResourceManager(QObject):
         name_label.setStyleSheet("color: #E0E0E0; background: transparent;")
         layout.addWidget(name_label, 0, Qt.AlignmentFlag.AlignCenter)
 
-        # 🚀 保持点击穿透
         icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         name_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
@@ -1276,13 +1271,141 @@ class ResourceManager(QObject):
             except Exception as e:
                 QMessageBox.critical(self.window, "错误", f"无法删除文件夹: {e}")
 
+    def generate_map_thumbnail(self, map_path, thumb_size=106):
+        try:
+            from models.map_model import MapDataModel
+
+            model = MapDataModel()
+            if not model.load(map_path):
+                return None
+
+            map_data = model.map_data
+            width = map_data.get("width", 40)
+            height = map_data.get("height", 30)
+            tile_size = map_data.get("tile_size", 16)
+            pixel_w = width * tile_size
+            pixel_h = height * tile_size
+
+            view_w = 640
+            view_h = 480
+            scene_w = max(pixel_w, view_w)
+            scene_h = max(pixel_h, view_h)
+
+            scene = QGraphicsScene(0, 0, scene_w, scene_h)
+
+            bg_rect = QGraphicsRectItem(0, 0, scene_w, scene_h)
+            bg_rect.setPen(Qt.PenStyle.NoPen)
+            bg_rect.setBrush(QBrush(QColor(30, 30, 30)))
+            scene.addItem(bg_rect)
+
+            border = QGraphicsRectItem(0, 0, pixel_w, pixel_h)
+            border.setPen(QPen(QColor(100, 100, 100), 1))
+            border.setBrush(Qt.BrushStyle.NoBrush)
+            scene.addItem(border)
+
+            tile_sets = map_data.get("tile_sets", [])
+            layer_resources_map = map_data.get("layer_resources_map", {})
+            layers = map_data.get("layers", [])
+
+            for layer in layers:
+                layer_id = str(layer.get("id", 0))
+                layer_type = layer.get("type", "drawing")
+
+                if layer_type == "drawing":
+                    tiles = layer.get("tiles", {})
+                    if not tiles or not tile_sets:
+                        continue
+
+                    res_range = layer_resources_map.get(layer_id)
+                    if not res_range:
+                        continue
+                    start_idx, end_idx = res_range
+                    if start_idx >= len(tile_sets):
+                        continue
+
+                    layer_tileset_cache = {}
+                    for i in range(start_idx, min(end_idx, len(tile_sets))):
+                        res = tile_sets[i]
+                        img_path = res.get("image_path", "")
+                        if not img_path or not os.path.exists(img_path):
+                            continue
+                        src_pix = QPixmap(img_path)
+                        if src_pix.isNull():
+                            continue
+                        tile_w = res.get("tile_width", 16)
+                        tile_h = res.get("tile_height", 16)
+                        tile_count_w = max(1, res.get("tile_count_w",
+                            src_pix.width() // tile_w))
+                        layer_tileset_cache[i] = (src_pix, tile_w, tile_h, tile_count_w)
+
+                    for (tx, ty), tid in tiles.items():
+                        if tid <= 0:
+                            continue
+                        if tx < 0 or tx >= width or ty < 0 or ty >= height:
+                            continue
+
+                        res_idx = tid // 1000 - 1
+                        tile_idx = (tid % 1000) - 1
+
+                        if res_idx not in layer_tileset_cache:
+                            continue
+                        src_pix, tile_w, tile_h, tile_count_w = layer_tileset_cache[res_idx]
+
+                        stx = (tile_idx % tile_count_w) * tile_w
+                        sty = (tile_idx // tile_count_w) * tile_h
+                        if stx + tile_w > src_pix.width() or sty + tile_h > src_pix.height():
+                            continue
+                        tile_pix = src_pix.copy(stx, sty, tile_w, tile_h)
+                        if not tile_pix.isNull():
+                            pm_item = scene.addPixmap(tile_pix)
+                            pm_item.setPos(tx * tile_size, ty * tile_size)
+
+                elif layer_type == "image":
+                    images = layer.get("images", [])
+                    for img_data in images:
+                        img_path = img_data.get("image_path", "")
+                        if not img_path or not os.path.exists(img_path):
+                            continue
+                        pix = QPixmap(img_path)
+                        if pix.isNull():
+                            continue
+                        pos = img_data.get("position", [0, 0])
+                        sx = img_data.get("scale_x", img_data.get("scale", 1.0))
+                        sy = img_data.get("scale_y", img_data.get("scale", 1.0))
+                        if sx != 1.0 or sy != 1.0:
+                            new_w = max(1, int(pix.width() * sx))
+                            new_h = max(1, int(pix.height() * sy))
+                            pix = pix.scaled(new_w, new_h, Qt.AspectRatioMode.IgnoreAspectRatio,
+                                             Qt.TransformationMode.SmoothTransformation)
+                        pm_item = scene.addPixmap(pix)
+                        pm_item.setPos(pos[0], pos[1])
+
+            scale = min(thumb_size / view_w, thumb_size / view_h) if view_w > 0 and view_h > 0 else 1
+            render_w = max(1, int(view_w * scale))
+            render_h = max(1, int(view_h * scale))
+
+            thumbnail = QPixmap(render_w, render_h)
+            thumbnail.fill(QColor(30, 30, 30))
+            painter = QPainter(thumbnail)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            scene.render(painter, QRectF(0, 0, render_w, render_h), QRectF(0, 0, view_w, view_h))
+            painter.end()
+            return thumbnail
+        except Exception:
+            return None
+
+    def invalidate_map_thumbnail_cache(self):
+        keys_to_remove = [k for k in self._pixmap_cache if k.startswith("map_thumb:")]
+        for k in keys_to_remove:
+            del self._pixmap_cache[k]
+
     def refresh_map_list(self):
-        """刷新地图列表"""
-        # 检查地图网格布局是否存在，如果不存在则重新创建
         if not hasattr(self, "map_grid_layout"):
             self.setup_map_grid_mode()
 
-        # 清空现有卡片
+        self.invalidate_map_thumbnail_cache()
+
         while self.map_grid_layout.count():
             child = self.map_grid_layout.takeAt(0)
             if child.widget():
@@ -1318,7 +1441,7 @@ class ResourceManager(QObject):
                             maps_dir, folder_name, f"{folder_name}.json"
                         )
                     if os.path.exists(map_file_path):
-                        self.add_map_card(folder_name, i)
+                        self.add_map_card(folder_name, i, map_path=map_file_path)
 
         except Exception as e:
             print(f"刷新地图列表失败: {e}")
@@ -1350,7 +1473,7 @@ class ResourceManager(QObject):
             save_result = new_map_model.save(map_file_path)
             print(f"DEBUG: 新地图已保存到: {map_file_path}, 结果: {save_result}")
 
-        self.add_map_card(map_name, map_count)
+        self.add_map_card(map_name, map_count, map_path=map_file_path)
         self.sig_map_created.emit(map_file_path or "")
 
     def destroy(self):

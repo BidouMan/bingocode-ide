@@ -84,9 +84,7 @@ class AppController:
         # self.ui.btn_save.clicked.connect(self.handle_save_project)
 
         # 编辑器页面切换按钮
-        self.ui.btn_code_editor.clicked.connect(
-            lambda: self.ui.editor_stacked.setCurrentIndex(0)
-        )
+        self.ui.btn_code_editor.clicked.connect(self.handle_switch_to_code_editor)
         self.ui.btn_sprite_editor.clicked.connect(self.handle_switch_to_sprite_editor)
         self.ui.btn_map_editor.clicked.connect(self.handle_switch_to_map_editor)
 
@@ -218,15 +216,12 @@ class AppController:
         # 1. 保存当前地图（如果正在编辑地图）
         if hasattr(self, "map_editor") and self.map_editor:
             try:
-                # 只有当有正在编辑的地图时才保存
                 if (
                     hasattr(self.map_editor, "current_map_path")
                     and self.map_editor.current_map_path
                 ):
-                    print("📝 正在保存地图文件...")
                     self.map_editor.save_map()
-                else:
-                    print("📝 当前没有正在编辑的地图，跳过保存")
+                    self.res_manager.refresh_map_list()
             except Exception as e:
                 print(f"❌ 保存地图文件失败: {e}")
 
@@ -240,18 +235,14 @@ class AppController:
     def _open_and_switch_to_map_editor(self, path):
         print(f"🛎️ [AppController] 收到地图编辑请求，目标路径: {path}")
 
-        # 1. 保存当前地图（如果正在编辑地图）
         if hasattr(self, "map_editor") and self.map_editor:
             try:
-                # 只有当有正在编辑的地图时才保存
                 if (
                     hasattr(self.map_editor, "current_map_path")
                     and self.map_editor.current_map_path
                 ):
-                    print("📝 正在保存地图文件...")
                     self.map_editor.save_map()
-                else:
-                    print("📝 当前没有正在编辑的地图，跳过保存")
+                    self.res_manager.refresh_map_list()
             except Exception as e:
                 print(f"❌ 保存地图文件失败: {e}")
 
@@ -444,15 +435,12 @@ class AppController:
             # 保存地图文件
             if hasattr(self, "map_editor") and self.map_editor:
                 try:
-                    # 只有当有正在编辑的地图时才保存
                     if (
                         hasattr(self.map_editor, "current_map_path")
                         and self.map_editor.current_map_path
                     ):
-                        print("📝 正在保存地图文件...")
                         self.map_editor.save_map()
-                    else:
-                        print("📝 当前没有正在编辑的地图，跳过保存")
+                        self.res_manager.refresh_map_list()
                 except Exception as e:
                     print(f"❌ 保存地图文件失败: {e}")
             # print("✨ 项目所有文件已成功同步到磁盘")
@@ -683,9 +671,25 @@ class AppController:
 
         return key_str
 
+    def _save_current_map_if_editing(self):
+        try:
+            if not hasattr(self, "map_editor") or not self.map_editor:
+                return
+            if (
+                hasattr(self.map_editor, "current_map_path")
+                and self.map_editor.current_map_path
+            ):
+                self.map_editor.save_map()
+                self.res_manager.refresh_map_list()
+        except Exception:
+            pass
+
+    def handle_switch_to_code_editor(self):
+        self._save_current_map_if_editing()
+        self.ui.editor_stacked.setCurrentIndex(0)
+
     def handle_switch_to_sprite_editor(self):
-        """切换到角色编辑页面，自动加载最后选择的或默认的角色"""
-        # 切换页面
+        self._save_current_map_if_editing()
         self.ui.editor_stacked.setCurrentIndex(1)
 
         # 获取最后选择的角色路径
