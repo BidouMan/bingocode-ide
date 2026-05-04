@@ -111,9 +111,11 @@ class MapLibManager(QObject):
 
     def _connect_signals(self):
         self.ui.mab_lib_return_btn.clicked.connect(self._on_return)
+        self.ui.mab_lib_search.textChanged.connect(self._on_search)
 
     def load_map_lib(self):
         self.ui.map_lib_list.clear()
+        self.ui.mab_lib_search.clear()
 
         app_dir = self._get_app_dir()
         if not app_dir:
@@ -205,6 +207,14 @@ class MapLibManager(QObject):
 
     def _on_return(self):
         self.ui.change_page.setCurrentIndex(0)
+
+    def _on_search(self, text):
+        keyword = text.strip().lower()
+        lw = self.ui.map_lib_list
+        for i in range(lw.count()):
+            item = lw.item(i)
+            name = item.data(Qt.ItemDataRole.DisplayRole) or ""
+            item.setHidden(keyword not in name.lower())
 
     def _get_safe_map_name(self, maps_dir, base_name):
         target = os.path.join(maps_dir, base_name)
