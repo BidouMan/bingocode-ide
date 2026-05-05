@@ -25,12 +25,17 @@ __pycache__/
 *.mov
 *.wav
 *.pdf
+*.bgs
+*.bgm
 
 # ===== 3. 屏蔽特定资产目录 =====
 # 如果你确定 assets 文件夹里只有代码和轻量级图标，可以不屏蔽整个目录
 # 但建议屏蔽已知的重灾区
 assets/font/
 assets/images/
+assets/icons/
+assets/sprite_lib/
+assets/map_lib/
 MyWorkspace/
 user_workspaces/
 examples/

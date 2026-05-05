@@ -1520,6 +1520,8 @@ class Ui_Form(object):
         self.verticalLayout_30.setContentsMargins(0, 0, 0, 0)
         self.map_lib_toolbar_frame = QFrame(self.map_lib)
         self.map_lib_toolbar_frame.setObjectName(u"map_lib_toolbar_frame")
+        self.map_lib_toolbar_frame.setMinimumSize(QSize(0, 40))
+        self.map_lib_toolbar_frame.setMaximumSize(QSize(16777215, 40))
         self.map_lib_toolbar_frame.setFrameShape(QFrame.Shape.StyledPanel)
         self.map_lib_toolbar_frame.setFrameShadow(QFrame.Shadow.Raised)
         self.horizontalLayout_16 = QHBoxLayout(self.map_lib_toolbar_frame)
@@ -1565,6 +1567,7 @@ class Ui_Form(object):
         self.map_lib_list_frame = QWidget(self.map_lib)
         self.map_lib_list_frame.setObjectName(u"map_lib_list_frame")
         self.verticalLayout_27 = QVBoxLayout(self.map_lib_list_frame)
+        self.verticalLayout_27.setSpacing(0)
         self.verticalLayout_27.setObjectName(u"verticalLayout_27")
         self.verticalLayout_27.setContentsMargins(0, 0, 0, 0)
         self.map_lib_list = QListWidget(self.map_lib_list_frame)
@@ -1576,6 +1579,74 @@ class Ui_Form(object):
         self.verticalLayout_30.addWidget(self.map_lib_list_frame)
 
         self.change_page.addWidget(self.map_lib)
+        self.sprite_lib = QWidget()
+        self.sprite_lib.setObjectName(u"sprite_lib")
+        self.verticalLayout_32 = QVBoxLayout(self.sprite_lib)
+        self.verticalLayout_32.setSpacing(0)
+        self.verticalLayout_32.setObjectName(u"verticalLayout_32")
+        self.verticalLayout_32.setContentsMargins(0, 0, 0, 0)
+        self.sprite_lib_toolbar_frame = QFrame(self.sprite_lib)
+        self.sprite_lib_toolbar_frame.setObjectName(u"sprite_lib_toolbar_frame")
+        self.sprite_lib_toolbar_frame.setMinimumSize(QSize(0, 40))
+        self.sprite_lib_toolbar_frame.setMaximumSize(QSize(16777215, 40))
+        self.sprite_lib_toolbar_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self.sprite_lib_toolbar_frame.setFrameShadow(QFrame.Shadow.Raised)
+        self.horizontalLayout_17 = QHBoxLayout(self.sprite_lib_toolbar_frame)
+        self.horizontalLayout_17.setSpacing(0)
+        self.horizontalLayout_17.setObjectName(u"horizontalLayout_17")
+        self.horizontalLayout_17.setContentsMargins(5, 0, 5, 0)
+        self.sprite_lib_search = QLineEdit(self.sprite_lib_toolbar_frame)
+        self.sprite_lib_search.setObjectName(u"sprite_lib_search")
+        self.sprite_lib_search.setMinimumSize(QSize(200, 0))
+        self.sprite_lib_search.setMaximumSize(QSize(200, 16777215))
+
+        self.horizontalLayout_17.addWidget(self.sprite_lib_search)
+
+        self.horizontalSpacer_19 = QSpacerItem(297, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        self.horizontalLayout_17.addItem(self.horizontalSpacer_19)
+
+        self.label_2 = QLabel(self.sprite_lib_toolbar_frame)
+        self.label_2.setObjectName(u"label_2")
+
+        self.horizontalLayout_17.addWidget(self.label_2, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        self.horizontalSpacer_20 = QSpacerItem(297, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        self.horizontalLayout_17.addItem(self.horizontalSpacer_20)
+
+        self.widget_6 = QWidget(self.sprite_lib_toolbar_frame)
+        self.widget_6.setObjectName(u"widget_6")
+        self.widget_6.setMinimumSize(QSize(120, 0))
+        self.widget_6.setMaximumSize(QSize(120, 16777215))
+
+        self.horizontalLayout_17.addWidget(self.widget_6)
+
+        self.sprite_lib_return = QPushButton(self.sprite_lib_toolbar_frame)
+        self.sprite_lib_return.setObjectName(u"sprite_lib_return")
+        self.sprite_lib_return.setMinimumSize(QSize(80, 0))
+        self.sprite_lib_return.setMaximumSize(QSize(80, 16777215))
+
+        self.horizontalLayout_17.addWidget(self.sprite_lib_return)
+
+
+        self.verticalLayout_32.addWidget(self.sprite_lib_toolbar_frame)
+
+        self.sprite_lib_list_frame = QWidget(self.sprite_lib)
+        self.sprite_lib_list_frame.setObjectName(u"sprite_lib_list_frame")
+        self.verticalLayout_31 = QVBoxLayout(self.sprite_lib_list_frame)
+        self.verticalLayout_31.setSpacing(0)
+        self.verticalLayout_31.setObjectName(u"verticalLayout_31")
+        self.verticalLayout_31.setContentsMargins(0, 0, 0, 0)
+        self.sprite_lib_list = QListWidget(self.sprite_lib_list_frame)
+        self.sprite_lib_list.setObjectName(u"sprite_lib_list")
+
+        self.verticalLayout_31.addWidget(self.sprite_lib_list)
+
+
+        self.verticalLayout_32.addWidget(self.sprite_lib_list_frame)
+
+        self.change_page.addWidget(self.sprite_lib)
 
         self.verticalLayout_4.addWidget(self.change_page)
 
@@ -1681,5 +1752,7 @@ class Ui_Form(object):
         self.fullscreen_btn_unfull.setText("")
         self.label.setText(QCoreApplication.translate("Form", u"\u8bf7\u9009\u62e9\u5730\u56fe", None))
         self.mab_lib_return_btn.setText(QCoreApplication.translate("Form", u"\u8fd4\u56de", None))
+        self.label_2.setText(QCoreApplication.translate("Form", u"\u8bf7\u9009\u62e9\u89d2\u8272", None))
+        self.sprite_lib_return.setText(QCoreApplication.translate("Form", u"\u8fd4\u56de", None))
     # retranslateUi
 

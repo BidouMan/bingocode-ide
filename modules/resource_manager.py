@@ -323,6 +323,7 @@ class ResourceManager(QObject):
         # 5. 上传菜单管理
         self.sprite_upload_menu = UploadMenuManager(self.ui.page_sprite)
         self.sprite_upload_menu.on_import_finished = self.handle_sprite_import_success
+        self.sprite_upload_menu.on_open_lib = self.app_controller.open_sprite_lib
 
         # 地图上传菜单管理
         self.map_upload_menu = MapUploadMenuManager(self.ui.page_map)

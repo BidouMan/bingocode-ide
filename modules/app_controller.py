@@ -28,6 +28,7 @@ from models.sprite_model import SpriteDataModel
 from modules.sprite_editor_manager import SpriteEditorManager
 from modules.map_editor.map_editor_manager import MapEditorManager
 from modules.map_lib_manager import MapLibManager
+from modules.sprite_lib_manager import SpriteLibManager
 
 
 class AppController:
@@ -71,6 +72,7 @@ class AppController:
         self.res_manager = ResourceManager(self.ui, self.window, self)
 
         self.map_lib_manager = MapLibManager(self.ui, self)
+        self.sprite_lib_manager = SpriteLibManager(self.ui, self)
 
         # 4. 绑定信号 (保持原有业务连接)
         self.setup_connections()
@@ -213,6 +215,11 @@ class AppController:
 
         # 8. 地图库导入信号
         self.map_lib_manager.sig_map_imported.connect(self._on_map_lib_imported)
+
+        # 9. 角色库导入信号
+        self.sprite_lib_manager.sig_sprite_imported.connect(
+            self._on_sprite_lib_imported
+        )
 
     def _open_and_switch_to_editor(self, path):
         print(f"🛎️ [AppController] 收到编辑请求，目标路径: {path}")
@@ -358,6 +365,10 @@ class AppController:
         self.map_lib_manager.load_map_lib()
         self.ui.change_page.setCurrentIndex(2)
 
+    def open_sprite_lib(self):
+        self.sprite_lib_manager.load_sprite_lib()
+        self.ui.change_page.setCurrentIndex(3)
+
     def _on_map_lib_imported(self, map_path):
         self.res_manager.refresh_map_list()
         self._refresh_map_selector()
@@ -368,6 +379,9 @@ class AppController:
                 self.ui.btn_editor_map_selectmap.blockSignals(True)
                 self.ui.btn_editor_map_selectmap.setCurrentIndex(idx)
                 self.ui.btn_editor_map_selectmap.blockSignals(False)
+
+    def _on_sprite_lib_imported(self, sprite_path):
+        self.res_manager.refresh_sprite_grid()
 
     def handle_new_project(self):
         """新建项目：重置并初始化运行目标"""
