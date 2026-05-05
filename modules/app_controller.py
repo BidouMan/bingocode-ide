@@ -30,6 +30,7 @@ from modules.map_editor.map_editor_manager import MapEditorManager
 from modules.map_lib_manager import MapLibManager
 from modules.sprite_lib_manager import SpriteLibManager
 from modules.map_res_lib_manager import MapResLibManager
+from modules.sound_lib_manager import SoundLibManager
 
 
 class AppController:
@@ -75,6 +76,7 @@ class AppController:
         self.map_lib_manager = MapLibManager(self.ui, self)
         self.sprite_lib_manager = SpriteLibManager(self.ui, self)
         self.map_res_lib_manager = MapResLibManager(self.ui, self)
+        self.sound_lib_manager = SoundLibManager(self.ui, self)
 
         # 4. 绑定信号 (保持原有业务连接)
         self.setup_connections()
@@ -224,6 +226,9 @@ class AppController:
             self._on_sprite_lib_imported
         )
 
+        # 10. 声音库导入信号
+        self.sound_lib_manager.sig_sound_imported.connect(self._on_sound_lib_imported)
+
     def _open_and_switch_to_editor(self, path):
         if hasattr(self, "map_editor") and self.map_editor:
             try:
@@ -371,6 +376,10 @@ class AppController:
         self.map_res_lib_manager.load_map_res_lib()
         self.ui.change_page.setCurrentIndex(4)
 
+    def open_sound_lib(self):
+        self.sound_lib_manager.load_sound_lib()
+        self.ui.change_page.setCurrentIndex(5)
+
     def _on_map_lib_imported(self, map_path):
         self.res_manager.refresh_map_list()
         self._refresh_map_selector()
@@ -384,6 +393,9 @@ class AppController:
 
     def _on_sprite_lib_imported(self, sprite_path):
         self.res_manager.refresh_sprite_grid()
+
+    def _on_sound_lib_imported(self, sound_path):
+        self.res_manager.refresh_sound_grid()
 
     def handle_new_project(self):
         """新建项目：重置并初始化运行目标"""
@@ -417,6 +429,7 @@ class AppController:
             self.res_manager.refresh_code_list()
             self.res_manager.refresh_sprite_grid()
             self.res_manager.refresh_map_list()
+            self.res_manager.refresh_sound_grid()
             self._refresh_map_selector()
             # 2. 获取目录下所有 py 文件
             all_files = [

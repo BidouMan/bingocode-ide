@@ -83,7 +83,7 @@
      <property name="frameShadow">
       <enum>QFrame::Shadow::Raised</enum>
      </property>
-     <layout class="QVBoxLayout" name="verticalLayout" stretch="0,0,0,0">
+     <layout class="QVBoxLayout" name="verticalLayout" stretch="0,0,0">
       <property name="spacing">
        <number>4</number>
       </property>
@@ -119,38 +119,6 @@
         <property name="icon">
          <iconset resource="../assets/resources.qrc">
           <normaloff>:/icons/icon--file-upload.svg</normaloff>:/icons/icon--file-upload.svg</iconset>
-        </property>
-        <property name="iconSize">
-         <size>
-          <width>20</width>
-          <height>20</height>
-         </size>
-        </property>
-        <property name="flat">
-         <bool>true</bool>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QPushButton" name="btn_creat">
-        <property name="minimumSize">
-         <size>
-          <width>0</width>
-          <height>30</height>
-         </size>
-        </property>
-        <property name="maximumSize">
-         <size>
-          <width>16777215</width>
-          <height>30</height>
-         </size>
-        </property>
-        <property name="text">
-         <string/>
-        </property>
-        <property name="icon">
-         <iconset resource="../assets/resources.qrc">
-          <normaloff>:/icons/编辑.svg</normaloff>:/icons/编辑.svg</iconset>
         </property>
         <property name="iconSize">
          <size>
@@ -247,7 +215,7 @@
      </property>
      <property name="icon">
       <iconset resource="../assets/resources.qrc">
-       <normaloff>:/icons/map_upload.svg</normaloff>:/icons/map_upload.svg</iconset>
+       <normaloff>:/icons/add_sound.svg</normaloff>:/icons/add_sound.svg</iconset>
      </property>
      <property name="iconSize">
       <size>

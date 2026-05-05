@@ -919,7 +919,7 @@
                        <string notr="true"/>
                       </property>
                       <property name="currentIndex">
-                       <number>1</number>
+                       <number>0</number>
                       </property>
                       <widget class="QWidget" name="page_sprite">
                        <layout class="QVBoxLayout" name="verticalLayout_12">
@@ -1031,6 +1031,18 @@
                       </widget>
                       <widget class="QWidget" name="page_sound">
                        <layout class="QVBoxLayout" name="verticalLayout_14">
+                        <property name="leftMargin">
+                         <number>0</number>
+                        </property>
+                        <property name="topMargin">
+                         <number>0</number>
+                        </property>
+                        <property name="rightMargin">
+                         <number>0</number>
+                        </property>
+                        <property name="bottomMargin">
+                         <number>0</number>
+                        </property>
                         <item>
                          <widget class="QFrame" name="sound_page_frame">
                           <property name="frameShape">
@@ -1039,29 +1051,23 @@
                           <property name="frameShadow">
                            <enum>QFrame::Shadow::Raised</enum>
                           </property>
-                          <widget class="QLabel" name="label_4">
-                           <property name="geometry">
-                            <rect>
-                             <x>40</x>
-                             <y>30</y>
-                             <width>58</width>
-                             <height>16</height>
-                            </rect>
+                          <layout class="QVBoxLayout" name="verticalLayout_37">
+                           <property name="leftMargin">
+                            <number>0</number>
                            </property>
-                           <property name="text">
-                            <string>声音页面</string>
+                           <property name="topMargin">
+                            <number>0</number>
                            </property>
-                          </widget>
-                          <widget class="QListWidget" name="listWidget">
-                           <property name="geometry">
-                            <rect>
-                             <x>80</x>
-                             <y>90</y>
-                             <width>256</width>
-                             <height>192</height>
-                            </rect>
+                           <property name="rightMargin">
+                            <number>0</number>
                            </property>
-                          </widget>
+                           <property name="bottomMargin">
+                            <number>0</number>
+                           </property>
+                           <item>
+                            <widget class="QListWidget" name="list_sound"/>
+                           </item>
+                          </layout>
                          </widget>
                         </item>
                        </layout>

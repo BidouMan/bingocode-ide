@@ -30,7 +30,7 @@ from PySide6.QtGui import (
     QBrush,
 )
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsRectItem
-from modules.upload_menu_manager import UploadMenuManager, MapUploadMenuManager
+from modules.upload_menu_manager import UploadMenuManager, MapUploadMenuManager, SoundUploadMenuManager
 
 
 class SpriteDelegate(QStyledItemDelegate):
@@ -331,6 +331,10 @@ class ResourceManager(QObject):
         self.map_upload_menu.on_create_map = self.handle_create_map
         self.map_upload_menu.on_open_lib = self.app_controller.open_map_lib
 
+        self.sound_upload_menu = SoundUploadMenuManager(self.ui.page_sound)
+        self.sound_upload_menu.on_import_finished = self.handle_sound_import_success
+        self.sound_upload_menu.on_open_lib = self.app_controller.open_sound_lib
+
     def setup_list_styles(self):
         lw = self.ui.list_code
         if not lw:
@@ -391,6 +395,7 @@ class ResourceManager(QObject):
 
         # 设置地图列表为网格布局
         self.setup_map_grid_mode()
+        self.setup_sound_grid_mode()
 
     def bind_switch_page(self):
         """绑定导航按钮"""
@@ -409,6 +414,8 @@ class ResourceManager(QObject):
                 self.refresh_sprite_grid()
             elif target_page == self.ui.page_map:
                 self.refresh_map_list()
+            elif target_page == self.ui.page_sound:
+                self.refresh_sound_grid()
 
     def _save_current_map_if_active(self):
         try:
@@ -559,6 +566,19 @@ class ResourceManager(QObject):
                         # 不排除任何卡片，全部隐藏
                         self.hide_all_delete_buttons()
                         self.clear_all_selections()
+
+                elif watched.objectName() == "soundCard":
+                    new_focus = QApplication.focusWidget()
+                    if not new_focus or new_focus.objectName() != "soundCard":
+                        self.hide_all_sound_delete_buttons()
+                        if hasattr(self, "current_sound_selected_card") and self.current_sound_selected_card:
+                            try:
+                                self.current_sound_selected_card.setProperty("selected", "false")
+                                self.current_sound_selected_card.style().unpolish(self.current_sound_selected_card)
+                                self.current_sound_selected_card.style().polish(self.current_sound_selected_card)
+                            except RuntimeError:
+                                pass
+                            self.current_sound_selected_card = None
         except RuntimeError:
             # 对象已销毁，忽略事件
             pass
@@ -794,6 +814,46 @@ class ResourceManager(QObject):
         self.map_scroll_area.setWidget(self.map_grid_container)
         container_layout.addWidget(self.map_scroll_area)
 
+    def setup_sound_grid_mode(self):
+        container_layout = self.ui.verticalLayout_37
+
+        if hasattr(self.ui, "list_sound"):
+            self.ui.list_sound.deleteLater()
+
+        self.sound_scroll_area = QScrollArea()
+        self.sound_scroll_area.setObjectName("SoundScrollArea")
+        self.sound_scroll_area.setWidgetResizable(True)
+        self.sound_scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.sound_scroll_area.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.sound_scroll_area.setStyleSheet("background: transparent;")
+
+        self.sound_scroll_area.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.sound_scroll_area.installEventFilter(self)
+
+        self.sound_grid_container = QWidget()
+        self.sound_grid_container.setStyleSheet("background: transparent;")
+        self.sound_grid_container.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.sound_grid_layout = QGridLayout(self.sound_grid_container)
+
+        self.sound_grid_layout.setContentsMargins(4, 6, 4, 6)
+        self.sound_grid_layout.setSpacing(0)
+        self.sound_grid_layout.setVerticalSpacing(5)
+
+        for i in range(4):
+            self.sound_grid_layout.setColumnStretch(i, 1)
+
+        self.sound_grid_layout.setAlignment(
+            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft
+        )
+
+        self.sound_scroll_area.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.sound_scroll_area.installEventFilter(self)
+
+        self.sound_scroll_area.setWidget(self.sound_grid_container)
+        container_layout.addWidget(self.sound_scroll_area)
+
     def add_sprite_card(self, name, index, icon_path=None):
         """核心入口：负责卡片的创建与网格定位"""
         from PySide6.QtCore import QTimer
@@ -836,6 +896,112 @@ class ResourceManager(QObject):
         self.map_grid_layout.addWidget(card, row, col, Qt.AlignmentFlag.AlignCenter)
 
         return card
+
+    def add_sound_card(self, name, index, sound_path=None):
+        card = QWidget()
+        card.setFixedSize(74, 74)
+        card.setObjectName("soundCard")
+        card.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        card.setProperty("selected", "false")
+        card.installEventFilter(self)
+
+        self._build_sound_card_ui(card, name)
+        self._build_sound_card_delete_button(card, name)
+        self._setup_sound_card_interactions(card, name)
+
+        row, col = index // 4, index % 4
+        self.sound_grid_layout.addWidget(card, row, col, Qt.AlignmentFlag.AlignCenter)
+
+        return card
+
+    def _build_sound_card_ui(self, card, name):
+        card.setStyleSheet("""
+            #soundCard {
+                background-color: #2D2D2D;
+                border-radius: 8px;
+                border: 2px solid transparent;
+            }
+            #soundCard:hover { background-color: #3D3D3D; }
+            #soundCard[selected="true"] {
+                background-color: #3D3D3D;
+                border: 2px solid #5bc772;
+            }
+        """)
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(2)
+
+        icon_label = QLabel()
+        icon_label.setFixedSize(40, 40)
+
+        cache_key = "sound_icon_default"
+        if cache_key in self._pixmap_cache:
+            target_pix = self._pixmap_cache[cache_key]
+        else:
+            icon = QIcon(":/icons/sound_icon.svg")
+            if not icon.isNull():
+                target_pix = icon.pixmap(QSize(80, 80))
+            else:
+                target_pix = None
+            if target_pix and not target_pix.isNull():
+                self._pixmap_cache[cache_key] = target_pix
+            else:
+                target_pix = None
+
+        if target_pix and not target_pix.isNull():
+            icon_label.setPixmap(target_pix)
+            icon_label.setScaledContents(True)
+        else:
+            icon_label.setStyleSheet("background-color: #E8A735; border-radius: 4px;")
+
+        layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignCenter)
+
+        name_label = QLabel(name)
+        name_label.setObjectName("soundNameLabel")
+        if hasattr(self, "custom_font_family"):
+            name_label.setFont(QFont(self.custom_font_family, 12))
+        name_label.setStyleSheet("color: #E0E0E0; background: transparent;")
+        layout.addWidget(name_label, 0, Qt.AlignmentFlag.AlignCenter)
+
+        icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        name_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+    def _build_sound_card_delete_button(self, card, name):
+        del_btn = QPushButton(card)
+        del_btn.setFixedSize(22, 22)
+        del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        del_btn.setIcon(QIcon(":/icons/icon--delete.svg"))
+        del_btn.setIconSize(QSize(16, 16))
+        del_btn.move(50, 2)
+        del_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ff4d4f;
+                border-radius: 11px;
+                border: 2px solid #2D2D2D;
+            }
+            QPushButton:hover { background-color: #ff7875; }
+        """)
+        del_btn.hide()
+        del_btn.clicked.connect(lambda: self.handle_sound_delete(name))
+        card.del_btn = del_btn
+
+    def _setup_sound_card_interactions(self, card, name):
+        card.long_press_timer = QTimer()
+        card.long_press_timer.setSingleShot(True)
+        card.long_press_timer.timeout.connect(lambda: self.show_sound_delete_mode(card))
+
+        def custom_mouse_press(event):
+            if event.button() == Qt.MouseButton.LeftButton:
+                card.long_press_timer.start(400)
+            self.handle_sound_card_click(card, event)
+
+        def custom_mouse_release(event):
+            if card.long_press_timer.isActive():
+                card.long_press_timer.stop()
+
+        card.mousePressEvent = custom_mouse_press
+        card.mouseReleaseEvent = custom_mouse_release
 
     def _build_card_ui(self, card, name, icon_path):
         """负责卡片的视觉样式、图标处理和文字"""
@@ -1475,6 +1641,134 @@ class ResourceManager(QObject):
         self.add_map_card(map_name, map_count, map_path=map_file_path)
         self.sig_map_created.emit(map_file_path or "")
 
+    def refresh_sound_grid(self):
+        if not hasattr(self, "sound_grid_layout"):
+            self.setup_sound_grid_mode()
+
+        while self.sound_grid_layout.count():
+            child = self.sound_grid_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        project_root = self.app_controller.project_manager.project_root
+        if not project_root or not os.path.exists(project_root):
+            return
+
+        try:
+            sounds_dir = os.path.join(project_root, "assets", "sounds")
+            if os.path.exists(sounds_dir):
+                sound_exts = (".wav", ".mp3", ".ogg", ".flac", ".m4a", ".aac", ".wma")
+                sound_files = [
+                    f
+                    for f in os.listdir(sounds_dir)
+                    if not f.startswith(".")
+                    and os.path.isfile(os.path.join(sounds_dir, f))
+                    and f.lower().endswith(sound_exts)
+                ]
+                sound_files.sort()
+
+                for i, file_name in enumerate(sound_files):
+                    name = os.path.splitext(file_name)[0]
+                    self.add_sound_card(name, i, sound_path=os.path.join(sounds_dir, file_name))
+        except Exception:
+            pass
+
+    def handle_sound_import_success(self, file_paths):
+        project_root = self.app_controller.project_manager.project_root
+        if not project_root or not file_paths:
+            return
+
+        sounds_dir = os.path.join(project_root, "assets", "sounds")
+        os.makedirs(sounds_dir, exist_ok=True)
+
+        for src_path in file_paths:
+            if not os.path.exists(src_path):
+                continue
+            base_name = os.path.splitext(os.path.basename(src_path))[0]
+            ext = os.path.splitext(src_path)[1]
+            safe_name = self._get_safe_sound_name(sounds_dir, base_name, ext)
+            target_path = os.path.join(sounds_dir, safe_name + ext)
+            try:
+                shutil.copy2(src_path, target_path)
+            except Exception:
+                pass
+
+        self.refresh_sound_grid()
+
+        if hasattr(self.app_controller, "project_manager"):
+            self.app_controller.project_manager.mark_resource_dirty()
+
+    def _get_safe_sound_name(self, sounds_dir, base_name, ext):
+        target = os.path.join(sounds_dir, base_name + ext)
+        if not os.path.exists(target):
+            return base_name
+        counter = 1
+        while True:
+            new_name = f"{base_name}_{counter}"
+            target = os.path.join(sounds_dir, new_name + ext)
+            if not os.path.exists(target):
+                return new_name
+            counter += 1
+
+    def handle_sound_card_click(self, card, event):
+        event.accept()
+        card.setFocus()
+        self.hide_all_sound_delete_buttons(exclude_card=card)
+
+        if hasattr(self, "current_sound_selected_card") and self.current_sound_selected_card:
+            try:
+                self.current_sound_selected_card.setProperty("selected", "false")
+                self.current_sound_selected_card.style().unpolish(self.current_sound_selected_card)
+                self.current_sound_selected_card.style().polish(self.current_sound_selected_card)
+            except RuntimeError:
+                pass
+
+        self.current_sound_selected_card = card
+        card.setProperty("selected", "true")
+        card.style().unpolish(card)
+        card.style().polish(card)
+
+    def show_sound_delete_mode(self, card):
+        if hasattr(card, "del_btn"):
+            card.del_btn.show()
+            card.update()
+
+    def hide_all_sound_delete_buttons(self, exclude_card=None):
+        if not hasattr(self, "sound_grid_layout"):
+            return
+        for i in range(self.sound_grid_layout.count()):
+            item = self.sound_grid_layout.itemAt(i)
+            if item:
+                w = item.widget()
+                if w and w != exclude_card and hasattr(w, "del_btn"):
+                    w.del_btn.hide()
+
+    def handle_sound_delete(self, name):
+        reply = QMessageBox.question(
+            self.window,
+            "确认删除",
+            f"确定要删除声音 '{name}' 吗？\n此操作不可撤销！",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            project_root = self.app_controller.project_manager.project_root
+            if not project_root:
+                return
+
+            sounds_dir = os.path.join(project_root, "assets", "sounds")
+            sound_exts = (".wav", ".mp3", ".ogg", ".flac", ".m4a", ".aac", ".wma")
+            for ext in sound_exts:
+                target_path = os.path.join(sounds_dir, name + ext)
+                if os.path.exists(target_path):
+                    try:
+                        os.remove(target_path)
+                        self.refresh_sound_grid()
+                    except Exception as e:
+                        QMessageBox.critical(self.window, "错误", f"无法删除文件: {e}")
+                    return
+
     def destroy(self):
         """销毁ResourceManager，移除所有事件过滤器"""
         try:
@@ -1512,6 +1806,21 @@ class ResourceManager(QObject):
             if hasattr(self, 'map_grid_layout'):
                 for i in range(self.map_grid_layout.count()):
                     item = self.map_grid_layout.itemAt(i)
+                    if item and item.widget():
+                        try:
+                            item.widget().removeEventFilter(self)
+                        except:
+                            pass
+
+            if hasattr(self, 'sound_scroll_area'):
+                try:
+                    self.sound_scroll_area.removeEventFilter(self)
+                except:
+                    pass
+
+            if hasattr(self, 'sound_grid_layout'):
+                for i in range(self.sound_grid_layout.count()):
+                    item = self.sound_grid_layout.itemAt(i)
                     if item and item.widget():
                         try:
                             item.widget().removeEventFilter(self)

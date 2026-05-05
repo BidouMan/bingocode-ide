@@ -32,6 +32,11 @@
     <file>icons/map_upload.svg</file>
     <file>icons/icon_hide.svg</file>
     <file>icons/icon_show.svg</file>
+
+    <file>icons/add_sound.svg</file>
+    <file>icons/sound_play.svg</file>
+    <file>icons/sound_icon.svg</file>
+
     <file>font/HarmonyOS_Sans_SC_Regular.ttf</file>
   </qresource>
 </RCC>

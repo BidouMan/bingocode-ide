@@ -1,9 +1,11 @@
 import os
-import shutil  # 🚀 用于文件拷贝
+import shutil
 from PySide6.QtWidgets import QWidget,QFileDialog
 from PySide6.QtCore import Qt, QEvent, QPropertyAnimation, QEasingCurve, QRect
-from ui.upload_menu_ui import Ui_upload_menu 
+from PySide6.QtGui import QRegion
+from ui.upload_menu_ui import Ui_upload_menu
 from ui.map_upload_ui import Ui_upload_menu as Ui_map_upload_menu
+from ui.sound_upload_ui import Ui_upload_menu as Ui_sound_upload_menu
 
 
 class UploadMenuManager(QWidget):
@@ -376,4 +378,130 @@ class MapUploadMenuManager(QWidget):
                 
             print("✅ [MapUploadMenuManager] 事件过滤器已移除")
         except Exception as e:
-            print(f"❌ [MapUploadMenuManager] 移除事件过滤器失败: {e}")
+            pass
+
+
+class SoundUploadMenuManager(QWidget):
+    def __init__(self, parent_widget):
+        super().__init__(parent_widget)
+        self.ui = Ui_sound_upload_menu()
+        self.ui.setupUi(self)
+
+        self.on_import_finished = None
+        self.on_open_lib = None
+
+        self.setFixedSize(50, 226)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        self.menu_container = QWidget(self)
+        self.menu_container.setGeometry(0, 0, 50, 226)
+
+        self.ui.menu_frame.setParent(self.menu_container)
+        self.menu_container.setObjectName("upload_menu_mask_container")
+
+        self.target_h = 80
+        self.anchor_y = 201
+
+        for btn in [self.ui.btn_import, self.ui.btn_open]:
+            btn.installEventFilter(self)
+
+        self.ui.menu_frame.setGeometry(10, self.anchor_y, 30, 0)
+        self.ui.menu_frame.setVisible(False)
+
+        self.ui.btn_upload.setParent(self)
+        self.ui.btn_upload.setGeometry(0, 176, 50, 50)
+        self.ui.btn_upload.raise_()
+
+        self.menu_container.setMask(QRegion(0, 0, 50, self.anchor_y))
+
+        self.anim = None
+        self.ui.btn_upload.installEventFilter(self)
+        self.installEventFilter(self)
+        parent_widget.installEventFilter(self)
+
+        self.setup_connections()
+        self.auto_layout()
+
+    def setup_connections(self):
+        self.ui.btn_import.clicked.connect(lambda: self.on_button_clicked("从文件导入"))
+        self.ui.btn_open.clicked.connect(lambda: self.on_button_clicked("选择库文件"))
+
+    def anim_menu(self, show=True):
+        if self.anim and self.anim.state() == QPropertyAnimation.State.Running:
+            self.anim.stop()
+
+        self.anim = QPropertyAnimation(self.ui.menu_frame, b"geometry")
+        self.anim.setDuration(300)
+
+        if show:
+            self.ui.menu_frame.setVisible(True)
+            end_geo = QRect(10, self.anchor_y - self.target_h, 30, self.target_h)
+        else:
+            end_geo = QRect(10, self.anchor_y, 30, 0)
+
+        self.anim.setStartValue(self.ui.menu_frame.geometry())
+        self.anim.setEndValue(end_geo)
+        self.anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        if not show:
+            self.anim.finished.connect(lambda: self.ui.menu_frame.setVisible(False))
+
+        self.anim.start()
+
+    def eventFilter(self, obj, event):
+        try:
+            if hasattr(self, 'ui') and self.ui and obj == self.ui.btn_upload and event.type() == QEvent.Type.Enter:
+                self.anim_menu(True)
+            elif obj == self and event.type() == QEvent.Type.Leave:
+                self.anim_menu(False)
+
+            if event.type() == QEvent.Type.Resize:
+                self.auto_layout()
+        except RuntimeError:
+            pass
+        return super().eventFilter(obj, event)
+
+    def auto_layout(self):
+        parent = self.parentWidget()
+        if not parent:
+            return
+        self.move(parent.width() - 70 + 15, parent.height() - 226 - 5)
+        self.raise_()
+
+    def on_button_clicked(self, action_name):
+        if action_name == "从文件导入":
+            self.import_assets()
+        elif action_name == "选择库文件":
+            if self.on_open_lib:
+                self.on_open_lib()
+        self.anim_menu(False)
+
+    def import_assets(self):
+        files, _ = QFileDialog.getOpenFileNames(
+            self, "选择声音资源", "",
+            "声音文件 (*.wav *.mp3 *.ogg *.flac *.m4a);;所有文件 (*)"
+        )
+
+        if files:
+            self.activateWindow()
+            self.raise_()
+
+            if self.on_import_finished:
+                self.on_import_finished(files)
+
+    def destroy(self):
+        try:
+            if hasattr(self, 'ui') and self.ui:
+                for btn in [self.ui.btn_import, self.ui.btn_open, self.ui.btn_upload]:
+                    try:
+                        btn.removeEventFilter(self)
+                    except:
+                        pass
+
+            self.removeEventFilter(self)
+
+            parent = self.parentWidget()
+            if parent:
+                parent.removeEventFilter(self)
+        except Exception as e:
+            pass

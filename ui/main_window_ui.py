@@ -28,7 +28,7 @@ class Ui_Form(object):
     def setupUi(self, Form):
         if not Form.objectName():
             Form.setObjectName(u"Form")
-        Form.resize(1078, 718)
+        Form.resize(1218, 859)
         sizePolicy = QSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
@@ -428,16 +428,19 @@ class Ui_Form(object):
         self.page_sound.setObjectName(u"page_sound")
         self.verticalLayout_14 = QVBoxLayout(self.page_sound)
         self.verticalLayout_14.setObjectName(u"verticalLayout_14")
+        self.verticalLayout_14.setContentsMargins(0, 0, 0, 0)
         self.sound_page_frame = QFrame(self.page_sound)
         self.sound_page_frame.setObjectName(u"sound_page_frame")
         self.sound_page_frame.setFrameShape(QFrame.Shape.StyledPanel)
         self.sound_page_frame.setFrameShadow(QFrame.Shadow.Raised)
-        self.label_4 = QLabel(self.sound_page_frame)
-        self.label_4.setObjectName(u"label_4")
-        self.label_4.setGeometry(QRect(40, 30, 58, 16))
-        self.listWidget = QListWidget(self.sound_page_frame)
-        self.listWidget.setObjectName(u"listWidget")
-        self.listWidget.setGeometry(QRect(80, 90, 256, 192))
+        self.verticalLayout_37 = QVBoxLayout(self.sound_page_frame)
+        self.verticalLayout_37.setObjectName(u"verticalLayout_37")
+        self.verticalLayout_37.setContentsMargins(0, 0, 0, 0)
+        self.list_sound = QListWidget(self.sound_page_frame)
+        self.list_sound.setObjectName(u"list_sound")
+
+        self.verticalLayout_37.addWidget(self.list_sound)
+
 
         self.verticalLayout_14.addWidget(self.sound_page_frame)
 
@@ -1741,6 +1744,92 @@ class Ui_Form(object):
         self.verticalLayout_34.addWidget(self.map_res_lib_list_frame)
 
         self.change_page.addWidget(self.map_res_lib)
+        self.sound_lib = QWidget()
+        self.sound_lib.setObjectName(u"sound_lib")
+        self.verticalLayout_36 = QVBoxLayout(self.sound_lib)
+        self.verticalLayout_36.setSpacing(0)
+        self.verticalLayout_36.setObjectName(u"verticalLayout_36")
+        self.verticalLayout_36.setContentsMargins(0, 0, 0, 0)
+        self.sound_lib_toolbar_frame = QFrame(self.sound_lib)
+        self.sound_lib_toolbar_frame.setObjectName(u"sound_lib_toolbar_frame")
+        self.sound_lib_toolbar_frame.setMinimumSize(QSize(0, 40))
+        self.sound_lib_toolbar_frame.setMaximumSize(QSize(16777215, 40))
+        self.sound_lib_toolbar_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self.sound_lib_toolbar_frame.setFrameShadow(QFrame.Shadow.Raised)
+        self.horizontalLayout_25 = QHBoxLayout(self.sound_lib_toolbar_frame)
+        self.horizontalLayout_25.setSpacing(1)
+        self.horizontalLayout_25.setObjectName(u"horizontalLayout_25")
+        self.horizontalLayout_25.setContentsMargins(5, 0, 5, 0)
+        self.sound_lib_search = QLineEdit(self.sound_lib_toolbar_frame)
+        self.sound_lib_search.setObjectName(u"sound_lib_search")
+        self.sound_lib_search.setMinimumSize(QSize(200, 0))
+        self.sound_lib_search.setMaximumSize(QSize(200, 16777215))
+
+        self.horizontalLayout_25.addWidget(self.sound_lib_search)
+
+        self.horizontalSpacer_23 = QSpacerItem(10, 20, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
+
+        self.horizontalLayout_25.addItem(self.horizontalSpacer_23)
+
+        self.sound_lib_btn1 = QPushButton(self.sound_lib_toolbar_frame)
+        self.buttonGroup_4 = QButtonGroup(Form)
+        self.buttonGroup_4.setObjectName(u"buttonGroup_4")
+        self.buttonGroup_4.addButton(self.sound_lib_btn1)
+        self.sound_lib_btn1.setObjectName(u"sound_lib_btn1")
+        self.sound_lib_btn1.setMinimumSize(QSize(80, 0))
+        self.sound_lib_btn1.setMaximumSize(QSize(80, 16777215))
+        self.sound_lib_btn1.setCheckable(True)
+        self.sound_lib_btn1.setChecked(True)
+
+        self.horizontalLayout_25.addWidget(self.sound_lib_btn1)
+
+        self.sound_lib_btn2 = QPushButton(self.sound_lib_toolbar_frame)
+        self.buttonGroup_4.addButton(self.sound_lib_btn2)
+        self.sound_lib_btn2.setObjectName(u"sound_lib_btn2")
+        self.sound_lib_btn2.setMinimumSize(QSize(80, 0))
+        self.sound_lib_btn2.setMaximumSize(QSize(80, 16777215))
+        self.sound_lib_btn2.setCheckable(True)
+
+        self.horizontalLayout_25.addWidget(self.sound_lib_btn2)
+
+        self.sound_lib_btn3 = QPushButton(self.sound_lib_toolbar_frame)
+        self.buttonGroup_4.addButton(self.sound_lib_btn3)
+        self.sound_lib_btn3.setObjectName(u"sound_lib_btn3")
+        self.sound_lib_btn3.setMinimumSize(QSize(80, 0))
+        self.sound_lib_btn3.setMaximumSize(QSize(80, 16777215))
+        self.sound_lib_btn3.setCheckable(True)
+
+        self.horizontalLayout_25.addWidget(self.sound_lib_btn3)
+
+        self.horizontalSpacer_24 = QSpacerItem(524, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        self.horizontalLayout_25.addItem(self.horizontalSpacer_24)
+
+        self.sound_lib_return = QPushButton(self.sound_lib_toolbar_frame)
+        self.sound_lib_return.setObjectName(u"sound_lib_return")
+        self.sound_lib_return.setMinimumSize(QSize(80, 0))
+        self.sound_lib_return.setMaximumSize(QSize(80, 16777215))
+
+        self.horizontalLayout_25.addWidget(self.sound_lib_return)
+
+
+        self.verticalLayout_36.addWidget(self.sound_lib_toolbar_frame)
+
+        self.widget_7 = QWidget(self.sound_lib)
+        self.widget_7.setObjectName(u"widget_7")
+        self.verticalLayout_35 = QVBoxLayout(self.widget_7)
+        self.verticalLayout_35.setSpacing(0)
+        self.verticalLayout_35.setObjectName(u"verticalLayout_35")
+        self.verticalLayout_35.setContentsMargins(0, 0, 0, 0)
+        self.listWidget_2 = QListWidget(self.widget_7)
+        self.listWidget_2.setObjectName(u"listWidget_2")
+
+        self.verticalLayout_35.addWidget(self.listWidget_2)
+
+
+        self.verticalLayout_36.addWidget(self.widget_7)
+
+        self.change_page.addWidget(self.sound_lib)
 
         self.verticalLayout_4.addWidget(self.change_page)
 
@@ -1752,7 +1841,7 @@ class Ui_Form(object):
         self.btn_outline_sprite.setDefault(False)
         self.btn_outline_sound.setDefault(False)
         self.btn_outline_code.setDefault(False)
-        self.outline_stracked.setCurrentIndex(1)
+        self.outline_stracked.setCurrentIndex(0)
         self.code_stacked.setCurrentIndex(-1)
         self.att_col_type.setCurrentIndex(0)
 
@@ -1776,7 +1865,6 @@ class Ui_Form(object):
         self.btn_outline_bg.setText(QCoreApplication.translate("Form", u"\u573a\u666f", None))
         self.btn_outline_sound.setText(QCoreApplication.translate("Form", u"\u58f0\u97f3", None))
         self.btn_outline_code.setText(QCoreApplication.translate("Form", u"\u4ee3\u7801", None))
-        self.label_4.setText(QCoreApplication.translate("Form", u"\u58f0\u97f3\u9875\u9762", None))
         self.btn_add_tab.setText(QCoreApplication.translate("Form", u"+", None))
         self.animate_label.setText(QCoreApplication.translate("Form", u"ANIMATION", None))
         self.animate_preview.setText("")
@@ -1852,5 +1940,9 @@ class Ui_Form(object):
         self.map_res_lib_btn2.setText(QCoreApplication.translate("Form", u"\u56fe\u5757", None))
         self.map_res_lib_btn3.setText(QCoreApplication.translate("Form", u"\u96c6\u5408", None))
         self.map_res_lib_return.setText(QCoreApplication.translate("Form", u"\u8fd4\u56de", None))
+        self.sound_lib_btn1.setText(QCoreApplication.translate("Form", u"\u5168\u90e8", None))
+        self.sound_lib_btn2.setText(QCoreApplication.translate("Form", u"\u6548\u679c", None))
+        self.sound_lib_btn3.setText(QCoreApplication.translate("Form", u"\u97f3\u4e50", None))
+        self.sound_lib_return.setText(QCoreApplication.translate("Form", u"\u8fd4\u56de", None))
     # retranslateUi
 
