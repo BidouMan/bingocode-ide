@@ -34,13 +34,18 @@ class SpriteLibCardDelegate(QStyledItemDelegate):
 
         thumb_data = index.data(Qt.ItemDataRole.UserRole + 1)
         if thumb_data and isinstance(thumb_data, QPixmap) and not thumb_data.isNull():
-            thumb_w = 150
-            thumb_h = 110
-            thumb_rect = self._center_rect(
-                QRect(card_rect.x(), card_rect.y(), card_w, card_h - 30),
-                thumb_w, thumb_h,
-            )
-            painter.drawPixmap(thumb_rect, thumb_data, thumb_data.rect())
+            max_w = 150
+            max_h = 110
+            pix_w = thumb_data.width()
+            pix_h = thumb_data.height()
+            scale = min(max_w / pix_w, max_h / pix_h) if pix_w > 0 and pix_h > 0 else 1
+            draw_w = int(pix_w * scale)
+            draw_h = int(pix_h * scale)
+            area_rect = QRect(card_rect.x(), card_rect.y(), card_w, card_h - 30)
+            draw_x = area_rect.x() + (area_rect.width() - draw_w) // 2
+            draw_y = area_rect.y() + (area_rect.height() - draw_h) // 2
+            draw_rect = QRect(draw_x, draw_y, draw_w, draw_h)
+            painter.drawPixmap(draw_rect, thumb_data, thumb_data.rect())
 
         name = index.data(Qt.ItemDataRole.DisplayRole)
         if name:

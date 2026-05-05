@@ -941,7 +941,7 @@ class ResourceManager(QObject):
         else:
             icon = QIcon(":/icons/sound_icon.svg")
             if not icon.isNull():
-                target_pix = icon.pixmap(QSize(80, 80))
+                target_pix = icon.pixmap(QSize(40, 40))
             else:
                 target_pix = None
             if target_pix and not target_pix.isNull():
@@ -951,7 +951,6 @@ class ResourceManager(QObject):
 
         if target_pix and not target_pix.isNull():
             icon_label.setPixmap(target_pix)
-            icon_label.setScaledContents(True)
         else:
             icon_label.setStyleSheet("background-color: #E8A735; border-radius: 4px;")
 

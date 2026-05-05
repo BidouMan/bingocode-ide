@@ -32,13 +32,18 @@ class SoundLibCardDelegate(QStyledItemDelegate):
 
         thumb_data = index.data(Qt.ItemDataRole.UserRole + 1)
         if thumb_data and isinstance(thumb_data, QPixmap) and not thumb_data.isNull():
-            thumb_w = 150
-            thumb_h = 110
-            thumb_rect = self._center_rect(
-                QRect(card_rect.x(), card_rect.y(), card_w, card_h - 30),
-                thumb_w, thumb_h,
-            )
-            painter.drawPixmap(thumb_rect, thumb_data, thumb_data.rect())
+            max_w = 150
+            max_h = 110
+            pix_w = thumb_data.width()
+            pix_h = thumb_data.height()
+            scale = min(max_w / pix_w, max_h / pix_h) if pix_w > 0 and pix_h > 0 else 1
+            draw_w = int(pix_w * scale)
+            draw_h = int(pix_h * scale)
+            area_rect = QRect(card_rect.x(), card_rect.y(), card_w, card_h - 30)
+            draw_x = area_rect.x() + (area_rect.width() - draw_w) // 2
+            draw_y = area_rect.y() + (area_rect.height() - draw_h) // 2
+            draw_rect = QRect(draw_x, draw_y, draw_w, draw_h)
+            painter.drawPixmap(draw_rect, thumb_data, thumb_data.rect())
 
         name = index.data(Qt.ItemDataRole.DisplayRole)
         if name:
@@ -136,7 +141,12 @@ class SoundLibManager(QObject):
         if not os.path.exists(sound_lib_dir):
             return
 
-        self._load_sounds_from_dir(sound_lib_dir, None)
+        for entry in sorted(os.listdir(sound_lib_dir)):
+            if entry.startswith("."):
+                continue
+            full_path = os.path.join(sound_lib_dir, entry)
+            if os.path.isfile(full_path) and entry.lower().endswith(self.SOUND_EXTENSIONS):
+                self._add_sound_card(full_path, None)
 
         for cat_dir_name in ("effects", "loop"):
             cat_dir = os.path.join(sound_lib_dir, cat_dir_name)
@@ -155,8 +165,6 @@ class SoundLibManager(QObject):
             full_path = os.path.join(directory, entry)
             if os.path.isfile(full_path) and entry.lower().endswith(self.SOUND_EXTENSIONS):
                 self._add_sound_card(full_path, category)
-            elif os.path.isdir(full_path):
-                self._load_sounds_from_dir(full_path, category)
 
     def _add_sound_card(self, sound_path, category):
         name = os.path.splitext(os.path.basename(sound_path))[0]
