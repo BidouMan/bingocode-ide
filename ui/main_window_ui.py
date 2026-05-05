@@ -1557,6 +1557,7 @@ class Ui_Form(object):
 
         self.mab_lib_return_btn = QPushButton(self.map_lib_toolbar_frame)
         self.mab_lib_return_btn.setObjectName(u"mab_lib_return_btn")
+        self.mab_lib_return_btn.setMinimumSize(QSize(80, 0))
         self.mab_lib_return_btn.setMaximumSize(QSize(80, 16777215))
 
         self.horizontalLayout_16.addWidget(self.mab_lib_return_btn)
@@ -1647,6 +1648,99 @@ class Ui_Form(object):
         self.verticalLayout_32.addWidget(self.sprite_lib_list_frame)
 
         self.change_page.addWidget(self.sprite_lib)
+        self.map_res_lib = QWidget()
+        self.map_res_lib.setObjectName(u"map_res_lib")
+        self.verticalLayout_34 = QVBoxLayout(self.map_res_lib)
+        self.verticalLayout_34.setSpacing(0)
+        self.verticalLayout_34.setObjectName(u"verticalLayout_34")
+        self.verticalLayout_34.setContentsMargins(0, 0, 0, 0)
+        self.map_res_lib_toolbar_frame = QFrame(self.map_res_lib)
+        self.map_res_lib_toolbar_frame.setObjectName(u"map_res_lib_toolbar_frame")
+        self.map_res_lib_toolbar_frame.setMinimumSize(QSize(0, 40))
+        self.map_res_lib_toolbar_frame.setMaximumSize(QSize(16777215, 40))
+        self.map_res_lib_toolbar_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self.map_res_lib_toolbar_frame.setFrameShadow(QFrame.Shadow.Raised)
+        self.horizontalLayout_22 = QHBoxLayout(self.map_res_lib_toolbar_frame)
+        self.horizontalLayout_22.setSpacing(0)
+        self.horizontalLayout_22.setObjectName(u"horizontalLayout_22")
+        self.horizontalLayout_22.setContentsMargins(5, 0, 5, 0)
+        self.map_res_lib_search = QLineEdit(self.map_res_lib_toolbar_frame)
+        self.map_res_lib_search.setObjectName(u"map_res_lib_search")
+        self.map_res_lib_search.setMinimumSize(QSize(200, 0))
+        self.map_res_lib_search.setMaximumSize(QSize(200, 16777215))
+
+        self.horizontalLayout_22.addWidget(self.map_res_lib_search)
+
+        self.horizontalSpacer_21 = QSpacerItem(10, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        self.horizontalLayout_22.addItem(self.horizontalSpacer_21)
+
+        self.map_res_lib_btn1 = QPushButton(self.map_res_lib_toolbar_frame)
+        self.buttonGroup_3 = QButtonGroup(Form)
+        self.buttonGroup_3.setObjectName(u"buttonGroup_3")
+        self.buttonGroup_3.addButton(self.map_res_lib_btn1)
+        self.map_res_lib_btn1.setObjectName(u"map_res_lib_btn1")
+        self.map_res_lib_btn1.setMinimumSize(QSize(80, 0))
+        self.map_res_lib_btn1.setMaximumSize(QSize(80, 16777215))
+        self.map_res_lib_btn1.setCheckable(True)
+        self.map_res_lib_btn1.setChecked(True)
+
+        self.horizontalLayout_22.addWidget(self.map_res_lib_btn1)
+
+        self.map_res_lib_btn2 = QPushButton(self.map_res_lib_toolbar_frame)
+        self.buttonGroup_3.addButton(self.map_res_lib_btn2)
+        self.map_res_lib_btn2.setObjectName(u"map_res_lib_btn2")
+        self.map_res_lib_btn2.setMinimumSize(QSize(80, 0))
+        self.map_res_lib_btn2.setMaximumSize(QSize(80, 16777215))
+        self.map_res_lib_btn2.setCheckable(True)
+
+        self.horizontalLayout_22.addWidget(self.map_res_lib_btn2)
+
+        self.map_res_lib_btn3 = QPushButton(self.map_res_lib_toolbar_frame)
+        self.buttonGroup_3.addButton(self.map_res_lib_btn3)
+        self.map_res_lib_btn3.setObjectName(u"map_res_lib_btn3")
+        self.map_res_lib_btn3.setMinimumSize(QSize(80, 0))
+        self.map_res_lib_btn3.setMaximumSize(QSize(80, 16777215))
+        self.map_res_lib_btn3.setCheckable(True)
+
+        self.horizontalLayout_22.addWidget(self.map_res_lib_btn3)
+
+        self.horizontalSpacer_22 = QSpacerItem(210, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        self.horizontalLayout_22.addItem(self.horizontalSpacer_22)
+
+        self.widget_4 = QWidget(self.map_res_lib_toolbar_frame)
+        self.widget_4.setObjectName(u"widget_4")
+        self.widget_4.setMinimumSize(QSize(120, 0))
+        self.widget_4.setMaximumSize(QSize(120, 16777215))
+
+        self.horizontalLayout_22.addWidget(self.widget_4)
+
+        self.map_res_lib_return = QPushButton(self.map_res_lib_toolbar_frame)
+        self.map_res_lib_return.setObjectName(u"map_res_lib_return")
+        self.map_res_lib_return.setMinimumSize(QSize(80, 0))
+        self.map_res_lib_return.setMaximumSize(QSize(80, 16777215))
+
+        self.horizontalLayout_22.addWidget(self.map_res_lib_return)
+
+
+        self.verticalLayout_34.addWidget(self.map_res_lib_toolbar_frame)
+
+        self.map_res_lib_list_frame = QWidget(self.map_res_lib)
+        self.map_res_lib_list_frame.setObjectName(u"map_res_lib_list_frame")
+        self.verticalLayout_33 = QVBoxLayout(self.map_res_lib_list_frame)
+        self.verticalLayout_33.setSpacing(0)
+        self.verticalLayout_33.setObjectName(u"verticalLayout_33")
+        self.verticalLayout_33.setContentsMargins(0, 0, 0, 0)
+        self.map_res_lib_list = QListWidget(self.map_res_lib_list_frame)
+        self.map_res_lib_list.setObjectName(u"map_res_lib_list")
+
+        self.verticalLayout_33.addWidget(self.map_res_lib_list)
+
+
+        self.verticalLayout_34.addWidget(self.map_res_lib_list_frame)
+
+        self.change_page.addWidget(self.map_res_lib)
 
         self.verticalLayout_4.addWidget(self.change_page)
 
@@ -1754,5 +1848,9 @@ class Ui_Form(object):
         self.mab_lib_return_btn.setText(QCoreApplication.translate("Form", u"\u8fd4\u56de", None))
         self.label_2.setText(QCoreApplication.translate("Form", u"\u8bf7\u9009\u62e9\u89d2\u8272", None))
         self.sprite_lib_return.setText(QCoreApplication.translate("Form", u"\u8fd4\u56de", None))
+        self.map_res_lib_btn1.setText(QCoreApplication.translate("Form", u"\u56fe\u50cf", None))
+        self.map_res_lib_btn2.setText(QCoreApplication.translate("Form", u"\u56fe\u5757", None))
+        self.map_res_lib_btn3.setText(QCoreApplication.translate("Form", u"\u96c6\u5408", None))
+        self.map_res_lib_return.setText(QCoreApplication.translate("Form", u"\u8fd4\u56de", None))
     # retranslateUi
 

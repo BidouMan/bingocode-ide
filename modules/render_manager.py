@@ -158,15 +158,12 @@ class RenderManager(QObject):
                 self.handle_scene_update(data)
 
         except Exception as e:
-            print(f"❌ [RenderManager] 处理指令失败: {e}")
+            pass
 
     def create_sprite(self, sprite_id, data):
         """创建精灵"""
         image_path = data.get("image", "")
         stype = data.get("type", "image")
-        print(f"✅ [RenderManager] 收到创建精灵指令: {sprite_id}")
-        print(f"   - 图片路径: {image_path}")
-        print(f"   - 类型: {stype}")
 
         item = None
         if stype == "rect":
@@ -175,24 +172,19 @@ class RenderManager(QObject):
             )
             item.setBrush(QBrush(QColor(data.get("color", "#FF0000"))))
             item.setPen(Qt.NoPen)
-            print(f"✅ [RenderManager] 创建矩形精灵")
         elif stype == "circle":
             r = data.get("radius", 30)
             item = QGraphicsEllipseItem(0, 0, r * 2, r * 2)
             item.setBrush(QBrush(QColor(data.get("color", "#0000FF"))))
             item.setPen(Qt.NoPen)
-            print(f"✅ [RenderManager] 创建圆形精灵")
         else:
             pixmap = QPixmap(image_path)
             if not pixmap.isNull():
                 item = QGraphicsPixmapItem(pixmap)
                 item.setTransformOriginPoint(pixmap.width() / 2, pixmap.height() / 2)
-                print(f"✅ [RenderManager] 创建图片精灵，尺寸: {pixmap.size()}")
 
-                # 存储精灵数据，用于动画播放
                 if "sprite_dir" in data and "config" in data:
                     config = data["config"]
-                    # 检查 frames 或 costumes 字段
                     if "frames" in config:
                         costumes = config["frames"]
                     else:
@@ -203,21 +195,12 @@ class RenderManager(QObject):
                         "config": config,
                         "costumes": costumes,
                     }
-                    print(
-                        f"✅ [RenderManager] 存储精灵数据，服装数量: {len(item.sprite_data['costumes'])}"
-                    )
-            else:
-                print(f"❌ [RenderManager] 图片加载失败: {image_path}")
 
         if not item:
-            print(f"❌ [RenderManager] 创建精灵失败")
             return
 
         self.sprites[sprite_id] = item
         self.scene.addItem(item)
-        print(
-            f"✅ [RenderManager] 精灵添加到场景，场景物品数量: {self.scene.items().__len__()}"
-        )
 
         if stype == "background":
             item.setZValue(-1000)
@@ -226,15 +209,12 @@ class RenderManager(QObject):
                 r = item.pixmap().rect()
                 if not r.isEmpty():
                     item.setScale(max(640 / r.width(), 480 / r.height()))
-                    print(f"✅ [RenderManager] 设置背景缩放: {item.scale()}")
         else:
             self.layer_counter += 1
             z_value = data.get("layer", self.layer_counter)
             item.setZValue(z_value)
-            print(f"✅ [RenderManager] 设置精灵 Z 值: {z_value}")
 
         self.update_sprite(sprite_id, data)
-        print(f"✅ [RenderManager] 更新精灵完成")
 
     def update_sprite(self, sprite_id, data):
         """
@@ -356,9 +336,7 @@ class RenderManager(QObject):
         if hasattr(self, "view") and self.view and self.view.viewport():
             self.view.viewport().removeEventFilter(self)
             self.view.viewport().installEventFilter(self)
-            print("✅ [RenderManager] 事件过滤器已重新安装")
 
-        # 🚀 既然 scene 已经干干净净了，直接重新创建 FPS 标签即可
         self._setup_fps_label()
 
     def update_fps_display(self, data):
@@ -474,11 +452,6 @@ class RenderManager(QObject):
         width = data.get("width", 640)
         height = data.get("height", 480)
 
-        print(
-            f"[IDE_SCENE] sceneRect=({width},{height}) vp={self.view.viewport().width()}x{self.view.viewport().height()}"
-        )
-
-        # 使用 world_bounds 设置场景范围，支持负坐标区域
         world_bounds = data.get(
             "world_bounds", {"left": 0, "top": 0, "right": width, "bottom": height}
         )
@@ -659,8 +632,6 @@ class RenderManager(QObject):
                         # 直接使用update_map_image方法来更新精灵，确保缩放逻辑一致
                         self.update_map_image(sprite_id, image_data)
 
-            print(f"✅ [RenderManager] 处理了 {len(image_tiles)} 个图像精灵")
-
         # 处理瓦片精灵
         tile_tiles = [tile for tile in tiles if tile.get("type") == "tile"]
         if tile_tiles:
@@ -709,17 +680,9 @@ class RenderManager(QObject):
                             # 首先尝试在目录中查找tilesets子目录
                             tilesets_dir = os.path.join(image_path, "tilesets")
                             if os.path.isdir(tilesets_dir):
-                                # 如果存在tilesets目录，则使用它
                                 image_path = os.path.join(tilesets_dir, tile_set_name)
-                                print(
-                                    f"⚠️ [RenderManager] 瓦片集路径是目录，尝试使用tilesets子目录: {image_path}"
-                                )
                             else:
-                                # 否则直接使用目录路径
                                 image_path = os.path.join(image_path, tile_set_name)
-                                print(
-                                    f"⚠️ [RenderManager] 瓦片集路径是目录，尝试使用文件名: {image_path}"
-                                )
 
                     pixmap = QPixmap(image_path)
                     if not pixmap.isNull():
@@ -730,18 +693,6 @@ class RenderManager(QObject):
                         tile_set_info["rows"] = (
                             pixmap.height() // tile_set_info["tile_height"]
                         )
-                        print(
-                            f"✅ [RenderManager] 加载瓦片集 {tile_set_index}: {image_path}"
-                        )
-                        print(f"   - 尺寸: {pixmap.size()}")
-                        print(
-                            f"   - 瓦片大小: {tile_set_info['tile_width']}x{tile_set_info['tile_height']}"
-                        )
-                        print(
-                            f"   - 行列数: {tile_set_info['cols']}x{tile_set_info['rows']}"
-                        )
-                    else:
-                        print(f"❌ [RenderManager] 瓦片集加载失败: {image_path}")
 
             # 按图层分组瓦片
             tiles_by_layer = {}
@@ -852,12 +803,6 @@ class RenderManager(QObject):
                 self.static_layers[layer] = layer_item
                 self.scene.addItem(layer_item)
 
-                print(
-                    f"✅ [RenderManager] 创建静态图层 {layer}，包含 {len(layer_tiles)} 个瓦片"
-                )
-
-            print(f"✅ [RenderManager] 静态图层烘焙完成，总瓦片数: {len(tile_tiles)}")
-
     # ---------- 内部函数 ----------
     def _setup_fps_label(self):
         """统一管理 FPS 标签的创建和样式配置"""
@@ -959,6 +904,5 @@ class RenderManager(QObject):
         try:
             if hasattr(self, "view") and self.view and self.view.viewport():
                 self.view.viewport().removeEventFilter(self)
-                print("✅ [RenderManager] 事件过滤器已移除")
         except Exception as e:
-            print(f"❌ [RenderManager] 移除事件过滤器失败: {e}")
+            pass

@@ -558,7 +558,6 @@ class CollisionManager(QObject):
     def set_snap_to_pixel(self, enabled):
         """设置是否吸附到像素网格"""
         self.snap_to_pixel = enabled
-        print(f"碰撞锚点吸附功能: {'开启' if enabled else '关闭'}")
 
     def _get_tile_pixmap(self, resource_index, tile_index):
         """获取图块图像"""
@@ -601,7 +600,7 @@ class CollisionManager(QObject):
             self._update_collision_anchors()
             self._save_collision_data()
         except Exception as e:
-            print(f"重置碰撞形状错误: {e}")
+            pass
 
     def _point_to_segment_distance(self, px, py, x1, y1, x2, y2):
         """计算点到线段的距离，返回 (距离, 最近点x, 最近点y)"""
@@ -787,7 +786,7 @@ class CollisionManager(QObject):
                                     )
                             break
         except Exception as e:
-            print(f"保存碰撞数据错误: {e}")
+            pass
 
     def _cleanup_collision_items(self):
         """清理碰撞相关的项，避免内存泄漏和程序崩溃"""
@@ -1241,8 +1240,5 @@ class CollisionManager(QObject):
                         self.col_editor_view.setCursor(QCursor(Qt.ArrowCursor))
                     return True
         except Exception as e:
-            print(f"DEBUG: 鼠标释放事件错误: {e}")
-            import traceback
-
-            traceback.print_exc()
+            pass
         return False

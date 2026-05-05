@@ -120,11 +120,6 @@ class MapCanvas(QGraphicsView):
 
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.MiddleButton:
-            print(f"DEBUG: 开始平移，鼠标位置: {event.pos()}")
-            print(f"DEBUG: 平移前视图变换矩阵: {self.transform()}")
-            print(
-                f"DEBUG: 平移前视图中心点: {self.mapToScene(self.viewport().rect().center())}"
-            )
             self._is_panning = True
             self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
             fake_event = QMouseEvent(
@@ -140,11 +135,6 @@ class MapCanvas(QGraphicsView):
 
     def mouseReleaseEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.MiddleButton:
-            print(f"DEBUG: 结束平移，鼠标位置: {event.pos()}")
-            print(f"DEBUG: 平移后视图变换矩阵: {self.transform()}")
-            print(
-                f"DEBUG: 平移后视图中心点: {self.mapToScene(self.viewport().rect().center())}"
-            )
             self._is_panning = False
             self.setDragMode(QGraphicsView.DragMode.NoDrag)
             self.unsetCursor()
@@ -154,7 +144,6 @@ class MapCanvas(QGraphicsView):
         """键盘事件处理"""
         # 按空格键重置视图到中心位置
         if event.key() == Qt.Key.Key_Space:
-            print("DEBUG: 按空格键重置视图")
             # 重置视图到游戏窗口中心(320, 240)
             self.centerOn(320, 240)
             event.accept()

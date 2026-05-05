@@ -242,7 +242,7 @@ class SpriteLibManager(QObject):
                     scaled = pix.scaled(
                         150, 110,
                         Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation,
+                        Qt.TransformationMode.FastTransformation,
                     )
                     self._pixmap_cache[cache_key] = scaled
                     return scaled

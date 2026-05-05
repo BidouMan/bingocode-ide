@@ -29,6 +29,7 @@ from modules.sprite_editor_manager import SpriteEditorManager
 from modules.map_editor.map_editor_manager import MapEditorManager
 from modules.map_lib_manager import MapLibManager
 from modules.sprite_lib_manager import SpriteLibManager
+from modules.map_res_lib_manager import MapResLibManager
 
 
 class AppController:
@@ -73,6 +74,7 @@ class AppController:
 
         self.map_lib_manager = MapLibManager(self.ui, self)
         self.sprite_lib_manager = SpriteLibManager(self.ui, self)
+        self.map_res_lib_manager = MapResLibManager(self.ui, self)
 
         # 4. 绑定信号 (保持原有业务连接)
         self.setup_connections()
@@ -142,6 +144,7 @@ class AppController:
             self.map_editor.map_exporter.export_map
         )
         self.ui.btn_editor_map_import.clicked.connect(self.open_map_lib)
+        self.ui.btn_res_list_open.clicked.connect(self.open_map_res_lib)
 
         # 绑定地图编辑器工具按钮
         self.map_editor.setup_tool_buttons(self.ui)
@@ -222,9 +225,6 @@ class AppController:
         )
 
     def _open_and_switch_to_editor(self, path):
-        print(f"🛎️ [AppController] 收到编辑请求，目标路径: {path}")
-
-        # 1. 保存当前地图（如果正在编辑地图）
         if hasattr(self, "map_editor") and self.map_editor:
             try:
                 if (
@@ -234,7 +234,7 @@ class AppController:
                     self.map_editor.save_map()
                     self.res_manager.refresh_map_list()
             except Exception as e:
-                print(f"❌ 保存地图文件失败: {e}")
+                pass
 
         # 2. 切换页面 (确保这里的 index 是正确的)
         # 这里的 index 1 通常对应你 UI 里的编辑器页面
@@ -244,8 +244,6 @@ class AppController:
         self.sprite_editor.load_sprite(path)
 
     def _open_and_switch_to_map_editor(self, path):
-        print(f"🛎️ [AppController] 收到地图编辑请求，目标路径: {path}")
-
         if hasattr(self, "map_editor") and self.map_editor:
             try:
                 if (
@@ -255,7 +253,7 @@ class AppController:
                     self.map_editor.save_map()
                     self.res_manager.refresh_map_list()
             except Exception as e:
-                print(f"❌ 保存地图文件失败: {e}")
+                pass
 
         # 2. 切换到地图编辑页面
         self.ui.editor_stacked.setCurrentIndex(2)
@@ -369,6 +367,10 @@ class AppController:
         self.sprite_lib_manager.load_sprite_lib()
         self.ui.change_page.setCurrentIndex(3)
 
+    def open_map_res_lib(self):
+        self.map_res_lib_manager.load_map_res_lib()
+        self.ui.change_page.setCurrentIndex(4)
+
     def _on_map_lib_imported(self, map_path):
         self.res_manager.refresh_map_list()
         self._refresh_map_selector()
@@ -478,8 +480,7 @@ class AppController:
                         self.map_editor.save_map()
                         self.res_manager.refresh_map_list()
                 except Exception as e:
-                    print(f"❌ 保存地图文件失败: {e}")
-            # print("✨ 项目所有文件已成功同步到磁盘")
+                    pass
         else:
             QMessageBox.warning(
                 self.window, "保存提醒", "部分新标签页保存失败，请检查权限。"
@@ -567,34 +568,21 @@ class AppController:
                 )
 
     def handle_exit_cleanup(self):
-        """
-        最后的物理清理与强制静默保存
-        """
-        print("🚀 执行最后的物理清理...")
-
-        # 1. 【强制保存】不管三七二十一，尝试把所有打开的编辑器内容写回文件
-        # 这一步能解决你说的“改了代码没提示但再打开没保存”的问题
         if hasattr(self, "editor_manager") and self.editor_manager:
             try:
-                print("📝 正在执行静默代码保存...")
                 self.editor_manager.save_all_opened_files()
             except Exception as e:
-                print(f"❌ 静默保存失败: {e}")
+                pass
 
-        # 2. 【强制保存地图】确保地图文件也被保存
         if hasattr(self, "map_editor") and self.map_editor:
             try:
-                # 只有当有正在编辑的地图时才保存
                 if (
                     hasattr(self.map_editor, "current_map_path")
                     and self.map_editor.current_map_path
                 ):
-                    print("📝 正在执行静默地图保存...")
                     self.map_editor.save_map()
-                else:
-                    print("📝 当前没有正在编辑的地图，跳过保存")
             except Exception as e:
-                print(f"❌ 静默保存地图失败: {e}")
+                pass
 
         # 2. 【停止引擎】防止 Python 进程残留
         if hasattr(self, "script_runner") and self.script_runner:
@@ -622,23 +610,20 @@ class AppController:
             try:
                 self.render_manager.destroy()
             except Exception as e:
-                print(f"❌ 销毁渲染管理器失败: {e}")
+                pass
 
-        # 5. 【销毁资源管理器】移除事件过滤器
         if hasattr(self, "res_manager") and self.res_manager:
             try:
                 self.res_manager.destroy()
             except Exception as e:
-                print(f"❌ 销毁资源管理器失败: {e}")
+                pass
 
-        # 6. 【销毁地图编辑器】移除事件过滤器
         if hasattr(self, "map_editor") and self.map_editor:
             try:
                 self.map_editor.destroy()
             except Exception as e:
-                print(f"❌ 销毁地图编辑器失败: {e}")
+                pass
 
-        # 7. 【销毁上传菜单管理器】移除事件过滤器
         if hasattr(self, "res_manager") and self.res_manager:
             if (
                 hasattr(self.res_manager, "upload_menu")
@@ -647,7 +632,7 @@ class AppController:
                 try:
                     self.res_manager.upload_menu.destroy()
                 except Exception as e:
-                    print(f"❌ 销毁上传菜单管理器失败: {e}")
+                    pass
             if (
                 hasattr(self.res_manager, "map_upload_menu")
                 and self.res_manager.map_upload_menu
@@ -655,9 +640,7 @@ class AppController:
                 try:
                     self.res_manager.map_upload_menu.destroy()
                 except Exception as e:
-                    print(f"❌ 销毁地图上传菜单管理器失败: {e}")
-
-        print("🏁 程序已安全关闭。")
+                    pass
 
     def open_file_in_editor(self, file_path):
         """统一的打开文件入口"""
@@ -846,14 +829,8 @@ class AppController:
         temp_dir = tempfile.gettempdir().lower()
         is_temp = not project_root or temp_dir in project_root or "temp" in project_root
 
-        # 2. 状态判定 (直接读取 ProjectManager 的标记)
         code_dirty = getattr(self.project_manager, "_code_dirty", False)
         res_dirty = getattr(self.project_manager, "_resource_dirty", False)
-
-        # 调试打印，你可以在控制台看到到底是哪个变量触发的
-        print(
-            f"🔍 退出检查: is_temp={is_temp}, code_dirty={code_dirty}, res_dirty={res_dirty}"
-        )
 
         # 🚀 重新梳理逻辑：
         # 只要代码脏了 (code_dirty) -> 必须弹窗

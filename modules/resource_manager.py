@@ -445,7 +445,7 @@ class ResourceManager(QObject):
 
             self.sync_delete_icons()
         except Exception as e:
-            print(f"刷新失败: {e}")
+            pass
 
     def _add_code_item(self, name):
         item = QListWidgetItem(self.ui.list_code)
@@ -616,7 +616,7 @@ class ResourceManager(QObject):
             self.refresh_code_list()
 
         except Exception as e:
-            print(f"列表重命名失败: {e}")
+            pass
 
     def handle_sprite_import_success(self, sprite_name, file_paths, is_bgs=False):
         """核心：处理资源导入，支持 .bgs 解压和 config.json 读取"""
@@ -636,7 +636,6 @@ class ResourceManager(QObject):
                 with zipfile.ZipFile(bgs_path, "r") as zip_ref:
                     # 1. 先读取 config.json 获取真实名字
                     if "config.json" not in zip_ref.namelist():
-                        print("❌ .bgs 文件缺少 config.json")
                         return
 
                     with zip_ref.open("config.json") as f:
@@ -651,7 +650,6 @@ class ResourceManager(QObject):
                     # 3. 解压所有内容
                     zip_ref.extractall(target_dir)
             except Exception as e:
-                print(f"❌ 解压 .bgs 失败: {e}")
                 return
         else:
             # 普通图片拷贝逻辑
@@ -1074,7 +1072,7 @@ class ResourceManager(QObject):
 
                 self.add_sprite_card(folder_name, i, thumb_path)
         except Exception as e:
-            print(f"角色网格刷新失败: {e}")
+            pass
 
     def handle_card_click(self, card, event):
         """处理卡片点击：设置焦点并切换高亮"""
@@ -1446,7 +1444,7 @@ class ResourceManager(QObject):
                         self.add_map_card(folder_name, i, map_path=map_file_path)
 
         except Exception as e:
-            print(f"刷新地图列表失败: {e}")
+            pass
 
     def handle_map_import_success(self, map_name, file_paths, is_bgs=False):
         """处理地图导入成功的回调"""
@@ -1473,7 +1471,6 @@ class ResourceManager(QObject):
             new_map_model = MapDataModel()
             new_map_model.set_map_name(map_name)
             save_result = new_map_model.save(map_file_path)
-            print(f"DEBUG: 新地图已保存到: {map_file_path}, 结果: {save_result}")
 
         self.add_map_card(map_name, map_count, map_path=map_file_path)
         self.sig_map_created.emit(map_file_path or "")
@@ -1520,7 +1517,5 @@ class ResourceManager(QObject):
                             item.widget().removeEventFilter(self)
                         except:
                             pass
-            
-            print("✅ [ResourceManager] 事件过滤器已移除")
         except Exception as e:
-            print(f"❌ [ResourceManager] 移除事件过滤器失败: {e}")
+            pass

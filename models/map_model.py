@@ -94,9 +94,6 @@ class MapDataModel(QObject):
                     if new_width != current_width or new_height != current_height:
                         self.map_data["width"] = new_width
                         self.map_data["height"] = new_height
-                        print(
-                            f"DEBUG: 地图尺寸更新: {current_width}x{current_height} -> {new_width}x{new_height}"
-                        )
 
             # 使用防抖机制，避免频繁触发信号
             self._debounce_timer.start()
@@ -151,13 +148,13 @@ class MapDataModel(QObject):
 
     def set_map_size(self, width, height):
         """设置地图尺寸"""
-        self.map_data["width"] = width
-        self.map_data["height"] = height
+        self.map_data["width"] = int(width)
+        self.map_data["height"] = int(height)
         self.data_changed.emit()
 
     def set_tile_size(self, tile_size):
         """设置瓦片大小"""
-        self.map_data["tile_size"] = tile_size
+        self.map_data["tile_size"] = int(tile_size)
         self.data_changed.emit()
 
     def get_map_name(self):
@@ -175,14 +172,10 @@ class MapDataModel(QObject):
             file_path = self._get_default_save_path()
 
         try:
-            print(f"[SAVE] map saved → {os.path.basename(file_path)}")
-
-            # 统计每个图层的瓦片数量
             total_tiles = 0
             for i, layer in enumerate(self.map_data["layers"]):
                 tile_count = len(layer.get("tiles", {}))
                 total_tiles += tile_count
-            print(f"[SAVE] layers={len(self.map_data['layers'])} tiles={total_tiles}")
 
             # 动态计算地图尺寸：根据所有图层中实际绘制的图块位置（基于像素）
             min_x_px = float("inf")
@@ -219,11 +212,6 @@ class MapDataModel(QObject):
                         min_y_px = min(min_y_px, pos[1])
                         max_y_px = max(max_y_px, img_bottom)
 
-            print(
-                f"[BOUNDS] pixels: x=[{min_x_px},{max_x_px}] y=[{min_y_px},{max_y_px}]"
-            )
-
-            # 如果没有绘制任何图块且没有图像，使用默认尺寸
             if min_x_px == float("inf"):
                 map_width = self.map_data["width"]
                 map_height = self.map_data["height"]
@@ -239,11 +227,7 @@ class MapDataModel(QObject):
                 # 计算偏移量（瓦片坐标）
                 offset_x = int(math.floor(min_x_px / tile_size))
                 offset_y = int(math.floor(min_y_px / tile_size))
-                print(
-                    f"  [SAVE] 尺寸: {map_width}x{map_height} tiles 偏移量: ({offset_x}, {offset_y})"
-                )
 
-            # 更新map_data中的偏移量和尺寸
             self.map_data["offset_x"] = offset_x
             self.map_data["offset_y"] = offset_y
             self.map_data["width"] = map_width
@@ -255,11 +239,9 @@ class MapDataModel(QObject):
             min_width_tiles = 640 // tile_size
             min_height_tiles = 480 // tile_size
 
-            map_width = max(map_width, min_width_tiles)
-            map_height = max(map_height, min_height_tiles)
-            print(f"  ↳ tiles={map_width}x{map_height}")
+            map_width = int(max(map_width, min_width_tiles))
+            map_height = int(max(map_height, min_height_tiles))
 
-            # 创建二进制分层存储文件
             base_name = os.path.splitext(file_path)[0]
 
             # 1. 保存地图元数据 (.info)
@@ -305,9 +287,8 @@ class MapDataModel(QObject):
                         f_record.write("\n")
 
             except Exception as e:
-                print(f"记录保存坐标错误: {e}")
+                pass
 
-            print(f"✅ {os.path.basename(file_path)} saved")
             return True
         except Exception as e:
             print(f"❌ 保存地图失败: {e}")
@@ -332,7 +313,7 @@ class MapDataModel(QObject):
             f.write(name_bytes)
 
             # 写入地图尺寸（8字节）
-            f.write(struct.pack("<II", width, height))
+            f.write(struct.pack("<II", int(width), int(height)))
 
             # 写入瓦片大小（4字节）
             f.write(struct.pack("<I", self.map_data["tile_size"]))
@@ -435,10 +416,9 @@ class MapDataModel(QObject):
                                 "<B", 1 if image.get("collision_enabled", False) else 0
                             )
                         )
-                        # 写入宽度和高度
-                        width = image.get("width", 16)
-                        height = image.get("height", 16)
-                        f.write(struct.pack("<ff", width, height))
+                        img_width = int(image.get("width", 16))
+                        img_height = int(image.get("height", 16))
+                        f.write(struct.pack("<ff", img_width, img_height))
                         # 写入碰撞形状
                         collision_shape = image.get("collision_shape", None)
                         if collision_shape and "points" in collision_shape:
@@ -453,7 +433,7 @@ class MapDataModel(QObject):
                     f.write(struct.pack("<I", 0))
 
                 # 创建numpy数组存储图块数据
-                tile_array = np.zeros((height, width), dtype=np.uint16)
+                tile_array = np.zeros((int(height), int(width)), dtype=np.uint16)
 
                 # 填充图块数据（使用偏移后的坐标）
                 for (x, y), tile_id in layer["tiles"].items():
@@ -478,7 +458,7 @@ class MapDataModel(QObject):
             # 为每个图层保存碰撞数据
             for layer_idx, layer in enumerate(self.map_data["layers"]):
                 # 创建numpy数组存储碰撞数据（每个图块4字节）
-                collision_array = np.zeros((height, width), dtype=np.uint32)
+                collision_array = np.zeros((int(height), int(width)), dtype=np.uint32)
 
                 # 填充碰撞数据（目前使用默认矩形碰撞）
                 for (x, y), tile_id in layer["tiles"].items():
@@ -607,7 +587,6 @@ class MapDataModel(QObject):
                             f.write(struct.pack("<dd", point[0], point[1]))
                     else:
                         f.write(struct.pack("<I", 0))
-        print(f"[BINARY] resources saved")
 
     def load(self, file_path):
         """从二进制分层文件加载地图数据"""
@@ -668,15 +647,9 @@ class MapDataModel(QObject):
                 "layer_resources_map": layer_resources_map,
             }
 
-            # 打印加载后的地图数据信息
-            print(
-                f"[BINARY] loaded: {width}x{height} ts={tile_size} off=({offset_x},{offset_y}) layers={len(layers)} tilesets={len(tile_sets)}"
-            )
-
             self.data_changed.emit()
             return True
         except Exception as e:
-            print(f"从二进制加载地图失败: {e}")
             return False
 
     def _load_map_info(self, file_path):
@@ -727,7 +700,7 @@ class MapDataModel(QObject):
                         start, end = struct.unpack("<II", f.read(8))
                         layer_resources_map[layer_id] = (start, end)
                 except Exception as e:
-                    print(f"读取图层资源映射错误: {e}")
+                    pass
 
             # 读取重力开关（版本5及以上，1字节）
             gravity = False
@@ -835,8 +808,9 @@ class MapDataModel(QObject):
                             # 读取宽度和高度
                             try:
                                 img_width, img_height = struct.unpack("<ff", f.read(8))
+                                img_width = int(img_width)
+                                img_height = int(img_height)
                             except:
-                                # 兼容旧版本文件
                                 img_width, img_height = 16, 16
                             # 读取碰撞形状
                             point_count = struct.unpack("<I", f.read(4))[0]
@@ -877,9 +851,6 @@ class MapDataModel(QObject):
                 try:
                     tile_data = np.fromfile(f, dtype=np.uint16, count=width * height)
                     if len(tile_data) != width * height:
-                        print(
-                            f"DEBUG: 图块数据长度不匹配: 预期 {width * height}, 实际 {len(tile_data)}"
-                        )
                         # 尝试调整数据大小
                         if len(tile_data) < width * height:
                             # 数据不足，填充零
@@ -893,9 +864,7 @@ class MapDataModel(QObject):
                             tile_data = tile_data[: width * height]
                     tile_grid = tile_data.reshape((height, width))
                 except Exception as e:
-                    print(f"[BINARY] load tiles error: {e}")
-                    # 创建一个空的图块网格
-                    tile_grid = np.zeros((height, width), dtype=np.uint16)
+                    tile_grid = np.zeros((int(height), int(width)), dtype=np.uint16)
 
                 # 转换为字典格式（只保存非零图块，应用偏移量）
                 tiles_dict = {}
@@ -924,7 +893,6 @@ class MapDataModel(QObject):
 
     def _load_map_resources(self, file_path, tile_set_count):
         """加载资源引用"""
-        print(f"[BINARY] loading resources: {file_path}")
         tile_sets = []
         try:
             with open(file_path, "rb") as f:
@@ -1030,12 +998,8 @@ class MapDataModel(QObject):
                     if not tile.get("collision_type"):
                         tile["collision_type"] = ts_col_type
 
-            print(f"[BINARY] resources loaded: {len(tile_sets)} tilesets")
         except Exception as e:
-            print(f"DEBUG: 加载资源引用错误: {e}")
-            import traceback
-
-            traceback.print_exc()
+            pass
 
         return tile_sets
 
