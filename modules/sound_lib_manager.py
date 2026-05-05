@@ -1,6 +1,6 @@
 import os
 import shutil
-from PySide6.QtCore import QObject, Qt, QSize, Signal, QRect
+from PySide6.QtCore import QObject, Qt, QSize, Signal, QRect, QUrl, QEvent
 from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
@@ -9,10 +9,18 @@ from PySide6.QtWidgets import (
     QStyleOptionViewItem,
     QMessageBox,
 )
-from PySide6.QtGui import QPixmap, QColor, QPainter, QIcon
+from PySide6.QtGui import QPixmap, QColor, QPainter, QIcon, QCursor
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
 
 class SoundLibCardDelegate(QStyledItemDelegate):
+    PLAY_ICON_SIZE = 30
+    PLAY_ICON_MARGIN = 6
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.play_icon_pix = None
+
     def paint(self, painter, option, index):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -45,6 +53,13 @@ class SoundLibCardDelegate(QStyledItemDelegate):
             draw_rect = QRect(draw_x, draw_y, draw_w, draw_h)
             painter.drawPixmap(draw_rect, thumb_data, thumb_data.rect())
 
+        if self.play_icon_pix:
+            icon_s = self.PLAY_ICON_SIZE
+            margin = self.PLAY_ICON_MARGIN
+            play_x = card_rect.right() - icon_s - margin
+            play_y = card_rect.top() + margin
+            painter.drawPixmap(play_x, play_y, icon_s, icon_s, self.play_icon_pix)
+
         name = index.data(Qt.ItemDataRole.DisplayRole)
         if name:
             painter.setPen(QColor(230, 230, 230))
@@ -66,6 +81,20 @@ class SoundLibCardDelegate(QStyledItemDelegate):
             int(outer.y() + (outer.height() - h) / 2),
             w, h,
         )
+
+    def get_play_icon_rect(self, item_rect):
+        card_w, card_h = 160, 160
+        card_x = item_rect.x() + (item_rect.width() - card_w) // 2
+        card_y = item_rect.y() + (item_rect.height() - card_h) // 2
+        card_right = card_x + card_w
+        card_top = card_y
+
+        icon_s = self.PLAY_ICON_SIZE
+        margin = self.PLAY_ICON_MARGIN
+        play_x = card_right - icon_s - margin
+        play_y = card_top + margin
+
+        return QRect(play_x, play_y, icon_s, icon_s)
 
 
 class SoundLibManager(QObject):
@@ -89,6 +118,8 @@ class SoundLibManager(QObject):
         self.app_controller = app_controller
         self._pixmap_cache = {}
         self._current_category = None
+        self._playing_path = None
+        self._last_hover_play_path = None
         self._setup_list_widget()
         self._connect_signals()
 
@@ -102,6 +133,7 @@ class SoundLibManager(QObject):
         lw.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         lw.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         lw.setFrameShape(QListWidget.Shape.NoFrame)
+        lw.setMouseTracking(True)
         lw.setStyleSheet("""
             QListWidget {
                 background-color: #1E1E1E;
@@ -117,8 +149,66 @@ class SoundLibManager(QObject):
                 background-color: #3D3D3D;
             }
         """)
-        lw.setItemDelegate(SoundLibCardDelegate())
+
+        self._delegate = SoundLibCardDelegate()
+        lw.setItemDelegate(self._delegate)
+
+        icon = QIcon(":/icons/sound_play.svg")
+        if not icon.isNull():
+            self._delegate.play_icon_pix = icon.pixmap(QSize(48, 48))
+
+        self._player = QMediaPlayer(self)
+        self._audio_output = QAudioOutput(self)
+        self._player.setAudioOutput(self._audio_output)
+        self._player.playbackStateChanged.connect(self._on_playback_state_changed)
+
+        lw.viewport().installEventFilter(self)
         lw.itemClicked.connect(self._on_card_clicked)
+
+    def eventFilter(self, obj, event):
+        lw = self.ui.listWidget_2
+        if obj == lw.viewport():
+            if event.type() == QEvent.Type.MouseMove:
+                pos = event.pos()
+                item = lw.itemAt(pos)
+                if item:
+                    item_rect = lw.visualItemRect(item)
+                    play_rect = self._delegate.get_play_icon_rect(item_rect)
+                    if play_rect.contains(pos):
+                        lw.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+                        sound_path = item.data(self.PATH_ROLE)
+                        if sound_path != self._last_hover_play_path:
+                            self._last_hover_play_path = sound_path
+                            self._play_sound(sound_path)
+                    else:
+                        lw.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
+                        if self._last_hover_play_path is not None:
+                            self._last_hover_play_path = None
+                            self._player.stop()
+                else:
+                    lw.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
+                    if self._last_hover_play_path is not None:
+                        self._last_hover_play_path = None
+                        self._player.stop()
+
+            elif event.type() == QEvent.Type.Leave:
+                lw.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
+                if self._last_hover_play_path is not None:
+                    self._last_hover_play_path = None
+                    self._player.stop()
+
+        return super().eventFilter(obj, event)
+
+    def _play_sound(self, sound_path):
+        if not sound_path or not os.path.exists(sound_path):
+            return
+        self._player.setSource(QUrl.fromLocalFile(os.path.abspath(sound_path)))
+        self._player.play()
+        self._playing_path = sound_path
+
+    def _on_playback_state_changed(self, state):
+        if state == QMediaPlayer.PlaybackState.StoppedState:
+            self._playing_path = None
 
     def _connect_signals(self):
         self.ui.sound_lib_return.clicked.connect(self._on_return)
@@ -129,6 +219,8 @@ class SoundLibManager(QObject):
                 btn.clicked.connect(self._on_category_clicked)
 
     def load_sound_lib(self):
+        self._stop_player()
+
         self.ui.listWidget_2.clear()
         self.ui.sound_lib_search.clear()
         self._current_category = None
@@ -222,10 +314,12 @@ class SoundLibManager(QObject):
             QMessageBox.critical(None, "导入失败", f"导入声音时发生错误:\n{str(e)}")
             return
 
+        self._stop_player()
         self.ui.change_page.setCurrentIndex(0)
         self.sig_sound_imported.emit(target_path)
 
     def _on_return(self):
+        self._stop_player()
         self.ui.change_page.setCurrentIndex(0)
 
     def _on_search(self, text):
@@ -257,6 +351,12 @@ class SoundLibManager(QObject):
                 or item.data(self.CATEGORY_ROLE) == self._current_category
             )
             item.setHidden(keyword not in name.lower() or not cat_match)
+
+    def _stop_player(self):
+        if hasattr(self, "_player") and self._player:
+            self._player.stop()
+        self._playing_path = None
+        self._last_hover_play_path = None
 
     def _get_safe_sound_name(self, sounds_dir, base_name, ext):
         target = os.path.join(sounds_dir, base_name + ext)
