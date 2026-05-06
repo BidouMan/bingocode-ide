@@ -156,7 +156,7 @@ class AppController:
         self.menu_manager.save_file_signal.connect(self.handle_save_project)
         self.menu_manager.save_as_signal.connect(self.handle_save_as)
         self.menu_manager.new_file_signal.connect(self.handle_new_project)
-        self.menu_manager.close_file_signal.connect(self.handle_new_project)
+        self.menu_manager.close_file_signal.connect(self.handle_close_project)
 
         # 运行程序按钮
         self.ui.btn_run.clicked.connect(self.handle_run_script)
@@ -396,6 +396,15 @@ class AppController:
 
     def _on_sound_lib_imported(self, sound_path):
         self.res_manager.refresh_sound_grid()
+
+    def handle_close_project(self):
+        self.project_manager.new_project()
+        self.editor_manager._clear_initial_state()
+        self.res_manager.refresh_code_list()
+        self.res_manager.refresh_sprite_grid()
+        self.res_manager.refresh_map_list()
+        self.res_manager.refresh_sound_grid()
+        self._refresh_map_selector()
 
     def handle_new_project(self):
         """新建项目：重置并初始化运行目标"""
