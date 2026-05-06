@@ -3111,16 +3111,16 @@
                         <number>0</number>
                        </property>
                        <item>
-                        <widget class="QPushButton" name="btn_editor_map_layer_tiled">
+                        <widget class="QPushButton" name="btn_editor_map_layer_image">
                          <property name="text">
-                          <string>Tiled</string>
+                          <string>IMG</string>
                          </property>
                         </widget>
                        </item>
                        <item>
-                        <widget class="QPushButton" name="btn_editor_map_layer_image">
+                        <widget class="QPushButton" name="btn_editor_map_layer_tiled">
                          <property name="text">
-                          <string>IMG</string>
+                          <string>Tiled</string>
                          </property>
                         </widget>
                        </item>

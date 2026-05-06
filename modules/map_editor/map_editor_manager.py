@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QPushButton,
     QLabel,
+    QLineEdit,
 )
 from PySide6.QtGui import (
     QPixmap,
@@ -280,11 +281,13 @@ def _get_layer_pixmap(name):
 class LayerItemWidget(QWidget):
     """图层列表项组件：左侧显示/隐藏按钮 + 右侧图层名称"""
 
-    visibility_toggled = Signal(int)  # 参数：实际图层索引
+    visibility_toggled = Signal(int)
+    layer_renamed = Signal(int, str)
 
     def __init__(self, layer_index, layer_name, is_visible, parent=None):
         super().__init__(parent)
         self._layer_index = layer_index
+        self._editing = False
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setAutoFillBackground(True)
 
@@ -307,9 +310,20 @@ class LayerItemWidget(QWidget):
 
         self.name_label = QLabel(layer_name)
         self.name_label.setCursor(Qt.PointingHandCursor)
+        self.name_label.mouseDoubleClickEvent = self._on_name_double_clicked
+
+        self.name_edit = QLineEdit(layer_name)
+        self.name_edit.setStyleSheet(
+            "QLineEdit { background-color: #3D3D3D; color: white; "
+            "border: 1px solid #5bc772; border-radius: 2px; padding: 1px 4px; }"
+        )
+        self.name_edit.editingFinished.connect(self._finish_edit)
+        self.name_edit.installEventFilter(self)
+        self.name_edit.hide()
 
         layout.addWidget(self.vis_button)
         layout.addWidget(self.name_label, 1)
+        layout.addWidget(self.name_edit, 1)
 
         self.set_visible_state(is_visible)
         self._selected = False
@@ -330,13 +344,51 @@ class LayerItemWidget(QWidget):
             self.setStyleSheet("")
 
     def set_layer_name(self, name):
-        self.name_label.setText(name)
+        if not self._editing:
+            self.name_label.setText(name)
 
     def set_layer_index(self, index):
         self._layer_index = index
 
     def _on_button_clicked(self):
         self.visibility_toggled.emit(self._layer_index)
+
+    def _on_name_double_clicked(self, event):
+        if self._editing:
+            return
+        self._editing = True
+        self.name_edit.setText(self.name_label.text())
+        self.name_label.hide()
+        self.name_edit.show()
+        self.name_edit.setFocus()
+        self.name_edit.selectAll()
+
+    def _finish_edit(self):
+        if not self._editing:
+            return
+        new_name = self.name_edit.text().strip()
+        self.name_edit.hide()
+        self.name_label.show()
+        self._editing = False
+        if new_name and new_name != self.name_label.text():
+            self.name_label.setText(new_name)
+            self.layer_renamed.emit(self._layer_index, new_name)
+
+    def eventFilter(self, obj, event):
+        if obj == self.name_edit and self._editing:
+            if event.type() == event.Type.KeyPress:
+                if event.key() == Qt.Key_Escape:
+                    self.name_edit.hide()
+                    self.name_label.show()
+                    self._editing = False
+                    return True
+                elif event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                    self._finish_edit()
+                    return True
+            elif event.type() == event.Type.FocusOut:
+                self._finish_edit()
+                return True
+        return super().eventFilter(obj, event)
 
 
 class MapEditorManager(QObject):
@@ -3878,6 +3930,17 @@ class MapEditorManager(QObject):
         if self.current_map_path:
             self.map_model.save(self.current_map_path)
 
+    def _on_layer_renamed(self, layer_index, new_name):
+        """双击图层名称原地编辑完成后更新图层名"""
+        layer = self.layer_manager.get_layer(layer_index)
+        if not layer:
+            return
+        layer.set_name(new_name)
+        self.layer_manager.update_map_model()
+        self.is_map_modified = True
+        if self.current_map_path:
+            self.map_model.save(self.current_map_path)
+
     def _update_editor_map_layer_list(self):
         """更新editor_map_layer_list组件"""
         if hasattr(self, "editor_map_layer_list") and self.editor_map_layer_list:
@@ -3890,6 +3953,7 @@ class MapEditorManager(QObject):
                 item = QListWidgetItem()
                 widget = LayerItemWidget(i, layer.name, layer.visible)
                 widget.visibility_toggled.connect(self._on_layer_visibility_toggled)
+                widget.layer_renamed.connect(self._on_layer_renamed)
                 item.setSizeHint(widget.sizeHint())
                 item.setData(Qt.UserRole, i)
                 self.editor_map_layer_list.addItem(item)
