@@ -19,7 +19,8 @@ from PySide6.QtGui import (
     QFontDatabase,
     QPainterPath,
 )
-from PySide6.QtCore import Qt, QObject, QEvent, QRect as QtCore_QRect
+from PySide6.QtCore import Qt, QObject, QEvent, QRect as QtCore_QRect, QUrl
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
 
 class RenderManager(QObject):
@@ -70,6 +71,8 @@ class RenderManager(QObject):
         self.sprites = {}
         self.static_layers = {}  # 静态图层烘焙，{layer_idx: QGraphicsPixmapItem}
         self.apply_fit()
+
+        self._sound_players = {}
 
         # 显示FPS帧数
         self.fps_label = self.scene.addText("FPS: 0")
@@ -156,6 +159,10 @@ class RenderManager(QObject):
             # 5. 处理场景更新指令
             elif cmd_type == "SCENE_UPDATE":
                 self.handle_scene_update(data)
+
+            # 6. 处理声音播放指令
+            elif cmd_type == "PLAY_SOUND":
+                self.handle_play_sound(data)
 
         except Exception as e:
             pass
@@ -332,6 +339,17 @@ class RenderManager(QObject):
         self.static_layers.clear()  # 清空静态图层
         self.layer_counter = 0  # 重置图层
 
+        for path, player in list(self._sound_players.items()):
+            try:
+                player.stop()
+                audio_out = player.audioOutput()
+                if audio_out:
+                    audio_out.deleteLater()
+                player.deleteLater()
+            except:
+                pass
+        self._sound_players.clear()
+
         # 🚀 重新安装事件过滤器
         if hasattr(self, "view") and self.view and self.view.viewport():
             self.view.viewport().removeEventFilter(self)
@@ -478,6 +496,57 @@ class RenderManager(QObject):
 
         # 调用摄像机更新方法（边界夹紧已在引擎端完成）
         self.update_camera(x, y)
+
+    def handle_play_sound(self, data):
+        sound_path = data.get("sound", "")
+        loop = data.get("loop", False)
+
+        if not sound_path:
+            return
+
+        if not os.path.isabs(sound_path):
+            project_root = None
+            if self.app_controller and hasattr(self.app_controller, "project_manager"):
+                project_root = self.app_controller.project_manager.project_root
+            if project_root:
+                sound_path = os.path.join(project_root, sound_path)
+
+        if not os.path.exists(sound_path):
+            return
+
+        if sound_path in self._sound_players:
+            player = self._sound_players[sound_path]
+            if player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                return
+        else:
+            audio_output = QAudioOutput(self)
+            audio_output.setVolume(1.0)
+            player = QMediaPlayer(self)
+            player.setAudioOutput(audio_output)
+            player.setSource(QUrl.fromLocalFile(os.path.abspath(sound_path)))
+            self._sound_players[sound_path] = player
+
+            if not loop:
+                player.mediaStatusChanged.connect(
+                    lambda status, p=player, sp=sound_path: self._on_sound_finished(p, sp)
+                )
+
+        if loop:
+            player.setLoops(QMediaPlayer.Loops.Infinite)
+        else:
+            player.setLoops(1)
+
+        player.play()
+
+    def _on_sound_finished(self, player, sound_path):
+        if player.mediaStatus() == QMediaPlayer.MediaStatus.EndOfMedia:
+            player.stop()
+            audio_out = player.audioOutput()
+            if sound_path in self._sound_players:
+                del self._sound_players[sound_path]
+                player.deleteLater()
+            if audio_out:
+                audio_out.deleteLater()
 
     def update_camera(self, target_x, target_y):
         """

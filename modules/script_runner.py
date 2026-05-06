@@ -57,13 +57,17 @@ class ScriptRunner:
         if is_exiting:
             return
 
-        # 2. 命令控制台执行收回动画
+        # 2. 清理渲染器（停止声音等）
+        if self.controller and hasattr(self.controller, 'render_manager'):
+            self.controller.render_manager.reset_session()
+
+        # 3. 命令控制台执行收回动画
         self.console_mgr.anim_console(show=False)
 
-        # 3. 清空控制台内容
+        # 4. 清空控制台内容
         self.console_mgr.output.clear()
 
-        # 4. 恢复按钮状态
+        # 5. 恢复按钮状态
         self.set_run_btn_visual(False)
 
     def cleanup_temp_files(self):

@@ -68,6 +68,7 @@ __all__ = [
     "mouse",
     "load_map",
     "follow",
+    "play_sound",
 ]
 
 
@@ -1452,6 +1453,29 @@ def set_background(image_name):
             "scale_y": 1.0,
             "z_value": -1000,  # 🚀 核心：给一个极小的层级，确保在最底层
             "type": "background",
+        },
+    }
+    print(json.dumps(packet), flush=True)
+
+
+def play_sound(sound_name, loop=False):
+    sounds_dir = os.path.join("assets", "sounds")
+    sound_path = None
+    if os.path.exists(os.path.join(sounds_dir, sound_name)):
+        sound_path = os.path.join(sounds_dir, sound_name)
+    else:
+        for ext in (".wav", ".mp3", ".ogg", ".flac", ".m4a", ".aac", ".wma"):
+            candidate = os.path.join(sounds_dir, sound_name + ext)
+            if os.path.exists(candidate):
+                sound_path = candidate
+                break
+    if not sound_path:
+        return
+    packet = {
+        "type": "PLAY_SOUND",
+        "data": {
+            "sound": sound_path,
+            "loop": loop,
         },
     }
     print(json.dumps(packet), flush=True)
