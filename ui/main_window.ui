@@ -405,7 +405,7 @@
        <item>
         <widget class="QStackedWidget" name="editor_stacked">
          <property name="currentIndex">
-          <number>0</number>
+          <number>2</number>
          </property>
          <widget class="QWidget" name="editor_code_web">
           <layout class="QVBoxLayout" name="verticalLayout_5">
@@ -2817,6 +2817,18 @@
                     </property>
                     <item>
                      <widget class="QLabel" name="label_8">
+                      <property name="minimumSize">
+                       <size>
+                        <width>0</width>
+                        <height>30</height>
+                       </size>
+                      </property>
+                      <property name="maximumSize">
+                       <size>
+                        <width>16777215</width>
+                        <height>30</height>
+                       </size>
+                      </property>
                       <property name="frameShape">
                        <enum>QFrame::Shape::StyledPanel</enum>
                       </property>
@@ -2844,144 +2856,25 @@
                         <number>4</number>
                        </property>
                        <property name="topMargin">
-                        <number>0</number>
+                        <number>4</number>
                        </property>
                        <property name="rightMargin">
                         <number>4</number>
                        </property>
                        <property name="bottomMargin">
-                        <number>0</number>
+                        <number>4</number>
                        </property>
                        <property name="horizontalSpacing">
                         <number>-1</number>
                        </property>
-                       <item row="9" column="2">
-                        <widget class="QComboBox" name="att_tile_size">
-                         <property name="editable">
-                          <bool>true</bool>
-                         </property>
-                         <property name="duplicatesEnabled">
-                          <bool>false</bool>
-                         </property>
-                         <property name="frame">
-                          <bool>true</bool>
-                         </property>
-                         <item>
-                          <property name="text">
-                           <string>16x16</string>
-                          </property>
-                         </item>
-                         <item>
-                          <property name="text">
-                           <string>32x32</string>
-                          </property>
-                         </item>
-                         <item>
-                          <property name="text">
-                           <string>64x64</string>
-                          </property>
-                         </item>
-                        </widget>
-                       </item>
-                       <item row="1" column="2">
-                        <widget class="QLineEdit" name="att_map_name">
+                       <item row="5" column="0">
+                        <widget class="QLabel" name="label_16">
                          <property name="text">
-                          <string>地图1</string>
+                          <string>地图重力</string>
                          </property>
                         </widget>
                        </item>
-                       <item row="2" column="0">
-                        <widget class="QLabel" name="label_14">
-                         <property name="text">
-                          <string>地图尺寸</string>
-                         </property>
-                        </widget>
-                       </item>
-                       <item row="1" column="0">
-                        <widget class="QLabel" name="label_13">
-                         <property name="text">
-                          <string>地图名称</string>
-                         </property>
-                        </widget>
-                       </item>
-                       <item row="2" column="2">
-                        <layout class="QHBoxLayout" name="horizontalLayout_12">
-                         <item>
-                          <widget class="QLabel" name="label_19">
-                           <property name="text">
-                            <string>X</string>
-                           </property>
-                          </widget>
-                         </item>
-                         <item>
-                          <widget class="QLineEdit" name="att_mapsize_x">
-                           <property name="text">
-                            <string>100</string>
-                           </property>
-                          </widget>
-                         </item>
-                        </layout>
-                       </item>
-                       <item row="7" column="0" colspan="3">
-                        <widget class="Line" name="line_2">
-                         <property name="orientation">
-                          <enum>Qt::Orientation::Horizontal</enum>
-                         </property>
-                        </widget>
-                       </item>
-                       <item row="15" column="2">
-                        <widget class="QCheckBox" name="map_collision">
-                         <property name="text">
-                          <string>启用</string>
-                         </property>
-                        </widget>
-                       </item>
-                       <item row="12" column="0">
-                        <widget class="QLabel" name="label_12">
-                         <property name="text">
-                          <string>物理属性</string>
-                         </property>
-                        </widget>
-                       </item>
-                       <item row="15" column="0">
-                        <widget class="QLabel" name="att_collision">
-                         <property name="text">
-                          <string>碰撞</string>
-                         </property>
-                        </widget>
-                       </item>
-                       <item row="1" column="1">
-                        <spacer name="horizontalSpacer_12">
-                         <property name="orientation">
-                          <enum>Qt::Orientation::Horizontal</enum>
-                         </property>
-                         <property name="sizeHint" stdset="0">
-                          <size>
-                           <width>30</width>
-                           <height>20</height>
-                          </size>
-                         </property>
-                        </spacer>
-                       </item>
-                       <item row="3" column="2">
-                        <layout class="QHBoxLayout" name="horizontalLayout_13">
-                         <item>
-                          <widget class="QLabel" name="label_20">
-                           <property name="text">
-                            <string>Y</string>
-                           </property>
-                          </widget>
-                         </item>
-                         <item>
-                          <widget class="QLineEdit" name="att_mapsize_y">
-                           <property name="text">
-                            <string>100</string>
-                           </property>
-                          </widget>
-                         </item>
-                        </layout>
-                       </item>
-                       <item row="12" column="2">
+                       <item row="11" column="2">
                         <widget class="QComboBox" name="att_col_type">
                          <property name="editable">
                           <bool>true</bool>
@@ -3017,22 +2910,134 @@
                          </item>
                         </widget>
                        </item>
-                       <item row="9" column="0">
+                       <item row="14" column="0">
+                        <widget class="QLabel" name="att_collision">
+                         <property name="text">
+                          <string>碰撞</string>
+                         </property>
+                        </widget>
+                       </item>
+                       <item row="14" column="2">
+                        <widget class="QCheckBox" name="map_collision">
+                         <property name="text">
+                          <string>启用</string>
+                         </property>
+                        </widget>
+                       </item>
+                       <item row="3" column="2">
+                        <layout class="QHBoxLayout" name="horizontalLayout_13">
+                         <item>
+                          <widget class="QLabel" name="label_20">
+                           <property name="text">
+                            <string>Y</string>
+                           </property>
+                          </widget>
+                         </item>
+                         <item>
+                          <widget class="QLineEdit" name="att_mapsize_y">
+                           <property name="text">
+                            <string>100</string>
+                           </property>
+                          </widget>
+                         </item>
+                        </layout>
+                       </item>
+                       <item row="11" column="0">
+                        <widget class="QLabel" name="label_12">
+                         <property name="text">
+                          <string>物理属性</string>
+                         </property>
+                        </widget>
+                       </item>
+                       <item row="2" column="2">
+                        <layout class="QHBoxLayout" name="horizontalLayout_12">
+                         <item>
+                          <widget class="QLabel" name="label_19">
+                           <property name="text">
+                            <string>X</string>
+                           </property>
+                          </widget>
+                         </item>
+                         <item>
+                          <widget class="QLineEdit" name="att_mapsize_x">
+                           <property name="text">
+                            <string>100</string>
+                           </property>
+                          </widget>
+                         </item>
+                        </layout>
+                       </item>
+                       <item row="1" column="2">
+                        <widget class="QLineEdit" name="att_map_name">
+                         <property name="text">
+                          <string>地图1</string>
+                         </property>
+                        </widget>
+                       </item>
+                       <item row="8" column="2">
+                        <widget class="QComboBox" name="att_tile_size">
+                         <property name="editable">
+                          <bool>true</bool>
+                         </property>
+                         <property name="duplicatesEnabled">
+                          <bool>false</bool>
+                         </property>
+                         <property name="frame">
+                          <bool>true</bool>
+                         </property>
+                         <item>
+                          <property name="text">
+                           <string>16x16</string>
+                          </property>
+                         </item>
+                         <item>
+                          <property name="text">
+                           <string>32x32</string>
+                          </property>
+                         </item>
+                         <item>
+                          <property name="text">
+                           <string>64x64</string>
+                          </property>
+                         </item>
+                        </widget>
+                       </item>
+                       <item row="12" column="2">
+                        <widget class="QLineEdit" name="att_tag"/>
+                       </item>
+                       <item row="2" column="0">
+                        <widget class="QLabel" name="label_14">
+                         <property name="text">
+                          <string>地图尺寸</string>
+                         </property>
+                        </widget>
+                       </item>
+                       <item row="8" column="0">
                         <widget class="QLabel" name="label_15">
                          <property name="text">
                           <string>图块尺寸</string>
                          </property>
                         </widget>
                        </item>
-                       <item row="5" column="0">
-                        <widget class="QLabel" name="label_16">
+                       <item row="1" column="0">
+                        <widget class="QLabel" name="label_13">
                          <property name="text">
-                          <string>地图重力</string>
+                          <string>地图名称</string>
                          </property>
                         </widget>
                        </item>
-                       <item row="13" column="2">
-                        <widget class="QLineEdit" name="att_tag"/>
+                       <item row="1" column="1">
+                        <spacer name="horizontalSpacer_12">
+                         <property name="orientation">
+                          <enum>Qt::Orientation::Horizontal</enum>
+                         </property>
+                         <property name="sizeHint" stdset="0">
+                          <size>
+                           <width>30</width>
+                           <height>20</height>
+                          </size>
+                         </property>
+                        </spacer>
                        </item>
                        <item row="5" column="2">
                         <widget class="QCheckBox" name="att_gravity">
@@ -3046,6 +3051,18 @@
                     </item>
                     <item>
                      <widget class="QLabel" name="label_24">
+                      <property name="minimumSize">
+                       <size>
+                        <width>0</width>
+                        <height>30</height>
+                       </size>
+                      </property>
+                      <property name="maximumSize">
+                       <size>
+                        <width>16777215</width>
+                        <height>30</height>
+                       </size>
+                      </property>
                       <property name="frameShape">
                        <enum>QFrame::Shape::StyledPanel</enum>
                       </property>

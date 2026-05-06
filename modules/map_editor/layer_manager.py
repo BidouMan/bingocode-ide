@@ -285,7 +285,7 @@ class LayerManager(QObject):
             self.layers.append(layer)
 
         if not self.layers:
-            self.create_layer("drawing", "Layer 1")
+            self.create_layer("image", "图层")
 
         self.layers_changed.emit()
     
@@ -293,7 +293,7 @@ class LayerManager(QObject):
         """创建新图层"""
         layer_id = self._get_next_layer_id()
         if not name:
-            name = f"{layer_type.capitalize()} Layer {len(self.layers) + 1}"
+            name = "图层"
         
         if layer_type == "drawing":
             layer = DrawingLayer(layer_id, name)

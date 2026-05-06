@@ -33,12 +33,14 @@ class MapDataModel(QObject):
             "offset_x": 0,  # 坐标偏移量
             "offset_y": 0,  # 坐标偏移量
             "gravity": False,  # 地图重力开关
-            "layers": [  # 地图图层
+            "layers": [
                 {
-                    "name": "ground",
+                    "name": "图层",
+                    "type": "image",
                     "visible": True,
-                    "tiles": {},  # 使用字典存储：(x, y): tile_id
-                    "objects": [],  # 用于存放不规则的大图或背景
+                    "tiles": {},
+                    "objects": [],
+                    "images": [],
                 }
             ],
             "tile_sets": [],  # 瓦片集配置
