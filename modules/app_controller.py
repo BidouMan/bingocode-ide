@@ -413,11 +413,16 @@ class AppController:
 
     def handle_open_project(self):
         """打开项目：加载目录下所有脚本"""
+        if hasattr(self, "menu_manager") and self.menu_manager.isVisible():
+            self.menu_manager.hide_popup_menu()
+
+        self.window.activateWindow()
+        self.window.raise_()
+
         target_dir = QFileDialog.getExistingDirectory(self.window, "选择工程目录")
         if not target_dir:
             return
 
-        # 🚀 修复焦点丢失问题：强制主窗口重新获取焦点
         self.window.activateWindow()
         self.window.raise_()
 
@@ -504,6 +509,12 @@ class AppController:
         pm = self.project_manager
         em = self.editor_manager
 
+        if hasattr(self, "menu_manager") and self.menu_manager.isVisible():
+            self.menu_manager.hide_popup_menu()
+
+        self.window.activateWindow()
+        self.window.raise_()
+
         # 1. 基础检查：如果没有打开的编辑器，则无需保存
         editor = em.get_current_editor()
         if not editor:
@@ -520,7 +531,6 @@ class AppController:
         if not full_path:
             return
 
-        # 🚀 修复焦点丢失问题：强制主窗口重新获取焦点
         self.window.activateWindow()
         self.window.raise_()
 

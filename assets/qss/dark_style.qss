@@ -73,11 +73,12 @@ QGraphicsView#game_view {
     border: none
 }
 #menu_frame QPushButton:pressed,
-#menu_frame QPushButton:hover{
+#menu_frame QPushButton:hover,
+#menu_frame QPushButton[menuOpen="true"]{
     background-color: rgb(61, 64, 72);
     border: none
 }
-#menu_frame QPushButton#btn_help:pressed
+#menu_frame QPushButton#btn_help:pressed,
 #menu_frame QPushButton#btn_help:hover {
     background-color: transparent;
     border: none
