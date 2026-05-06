@@ -74,6 +74,13 @@ class RenderManager(QObject):
 
         self._sound_players = {}
 
+        warmup_player = QMediaPlayer(self)
+        warmup_output = QAudioOutput(self)
+        warmup_player.setAudioOutput(warmup_output)
+        warmup_player.setSource(QUrl(""))
+        warmup_player.deleteLater()
+        warmup_output.deleteLater()
+
         # 显示FPS帧数
         self.fps_label = self.scene.addText("FPS: 0")
         # 🚀 设置字体大小

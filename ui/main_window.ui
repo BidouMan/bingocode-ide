@@ -2109,7 +2109,7 @@
                          </property>
                          <property name="icon">
                           <iconset resource="../assets/resources.qrc">
-                           <normaloff>:/icons/icon--file-upload.svg</normaloff>:/icons/icon--file-upload.svg</iconset>
+                           <normaloff>:/icons/上传本地图片资源.svg</normaloff>:/icons/上传本地图片资源.svg</iconset>
                          </property>
                          <property name="iconSize">
                           <size>
@@ -2141,7 +2141,7 @@
                          </property>
                          <property name="icon">
                           <iconset resource="../assets/resources.qrc">
-                           <normaloff>:/icons/删除选中.svg</normaloff>:/icons/删除选中.svg</iconset>
+                           <normaloff>:/icons/选中删除.svg</normaloff>:/icons/选中删除.svg</iconset>
                          </property>
                          <property name="iconSize">
                           <size>
@@ -4450,9 +4450,9 @@
  </resources>
  <connections/>
  <buttongroups>
-  <buttongroup name="buttonGroup_3"/>
   <buttongroup name="buttonGroup"/>
-  <buttongroup name="buttonGroup_2"/>
+  <buttongroup name="buttonGroup_3"/>
   <buttongroup name="buttonGroup_4"/>
+  <buttongroup name="buttonGroup_2"/>
  </buttongroups>
 </ui>
