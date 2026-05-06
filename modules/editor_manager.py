@@ -151,7 +151,7 @@ class EditorManager(QObject):
         is_temp = getattr(editor, 'is_temp', False)
 
         # 如果它是 untitled 且已经写了磁盘（不是 temp 了），但内容又被删空了，则清理
-        if not is_temp and file_path and "untitled" in os.path.basename(file_path):
+        if not is_temp and file_path and "未命名-" in os.path.basename(file_path):
             if not editor.toPlainText().strip():
                 try:
                     if os.path.exists(file_path):
@@ -183,7 +183,7 @@ class EditorManager(QObject):
         file_name = os.path.basename(path).lower()
         
         # 判定：如果是临时文件，或者磁盘上不存在，或者文件名叫 untitled
-        if getattr(editor, 'is_temp', False) or not os.path.exists(path) or "untitled" in file_name:
+        if getattr(editor, 'is_temp', False) or not os.path.exists(path) or "未命名-" in file_name:
             new_path, _ = QFileDialog.getSaveFileName(
                 parent_window, 
                 "保存文件", 
@@ -314,16 +314,13 @@ class EditorManager(QObject):
 
     def create_untitled_file(self):
         """在当前项目目录下创建一个新的临时标签页"""
-        # 1. 确定新文件的物理路径（放在当前项目根目录下）
         i = 1
         while True:
-            name = f"untitled_{i}.py"
+            name = f"未命名-{i}.py"
             path = os.path.join(self.pm.project_root, name)
             if not os.path.exists(path): break
             i += 1
-        
-        # 2. 调用你现有的核心方法创建 UI
-        # 注意：content 为空，这样它会触发你写好的 is_temp = True 逻辑
+
         return self.create_new_tab(file_path=path, content="")
     
     def save_all_opened_files(self):

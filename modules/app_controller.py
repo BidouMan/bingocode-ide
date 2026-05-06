@@ -461,22 +461,19 @@ class AppController:
                 self.handle_new_project()
                 return
 
-            # 3. 只加载main.py（懒加载：其他文件通过代码列表点击加载）
-            all_files.sort(key=lambda x: (x != "main.py", x.lower()))
+            # 3. 加载最后修改的 .py 文件（懒加载：其他文件通过代码列表点击加载）
+            all_files.sort(key=lambda x: os.path.getmtime(os.path.join(target_dir, x)), reverse=True)
 
-            # 只加载main.py文件
-            for file_name in all_files:
-                if file_name == "main.py":
-                    file_path = os.path.join(target_dir, file_name)
-                    try:
-                        with open(file_path, "r", encoding="utf-8") as f:
-                            content = f.read()
-                        self.editor_manager.create_new_tab(
-                            file_path, content, auto_activate=True
-                        )
-                    except:
-                        pass
-                    break
+            if all_files:
+                file_path = os.path.join(target_dir, all_files[0])
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    self.editor_manager.create_new_tab(
+                        file_path, content, auto_activate=True
+                    )
+                except:
+                    pass
 
             # 4. 默认激活第一个找到的脚本
             if self.tabbar_manager.tab_bar.count() > 0:
