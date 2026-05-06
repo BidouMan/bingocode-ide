@@ -162,6 +162,10 @@ class AppController:
         self.ui.btn_run.clicked.connect(self.handle_run_script)
         if hasattr(self.ui, "btn_stop"):
             self.ui.btn_stop.clicked.connect(self.script_runner.stop_script)
+        if hasattr(self.ui, "fullscreen_btn_run"):
+            self.ui.fullscreen_btn_run.clicked.connect(self.handle_run_script)
+        if hasattr(self.ui, "fullscreen_btn_stop"):
+            self.ui.fullscreen_btn_stop.clicked.connect(self.script_runner.stop_script)
 
         # 运行console控制台
         self.console_manager.process_started.connect(

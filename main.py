@@ -91,11 +91,19 @@ class BingoIDE(QWidget):
 
 # --- 5. 程序启动入口 ---
 if __name__ == "__main__":
-    # 适配多进程打包
     multiprocessing.freeze_support()
-    # 🚀 在创建 QApplication 之前，设置不恢复窗口状态
+
+    _saved_stderr_fd = os.dup(2)
+    _devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(_devnull_fd, 2)
+    os.close(_devnull_fd)
+
+    os.environ["QT_LOGGING_RULES"] = "qt.multimedia=false"
 
     app = QApplication(sys.argv)
+
+    _saved_stderr_file = os.fdopen(_saved_stderr_fd, 'w')
+    sys.stderr = _saved_stderr_file
 
     # 屏蔽 Qt 内部不必要的字体警告
     QLoggingCategory.setFilterRules(

@@ -2044,7 +2044,7 @@
                       </property>
                       <layout class="QHBoxLayout" name="horizontalLayout_14">
                        <property name="spacing">
-                        <number>2</number>
+                        <number>0</number>
                        </property>
                        <property name="leftMargin">
                         <number>4</number>
@@ -2058,31 +2058,131 @@
                        <property name="bottomMargin">
                         <number>0</number>
                        </property>
-                       <item>
+                       <item alignment="Qt::AlignmentFlag::AlignHCenter|Qt::AlignmentFlag::AlignVCenter">
                         <widget class="QPushButton" name="btn_res_list_open">
+                         <property name="minimumSize">
+                          <size>
+                           <width>30</width>
+                           <height>0</height>
+                          </size>
+                         </property>
+                         <property name="maximumSize">
+                          <size>
+                           <width>30</width>
+                           <height>16777215</height>
+                          </size>
+                         </property>
                          <property name="text">
-                          <string>选</string>
+                          <string/>
+                         </property>
+                         <property name="icon">
+                          <iconset resource="../assets/resources.qrc">
+                           <normaloff>:/icons/图片库.svg</normaloff>:/icons/图片库.svg</iconset>
+                         </property>
+                         <property name="iconSize">
+                          <size>
+                           <width>20</width>
+                           <height>20</height>
+                          </size>
+                         </property>
+                         <property name="flat">
+                          <bool>true</bool>
                          </property>
                         </widget>
                        </item>
                        <item>
                         <widget class="QPushButton" name="btn_res_list_upload">
+                         <property name="minimumSize">
+                          <size>
+                           <width>30</width>
+                           <height>0</height>
+                          </size>
+                         </property>
+                         <property name="maximumSize">
+                          <size>
+                           <width>30</width>
+                           <height>16777215</height>
+                          </size>
+                         </property>
                          <property name="text">
-                          <string>上</string>
+                          <string/>
+                         </property>
+                         <property name="icon">
+                          <iconset resource="../assets/resources.qrc">
+                           <normaloff>:/icons/icon--file-upload.svg</normaloff>:/icons/icon--file-upload.svg</iconset>
+                         </property>
+                         <property name="iconSize">
+                          <size>
+                           <width>20</width>
+                           <height>20</height>
+                          </size>
+                         </property>
+                         <property name="flat">
+                          <bool>true</bool>
                          </property>
                         </widget>
                        </item>
                        <item>
                         <widget class="QPushButton" name="btn_res_list_del">
+                         <property name="minimumSize">
+                          <size>
+                           <width>30</width>
+                           <height>0</height>
+                          </size>
+                         </property>
+                         <property name="maximumSize">
+                          <size>
+                           <width>30</width>
+                           <height>16777215</height>
+                          </size>
+                         </property>
                          <property name="text">
-                          <string>删</string>
+                          <string/>
+                         </property>
+                         <property name="icon">
+                          <iconset resource="../assets/resources.qrc">
+                           <normaloff>:/icons/删除选中.svg</normaloff>:/icons/删除选中.svg</iconset>
+                         </property>
+                         <property name="iconSize">
+                          <size>
+                           <width>20</width>
+                           <height>20</height>
+                          </size>
+                         </property>
+                         <property name="flat">
+                          <bool>true</bool>
                          </property>
                         </widget>
                        </item>
                        <item>
                         <widget class="QPushButton" name="btn_res_list_clear">
+                         <property name="minimumSize">
+                          <size>
+                           <width>30</width>
+                           <height>0</height>
+                          </size>
+                         </property>
+                         <property name="maximumSize">
+                          <size>
+                           <width>30</width>
+                           <height>16777215</height>
+                          </size>
+                         </property>
                          <property name="text">
-                          <string>清</string>
+                          <string/>
+                         </property>
+                         <property name="icon">
+                          <iconset resource="../assets/resources.qrc">
+                           <normaloff>:/icons/清空.svg</normaloff>:/icons/清空.svg</iconset>
+                         </property>
+                         <property name="iconSize">
+                          <size>
+                           <width>20</width>
+                           <height>20</height>
+                          </size>
+                         </property>
+                         <property name="flat">
+                          <bool>true</bool>
                          </property>
                         </widget>
                        </item>

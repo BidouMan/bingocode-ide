@@ -1,4 +1,4 @@
-import json, os
+import json, os, sys, contextlib
 from PySide6.QtWidgets import (
     QGraphicsView,
     QGraphicsScene,
