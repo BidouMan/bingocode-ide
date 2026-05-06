@@ -69,6 +69,7 @@ __all__ = [
     "load_map",
     "follow",
     "play_sound",
+    "show_collision",
 ]
 
 
@@ -145,6 +146,7 @@ class Sprite:
         self._cached_hitbox = None
         self._visual_offset_x = 0
         self._visual_offset_y = 0
+        self._show_hitbox = False
 
         # 4. 初始计算碰撞箱和图片信息
         self._setup_hitbox()
@@ -1307,7 +1309,7 @@ class Sprite:
             "scale_y": final_scale_y,
             # 添加碰撞盒信息，用于可视化调试
             "hitbox": self._get_hitbox_rect()
-            if hasattr(self, "_get_hitbox_rect")
+            if self._show_hitbox and hasattr(self, "_get_hitbox_rect")
             else None,
             "vox": self._visual_offset_x,
             "voy": self._visual_offset_y,
@@ -1479,6 +1481,11 @@ def play_sound(sound_name, loop=False):
         },
     }
     print(json.dumps(packet), flush=True)
+
+
+def show_collision(sprite):
+    if isinstance(sprite, Sprite):
+        sprite._show_hitbox = True
 
 
 # ---------- 内部函数 ----------
