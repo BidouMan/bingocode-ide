@@ -62,7 +62,11 @@ QWidget{
 /* 负责裁剪和背景 */
 QGraphicsView#game_view {
     border: none;
-    background-color: transparent; /* 设为透明则显示父级的黑色，设为红色则用于测试 */
+    background-color: transparent;
+}
+
+QGraphicsView#editor_map_canvas {
+    border: none;
 }
 
 

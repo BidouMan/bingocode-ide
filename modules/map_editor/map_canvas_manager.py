@@ -157,14 +157,13 @@ class MapCanvas(QGraphicsView):
 
         # 如果网格可见，使用网格纹理绘制
         if self._grid_visible and self._grid_brush:
-            # 保存当前画笔
             old_brush = painter.brush()
-            # 使用网格纹理画笔
+            old_pen = painter.pen()
             painter.setBrush(self._grid_brush)
-            # 绘制覆盖整个可见区域的矩形
+            painter.setPen(Qt.PenStyle.NoPen)
             painter.drawRect(rect)
-            # 恢复原来的画笔
             painter.setBrush(old_brush)
+            painter.setPen(old_pen)
 
     def dragEnterEvent(self, event):
         """处理拖拽进入事件"""

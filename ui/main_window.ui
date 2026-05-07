@@ -239,7 +239,7 @@
             </property>
             <property name="icon">
              <iconset resource="../assets/resources.qrc">
-              <normaloff>:/icons/icon--edit.svg</normaloff>:/icons/icon--edit.svg</iconset>
+              <normaloff>:/icons/代码编辑.svg</normaloff>:/icons/代码编辑.svg</iconset>
             </property>
             <property name="iconSize">
              <size>
@@ -358,16 +358,16 @@
              <enum>Qt::FocusPolicy::NoFocus</enum>
             </property>
             <property name="text">
-             <string>声音</string>
+             <string>插件</string>
             </property>
             <property name="icon">
              <iconset resource="../assets/resources.qrc">
-              <normaloff>:/icons/保存.svg</normaloff>:/icons/保存.svg</iconset>
+              <normaloff>:/icons/addons.svg</normaloff>:/icons/addons.svg</iconset>
             </property>
             <property name="iconSize">
              <size>
-              <width>16</width>
-              <height>16</height>
+              <width>20</width>
+              <height>20</height>
              </size>
             </property>
             <property name="flat">
@@ -2179,7 +2179,7 @@
                          </property>
                          <property name="icon">
                           <iconset resource="../assets/resources.qrc">
-                           <normaloff>:/icons/清空.svg</normaloff>:/icons/清空.svg</iconset>
+                           <normaloff>:/icons/重置.svg</normaloff>:/icons/重置.svg</iconset>
                          </property>
                          <property name="iconSize">
                           <size>
@@ -3004,6 +3004,12 @@
                     </item>
                     <item>
                      <widget class="QComboBox" name="btn_editor_map_selectmap">
+                      <property name="minimumSize">
+                       <size>
+                        <width>100</width>
+                        <height>0</height>
+                       </size>
+                      </property>
                       <property name="editable">
                        <bool>true</bool>
                       </property>
@@ -3224,19 +3230,19 @@
                         <enum>QLayout::SizeConstraint::SetDefaultConstraint</enum>
                        </property>
                        <property name="leftMargin">
-                        <number>4</number>
+                        <number>8</number>
                        </property>
                        <property name="topMargin">
                         <number>4</number>
                        </property>
                        <property name="rightMargin">
-                        <number>4</number>
+                        <number>8</number>
                        </property>
                        <property name="bottomMargin">
-                        <number>4</number>
+                        <number>10</number>
                        </property>
-                       <property name="horizontalSpacing">
-                        <number>-1</number>
+                       <property name="spacing">
+                        <number>10</number>
                        </property>
                        <item row="5" column="0">
                         <widget class="QLabel" name="label_16">

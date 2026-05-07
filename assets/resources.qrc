@@ -37,6 +37,7 @@
     <file>icons/sound_icon.svg</file>
 
     <file>icons/清空.svg</file>
+    <file>icons/重置.svg</file>
     <file>icons/选中删除.svg</file>
     <file>icons/图片库.svg</file>
     <file>icons/上传本地图片资源.svg</file>
@@ -55,6 +56,9 @@
     <file>icons/显示网格.svg</file>
     <file>icons/上移图层.svg</file>
     <file>icons/下移图层.svg</file>
+
+
+    <file>icons/代码编辑.svg</file>
 
     <file>font/HarmonyOS_Sans_SC_Regular.ttf</file>
   </qresource>
