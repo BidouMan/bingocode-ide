@@ -1,7 +1,7 @@
 /* 全局设置 */
 QWidget{
     color:white;
-    background-color:rgb(30, 30, 30);
+    background-color:rgb(34, 37, 43);
     /* font-size: 14px; */
 }
 
@@ -63,10 +63,6 @@ QWidget{
 QGraphicsView#game_view {
     border: none;
     background-color: transparent;
-}
-
-QGraphicsView#editor_map_canvas {
-    border: none;
 }
 
 

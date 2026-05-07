@@ -1,0 +1,23 @@
+/* #editor_map_canvas {
+    border: none;
+    background-color: rgb(30, 30, 30);
+} */
+
+#editor_map_left {
+    border-right: 1px solid rgb(12, 12, 12);
+    /* background-color: red; */
+}
+
+
+#res_list_view,#col_editor_view{
+    background-color: rgb(30, 30, 30);
+    margin-left: 4px;
+    margin-right: 4px;
+}
+
+#col_tag_label{
+    color: #9ca0a4;
+    /* border: 1px solid rgb(163, 163, 163); */
+    background-color: transparent;
+    padding: 0px;
+}

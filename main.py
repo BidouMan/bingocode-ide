@@ -115,8 +115,11 @@ if __name__ == "__main__":
     sprite_style_data = load_stylesheet(
         os.path.join("assets", "qss", "sprite_editor_style.qss")
     )
+    map_style_data = load_stylesheet(
+        os.path.join("assets", "qss", "map_editor_style.qss")
+    )
     if style_data:
-        app.setStyleSheet(style_data + sprite_style_data)
+        app.setStyleSheet(style_data + sprite_style_data + map_style_data)
 
     # 显示窗口
     window = BingoIDE()
