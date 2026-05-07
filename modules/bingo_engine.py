@@ -62,7 +62,6 @@ __all__ = [
     "run",
     "key_down",
     "show_fps",
-    "set_background",
     "mouse_down",
     "mouse_pressed",
     "mouse",
@@ -1434,29 +1433,6 @@ def show_fps(visible=True):
     global _SHOW_FPS
     _SHOW_FPS = visible
     packet = {"type": "UI_COMMAND", "data": {"visible": visible}}
-    print(json.dumps(packet), flush=True)
-
-
-def set_background(image_name):
-    """
-    设置舞台背景图
-    """
-    image_path = os.path.join("assets", "images", image_name)
-    # 背景图使用固定的 ID，确保重复调用时是“替换”而不是“叠加”
-    packet = {
-        "type": "CREATE",
-        "id": "STAGE_BACKGROUND",
-        "data": {
-            "image": image_path,
-            "x": 320,  # 自动居中
-            "y": 240,
-            "angle": 0,
-            "scale_x": 1.0,
-            "scale_y": 1.0,
-            "z_value": -1000,  # 🚀 核心：给一个极小的层级，确保在最底层
-            "type": "background",
-        },
-    }
     print(json.dumps(packet), flush=True)
 
 

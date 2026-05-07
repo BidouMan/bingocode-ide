@@ -41,6 +41,21 @@
     <file>icons/图片库.svg</file>
     <file>icons/上传本地图片资源.svg</file>
 
+    <file>icons/移动锚点.svg</file>
+    <file>icons/添加锚点.svg</file>
+    <file>icons/删除锚点.svg</file>
+    <file>icons/重置锚点.svg</file>
+    <file>icons/吸附锚点.svg</file>
+
+    <file>icons/新建地图.svg</file>
+    <file>icons/导入地图.svg</file>
+    <file>icons/导出地图.svg</file>
+    <file>icons/移动工具.svg</file>
+    <file>icons/选取工具.svg</file>
+    <file>icons/显示网格.svg</file>
+    <file>icons/上移图层.svg</file>
+    <file>icons/下移图层.svg</file>
+
     <file>font/HarmonyOS_Sans_SC_Regular.ttf</file>
   </qresource>
 </RCC>

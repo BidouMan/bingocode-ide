@@ -6,20 +6,26 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1078</width>
-    <height>718</height>
+    <width>1067</width>
+    <height>743</height>
    </rect>
   </property>
   <property name="sizePolicy">
-   <sizepolicy hsizetype="Minimum" vsizetype="Minimum">
+   <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
     <horstretch>0</horstretch>
     <verstretch>0</verstretch>
    </sizepolicy>
   </property>
   <property name="minimumSize">
    <size>
-    <width>640</width>
-    <height>480</height>
+    <width>0</width>
+    <height>0</height>
+   </size>
+  </property>
+  <property name="maximumSize">
+   <size>
+    <width>16777215</width>
+    <height>16777215</height>
    </size>
   </property>
   <property name="windowTitle">
@@ -72,7 +78,7 @@
        <item>
         <widget class="QFrame" name="menu_frame">
          <property name="sizePolicy">
-          <sizepolicy hsizetype="Ignored" vsizetype="Preferred">
+          <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
            <horstretch>0</horstretch>
            <verstretch>0</verstretch>
           </sizepolicy>
@@ -405,7 +411,7 @@
        <item>
         <widget class="QStackedWidget" name="editor_stacked">
          <property name="currentIndex">
-          <number>2</number>
+          <number>0</number>
          </property>
          <widget class="QWidget" name="editor_code_web">
           <layout class="QVBoxLayout" name="verticalLayout_5">
@@ -1126,7 +1132,7 @@
               <item>
                <widget class="QFrame" name="editor_frame">
                 <property name="sizePolicy">
-                 <sizepolicy hsizetype="Ignored" vsizetype="Ignored">
+                 <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
                   <horstretch>0</horstretch>
                   <verstretch>0</verstretch>
                  </sizepolicy>
@@ -2293,13 +2299,29 @@
                           <enum>Qt::FocusPolicy::NoFocus</enum>
                          </property>
                          <property name="text">
-                          <string>移</string>
+                          <string/>
+                         </property>
+                         <property name="icon">
+                          <iconset resource="../assets/resources.qrc">
+                           <normaloff>:/icons/移动锚点.svg</normaloff>:/icons/移动锚点.svg</iconset>
+                         </property>
+                         <property name="iconSize">
+                          <size>
+                           <width>20</width>
+                           <height>20</height>
+                          </size>
                          </property>
                          <property name="checkable">
                           <bool>true</bool>
                          </property>
                          <property name="checked">
                           <bool>true</bool>
+                         </property>
+                         <property name="autoDefault">
+                          <bool>false</bool>
+                         </property>
+                         <property name="default">
+                          <bool>false</bool>
                          </property>
                          <property name="flat">
                           <bool>true</bool>
@@ -2327,7 +2349,17 @@
                           <enum>Qt::FocusPolicy::NoFocus</enum>
                          </property>
                          <property name="text">
-                          <string>加</string>
+                          <string/>
+                         </property>
+                         <property name="icon">
+                          <iconset resource="../assets/resources.qrc">
+                           <normaloff>:/icons/添加锚点.svg</normaloff>:/icons/添加锚点.svg</iconset>
+                         </property>
+                         <property name="iconSize">
+                          <size>
+                           <width>20</width>
+                           <height>20</height>
+                          </size>
                          </property>
                          <property name="checkable">
                           <bool>true</bool>
@@ -2358,7 +2390,17 @@
                           <enum>Qt::FocusPolicy::NoFocus</enum>
                          </property>
                          <property name="text">
-                          <string>删</string>
+                          <string/>
+                         </property>
+                         <property name="icon">
+                          <iconset resource="../assets/resources.qrc">
+                           <normaloff>:/icons/删除锚点.svg</normaloff>:/icons/删除锚点.svg</iconset>
+                         </property>
+                         <property name="iconSize">
+                          <size>
+                           <width>20</width>
+                           <height>20</height>
+                          </size>
                          </property>
                          <property name="checkable">
                           <bool>true</bool>
@@ -2389,7 +2431,17 @@
                           <enum>Qt::FocusPolicy::NoFocus</enum>
                          </property>
                          <property name="text">
-                          <string>重</string>
+                          <string/>
+                         </property>
+                         <property name="icon">
+                          <iconset resource="../assets/resources.qrc">
+                           <normaloff>:/icons/重置锚点.svg</normaloff>:/icons/重置锚点.svg</iconset>
+                         </property>
+                         <property name="iconSize">
+                          <size>
+                           <width>20</width>
+                           <height>20</height>
+                          </size>
                          </property>
                          <property name="checkable">
                           <bool>false</bool>
@@ -2420,7 +2472,17 @@
                           <enum>Qt::FocusPolicy::NoFocus</enum>
                          </property>
                          <property name="text">
-                          <string>吸</string>
+                          <string/>
+                         </property>
+                         <property name="icon">
+                          <iconset resource="../assets/resources.qrc">
+                           <normaloff>:/icons/吸附锚点.svg</normaloff>:/icons/吸附锚点.svg</iconset>
+                         </property>
+                         <property name="iconSize">
+                          <size>
+                           <width>20</width>
+                           <height>20</height>
+                          </size>
                          </property>
                          <property name="checkable">
                           <bool>true</bool>
@@ -2590,7 +2652,7 @@
                  <item>
                   <widget class="QFrame" name="editor_map_toolbar">
                    <property name="sizePolicy">
-                    <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+                    <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
                      <horstretch>0</horstretch>
                      <verstretch>0</verstretch>
                     </sizepolicy>
@@ -2631,34 +2693,143 @@
                     </property>
                     <item>
                      <widget class="QPushButton" name="btn_editor_map_new">
+                      <property name="sizePolicy">
+                       <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+                        <horstretch>0</horstretch>
+                        <verstretch>0</verstretch>
+                       </sizepolicy>
+                      </property>
+                      <property name="minimumSize">
+                       <size>
+                        <width>30</width>
+                        <height>0</height>
+                       </size>
+                      </property>
+                      <property name="maximumSize">
+                       <size>
+                        <width>30</width>
+                        <height>16777215</height>
+                       </size>
+                      </property>
+                      <property name="layoutDirection">
+                       <enum>Qt::LayoutDirection::LeftToRight</enum>
+                      </property>
                       <property name="text">
-                       <string>新建</string>
+                       <string/>
+                      </property>
+                      <property name="icon">
+                       <iconset resource="../assets/resources.qrc">
+                        <normaloff>:/icons/新建地图.svg</normaloff>:/icons/新建地图.svg</iconset>
+                      </property>
+                      <property name="iconSize">
+                       <size>
+                        <width>20</width>
+                        <height>20</height>
+                       </size>
+                      </property>
+                      <property name="flat">
+                       <bool>true</bool>
                       </property>
                      </widget>
                     </item>
                     <item>
                      <widget class="QPushButton" name="btn_editor_map_import">
+                      <property name="minimumSize">
+                       <size>
+                        <width>30</width>
+                        <height>0</height>
+                       </size>
+                      </property>
+                      <property name="maximumSize">
+                       <size>
+                        <width>30</width>
+                        <height>16777215</height>
+                       </size>
+                      </property>
                       <property name="text">
-                       <string>导入</string>
+                       <string/>
+                      </property>
+                      <property name="icon">
+                       <iconset resource="../assets/resources.qrc">
+                        <normaloff>:/icons/导入地图.svg</normaloff>:/icons/导入地图.svg</iconset>
+                      </property>
+                      <property name="iconSize">
+                       <size>
+                        <width>20</width>
+                        <height>20</height>
+                       </size>
+                      </property>
+                      <property name="flat">
+                       <bool>true</bool>
                       </property>
                      </widget>
                     </item>
                     <item>
                      <widget class="QPushButton" name="btn_editor_map_export">
+                      <property name="minimumSize">
+                       <size>
+                        <width>30</width>
+                        <height>0</height>
+                       </size>
+                      </property>
+                      <property name="maximumSize">
+                       <size>
+                        <width>30</width>
+                        <height>16777215</height>
+                       </size>
+                      </property>
                       <property name="text">
-                       <string>导出</string>
+                       <string/>
+                      </property>
+                      <property name="icon">
+                       <iconset resource="../assets/resources.qrc">
+                        <normaloff>:/icons/导出地图.svg</normaloff>:/icons/导出地图.svg</iconset>
+                      </property>
+                      <property name="iconSize">
+                       <size>
+                        <width>20</width>
+                        <height>20</height>
+                       </size>
+                      </property>
+                      <property name="flat">
+                       <bool>true</bool>
                       </property>
                      </widget>
                     </item>
                     <item>
                      <widget class="QPushButton" name="btn_editor_map_move">
+                      <property name="minimumSize">
+                       <size>
+                        <width>30</width>
+                        <height>0</height>
+                       </size>
+                      </property>
+                      <property name="maximumSize">
+                       <size>
+                        <width>30</width>
+                        <height>16777215</height>
+                       </size>
+                      </property>
                       <property name="text">
-                       <string>移动</string>
+                       <string/>
+                      </property>
+                      <property name="icon">
+                       <iconset resource="../assets/resources.qrc">
+                        <normaloff>:/icons/移动工具.svg</normaloff>:/icons/移动工具.svg</iconset>
+                      </property>
+                      <property name="iconSize">
+                       <size>
+                        <width>20</width>
+                        <height>20</height>
+                       </size>
                       </property>
                       <property name="checkable">
                        <bool>true</bool>
                       </property>
                       <property name="checked">
+                       <bool>true</bool>
+                      </property>
+                      <property name="flat">
                        <bool>true</bool>
                       </property>
                       <attribute name="buttonGroup">
@@ -2668,10 +2839,35 @@
                     </item>
                     <item>
                      <widget class="QPushButton" name="btn_editor_map_select">
+                      <property name="minimumSize">
+                       <size>
+                        <width>30</width>
+                        <height>0</height>
+                       </size>
+                      </property>
+                      <property name="maximumSize">
+                       <size>
+                        <width>30</width>
+                        <height>16777215</height>
+                       </size>
+                      </property>
                       <property name="text">
-                       <string>选区</string>
+                       <string/>
+                      </property>
+                      <property name="icon">
+                       <iconset resource="../assets/resources.qrc">
+                        <normaloff>:/icons/选取工具.svg</normaloff>:/icons/选取工具.svg</iconset>
+                      </property>
+                      <property name="iconSize">
+                       <size>
+                        <width>20</width>
+                        <height>20</height>
+                       </size>
                       </property>
                       <property name="checkable">
+                       <bool>true</bool>
+                      </property>
+                      <property name="flat">
                        <bool>true</bool>
                       </property>
                       <attribute name="buttonGroup">
@@ -2681,10 +2877,35 @@
                     </item>
                     <item>
                      <widget class="QPushButton" name="btn_editor_map_draw">
+                      <property name="minimumSize">
+                       <size>
+                        <width>30</width>
+                        <height>0</height>
+                       </size>
+                      </property>
+                      <property name="maximumSize">
+                       <size>
+                        <width>30</width>
+                        <height>16777215</height>
+                       </size>
+                      </property>
                       <property name="text">
-                       <string>绘制</string>
+                       <string/>
+                      </property>
+                      <property name="icon">
+                       <iconset resource="../assets/resources.qrc">
+                        <normaloff>:/icons/icon--paint.svg</normaloff>:/icons/icon--paint.svg</iconset>
+                      </property>
+                      <property name="iconSize">
+                       <size>
+                        <width>20</width>
+                        <height>20</height>
+                       </size>
                       </property>
                       <property name="checkable">
+                       <bool>true</bool>
+                      </property>
+                      <property name="flat">
                        <bool>true</bool>
                       </property>
                       <attribute name="buttonGroup">
@@ -2694,10 +2915,35 @@
                     </item>
                     <item>
                      <widget class="QPushButton" name="btn_editor_map_erase">
+                      <property name="minimumSize">
+                       <size>
+                        <width>30</width>
+                        <height>0</height>
+                       </size>
+                      </property>
+                      <property name="maximumSize">
+                       <size>
+                        <width>30</width>
+                        <height>16777215</height>
+                       </size>
+                      </property>
                       <property name="text">
-                       <string>擦除</string>
+                       <string/>
+                      </property>
+                      <property name="icon">
+                       <iconset resource="../assets/resources.qrc">
+                        <normaloff>:/icons/清空.svg</normaloff>:/icons/清空.svg</iconset>
+                      </property>
+                      <property name="iconSize">
+                       <size>
+                        <width>20</width>
+                        <height>20</height>
+                       </size>
                       </property>
                       <property name="checkable">
+                       <bool>true</bool>
+                      </property>
+                      <property name="flat">
                        <bool>true</bool>
                       </property>
                       <attribute name="buttonGroup">
@@ -2707,13 +2953,38 @@
                     </item>
                     <item>
                      <widget class="QPushButton" name="btn_editor_map_gird">
+                      <property name="minimumSize">
+                       <size>
+                        <width>30</width>
+                        <height>0</height>
+                       </size>
+                      </property>
+                      <property name="maximumSize">
+                       <size>
+                        <width>30</width>
+                        <height>16777215</height>
+                       </size>
+                      </property>
                       <property name="text">
-                       <string>网</string>
+                       <string/>
+                      </property>
+                      <property name="icon">
+                       <iconset resource="../assets/resources.qrc">
+                        <normaloff>:/icons/显示网格.svg</normaloff>:/icons/显示网格.svg</iconset>
+                      </property>
+                      <property name="iconSize">
+                       <size>
+                        <width>20</width>
+                        <height>20</height>
+                       </size>
                       </property>
                       <property name="checkable">
                        <bool>true</bool>
                       </property>
                       <property name="checked">
+                       <bool>true</bool>
+                      </property>
+                      <property name="flat">
                        <bool>true</bool>
                       </property>
                      </widget>
@@ -3213,35 +3484,100 @@
                        <item>
                         <widget class="QPushButton" name="btn_editor_map_layer_image">
                          <property name="text">
-                          <string>IMG</string>
+                          <string/>
+                         </property>
+                         <property name="icon">
+                          <iconset resource="../assets/resources.qrc">
+                           <normaloff>:/icons/图片库.svg</normaloff>:/icons/图片库.svg</iconset>
+                         </property>
+                         <property name="iconSize">
+                          <size>
+                           <width>20</width>
+                           <height>20</height>
+                          </size>
+                         </property>
+                         <property name="flat">
+                          <bool>true</bool>
                          </property>
                         </widget>
                        </item>
                        <item>
                         <widget class="QPushButton" name="btn_editor_map_layer_tiled">
                          <property name="text">
-                          <string>Tiled</string>
+                          <string/>
+                         </property>
+                         <property name="icon">
+                          <iconset resource="../assets/resources.qrc">
+                           <normaloff>:/icons/btn_preview_add.svg</normaloff>:/icons/btn_preview_add.svg</iconset>
+                         </property>
+                         <property name="iconSize">
+                          <size>
+                           <width>20</width>
+                           <height>20</height>
+                          </size>
+                         </property>
+                         <property name="flat">
+                          <bool>true</bool>
                          </property>
                         </widget>
                        </item>
                        <item>
                         <widget class="QPushButton" name="btn_editor_map_layer_del">
                          <property name="text">
-                          <string>删</string>
+                          <string/>
+                         </property>
+                         <property name="icon">
+                          <iconset resource="../assets/resources.qrc">
+                           <normaloff>:/icons/选中删除.svg</normaloff>:/icons/选中删除.svg</iconset>
+                         </property>
+                         <property name="iconSize">
+                          <size>
+                           <width>20</width>
+                           <height>20</height>
+                          </size>
+                         </property>
+                         <property name="flat">
+                          <bool>true</bool>
                          </property>
                         </widget>
                        </item>
                        <item>
                         <widget class="QPushButton" name="btn_editor_map_layer_up">
                          <property name="text">
-                          <string>上</string>
+                          <string/>
+                         </property>
+                         <property name="icon">
+                          <iconset resource="../assets/resources.qrc">
+                           <normaloff>:/icons/上移图层.svg</normaloff>:/icons/上移图层.svg</iconset>
+                         </property>
+                         <property name="iconSize">
+                          <size>
+                           <width>20</width>
+                           <height>20</height>
+                          </size>
+                         </property>
+                         <property name="flat">
+                          <bool>true</bool>
                          </property>
                         </widget>
                        </item>
                        <item>
                         <widget class="QPushButton" name="btn_editor_map_layer_down">
                          <property name="text">
-                          <string>下</string>
+                          <string/>
+                         </property>
+                         <property name="icon">
+                          <iconset resource="../assets/resources.qrc">
+                           <normaloff>:/icons/下移图层.svg</normaloff>:/icons/下移图层.svg</iconset>
+                         </property>
+                         <property name="iconSize">
+                          <size>
+                           <width>20</width>
+                           <height>20</height>
+                          </size>
+                         </property>
+                         <property name="flat">
+                          <bool>true</bool>
                          </property>
                         </widget>
                        </item>
@@ -4450,9 +4786,9 @@
  </resources>
  <connections/>
  <buttongroups>
-  <buttongroup name="buttonGroup"/>
-  <buttongroup name="buttonGroup_3"/>
   <buttongroup name="buttonGroup_4"/>
+  <buttongroup name="buttonGroup_3"/>
   <buttongroup name="buttonGroup_2"/>
+  <buttongroup name="buttonGroup"/>
  </buttongroups>
 </ui>
