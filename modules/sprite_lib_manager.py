@@ -83,6 +83,7 @@ class SpriteLibManager(QObject):
         self._pixmap_cache = {}
         self._setup_list_widget()
         self._connect_signals()
+        self.ui.sprite_lib_search.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
 
     def _setup_list_widget(self):
         lw = self.ui.sprite_lib_list
@@ -94,21 +95,6 @@ class SpriteLibManager(QObject):
         lw.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         lw.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         lw.setFrameShape(QListWidget.Shape.NoFrame)
-        lw.setStyleSheet("""
-            QListWidget {
-                background-color: #1E1E1E;
-                border: none;
-                outline: none;
-            }
-            QListWidget::item {
-                background: transparent;
-                border-radius: 8px;
-                margin: 2px;
-            }
-            QListWidget::item:selected {
-                background-color: #3D3D3D;
-            }
-        """)
         lw.setItemDelegate(SpriteLibCardDelegate())
         lw.itemClicked.connect(self._on_card_clicked)
 
@@ -119,6 +105,7 @@ class SpriteLibManager(QObject):
     def load_sprite_lib(self):
         self.ui.sprite_lib_list.clear()
         self.ui.sprite_lib_search.clear()
+        self.ui.sprite_lib_search.clearFocus()
 
         app_dir = self._get_app_dir()
         if not app_dir:

@@ -8,6 +8,8 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QApplication,
     QVBoxLayout,
+    QComboBox,
+    QWidget,
 )
 
 
@@ -31,6 +33,22 @@ from modules.map_lib_manager import MapLibManager
 from modules.sprite_lib_manager import SpriteLibManager
 from modules.map_res_lib_manager import MapResLibManager
 from modules.sound_lib_manager import SoundLibManager
+
+
+class MapSelectorComboBox(QComboBox):
+    def showPopup(self):
+        self.setMaxVisibleItems(max(self.count(), 1))
+        super().showPopup()
+        popup = self.view().parent()
+        if popup is None:
+            return
+        for child in popup.findChildren(QWidget):
+            cls = child.metaObject().className()
+            if "Scroller" in cls or "ToolButton" in cls:
+                child.hide()
+        btn_pos = self.mapToGlobal(self.rect().bottomLeft())
+        popup.move(btn_pos)
+        popup.setFixedWidth(self.width())
 
 
 class AppController:
@@ -78,11 +96,28 @@ class AppController:
         self.map_res_lib_manager = MapResLibManager(self.ui, self)
         self.sound_lib_manager = SoundLibManager(self.ui, self)
 
+        self._upgrade_map_selector()
+
         # 4. 绑定信号 (保持原有业务连接)
         self.setup_connections()
 
         # 自动切换到地图编辑器页面（调试用）
         # self.handle_switch_to_map_editor()
+
+    def _upgrade_map_selector(self):
+        old = self.ui.btn_editor_map_selectmap
+        parent = old.parent()
+        layout = old.parent().layout()
+        idx = layout.indexOf(old)
+        old.hide()
+        new_combo = MapSelectorComboBox(parent)
+        new_combo.setObjectName(old.objectName())
+        new_combo.setMinimumSize(old.minimumSize())
+        new_combo.setEditable(False)
+        layout.insertWidget(idx, new_combo)
+        layout.removeWidget(old)
+        old.deleteLater()
+        self.ui.btn_editor_map_selectmap = new_combo
 
     def setup_connections(self):
         """绑定业务信号，完全保留文件和编辑器逻辑"""
@@ -462,7 +497,10 @@ class AppController:
                 return
 
             # 3. 加载最后修改的 .py 文件（懒加载：其他文件通过代码列表点击加载）
-            all_files.sort(key=lambda x: os.path.getmtime(os.path.join(target_dir, x)), reverse=True)
+            all_files.sort(
+                key=lambda x: os.path.getmtime(os.path.join(target_dir, x)),
+                reverse=True,
+            )
 
             if all_files:
                 file_path = os.path.join(target_dir, all_files[0])

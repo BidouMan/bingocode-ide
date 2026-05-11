@@ -88,6 +88,7 @@ class MapResLibManager(QObject):
         self._current_category = "images"
         self._setup_list_widget()
         self._connect_signals()
+        self.ui.map_res_lib_search.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
 
     def _setup_list_widget(self):
         lw = self.ui.map_res_lib_list
@@ -99,21 +100,6 @@ class MapResLibManager(QObject):
         lw.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         lw.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         lw.setFrameShape(QListWidget.Shape.NoFrame)
-        lw.setStyleSheet("""
-            QListWidget {
-                background-color: #1E1E1E;
-                border: none;
-                outline: none;
-            }
-            QListWidget::item {
-                background: transparent;
-                border-radius: 8px;
-                margin: 2px;
-            }
-            QListWidget::item:selected {
-                background-color: #3D3D3D;
-            }
-        """)
         lw.setItemDelegate(MapResLibCardDelegate())
         lw.itemClicked.connect(self._on_card_clicked)
 
@@ -130,6 +116,7 @@ class MapResLibManager(QObject):
 
     def load_map_res_lib(self):
         self.ui.map_res_lib_search.clear()
+        self.ui.map_res_lib_search.clearFocus()
         self.ui.map_res_lib_btn1.setChecked(True)
         self._current_category = "images"
         self._load_category("images")

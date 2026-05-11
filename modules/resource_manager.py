@@ -915,19 +915,6 @@ class ResourceManager(QObject):
         return card
 
     def _build_sound_card_ui(self, card, name):
-        card.setStyleSheet("""
-            #soundCard {
-                background-color: #2D2D2D;
-                border-radius: 8px;
-                border: 2px solid transparent;
-            }
-            #soundCard:hover { background-color: #3D3D3D; }
-            #soundCard[selected="true"] {
-                background-color: #3D3D3D;
-                border: 2px solid #5bc772;
-            }
-        """)
-
         layout = QVBoxLayout(card)
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(2)
@@ -960,7 +947,6 @@ class ResourceManager(QObject):
         name_label.setObjectName("soundNameLabel")
         if hasattr(self, "custom_font_family"):
             name_label.setFont(QFont(self.custom_font_family, 12))
-        name_label.setStyleSheet("color: #E0E0E0; background: transparent;")
         layout.addWidget(name_label, 0, Qt.AlignmentFlag.AlignCenter)
 
         icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -1004,18 +990,6 @@ class ResourceManager(QObject):
 
     def _build_card_ui(self, card, name, icon_path):
         """负责卡片的视觉样式、图标处理和文字"""
-        card.setStyleSheet("""
-            #spriteCard {
-                background-color: #2D2D2D;
-                border-radius: 8px;
-                border: 2px solid transparent;
-            }
-            #spriteCard:hover { background-color: #3D3D3D; }
-            #spriteCard[selected="true"] {
-                background-color: #3D3D3D;
-                border: 2px solid #5bc772;
-            }
-        """)
 
         layout = QVBoxLayout(card)
         layout.setContentsMargins(5, 5, 5, 5)
@@ -1060,7 +1034,6 @@ class ResourceManager(QObject):
         name_label.setObjectName("spriteNameLabel")
         if hasattr(self, "custom_font_family"):
             name_label.setFont(QFont(self.custom_font_family, 12))
-        name_label.setStyleSheet("color: #E0E0E0; background: transparent;")
         layout.addWidget(name_label, 0, Qt.AlignmentFlag.AlignCenter)
 
         # 🚀 保持点击穿透
@@ -1069,18 +1042,6 @@ class ResourceManager(QObject):
 
     def _build_map_card_ui(self, card, name, icon_path, map_path=None):
         """负责地图卡片的视觉样式、图标处理和文字"""
-        card.setStyleSheet("""
-            #mapCard {
-                background-color: #2D2D2D;
-                border-radius: 8px;
-                border: 2px solid transparent;
-            }
-            #mapCard:hover { background-color: #3D3D3D; }
-            #mapCard[selected="true"] {
-                background-color: #3D3D3D;
-                border: 2px solid #5bc772;
-            }
-        """)
 
         layout = QVBoxLayout(card)
         layout.setContentsMargins(5, 5, 5, 5)
@@ -1111,7 +1072,6 @@ class ResourceManager(QObject):
         name_label.setObjectName("mapNameLabel")
         if hasattr(self, "custom_font_family"):
             name_label.setFont(QFont(self.custom_font_family, 12))
-        name_label.setStyleSheet("color: #E0E0E0; background: transparent;")
         layout.addWidget(name_label, 0, Qt.AlignmentFlag.AlignCenter)
 
         icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)

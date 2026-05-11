@@ -416,47 +416,246 @@ QToolTip {
 }
 
 UploadMenuManager #menu_frame,
-MapUploadMenuManager #menu_frame{
-    /* 设置背景色，这里用了一个深灰色，你可以换成你喜欢的颜色 */
+MapUploadMenuManager #menu_frame,
+SoundUploadMenuManager #menu_frame {
     background-color: #4B9B5C; 
     
-    /* 顶部圆角设置：左上, 右上, 右下, 左下 */
-    /* 宽度30px，半径建议设为 15px，刚好是一个完美的半圆顶 */
     border-top-left-radius: 15px;
     border-top-right-radius: 15px;
     border-bottom-left-radius: 0px;
     border-bottom-right-radius: 0px;
 
-    /* 可选：如果背景色太暗，加个细边框分界 */
-   
-    border-bottom: none; /* 底部不要边框，方便和按钮对接 */
+    border-bottom: none;
 }
 
 UploadMenuManager QPushButton,
-MapUploadMenuManager QPushButton {
+MapUploadMenuManager QPushButton,
+SoundUploadMenuManager QPushButton {
     border: none;
     background-color: transparent;
     padding: 0px;
-    margin: 0px;  /* 移除你之前可能加的 margin */
-    border-radius: 0px; /* 强制直角 */
+    margin: 0px;
+    border-radius: 0px;
 }
 
-/* 2. 通用的 Hover 状态 */
 UploadMenuManager #menu_frame QPushButton#btn_import:hover,
 UploadMenuManager #menu_frame QPushButton#btn_paint:hover,
 UploadMenuManager #menu_frame QPushButton#btn_open:hover,
 MapUploadMenuManager #menu_frame QPushButton#btn_import:hover,
 MapUploadMenuManager #menu_frame QPushButton#btn_creat:hover,
-MapUploadMenuManager #menu_frame QPushButton#btn_open:hover {
+MapUploadMenuManager #menu_frame QPushButton#btn_open:hover,
+SoundUploadMenuManager #menu_frame QPushButton#btn_import:hover,
+SoundUploadMenuManager #menu_frame QPushButton#btn_open:hover {
     background-color: #5bc772;
 }
 
-/* 🚀 3. 特殊处理：解决最顶端按钮的高亮溢出 */
-/* 假设 btn_import 是最上面的那个按钮 */
 UploadMenuManager QPushButton#btn_import:hover,
-MapUploadMenuManager QPushButton#btn_import:hover {
+MapUploadMenuManager QPushButton#btn_import:hover,
+SoundUploadMenuManager QPushButton#btn_import:hover {
     border-top-left-radius: 15px;
     border-top-right-radius: 15px;
+}
+
+
+/* ===== 资源库页面通用样式 ===== */
+
+/* --- 库页面容器 --- */
+#map_lib,
+#map_res_lib,
+#sound_lib,
+#sprite_lib {
+    background-color: rgb(30, 30, 30);
+}
+
+/* --- 库页面工具栏 --- */
+#map_lib_toolbar_frame,
+#map_res_lib_toolbar_frame,
+#sound_lib_toolbar_frame,
+#sprite_lib_toolbar_frame {
+    background-color: rgb(34, 37, 43);
+    border: none;
+    border-bottom: 1px solid rgb(12, 12, 12);
+}
+
+/* --- 库页面搜索框 --- */
+#mab_lib_search,
+#map_res_lib_search,
+#sound_lib_search,
+#sprite_lib_search {
+    background-color: rgb(40, 43, 52);
+    border: 1px solid rgb(55, 59, 68);
+    border-radius: 4px;
+    color: white;
+    padding: 3px 8px;
+    font-size: 12px;
+}
+
+#mab_lib_search:hover,
+#map_res_lib_search:hover,
+#sound_lib_search:hover,
+#sprite_lib_search:hover {
+    background-color: rgb(50, 53, 62);
+    border: 1px solid rgb(65, 69, 82);
+}
+
+#mab_lib_search:focus,
+#map_res_lib_search:focus,
+#sound_lib_search:focus,
+#sprite_lib_search:focus {
+    background-color: rgb(55, 59, 68);
+    border: 1px solid #528bff;
+    color: white;
+}
+
+/* --- 库页面返回按钮 --- */
+#mab_lib_return_btn,
+#map_res_lib_return,
+#sound_lib_return,
+#sprite_lib_return {
+    border: none;
+    border-radius: 4px;
+    background-color: transparent;
+    color: #9ca0a4;
+    padding: 4px 8px;
+}
+
+#mab_lib_return_btn:hover,
+#map_res_lib_return:hover,
+#sound_lib_return:hover,
+#sprite_lib_return:hover {
+    background-color: rgb(61, 64, 72);
+    color: white;
+}
+
+/* --- 库页面分类按钮 --- */
+#map_res_lib_btn1, #map_res_lib_btn2, #map_res_lib_btn3,
+#sound_lib_btn1, #sound_lib_btn2, #sound_lib_btn3 {
+    border: none;
+    border-radius: 4px;
+    background-color: transparent;
+    color: #9ca0a4;
+    padding: 4px 10px;
+    font-size: 12px;
+}
+
+#map_res_lib_btn1:hover, #map_res_lib_btn2:hover, #map_res_lib_btn3:hover,
+#sound_lib_btn1:hover, #sound_lib_btn2:hover, #sound_lib_btn3:hover {
+    background-color: rgb(61, 64, 72);
+    color: white;
+}
+
+#map_res_lib_btn1:checked, #map_res_lib_btn2:checked, #map_res_lib_btn3:checked,
+#sound_lib_btn1:checked, #sound_lib_btn2:checked, #sound_lib_btn3:checked {
+    background-color: rgb(46, 49, 58);
+    border: 1px solid rgb(55, 59, 68);
+    color: white;
+}
+
+/* --- 库页面列表 --- */
+#map_lib_list,
+#map_res_lib_list,
+#sprite_lib_list,
+#listWidget_2 {
+    background-color: rgb(30, 30, 30);
+    border: none;
+    outline: none;
+}
+
+#map_lib_list::item,
+#map_res_lib_list::item,
+#sprite_lib_list::item,
+#listWidget_2::item {
+    background: transparent;
+    border-radius: 8px;
+    margin: 2px;
+}
+
+#map_lib_list::item:selected,
+#map_res_lib_list::item:selected,
+#sprite_lib_list::item:selected,
+#listWidget_2::item:selected {
+    background-color: #2c313a;
+}
+
+#map_lib_list::item:hover,
+#map_res_lib_list::item:hover,
+#sprite_lib_list::item:hover,
+#listWidget_2::item:hover {
+    background-color: #2c313a;
+}
+
+/* --- 库页面列表容器 --- */
+#map_lib_list_frame,
+#map_res_lib_list_frame,
+#sprite_lib_list_frame {
+    background-color: rgb(30, 30, 30);
+    border: none;
+}
+
+/* --- 资源卡片 (大纲面板中的 sprite/map/sound 卡片) --- */
+#spriteCard,
+#mapCard,
+#soundCard {
+    background-color: #2D2D2D;
+    border-radius: 8px;
+    border: 2px solid transparent;
+}
+
+#spriteCard:hover,
+#mapCard:hover,
+#soundCard:hover {
+    background-color: #3D3D3D;
+}
+
+#spriteCard[selected="true"],
+#mapCard[selected="true"],
+#soundCard[selected="true"] {
+    background-color: #3D3D3D;
+    border: 2px solid #5bc772;
+}
+
+/* --- 资源卡片名称标签 --- */
+#spriteNameLabel,
+#mapNameLabel,
+#soundNameLabel {
+    color: #E0E0E0;
+    background: transparent;
+}
+
+/* --- 大纲面板列表 --- */
+#list_sprite,
+#list_map,
+#list_sound {
+    border: none;
+    background: transparent;
+    outline: none;
+}
+
+#list_sprite::item,
+#list_map::item,
+#list_sound::item {
+    background: transparent;
+    border-radius: 8px;
+    margin: 2px 5px;
+}
+
+#list_sprite::item:selected,
+#list_map::item:selected,
+#list_sound::item:selected {
+    background-color: #3D3D3D;
+}
+
+#list_sprite::item:selected:!active,
+#list_map::item:selected:!active,
+#list_sound::item:selected:!active {
+    background-color: transparent;
+}
+
+#list_sprite QWidget,
+#list_map QWidget,
+#list_sound QWidget {
+    background: transparent;
+    border: none;
 }
 
 

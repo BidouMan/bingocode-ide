@@ -28,7 +28,7 @@ class Ui_Form(object):
     def setupUi(self, Form):
         if not Form.objectName():
             Form.setObjectName(u"Form")
-        Form.resize(1067, 743)
+        Form.resize(1015, 762)
         sizePolicy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
@@ -829,7 +829,7 @@ class Ui_Form(object):
         self.res_list_toobar.setFrameShape(QFrame.Shape.NoFrame)
         self.res_list_toobar.setFrameShadow(QFrame.Shadow.Raised)
         self.horizontalLayout_14 = QHBoxLayout(self.res_list_toobar)
-        self.horizontalLayout_14.setSpacing(0)
+        self.horizontalLayout_14.setSpacing(5)
         self.horizontalLayout_14.setObjectName(u"horizontalLayout_14")
         self.horizontalLayout_14.setContentsMargins(0, 0, 0, 0)
         self.btn_res_list_open = QPushButton(self.res_list_toobar)
@@ -903,33 +903,25 @@ class Ui_Form(object):
 
         self.verticalLayout_24.addWidget(self.res_list_view, 0, Qt.AlignmentFlag.AlignHCenter)
 
-        self.col_tag_label = QLabel(self.editor_map_left)
-        self.col_tag_label.setObjectName(u"col_tag_label")
-        self.col_tag_label.setMinimumSize(QSize(0, 30))
-        self.col_tag_label.setMaximumSize(QSize(16777215, 30))
-        self.col_tag_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.verticalLayout_24.addWidget(self.col_tag_label)
-
         self.res_col_toolbar = QFrame(self.editor_map_left)
         self.res_col_toolbar.setObjectName(u"res_col_toolbar")
         sizePolicy8.setHeightForWidth(self.res_col_toolbar.sizePolicy().hasHeightForWidth())
         self.res_col_toolbar.setSizePolicy(sizePolicy8)
-        self.res_col_toolbar.setMinimumSize(QSize(256, 30))
-        self.res_col_toolbar.setMaximumSize(QSize(256, 30))
+        self.res_col_toolbar.setMinimumSize(QSize(256, 40))
+        self.res_col_toolbar.setMaximumSize(QSize(256, 40))
         self.res_col_toolbar.setFrameShape(QFrame.Shape.NoFrame)
         self.res_col_toolbar.setMidLineWidth(0)
         self.horizontalLayout_15 = QHBoxLayout(self.res_col_toolbar)
-        self.horizontalLayout_15.setSpacing(0)
+        self.horizontalLayout_15.setSpacing(5)
         self.horizontalLayout_15.setObjectName(u"horizontalLayout_15")
-        self.horizontalLayout_15.setContentsMargins(0, 0, 0, 0)
+        self.horizontalLayout_15.setContentsMargins(0, 8, 0, 8)
         self.btn_res_col_move = QPushButton(self.res_col_toolbar)
         self.buttonGroup_2 = QButtonGroup(Form)
         self.buttonGroup_2.setObjectName(u"buttonGroup_2")
         self.buttonGroup_2.addButton(self.btn_res_col_move)
         self.btn_res_col_move.setObjectName(u"btn_res_col_move")
-        self.btn_res_col_move.setMinimumSize(QSize(0, 30))
-        self.btn_res_col_move.setMaximumSize(QSize(16777215, 30))
+        self.btn_res_col_move.setMinimumSize(QSize(0, 24))
+        self.btn_res_col_move.setMaximumSize(QSize(16777215, 24))
         self.btn_res_col_move.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         icon20 = QIcon()
         icon20.addFile(u":/icons/\u79fb\u52a8\u951a\u70b9.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
@@ -945,8 +937,8 @@ class Ui_Form(object):
         self.btn_res_col_add = QPushButton(self.res_col_toolbar)
         self.buttonGroup_2.addButton(self.btn_res_col_add)
         self.btn_res_col_add.setObjectName(u"btn_res_col_add")
-        self.btn_res_col_add.setMinimumSize(QSize(0, 30))
-        self.btn_res_col_add.setMaximumSize(QSize(16777215, 30))
+        self.btn_res_col_add.setMinimumSize(QSize(0, 24))
+        self.btn_res_col_add.setMaximumSize(QSize(16777215, 24))
         self.btn_res_col_add.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         icon21 = QIcon()
         icon21.addFile(u":/icons/\u6dfb\u52a0\u951a\u70b9.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
@@ -960,8 +952,8 @@ class Ui_Form(object):
         self.btn_res_col_del = QPushButton(self.res_col_toolbar)
         self.buttonGroup_2.addButton(self.btn_res_col_del)
         self.btn_res_col_del.setObjectName(u"btn_res_col_del")
-        self.btn_res_col_del.setMinimumSize(QSize(0, 30))
-        self.btn_res_col_del.setMaximumSize(QSize(16777215, 30))
+        self.btn_res_col_del.setMinimumSize(QSize(0, 24))
+        self.btn_res_col_del.setMaximumSize(QSize(16777215, 24))
         self.btn_res_col_del.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         icon22 = QIcon()
         icon22.addFile(u":/icons/\u5220\u9664\u951a\u70b9.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
@@ -974,8 +966,8 @@ class Ui_Form(object):
 
         self.btn_res_col_reset = QPushButton(self.res_col_toolbar)
         self.btn_res_col_reset.setObjectName(u"btn_res_col_reset")
-        self.btn_res_col_reset.setMinimumSize(QSize(0, 30))
-        self.btn_res_col_reset.setMaximumSize(QSize(16777215, 30))
+        self.btn_res_col_reset.setMinimumSize(QSize(0, 24))
+        self.btn_res_col_reset.setMaximumSize(QSize(16777215, 24))
         self.btn_res_col_reset.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         icon23 = QIcon()
         icon23.addFile(u":/icons/\u91cd\u7f6e\u951a\u70b9.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
@@ -989,8 +981,8 @@ class Ui_Form(object):
 
         self.btn_res_col_snap = QPushButton(self.res_col_toolbar)
         self.btn_res_col_snap.setObjectName(u"btn_res_col_snap")
-        self.btn_res_col_snap.setMinimumSize(QSize(0, 30))
-        self.btn_res_col_snap.setMaximumSize(QSize(16777215, 30))
+        self.btn_res_col_snap.setMinimumSize(QSize(0, 24))
+        self.btn_res_col_snap.setMaximumSize(QSize(16777215, 24))
         self.btn_res_col_snap.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         icon24 = QIcon()
         icon24.addFile(u":/icons/\u5438\u9644\u951a\u70b9.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
@@ -1069,7 +1061,7 @@ class Ui_Form(object):
         self.editor_map_toolbar.setFrameShape(QFrame.Shape.NoFrame)
         self.editor_map_toolbar.setFrameShadow(QFrame.Shadow.Raised)
         self.horizontalLayout_18 = QHBoxLayout(self.editor_map_toolbar)
-        self.horizontalLayout_18.setSpacing(1)
+        self.horizontalLayout_18.setSpacing(5)
         self.horizontalLayout_18.setObjectName(u"horizontalLayout_18")
         self.horizontalLayout_18.setContentsMargins(0, 0, 0, 0)
         self.btn_editor_map_new = QPushButton(self.editor_map_toolbar)
@@ -1258,44 +1250,43 @@ class Ui_Form(object):
         self.editor_map_right.setObjectName(u"editor_map_right")
         sizePolicy8.setHeightForWidth(self.editor_map_right.sizePolicy().hasHeightForWidth())
         self.editor_map_right.setSizePolicy(sizePolicy8)
-        self.editor_map_right.setMinimumSize(QSize(240, 0))
-        self.editor_map_right.setMaximumSize(QSize(240, 16777215))
-        self.verticalLayout_28 = QVBoxLayout(self.editor_map_right)
-        self.verticalLayout_28.setSpacing(0)
-        self.verticalLayout_28.setObjectName(u"verticalLayout_28")
-        self.verticalLayout_28.setContentsMargins(0, 0, 0, 0)
-        self.editor_map_right_bg = QFrame(self.editor_map_right)
-        self.editor_map_right_bg.setObjectName(u"editor_map_right_bg")
-        self.editor_map_right_bg.setFrameShape(QFrame.Shape.NoFrame)
-        self.editor_map_right_bg.setFrameShadow(QFrame.Shadow.Raised)
-        self.verticalLayout_23 = QVBoxLayout(self.editor_map_right_bg)
-        self.verticalLayout_23.setSpacing(0)
-        self.verticalLayout_23.setObjectName(u"verticalLayout_23")
-        self.verticalLayout_23.setContentsMargins(4, 0, 4, 0)
-        self.label_8 = QLabel(self.editor_map_right_bg)
-        self.label_8.setObjectName(u"label_8")
-        self.label_8.setMinimumSize(QSize(0, 30))
-        self.label_8.setMaximumSize(QSize(16777215, 30))
-        self.label_8.setFrameShape(QFrame.Shape.NoFrame)
-        self.label_8.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.editor_map_right.setMinimumSize(QSize(0, 0))
+        self.editor_map_right.setMaximumSize(QSize(16777215, 16777215))
+        self.verticalLayout_22 = QVBoxLayout(self.editor_map_right)
+        self.verticalLayout_22.setSpacing(0)
+        self.verticalLayout_22.setObjectName(u"verticalLayout_22")
+        self.verticalLayout_22.setContentsMargins(6, 0, 6, 0)
+        self.att_tag_name = QLabel(self.editor_map_right)
+        self.att_tag_name.setObjectName(u"att_tag_name")
+        self.att_tag_name.setMinimumSize(QSize(256, 30))
+        self.att_tag_name.setMaximumSize(QSize(256, 30))
+        self.att_tag_name.setFrameShape(QFrame.Shape.NoFrame)
+        self.att_tag_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.verticalLayout_23.addWidget(self.label_8)
+        self.verticalLayout_22.addWidget(self.att_tag_name)
 
-        self.frame_9 = QFrame(self.editor_map_right_bg)
-        self.frame_9.setObjectName(u"frame_9")
-        self.frame_9.setFrameShape(QFrame.Shape.NoFrame)
-        self.frame_9.setFrameShadow(QFrame.Shadow.Raised)
-        self.gridLayout = QGridLayout(self.frame_9)
+        self.att_frame = QFrame(self.editor_map_right)
+        self.att_frame.setObjectName(u"att_frame")
+        self.att_frame.setMinimumSize(QSize(256, 0))
+        self.att_frame.setMaximumSize(QSize(256, 16777215))
+        self.att_frame.setFrameShape(QFrame.Shape.NoFrame)
+        self.att_frame.setFrameShadow(QFrame.Shadow.Raised)
+        self.gridLayout = QGridLayout(self.att_frame)
         self.gridLayout.setSpacing(10)
         self.gridLayout.setObjectName(u"gridLayout")
         self.gridLayout.setSizeConstraint(QLayout.SizeConstraint.SetDefaultConstraint)
         self.gridLayout.setContentsMargins(8, 4, 8, 10)
-        self.label_16 = QLabel(self.frame_9)
-        self.label_16.setObjectName(u"label_16")
+        self.att_tag = QLineEdit(self.att_frame)
+        self.att_tag.setObjectName(u"att_tag")
 
-        self.gridLayout.addWidget(self.label_16, 5, 0, 1, 1)
+        self.gridLayout.addWidget(self.att_tag, 12, 2, 1, 1)
 
-        self.att_col_type = QComboBox(self.frame_9)
+        self.label_15 = QLabel(self.att_frame)
+        self.label_15.setObjectName(u"label_15")
+
+        self.gridLayout.addWidget(self.label_15, 8, 0, 1, 1)
+
+        self.att_col_type = QComboBox(self.att_frame)
         self.att_col_type.addItem("")
         self.att_col_type.addItem("")
         self.att_col_type.addItem("")
@@ -1306,24 +1297,14 @@ class Ui_Form(object):
 
         self.gridLayout.addWidget(self.att_col_type, 11, 2, 1, 1)
 
-        self.att_collision = QLabel(self.frame_9)
-        self.att_collision.setObjectName(u"att_collision")
-
-        self.gridLayout.addWidget(self.att_collision, 14, 0, 1, 1)
-
-        self.map_collision = QCheckBox(self.frame_9)
-        self.map_collision.setObjectName(u"map_collision")
-
-        self.gridLayout.addWidget(self.map_collision, 14, 2, 1, 1)
-
         self.horizontalLayout_13 = QHBoxLayout()
         self.horizontalLayout_13.setObjectName(u"horizontalLayout_13")
-        self.label_20 = QLabel(self.frame_9)
+        self.label_20 = QLabel(self.att_frame)
         self.label_20.setObjectName(u"label_20")
 
         self.horizontalLayout_13.addWidget(self.label_20)
 
-        self.att_mapsize_y = QLineEdit(self.frame_9)
+        self.att_mapsize_y = QLineEdit(self.att_frame)
         self.att_mapsize_y.setObjectName(u"att_mapsize_y")
 
         self.horizontalLayout_13.addWidget(self.att_mapsize_y)
@@ -1331,19 +1312,24 @@ class Ui_Form(object):
 
         self.gridLayout.addLayout(self.horizontalLayout_13, 3, 2, 1, 1)
 
-        self.label_12 = QLabel(self.frame_9)
-        self.label_12.setObjectName(u"label_12")
+        self.map_collision = QCheckBox(self.att_frame)
+        self.map_collision.setObjectName(u"map_collision")
 
-        self.gridLayout.addWidget(self.label_12, 11, 0, 1, 1)
+        self.gridLayout.addWidget(self.map_collision, 14, 2, 1, 1)
+
+        self.att_collision = QLabel(self.att_frame)
+        self.att_collision.setObjectName(u"att_collision")
+
+        self.gridLayout.addWidget(self.att_collision, 14, 0, 1, 1)
 
         self.horizontalLayout_12 = QHBoxLayout()
         self.horizontalLayout_12.setObjectName(u"horizontalLayout_12")
-        self.label_19 = QLabel(self.frame_9)
+        self.label_19 = QLabel(self.att_frame)
         self.label_19.setObjectName(u"label_19")
 
         self.horizontalLayout_12.addWidget(self.label_19)
 
-        self.att_mapsize_x = QLineEdit(self.frame_9)
+        self.att_mapsize_x = QLineEdit(self.att_frame)
         self.att_mapsize_x.setObjectName(u"att_mapsize_x")
 
         self.horizontalLayout_12.addWidget(self.att_mapsize_x)
@@ -1351,12 +1337,21 @@ class Ui_Form(object):
 
         self.gridLayout.addLayout(self.horizontalLayout_12, 2, 2, 1, 1)
 
-        self.att_map_name = QLineEdit(self.frame_9)
-        self.att_map_name.setObjectName(u"att_map_name")
+        self.label_13 = QLabel(self.att_frame)
+        self.label_13.setObjectName(u"label_13")
 
-        self.gridLayout.addWidget(self.att_map_name, 1, 2, 1, 1)
+        self.gridLayout.addWidget(self.label_13, 1, 0, 1, 1)
 
-        self.att_tile_size = QComboBox(self.frame_9)
+        self.horizontalSpacer_12 = QSpacerItem(30, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        self.gridLayout.addItem(self.horizontalSpacer_12, 1, 1, 1, 1)
+
+        self.att_gravity = QCheckBox(self.att_frame)
+        self.att_gravity.setObjectName(u"att_gravity")
+
+        self.gridLayout.addWidget(self.att_gravity, 5, 2, 1, 1)
+
+        self.att_tile_size = QComboBox(self.att_frame)
         self.att_tile_size.addItem("")
         self.att_tile_size.addItem("")
         self.att_tile_size.addItem("")
@@ -1367,65 +1362,53 @@ class Ui_Form(object):
 
         self.gridLayout.addWidget(self.att_tile_size, 8, 2, 1, 1)
 
-        self.att_tag = QLineEdit(self.frame_9)
-        self.att_tag.setObjectName(u"att_tag")
-
-        self.gridLayout.addWidget(self.att_tag, 12, 2, 1, 1)
-
-        self.label_14 = QLabel(self.frame_9)
+        self.label_14 = QLabel(self.att_frame)
         self.label_14.setObjectName(u"label_14")
 
         self.gridLayout.addWidget(self.label_14, 2, 0, 1, 1)
 
-        self.label_15 = QLabel(self.frame_9)
-        self.label_15.setObjectName(u"label_15")
+        self.label_16 = QLabel(self.att_frame)
+        self.label_16.setObjectName(u"label_16")
 
-        self.gridLayout.addWidget(self.label_15, 8, 0, 1, 1)
+        self.gridLayout.addWidget(self.label_16, 5, 0, 1, 1)
 
-        self.label_13 = QLabel(self.frame_9)
-        self.label_13.setObjectName(u"label_13")
+        self.att_map_name = QLineEdit(self.att_frame)
+        self.att_map_name.setObjectName(u"att_map_name")
 
-        self.gridLayout.addWidget(self.label_13, 1, 0, 1, 1)
+        self.gridLayout.addWidget(self.att_map_name, 1, 2, 1, 1)
 
-        self.horizontalSpacer_12 = QSpacerItem(30, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.label_12 = QLabel(self.att_frame)
+        self.label_12.setObjectName(u"label_12")
 
-        self.gridLayout.addItem(self.horizontalSpacer_12, 1, 1, 1, 1)
-
-        self.att_gravity = QCheckBox(self.frame_9)
-        self.att_gravity.setObjectName(u"att_gravity")
-
-        self.gridLayout.addWidget(self.att_gravity, 5, 2, 1, 1)
+        self.gridLayout.addWidget(self.label_12, 11, 0, 1, 1)
 
 
-        self.verticalLayout_23.addWidget(self.frame_9)
+        self.verticalLayout_22.addWidget(self.att_frame, 0, Qt.AlignmentFlag.AlignHCenter)
 
-        self.label_24 = QLabel(self.editor_map_right_bg)
-        self.label_24.setObjectName(u"label_24")
-        self.label_24.setMinimumSize(QSize(0, 30))
-        self.label_24.setMaximumSize(QSize(16777215, 30))
-        self.label_24.setFrameShape(QFrame.Shape.NoFrame)
-        self.label_24.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.layer_tag_name = QLabel(self.editor_map_right)
+        self.layer_tag_name.setObjectName(u"layer_tag_name")
+        self.layer_tag_name.setEnabled(False)
+        self.layer_tag_name.setMinimumSize(QSize(256, 30))
+        self.layer_tag_name.setMaximumSize(QSize(256, 30))
+        self.layer_tag_name.setFrameShape(QFrame.Shape.NoFrame)
+        self.layer_tag_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.verticalLayout_23.addWidget(self.label_24)
+        self.verticalLayout_22.addWidget(self.layer_tag_name, 0, Qt.AlignmentFlag.AlignHCenter)
 
-        self.editor_map_layer_list = QListWidget(self.editor_map_right_bg)
-        self.editor_map_layer_list.setObjectName(u"editor_map_layer_list")
-        self.editor_map_layer_list.setFrameShape(QFrame.Shape.NoFrame)
-
-        self.verticalLayout_23.addWidget(self.editor_map_layer_list)
-
-        self.layer_editor_toolbar = QFrame(self.editor_map_right_bg)
+        self.layer_editor_toolbar = QFrame(self.editor_map_right)
         self.layer_editor_toolbar.setObjectName(u"layer_editor_toolbar")
-        self.layer_editor_toolbar.setMinimumSize(QSize(0, 30))
-        self.layer_editor_toolbar.setMaximumSize(QSize(16777215, 30))
+        self.layer_editor_toolbar.setMinimumSize(QSize(256, 30))
+        self.layer_editor_toolbar.setMaximumSize(QSize(256, 30))
         self.layer_editor_toolbar.setFrameShape(QFrame.Shape.NoFrame)
         self.layer_editor_toolbar.setFrameShadow(QFrame.Shadow.Raised)
         self.horizontalLayout_21 = QHBoxLayout(self.layer_editor_toolbar)
-        self.horizontalLayout_21.setSpacing(1)
+        self.horizontalLayout_21.setSpacing(5)
         self.horizontalLayout_21.setObjectName(u"horizontalLayout_21")
-        self.horizontalLayout_21.setContentsMargins(0, 0, 0, 0)
+        self.horizontalLayout_21.setContentsMargins(0, 3, 0, 3)
         self.btn_editor_map_layer_image = QPushButton(self.layer_editor_toolbar)
         self.btn_editor_map_layer_image.setObjectName(u"btn_editor_map_layer_image")
+        self.btn_editor_map_layer_image.setMinimumSize(QSize(0, 24))
+        self.btn_editor_map_layer_image.setMaximumSize(QSize(16777215, 24))
         self.btn_editor_map_layer_image.setIcon(icon16)
         self.btn_editor_map_layer_image.setIconSize(QSize(20, 20))
         self.btn_editor_map_layer_image.setFlat(True)
@@ -1434,6 +1417,8 @@ class Ui_Form(object):
 
         self.btn_editor_map_layer_tiled = QPushButton(self.layer_editor_toolbar)
         self.btn_editor_map_layer_tiled.setObjectName(u"btn_editor_map_layer_tiled")
+        self.btn_editor_map_layer_tiled.setMinimumSize(QSize(0, 24))
+        self.btn_editor_map_layer_tiled.setMaximumSize(QSize(16777215, 24))
         self.btn_editor_map_layer_tiled.setIcon(icon15)
         self.btn_editor_map_layer_tiled.setIconSize(QSize(20, 20))
         self.btn_editor_map_layer_tiled.setFlat(True)
@@ -1442,6 +1427,8 @@ class Ui_Form(object):
 
         self.btn_editor_map_layer_del = QPushButton(self.layer_editor_toolbar)
         self.btn_editor_map_layer_del.setObjectName(u"btn_editor_map_layer_del")
+        self.btn_editor_map_layer_del.setMinimumSize(QSize(0, 24))
+        self.btn_editor_map_layer_del.setMaximumSize(QSize(16777215, 24))
         self.btn_editor_map_layer_del.setIcon(icon18)
         self.btn_editor_map_layer_del.setIconSize(QSize(20, 20))
         self.btn_editor_map_layer_del.setFlat(True)
@@ -1450,6 +1437,8 @@ class Ui_Form(object):
 
         self.btn_editor_map_layer_up = QPushButton(self.layer_editor_toolbar)
         self.btn_editor_map_layer_up.setObjectName(u"btn_editor_map_layer_up")
+        self.btn_editor_map_layer_up.setMinimumSize(QSize(0, 24))
+        self.btn_editor_map_layer_up.setMaximumSize(QSize(16777215, 24))
         icon33 = QIcon()
         icon33.addFile(u":/icons/\u4e0a\u79fb\u56fe\u5c42.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.btn_editor_map_layer_up.setIcon(icon33)
@@ -1460,6 +1449,8 @@ class Ui_Form(object):
 
         self.btn_editor_map_layer_down = QPushButton(self.layer_editor_toolbar)
         self.btn_editor_map_layer_down.setObjectName(u"btn_editor_map_layer_down")
+        self.btn_editor_map_layer_down.setMinimumSize(QSize(0, 24))
+        self.btn_editor_map_layer_down.setMaximumSize(QSize(16777215, 24))
         icon34 = QIcon()
         icon34.addFile(u":/icons/\u4e0b\u79fb\u56fe\u5c42.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.btn_editor_map_layer_down.setIcon(icon34)
@@ -1469,20 +1460,28 @@ class Ui_Form(object):
         self.horizontalLayout_21.addWidget(self.btn_editor_map_layer_down)
 
 
-        self.verticalLayout_23.addWidget(self.layer_editor_toolbar)
+        self.verticalLayout_22.addWidget(self.layer_editor_toolbar)
 
-        self.widget_3 = QWidget(self.editor_map_right_bg)
-        self.widget_3.setObjectName(u"widget_3")
-        self.widget_3.setMinimumSize(QSize(0, 30))
-        self.widget_3.setMaximumSize(QSize(16777215, 30))
-        self.horizontalLayout_20 = QHBoxLayout(self.widget_3)
+        self.editor_map_layer_list = QListWidget(self.editor_map_right)
+        self.editor_map_layer_list.setObjectName(u"editor_map_layer_list")
+        self.editor_map_layer_list.setMinimumSize(QSize(256, 0))
+        self.editor_map_layer_list.setMaximumSize(QSize(256, 16777215))
+        self.editor_map_layer_list.setFrameShape(QFrame.Shape.NoFrame)
+
+        self.verticalLayout_22.addWidget(self.editor_map_layer_list, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        self.layer_info = QWidget(self.editor_map_right)
+        self.layer_info.setObjectName(u"layer_info")
+        self.layer_info.setMinimumSize(QSize(256, 30))
+        self.layer_info.setMaximumSize(QSize(256, 30))
+        self.horizontalLayout_20 = QHBoxLayout(self.layer_info)
         self.horizontalLayout_20.setObjectName(u"horizontalLayout_20")
         self.horizontalLayout_20.setContentsMargins(0, 0, 0, 0)
         self.horizontalSpacer_14 = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
         self.horizontalLayout_20.addItem(self.horizontalSpacer_14)
 
-        self.label_map_layer_mode = QLabel(self.widget_3)
+        self.label_map_layer_mode = QLabel(self.layer_info)
         self.label_map_layer_mode.setObjectName(u"label_map_layer_mode")
 
         self.horizontalLayout_20.addWidget(self.label_map_layer_mode)
@@ -1492,10 +1491,7 @@ class Ui_Form(object):
         self.horizontalLayout_20.addItem(self.horizontalSpacer_15)
 
 
-        self.verticalLayout_23.addWidget(self.widget_3)
-
-
-        self.verticalLayout_28.addWidget(self.editor_map_right_bg)
+        self.verticalLayout_22.addWidget(self.layer_info, 0, Qt.AlignmentFlag.AlignHCenter)
 
 
         self.horizontalLayout_24.addWidget(self.editor_map_right)
@@ -1991,7 +1987,6 @@ class Ui_Form(object):
         self.btn_res_list_upload.setText("")
         self.btn_res_list_del.setText("")
         self.btn_res_list_clear.setText("")
-        self.col_tag_label.setText(QCoreApplication.translate("Form", u"\u78b0\u649e\u7f16\u8f91\u5668", None))
         self.btn_res_col_move.setText("")
         self.btn_res_col_add.setText("")
         self.btn_res_col_del.setText("")
@@ -2012,31 +2007,31 @@ class Ui_Form(object):
         self.label_editor_map_size.setText(QCoreApplication.translate("Form", u"\u573a\u666f\u5927\u5c0f:--", None))
         self.label_editor_map_pos.setText(QCoreApplication.translate("Form", u"\u5750\u6807:--", None))
         self.label_res_list_size.setText(QCoreApplication.translate("Form", u"\u8d44\u6e90\u5c3a\u5bf8:--", None))
-        self.label_8.setText(QCoreApplication.translate("Form", u"\u5c5e\u6027", None))
-        self.label_16.setText(QCoreApplication.translate("Form", u"\u5730\u56fe\u91cd\u529b", None))
+        self.att_tag_name.setText(QCoreApplication.translate("Form", u"\u5c5e\u6027", None))
+        self.label_15.setText(QCoreApplication.translate("Form", u"\u56fe\u5757\u5c3a\u5bf8", None))
         self.att_col_type.setItemText(0, QCoreApplication.translate("Form", u"\u5899\u4f53", None))
         self.att_col_type.setItemText(1, QCoreApplication.translate("Form", u"\u8df3\u677f", None))
         self.att_col_type.setItemText(2, QCoreApplication.translate("Form", u"\u56fe\u50cf", None))
         self.att_col_type.setItemText(3, QCoreApplication.translate("Form", u"\u81ea\u5b9a\u4e49", None))
 
         self.att_col_type.setCurrentText(QCoreApplication.translate("Form", u"\u5899\u4f53", None))
-        self.att_collision.setText(QCoreApplication.translate("Form", u"\u78b0\u649e", None))
-        self.map_collision.setText(QCoreApplication.translate("Form", u"\u542f\u7528", None))
         self.label_20.setText(QCoreApplication.translate("Form", u"Y", None))
         self.att_mapsize_y.setText(QCoreApplication.translate("Form", u"100", None))
-        self.label_12.setText(QCoreApplication.translate("Form", u"\u7269\u7406\u5c5e\u6027", None))
+        self.map_collision.setText(QCoreApplication.translate("Form", u"\u542f\u7528", None))
+        self.att_collision.setText(QCoreApplication.translate("Form", u"\u78b0\u649e", None))
         self.label_19.setText(QCoreApplication.translate("Form", u"X", None))
         self.att_mapsize_x.setText(QCoreApplication.translate("Form", u"100", None))
-        self.att_map_name.setText(QCoreApplication.translate("Form", u"\u5730\u56fe1", None))
+        self.label_13.setText(QCoreApplication.translate("Form", u"\u5730\u56fe\u540d\u79f0", None))
+        self.att_gravity.setText(QCoreApplication.translate("Form", u"\u542f\u7528", None))
         self.att_tile_size.setItemText(0, QCoreApplication.translate("Form", u"16x16", None))
         self.att_tile_size.setItemText(1, QCoreApplication.translate("Form", u"32x32", None))
         self.att_tile_size.setItemText(2, QCoreApplication.translate("Form", u"64x64", None))
 
         self.label_14.setText(QCoreApplication.translate("Form", u"\u5730\u56fe\u5c3a\u5bf8", None))
-        self.label_15.setText(QCoreApplication.translate("Form", u"\u56fe\u5757\u5c3a\u5bf8", None))
-        self.label_13.setText(QCoreApplication.translate("Form", u"\u5730\u56fe\u540d\u79f0", None))
-        self.att_gravity.setText(QCoreApplication.translate("Form", u"\u542f\u7528", None))
-        self.label_24.setText(QCoreApplication.translate("Form", u"\u56fe\u5c42", None))
+        self.label_16.setText(QCoreApplication.translate("Form", u"\u5730\u56fe\u91cd\u529b", None))
+        self.att_map_name.setText(QCoreApplication.translate("Form", u"\u5730\u56fe1", None))
+        self.label_12.setText(QCoreApplication.translate("Form", u"\u7269\u7406\u5c5e\u6027", None))
+        self.layer_tag_name.setText(QCoreApplication.translate("Form", u"\u56fe\u5c42\u7ba1\u7406", None))
         self.btn_editor_map_layer_image.setText("")
         self.btn_editor_map_layer_tiled.setText("")
         self.btn_editor_map_layer_del.setText("")

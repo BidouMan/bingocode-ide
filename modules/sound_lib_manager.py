@@ -122,6 +122,7 @@ class SoundLibManager(QObject):
         self._last_hover_play_path = None
         self._setup_list_widget()
         self._connect_signals()
+        self.ui.sound_lib_search.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
 
     def _setup_list_widget(self):
         lw = self.ui.listWidget_2
@@ -134,21 +135,6 @@ class SoundLibManager(QObject):
         lw.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         lw.setFrameShape(QListWidget.Shape.NoFrame)
         lw.setMouseTracking(True)
-        lw.setStyleSheet("""
-            QListWidget {
-                background-color: #1E1E1E;
-                border: none;
-                outline: none;
-            }
-            QListWidget::item {
-                background: transparent;
-                border-radius: 8px;
-                margin: 2px;
-            }
-            QListWidget::item:selected {
-                background-color: #3D3D3D;
-            }
-        """)
 
         self._delegate = SoundLibCardDelegate()
         lw.setItemDelegate(self._delegate)
@@ -223,6 +209,7 @@ class SoundLibManager(QObject):
 
         self.ui.listWidget_2.clear()
         self.ui.sound_lib_search.clear()
+        self.ui.sound_lib_search.clearFocus()
         self._current_category = None
 
         app_dir = self._get_app_dir()
