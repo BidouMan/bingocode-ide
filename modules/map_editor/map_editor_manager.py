@@ -1060,6 +1060,7 @@ class MapEditorManager(QObject):
                                     "collision_enabled", False
                                 ),
                                 "collisions": collisions,
+                                "tile_set_index": i,
                             }
                             # 计算图块数量
                             if "tiles" in resource:
@@ -1088,10 +1089,11 @@ class MapEditorManager(QObject):
                                 resource["path"] = os.path.join(
                                     resource["path"], resource.get("name", "")
                                 )
+                            if "tile_set_index" not in resource:
+                                resource["tile_set_index"] = i
                             converted_resources.append(resource)
-                    # 添加图像图层的图像资源
 
-                    for layer in self.layer_manager.layers:
+                    # 添加图像图层的图像资源
                         if layer.layer_type == "image":
                             for image_data in layer.images:
                                 image_path = image_data.image_path
@@ -1128,6 +1130,7 @@ class MapEditorManager(QObject):
                                         "collision_type": image_data.collision_type,
                                         "collision_enabled": image_data.collision_enabled,
                                         "collisions": [],
+                                        "tile_set_index": -1,
                                     }
                                     converted_resources.append(image_resource)
                     # 为每个图层分配资源
@@ -3157,8 +3160,11 @@ class MapEditorManager(QObject):
             return -1
 
         resource = layer_resources[local_resource_index]
-        resource_path = resource.get("path", "")
+        ts_index = resource.get("tile_set_index", -1)
+        if ts_index >= 0:
+            return ts_index
 
+        resource_path = resource.get("path", "")
         tile_sets = self.map_model.map_data.get("tile_sets", [])
         for i, ts in enumerate(tile_sets):
             ts_path = ts.get("path", "") or ts.get("image_path", "")
@@ -4145,23 +4151,22 @@ class MapEditorManager(QObject):
 
                 # 图像图层：只添加到资源列表，不自动创建图像
                 if current_layer.layer_type == "image":
-                    pass
+                    resource_info["tile_set_index"] = -1
                 # 绘制图层：添加到地图模型的tile_sets中
                 if (
                     current_layer.layer_type == "drawing"
                     and self.project_manager
                     and self.current_map_path
                 ):
-                    # 直接使用dest_path作为full_image_path，因为dest_path已经是资源文件的完整路径
                     full_image_path = dest_path
-                    # 统一使用用户设置的tile_size作为图块尺寸
-                    self.map_model.add_tile_set(
+                    ts_index = self.map_model.add_tile_set(
                         name=resource_info["name"],
                         image_path=full_image_path,
                         tile_width=tile_size,
                         tile_height=tile_size,
                         collision_type=default_col_type,
                     )
+                    resource_info["tile_set_index"] = ts_index
 
         # 绘制图层：更新地图模型的全局tile_size
         if current_layer.layer_type == "drawing":
