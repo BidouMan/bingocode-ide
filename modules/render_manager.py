@@ -8,6 +8,10 @@ from PySide6.QtWidgets import (
     QGraphicsSimpleTextItem,
     QGraphicsPathItem,
 )
+try:
+    from PySide6.QtOpenGLWidgets import QOpenGLWidget
+except ImportError:
+    QOpenGLWidget = None
 from PySide6.QtGui import (
     QPainter,
     QPixmap,
@@ -64,8 +68,19 @@ class RenderManager(QObject):
         self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
-        # 性能优化：减轻集成显卡压力
-        self.view.setViewportUpdateMode(QGraphicsView.MinimalViewportUpdate)
+        # 尝试使用 OpenGL 视口（启用 VSync 消除画面撕裂），失败则回退到软件渲染
+        self._use_opengl = False
+        if QOpenGLWidget is not None:
+            try:
+                gl_widget = QOpenGLWidget(self.view)
+                self.view.setViewport(gl_widget)
+                self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
+                self._use_opengl = True
+            except Exception:
+                self.view.setViewportUpdateMode(QGraphicsView.MinimalViewportUpdate)
+        else:
+            self.view.setViewportUpdateMode(QGraphicsView.MinimalViewportUpdate)
+
         self.view.setOptimizationFlag(QGraphicsView.IndirectPainting)
 
         self.sprites = {}
