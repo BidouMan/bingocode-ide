@@ -36,6 +36,3 @@ MyWorkspace/
 user_workspaces/
 test/
 
-# ===== AI 会话文件 =====
-AGENTS.md
-MEMORY.md
