@@ -743,70 +743,138 @@ QMessageBox QPushButton:pressed {
 }
 
 #helpScrollArea {
-    background-color: rgb(34, 37, 43);
+    background: transparent;
     border: none;
+    padding: 0px;
+    margin: 0px;
+}
+
+#helpScrollArea QScrollBar:vertical {
+    width: 0px;
+    background: transparent;
+}
+
+#helpScrollArea QScrollBar::handle:vertical {
+    background: transparent;
+}
+
+#helpScrollArea QScrollBar::add-line:vertical,
+#helpScrollArea QScrollBar::sub-line:vertical {
+    height: 0px;
+    background: transparent;
+}
+
+#helpScrollArea QScrollBar::add-page:vertical,
+#helpScrollArea QScrollBar::sub-page:vertical {
+    background: transparent;
+}
+
+#helpScrollArea QWidget {
+    background: transparent;
 }
 
 #helpContentWidget {
-    background-color: rgb(34, 37, 43);
+    background: transparent;
+    padding-right: 0px;
+}
+
+#helpContentWidget QLabel {
+    background: transparent;
+}
+
+#helpCatCard {
+    background: transparent;
+    border-radius: 8px;
+    border: 1px solid rgb(55, 59, 68);
+    margin: 0px;
 }
 
 #helpFunctionCard {
-    background-color: transparent;
+    background: transparent;
     border-radius: 4px;
     padding: 2px 0px;
+    max-width: 320px;
 }
 #helpFunctionCard:hover {
     background-color: rgba(255, 255, 255, 0.04);
 }
+#helpFunctionCard[expanded="true"] {
+    background-color: rgba(255, 255, 255, 0.06);
+}
+#helpFunctionCard[expanded="true"]:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+}
 
-#helpBadge {
-    background-color: rgba(91, 155, 245, 0.15);
-    color: #7BAAFA;
+#helpFunctionCard #helpBadge {
+    background-color: rgb(100, 136, 237);
+    color: #F0F0F0;
     border-radius: 4px;
-    padding: 1px 6px;
-    font-size: 10px;
+    padding: 3px 10px;
+    font-size: 12px;
     font-weight: bold;
 }
-#helpBadge[badgeType="object"] {
-    background-color: rgba(90, 192, 176, 0.15);
-    color: #5AC0B0;
+#helpFunctionCard #helpBadge[badgeType="object"] {
+    background-color: rgb(77, 192, 123);
+    color: #F0F0F0;
 }
-#helpBadge[badgeType="property"] {
-    background-color: rgba(176, 124, 232, 0.15);
-    color: #B07CE8;
+#helpFunctionCard #helpBadge[badgeType="property"] {
+    background-color: #FF6D37;
+    color: #F0F0F0;
 }
 
 #helpFuncName {
-    color: #7BAAFA;
+    color: #93B8FF;
     font-weight: bold;
-    font-size: 13px;
+    font-size: 14px;
+    background: transparent;
 }
 
 #helpFuncBrief {
-    color: rgb(150, 150, 150);
-    font-size: 12px;
+    color: rgb(160, 160, 160);
+    font-size: 13px;
+    background: transparent;
 }
 
 #helpExpandArrow {
-    color: rgb(80, 80, 80);
-    font-size: 11px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    padding: 0px;
+}
+#helpExpandArrow:hover {
+    background-color: rgba(255, 255, 255, 0.08);
 }
 
 #helpDetailWidget {
-    background-color: transparent;
+    background: transparent;
 }
 
-#helpSectionLabel {
-    color: rgb(160, 160, 160);
-    font-size: 11px;
+#helpMarkdownTitle {
+    color: rgb(190, 190, 190);
+    font-size: 13px;
     font-weight: bold;
-    padding-top: 2px;
+    padding-top: 6px;
+}
+
+#helpDescText {
+    color: rgb(170, 170, 170);
+    font-size: 13px;
+    padding: 4px 0px;
+}
+
+#helpCodeInline {
+    background-color: rgb(30, 32, 38);
+    border-radius: 4px;
+    padding: 8px 12px;
+    color: rgb(171, 178, 191);
+    font-family: "Menlo", "Consolas", monospace;
+    font-size: 13px;
 }
 
 #helpDetailText {
-    color: rgb(170, 170, 170);
-    font-size: 12px;
+    color: rgb(180, 180, 180);
+    font-size: 13px;
+    padding-left: 8px;
 }
 
 #helpCodeBlock {
@@ -827,20 +895,18 @@ QMessageBox QPushButton:pressed {
 
 #helpCodeText {
     color: rgb(171, 178, 191);
-    background-color: transparent;
-    font-size: 12px;
+    background: transparent;
+    font-size: 13px;
 }
 
 #helpCopyBtn {
-    background-color: rgb(50, 53, 62);
-    color: rgb(180, 180, 180);
+    background: transparent;
     border: none;
     border-radius: 3px;
-    font-size: 11px;
+    padding: 2px;
 }
 #helpCopyBtn:hover {
-    background-color: #528BFF;
-    color: white;
+    background-color: rgba(255, 255, 255, 0.1);
 }
 
 #helpSectionTitle {

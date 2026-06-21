@@ -1,5 +1,6 @@
+import os
 from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QSize, Signal
-from PySide6.QtGui import QFont, QColor, QClipboard
+from PySide6.QtGui import QFont, QColor, QClipboard, QIcon
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QLabel, QScrollArea, QFrame, QApplication,
@@ -16,8 +17,9 @@ HELP_DATA = [
                 "items": [
                     {
                         "name": "Sprite",
+                        "short": "创建角色",
                         "badge": "module",
-                        "brief": "创建一个新的精灵角色",
+                        "desc": "创建一个新的精灵角色对象",
                         "definition": "Sprite(filename)",
                         "params": "filename: 角色文件夹名称（在 assets/sprites/ 下）",
                         "returns": "Sprite 实例",
@@ -30,8 +32,9 @@ HELP_DATA = [
                 "items": [
                     {
                         "name": "x / y",
+                        "short": "读写坐标",
                         "badge": "property",
-                        "brief": "读取或设置角色的坐标",
+                        "desc": "读取或设置角色的屏幕坐标位置",
                         "definition": "sprite.x = value\nsprite.y = value",
                         "params": "value: 数字（像素坐标）",
                         "returns": "读取时返回当前坐标",
@@ -39,8 +42,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "angle",
+                        "short": "读写角度",
                         "badge": "property",
-                        "brief": "读取或设置角色的旋转角度",
+                        "desc": "读取或设置角色的旋转角度",
                         "definition": "sprite.angle = value",
                         "params": "value: 角度（0-360）",
                         "returns": "读取时返回当前角度",
@@ -48,8 +52,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "scale",
+                        "short": "读写缩放",
                         "badge": "property",
-                        "brief": "读取或设置角色的缩放比例",
+                        "desc": "读取或设置角色的缩放比例，100为原始大小",
                         "definition": "sprite.scale = value",
                         "params": "value: 百分比（100=原始大小）",
                         "returns": "读取时返回当前缩放",
@@ -57,8 +62,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "layer",
+                        "short": "读写层级",
                         "badge": "property",
-                        "brief": "读取或设置角色的渲染层级",
+                        "desc": "读取或设置角色的渲染层级，数字越大越靠前",
                         "definition": "sprite.layer = value",
                         "params": "value: 整数，数字越大越靠前",
                         "returns": "读取时返回当前层级",
@@ -71,8 +77,9 @@ HELP_DATA = [
                 "items": [
                     {
                         "name": "delete",
+                        "short": "删除角色",
                         "badge": "object",
-                        "brief": "彻底删除角色（视觉+物理+内存）",
+                        "desc": "彻底删除角色，包括视觉显示、物理碰撞和内存",
                         "definition": "sprite.delete()",
                         "params": "无",
                         "returns": "无",
@@ -91,8 +98,9 @@ HELP_DATA = [
                 "items": [
                     {
                         "name": "goto",
+                        "short": "移到坐标",
                         "badge": "object",
-                        "brief": "移到指定坐标",
+                        "desc": "将角色移动到指定的屏幕坐标位置",
                         "definition": "goto(x, y)",
                         "params": "x: X坐标\ny: Y坐标",
                         "returns": "无",
@@ -100,8 +108,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "set_xy",
+                        "short": "设置坐标",
                         "badge": "object",
-                        "brief": "设置坐标（同 goto）",
+                        "desc": "设置角色坐标，功能同 goto",
                         "definition": "set_xy(x, y)",
                         "params": "x: X坐标\ny: Y坐标",
                         "returns": "无",
@@ -109,8 +118,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "set_x / set_y",
+                        "short": "设置单轴",
                         "badge": "object",
-                        "brief": "单独设置 X 或 Y 坐标",
+                        "desc": "单独设置 X 或 Y 坐标",
                         "definition": "set_x(x)\nset_y(y)",
                         "params": "x 或 y: 数字",
                         "returns": "无",
@@ -118,8 +128,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "add_x / add_y",
+                        "short": "增量移动",
                         "badge": "object",
-                        "brief": "将坐标增加（或减少）一定数值",
+                        "desc": "将坐标增加指定数值，可为负数",
                         "definition": "add_x(dx)\nadd_y(dy)",
                         "params": "dx/dy: 增量（可为负数）",
                         "returns": "无",
@@ -127,8 +138,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "goto_rand",
+                        "short": "随机位置",
                         "badge": "object",
-                        "brief": "移到随机位置",
+                        "desc": "将角色移到舞台内的随机位置",
                         "definition": "goto_rand()",
                         "params": "无",
                         "returns": "无",
@@ -141,8 +153,9 @@ HELP_DATA = [
                 "items": [
                     {
                         "name": "move",
+                        "short": "方向移动",
                         "badge": "object",
-                        "brief": "朝当前角度方向移动指定距离",
+                        "desc": "朝当前角度方向移动指定距离",
                         "definition": "move(distance)",
                         "params": "distance: 移动像素数",
                         "returns": "无",
@@ -150,8 +163,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "set_angle",
+                        "short": "设置角度",
                         "badge": "object",
-                        "brief": "设置旋转角度",
+                        "desc": "设置角色的旋转角度",
                         "definition": "set_angle(angle)",
                         "params": "angle: 角度（0-360）",
                         "returns": "无",
@@ -159,8 +173,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "look_at",
+                        "short": "朝向目标",
                         "badge": "object",
-                        "brief": "朝向目标（角色或鼠标）",
+                        "desc": "让角色朝向另一个角色或鼠标",
                         "definition": "look_at(target)",
                         "params": "target: Sprite 实例或 mouse",
                         "returns": "无",
@@ -168,8 +183,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "edge_bounce",
+                        "short": "边缘反弹",
                         "badge": "object",
-                        "brief": "碰到舞台边缘自动反弹",
+                        "desc": "碰到舞台边缘时自动反弹",
                         "definition": "edge_bounce()",
                         "params": "无",
                         "returns": "无",
@@ -182,8 +198,9 @@ HELP_DATA = [
                 "items": [
                     {
                         "name": "jump",
+                        "short": "跳跃",
                         "badge": "object",
-                        "brief": "角色跳跃，power 越大跳越高",
+                        "desc": "角色跳跃，power 越大跳越高",
                         "definition": "jump(power=10)",
                         "params": "power: 跳跃力度，默认10",
                         "returns": "无",
@@ -191,8 +208,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "cut_jump",
+                        "short": "截断跳跃",
                         "badge": "object",
-                        "brief": "提前下落（松开跳跃键时调用）",
+                        "desc": "提前下落，松开跳跃键时调用",
                         "definition": "cut_jump()",
                         "params": "无",
                         "returns": "无",
@@ -200,8 +218,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "drop_through",
+                        "short": "穿越跳板",
                         "badge": "object",
-                        "brief": "从跳板下方穿过",
+                        "desc": "从跳板下方穿过下落",
                         "definition": "drop_through()",
                         "params": "无",
                         "returns": "无",
@@ -209,8 +228,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "is_on_floor",
+                        "short": "检测地面",
                         "badge": "object",
-                        "brief": "检测角色是否在地面上",
+                        "desc": "检测角色是否站在地面上",
                         "definition": "is_on_floor()",
                         "params": "无",
                         "returns": "True / False",
@@ -218,8 +238,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "set_speed",
+                        "short": "设置速度",
                         "badge": "object",
-                        "brief": "设置持续速度，引擎每帧自动移动",
+                        "desc": "设置持续速度，引擎每帧自动移动",
                         "definition": "set_speed(speed)",
                         "params": "speed: 每帧移动像素数",
                         "returns": "无",
@@ -227,10 +248,11 @@ HELP_DATA = [
                     },
                     {
                         "name": "set_rotation_mode",
+                        "short": "旋转模式",
                         "badge": "object",
-                        "brief": "设置旋转模式",
+                        "desc": "设置角色的旋转模式",
                         "definition": "set_rotation_mode(style)",
-                        "params": 'style: "all"(任意旋转) / "left_right"(左右翻转) / "none"(不旋转)',
+                        "params": 'style: "all"(任意) / "left_right"(翻转) / "none"(不旋转)',
                         "returns": "无",
                         "example": 'hero.set_rotation_mode("left_right")',
                     },
@@ -247,8 +269,9 @@ HELP_DATA = [
                 "items": [
                     {
                         "name": "show",
+                        "short": "显示角色",
                         "badge": "object",
-                        "brief": "显示角色",
+                        "desc": "让隐藏的角色重新显示",
                         "definition": "show()",
                         "params": "无",
                         "returns": "无",
@@ -256,8 +279,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "hide",
+                        "short": "隐藏角色",
                         "badge": "object",
-                        "brief": "隐藏角色（物体还在内存里）",
+                        "desc": "隐藏角色，物体还在内存中",
                         "definition": "hide()",
                         "params": "无",
                         "returns": "无",
@@ -270,8 +294,9 @@ HELP_DATA = [
                 "items": [
                     {
                         "name": "set_scale",
+                        "short": "设置缩放",
                         "badge": "object",
-                        "brief": "设置缩放比例（100=原始大小）",
+                        "desc": "设置缩放比例，100为原始大小",
                         "definition": "set_scale(value)",
                         "params": "value: 百分比（5-1000）",
                         "returns": "无",
@@ -279,8 +304,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "add_scale",
+                        "short": "增减缩放",
                         "badge": "object",
-                        "brief": "在当前缩放基础上增加百分比",
+                        "desc": "在当前缩放基础上增加百分比",
                         "definition": "add_scale(value)",
                         "params": "value: 增量百分比",
                         "returns": "无",
@@ -293,8 +319,9 @@ HELP_DATA = [
                 "items": [
                     {
                         "name": "say",
+                        "short": "角色说话",
                         "badge": "object",
-                        "brief": "让角色说话，新话替换旧话",
+                        "desc": "让角色头顶显示文字，新话替换旧话",
                         "definition": "say(text, seconds=0)",
                         "params": "text: 要说的话\nseconds: 显示秒数，0=永久",
                         "returns": "无",
@@ -302,8 +329,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "play",
+                        "short": "播放动画",
                         "badge": "object",
-                        "brief": "播放指定名称的动画",
+                        "desc": "播放角色的指定动画",
                         "definition": "play(animation_name, transition_time=0.1)",
                         "params": "animation_name: 动画名称\ntransition_time: 过渡时间（秒）",
                         "returns": "无",
@@ -322,8 +350,9 @@ HELP_DATA = [
                 "items": [
                     {
                         "name": "is_touch",
+                        "short": "检测碰撞",
                         "badge": "object",
-                        "brief": "判断是否碰到目标（角色、鼠标、图块标签）",
+                        "desc": "判断是否碰到目标（角色、鼠标或图块标签）",
                         "definition": "is_touch(target)",
                         "params": "target: Sprite / mouse / 字符串标签",
                         "returns": "True / False",
@@ -331,8 +360,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "is_touch_edge",
+                        "short": "碰边检测",
                         "badge": "object",
-                        "brief": "判断是否碰到舞台边缘",
+                        "desc": "判断角色是否碰到舞台边缘",
                         "definition": "is_touch_edge()",
                         "params": "无",
                         "returns": "True / False",
@@ -340,8 +370,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "is_out_side",
+                        "short": "出界检测",
                         "badge": "object",
-                        "brief": "判断是否完全离开舞台",
+                        "desc": "判断角色是否完全离开舞台",
                         "definition": "is_out_side()",
                         "params": "无",
                         "returns": "True / False",
@@ -354,17 +385,19 @@ HELP_DATA = [
                 "items": [
                     {
                         "name": "distance_to",
+                        "short": "计算距离",
                         "badge": "object",
-                        "brief": "计算到目标的距离",
+                        "desc": "计算到目标的像素距离",
                         "definition": "distance_to(target)",
                         "params": "target: Sprite 或 mouse",
                         "returns": "数字（像素距离）",
-                        "example": 'd = hero.distance_to(enemy)\nif d < 50:\n    print("很近")',
+                        "example": "d = hero.distance_to(enemy)\nif d < 50:\n    print('很近')",
                     },
                     {
                         "name": "touch_group",
+                        "short": "组碰撞",
                         "badge": "object",
-                        "brief": "检测是否碰到组内成员，碰到返回那个成员",
+                        "desc": "检测是否碰到组内成员，碰到返回那个成员",
                         "definition": "touch_group(group_name)",
                         "params": "group_name: 组名字符串",
                         "returns": "碰到的成员 / None",
@@ -372,8 +405,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "add_to_group",
+                        "short": "加入分组",
                         "badge": "object",
-                        "brief": "将角色归类到指定组",
+                        "desc": "将角色归类到指定组",
                         "definition": "add_to_group(group_name)",
                         "params": "group_name: 组名字符串",
                         "returns": "无",
@@ -392,8 +426,9 @@ HELP_DATA = [
                 "items": [
                     {
                         "name": "key_down",
+                        "short": "按住检测",
                         "badge": "module",
-                        "brief": "按住时每帧返回 True",
+                        "desc": "按键按住时每帧返回 True",
                         "definition": "key_down(key)",
                         "params": "key: 按键名称字符串",
                         "returns": "True / False",
@@ -401,8 +436,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "key_pressed",
+                        "short": "单次按下",
                         "badge": "module",
-                        "brief": "按下瞬间返回 True（只触发一次）",
+                        "desc": "按键按下瞬间返回 True，只触发一次",
                         "definition": "key_pressed(key)",
                         "params": "key: 按键名称字符串",
                         "returns": "True / False",
@@ -415,8 +451,9 @@ HELP_DATA = [
                 "items": [
                     {
                         "name": "mouse_down",
+                        "short": "鼠标按住",
                         "badge": "module",
-                        "brief": "鼠标按下时返回 True",
+                        "desc": "鼠标按下时返回 True",
                         "definition": "mouse_down()",
                         "params": "无",
                         "returns": "True / False",
@@ -424,8 +461,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "mouse_pressed",
+                        "short": "鼠标单击",
                         "badge": "module",
-                        "brief": "鼠标点击瞬间返回 True",
+                        "desc": "鼠标点击瞬间返回 True",
                         "definition": "mouse_pressed()",
                         "params": "无",
                         "returns": "True / False",
@@ -433,8 +471,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "mouse.x / mouse.y",
+                        "short": "鼠标坐标",
                         "badge": "module",
-                        "brief": "获取鼠标的 X / Y 坐标",
+                        "desc": "获取鼠标的 X / Y 坐标",
                         "definition": "mouse.x\nmouse.y",
                         "params": "无",
                         "returns": "数字（像素坐标）",
@@ -458,8 +497,9 @@ HELP_DATA = [
                 "items": [
                     {
                         "name": "run",
+                        "short": "启动游戏",
                         "badge": "module",
-                        "brief": "启动游戏循环，必须放在脚本最后",
+                        "desc": "启动游戏循环，必须放在脚本最后",
                         "definition": "run()",
                         "params": "无",
                         "returns": "无（阻塞）",
@@ -467,8 +507,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "stop",
+                        "short": "停止游戏",
                         "badge": "module",
-                        "brief": "停止游戏（退出 run 循环）",
+                        "desc": "停止游戏，退出 run 循环",
                         "definition": "stop()",
                         "params": "无",
                         "returns": "无",
@@ -481,8 +522,9 @@ HELP_DATA = [
                 "items": [
                     {
                         "name": "pause",
+                        "short": "暂停游戏",
                         "badge": "module",
-                        "brief": "暂停游戏（精灵停止移动，loop 仍运行）",
+                        "desc": "暂停游戏，精灵停止移动但 loop 仍运行",
                         "definition": "pause()",
                         "params": "无",
                         "returns": "无",
@@ -490,8 +532,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "resume",
+                        "short": "继续游戏",
                         "badge": "module",
-                        "brief": "继续游戏",
+                        "desc": "继续已暂停的游戏",
                         "definition": "resume()",
                         "params": "无",
                         "returns": "无",
@@ -499,8 +542,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "is_paused",
+                        "short": "检测暂停",
                         "badge": "module",
-                        "brief": "检查游戏是否暂停",
+                        "desc": "检查游戏是否处于暂停状态",
                         "definition": "is_paused()",
                         "params": "无",
                         "returns": "True / False",
@@ -513,8 +557,9 @@ HELP_DATA = [
                 "items": [
                     {
                         "name": "wait",
+                        "short": "简易定时",
                         "badge": "module",
-                        "brief": "简易定时，每 N 秒触发一次",
+                        "desc": "每 N 秒触发一次，无需创建对象",
                         "definition": "wait(seconds)",
                         "params": "seconds: 间隔秒数",
                         "returns": "True（触发时）/ False",
@@ -522,8 +567,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "Timer",
+                        "short": "精细定时器",
                         "badge": "module",
-                        "brief": "精细定时器，支持循环/单次/启停",
+                        "desc": "支持循环/单次/启停的定时器",
                         "definition": "Timer(seconds, loop=True, autostart=False)",
                         "params": "seconds: 间隔秒数\nloop: 是否循环\nautostart: 创建即启动",
                         "returns": "Timer 实例",
@@ -542,8 +588,9 @@ HELP_DATA = [
                 "items": [
                     {
                         "name": "load_map",
+                        "short": "加载地图",
                         "badge": "module",
-                        "brief": "加载指定名称的地图",
+                        "desc": "加载指定名称的地图文件",
                         "definition": "load_map(map_name)",
                         "params": "map_name: 地图文件夹名称",
                         "returns": "无",
@@ -551,8 +598,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "follow",
+                        "short": "摄像机跟随",
                         "badge": "module",
-                        "brief": "摄像机跟随指定角色",
+                        "desc": "让摄像机跟随指定角色移动",
                         "definition": "follow(target)",
                         "params": "target: Sprite 实例",
                         "returns": "无",
@@ -560,8 +608,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "show_collision",
+                        "short": "显示碰撞盒",
                         "badge": "module",
-                        "brief": "显示角色的碰撞盒（调试用）",
+                        "desc": "调试用，显示角色的碰撞盒范围",
                         "definition": "show_collision(sprite)",
                         "params": "sprite: 要显示碰撞盒的角色",
                         "returns": "无",
@@ -580,17 +629,19 @@ HELP_DATA = [
                 "items": [
                     {
                         "name": "play_sound",
+                        "short": "播放音效",
                         "badge": "module",
-                        "brief": "播放音效",
-                        "definition": 'play_sound(name, loop=False)',
+                        "desc": "播放指定的音效文件",
+                        "definition": "play_sound(name, loop=False)",
                         "params": "name: 音效名称\nloop: 是否循环播放",
                         "returns": "无",
                         "example": 'play_sound("爆炸")\nplay_sound("背景音乐", loop=True)',
                     },
                     {
                         "name": "stop_sound",
+                        "short": "停止音效",
                         "badge": "module",
-                        "brief": "停止音效",
+                        "desc": "停止指定音效或所有音效",
                         "definition": "stop_sound(name=None)",
                         "params": "name: 要停止的音效名称，不传则停止所有",
                         "returns": "无",
@@ -609,8 +660,9 @@ HELP_DATA = [
                 "items": [
                     {
                         "name": "draw_text",
+                        "short": "绘制文字",
                         "badge": "module",
-                        "brief": "在屏幕指定位置绘制文字",
+                        "desc": "在屏幕指定位置绘制文字",
                         "definition": "draw_text(x, y, *args)",
                         "params": "x, y: 坐标\n*args: 多个参数自动拼接",
                         "returns": "无",
@@ -618,8 +670,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "shake",
+                        "short": "屏幕震动",
                         "badge": "module",
-                        "brief": "屏幕震动效果",
+                        "desc": "屏幕震动效果，常用于打击反馈",
                         "definition": "shake(intensity=5, duration=0.3)",
                         "params": "intensity: 震动强度\nduration: 持续时间（秒）",
                         "returns": "无",
@@ -627,8 +680,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "show_fps",
+                        "short": "显示帧率",
                         "badge": "module",
-                        "brief": "显示/隐藏帧率（调试用）",
+                        "desc": "调试用，显示/隐藏当前帧率",
                         "definition": "show_fps()",
                         "params": "无",
                         "returns": "无",
@@ -641,8 +695,9 @@ HELP_DATA = [
                 "items": [
                     {
                         "name": "random_int",
+                        "short": "随机整数",
                         "badge": "module",
-                        "brief": "生成随机整数（包含两端）",
+                        "desc": "生成指定范围内的随机整数（包含两端）",
                         "definition": "random_int(a, b)",
                         "params": "a: 最小值\nb: 最大值",
                         "returns": "整数",
@@ -650,8 +705,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "random_float",
+                        "short": "随机浮点",
                         "badge": "module",
-                        "brief": "生成随机浮点数",
+                        "desc": "生成指定范围内的随机浮点数",
                         "definition": "random_float(a, b)",
                         "params": "a: 最小值\nb: 最大值",
                         "returns": "浮点数",
@@ -670,8 +726,9 @@ HELP_DATA = [
                 "items": [
                     {
                         "name": "broadcast",
+                        "short": "发送广播",
                         "badge": "module",
-                        "brief": "发送全局广播事件",
+                        "desc": "发送全局广播事件",
                         "definition": 'broadcast("event_name")',
                         "params": "event_name: 事件名称字符串",
                         "returns": "无",
@@ -679,8 +736,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "sprite.broadcast",
+                        "short": "角色广播",
                         "badge": "object",
-                        "brief": "角色发送广播事件",
+                        "desc": "角色发送广播事件",
                         "definition": 'sprite.broadcast("event_name")',
                         "params": "event_name: 事件名称字符串",
                         "returns": "无",
@@ -688,8 +746,9 @@ HELP_DATA = [
                     },
                     {
                         "name": "receive",
+                        "short": "接收广播",
                         "badge": "module",
-                        "brief": "注册接收广播事件的回调",
+                        "desc": "注册接收广播事件的回调函数",
                         "definition": 'receive("event_name", callback)',
                         "params": "event_name: 事件名称\ncallback: 回调函数",
                         "returns": "无",
@@ -779,6 +838,19 @@ class FunctionCard(QFrame):
         header = QHBoxLayout()
         header.setSpacing(6)
 
+        icons_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "icons")
+        right_arrow_icon = QIcon(os.path.join(icons_dir, "right_arrow.svg"))
+        down_arrow_icon = QIcon(os.path.join(icons_dir, "down_arrow.svg"))
+
+        self._expand_arrow = QPushButton()
+        self._expand_arrow.setObjectName("helpExpandArrow")
+        self._expand_arrow.setFixedSize(20, 20)
+        self._expand_arrow.setIcon(right_arrow_icon)
+        self._expand_arrow.setIconSize(QSize(14, 14))
+        self._expand_arrow.setCursor(Qt.PointingHandCursor)
+        self._expand_arrow.clicked.connect(self.toggle_expand)
+        header.addWidget(self._expand_arrow)
+
         badge = QLabel()
         badge.setObjectName("helpBadge")
         badge_type = data.get("badge", "module")
@@ -791,37 +863,47 @@ class FunctionCard(QFrame):
         else:
             badge.setText("属性")
             badge.setProperty("badgeType", "property")
-        badge.setFixedHeight(18)
+        badge.setFixedHeight(24)
+        badge.setMinimumWidth(60)
+        badge.setMaximumWidth(80)
         badge.setAlignment(Qt.AlignCenter)
         header.addWidget(badge)
 
         name_label = QLabel(data["name"])
         name_label.setObjectName("helpFuncName")
+        name_label.setMaximumWidth(120)
         header.addWidget(name_label)
 
-        brief_label = QLabel(data["brief"])
+        brief_label = QLabel(data.get("short", data["name"]))
         brief_label.setObjectName("helpFuncBrief")
-        brief_label.setStyleSheet("color: rgb(150,150,150);")
+        brief_label.setWordWrap(True)
         header.addWidget(brief_label, 1)
-
-        self._expand_arrow = QLabel(">")
-        self._expand_arrow.setObjectName("helpExpandArrow")
-        self._expand_arrow.setFixedWidth(14)
-        self._expand_arrow.setAlignment(Qt.AlignCenter)
-        header.addWidget(self._expand_arrow)
 
         layout.addLayout(header)
 
         self._detail_widget = QWidget()
         self._detail_widget.setObjectName("helpDetailWidget")
         detail_layout = QVBoxLayout(self._detail_widget)
-        detail_layout.setContentsMargins(0, 6, 0, 0)
-        detail_layout.setSpacing(4)
+        detail_layout.setContentsMargins(0, 8, 0, 0)
+        detail_layout.setSpacing(6)
+
+        desc = data.get("desc", "")
+        if desc:
+            desc_label = QLabel(desc)
+            desc_label.setObjectName("helpDescText")
+            desc_label.setWordWrap(True)
+            detail_layout.addWidget(desc_label)
 
         def_def = data.get("definition", "")
         if def_def:
-            def_label = QLabel(f"定义: {def_def}")
-            def_label.setObjectName("helpCodeBlock")
+            def_title = QLabel("定义")
+            def_title.setObjectName("helpMarkdownTitle")
+            font = def_title.font()
+            font.setBold(True)
+            def_title.setFont(font)
+            detail_layout.addWidget(def_title)
+            def_label = QLabel(def_def)
+            def_label.setObjectName("helpCodeInline")
             def_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
             def_label.setWordWrap(True)
             detail_layout.addWidget(def_label)
@@ -829,7 +911,10 @@ class FunctionCard(QFrame):
         params = data.get("params", "")
         if params:
             params_title = QLabel("参数")
-            params_title.setObjectName("helpSectionLabel")
+            params_title.setObjectName("helpMarkdownTitle")
+            font = params_title.font()
+            font.setBold(True)
+            params_title.setFont(font)
             detail_layout.addWidget(params_title)
             params_label = QLabel(params)
             params_label.setObjectName("helpDetailText")
@@ -839,7 +924,10 @@ class FunctionCard(QFrame):
         returns = data.get("returns", "")
         if returns:
             ret_title = QLabel("返回")
-            ret_title.setObjectName("helpSectionLabel")
+            ret_title.setObjectName("helpMarkdownTitle")
+            font = ret_title.font()
+            font.setBold(True)
+            ret_title.setFont(font)
             detail_layout.addWidget(ret_title)
             ret_label = QLabel(returns)
             ret_label.setObjectName("helpDetailText")
@@ -848,7 +936,10 @@ class FunctionCard(QFrame):
         example = data.get("example", "")
         if example:
             ex_title = QLabel("示例代码")
-            ex_title.setObjectName("helpSectionLabel")
+            ex_title.setObjectName("helpMarkdownTitle")
+            font = ex_title.font()
+            font.setBold(True)
+            ex_title.setFont(font)
             detail_layout.addWidget(ex_title)
 
             code_frame = QFrame()
@@ -861,17 +952,10 @@ class FunctionCard(QFrame):
             code_label.setObjectName("helpCodeText")
             code_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
             code_label.setWordWrap(True)
-            font = QFont("Menlo, Consolas, monospace")
+            font = QFont("Menlo, Consolas")
             font.setPointSize(11)
             code_label.setFont(font)
             code_layout.addWidget(code_label)
-
-            copy_btn = QPushButton("复制")
-            copy_btn.setObjectName("helpCopyBtn")
-            copy_btn.setFixedWidth(50)
-            copy_btn.setFixedHeight(22)
-            copy_btn.clicked.connect(lambda: self._copy_code(example))
-            code_layout.addWidget(copy_btn, 0, Qt.AlignRight)
 
             detail_layout.addWidget(code_frame)
 
@@ -888,7 +972,14 @@ class FunctionCard(QFrame):
     def toggle_expand(self):
         self._expanded = not self._expanded
         self._detail_widget.setVisible(self._expanded)
-        self._expand_arrow.setText("v" if self._expanded else ">")
+        icons_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "icons")
+        if self._expanded:
+            self._expand_arrow.setIcon(QIcon(os.path.join(icons_dir, "down_arrow.svg")))
+        else:
+            self._expand_arrow.setIcon(QIcon(os.path.join(icons_dir, "right_arrow.svg")))
+        self.setProperty("expanded", self._expanded)
+        self.style().unpolish(self)
+        self.style().polish(self)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -918,44 +1009,48 @@ class HelpPanelManager:
         scroll.setObjectName("helpScrollArea")
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QFrame.NoFrame)
 
         content_widget = QWidget()
         content_widget.setObjectName("helpContentWidget")
         content_layout = QVBoxLayout(content_widget)
-        content_layout.setContentsMargins(12, 12, 12, 12)
-        content_layout.setSpacing(0)
+        content_layout.setContentsMargins(16, 12, 16, 12)
+        content_layout.setSpacing(10)
 
         for cat in HELP_DATA:
+            cat_card = QFrame()
+            cat_card.setObjectName("helpCatCard")
+            cat_card_layout = QVBoxLayout(cat_card)
+            cat_card_layout.setContentsMargins(12, 10, 12, 10)
+            cat_card_layout.setSpacing(4)
+
             cat_label = QLabel(cat["name"])
             cat_label.setObjectName("helpCatTitle")
             cat_label.setStyleSheet(
-                f"font-size: 16px; font-weight: bold; color: {cat['color']}; padding: 8px 0px;"
+                f"font-size: 15px; font-weight: bold; color: {cat['color']}; padding: 0px 0px 4px 0px;"
             )
-            content_layout.addWidget(cat_label)
-            self._category_positions.append((cat, cat_label))
+            cat_card_layout.addWidget(cat_label)
 
             for section in cat.get("sections", []):
                 sec_label = QLabel(section["title"])
                 sec_label.setObjectName("helpSectionTitle")
-                sec_label.setStyleSheet("font-size: 13px; color: rgb(150,150,150); padding: 6px 0px 4px 0px;")
-                content_layout.addWidget(sec_label)
+                sec_label.setStyleSheet("font-size: 13px; color: rgb(160,160,160); padding: 6px 0px 4px 0px;")
+                cat_card_layout.addWidget(sec_label)
 
                 for item in section.get("items", []):
                     card = FunctionCard(item)
-                    content_layout.addWidget(card)
+                    cat_card_layout.addWidget(card)
 
                 note = section.get("note")
                 if note:
                     note_label = QLabel(note)
                     note_label.setObjectName("helpNoteText")
                     note_label.setWordWrap(True)
-                    note_label.setStyleSheet("color: rgb(130,130,130); padding: 4px 0px; font-size: 12px;")
-                    content_layout.addWidget(note_label)
+                    note_label.setStyleSheet("color: rgb(140,140,140); padding: 4px 0px; font-size: 12px;")
+                    cat_card_layout.addWidget(note_label)
 
-            spacer = QFrame()
-            spacer.setFixedHeight(12)
-            spacer.setObjectName("helpSpacer")
-            content_layout.addWidget(spacer)
+            content_layout.addWidget(cat_card)
+            self._category_positions.append((cat, cat_card))
 
         content_layout.addStretch()
 
@@ -994,10 +1089,10 @@ class HelpPanelManager:
             btn.setChecked(False)
         clicked_btn.setChecked(True)
 
-        for c, label in self._category_positions:
+        for c, widget in self._category_positions:
             if c["name"] == cat["name"]:
                 scrollbar = self._scroll_area.verticalScrollBar()
-                target = label.y() - 10
+                target = widget.y() - 10
                 scrollbar.setValue(max(0, target))
                 break
 
