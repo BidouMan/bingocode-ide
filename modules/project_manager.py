@@ -1,6 +1,8 @@
 import os
 import tempfile
 import shutil
+import zipfile
+import json
 
 
 class ProjectManager:
@@ -11,6 +13,10 @@ class ProjectManager:
         self.sprite_dir = None
         self.sound_dir = None
         self.current_run_target = ""
+        self.bingo_path = None
+        self.last_save_dir = os.path.expanduser("~/Desktop")
+        self.game_dir = None
+        self.code_dir = None
 
         self._code_dirty = False
         self._resource_dirty = False
@@ -56,8 +62,12 @@ class ProjectManager:
 
         self.sprite_dir = os.path.join(self.project_root, "assets", "sprites")
         self.sound_dir = os.path.join(self.project_root, "assets", "sounds")
+        self.game_dir = os.path.join(self.project_root, "game")
+        self.code_dir = os.path.join(self.project_root, "code")
         os.makedirs(self.sprite_dir, exist_ok=True)
         os.makedirs(self.sound_dir, exist_ok=True)
+        os.makedirs(self.game_dir, exist_ok=True)
+        os.makedirs(self.code_dir, exist_ok=True)
 
         self.main_script_path = self._get_default_script_path()
         with open(self.main_script_path, "w", encoding="utf-8") as f:
@@ -74,9 +84,13 @@ class ProjectManager:
         self.main_script_path = self._get_default_script_path()
         self.sprite_dir = os.path.join(self.project_root, "assets", "sprites")
         self.sound_dir = os.path.join(self.project_root, "assets", "sounds")
+        self.game_dir = os.path.join(self.project_root, "game")
+        self.code_dir = os.path.join(self.project_root, "code")
 
         os.makedirs(self.sprite_dir, exist_ok=True)
         os.makedirs(self.sound_dir, exist_ok=True)
+        os.makedirs(self.game_dir, exist_ok=True)
+        os.makedirs(self.code_dir, exist_ok=True)
 
         default_code = 'print("Hello Bingo!")\n'
         with open(self.main_script_path, "w", encoding="utf-8") as f:
@@ -90,6 +104,10 @@ class ProjectManager:
         self.project_root = tempfile.mkdtemp(prefix="BingoProject_")
 
         self.main_script_path = self._get_default_script_path()
+        self.game_dir = os.path.join(self.project_root, "game")
+        self.code_dir = os.path.join(self.project_root, "code")
+        os.makedirs(self.game_dir, exist_ok=True)
+        os.makedirs(self.code_dir, exist_ok=True)
 
         initial_code = 'print("Hello Bingo!")'
         with open(self.main_script_path, "w", encoding="utf-8") as f:
@@ -112,8 +130,12 @@ class ProjectManager:
 
         self.sprite_dir = os.path.join(folder_path, "assets", "sprites")
         self.sound_dir = os.path.join(folder_path, "assets", "sounds")
+        self.game_dir = os.path.join(folder_path, "game")
+        self.code_dir = os.path.join(folder_path, "code")
         os.makedirs(self.sprite_dir, exist_ok=True)
         os.makedirs(self.sound_dir, exist_ok=True)
+        os.makedirs(self.game_dir, exist_ok=True)
+        os.makedirs(self.code_dir, exist_ok=True)
 
         return True, "项目已加载"
 
@@ -143,3 +165,31 @@ class ProjectManager:
         except Exception as e:
             print(f"静默保存出错: {e}")
             return False
+
+    def pack_to_bingo(self, bingo_path):
+        """将整个项目打包为 .bingo 文件（ZIP格式）"""
+        try:
+            with zipfile.ZipFile(bingo_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for root, dirs, files in os.walk(self.project_root):
+                    dirs[:] = [d for d in dirs if not d.startswith('.') and d != '__pycache__']
+                    for f in files:
+                        if f.startswith('.'):
+                            continue
+                        full_path = os.path.join(root, f)
+                        arc_name = os.path.relpath(full_path, self.project_root)
+                        zf.write(full_path, arc_name)
+            return True
+        except Exception as e:
+            print(f"打包失败: {e}")
+            return False
+
+    def unpack_from_bingo(self, bingo_path):
+        """解压 .bingo 文件到临时目录并加载"""
+        try:
+            new_root = tempfile.mkdtemp(prefix="BingoProject_")
+            with zipfile.ZipFile(bingo_path, 'r') as zf:
+                zf.extractall(new_root)
+            return self.open_project(new_root)
+        except Exception as e:
+            print(f"解压失败: {e}")
+            return False, str(e)

@@ -923,19 +923,22 @@ class SpriteEditorManager(QObject):
 
     def eventFilter(self, obj, event):
         """事件过滤器：阻止水平滚动但允许选择"""
-        if obj == self.fps_list.viewport():
-            if event.type() == QEvent.MouseMove:
-                if event.buttons() & Qt.LeftButton:
-                    # 检测是否在进行水平拖拽
-                    if hasattr(self, "_last_mouse_pos"):
-                        delta_x = abs(event.pos().x() - self._last_mouse_pos.x())
-                        delta_y = abs(event.pos().y() - self._last_mouse_pos.y())
-                        # 如果水平移动大于垂直移动，阻止水平滚动
-                        if delta_x > delta_y and delta_x > 5:
-                            return True
-            elif event.type() == QEvent.MouseButtonPress:
-                # 记录点击位置
-                self._last_mouse_pos = event.pos()
+        try:
+            if obj == self.fps_list.viewport():
+                if event.type() == QEvent.MouseMove:
+                    if event.buttons() & Qt.LeftButton:
+                        # 检测是否在进行水平拖拽
+                        if hasattr(self, "_last_mouse_pos"):
+                            delta_x = abs(event.pos().x() - self._last_mouse_pos.x())
+                            delta_y = abs(event.pos().y() - self._last_mouse_pos.y())
+                            # 如果水平移动大于垂直移动，阻止水平滚动
+                            if delta_x > delta_y and delta_x > 5:
+                                return True
+                elif event.type() == QEvent.MouseButtonPress:
+                    # 记录点击位置
+                    self._last_mouse_pos = event.pos()
+        except RuntimeError:
+            pass
         return super().eventFilter(obj, event)
 
     def cleanup(self):

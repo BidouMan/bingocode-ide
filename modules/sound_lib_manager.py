@@ -152,36 +152,38 @@ class SoundLibManager(QObject):
         lw.itemClicked.connect(self._on_card_clicked)
 
     def eventFilter(self, obj, event):
-        lw = self.ui.listWidget_2
-        if obj == lw.viewport():
-            if event.type() == QEvent.Type.MouseMove:
-                pos = event.pos()
-                item = lw.itemAt(pos)
-                if item:
-                    item_rect = lw.visualItemRect(item)
-                    play_rect = self._delegate.get_play_icon_rect(item_rect)
-                    if play_rect.contains(pos):
-                        lw.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-                        sound_path = item.data(self.PATH_ROLE)
-                        if sound_path != self._last_hover_play_path:
-                            self._last_hover_play_path = sound_path
-                            self._play_sound(sound_path)
+        try:
+            lw = self.ui.listWidget_2
+            if obj == lw.viewport():
+                if event.type() == QEvent.Type.MouseMove:
+                    pos = event.pos()
+                    item = lw.itemAt(pos)
+                    if item:
+                        item_rect = lw.visualItemRect(item)
+                        play_rect = self._delegate.get_play_icon_rect(item_rect)
+                        if play_rect.contains(pos):
+                            lw.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+                            sound_path = item.data(self.PATH_ROLE)
+                            if sound_path != self._last_hover_play_path:
+                                self._last_hover_play_path = sound_path
+                                self._play_sound(sound_path)
+                        else:
+                            lw.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
+                            if self._last_hover_play_path is not None:
+                                self._last_hover_play_path = None
+                                self._player.stop()
                     else:
                         lw.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
                         if self._last_hover_play_path is not None:
                             self._last_hover_play_path = None
                             self._player.stop()
-                else:
+                elif event.type() == QEvent.Type.Leave:
                     lw.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
                     if self._last_hover_play_path is not None:
                         self._last_hover_play_path = None
                         self._player.stop()
-
-            elif event.type() == QEvent.Type.Leave:
-                lw.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
-                if self._last_hover_play_path is not None:
-                    self._last_hover_play_path = None
-                    self._player.stop()
+        except RuntimeError:
+            pass
 
         return super().eventFilter(obj, event)
 

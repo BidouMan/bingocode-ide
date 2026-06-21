@@ -57,6 +57,11 @@
     <file>icons/上移图层.svg</file>
     <file>icons/下移图层.svg</file>
 
+    <file>icons/关闭_2.svg</file>
+    <file>icons/关闭_3.svg</file>
+    <file>icons/未保存.svg</file>
+    <file>icons/undo.svg</file>
+    <file>icons/redo.svg</file>
 
     <file>icons/代码编辑.svg</file>
     <file>icons/角色精灵.svg</file>

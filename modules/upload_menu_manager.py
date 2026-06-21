@@ -144,9 +144,14 @@ class UploadMenuManager(QWidget):
         )
 
         if files:
-            # 🚀 修复焦点丢失问题：强制主窗口重新获取焦点
-            self.activateWindow()
-            self.raise_()
+            # 🚀 修复焦点丢失问题：延迟恢复主窗口焦点
+            from PySide6.QtCore import QTimer
+            parent = self.parentWidget()
+            QTimer.singleShot(100, lambda: (
+                parent.activateWindow() if parent else None,
+                parent.raise_() if parent else None,
+                parent.setFocus() if parent else None,
+            ))
 
             # 如果选中的是 .bgs 文件，我们单独处理
             if len(files) == 1 and files[0].lower().endswith(".bgs"):
@@ -344,11 +349,13 @@ class MapUploadMenuManager(QWidget):
         )
 
         if files:
-            self.activateWindow()
-            self.raise_()
-
-            # 处理地图文件导入
-            import os
+            from PySide6.QtCore import QTimer
+            parent = self.parentWidget()
+            QTimer.singleShot(100, lambda: (
+                parent.activateWindow() if parent else None,
+                parent.raise_() if parent else None,
+                parent.setFocus() if parent else None,
+            ))
 
             map_name = os.path.splitext(os.path.basename(files[0]))[0]
             if not map_name:
@@ -505,8 +512,13 @@ class SoundUploadMenuManager(QWidget):
         )
 
         if files:
-            self.activateWindow()
-            self.raise_()
+            from PySide6.QtCore import QTimer
+            parent = self.parentWidget()
+            QTimer.singleShot(100, lambda: (
+                parent.activateWindow() if parent else None,
+                parent.raise_() if parent else None,
+                parent.setFocus() if parent else None,
+            ))
 
             if self.on_import_finished:
                 self.on_import_finished(files)

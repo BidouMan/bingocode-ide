@@ -1,5 +1,24 @@
 from PySide6.QtWidgets import QTabBar, QVBoxLayout, QSizePolicy
-from PySide6.QtCore import QObject, Signal, Qt
+from PySide6.QtCore import QObject, Signal, Qt, QEvent
+
+
+class _WheelTabBar(QTabBar):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._scroll_acc = 0
+        self._scroll_threshold = 80
+
+    def wheelEvent(self, event):
+        self._scroll_acc += event.angleDelta().y()
+        if abs(self._scroll_acc) >= self._scroll_threshold:
+            if self._scroll_acc > 0:
+                idx = max(0, self.currentIndex() - 1)
+            else:
+                idx = min(self.count() - 1, self.currentIndex() + 1)
+            self.setCurrentIndex(idx)
+            self._scroll_acc = 0
+        event.accept()
+
 
 class TabbarManager(QObject):
     tab_changed = Signal(int)
@@ -7,7 +26,7 @@ class TabbarManager(QObject):
     def __init__(self, container):
         super().__init__()
         self.container = container 
-        self.tab_bar = QTabBar()
+        self.tab_bar = _WheelTabBar()
         self._last_active_index = -1
         self._init_tab_bar()
 

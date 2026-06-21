@@ -19,11 +19,17 @@ sys.stdout = os.fdopen(sys.stdout.fileno(), "w", buffering=1)
 from models.map_model import MapDataModel
 
 _PRESSED_KEYS = set()
+_PRESSED_KEYS_PREV = set()
+_WAIT_TIMERS = {}
+_EVENT_LISTENERS = {}
 _SHOW_FPS = False
+_PAUSED = False
+_STOPPED = False
 _PERF_STATS = {"last_time": time.time(), "frame_count": 0}
 _GROUPS = {}
 _MOUSE_STATE = {"down": False, "last_down": False, "x": 0, "y": 0}  # 用字典包装鼠标状态
 _SPRITES = {}  # 存储所有精灵实例
+_SAY_TIMERS = {}  # say 定时消失计时器
 _CURRENT_MAP = None  # 当前加载的地图数据
 _MAP_DIR = None  # 当前地图所在目录
 _MAP_SPRITES = {}  # 地图瓦片精灵
@@ -59,8 +65,17 @@ mouse = _MouseType()  # 🚀 定义全局变量 mouse
 
 __all__ = [
     "Sprite",
+    "Timer",
     "run",
     "key_down",
+    "key_pressed",
+    "wait",
+    "broadcast",
+    "receive",
+    "pause",
+    "resume",
+    "is_paused",
+    "stop",
     "show_fps",
     "mouse_down",
     "mouse_pressed",
@@ -69,7 +84,40 @@ __all__ = [
     "follow",
     "play_sound",
     "show_collision",
+    "random_int",
+    "random_float",
+    "draw_text",
+    "stop_sound",
+    "shake",
 ]
+
+
+class Timer:
+    def __init__(self, seconds, loop=True, autostart=False):
+        self._interval = seconds
+        self._loop = loop
+        self._running = False
+        self._last_time = 0
+        if autostart:
+            self.start()
+
+    def start(self):
+        self._running = True
+        self._last_time = time.time()
+
+    def stop(self):
+        self._running = False
+
+    def is_timeout(self):
+        if not self._running:
+            return False
+        now = time.time()
+        if now - self._last_time >= self._interval:
+            self._last_time = now
+            if not self._loop:
+                self._running = False
+            return True
+        return False
 
 
 class Sprite:
@@ -99,6 +147,9 @@ class Sprite:
         self._visible = True
         self._is_deleted = False
         self._layer = 0
+        self._speed = 0
+        self._on_hit_callbacks = []
+        self._auto_destroy = False
 
         # 🚀 2. 资源解析逻辑升级
         # 尝试寻找解压后的角色文件夹 (例如 assets/sprites/洛克人)
@@ -484,6 +535,10 @@ class Sprite:
                     center_to_bottom = sprite_rect[3] - self._y
                     self._y = bounds["bottom"] - center_to_bottom - 0.05
 
+    def goto(self, x, y):
+        """移到指定坐标"""
+        self.set_xy(x, y)
+
     def set_xy(self, x, y):
         """设置坐标"""
         hitbox = self._get_hitbox_rect()
@@ -571,6 +626,19 @@ class Sprite:
             self.on_ground = False
             self.vy = 2
 
+    def set_speed(self, speed):
+        """设置持续速度，引擎每帧自动沿当前方向移动"""
+        self._speed = speed
+
+    def on_hit(self, group, callback=None):
+        """注册碰撞回调。callback(bullet, other) 或默认双方删除"""
+        self._on_hit_callbacks.append((group, callback))
+
+    def broadcast(self, event_name):
+        """发送广播（触发所有接收该事件的回调）"""
+        for callback in _EVENT_LISTENERS.get(event_name, []):
+            callback()
+
     def move(self, distance):
         """朝着当前 angle 方向移动 distance 像素"""
         radians = math.radians(self._angle)
@@ -649,28 +717,36 @@ class Sprite:
         self.set_angle(angle % 360)
 
     def edge_bounce(self):
-        """基于 Hitbox 的精准反弹"""
-        STAGE_W, STAGE_H = 640, 480
+        """基于 Hitbox 的精准反弹，自动识别世界边界"""
+        if _CURRENT_MAP:
+            bounds = _CURRENT_MAP.get("world_bounds", {"left": 0, "top": 0, "right": 640, "bottom": 480})
+        else:
+            bounds = {"left": 0, "top": 0, "right": 640, "bottom": 480}
+
+        STAGE_LEFT = bounds["left"]
+        STAGE_TOP = bounds["top"]
+        STAGE_RIGHT = bounds["right"]
+        STAGE_BOTTOM = bounds["bottom"]
         rect = self._get_hitbox_rect()
         hit = False
 
         # 左右判断
-        if rect[2] > STAGE_W:  # 右边出界
-            self._x -= rect[2] - STAGE_W  # 修正位置，消除穿墙感
+        if rect[2] > STAGE_RIGHT:
+            self._x -= rect[2] - STAGE_RIGHT
             self._angle = 180 - self._angle
             hit = True
-        elif rect[0] < 0:  # 左边出界
-            self._x += 0 - rect[0]
+        elif rect[0] < STAGE_LEFT:
+            self._x += STAGE_LEFT - rect[0]
             self._angle = 180 - self._angle
             hit = True
 
         # 上下判断
-        if rect[3] > STAGE_H:  # 下边出界
-            self._y -= rect[3] - STAGE_H
+        if rect[3] > STAGE_BOTTOM:
+            self._y -= rect[3] - STAGE_BOTTOM
             self._angle = -self._angle
             hit = True
-        elif rect[1] < 0:  # 上边出界
-            self._y += 0 - rect[1]
+        elif rect[1] < STAGE_TOP:
+            self._y += STAGE_TOP - rect[1]
             self._angle = -self._angle
             hit = True
 
@@ -714,12 +790,18 @@ class Sprite:
         self._visible = False
         self._send_command("UPDATE", {"id": self.id, "visible": False})
 
-    def say(self, text):
+    def say(self, text, seconds=0):
         """
-        让角色说话。由于设定是永久显示，新话会替换旧话。
+        让角色说话。新话会替换旧话。
+        say("你好")      → 永久显示
+        say("得分+1", 2) → 2秒后自动消失
         """
-        # 确保 text 是字符串
         self._send_command("SAY", {"text": str(text)})
+        if seconds > 0:
+            def _hide():
+                self._send_command("SAY", {"text": ""})
+            timer = Timer(seconds, loop=False, autostart=True)
+            _SAY_TIMERS[self.id] = (timer, _hide)
 
     def play(self, animation_name, transition_time=0.1):
         """
@@ -941,6 +1023,9 @@ class Sprite:
         # 从全局精灵集合中移除
         if self.id in _SPRITES:
             del _SPRITES[self.id]
+        # 清理 say 计时器
+        if self.id in _SAY_TIMERS:
+            del _SAY_TIMERS[self.id]
 
     def distance_to(self, target):
         """
@@ -1428,11 +1513,101 @@ def key_down(key):
     return str(key).lower() in _PRESSED_KEYS
 
 
+def key_pressed(key):
+    """只有按下的那一帧返回 True"""
+    return str(key).lower() in _PRESSED_KEYS and str(key).lower() not in _PRESSED_KEYS_PREV
+
+
+def wait(seconds):
+    """每 N 秒返回一次 True"""
+    now = time.time()
+    if seconds not in _WAIT_TIMERS or now - _WAIT_TIMERS[seconds] >= seconds:
+        _WAIT_TIMERS[seconds] = now
+        return True
+    return False
+
+
+def broadcast(event_name):
+    """发送全局广播"""
+    for callback in _EVENT_LISTENERS.get(event_name, []):
+        callback()
+
+
+def receive(event_name, callback):
+    """注册全局广播接收"""
+    if event_name not in _EVENT_LISTENERS:
+        _EVENT_LISTENERS[event_name] = []
+    _EVENT_LISTENERS[event_name].append(callback)
+
+
+def pause():
+    """暂停游戏（loop 仍运行，但精灵停止移动）"""
+    global _PAUSED
+    _PAUSED = True
+
+
+def resume():
+    """继续游戏"""
+    global _PAUSED
+    _PAUSED = False
+
+
+def is_paused():
+    """检查是否暂停"""
+    return _PAUSED
+
+
+def stop():
+    """停止游戏（退出 run 循环）"""
+    global _STOPPED
+    _STOPPED = True
+
+
 def show_fps(visible=True):
     """学生调用的接口"""
     global _SHOW_FPS
     _SHOW_FPS = visible
     packet = {"type": "UI_COMMAND", "data": {"visible": visible}}
+    print(json.dumps(packet), flush=True)
+
+
+def random_int(min_val, max_val):
+    """在 min_val 和 max_val 之间取随机整数（包含两端）"""
+    return random.randint(int(min_val), int(max_val))
+
+
+def random_float(min_val=0.0, max_val=1.0):
+    """在 min_val 和 max_val 之间取随机浮点数"""
+    return random.uniform(float(min_val), float(max_val))
+
+
+def shake(intensity=5, duration=0.3):
+    """屏幕震动效果"""
+    packet = {
+        "type": "SCREEN_SHAKE",
+        "data": {"intensity": intensity, "duration": duration},
+    }
+    print(json.dumps(packet), flush=True)
+
+
+def stop_sound(sound_name=None):
+    """停止音效。不传参数则停止所有音效。"""
+    packet = {
+        "type": "STOP_SOUND",
+        "data": {"sound": sound_name} if sound_name else {},
+    }
+    print(json.dumps(packet), flush=True)
+
+
+def draw_text(x, y, *args):
+    """在屏幕指定位置绘制文字，参数自动拼接为字符串
+    draw_text(100, 50, "分数:", score)
+    """
+    text = "".join(str(a) for a in args)
+    packet = {
+        "type": "DRAW_TEXT",
+        "data": {"id": f"text_{x}_{y}", "text": text, "x": x, "y": y},
+    }
     print(json.dumps(packet), flush=True)
 
 
@@ -1684,9 +1859,17 @@ def _handle_physics_collision():
         if sprite._jump_buffer > 0:
             sprite._jump_buffer -= 1
 
-        sprite.vy = min(
-            sprite.vy + (3.5 if sprite.vy < 0 and sprite._jump_cut else 0.8), 12
-        )
+        if _CURRENT_MAP.get("gravity", False):
+            if sprite.vy < 0:
+                if sprite._jump_cut:
+                    gravity = 2.8
+                else:
+                    gravity = 0.5
+            else:
+                gravity = 1.1
+            sprite.vy = min(sprite.vy + gravity, 10)
+        else:
+            gravity = 0
 
         sprite._y += sprite.vy
         sprite._resolve_collision("y")
@@ -1939,104 +2122,125 @@ def run():
     if not hasattr(main_module, "loop"):
         return
 
-    target_fps = 60
-    frame_duration = 1.0 / target_fps
-    _PERF_STATS["last_time"] = time.time()
+    _PHYSICS_DT = 1.0 / 60.0
+    _MAX_FRAME_TIME = 0.05
+    _MAX_PHYSICS_STEPS = 3
 
-    next_frame_time = time.time()  # 🚀 记录下一帧应该开始的时间点
+    _PERF_STATS["last_time"] = time.time()
+    accumulator = 0.0
+    prev_time = time.time()
 
     while True:
-        start_frame = time.time()
+        if _STOPPED:
+            break
 
-        # 更新所有精灵的动画
-        for sprite in _SPRITES.values():
-            # 如果正在过渡中，需要同时更新源动画和目标动画
-            if hasattr(sprite, "_is_transitioning") and sprite._is_transitioning:
-                # 更新源动画
-                source_state = sprite._source_animation
-                if source_state.get("is_playing", True):
-                    now = time.time()
-                    elapsed = now - source_state["last_frame_time"]
-                    if elapsed >= source_state["frame_duration"]:
-                        source_state["current_frame"] += 1
-                        if source_state["current_frame"] > source_state["end"]:
-                            if source_state.get("loop", True):
-                                source_state["current_frame"] = source_state["start"]
-                            else:
-                                source_state["current_frame"] = source_state["end"]
-                                source_state["is_playing"] = False
-                        source_state["last_frame_time"] = now
+        now = time.time()
+        frame_time = min(now - prev_time, _MAX_FRAME_TIME)
+        prev_time = now
+        accumulator += frame_time
 
-                # 更新目标动画
-                target_state = sprite._target_animation
-                if target_state.get("is_playing", True):
-                    now = time.time()
-                    elapsed = now - target_state["last_frame_time"]
-                    if elapsed >= target_state["frame_duration"]:
-                        target_state["current_frame"] += 1
-                        if target_state["current_frame"] > target_state["end"]:
-                            if target_state.get("loop", True):
-                                target_state["current_frame"] = target_state["start"]
-                            else:
-                                target_state["current_frame"] = target_state["end"]
-                                target_state["is_playing"] = False
-                        target_state["last_frame_time"] = now
+        steps = 0
+        while accumulator >= _PHYSICS_DT and steps < _MAX_PHYSICS_STEPS:
+            if not _PAUSED:
+                for sprite in _SPRITES.values():
+                    if hasattr(sprite, "_is_transitioning") and sprite._is_transitioning:
+                        source_state = sprite._source_animation
+                        if source_state.get("is_playing", True):
+                            t = time.time()
+                            if t - source_state["last_frame_time"] >= source_state["frame_duration"]:
+                                source_state["current_frame"] += 1
+                                if source_state["current_frame"] > source_state["end"]:
+                                    if source_state.get("loop", True):
+                                        source_state["current_frame"] = source_state["start"]
+                                    else:
+                                        source_state["current_frame"] = source_state["end"]
+                                        source_state["is_playing"] = False
+                                source_state["last_frame_time"] = t
 
-                # 更新帧（使用过渡逻辑）
-                sprite._update_animation_frame()
-            elif hasattr(sprite, "animation_state") and sprite.animation_state:
-                # 正常动画播放
-                sprite_state = sprite.animation_state
+                        target_state = sprite._target_animation
+                        if target_state.get("is_playing", True):
+                            t = time.time()
+                            if t - target_state["last_frame_time"] >= target_state["frame_duration"]:
+                                target_state["current_frame"] += 1
+                                if target_state["current_frame"] > target_state["end"]:
+                                    if target_state.get("loop", True):
+                                        target_state["current_frame"] = target_state["start"]
+                                    else:
+                                        target_state["current_frame"] = target_state["end"]
+                                        target_state["is_playing"] = False
+                                target_state["last_frame_time"] = t
 
-                # 检查动画是否正在播放
-                if not sprite_state.get("is_playing", True):
-                    continue
+                        sprite._update_animation_frame()
+                    elif hasattr(sprite, "animation_state") and sprite.animation_state:
+                        sprite_state = sprite.animation_state
+                        if not sprite_state.get("is_playing", True):
+                            continue
+                        t = time.time()
+                        if t - sprite_state["last_frame_time"] >= sprite_state["frame_duration"]:
+                            sprite_state["current_frame"] += 1
+                            if sprite_state["current_frame"] > sprite_state["end"]:
+                                if sprite_state.get("loop", True):
+                                    sprite_state["current_frame"] = sprite_state["start"]
+                                else:
+                                    sprite_state["current_frame"] = sprite_state["end"]
+                                    sprite_state["is_playing"] = False
+                            sprite_state["last_frame_time"] = t
+                            sprite._update_animation_frame()
 
-                now = time.time()
-                elapsed = now - sprite_state["last_frame_time"]
+            main_module.loop()
 
-                # 检查是否需要更新帧
-                if elapsed >= sprite_state["frame_duration"]:
-                    # 更新帧索引
-                    sprite_state["current_frame"] += 1
+            for sid in list(_SAY_TIMERS.keys()):
+                timer, hide_fn = _SAY_TIMERS[sid]
+                if timer.is_timeout():
+                    hide_fn()
+                    del _SAY_TIMERS[sid]
 
-                    # 根据 loop 属性决定是否循环
-                    if sprite_state["current_frame"] > sprite_state["end"]:
-                        if sprite_state.get("loop", True):
-                            # 循环播放：回到起始帧
-                            sprite_state["current_frame"] = sprite_state["start"]
-                        else:
-                            # 非循环播放：停在最后一帧，停止动画
-                            sprite_state["current_frame"] = sprite_state["end"]
-                            sprite_state["is_playing"] = False
+            if not _PAUSED:
+                for sprite in list(_SPRITES.values()):
+                    if sprite._is_deleted or sprite._speed <= 0:
+                        continue
+                    sprite.move(sprite._speed)
 
-                    # 更新帧时间
-                    sprite_state["last_frame_time"] = now
+                for sprite in list(_SPRITES.values()):
+                    if sprite._is_deleted or not sprite._auto_destroy:
+                        continue
+                    if sprite.is_out_side():
+                        sprite.delete()
 
-                    # 更新帧
-                    sprite._update_animation_frame()
+                for sprite in list(_SPRITES.values()):
+                    if sprite._is_deleted or not sprite._on_hit_callbacks:
+                        continue
+                    for group_name, callback in list(sprite._on_hit_callbacks):
+                        for other in list(_GROUPS.get(group_name, [])):
+                            if other is sprite or other._is_deleted:
+                                continue
+                            if sprite.is_touch(other):
+                                if callback:
+                                    callback(sprite, other)
+                                else:
+                                    sprite.delete()
+                                    other.delete()
+                                break
 
-        # 执行用户逻辑
-        main_module.loop()
+                if _CURRENT_MAP:
+                    _handle_physics_collision()
 
-        # 物理碰撞检测和位移修正
-        if _CURRENT_MAP:
-            _handle_physics_collision()
+            accumulator -= _PHYSICS_DT
+            steps += 1
 
-        # 更新摄像机位置
+        if accumulator > _PHYSICS_DT * _MAX_PHYSICS_STEPS:
+            accumulator = 0.0
+
         if _CURRENT_MAP and _FOLLOW_TARGET:
-            # 更新摄像机位置
             global _CAMERA_X, _CAMERA_Y
             old_camera_x = _CAMERA_X
             old_camera_y = _CAMERA_Y
 
-            # 获取地图的世界像素边界
             bounds = _CURRENT_MAP.get(
                 "world_bounds", {"left": 0, "top": 0, "right": 640, "bottom": 480}
             )
             view_w, view_h = 640, 480
 
-            # 边界夹紧（参考 Godot Camera2D）
             _CAMERA_X = max(
                 bounds["left"] + view_w / 2,
                 min(_FOLLOW_TARGET.x, bounds["right"] - view_w / 2),
@@ -2046,10 +2250,8 @@ def run():
                 min(_FOLLOW_TARGET.y, bounds["bottom"] - view_h / 2),
             )
 
-            # 使用跟随目标更新摄像机
             _send_camera_update(_CAMERA_X, _CAMERA_Y, bounds)
 
-            # 只在摄像机位置变化较大时重新渲染地图，避免频繁渲染
             tile_size = _CURRENT_MAP.get("tile_size", 16)
             if (
                 abs(_CAMERA_X - old_camera_x) >= tile_size // 2
@@ -2057,26 +2259,15 @@ def run():
             ):
                 _render_map()
 
-        # 每一帧结束时，记录当前状态供下一帧对比(鼠标持续按下还是单次按下)
         _MOUSE_STATE["last_down"] = _MOUSE_STATE["down"]
+        _PRESSED_KEYS_PREV = _PRESSED_KEYS.copy()
 
-        # FPS 统计
         _PERF_STATS["frame_count"] += 1
-        now = time.time()
-        duration = now - _PERF_STATS["last_time"]
+        t = time.time()
+        duration = t - _PERF_STATS["last_time"]
         if duration >= 0.5:
             fps = _PERF_STATS["frame_count"] / duration
             if _SHOW_FPS:
                 _send_fps_to_ide(fps)
             _PERF_STATS["frame_count"] = 0
-            _PERF_STATS["last_time"] = now
-
-        # 🚀 改进的帧率控制：追踪时间线而不是死等
-        next_frame_time += frame_duration
-        sleep_time = next_frame_time - time.time()
-
-        if sleep_time > 0:
-            time.sleep(sleep_time)
-        else:
-            # 如果逻辑太重导致掉帧了，重置时间线防止“加速追赶”
-            next_frame_time = time.time()
+            _PERF_STATS["last_time"] = t

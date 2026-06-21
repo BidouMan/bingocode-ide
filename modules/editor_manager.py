@@ -9,12 +9,13 @@ class EditorManager(QObject):
     file_created_on_disk = Signal()
     file_renamed_on_disk = Signal()
 
-    def __init__(self, stacked_widget, tab_manager,project_manager):
+    def __init__(self, stacked_widget, tab_manager, project_manager, mode="game"):
         super().__init__()
         self.stacked = stacked_widget
         self.tab_manager = tab_manager
         self.tabs = tab_manager.tab_bar
         self.pm = project_manager
+        self.mode = mode
         # 清理空tab
         self._clear_initial_state()
 
@@ -61,11 +62,20 @@ class EditorManager(QObject):
 
     def initialize_startup(self):
         """启动逻辑：不写磁盘，只创建虚拟 Tab"""
-        file_path = self.pm.main_script_path
+        work_dir = self.pm.game_dir if self.mode == "game" else self.pm.code_dir
+        if not work_dir or not os.path.exists(work_dir):
+            work_dir = self.pm.project_root
+
+        py_files = [f for f in os.listdir(work_dir) if f.endswith('.py') and not f.startswith('.')]
+        if py_files:
+            py_files.sort(key=lambda x: os.path.getmtime(os.path.join(work_dir, x)), reverse=True)
+            file_path = os.path.join(work_dir, py_files[0])
+        else:
+            file_path = self.pm.main_script_path
+
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
-            # 创建 Tab，注意这里不再是 temp 状态，因为它已经有物理文件了
             self.create_new_tab(file_path, content)
         except Exception as e:
             print(f"启动加载代码失败: {e}")
@@ -175,46 +185,49 @@ class EditorManager(QObject):
             pass
 
     def request_save_file(self, parent_window):
-        """保存当前文件：修正保存后状态不更新的问题"""
+        """保存当前文件"""
         editor = self.get_current_editor()
         if not editor: return
 
         path = editor.file_path
         file_name = os.path.basename(path).lower()
-        
-        # 判定：如果是临时文件，或者磁盘上不存在，或者文件名叫 untitled
+
         if getattr(editor, 'is_temp', False) or not os.path.exists(path) or "未命名-" in file_name:
+            parent_window.activateWindow()
+            parent_window.raise_()
+            parent_window.setFocus()
+
+            default_dir = self.pm.last_save_dir if self.pm else os.path.expanduser("~/Desktop")
             new_path, _ = QFileDialog.getSaveFileName(
-                parent_window, 
-                "保存文件", 
-                path, 
-                "Python Files (*.py);;All Files (*)"
+                parent_window,
+                "保存文件",
+                default_dir,
+                "Python Files (*.py)",
             )
-            
+
             if new_path:
-                # 🚀 修复焦点丢失问题：强制主窗口重新获取焦点
+                if not new_path.endswith('.py'):
+                    new_path += '.py'
+                if self.pm:
+                    self.pm.last_save_dir = os.path.dirname(new_path)
+
                 parent_window.activateWindow()
                 parent_window.raise_()
-                
-                # 如果用户选了新路径，且原本后台有残留文件，则清理
+
                 if path and os.path.exists(path) and path != new_path:
                     try: os.remove(path)
                     except: pass
-                
-                # 更新编辑器路径
+
                 editor.file_path = new_path
                 if self._do_physical_save(editor):
-                    # 🚀 【关键修正】：一旦手动保存成功，必须取消 temp 标记
-                    editor.is_temp = False 
-                    
+                    editor.is_temp = False
                     self._set_tab_modified(editor, False)
-                    
-                    # 更新界面文字
                     idx = self.tabs.currentIndex()
                     self.tabs.setTabText(idx, os.path.splitext(os.path.basename(new_path))[0])
                     self.file_created_on_disk.emit()
+                    if self.pm:
+                        self.pm.set_run_target(new_path)
         else:
-            # 对于已经不是 temp 的文件，直接执行静默覆盖
             if self._do_physical_save(editor):
                 self._set_tab_modified(editor, False)
 
@@ -223,16 +236,19 @@ class EditorManager(QObject):
             editor = self.get_current_editor()
             if not editor: return
 
-            # 强制弹出另存为对话框
+            default_dir = self.pm.last_save_dir if self.pm else os.path.expanduser("~/Desktop")
             new_path, _ = QFileDialog.getSaveFileName(
-                parent_window, 
-                "另存为", 
-                editor.file_path, # 初始路径建议为当前文件路径
-                "Python Files (*.py);;All Files (*)"
+                parent_window,
+                "另存为",
+                default_dir,
+                "Python Files (*.py)",
             )
             
             if new_path:
-                # 🚀 修复焦点丢失问题：强制主窗口重新获取焦点
+                if not new_path.endswith('.py'):
+                    new_path += '.py'
+                if self.pm:
+                    self.pm.last_save_dir = os.path.dirname(new_path)
                 parent_window.activateWindow()
                 parent_window.raise_()
                 
@@ -245,7 +261,9 @@ class EditorManager(QObject):
                     # 更新 Tab 标签文字
                     idx = self.tabs.currentIndex()
                     self.tabs.setTabText(idx, os.path.splitext(os.path.basename(new_path))[0])
-                    self.file_created_on_disk.emit() # 通知文件树刷新
+                    self.file_created_on_disk.emit()
+                    if self.pm:
+                        self.pm.set_run_target(new_path)
 
     def on_tab_double_clicked(self, index):
         """双击重命名"""
@@ -313,15 +331,25 @@ class EditorManager(QObject):
         return self.stacked.widget(idx) if idx != -1 else None
 
     def create_untitled_file(self):
-        """在当前项目目录下创建一个新的临时标签页"""
+        """在当前模式的专属目录下创建一个新的临时标签页"""
+        work_dir = self.pm.code_dir if self.mode == "ide" else self.pm.game_dir
+        if not work_dir or not os.path.exists(work_dir):
+            work_dir = self.pm.project_root
+
         i = 1
         while True:
             name = f"未命名-{i}.py"
-            path = os.path.join(self.pm.project_root, name)
+            path = os.path.join(work_dir, name)
             if not os.path.exists(path): break
             i += 1
 
-        return self.create_new_tab(file_path=path, content="")
+        with open(path, "w", encoding="utf-8") as f:
+            pass
+
+        editor = self.create_new_tab(file_path=path, content="")
+        self.pm.set_run_target(path)
+        self.file_created_on_disk.emit()
+        return editor
     
     def save_all_opened_files(self):
         """全量保存：遍历所有标签页并强制写盘"""
@@ -361,5 +389,6 @@ class EditorManager(QObject):
                 
                 # 使用你已有的 create_new_tab 方法
                 self.create_new_tab(file_path, content, auto_activate=True)
+                self.pm.set_run_target(file_path)
         except Exception as e:
             print(f"打开文件失败: {e}")

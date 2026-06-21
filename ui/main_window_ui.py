@@ -10,7 +10,7 @@
 
 from PySide6.QtCore import (QCoreApplication, QDate, QDateTime, QLocale,
     QMetaObject, QObject, QPoint, QRect,
-    QSize, QTime, QUrl, Qt)
+    QSize, QTime, QUrl, Qt, QSettings)
 from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
@@ -23,6 +23,52 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QC
     QSpacerItem, QSplitter, QStackedWidget, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget)
 import resources_rc
+
+
+class ToggleSwitch(QWidget):
+    from PySide6.QtCore import Signal as _Signal
+    toggled = _Signal(bool)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._checked = False
+        self.setFixedSize(36, 20)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def isChecked(self):
+        return self._checked
+
+    def setChecked(self, v):
+        if self._checked != v:
+            self._checked = v
+            self.update()
+
+    def mousePressEvent(self, e):
+        self._checked = not self._checked
+        self.toggled.emit(self._checked)
+        self.update()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        r = h / 2
+
+        if self._checked:
+            bg = QColor(91, 251, 132)
+        else:
+            bg = QColor(55, 120, 200)
+
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(bg)
+        p.drawRoundedRect(0, 0, w, h, r, r)
+
+        knob_r = r - 2
+        knob_x = w - h + 2 if self._checked else 2
+        p.setBrush(QColor(255, 255, 255))
+        p.drawEllipse(int(knob_x), 2, int(knob_r * 2), int(knob_r * 2))
+        p.end()
+
 
 class Ui_Form(object):
     def setupUi(self, Form):
@@ -92,7 +138,6 @@ class Ui_Form(object):
         self.btn_file.setSizePolicy(sizePolicy2)
         self.btn_file.setMinimumSize(QSize(0, 0))
         self.btn_file.setMaximumSize(QSize(16777215, 40))
-        self.btn_file.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         icon1 = QIcon()
         icon1.addFile(u":/icons/icon--file.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.btn_file.setIcon(icon1)
@@ -165,6 +210,35 @@ class Ui_Form(object):
 
         self.horizontalLayout_3.addItem(self.horizontalSpacer_2)
 
+        self.mode_switch_frame = QWidget(self.menu_frame)
+        self.mode_switch_frame.setObjectName(u"mode_switch_frame")
+        self.mode_switch_layout = QHBoxLayout(self.mode_switch_frame)
+        self.mode_switch_layout.setContentsMargins(0, 0, 0, 0)
+        self.mode_switch_layout.setSpacing(6)
+
+        self.mode_label = QLabel("代码模式", self.mode_switch_frame)
+        self.mode_label.setStyleSheet("color:rgb(160,160,160);font-size:11px;border:none;background:transparent;")
+        self.mode_switch_layout.addWidget(self.mode_label)
+
+        self.btn_mode_switch = ToggleSwitch(self.mode_switch_frame)
+        self.btn_mode_switch.setObjectName(u"btn_mode_switch")
+        self.mode_switch_layout.addWidget(self.btn_mode_switch)
+
+        self.horizontalLayout_3.addWidget(self.mode_switch_frame)
+
+        def _on_mode_toggled(checked):
+            self.mode_label.setText("游戏模式" if checked else "代码模式")
+            settings = QSettings("BingoCode", "BingoIDE")
+            settings.setValue("mode/is_game_mode", checked)
+
+        self.btn_mode_switch.toggled.connect(_on_mode_toggled)
+
+        _settings = QSettings("BingoCode", "BingoIDE")
+        _is_game = _settings.value("mode/is_game_mode", False, type=bool)
+        if _is_game:
+            self.btn_mode_switch.setChecked(True)
+            self.mode_label.setText("游戏模式")
+
         self.btn_help = QPushButton(self.menu_frame)
         self.btn_help.setObjectName(u"btn_help")
         icon6 = QIcon()
@@ -181,6 +255,7 @@ class Ui_Form(object):
         self.horizontalLayout_3.setStretch(4, 1)
         self.horizontalLayout_3.setStretch(5, 1)
         self.horizontalLayout_3.setStretch(6, 6)
+        self.horizontalLayout_3.setStretch(7, 0)
 
         self.verticalLayout_19.addWidget(self.menu_frame)
 
@@ -1501,6 +1576,159 @@ class Ui_Form(object):
 
         self.editor_stacked.addWidget(self.editor_map_web)
 
+        self.editor_ide_web = QWidget()
+        self.editor_ide_web.setObjectName(u"editor_ide_web")
+        self.ide_main_layout = QVBoxLayout(self.editor_ide_web)
+        self.ide_main_layout.setContentsMargins(0, 0, 0, 0)
+        self.ide_main_layout.setSpacing(0)
+
+        self.ide_toolbar_frame = QFrame()
+        self.ide_toolbar_frame.setObjectName(u"toolbar_frame")
+        sizePolicy3 = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.ide_toolbar_frame.setSizePolicy(sizePolicy3)
+        self.ide_toolbar_frame.setMinimumSize(QSize(0, 30))
+        self.ide_toolbar_frame.setMaximumSize(QSize(16777215, 30))
+        self.ide_toolbar_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self.ide_toolbar_frame.setFrameShadow(QFrame.Shadow.Raised)
+        self.ide_toolbar_hl = QHBoxLayout(self.ide_toolbar_frame)
+        self.ide_toolbar_hl.setSpacing(0)
+        self.ide_toolbar_hl.setContentsMargins(0, 0, 0, 0)
+
+        self.ide_tab_frame = QFrame()
+        self.ide_tab_frame.setObjectName(u"tab_frame")
+        self.ide_tab_frame.setSizePolicy(sizePolicy3)
+        self.ide_tab_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self.ide_tab_frame.setFrameShadow(QFrame.Shadow.Raised)
+        self.ide_tab_frame.setLineWidth(0)
+        self.ide_tab_6 = QHBoxLayout(self.ide_tab_frame)
+        self.ide_tab_6.setSpacing(0)
+        self.ide_tab_6.setContentsMargins(0, 0, 0, 0)
+
+        self.ide_tab = QFrame(self.ide_tab_frame)
+        self.ide_tab.setObjectName(u"ide_tab")
+        sizePolicy6 = QSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred)
+        self.ide_tab.setSizePolicy(sizePolicy6)
+        self.ide_tab.setMinimumSize(QSize(0, 30))
+        self.ide_tab.setFrameShape(QFrame.Shape.NoFrame)
+        self.ide_tab.setFrameShadow(QFrame.Shadow.Raised)
+        self.ide_tab.setLineWidth(0)
+        self.ide_tab_7 = QHBoxLayout(self.ide_tab)
+        self.ide_tab_7.setSpacing(0)
+        self.ide_tab_7.setContentsMargins(0, 0, 0, 0)
+
+        self.ide_tab_6.addWidget(self.ide_tab, 0, Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
+
+        self.ide_btn_add_tab = QPushButton(self.ide_tab_frame)
+        self.ide_btn_add_tab.setObjectName(u"btn_add_tab")
+        sizePolicy7 = QSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.ide_btn_add_tab.setSizePolicy(sizePolicy7)
+        self.ide_btn_add_tab.setMinimumSize(QSize(24, 24))
+        self.ide_btn_add_tab.setMaximumSize(QSize(24, 24))
+        self.ide_btn_add_tab.setFlat(True)
+        self.ide_tab_6.addWidget(self.ide_btn_add_tab)
+
+        self.ide_toolbar_hl.addWidget(self.ide_tab_frame, 1, Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignBottom)
+
+        self.ide_toolbar_hl.addStretch(1)
+
+        self.ide_btn_group = QFrame()
+        self.ide_btn_group.setObjectName(u"ide_btn_group")
+        self.ide_btn_group_hl = QHBoxLayout(self.ide_btn_group)
+        self.ide_btn_group_hl.setContentsMargins(0, 0, 4, 0)
+        self.ide_btn_group_hl.setSpacing(4)
+
+        self.ide_btn_run = QPushButton(self.ide_btn_group)
+        self.ide_btn_run.setObjectName(u"ide_btn_run")
+        self.ide_btn_run.setMinimumSize(QSize(30, 24))
+        self.ide_btn_run.setMaximumSize(QSize(30, 24))
+        self.ide_btn_run.setFlat(True)
+        self.ide_btn_run.setCheckable(True)
+        self.ide_btn_run.setIconSize(QSize(18, 18))
+        self.ide_btn_group_hl.addWidget(self.ide_btn_run)
+
+        self.ide_btn_undo = QPushButton(self.ide_btn_group)
+        self.ide_btn_undo.setObjectName(u"ide_btn_undo")
+        self.ide_btn_undo.setMinimumSize(QSize(30, 24))
+        self.ide_btn_undo.setMaximumSize(QSize(30, 24))
+        self.ide_btn_undo.setFlat(True)
+        self.ide_btn_undo.setIconSize(QSize(18, 18))
+        self.ide_btn_group_hl.addWidget(self.ide_btn_undo)
+
+        self.ide_btn_redo = QPushButton(self.ide_btn_group)
+        self.ide_btn_redo.setObjectName(u"ide_btn_redo")
+        self.ide_btn_redo.setMinimumSize(QSize(30, 24))
+        self.ide_btn_redo.setMaximumSize(QSize(30, 24))
+        self.ide_btn_redo.setFlat(True)
+        self.ide_btn_redo.setIconSize(QSize(18, 18))
+        self.ide_btn_group_hl.addWidget(self.ide_btn_redo)
+
+        self.ide_toolbar_hl.addWidget(self.ide_btn_group)
+
+        self.ide_toolbar_hl.setStretch(0, 1)
+        self.ide_toolbar_hl.setStretch(1, 0)
+
+        self.ide_main_layout.addWidget(self.ide_toolbar_frame)
+
+        self.ide_code_frame = QFrame()
+        self.ide_code_frame.setObjectName(u"code_frame")
+        self.ide_code_layout = QVBoxLayout(self.ide_code_frame)
+        self.ide_code_layout.setSpacing(0)
+        self.ide_code_layout.setContentsMargins(8, 0, 8, 0)
+
+        self.ide_splitter = QSplitter(self.ide_code_frame)
+        self.ide_splitter.setObjectName(u"splitter")
+        self.ide_splitter.setOrientation(Qt.Orientation.Vertical)
+
+        self.ide_code_stacked = QStackedWidget(self.ide_splitter)
+        self.ide_code_stacked.setObjectName(u"code_stacked")
+        self.ide_splitter.addWidget(self.ide_code_stacked)
+
+        self.ide_console_container = QFrame()
+        self.ide_console_container.setObjectName(u"ide_console_container")
+        self.ide_console_vl = QVBoxLayout(self.ide_console_container)
+        self.ide_console_vl.setContentsMargins(0, 0, 0, 0)
+        self.ide_console_vl.setSpacing(0)
+
+        self.ide_console_toolbar = QFrame()
+        self.ide_console_toolbar.setObjectName(u"ide_console_toolbar")
+        self.ide_console_toolbar_hl = QHBoxLayout(self.ide_console_toolbar)
+        self.ide_console_toolbar_hl.setContentsMargins(8, 0, 4, 0)
+        self.ide_console_toolbar_hl.setSpacing(4)
+        self.ide_console_toolbar_hl.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        self.ide_console_label = QLabel("终端")
+        self.ide_console_label.setStyleSheet("color:rgb(140,140,140);font-size:11px;border:none;background:transparent;")
+        self.ide_console_toolbar_hl.addWidget(self.ide_console_label)
+        self.ide_console_toolbar_hl.addStretch()
+
+        self.ide_console_clear = QPushButton("清空")
+        self.ide_console_clear.setObjectName(u"ide_console_clear")
+        self.ide_console_clear.setFlat(True)
+        self.ide_console_clear.setStyleSheet("QPushButton{background:transparent;color:rgb(100,100,100);border:none;font-size:11px;}QPushButton:hover{color:rgb(200,200,200);}")
+        self.ide_console_toolbar_hl.addWidget(self.ide_console_clear)
+
+        self.ide_console_close = QPushButton("✕")
+        self.ide_console_close.setObjectName(u"ide_console_close")
+        self.ide_console_close.setFixedSize(18, 18)
+        self.ide_console_close.setFlat(True)
+        self.ide_console_close.setStyleSheet("QPushButton{background:transparent;color:rgb(100,100,100);border:none;font-size:11px;}QPushButton:hover{color:rgb(200,200,200);}")
+        self.ide_console_toolbar_hl.addWidget(self.ide_console_close)
+
+        self.ide_console_vl.addWidget(self.ide_console_toolbar)
+
+        from modules.console_manager import TerminalWidget
+        self.ide_console = TerminalWidget()
+        self.ide_console.setObjectName(u"console_output")
+        self.ide_console.setFrameShape(QFrame.Shape.NoFrame)
+        self.ide_console_vl.addWidget(self.ide_console)
+
+        self.ide_splitter.addWidget(self.ide_console_container)
+
+        self.ide_code_layout.addWidget(self.ide_splitter)
+        self.ide_main_layout.addWidget(self.ide_code_frame)
+
+        self.editor_stacked.addWidget(self.editor_ide_web)
+
         self.verticalLayout_19.addWidget(self.editor_stacked)
 
         self.change_page.addWidget(self.edit_stage_frame)
@@ -1945,7 +2173,7 @@ class Ui_Form(object):
         self.retranslateUi(Form)
 
         self.change_page.setCurrentIndex(0)
-        self.editor_stacked.setCurrentIndex(2)
+        self.editor_stacked.setCurrentIndex(0)
         self.btn_outline_sprite.setDefault(False)
         self.btn_outline_sound.setDefault(False)
         self.btn_outline_code.setDefault(False)
@@ -1975,6 +2203,7 @@ class Ui_Form(object):
         self.btn_outline_sound.setText(QCoreApplication.translate("Form", u"\u58f0\u97f3", None))
         self.btn_outline_code.setText(QCoreApplication.translate("Form", u"\u4ee3\u7801", None))
         self.btn_add_tab.setText(QCoreApplication.translate("Form", u"+", None))
+        self.ide_btn_add_tab.setText("+")
         self.animate_label.setText(QCoreApplication.translate("Form", u"ANIMATION", None))
         self.animate_preview.setText("")
         self.btn_preview_prev.setText("")

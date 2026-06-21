@@ -23,7 +23,7 @@ from PySide6.QtGui import (
     QFontDatabase,
     QPainterPath,
 )
-from PySide6.QtCore import Qt, QObject, QEvent, QRect as QtCore_QRect, QUrl
+from PySide6.QtCore import Qt, QObject, QEvent, QRect as QtCore_QRect, QUrl, QTimer
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 
 
@@ -84,6 +84,7 @@ class RenderManager(QObject):
         self.view.setOptimizationFlag(QGraphicsView.IndirectPainting)
 
         self.sprites = {}
+        self.text_items = {}
         self.static_layers = {}  # 静态图层烘焙，{layer_idx: QGraphicsPixmapItem}
         self.apply_fit()
 
@@ -185,6 +186,18 @@ class RenderManager(QObject):
             # 6. 处理声音播放指令
             elif cmd_type == "PLAY_SOUND":
                 self.handle_play_sound(data)
+
+            # 7. 处理文字绘制指令
+            elif cmd_type == "DRAW_TEXT":
+                self.handle_draw_text(data)
+
+            # 8. 处理停止音效指令
+            elif cmd_type == "STOP_SOUND":
+                self.handle_stop_sound(data)
+
+            # 9. 处理屏幕震动指令
+            elif cmd_type == "SCREEN_SHAKE":
+                self.handle_screen_shake(data)
 
         except Exception as e:
             pass
@@ -358,6 +371,7 @@ class RenderManager(QObject):
 
         self.scene.clear()  # 物理清理所有 Item
         self.sprites.clear()  # 清空引用字典
+        self.text_items.clear()  # 清空文字绘制
         self.static_layers.clear()  # 清空静态图层
         self.layer_counter = 0  # 重置图层
 
@@ -569,6 +583,72 @@ class RenderManager(QObject):
                 player.deleteLater()
             if audio_out:
                 audio_out.deleteLater()
+
+    def handle_stop_sound(self, data):
+        sound_name = data.get("sound")
+        if sound_name:
+            for path in list(self._sound_players.keys()):
+                if sound_name in path:
+                    player = self._sound_players[path]
+                    player.stop()
+                    audio_out = player.audioOutput()
+                    del self._sound_players[path]
+                    player.deleteLater()
+                    if audio_out:
+                        audio_out.deleteLater()
+        else:
+            for path, player in list(self._sound_players.items()):
+                player.stop()
+                audio_out = player.audioOutput()
+                player.deleteLater()
+                if audio_out:
+                    audio_out.deleteLater()
+            self._sound_players.clear()
+
+    def handle_screen_shake(self, data):
+        import random
+        intensity = data.get("intensity", 5)
+        duration = data.get("duration", 0.3)
+        original_transform = self.view.transform()
+
+        elapsed = [0.0]
+        interval = 50
+
+        def tick():
+            elapsed[0] += interval / 1000.0
+            if elapsed[0] >= duration:
+                self.view.setTransform(original_transform)
+                return
+            dx = random.uniform(-intensity, intensity)
+            dy = random.uniform(-intensity, intensity)
+            t = original_transform
+            t.translate(dx, dy)
+            self.view.setTransform(t)
+            QTimer.singleShot(interval, tick)
+
+        tick()
+
+    def handle_draw_text(self, data):
+        item_id = data.get("id", "__draw_text__")
+        text = data.get("text", "")
+
+        if item_id in self.text_items:
+            self.scene.removeItem(self.text_items[item_id])
+            del self.text_items[item_id]
+
+        if not text:
+            return
+
+        item = QGraphicsSimpleTextItem(text)
+        font = QFont("Arial", 20)
+        font.setBold(True)
+        item.setFont(font)
+        item.setBrush(QBrush(QColor("#FFFFFF")))
+        item.setPen(QPen(QColor("#000000"), 2))
+        item.setPos(data.get("x", 0), data.get("y", 0))
+        item.setZValue(5000)
+        self.scene.addItem(item)
+        self.text_items[item_id] = item
 
     def update_camera(self, target_x, target_y):
         """

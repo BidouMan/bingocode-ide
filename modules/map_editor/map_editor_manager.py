@@ -4974,7 +4974,7 @@ class MapEditorManager(QObject):
                     self._update_preview(cursor_pos)
 
     def destroy(self):
-        """销毁MapEditorManager，移除事件过滤器"""
+        """销毁MapEditorManager，移除所有事件过滤器，防止关闭崩溃"""
         try:
             # 移除画布场景的事件过滤器
             if hasattr(self, "canvas_scene"):
@@ -4983,11 +4983,49 @@ class MapEditorManager(QObject):
                 except:
                     pass
 
-            # 清理collision_manager的引用，让它自己的__del__方法处理
-            if hasattr(self, "collision_manager"):
+            # 移除canvas_manager的事件过滤器
+            if hasattr(self, "canvas_manager") and self.canvas_manager:
                 try:
-                    self.collision_manager = None
+                    self.canvas_manager.removeEventFilter(self)
                 except:
                     pass
+                try:
+                    self.canvas_manager.viewport().removeEventFilter(self)
+                except:
+                    pass
+
+            # 移除res_list_view的事件过滤器
+            if hasattr(self, "res_list_view") and self.res_list_view:
+                try:
+                    self.res_list_view.removeEventFilter(self)
+                except:
+                    pass
+                try:
+                    self.res_list_view.viewport().removeEventFilter(self)
+                except:
+                    pass
+
+            # 移除所有LayerItemWidget的name_edit事件过滤器
+            if hasattr(self, "editor_map_layer_list") and self.editor_map_layer_list:
+                for i in range(self.editor_map_layer_list.count()):
+                    item = self.editor_map_layer_list.item(i)
+                    if item and item.widget():
+                        try:
+                            w = item.widget()
+                            if hasattr(w, "name_edit") and w.name_edit:
+                                w.name_edit.removeEventFilter(w)
+                        except:
+                            pass
+
+            # 清理collision_manager的事件过滤器
+            if hasattr(self, "collision_manager") and self.collision_manager:
+                cm = self.collision_manager
+                try:
+                    if hasattr(cm, "col_editor_view") and cm.col_editor_view:
+                        cm.col_editor_view.removeEventFilter(cm)
+                        cm.col_editor_view.viewport().removeEventFilter(cm)
+                except:
+                    pass
+                self.collision_manager = None
         except Exception as e:
             pass

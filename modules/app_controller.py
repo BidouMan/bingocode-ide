@@ -1,9 +1,11 @@
 import os
-from PySide6.QtCore import Qt, QStandardPaths, QTimer, QProcess
-from PySide6.QtGui import QColor, QKeySequence
+from PySide6.QtCore import Qt, QStandardPaths, QTimer, QProcess, QSize
+from PySide6.QtGui import QColor, QKeySequence, QIcon
 from PySide6.QtWidgets import (
     QFileDialog,
     QMessageBox,
+    QDialog,
+    QHBoxLayout,
     QTabBar,
     QSizePolicy,
     QApplication,
@@ -33,6 +35,7 @@ from modules.map_lib_manager import MapLibManager
 from modules.sprite_lib_manager import SpriteLibManager
 from modules.map_res_lib_manager import MapResLibManager
 from modules.sound_lib_manager import SoundLibManager
+from modules.help_panel_manager import HelpPanelManager
 
 
 class MapSelectorComboBox(QComboBox):
@@ -82,11 +85,13 @@ class AppController:
         self.file_manager = FileManager(self.window)
         self.console_manager = ConsoleManager(self.ui.splitter, self.ui.console_output)
         self.menu_manager = MenuManager(main_window)
+        from modules.title_bar_manager import TitleBarManager
+        self.title_bar_manager = TitleBarManager(self.window, self.ui, self.menu_manager)
         self.render_manager = RenderManager(self.ui.game_view, app_controller=self)
         self.screen_manager = ScreenManager(self)
         self.tabbar_manager = TabbarManager(self.ui.tab_frame)
         self.editor_manager = EditorManager(
-            self.ui.code_stacked, self.tabbar_manager, self.project_manager
+            self.ui.code_stacked, self.tabbar_manager, self.project_manager, mode="game"
         )
         self.script_runner = ScriptRunner(self)
         self.res_manager = ResourceManager(self.ui, self.window, self)
@@ -96,10 +101,38 @@ class AppController:
         self.map_res_lib_manager = MapResLibManager(self.ui, self)
         self.sound_lib_manager = SoundLibManager(self.ui, self)
 
+        from modules.file_tree_manager import FileTreeManager
+        self.file_tree_manager = FileTreeManager(self.project_manager)
+
+        self.ide_tabbar_manager = TabbarManager(self.ui.ide_tab_frame)
+        self.ide_editor_manager = EditorManager(
+            self.ui.ide_code_stacked, self.ide_tabbar_manager, self.project_manager, mode="ide"
+        )
+
+        # 帮助面板管理器
+        self.help_panel_manager = HelpPanelManager(self.ui)
+        from modules.console_manager import ConsoleManager as CM
+        self.ide_console_manager = CM(
+            self.ui.ide_splitter, self.ui.ide_console,
+            container=self.ui.ide_console_container
+        )
+
+        self.ui.ide_console_clear.clicked.connect(self.ui.ide_console.clear)
+        self.ui.ide_console_close.clicked.connect(
+            lambda: self.ide_console_manager.anim_console(show=False)
+        )
+
         self._upgrade_map_selector()
 
         # 4. 绑定信号 (保持原有业务连接)
         self.setup_connections()
+
+        from PySide6.QtCore import QSettings
+        _settings = QSettings("BingoCode", "BingoIDE")
+        if not _settings.value("mode/is_game_mode", False, type=bool):
+            self.ui.editor_stacked.setCurrentIndex(3)
+            if self.ide_editor_manager.tabs.count() > 0:
+                self.ide_editor_manager.switch_to_page(0)
 
         # 自动切换到地图编辑器页面（调试用）
         # self.handle_switch_to_map_editor()
@@ -243,6 +276,12 @@ class AppController:
         self.map_editor.map_renamed.connect(self.res_manager.refresh_map_list)
         self.map_editor.map_imported.connect(self.res_manager.refresh_map_list)
 
+        # 5.1 绑定代码文件变更信号：新建/保存文件后刷新代码列表
+        self.editor_manager.file_created_on_disk.connect(self.res_manager.refresh_code_list)
+        self.editor_manager.file_renamed_on_disk.connect(self.res_manager.refresh_code_list)
+        self.ide_editor_manager.file_created_on_disk.connect(self.res_manager.refresh_code_list)
+        self.ide_editor_manager.file_renamed_on_disk.connect(self.res_manager.refresh_code_list)
+
         # 6. 地图选择下拉框
         self.ui.btn_editor_map_selectmap.setEditable(False)
         self.ui.btn_editor_map_selectmap.currentIndexChanged.connect(
@@ -267,6 +306,44 @@ class AppController:
 
         # 10. 声音库导入信号
         self.sound_lib_manager.sig_sound_imported.connect(self._on_sound_lib_imported)
+
+        # 11. 模式切换（代码模式 / 游戏模式）
+        self.ui.btn_mode_switch.toggled.connect(self._on_mode_switch)
+
+        # 12. IDE 新建标签页
+        self.ui.ide_btn_add_tab.clicked.connect(self.ide_editor_manager.create_untitled_file)
+
+        # 12.1 设置 IDE 按钮图标（缓存路径，性能优先）
+        self._ide_icons_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "icons")
+        self._ide_icon_play = QIcon(os.path.join(self._ide_icons_dir, "btn_preview_play.svg"))
+        self._ide_icon_pause = QIcon(os.path.join(self._ide_icons_dir, "btn_preview_pause.svg"))
+        self._ide_icon_undo = QIcon(os.path.join(self._ide_icons_dir, "undo.svg"))
+        self._ide_icon_redo = QIcon(os.path.join(self._ide_icons_dir, "redo.svg"))
+        self.ui.ide_btn_undo.setIcon(self._ide_icon_undo)
+        self.ui.ide_btn_redo.setIcon(self._ide_icon_redo)
+        self.ui.ide_btn_run.setIcon(self._ide_icon_play)
+
+        # 12.2 帮助面板按钮
+        self.ui.btn_help.clicked.connect(self.help_panel_manager.toggle)
+
+        # 14. IDE 标签切换
+        self.ide_tabbar_manager.tab_changed.connect(self.ide_editor_manager.switch_to_page)
+
+        # 15. IDE 运行/停止
+        self.ui.ide_btn_run.clicked.connect(self.ide_handle_run)
+
+        # 16. IDE 撤销/重做
+        self.ui.ide_btn_undo.clicked.connect(self._ide_undo)
+        self.ui.ide_btn_redo.clicked.connect(self._ide_redo)
+
+        # 17. IDE 控制台指令
+        self.ide_console_manager.instruction_received.connect(
+            self.render_manager.handle_instruction
+        )
+
+        # 18. IDE 运行状态切换
+        self.ide_console_manager.process_started.connect(self._ide_set_running)
+        self.ide_console_manager.process_finished.connect(self._ide_set_stopped)
 
     def _open_and_switch_to_editor(self, path):
         if hasattr(self, "map_editor") and self.map_editor:
@@ -436,6 +513,60 @@ class AppController:
     def _on_sound_lib_imported(self, sound_path):
         self.res_manager.refresh_sound_grid()
 
+    def _on_mode_switch(self, checked):
+        if checked:
+            self.ui.editor_stacked.setCurrentIndex(0)
+            if self.editor_manager.tabs.count() > 0:
+                idx = self.editor_manager.tabs.currentIndex()
+                if idx >= 0:
+                    self.editor_manager.switch_to_page(idx)
+        else:
+            self.ui.editor_stacked.setCurrentIndex(3)
+            if self.ide_editor_manager.tabs.count() > 0:
+                idx = self.ide_editor_manager.tabs.currentIndex()
+                if idx >= 0:
+                    self.ide_editor_manager.switch_to_page(idx)
+
+    def ide_handle_run(self):
+        if self.ui.ide_btn_run.isChecked():
+            self.render_manager.reset_session()
+            self.handle_save_project()
+            run_path = self.project_manager.get_run_target()
+            if run_path and os.path.exists(run_path):
+                self.ide_console_manager.run_file(run_path)
+            else:
+                fallback = os.path.join(self.project_manager.project_root, "main.py")
+                if os.path.exists(fallback):
+                    self.project_manager.set_run_target(fallback)
+                    self.ide_console_manager.run_file(fallback)
+        else:
+            self.ide_console_manager.process.kill()
+
+    def _ide_undo(self):
+        editor = self.ide_editor_manager.get_current_editor()
+        if editor:
+            editor.undo()
+
+    def _ide_redo(self):
+        editor = self.ide_editor_manager.get_current_editor()
+        if editor:
+            editor.redo()
+
+    def _ide_set_running(self):
+        self.ui.ide_btn_run.setChecked(True)
+        self.ui.ide_btn_run.setIcon(self._ide_icon_pause)
+        self.ui.ide_btn_run.setStyleSheet(
+            "QPushButton{background-color:rgb(55,120,200);border:none;border-radius:4px;}"
+        )
+
+    def _ide_set_stopped(self):
+        self.ui.ide_btn_run.setChecked(False)
+        self.ui.ide_btn_run.setIcon(self._ide_icon_play)
+        self.ui.ide_btn_run.setStyleSheet(
+            "QPushButton{background-color:rgb(40,43,52);border:none;border-radius:4px;}"
+            "QPushButton:hover{background-color:rgb(62,66,79);}"
+        )
+
     def handle_close_project(self):
         self.project_manager.new_project()
         self.editor_manager._clear_initial_state()
@@ -449,6 +580,7 @@ class AppController:
         """新建项目：重置并初始化运行目标"""
         self.project_manager.new_project()
         self.editor_manager._clear_initial_state()
+        self.title_bar_manager.set_title("BingoCode")
 
         path = self.project_manager.main_script_path
         with open(path, "r", encoding="utf-8") as f:
@@ -460,22 +592,53 @@ class AppController:
         self.project_manager.set_run_target(path)
 
     def handle_open_project(self):
-        """打开项目：加载目录下所有脚本"""
+        """打开项目：代码模式打开.py文件，游戏模式打开.bingo/文件夹"""
         if hasattr(self, "menu_manager") and self.menu_manager.isVisible():
             self.menu_manager.hide_popup_menu()
 
-        self.window.activateWindow()
-        self.window.raise_()
+        is_code_mode = not self.ui.btn_mode_switch.isChecked()
 
-        target_dir = QFileDialog.getExistingDirectory(self.window, "选择工程目录")
-        if not target_dir:
+        if is_code_mode:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self.window,
+                "打开文件",
+                self.project_manager.last_save_dir,
+                "Python Files (*.py)",
+            )
+            if not file_path:
+                return
+            self.project_manager.last_save_dir = os.path.dirname(file_path)
+            self.ui.editor_stacked.setCurrentIndex(3)
+            self.ide_editor_manager.logic_open_file(file_path)
+        else:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self.window,
+                "打开项目",
+                self.project_manager.last_save_dir,
+                "Bingo Project (*.bingo);;所有文件 (*)",
+            )
+            if not file_path:
+                return
+            self.project_manager.last_save_dir = os.path.dirname(file_path)
+
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(100, lambda: (
+                self.window.activateWindow(),
+                self.window.raise_(),
+                self.window.setFocus(),
+            ))
+
+            if file_path.endswith('.bingo'):
+                success, _ = self.project_manager.unpack_from_bingo(file_path)
+                if success:
+                    self.project_manager.bingo_path = file_path
+            else:
+                success, _ = self.project_manager.open_project(file_path)
+                if success:
+                    self.project_manager.bingo_path = None
+
+        if is_code_mode:
             return
-
-        self.window.activateWindow()
-        self.window.raise_()
-
-        # 1. 切换根目录（现在它不会因为没 main.py 而返回 False 了）
-        success, _ = self.project_manager.open_project(target_dir)
 
         if success:
             self.editor_manager._clear_initial_state()
@@ -484,133 +647,127 @@ class AppController:
             self.res_manager.refresh_map_list()
             self.res_manager.refresh_sound_grid()
             self._refresh_map_selector()
-            # 2. 获取目录下所有 py 文件
+            project_name = os.path.splitext(os.path.basename(file_path))[0] if file_path.endswith('.bingo') else os.path.basename(file_path)
+            self.title_bar_manager.set_title(f"BingoCode - {project_name}")
+
             all_files = [
                 f
-                for f in os.listdir(target_dir)
+                for f in os.listdir(self.project_manager.project_root)
                 if f.endswith(".py") and not f.startswith(".")
             ]
 
             if not all_files:
-                # 如果是空项目，自动帮学生建一个，免得界面空荡荡
                 self.handle_new_project()
                 return
 
-            # 3. 加载最后修改的 .py 文件（懒加载：其他文件通过代码列表点击加载）
             all_files.sort(
-                key=lambda x: os.path.getmtime(os.path.join(target_dir, x)),
+                key=lambda x: os.path.getmtime(os.path.join(self.project_manager.project_root, x)),
                 reverse=True,
             )
 
             if all_files:
-                file_path = os.path.join(target_dir, all_files[0])
+                fp = os.path.join(self.project_manager.project_root, all_files[0])
                 try:
-                    with open(file_path, "r", encoding="utf-8") as f:
+                    with open(fp, "r", encoding="utf-8") as f:
                         content = f.read()
                     self.editor_manager.create_new_tab(
-                        file_path, content, auto_activate=True
+                        fp, content, auto_activate=True
                     )
                 except:
                     pass
 
-            # 4. 默认激活第一个找到的脚本
             if self.tabbar_manager.tab_bar.count() > 0:
                 self.tabbar_manager.tab_bar.setCurrentIndex(0)
                 self.editor_manager.switch_to_page(0)
                 self.tabbar_manager.active_index = 0
 
         else:
-            QMessageBox.warning(self.window, "打开失败", "无法访问该目录。")
+            QMessageBox.warning(self.window, "打开失败", "无法访问该文件。")
 
     def handle_save_project(self):
-        """点击保存按钮：保存当前项目所有改动"""
+        """保存：代码模式保存当前文件，游戏模式保存整个项目"""
         pm = self.project_manager
-        em = self.editor_manager
 
-        # 1. 检查是否是从未保存过的“纯临时”项目
-        # 如果路径里包含系统的 Temp 目录，说明用户还没给项目起名
-        if "/T/" in pm.project_root or "Temp" in pm.project_root:
-            self.handle_save_as()  # 引导去另存为
+        is_code_mode = not self.ui.btn_mode_switch.isChecked()
+
+        if is_code_mode:
+            em = self.ide_editor_manager
+            editor = em.get_current_editor()
+            if editor:
+                em.request_save_file(self.window)
             return
 
-        # 2. 如果已经是正式项目（比如在桌面），执行全量保存
-        # 🚀 这一步会把所有新建的 untitled_x.py 都存进项目文件夹
-        if em.save_all_opened_files():
-            # 保存地图文件
-            if hasattr(self, "map_editor") and self.map_editor:
-                try:
-                    if (
-                        hasattr(self.map_editor, "current_map_path")
-                        and self.map_editor.current_map_path
-                    ):
-                        self.map_editor.save_map()
-                        self.res_manager.refresh_map_list()
-                except Exception as e:
-                    pass
-        else:
-            QMessageBox.warning(
-                self.window, "保存提醒", "部分新标签页保存失败，请检查权限。"
-            )
+        em = self.editor_manager
+        if pm.bingo_path:
+            em.save_all_opened_files()
+            pm.pack_to_bingo(pm.bingo_path)
+            return
+
+        self.handle_save_as()
 
     def handle_save_as(self):
-        """另存为：强制弹出起名窗口，并完整搬迁项目（包含所有标签页）"""
+        """另存为：代码模式保存当前文件，游戏模式打包为 .bingo"""
         pm = self.project_manager
-        em = self.editor_manager
 
         if hasattr(self, "menu_manager") and self.menu_manager.isVisible():
             self.menu_manager.hide_popup_menu()
 
-        self.window.activateWindow()
-        self.window.raise_()
+        is_code_mode = not self.ui.btn_mode_switch.isChecked()
 
-        # 1. 基础检查：如果没有打开的编辑器，则无需保存
-        editor = em.get_current_editor()
-        if not editor:
+        if is_code_mode:
+            em = self.ide_editor_manager
+            editor = em.get_current_editor()
+            if not editor:
+                return
+            new_path, _ = QFileDialog.getSaveFileName(
+                self.window,
+                "另存为",
+                pm.last_save_dir,
+                "Python Files (*.py)",
+            )
+            if not new_path:
+                return
+            if not new_path.endswith('.py'):
+                new_path += '.py'
+            pm.last_save_dir = os.path.dirname(new_path)
+            try:
+                with open(new_path, "w", encoding="utf-8") as f:
+                    f.write(editor.toPlainText())
+                editor.file_path = new_path
+                editor.is_temp = False
+                idx = em.tabs.currentIndex()
+                em.tabs.setTabText(idx, os.path.splitext(os.path.basename(new_path))[0])
+                em._set_tab_modified(editor, False)
+            except Exception as e:
+                QMessageBox.warning(self.window, "保存失败", str(e))
             return
 
-        # 2. 弹出『起名』对话框
         full_path, _ = QFileDialog.getSaveFileName(
             self.window,
-            "另存为新项目 (请输入项目名称)",
-            os.path.expanduser("~/Desktop"),
+            "保存项目",
+            pm.last_save_dir,
             "Bingo Project (*.bingo)",
         )
 
         if not full_path:
             return
+        if not full_path.endswith('.bingo'):
+            full_path += '.bingo'
+        pm.last_save_dir = os.path.dirname(full_path)
 
-        self.window.activateWindow()
-        self.window.raise_()
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(100, lambda: (
+            self.window.activateWindow(),
+            self.window.raise_(),
+            self.window.setFocus(),
+        ))
 
-        # 3. 解析目标路径：去掉 .bingo 后缀，作为项目文件夹
-        target_project_dir = os.path.splitext(full_path)[0]
-
-        # 🚀 4. 【核心改动】全量刷盘：
-        # 在搬家前，让 EditorManager 把所有 Tab 里的内存代码写入当前的临时磁盘目录
-        # 这样 shutil.copytree 才能抓取到这些新文件
+        em = self.editor_manager
         em.save_all_opened_files()
 
-        # 5. 获取当前主编辑器的代码，用于 ProjectManager 的备用写入
-        latest_code = editor.toPlainText()
-
-        # 6. 下令给 ProjectManager 执行物理搬迁
-        # 它会把整个临时文件夹（含 main.py 和所有已经写盘的 untitled_x.py）拷贝到新路径
-        if pm.save_project_to(target_project_dir, latest_code):
-            # 7. 搬家成功后，更新所有打开编辑器的关联路径
-            # 这一步确保后续『静默保存』能写到新家，而不是旧的临时目录
-            for i in range(em.stacked.count()):
-                widget = em.stacked.widget(i)
-                if hasattr(widget, "file_path"):
-                    old_name = os.path.basename(widget.file_path)
-                    widget.file_path = os.path.join(pm.project_root, old_name)
-                    # 标记为非临时文件，因为已经落户了
-                    widget.is_temp = False
-
-            QMessageBox.information(
-                self.window,
-                "保存成功",
-                f"项目已完整另存为至：\n{os.path.basename(target_project_dir)}",
-            )
+        if pm.pack_to_bingo(full_path):
+            pm.bingo_path = full_path
+            self.title_bar_manager.set_title(f"BingoCode - {os.path.splitext(os.path.basename(full_path))[0]}")
 
     def handle_run_script(self):
         """运行脚本：完全动态捕获"""
@@ -712,6 +869,49 @@ class AppController:
                     self.res_manager.map_upload_menu.destroy()
                 except Exception as e:
                     pass
+            if (
+                hasattr(self.res_manager, "sound_upload_menu")
+                and self.res_manager.sound_upload_menu
+            ):
+                try:
+                    self.res_manager.sound_upload_menu.destroy()
+                except Exception as e:
+                    pass
+
+        # 5. 【清理事件过滤器】移除所有Python事件过滤器，防止PySide6关闭崩溃
+        if hasattr(self, "menu_manager") and self.menu_manager:
+            try:
+                self.menu_manager.hide_popup_menu()
+            except Exception:
+                pass
+
+        if hasattr(self, "sound_lib_manager") and self.sound_lib_manager:
+            try:
+                slm = self.sound_lib_manager
+                if hasattr(slm, "ui") and slm.ui and hasattr(slm.ui, "listWidget_2"):
+                    slm.ui.listWidget_2.viewport().removeEventFilter(slm)
+            except Exception:
+                pass
+
+        if hasattr(self, "sprite_editor_manager") and self.sprite_editor_manager:
+            try:
+                sem = self.sprite_editor_manager
+                if hasattr(sem, "fps_list") and sem.fps_list:
+                    sem.fps_list.viewport().removeEventFilter(sem)
+            except Exception:
+                pass
+
+        # 6. 主动销毁主窗口的 widget 树，防止 Py_FinalizeEx 阶段
+        #    destroyQCoreApplication() 重新遍历 C++ 对象时触发已死的 Python eventFilter
+        if hasattr(self, "window") and self.window:
+            try:
+                self.window.hide()
+                from PySide6.QtWidgets import QApplication
+                QApplication.processEvents()
+                self.window.deleteLater()
+                QApplication.processEvents()
+            except Exception:
+                pass
 
     def open_file_in_editor(self, file_path):
         """统一的打开文件入口"""
@@ -776,7 +976,14 @@ class AppController:
 
     def handle_switch_to_code_editor(self):
         self._save_current_map_if_editing()
-        self.ui.editor_stacked.setCurrentIndex(0)
+        if self.ui.btn_mode_switch.isChecked():
+            self.ui.editor_stacked.setCurrentIndex(0)
+        else:
+            self.ui.editor_stacked.setCurrentIndex(3)
+            if self.ide_editor_manager.tabs.count() > 0:
+                idx = self.ide_editor_manager.tabs.currentIndex()
+                if idx >= 0:
+                    self.ide_editor_manager.switch_to_page(idx)
 
     def handle_switch_to_sprite_editor(self):
         self._save_current_map_if_editing()
@@ -914,28 +1121,71 @@ class AppController:
             should_prompt = True
 
         if should_prompt:
-            msg_box = QMessageBox(self.window)
-            msg_box.setWindowTitle("Bingo IDE")
-            msg_box.setText("要保存对项目的更改吗？")
-            msg_box.setInformativeText(
-                "如果不保存，您的代码改动（或临时项目中的资源）将会丢失。"
-            )
+            from PySide6.QtWidgets import QLabel, QPushButton
 
-            save_btn = msg_box.addButton("保存项目", QMessageBox.AcceptRole)
-            discard_btn = msg_box.addButton("不保存退出", QMessageBox.DestructiveRole)
-            cancel_btn = msg_box.addButton("取消", QMessageBox.RejectRole)
+            dialog = QDialog(self.window)
+            dialog.setWindowTitle("Bingo IDE")
+            dialog.setFixedSize(320, 120)
+            dialog.setStyleSheet("""
+                QDialog {
+                    background-color: rgb(34, 37, 43);
+                }
+                QLabel {
+                    color: white;
+                    font-size: 13px;
+                    qproperty-alignment: AlignCenter;
+                }
+                QPushButton {
+                    background-color: rgb(61, 64, 72);
+                    color: white;
+                    border: 1px solid rgb(55, 59, 68);
+                    border-radius: 3px;
+                    padding: 3px 8px;
+                    min-width: 50px;
+                    min-height: 17px;
+                    font-size: 12px;
+                }
+                QPushButton:hover {
+                    background-color: rgb(80, 83, 92);
+                }
+                QPushButton:pressed {
+                    background-color: rgb(95, 45, 39);
+                }
+            """)
 
-            msg_box.setDefaultButton(save_btn)
-            msg_box.exec()
+            layout = QVBoxLayout(dialog)
+            layout.setAlignment(Qt.AlignCenter)
+            layout.setSpacing(30)
 
-            clicked = msg_box.clickedButton()
-            if clicked == save_btn:
-                # 如果用户选保存，保存后重置脏标记
+            label = QLabel("是否保存更改？")
+            layout.addWidget(label)
+
+            btn_layout = QHBoxLayout()
+            btn_layout.setAlignment(Qt.AlignCenter)
+            btn_layout.setSpacing(20)
+
+            cancel_btn = QPushButton("取消")
+            discard_btn = QPushButton("不保存")
+            save_btn = QPushButton("保存")
+
+            cancel_btn.clicked.connect(dialog.reject)
+            discard_btn.clicked.connect(lambda: dialog.done(2))
+            save_btn.clicked.connect(dialog.accept)
+
+            btn_layout.addWidget(cancel_btn)
+            btn_layout.addWidget(discard_btn)
+            btn_layout.addWidget(save_btn)
+            layout.addLayout(btn_layout)
+
+            dialog.exec()
+
+            result = dialog.result()
+            if result == QDialog.Accepted:
                 success = self.handle_save_project()
                 if success:
                     self.project_manager.reset_dirty()
-                return success
-            elif clicked == discard_btn:
+                return True
+            elif result == 2:
                 return True
             else:
                 return False

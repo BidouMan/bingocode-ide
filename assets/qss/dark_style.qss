@@ -5,11 +5,19 @@ QWidget{
     /* font-size: 14px; */
 }
 
+/* 圆角容器透明背景 */
+#change_page{
+    background-color:transparent;
+}
+#edit_stage_frame{
+    background-color:transparent;
+}
+
 /* 基础容器颜色 */
-#code_frame,#code_stacked,#console,#splitter,
-#screen_btn_frame,#toolbtn_frame,#editor_frame,
-#tab_frame,#toolbar_frame,#outline_menu_frame,#code_frame,
-#code_stacked,#splitter,#fullscreen_tool_bar
+#code_frame,#console,#splitter,
+#screen_btn_frame,#toolbtn_frame,
+#tab_frame,#toolbar_frame,#outline_menu_frame,
+#splitter,#fullscreen_tool_bar
 {
     margin: 0px;
     padding: 0px;
@@ -36,12 +44,20 @@ QWidget{
     background-color: rgb(34,37,43);
 }
 
-#code_page_frame,#outline_stracked,#sprite_page_frame,#list_sprite,#upload_menu_mask_container
+#outline_stracked, #list_sprite, #upload_menu_mask_container
 {
     margin: 0px;
     padding: 0px;
     border: none;
     background-color: transparent;
+}
+
+#sprite_page_frame, #map_page_frame, #sound_page_frame, #code_page_frame
+{
+    margin: 0px;
+    padding: 0px;
+    border: none;
+    background-color: rgb(30, 30, 30);
 }
 
 /* 代码编辑颜色 */
@@ -224,19 +240,15 @@ QPushButton[objectName="tabCloseBtn"] {
     image: none;
 }
 
-/* 2. 激活状态：当前选中的标签，显示关闭_1 (默认叉号) */
+/* 2. 激活状态：不显示关闭图标，只在hover时显示 */
 QPushButton[objectName="tabCloseBtn"][active="true"] {
-    image: url(:/icons/关闭_2.svg);
-    padding-top: 2px;
-    padding-bottom: 0px; 
-    padding-left: 0px;
-    padding-right: 0px;
+    image: none;
 }
 
 /* 3. 悬停状态：不论是否选中，只要鼠标指着按钮，就变色显示关闭_3 (高亮叉号) */
 /* 放在 active="true" 后面，确保优先级更高 */
 QPushButton[objectName="tabCloseBtn"]:hover {
-    image: url(:/icons/关闭_3.svg) !important;
+    image: url(__ICONS__/关闭_3.svg) !important;
     padding-top: 2px;
     padding-bottom: 0px; 
     padding-left: 0px;
@@ -245,20 +257,20 @@ QPushButton[objectName="tabCloseBtn"]:hover {
 
 /* 4. 修改状态：未保存时显示圆点 */
 QPushButton[objectName="tabCloseBtn"][modified="true"] {
-    image: url(:/icons/未保存.svg) !important;
+    image: url(__ICONS__/未保存.svg) !important;
     padding-top: 2px;
     padding-bottom: 0px; 
     padding-left: 0px;
-    padding-right: 0px;
+    padding-right: 4px;
 }
 
 /* 5. 修改状态下的悬停：即便是圆点，鼠标指上去也要变叉号方便关闭 */
 QPushButton[objectName="tabCloseBtn"][modified="true"]:hover {
-    image: url(:/icons/关闭_3.svg) !important;
+    image: url(__ICONS__/关闭_3.svg) !important;
     padding-top: 2px;
     padding-bottom: 0px; 
     padding-left: 0px;
-    padding-right: 0px;
+    padding-right: 4px;
 }
 
 
@@ -301,9 +313,18 @@ QLineEdit#tabRenameEdit {
 
 
 #console_output{
-    background-color:rgb(32, 36, 43);
-    border-radius: 6px;
-    border: 1px solid rgb(45, 45, 45);
+    background-color:rgb(28, 30, 36);
+    border-radius: 4px;
+    border:none;
+    padding: 4px;
+    margin-top: 2px;
+}
+
+#ide_console_toolbar{
+    background-color:rgb(34, 37, 43);
+    border:none;
+    padding:0px;
+    margin:0px;
 }
 
 
@@ -658,4 +679,183 @@ SoundUploadMenuManager QPushButton#btn_import:hover {
     border: none;
 }
 
+/* ========== QMessageBox 样式 ========== */
+QMessageBox {
+    background-color: rgb(34, 37, 43);
+}
+
+QMessageBox QLabel {
+    color: white;
+    font-size: 13px;
+}
+
+QMessageBox QPushButton {
+    background-color: rgb(61, 64, 72);
+    color: white;
+    border: 1px solid rgb(55, 59, 68);
+    border-radius: 3px;
+    padding: 4px 12px;
+    min-width: 70px;
+    min-height: 24px;
+    font-size: 12px;
+}
+
+QMessageBox QPushButton:hover {
+    background-color: rgb(80, 83, 92);
+    border: 1px solid rgb(70, 73, 82);
+}
+
+QMessageBox QPushButton:pressed {
+    background-color: rgb(95, 45, 39);
+    border: 1px solid rgb(95, 45, 39);
+}
+
+/* IDE 工具栏按钮样式（和角色编辑器预览按钮一致） */
+#ide_btn_run, #ide_btn_undo, #ide_btn_redo {
+    border: none;
+    border-radius: 4px;
+    background-color: rgb(40, 43, 52);
+}
+#ide_btn_run:hover, #ide_btn_undo:hover, #ide_btn_redo:hover {
+    background-color: rgb(62, 66, 79);
+}
+#ide_btn_run:pressed, #ide_btn_undo:pressed, #ide_btn_redo:pressed {
+    background-color: rgb(62, 66, 79);
+}
+
+/* ===== 帮助面板样式 ===== */
+#helpPanel {
+    background-color: rgb(34, 37, 43);
+    border-left: 1px solid rgb(12, 12, 12);
+}
+
+#helpCategoryBar {
+    background-color: rgb(38, 41, 49);
+    border-left: 1px solid rgb(20, 22, 28);
+}
+
+#scratchCatBtn {
+    background-color: transparent;
+    border-radius: 8px;
+}
+#scratchCatBtn:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+#helpScrollArea {
+    background-color: rgb(34, 37, 43);
+    border: none;
+}
+
+#helpContentWidget {
+    background-color: rgb(34, 37, 43);
+}
+
+#helpFunctionCard {
+    background-color: transparent;
+    border-radius: 4px;
+    padding: 2px 0px;
+}
+#helpFunctionCard:hover {
+    background-color: rgba(255, 255, 255, 0.04);
+}
+
+#helpBadge {
+    background-color: rgba(91, 155, 245, 0.15);
+    color: #7BAAFA;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 10px;
+    font-weight: bold;
+}
+#helpBadge[badgeType="object"] {
+    background-color: rgba(90, 192, 176, 0.15);
+    color: #5AC0B0;
+}
+#helpBadge[badgeType="property"] {
+    background-color: rgba(176, 124, 232, 0.15);
+    color: #B07CE8;
+}
+
+#helpFuncName {
+    color: #7BAAFA;
+    font-weight: bold;
+    font-size: 13px;
+}
+
+#helpFuncBrief {
+    color: rgb(150, 150, 150);
+    font-size: 12px;
+}
+
+#helpExpandArrow {
+    color: rgb(80, 80, 80);
+    font-size: 11px;
+}
+
+#helpDetailWidget {
+    background-color: transparent;
+}
+
+#helpSectionLabel {
+    color: rgb(160, 160, 160);
+    font-size: 11px;
+    font-weight: bold;
+    padding-top: 2px;
+}
+
+#helpDetailText {
+    color: rgb(170, 170, 170);
+    font-size: 12px;
+}
+
+#helpCodeBlock {
+    background-color: rgb(30, 32, 38);
+    border-radius: 4px;
+    padding: 6px 8px;
+    color: rgb(171, 178, 191);
+    font-family: "Menlo", "Consolas", monospace;
+    font-size: 12px;
+    border: 1px solid rgb(50, 53, 62);
+}
+
+#helpCodeFrame {
+    background-color: rgb(30, 32, 38);
+    border-radius: 4px;
+    border: 1px solid rgb(50, 53, 62);
+}
+
+#helpCodeText {
+    color: rgb(171, 178, 191);
+    background-color: transparent;
+    font-size: 12px;
+}
+
+#helpCopyBtn {
+    background-color: rgb(50, 53, 62);
+    color: rgb(180, 180, 180);
+    border: none;
+    border-radius: 3px;
+    font-size: 11px;
+}
+#helpCopyBtn:hover {
+    background-color: #528BFF;
+    color: white;
+}
+
+#helpSectionTitle {
+    color: rgb(140, 140, 140);
+    font-size: 13px;
+    padding: 6px 0px 4px 0px;
+}
+
+#helpNoteText {
+    color: rgb(130, 130, 130);
+    font-size: 12px;
+    padding: 4px 0px;
+}
+
+#helpSpacer {
+    background-color: transparent;
+}
 

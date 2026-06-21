@@ -2,7 +2,7 @@ import sys
 import os
 import multiprocessing
 from PySide6.QtWidgets import QApplication, QWidget, QLayout, QSizePolicy
-from PySide6.QtCore import QLoggingCategory
+from PySide6.QtCore import Qt, QLoggingCategory
 
 # --- 1. 路径修复核心逻辑 ---
 # 获取当前 main.py 所在的绝对路径
@@ -57,6 +57,9 @@ def load_stylesheet(file_name):
 class BingoIDE(QWidget):
     def __init__(self):
         super().__init__()
+        self.setWindowFlags(
+            self.windowFlags() | Qt.WindowType.FramelessWindowHint
+        )
         self.ui = Ui_Form()
         self.ui.setupUi(self)
 
@@ -80,8 +83,7 @@ class BingoIDE(QWidget):
         if hasattr(self, "controller"):
             if self.controller.request_exit():
                 self.controller.handle_exit_cleanup()
-                # 彻底切断引用
-                del self.controller
+                self.controller = None
                 event.accept()
             else:
                 event.ignore()
@@ -119,10 +121,27 @@ if __name__ == "__main__":
         os.path.join("assets", "qss", "map_editor_style.qss")
     )
     if style_data:
+        icons_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icons").replace("\\", "/")
+        style_data = style_data.replace("__ICONS__", icons_dir)
         app.setStyleSheet(style_data + sprite_style_data + map_style_data)
 
-    # 显示窗口
+    # 显示窗口，自适应屏幕尺寸
     window = BingoIDE()
+
+    screen = app.primaryScreen()
+    if screen:
+        screen_geo = screen.availableGeometry()
+        sw, sh = screen_geo.width(), screen_geo.height()
+        ww, wh = window.width(), window.height()
+
+        if ww > sw or wh > sh:
+            scale = min(sw / ww, sh / wh, 1.0)
+            window.resize(int(ww * scale), int(wh * scale))
+
+        x = screen_geo.x() + (sw - window.width()) // 2
+        y = screen_geo.y() + (sh - window.height()) // 2
+        window.move(x, y)
+
     window.show()
 
     sys.exit(app.exec())
