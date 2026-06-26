@@ -1,38 +1,41 @@
-# ===== 开发环境 =====
-.venv/
-venv/
-ENV/
-__pycache__/
-*.pyc
-.DS_Store
-.vscode/
-.idea/
-.mimocode/
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# ===== 构建产物 =====
-build/
+# Dependencies
+node_modules/
+
+# Build output
 dist/
-*.spec
+dist-ssr/
+target/
+*.local
 
-# ===== 临时文件 =====
-.temp_*
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 
-# ===== 压缩包/视频/PDF =====
-*.zip
-*.rar
-*.7z
-*.tar.gz
-*.mp4
-*.avi
-*.mov
-*.pdf
+# Tauri
+src-tauri/target/
+src-tauri/WixTools/
+src-tauri/Frameworks/
 
-# ===== 二进制游戏数据（用户运行时生成）=====
-*.bgs
-*.bgm
+# Python engine venv
+engine/venv/
+engine/__pycache__/
+engine/**/*.pyc
 
-# ===== 用户工作区 =====
-MyWorkspace/
-user_workspaces/
-test/
-
+# Legacy old project (will be removed after refactor)
+legacy/
