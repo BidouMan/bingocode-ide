@@ -1,86 +1,108 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import MapToolbar from './MapToolbar.vue'
+import MapCanvas from './MapCanvas.vue'
+import ResourceListPanel from './ResourceListPanel.vue'
+import PropertyPanel from './PropertyPanel.vue'
+import LayerPanel from './LayerPanel.vue'
+import { useMapStore } from '../../stores/map'
 
-const canvasRef = ref<HTMLDivElement>()
+const mapStore = useMapStore()
 
-let app: any = null
-
-async function initPixi() {
-  if (!canvasRef.value) return
-
-  try {
-    const PIXI = await import('pixi.js')
-
-    app = new PIXI.Application()
-
-    await app.init({
-      background: '#1e1e1e',
-      resizeTo: canvasRef.value,
-      antialias: true,
-      resolution: window.devicePixelRatio || 1,
-      autoDensity: true,
-    })
-
-    canvasRef.value.appendChild(app.canvas)
-
-    const grid = new PIXI.Graphics()
-    grid.rect(0, 0, 640, 480)
-    grid.stroke({ width: 1, color: 0x444444 })
-    app.stage.addChild(grid)
-
-    const border = new PIXI.Graphics()
-    border.rect(0, 0, 640, 480)
-    border.stroke({ width: 2, color: 0x3778c8 })
-    app.stage.addChild(border)
-  } catch (e) {
-    console.error('Failed to init PixiJS:', e)
-  }
+function onNewMap() {
+  // TODO: Task 10 - map file operations
 }
 
-onMounted(() => {
-  initPixi()
-})
+function onImportMap() {
+  // TODO: Task 10 - map file operations
+}
 
-onBeforeUnmount(() => {
-  if (app) {
-    app.destroy(true)
-    app = null
-  }
-})
+function onExportMap() {
+  // TODO: Task 10 - map file operations
+}
+
+function onOpenLibrary() {
+  // TODO: Task 8 - map library page
+}
+
+function onUploadResource() {
+  // TODO: Task 9 - resource import dialog
+}
 </script>
 
 <template>
-  <div class="h-full flex bg-[#1a1a1a]">
-    <div class="flex-1 flex items-center justify-center overflow-auto p-4">
-      <div ref="canvasRef" class="relative" />
-    </div>
-
-    <div class="w-56 border-l border-[#2d2d2d] bg-[#252526] p-3 flex flex-col gap-3 text-xs">
-      <div>
-        <h3 class="text-gray-400 mb-2 font-medium">图层</h3>
-        <div class="space-y-1">
-          <div class="flex items-center gap-2 px-2 py-1 rounded bg-[#2d2d2d]">
-            <input type="checkbox" checked class="accent-[#3778c8]" />
-            <span class="text-white">背景层</span>
-          </div>
+  <div class="map-editor-view">
+    <MapToolbar
+      @new-map="onNewMap"
+      @import-map="onImportMap"
+      @export-map="onExportMap"
+    />
+    <div class="map-editor-body">
+      <ResourceListPanel
+        @open-library="onOpenLibrary"
+        @upload-resource="onUploadResource"
+      />
+      <div class="map-editor-center">
+        <MapCanvas class="map-canvas-area" />
+        <div class="map-info-bar">
+          <span class="info-label">名称: {{ mapStore.mapData.name }}</span>
+          <span class="info-label">尺寸: {{ mapStore.mapData.width }} × {{ mapStore.mapData.height }}</span>
+          <span class="info-label">瓦片: {{ mapStore.mapData.tileSize }}px</span>
         </div>
       </div>
-
-      <div>
-        <h3 class="text-gray-400 mb-2 font-medium">瓦片集</h3>
-        <p class="text-gray-600">暂无瓦片集</p>
-      </div>
-
-      <div>
-        <h3 class="text-gray-400 mb-2 font-medium">碰撞</h3>
-        <p class="text-gray-600">选择瓦片编辑碰撞</p>
-      </div>
-
-      <div class="mt-auto">
-        <button class="w-full px-3 py-1.5 bg-[#3778c8] text-white rounded hover:bg-[#2d6ab8] transition-colors">
-          导出地图
-        </button>
+      <div class="map-editor-right">
+        <PropertyPanel />
+        <LayerPanel />
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.map-editor-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: rgb(30, 30, 30);
+}
+
+.map-editor-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.map-editor-center {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.map-canvas-area {
+  flex: 1;
+  min-height: 0;
+}
+
+.map-info-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  gap: 20px;
+  background: rgb(34, 37, 43);
+}
+
+.info-label {
+  font-size: 12px;
+  color: rgb(156, 160, 164);
+  padding: 0 6px;
+}
+
+.map-editor-right {
+  display: flex;
+  flex-direction: column;
+  width: 256px;
+  min-width: 256px;
+}
+</style>
