@@ -18,40 +18,78 @@ async function initMonaco() {
   const m = await loader.init()
   monaco = m
 
-  // 自定义暗色主题，匹配原版 QSS 配色
+  // Tokyo Night 风格主题
   m.editor.defineTheme('bingo-dark', {
     base: 'vs-dark',
     inherit: true,
     rules: [
-      { token: 'comment', foreground: '6A9955', fontStyle: 'italic' },
-      { token: 'keyword', foreground: 'C586C0' },
-      { token: 'string', foreground: 'CE9178' },
-      { token: 'number', foreground: 'B5CEA8' },
-      { token: 'type', foreground: '4EC9B0' },
-      { token: 'function', foreground: 'DCDCAA' },
-      { token: 'variable', foreground: '9CDCFE' },
-      { token: 'operator', foreground: 'D4D4D4' },
+      { token: 'comment', foreground: '565f89', fontStyle: 'italic' },
+      { token: 'keyword', foreground: 'bb9af7' },
+      { token: 'string', foreground: '9ece6a' },
+      { token: 'number', foreground: 'ff9e64' },
+      { token: 'type', foreground: '2ac3de' },
+      { token: 'function', foreground: '7aa2f7' },
+      { token: 'variable', foreground: 'c0caf5' },
+      { token: 'operator', foreground: '89ddff' },
+      { token: 'delimiter', foreground: '89ddff' },
+      { token: 'identifier', foreground: 'c0caf5' },
     ],
     colors: {
-      'editor.background': '#1E1E1E',
-      'editor.foreground': '#D4D4D4',
-      'editor.lineHighlightBackground': '#2A2D2E',
-      'editor.selectionBackground': '#264F78',
-      'editor.inactiveSelectionBackground': '#3A3D41',
-      'editorCursor.foreground': '#FFFFFF',
-      'editorWhitespace.foreground': '#3B3B3B',
-      'editorIndentGuide.background': '#3B3B3B',
-      'editorIndentGuide.activeBackground': '#6B6B6B',
-      'editorLineNumber.foreground': '#858585',
-      'editorLineNumber.activeForeground': '#C6C6C6',
-      'editor.selectionHighlightBackground': '#ADD6FF26',
-      'editorBracketMatch.background': '#0064001A',
-      'editorBracketMatch.border': '#888888',
+      'editor.background': '#1a1b26',
+      'editor.foreground': '#c0caf5',
+      'editor.lineHighlightBackground': '#1e2030',
+      'editor.selectionBackground': '#33467c',
+      'editor.inactiveSelectionBackground': '#283457',
+      'editorCursor.foreground': '#c0caf5',
+      'editorWhitespace.foreground': '#3b4261',
+      'editorIndentGuide.background': '#292e42',
+      'editorIndentGuide.activeBackground': '#3b4261',
+      'editorLineNumber.foreground': '#3b4261',
+      'editorLineNumber.activeForeground': '#737aa2',
+      'editorGutter.background': '#16161e',
+      'editor.selectionHighlightBackground': '#33467c55',
+      'editorBracketMatch.background': '#33467c55',
+      'editorBracketMatch.border': '#565f89',
       'scrollbar.shadow': '#00000000',
-      'scrollbarSlider.background': '#79797933',
-      'scrollbarSlider.hoverBackground': '#79797955',
-      'scrollbarSlider.activeBackground': '#79797988',
-      'minimap.background': '#1E1E1E',
+      'scrollbarSlider.background': '#3b426133',
+      'scrollbarSlider.hoverBackground': '#3b426155',
+      'scrollbarSlider.activeBackground': '#3b426188',
+      'minimap.background': '#1a1b26',
+    },
+  })
+
+  // Python Monarch tokenizer
+  m.languages.setMonarchTokensProvider('python', {
+    keywords: ['def','class','return','if','elif','else','for','while','import','from','as','try','except','finally','with','yield','lambda','pass','break','continue','raise','and','or','not','in','is','global','nonlocal','del','assert'],
+    builtin: ['print','len','range','int','str','float','list','dict','tuple','set','type','input','open','True','False','None','self','cls'],
+    tokenizer: {
+      root: [
+        [/"{3}([\s\S]*?"{3})?/, 'string'],
+        [/'{3}([\s\S]*?'{3})?/, 'string'],
+        [/"(?!")/, 'string', '@dblString'],
+        [/'(?!')/, 'string', '@sglString'],
+        [/#.*$/, 'comment'],
+        [/\b\d+\.?\d*\b/, 'number'],
+        [/[a-zA-Z_]\w*/, {
+          cases: {
+            '@keywords': 'keyword',
+            '@builtin': 'type',
+            '@default': 'identifier',
+          },
+        }],
+        [/[ \t]+/, 'white'],
+        [/./, 'source'],
+      ],
+      dblString: [
+        [/[^"\\]+/, 'string'],
+        [/\\./, 'string.escape'],
+        [/"/, 'string', '@pop'],
+      ],
+      sglString: [
+        [/[^'\\]+/, 'string'],
+        [/\\./, 'string.escape'],
+        [/'/, 'string', '@pop'],
+      ],
     },
   })
 
@@ -59,19 +97,22 @@ async function initMonaco() {
     value: editorStore.currentTab?.content || '',
     language: 'python',
     theme: 'bingo-dark',
-    fontSize: 14,
+    fontSize: 16,
+    lineHeight: 24,
     fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
     fontLigatures: true,
     minimap: { enabled: false },
     automaticLayout: true,
     scrollBeyondLastLine: false,
     renderWhitespace: 'selection',
-    bracketPairColorization: { enabled: true },
-    guides: { bracketPairs: true },
-    cursorBlinking: 'smooth',
-    cursorSmoothCaretAnimation: 'on',
-    smoothScrolling: true,
-    padding: { top: 12, bottom: 12 },
+    bracketPairColorization: { enabled: false },
+    guides: { bracketPairs: false },
+    highlightActiveBracketPair: false,
+    selectionHighlight: false,
+    cursorBlinking: 'solid',
+    cursorSmoothCaretAnimation: 'off',
+    smoothScrolling: false,
+    padding: { top: 0, bottom: 0 },
     tabSize: 4,
     insertSpaces: true,
     wordWrap: 'off',
@@ -92,15 +133,41 @@ async function initMonaco() {
     overviewRulerBorder: false,
     roundedSelection: true,
     selectOnLineNumbers: true,
+    suggest: { showUnused: false },
+    parameterHints: { enabled: false },
   })
 
-  // 强制 Monaco 重新计算布局（确保容器尺寸已确定）
   nextTick(() => {
     if (editor) {
       editor.layout()
       editor.focus()
     }
   })
+
+  // IME 中文输入法处理
+  // 抖动根因：组合期间 textarea 宽度变化 (1→59px) 触发容器重排
+  // 方案：永久固定 textarea 尺寸 + contain:strict 隔离布局影响，opacity:0 隐藏
+  const editorDomNode = editor.getDomNode()
+  if (editorDomNode) {
+    if (!document.getElementById('ime-stable-style')) {
+      const style = document.createElement('style')
+      style.id = 'ime-stable-style'
+      style.textContent = `
+        .monaco-editor textarea.inputarea {
+          width: 1px !important;
+          min-width: 1px !important;
+          max-width: 1px !important;
+          height: 24px !important;
+          min-height: 24px !important;
+          max-height: 24px !important;
+          overflow: hidden !important;
+          contain: strict !important;
+          opacity: 0 !important;
+        }
+      `
+      document.head.appendChild(style)
+    }
+  }
 
   // 内容变更 → 同步到 store
   editor.onDidChangeModelContent(() => {
@@ -130,26 +197,19 @@ async function initMonaco() {
   }
 }
 
-// 切换标签：保存旧标签状态 → 恢复新标签状态
 function switchTab() {
   if (!editor || !monaco) return
 
-  const oldIndex = editorStore.activeTabIndex
   const newTab = editorStore.currentTab
-
-  // 保存旧标签的光标/滚动位置
-  // (通过 activeTabIndex watch 触发)
 
   if (!newTab) return
 
-  // 检查是否已有保存的状态
   let saved = tabStates.get(newTab.id)
   if (!saved) {
     saved = { viewState: null, content: newTab.content }
     tabStates.set(newTab.id, saved)
   }
 
-  // 切换内容
   ignoreChange = true
   const model = editor.getModel()
   if (model) {
@@ -158,7 +218,6 @@ function switchTab() {
   }
   ignoreChange = false
 
-  // 恢复光标/滚动位置
   if (saved.viewState) {
     editor.restoreViewState(saved.viewState)
   }
@@ -174,7 +233,6 @@ watch(
 onMounted(() => {
   initMonaco()
 
-  // 监听外部撤销/重做事件
   window.addEventListener('editor-undo', handleUndo)
   window.addEventListener('editor-redo', handleRedo)
 })
@@ -206,5 +264,8 @@ onBeforeUnmount(() => {
   flex: 1;
   min-height: 0;
   background: #1e1e1e;
+}
+.code-editor-container :deep(.margin) {
+  border-right: 1px solid #292e42;
 }
 </style>
