@@ -41,6 +41,7 @@ export interface MapResource {
 
 export interface MapData {
   name: string
+  version: number
   width: number
   height: number
   tileSize: number
@@ -58,6 +59,7 @@ export const useMapStore = defineStore('map', () => {
   const currentMapPath = ref('')
   const mapData = ref<MapData>({
     name: '未命名地图',
+    version: 5,
     width: 40,
     height: 30,
     tileSize: 16,
@@ -100,6 +102,7 @@ export const useMapStore = defineStore('map', () => {
   function newMap() {
     mapData.value = {
       name: '未命名地图',
+      version: 5,
       width: 40,
       height: 30,
       tileSize: 16,
