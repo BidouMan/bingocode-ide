@@ -443,7 +443,7 @@ function codeDisplayName(name: string) {
         </button>
 
         <!-- 运行/停止 -->
-        <button class="menu-btn" :class="{ 'menu-btn-run-active': editorStore.isRunning }" @click="toggleRun" :title="editorStore.isRunning ? '停止' : '运行'">
+        <button class="menu-btn" @click="toggleRun" :title="editorStore.isRunning ? '停止' : '运行'">
           <img v-if="!editorStore.isRunning" src="../../assets/icons/codemode_运行.svg" class="menu-icon" />
           <img v-else src="../../assets/icons/codemode_停止.svg" class="menu-icon" />
           <span>{{ editorStore.isRunning ? '停止' : '运行' }}</span>
@@ -826,7 +826,6 @@ function codeDisplayName(name: string) {
 }
 .menu-btn:hover { background: rgb(61, 64, 72); }
 .menu-btn-active { background: rgb(61, 64, 72); }
-.menu-btn-run-active { background: rgb(95, 45, 39); color: rgb(200, 200, 200); }
 .menu-btn-help {
   width: 40px;
   min-width: 40px;
