@@ -936,9 +936,10 @@ function codeDisplayName(name: string) {
 
 /* 全宽编辑器页面 (角色/地图/IDE) */
 .editor-page-full {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  height: 100%;
   background: rgb(41, 44, 52);
 }
 
