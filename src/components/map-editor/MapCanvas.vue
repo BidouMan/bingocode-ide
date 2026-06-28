@@ -5,7 +5,10 @@ import { useMapStore } from '../../stores/map'
 const emit = defineEmits<{
   'tile-painted': [x: number, y: number, tileId: number]
   'tile-erased': [x: number, y: number]
+  'cursor-move': [x: number, y: number]
 }>()
+
+const cursorGridPos = ref<{ x: number; y: number } | null>(null)
 
 const canvasRef = ref<HTMLDivElement>()
 let PIXI: any = null
@@ -105,7 +108,7 @@ function drawGameWindow() {
 
   gameWindowRect = new PIXI.Graphics()
   gameWindowRect.rect(0, 0, LOGIC_W, LOGIC_H)
-  gameWindowRect.stroke({ width: 1, color: 0xB4B4FF, alpha: 0.6 })
+  gameWindowRect.stroke({ width: 1, color: 0xB4B4FF, alpha: 0.6, dash: [6, 4] })
   app.stage.addChild(gameWindowRect)
 }
 
@@ -182,6 +185,14 @@ function setupInteraction() {
       return
     }
 
+    const gridPos = screenToGrid(e)
+    if (gridPos) {
+      cursorGridPos.value = gridPos
+      emit('cursor-move', gridPos.x, gridPos.y)
+    } else {
+      cursorGridPos.value = null
+    }
+
     if (mapStore.currentTool === 'draw' || mapStore.currentTool === 'erase') {
       const pos = screenToGrid(e)
       updatePreview(pos)
@@ -212,6 +223,7 @@ function setupInteraction() {
   canvas.addEventListener('pointerleave', () => {
     isPanning = false
     lastPaintedKey = ''
+    cursorGridPos.value = null
     if (previewTile) {
       previewTile.visible = false
     }
@@ -311,7 +323,7 @@ onBeforeUnmount(() => {
   PIXI = null
 })
 
-defineExpose({ redraw })
+defineExpose({ redraw, cursorGridPos })
 </script>
 
 <template>
