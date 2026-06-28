@@ -9,6 +9,15 @@ let monaco: any = null
 let ignoreChange = false
 const tabStates = new Map<string, { viewState: any; content: string }>()
 
+function updateLineNumberWidth() {
+  if (!editor) return
+  const lineCount = editor.getModel()?.getLineCount() ?? 0
+  let chars = 3
+  if (lineCount >= 10000) chars = 5
+  else if (lineCount >= 1000) chars = 4
+  editor.updateOptions({ lineNumbersMinChars: chars })
+}
+
 async function initMonaco() {
   const mod = await import('@monaco-editor/loader')
   const loader = mod.default || mod
@@ -44,9 +53,10 @@ async function initMonaco() {
       'editorWhitespace.foreground': '#3b4261',
       'editorIndentGuide.background': '#292e42',
       'editorIndentGuide.activeBackground': '#3b4261',
-      'editorLineNumber.foreground': '#3b4261',
+      'editorLineNumber.foreground': '#3d4260',
       'editorLineNumber.activeForeground': '#737aa2',
-      'editorGutter.background': '#16161e',
+      'editorGutter.background': '#1a1b26',
+      'editorGutter.border': 'transparent',
       'editor.selectionHighlightBackground': '#33467c55',
       'editorBracketMatch.background': '#33467c55',
       'editorBracketMatch.border': '#565f89',
@@ -119,8 +129,8 @@ async function initMonaco() {
     lineNumbers: 'on',
     glyphMargin: false,
     folding: true,
-    lineDecorationsWidth: 8,
-    lineNumbersMinChars: 4,
+    lineDecorationsWidth: 16,
+    lineNumbersMinChars: 3,
     renderLineHighlight: 'all',
     scrollbar: {
       vertical: 'auto',
@@ -169,7 +179,7 @@ async function initMonaco() {
     }
   }
 
-  // 内容变更 → 同步到 store
+  // 内容变更 → 同步到 store + 动态调整行号宽度
   editor.onDidChangeModelContent(() => {
     if (ignoreChange) return
     const tab = editorStore.currentTab
@@ -177,6 +187,7 @@ async function initMonaco() {
       tab.content = editor.getValue()
       tab.modified = true
     }
+    updateLineNumberWidth()
   })
 
   // Ctrl+S 保存
@@ -221,6 +232,7 @@ function switchTab() {
   if (saved.viewState) {
     editor.restoreViewState(saved.viewState)
   }
+  updateLineNumberWidth()
 }
 
 watch(
@@ -263,9 +275,13 @@ onBeforeUnmount(() => {
 .code-editor-container {
   flex: 1;
   min-height: 0;
-  background: #1e1e1e;
+  background: #1a1b26;
 }
 .code-editor-container :deep(.margin) {
-  border-right: 1px solid #292e42;
+  border-right: none;
+  background: #1a1b26;
+}
+.code-editor-container :deep(.monaco-editor .margin) {
+  padding-right: 4px;
 }
 </style>
