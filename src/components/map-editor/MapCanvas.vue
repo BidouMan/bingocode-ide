@@ -128,119 +128,125 @@ function centerView() {
   app.stage.y = (vpH - mapPixelH * currentScale) / 2
 }
 
+function onWheel(e: WheelEvent) {
+  e.preventDefault()
+  const rect = canvasRef.value?.getBoundingClientRect()
+  if (!rect) return
+  const mouseX = e.clientX - rect.left
+  const mouseY = e.clientY - rect.top
+  const worldX = (mouseX - app.stage.x) / currentScale
+  const worldY = (mouseY - app.stage.y) / currentScale
+  const delta = e.deltaY > 0 ? 0.9 : 1.1
+  currentScale = Math.max(0.5, Math.min(4, currentScale * delta))
+  app.stage.x = mouseX - worldX * currentScale
+  app.stage.y = mouseY - worldY * currentScale
+  applyScale()
+}
+
+function onPointerDown(e: PointerEvent) {
+  if (e.button === 1 || (e.button === 0 && isSpaceHeld) || (e.button === 0 && e.altKey)) {
+    isPanning = true
+    lastPointer = { x: e.clientX, y: e.clientY }
+    ;(app.canvas as HTMLCanvasElement).style.cursor = 'grabbing'
+    e.preventDefault()
+    return
+  }
+
+  if (e.button === 0 && !e.altKey && !isSpaceHeld) {
+    if (mapStore.currentTool === 'draw' || mapStore.currentTool === 'erase') {
+      const pos = screenToGrid(e)
+      if (pos) {
+        if (mapStore.currentTool === 'draw' && mapStore.selectedTileIndex >= 0) {
+          const tileId = (mapStore.selectedResourceIndex + 1) * 1000 + mapStore.selectedTileIndex
+          mapStore.setTile(pos.x, pos.y, tileId)
+          lastPaintedKey = `${pos.x},${pos.y}`
+          emit('tile-painted', pos.x, pos.y, tileId)
+        } else if (mapStore.currentTool === 'erase') {
+          mapStore.setTile(pos.x, pos.y, 0)
+          lastPaintedKey = `${pos.x},${pos.y}`
+          emit('tile-erased', pos.x, pos.y)
+        }
+      }
+    }
+  }
+}
+
+function onPointerMove(e: PointerEvent) {
+  if (isPanning) {
+    const dx = e.clientX - lastPointer.x
+    const dy = e.clientY - lastPointer.y
+    app.stage.x += dx
+    app.stage.y += dy
+    lastPointer = { x: e.clientX, y: e.clientY }
+    return
+  }
+
+  const gridPos = screenToGrid(e)
+  if (gridPos) {
+    cursorGridPos.value = gridPos
+    emit('cursor-move', gridPos.x, gridPos.y)
+  } else {
+    cursorGridPos.value = null
+  }
+
+  if (mapStore.currentTool === 'draw' || mapStore.currentTool === 'erase') {
+    const pos = screenToGrid(e)
+    updatePreview(pos)
+
+    if (pos && (mapStore.currentTool === 'draw' || mapStore.currentTool === 'erase') && e.buttons === 1) {
+      const key = `${pos.x},${pos.y}`
+      if (key !== lastPaintedKey) {
+        if (mapStore.currentTool === 'draw' && mapStore.selectedTileIndex >= 0) {
+          const tileId = (mapStore.selectedResourceIndex + 1) * 1000 + mapStore.selectedTileIndex
+          mapStore.setTile(pos.x, pos.y, tileId)
+          emit('tile-painted', pos.x, pos.y, tileId)
+        } else if (mapStore.currentTool === 'erase') {
+          mapStore.setTile(pos.x, pos.y, 0)
+          emit('tile-erased', pos.x, pos.y)
+        }
+        lastPaintedKey = key
+      }
+    }
+  }
+}
+
+function onPointerUp() {
+  isPanning = false
+  lastPaintedKey = ''
+  if (app?.canvas) (app.canvas as HTMLCanvasElement).style.cursor = 'default'
+}
+
+function onPointerLeave() {
+  isPanning = false
+  lastPaintedKey = ''
+  cursorGridPos.value = null
+  if (previewTile) {
+    previewTile.visible = false
+  }
+}
+
 function setupInteraction() {
   if (!app || !app.canvas) return
   const canvas = app.canvas as HTMLCanvasElement
 
-  canvas.addEventListener('wheel', (e: WheelEvent) => {
-    e.preventDefault()
-    const rect = canvasRef.value?.getBoundingClientRect()
-    if (!rect) return
-    const mouseX = e.clientX - rect.left
-    const mouseY = e.clientY - rect.top
-    const worldX = (mouseX - app.stage.x) / currentScale
-    const worldY = (mouseY - app.stage.y) / currentScale
-    const delta = e.deltaY > 0 ? 0.9 : 1.1
-    currentScale = Math.max(0.5, Math.min(4, currentScale * delta))
-    app.stage.x = mouseX - worldX * currentScale
-    app.stage.y = mouseY - worldY * currentScale
-    applyScale()
-  }, { passive: false })
-
-  canvas.addEventListener('pointerdown', (e: PointerEvent) => {
-    if (e.button === 1 || (e.button === 0 && isSpaceHeld) || (e.button === 0 && e.altKey)) {
-      isPanning = true
-      lastPointer = { x: e.clientX, y: e.clientY }
-      canvas.style.cursor = 'grabbing'
-      e.preventDefault()
-      return
-    }
-
-    if (e.button === 0 && !e.altKey && !isSpaceHeld) {
-      if (mapStore.currentTool === 'draw' || mapStore.currentTool === 'erase') {
-        const pos = screenToGrid(e)
-        if (pos) {
-          if (mapStore.currentTool === 'draw' && mapStore.selectedTileIndex >= 0) {
-            const tileId = (mapStore.selectedResourceIndex + 1) * 1000 + mapStore.selectedTileIndex
-            mapStore.setTile(pos.x, pos.y, tileId)
-            lastPaintedKey = `${pos.x},${pos.y}`
-            emit('tile-painted', pos.x, pos.y, tileId)
-          } else if (mapStore.currentTool === 'erase') {
-            mapStore.setTile(pos.x, pos.y, 0)
-            lastPaintedKey = `${pos.x},${pos.y}`
-            emit('tile-erased', pos.x, pos.y)
-          }
-        }
-      }
-    }
-  })
-
-  canvas.addEventListener('pointermove', (e: PointerEvent) => {
-    if (isPanning) {
-      const dx = e.clientX - lastPointer.x
-      const dy = e.clientY - lastPointer.y
-      app.stage.x += dx
-      app.stage.y += dy
-      lastPointer = { x: e.clientX, y: e.clientY }
-      return
-    }
-
-    const gridPos = screenToGrid(e)
-    if (gridPos) {
-      cursorGridPos.value = gridPos
-      emit('cursor-move', gridPos.x, gridPos.y)
-    } else {
-      cursorGridPos.value = null
-    }
-
-    if (mapStore.currentTool === 'draw' || mapStore.currentTool === 'erase') {
-      const pos = screenToGrid(e)
-      updatePreview(pos)
-
-      if (pos && (mapStore.currentTool === 'draw' || mapStore.currentTool === 'erase') && e.buttons === 1) {
-        const key = `${pos.x},${pos.y}`
-        if (key !== lastPaintedKey) {
-          if (mapStore.currentTool === 'draw' && mapStore.selectedTileIndex >= 0) {
-            const tileId = (mapStore.selectedResourceIndex + 1) * 1000 + mapStore.selectedTileIndex
-            mapStore.setTile(pos.x, pos.y, tileId)
-            emit('tile-painted', pos.x, pos.y, tileId)
-          } else if (mapStore.currentTool === 'erase') {
-            mapStore.setTile(pos.x, pos.y, 0)
-            emit('tile-erased', pos.x, pos.y)
-          }
-          lastPaintedKey = key
-        }
-      }
-    }
-  })
-
-  canvas.addEventListener('pointerup', () => {
-    isPanning = false
-    lastPaintedKey = ''
-    if (canvasRef.value) canvasRef.value.style.cursor = 'default'
-  })
-
-  canvas.addEventListener('pointerleave', () => {
-    isPanning = false
-    lastPaintedKey = ''
-    cursorGridPos.value = null
-    if (previewTile) {
-      previewTile.visible = false
-    }
-  })
+  canvas.addEventListener('wheel', onWheel, { passive: false })
+  canvas.addEventListener('pointerdown', onPointerDown)
+  canvas.addEventListener('pointermove', onPointerMove)
+  canvas.addEventListener('pointerup', onPointerUp)
+  canvas.addEventListener('pointerleave', onPointerLeave)
 }
 
 function onKeyDown(e: KeyboardEvent) {
   if (e.code === 'Space' && !e.repeat) {
     isSpaceHeld = true
-    if (canvasRef.value) canvasRef.value.style.cursor = 'grab'
+    if (app?.canvas) (app.canvas as HTMLCanvasElement).style.cursor = 'grab'
   }
 }
 
 function onKeyUp(e: KeyboardEvent) {
   if (e.code === 'Space') {
     isSpaceHeld = false
-    if (!isPanning && canvasRef.value) canvasRef.value.style.cursor = 'default'
+    if (!isPanning && app?.canvas) (app.canvas as HTMLCanvasElement).style.cursor = 'default'
   }
 }
 
@@ -316,6 +322,14 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
+  if (app?.canvas) {
+    const canvas = app.canvas as HTMLCanvasElement
+    canvas.removeEventListener('wheel', onWheel)
+    canvas.removeEventListener('pointerdown', onPointerDown)
+    canvas.removeEventListener('pointermove', onPointerMove)
+    canvas.removeEventListener('pointerup', onPointerUp)
+    canvas.removeEventListener('pointerleave', onPointerLeave)
+  }
   if (app) {
     app.destroy(true)
     app = null
