@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useMapStore } from '../../stores/map'
+import CollisionEditor from './CollisionEditor.vue'
 
 const emit = defineEmits<{
   'open-library': []
@@ -57,6 +58,8 @@ function getTileCount(resource: any) {
         暂无资源
       </div>
     </div>
+
+    <CollisionEditor />
 
     <div class="res-info-bar">
       <span v-if="mapStore.selectedResourceIndex >= 0">
