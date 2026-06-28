@@ -82,7 +82,7 @@ const collisionTypes = ['图像', '墙体', '跳板', '自定义']
   color: rgb(156, 160, 164);
   font-size: 12px;
   padding: 8px 0;
-  border-bottom: 1px solid rgb(45, 45, 45);
+  border-bottom: 1px solid rgb(55, 59, 68);
 }
 
 .prop-grid {

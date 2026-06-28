@@ -101,7 +101,7 @@ function cancelRename() {
   color: rgb(156, 160, 164);
   font-size: 12px;
   padding: 8px 0;
-  border-top: 1px solid rgb(45, 45, 45);
+  border-top: 1px solid rgb(55, 59, 68);
 }
 
 .layer-toolbar {
@@ -150,7 +150,7 @@ function cancelRename() {
 }
 
 .layer-item:hover {
-  background: #2c313a;
+  background: rgb(61, 64, 72);
 }
 
 .layer-item-active {
@@ -192,7 +192,7 @@ function cancelRename() {
 .layer-rename-input {
   flex: 1;
   height: 18px;
-  background: rgb(61, 61, 61);
+  background: rgb(40, 43, 52);
   border: 1px solid rgb(91, 199, 114);
   border-radius: 2px;
   color: white;

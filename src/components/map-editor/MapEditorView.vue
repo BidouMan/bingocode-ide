@@ -104,5 +104,6 @@ function onUploadResource() {
   flex-direction: column;
   width: 256px;
   min-width: 256px;
+  border-left: 1px solid rgb(12, 12, 12);
 }
 </style>
