@@ -924,6 +924,8 @@ function codeDisplayName(name: string) {
 .edit-stage-frame {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 /* 游戏模式页面 */
