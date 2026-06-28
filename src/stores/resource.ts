@@ -28,11 +28,16 @@ export const useResourceStore = defineStore('resource', () => {
 
   function addItem(item: Omit<ResourceItem, 'id'>) {
     const list = getList(item.type)
-    const existing = list.value.find(i => i.name === item.name)
-    if (existing) return existing.id
+    let name = item.name
+    const existingNames = list.value.map(i => i.name)
+    if (existingNames.includes(name)) {
+      let counter = 1
+      while (existingNames.includes(`${name}-${counter}`)) counter++
+      name = `${name}-${counter}`
+    }
 
     const id = `res-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
-    list.value.push({ ...item, id })
+    list.value.push({ ...item, name, id })
     return id
   }
 
@@ -40,6 +45,21 @@ export const useResourceStore = defineStore('resource', () => {
     const list = getList(type)
     const idx = list.value.findIndex(i => i.id === id)
     if (idx >= 0) list.value.splice(idx, 1)
+  }
+
+  function renameItem(id: string, newName: string) {
+    for (const list of [sprites, maps, sounds, codes]) {
+      const item = list.value.find(i => i.id === id)
+      if (item) {
+        // 代码文件自动补 .py 后缀
+        if (item.type === 'code') {
+          item.name = newName.endsWith('.py') ? newName : newName + '.py'
+        } else {
+          item.name = newName
+        }
+        break
+      }
+    }
   }
 
   function clearAll(type: ResourceItem['type']) {
@@ -51,5 +71,5 @@ export const useResourceStore = defineStore('resource', () => {
     return getList(type).value.find(i => i.id === id)
   }
 
-  return { sprites, maps, sounds, codes, selectedSpriteId, addItem, removeItem, clearAll, getItem }
+  return { sprites, maps, sounds, codes, selectedSpriteId, addItem, removeItem, renameItem, clearAll, getItem }
 })

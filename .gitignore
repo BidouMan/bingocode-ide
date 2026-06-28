@@ -39,3 +39,16 @@ engine/**/*.pyc
 
 # Legacy old project (will be removed after refactor)
 legacy/
+
+# MiMoCode internal
+.mimocode/
+
+# Tauri generated
+src-tauri/gen/
+
+# TypeScript build cache
+*.tsbuildinfo
+
+# Vite generated
+vite.config.d.ts
+vite.config.js
