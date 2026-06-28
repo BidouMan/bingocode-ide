@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, nextTick, onMounted, watch } from 'vue'
 import { useEditorStore } from '../../stores/editor'
 import { useResourceStore } from '../../stores/resource'
 import { useEngine } from '../../composables/useEngine'
 import { useFileDialog } from '../../composables/useFileDialog'
+import JSZip from 'jszip'
 import GameCanvas from '../canvas/GameCanvas.vue'
 import CodeEditor from '../editor/CodeEditor.vue'
 import SpriteEditorView from '../sprite-editor/SpriteEditorView.vue'
@@ -23,6 +24,31 @@ const consoleVisible = ref(false)
 const consoleExpanded = ref(true)
 const fileMenuVisible = ref(false)
 const selectedResource = ref<string | null>(null)
+
+// 角色缩略图缓存
+const spriteThumbnails = ref<Record<string, string>>({})
+// 角色右键菜单
+const spriteContextMenu = ref<{ show: boolean; x: number; y: number; item: { id: string; name: string } | null }>({ show: false, x: 0, y: 0, item: null })
+const spriteRenameId = ref<string | null>(null)
+
+// 代码资源管理
+const codeContextMenu = ref<{ show: boolean; x: number; y: number; item: { id: string; name: string } | null }>({ show: false, x: 0, y: 0, item: null })
+const codeRenameId = ref<string | null>(null)
+const codeRenameValue = ref('')
+const spriteRenameValue = ref('')
+
+// 角色列表变化时立即加载缩略图
+function loadAllSpriteThumbnails() {
+  for (const item of resourceStore.sprites) {
+    if (item.path && !spriteThumbnails.value[item.id]) {
+      loadSpriteThumbnail(item)
+    }
+  }
+}
+
+watch(() => [...resourceStore.sprites], loadAllSpriteThumbnails)
+
+onMounted(loadAllSpriteThumbnails)
 
 function toggleFileMenu() {
   fileMenuVisible.value = !fileMenuVisible.value
@@ -115,11 +141,11 @@ async function uploadResource(type: 'sprite' | 'map' | 'sound' | 'code') {
 
 function openResource(item: { id: string; name: string; type: string; content?: string }) {
   if (item.type === 'code') {
-    const existing = editorStore.currentTabs.find(t => t.name === item.name)
-    if (existing) {
-      editorStore.setActiveTab(editorStore.currentTabs.indexOf(existing))
-    } else {
-      editorStore.createTab(item.name, item.name, item.content || '')
+    // 在游戏模式标签中查找
+    const idx = editorStore.gameTabs.findIndex(t => t.id === item.id)
+    if (idx >= 0) {
+      editorStore.setGameMode(true)
+      editorStore.setActiveTab(idx)
     }
   }
 }
@@ -161,6 +187,194 @@ function editorRedo() {
 function switchPage(page: number) {
   currentPage.value = page
 }
+
+// 双击角色跳转到角色编辑页面
+function openSpriteEditor(item: { id: string; name: string; path: string }) {
+  resourceStore.selectedSpriteId = item.id
+  editorStore.setActiveEditorMode('sprite')
+  editorStore.setGameMode(false)
+}
+
+// 加载角色缩略图
+async function loadSpriteThumbnail(item: { id: string; path: string }) {
+  if (spriteThumbnails.value[item.id]) return
+  try {
+    const resp = await fetch(item.path)
+    const blob = await resp.blob()
+    const zip = await JSZip.loadAsync(blob)
+    const configEntry = zip.file('config.json')
+    if (!configEntry) return
+    const config = JSON.parse(await configEntry.async('text'))
+    const firstFrame = (config.frames || [])[0]
+    if (!firstFrame) return
+    const entry = zip.file(firstFrame)
+    if (!entry) return
+    const frameBlob = await entry.async('blob')
+    spriteThumbnails.value[item.id] = URL.createObjectURL(frameBlob)
+  } catch (e) {
+    console.warn('Failed to load sprite thumbnail:', e)
+  }
+}
+
+// 角色右键菜单
+function onSpriteContextMenu(e: MouseEvent, item: { id: string; name: string }) {
+  e.preventDefault()
+  e.stopPropagation()
+  spriteContextMenu.value = { show: true, x: e.clientX, y: e.clientY, item }
+}
+
+function closeSpriteContextMenu() {
+  spriteContextMenu.value.show = false
+}
+
+function deleteSpriteFromContext(id: string) {
+  resourceStore.removeItem(id, 'sprite')
+  if (resourceStore.selectedSpriteId === id) resourceStore.selectedSpriteId = null
+  spriteContextMenu.value.show = false
+}
+
+function startSpriteRename(id: string) {
+  const item = resourceStore.sprites.find(i => i.id === id)
+  if (!item) return
+  spriteRenameId.value = id
+  spriteRenameValue.value = item.name
+  spriteContextMenu.value.show = false
+  // 等两轮 tick 确保 DOM 更新完毕
+  nextTick(() => nextTick(() => {
+    const input = document.querySelector('.sprite-rename-input') as HTMLInputElement | null
+    if (input) {
+      input.focus()
+      input.setSelectionRange(input.value.length, input.value.length)
+    }
+  }))
+}
+
+function confirmSpriteRename() {
+  if (!spriteRenameId.value) return
+  const val = spriteRenameValue.value.trim()
+  if (val) resourceStore.renameItem(spriteRenameId.value, val)
+  spriteRenameId.value = null
+}
+
+function cancelSpriteRename() {
+  spriteRenameId.value = null
+}
+
+function closeSpriteContextMenus() {
+  spriteContextMenu.value.show = false
+}
+
+// 同步游戏模式标签和代码资源管理器
+watch(() => [...editorStore.gameTabs], (tabs) => {
+  for (const tab of tabs) {
+    const existing = resourceStore.codes.find(c => c.id === tab.id)
+    if (!existing) {
+      resourceStore.codes.push({ id: tab.id, name: tab.name, type: 'code', path: tab.path, content: tab.content })
+    } else {
+      existing.name = tab.name
+    }
+  }
+  // 移除资源管理器中不存在的标签
+  resourceStore.codes = resourceStore.codes.filter(c => tabs.some(t => t.id === c.id))
+}, { immediate: true, deep: true })
+
+// 代码右键菜单
+function onCodeContextMenu(e: MouseEvent, item: { id: string; name: string }) {
+  e.preventDefault()
+  e.stopPropagation()
+  codeContextMenu.value = { show: true, x: e.clientX, y: e.clientY, item }
+}
+
+function closeCodeContextMenu() {
+  codeContextMenu.value.show = false
+}
+
+function deleteCodeFromContext(id: string) {
+  const tabs = editorStore.gameTabs
+  const idx = tabs.findIndex(t => t.id === id)
+  if (idx >= 0) editorStore.closeTab(idx)
+  codeContextMenu.value.show = false
+}
+
+function startCodeRename(id: string) {
+  const item = resourceStore.codes.find(c => c.id === id)
+  if (!item) return
+  codeRenameId.value = id
+  // 输入时隐藏 .py 后缀
+  codeRenameValue.value = codeDisplayName(item.name)
+  codeContextMenu.value.show = false
+  nextTick(() => {
+    nextTick(() => {
+      const input = document.querySelector('.code-rename-input') as HTMLInputElement | null
+      if (input) {
+        input.focus()
+        input.select()
+      }
+    })
+  })
+}
+
+function confirmCodeRename() {
+  if (!codeRenameId.value) return
+  const val = codeRenameValue.value.trim()
+  if (val && val !== '') {
+    const nameWithPy = val.endsWith('.py') ? val : val + '.py'
+    // 同步更新标签页名称
+    const tab = editorStore.gameTabs.find(t => t.id === codeRenameId.value)
+    if (tab) tab.name = nameWithPy
+    // 同步更新资源管理器
+    const codeItem = resourceStore.codes.find(c => c.id === codeRenameId.value)
+    if (codeItem) codeItem.name = nameWithPy
+  }
+  codeRenameId.value = null
+  codeRenameValue.value = ''
+}
+
+function cancelCodeRename() {
+  codeRenameId.value = null
+  codeRenameValue.value = ''
+}
+
+// 代码文件显示名：隐藏 .py 后缀
+// 代码标签重命名
+const tabRenameId = ref<string | null>(null)
+const tabRenameValue = ref('')
+
+function startTabRename(id: string) {
+  const tab = editorStore.currentTabs.find(t => t.id === id)
+  if (!tab) return
+  tabRenameId.value = id
+  tabRenameValue.value = codeDisplayName(tab.name)
+  nextTick(() => nextTick(() => {
+    const input = document.querySelector('.tab-rename-input') as HTMLInputElement | null
+    if (input) { input.focus(); input.select() }
+  }))
+}
+
+function confirmTabRename() {
+  if (!tabRenameId.value) return
+  const val = tabRenameValue.value.trim()
+  if (val) {
+    const nameWithPy = val.endsWith('.py') ? val : val + '.py'
+    const tab = editorStore.currentTabs.find(t => t.id === tabRenameId.value)
+    if (tab) tab.name = nameWithPy
+    // 同步资源管理器
+    const codeItem = resourceStore.codes.find(c => c.id === tabRenameId.value)
+    if (codeItem) codeItem.name = nameWithPy
+  }
+  tabRenameId.value = null
+  tabRenameValue.value = ''
+}
+
+function cancelTabRename() {
+  tabRenameId.value = null
+  tabRenameValue.value = ''
+}
+
+// 代码文件显示名：隐藏 .py 后缀
+function codeDisplayName(name: string) {
+  return name.endsWith('.py') ? name.slice(0, -3) : name
+}
 </script>
 
 <template>
@@ -172,46 +386,73 @@ function switchPage(page: number) {
         <img src="../../assets/icons/logo.svg" style="width:90px;height:40px;" />
       </button>
 
-      <!-- 文件 (图标+文字) + 下拉菜单 -->
-      <div class="menu-file-wrapper" @mouseleave="closeFileMenu">
-        <button class="menu-btn" title="文件" @click="toggleFileMenu">
-          <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14,2 14,8 20,8"/>
-          </svg>
-          <span>文件</span>
-        </button>
-        <div v-show="fileMenuVisible" class="file-menu-dropdown">
-          <button class="file-menu-item" @click="fileMenuAction('new')">新建</button>
-          <button class="file-menu-item" @click="fileMenuAction('open')">打开</button>
-          <button class="file-menu-item" @click="fileMenuAction('save')">保存</button>
-          <button class="file-menu-item" @click="fileMenuAction('saveAs')">另存为</button>
-          <button class="file-menu-item" @click="fileMenuAction('close')">关闭</button>
-          <button class="file-menu-item" @click="fileMenuAction('exit')">退出</button>
+      <!-- ═══ 游戏模式菜单 ═══ -->
+      <template v-if="editorStore.isGameMode">
+        <div class="menu-file-wrapper" @mouseleave="closeFileMenu">
+          <button class="menu-btn menu-btn-file" title="文件" @click="toggleFileMenu">
+            <img src="../../assets/icons/icon--file.svg" class="menu-icon" />
+            <span>文件</span>
+          </button>
+          <div v-show="fileMenuVisible" class="file-menu-dropdown">
+            <button class="file-menu-item" @click="fileMenuAction('new')">新建</button>
+            <button class="file-menu-item" @click="fileMenuAction('open')">打开</button>
+            <button class="file-menu-item" @click="fileMenuAction('save')">保存</button>
+            <button class="file-menu-item" @click="fileMenuAction('saveAs')">另存为</button>
+            <button class="file-menu-item" @click="fileMenuAction('close')">关闭</button>
+            <button class="file-menu-item" @click="fileMenuAction('exit')">退出</button>
+          </div>
         </div>
-      </div>
 
-      <!-- 代码 (图标+文字) -->
-      <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.activeEditorMode === 'code' }" @click="editorStore.setActiveEditorMode('code'); editorStore.setGameMode(true)">
-        <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16,18 22,12 16,6"/><polyline points="8,6 2,12 8,18"/></svg>
-        <span>代码</span>
-      </button>
+        <!-- 代码 (图标+文字) -->
+        <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.activeEditorMode === 'code' }" @click="editorStore.setActiveEditorMode('code'); editorStore.setGameMode(true)">
+          <img src="../../assets/icons/代码编辑.svg" class="menu-icon" />
+          <span>代码</span>
+        </button>
 
-      <!-- 角色 (图标+文字) -->
-      <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.activeEditorMode === 'sprite' }" @click="editorStore.setActiveEditorMode('sprite'); editorStore.setGameMode(false)">
-        <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21,15 16,10 5,21"/></svg>
-        <span>角色</span>
-      </button>
+        <!-- 角色 (图标+文字) -->
+        <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.activeEditorMode === 'sprite' }" @click="editorStore.setActiveEditorMode('sprite'); editorStore.setGameMode(false)">
+          <img src="../../assets/icons/角色精灵.svg" class="menu-icon" />
+          <span>角色</span>
+        </button>
 
-      <!-- 地图 (图标+文字) -->
-      <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.activeEditorMode === 'map' }" @click="editorStore.setActiveEditorMode('map'); editorStore.setGameMode(false)">
-        <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="1,6 1,22 8,18 16,22 23,18 23,2 16,6 8,2"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
-        <span>地图</span>
-      </button>
+        <!-- 地图 (图标+文字) -->
+        <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.activeEditorMode === 'map' }" @click="editorStore.setActiveEditorMode('map'); editorStore.setGameMode(false)">
+          <img src="../../assets/icons/addons.svg" class="menu-icon" />
+          <span>地图</span>
+        </button>
+      </template>
 
-      <!-- 设置 (图标+文字) -->
+      <!-- ═══ 代码模式菜单 ═══ -->
+      <template v-else>
+        <!-- 新建 -->
+        <button class="menu-btn" @click="editorStore.createTab('未命名.py', '')" title="新建">
+          <img src="../../assets/icons/新建地图.svg" class="menu-icon" />
+          <span>新建</span>
+        </button>
+
+        <!-- 打开 -->
+        <button class="menu-btn" @click="fileMenuAction('open')" title="打开">
+          <img src="../../assets/icons/codemode_打开.svg" class="menu-icon" />
+          <span>打开</span>
+        </button>
+
+        <!-- 保存 -->
+        <button class="menu-btn" @click="fileMenuAction('save')" title="保存">
+          <img src="../../assets/icons/codemode_保存.svg" class="menu-icon" />
+          <span>保存</span>
+        </button>
+
+        <!-- 运行/停止 -->
+        <button class="menu-btn" :class="{ 'menu-btn-run-active': editorStore.isRunning }" @click="toggleRun" :title="editorStore.isRunning ? '停止' : '运行'">
+          <img v-if="!editorStore.isRunning" src="../../assets/icons/codemode_运行.svg" class="menu-icon" />
+          <img v-else src="../../assets/icons/codemode_停止.svg" class="menu-icon" />
+          <span>{{ editorStore.isRunning ? '停止' : '运行' }}</span>
+        </button>
+      </template>
+
+      <!-- 设置 (两种模式都有) -->
       <button class="menu-btn">
-        <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <img src="../../assets/icons/icon--settings.svg" class="menu-icon" />
         <span>设置</span>
       </button>
 
@@ -228,7 +469,7 @@ function switchPage(page: number) {
 
       <!-- 帮助 (仅图标) -->
       <button class="menu-btn menu-btn-help" title="帮助">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <img src="../../assets/icons/help.svg" width="24" height="24" />
       </button>
     </div>
 
@@ -243,15 +484,15 @@ function switchPage(page: number) {
           <div class="sidebar">
             <div class="sidebar-toolbar">
               <button class="tool-btn" :class="{ 'tool-btn-active': editorStore.isRunning }" @click="toggleRun" title="运行">
-                <svg v-if="!editorStore.isRunning" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
-                <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                <img v-if="!editorStore.isRunning" src="../../assets/icons/icon--play.svg" width="16" height="16" />
+                <img v-else src="../../assets/icons/icon--stop-all.svg" width="16" height="16" />
               </button>
               <button class="tool-btn" @click="engine.stop()" title="停止">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                <img src="../../assets/icons/icon--stop-all.svg" width="16" height="16" />
               </button>
               <div class="tool-spacer"></div>
               <button class="tool-btn" @click="switchPage(1)" title="全屏">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15,3 21,3 21,9"/><polyline points="9,21 3,21 3,15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                <img src="../../assets/icons/icon--fullscreen.svg" width="20" height="20" />
               </button>
             </div>
             <div class="game-preview-wrapper">
@@ -269,36 +510,88 @@ function switchPage(page: number) {
             </div>
             <div class="outline-list-wrapper">
               <div class="outline-list">
-                <div v-if="editorStore.resourceTab === 'sprite'" class="resource-grid">
-                  <div v-for="item in resourceStore.sprites" :key="item.id" class="resource-grid-item" :class="{ 'resource-grid-item-active': resourceStore.selectedSpriteId === item.id }" @click="resourceStore.selectedSpriteId = item.id" @dblclick="openResource(item)">
-                    <div class="resource-thumb"><span>{{ item.name.charAt(0) }}</span></div>
-                    <span class="resource-grid-name">{{ item.name }}</span>
-                    <button class="resource-card-del" @click.stop="resourceStore.removeItem(item.id, 'sprite')">×</button>
+                <div v-if="editorStore.resourceTab === 'sprite'" class="resource-grid" @click="closeSpriteContextMenus">
+                  <div
+                    v-for="item in resourceStore.sprites"
+                    :key="item.id"
+                    class="resource-grid-item"
+                    :class="{ 'resource-grid-item-active': resourceStore.selectedSpriteId === item.id }"
+                    @click="resourceStore.selectedSpriteId = item.id"
+                    @dblclick="openSpriteEditor(item)"
+                    @contextmenu="onSpriteContextMenu($event, item)"
+                  >
+                    <div class="resource-thumb">
+                      <img v-if="spriteThumbnails[item.id]" :src="spriteThumbnails[item.id]" class="resource-thumb-img" />
+                      <span v-else>{{ item.name.charAt(0) }}</span>
+                    </div>
+                    <template v-if="spriteRenameId === item.id">
+                      <input
+                        class="sprite-rename-input"
+                        v-model="spriteRenameValue"
+                        @blur="confirmSpriteRename"
+                        @keydown.enter.prevent="confirmSpriteRename"
+                        @keydown.escape="cancelSpriteRename"
+                        @click.stop
+                      />
+                    </template>
+                    <template v-else>
+                      <span class="resource-grid-name">{{ item.name }}</span>
+                    </template>
                   </div>
-                  <div v-if="resourceStore.sprites.length === 0" class="resource-empty"><span>暂无角色</span></div>
+                  <div v-if="resourceStore.sprites.length === 0" class="resource-empty"></div>
                 </div>
-                <div v-else-if="editorStore.resourceTab === 'map'" class="resource-grid">
-                  <div v-for="item in resourceStore.maps" :key="item.id" class="resource-grid-item" :class="{ 'resource-grid-item-active': selectedResource === item.id }" @click="selectedResource = item.id" @dblclick="openResource(item)">
+                <div v-else-if="editorStore.resourceTab === 'map'" class="resource-grid" @click="closeSpriteContextMenus">
+                  <div
+                    v-for="item in resourceStore.maps"
+                    :key="item.id"
+                    class="resource-grid-item"
+                    :class="{ 'resource-grid-item-active': selectedResource === item.id }"
+                    @click="selectedResource = item.id"
+                    @dblclick="openResource(item)"
+                  >
                     <div class="resource-thumb resource-thumb-map"><span>{{ item.name.charAt(0) }}</span></div>
                     <span class="resource-grid-name">{{ item.name }}</span>
-                    <button class="resource-card-del" @click.stop="resourceStore.removeItem(item.id, 'map')">×</button>
                   </div>
-                  <div v-if="resourceStore.maps.length === 0" class="resource-empty"><span>暂无地图</span></div>
+                  <div v-if="resourceStore.maps.length === 0" class="resource-empty"></div>
                 </div>
                 <div v-else-if="editorStore.resourceTab === 'sound'" class="resource-grid">
-                  <div v-for="item in resourceStore.sounds" :key="item.id" class="resource-grid-item" :class="{ 'resource-grid-item-active': selectedResource === item.id }" @click="selectedResource = item.id">
+                  <div
+                    v-for="item in resourceStore.sounds"
+                    :key="item.id"
+                    class="resource-grid-item"
+                    :class="{ 'resource-grid-item-active': selectedResource === item.id }"
+                    @click="selectedResource = item.id"
+                  >
                     <div class="resource-thumb resource-thumb-sound"><span>{{ item.name.charAt(0) }}</span></div>
                     <span class="resource-grid-name">{{ item.name }}</span>
-                    <button class="resource-card-del" @click.stop="resourceStore.removeItem(item.id, 'sound')">×</button>
                   </div>
-                  <div v-if="resourceStore.sounds.length === 0" class="resource-empty"><span>暂无声音</span></div>
+                  <div v-if="resourceStore.sounds.length === 0" class="resource-empty"></div>
                 </div>
-                <div v-else class="resource-code-list">
-                  <div v-for="item in resourceStore.codes" :key="item.id" class="resource-code-item" @click="selectedResource = item.id" @dblclick="openResource(item)">
+                <div v-else class="resource-code-list" @click="closeCodeContextMenu">
+                  <div
+                    v-for="item in resourceStore.codes"
+                    :key="item.id"
+                    class="resource-code-item"
+                    :class="{ 'resource-code-item-active': editorStore.currentTab?.id === item.id }"
+                    @click="selectedResource = item.id; openResource(item)"
+                    @dblclick="openResource(item)"
+                    @contextmenu="onCodeContextMenu($event, item)"
+                  >
                     <img src="../../assets/icons/python_file_1.svg" class="resource-code-icon" />
-                    <span class="resource-code-name">{{ item.name }}</span>
+                    <template v-if="codeRenameId === item.id">
+                      <input
+                        class="code-rename-input"
+                        v-model="codeRenameValue"
+                        @blur="confirmCodeRename"
+                        @keydown.enter.prevent="confirmCodeRename"
+                        @keydown.escape="cancelCodeRename"
+                        @click.stop
+                      />
+                    </template>
+                    <template v-else>
+                      <span class="resource-code-name">{{ codeDisplayName(item.name) }}</span>
+                    </template>
                   </div>
-                  <div v-if="resourceStore.codes.length === 0" class="resource-empty"><span>暂无代码文件</span></div>
                 </div>
               </div>
               <UploadDrawer v-if="editorStore.resourceTab !== 'code'" :type="editorStore.resourceTab" @uploaded="onResourceUploaded" @open-library="onOpenLibrary" />
@@ -310,7 +603,12 @@ function switchPage(page: number) {
             <div class="tab-bar">
               <div class="tab-bar-tabs">
                 <div v-for="(tab, index) in editorStore.currentTabs" :key="tab.id" class="tab-item" :class="{ 'tab-item-active': editorStore.activeTabIndex === index }" @click="editorStore.setActiveTab(index)">
-                  <span>{{ tab.name }}</span>
+                  <template v-if="tabRenameId === tab.id">
+                    <input class="tab-rename-input" v-model="tabRenameValue" @blur="confirmTabRename" @keydown.enter.prevent="confirmTabRename" @keydown.escape="cancelTabRename" @click.stop />
+                  </template>
+                  <template v-else>
+                    <span @dblclick.stop="startTabRename(tab.id)">{{ codeDisplayName(tab.name) }}</span>
+                  </template>
                   <button class="tab-close" @click.stop="editorStore.closeTab(index)">×</button>
                 </div>
                 <button class="tab-add" @click="editorStore.createTab('未命名.py', '')" title="新建文件">+</button>
@@ -343,16 +641,17 @@ function switchPage(page: number) {
           <div class="ide-tab-bar">
             <div class="tab-bar-tabs">
               <div v-for="(tab, index) in editorStore.currentTabs" :key="tab.id" class="tab-item" :class="{ 'tab-item-active': editorStore.activeTabIndex === index }" @click="editorStore.setActiveTab(index)">
-                <span>{{ tab.name }}</span>
+                <template v-if="tabRenameId === tab.id">
+                  <input class="tab-rename-input" v-model="tabRenameValue" @blur="confirmTabRename" @keydown.enter.prevent="confirmTabRename" @keydown.escape="cancelTabRename" @click.stop />
+                </template>
+                <template v-else>
+                  <span @dblclick.stop="startTabRename(tab.id)">{{ codeDisplayName(tab.name) }}</span>
+                </template>
                 <button class="tab-close" @click.stop="editorStore.closeTab(index)">×</button>
               </div>
               <button class="tab-add" @click="editorStore.createTab('未命名.py', '')" title="新建文件">+</button>
             </div>
             <div class="ide-toolbar">
-              <button class="ide-tool-btn" :class="{ 'ide-tool-btn-active': editorStore.isRunning }" @click="toggleRun" title="运行">
-                <svg v-if="!editorStore.isRunning" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
-                <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-              </button>
               <button class="ide-tool-btn" title="撤销" @click="editorUndo"><img src="../../assets/icons/undo.svg" width="18" height="18" /></button>
               <button class="ide-tool-btn" title="重做" @click="editorRedo"><img src="../../assets/icons/redo.svg" width="18" height="18" /></button>
             </div>
@@ -370,15 +669,15 @@ function switchPage(page: number) {
         <div class="fullscreen-wrapper">
           <div class="fullscreen-toolbar">
             <button class="tool-btn" :class="{ 'tool-btn-active': editorStore.isRunning }" @click="toggleRun">
-              <svg v-if="!editorStore.isRunning" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
-              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+              <img v-if="!editorStore.isRunning" src="../../assets/icons/icon--play.svg" width="16" height="16" />
+              <img v-else src="../../assets/icons/icon--stop-all.svg" width="16" height="16" />
             </button>
             <button class="tool-btn" @click="engine.stop()">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+              <img src="../../assets/icons/icon--stop-all.svg" width="16" height="16" />
             </button>
             <div class="tool-spacer"></div>
             <button class="tool-btn" @click="switchPage(0)">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4,14 10,14 10,20"/><polyline points="20,10 14,10 14,4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+              <img src="../../assets/icons/icon--unfullscreen.svg" width="20" height="20" />
             </button>
           </div>
           <div class="fullscreen-game-frame">
@@ -437,6 +736,32 @@ function switchPage(page: number) {
     </div>
 
     <!-- 控制台按钮已移至游戏模式编辑区内 -->
+
+    <!-- 角色右键菜单 -->
+    <Teleport to="body">
+      <div
+        v-if="spriteContextMenu.show"
+        class="sprite-ctx-menu"
+        :style="{ left: spriteContextMenu.x + 'px', top: spriteContextMenu.y + 'px' }"
+        @click.stop
+      >
+        <div class="sprite-ctx-item" @click="startSpriteRename(spriteContextMenu.item!.id)">重命名</div>
+        <div class="sprite-ctx-item sprite-ctx-del" @click="deleteSpriteFromContext(spriteContextMenu.item!.id)">删除</div>
+      </div>
+    </Teleport>
+
+    <!-- 代码右键菜单 -->
+    <Teleport to="body">
+      <div
+        v-if="codeContextMenu.show"
+        class="sprite-ctx-menu"
+        :style="{ left: codeContextMenu.x + 'px', top: codeContextMenu.y + 'px' }"
+        @click.stop
+      >
+        <div class="sprite-ctx-item" @click="startCodeRename(codeContextMenu.item!.id)">重命名</div>
+        <div class="sprite-ctx-item sprite-ctx-del" @click="deleteCodeFromContext(codeContextMenu.item!.id)">删除</div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -457,8 +782,8 @@ function switchPage(page: number) {
 .menu-bar {
   display: flex;
   align-items: stretch;
-  height: 56px;
-  min-height: 56px;
+  height: 40px;
+  min-height: 40px;
   padding: 0;
   flex-shrink: 0;
   border-bottom: 1px solid rgb(12, 12, 12);
@@ -476,25 +801,23 @@ function switchPage(page: number) {
 }
 .menu-logo:hover { background: rgb(61, 64, 72); }
 .menu-icon {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   flex-shrink: 0;
 }
 .menu-btn {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
-  width: 72px;
-  min-width: 72px;
+  gap: 6px;
   flex-shrink: 0;
   background: transparent;
   border: none;
   color: white;
   cursor: pointer;
   transition: background 0.15s;
-  gap: 4px;
-  padding: 6px 0;
+  padding: 0 12px;
 }
 .menu-btn span {
   font-size: 11px;
@@ -503,9 +826,12 @@ function switchPage(page: number) {
 }
 .menu-btn:hover { background: rgb(61, 64, 72); }
 .menu-btn-active { background: rgb(61, 64, 72); }
+.menu-btn-run-active { background: rgb(95, 45, 39); color: rgb(200, 200, 200); }
 .menu-btn-help {
   width: 40px;
   min-width: 40px;
+  padding: 0;
+  justify-content: center;
 }
 .menu-btn-help:hover { background: transparent; }
 .menu-btn-help:active { background: transparent; }
@@ -514,6 +840,12 @@ function switchPage(page: number) {
 /* 文件下拉菜单 */
 .menu-file-wrapper {
   position: relative;
+  display: flex;
+  align-items: stretch;
+  height: 40px;
+}
+.menu-btn-file {
+  height: 100%;
 }
 .file-menu-dropdown {
   position: absolute;
@@ -641,6 +973,7 @@ function switchPage(page: number) {
   flex-direction: column;
   border-right: 1px solid rgb(12, 12, 12);
   background: rgb(34, 37, 43);
+  padding: 0 8px;
 }
 .sidebar-toolbar {
   display: flex;
@@ -671,13 +1004,11 @@ function switchPage(page: number) {
 /* 游戏预览 */
 .game-preview-wrapper {
   display: flex;
-  justify-content: center;
-  padding: 8px 0;
   flex-shrink: 0;
 }
 .game-preview-container {
-  width: 320px;
-  height: 240px;
+  width: 324px;
+  height: 244px;
   border: 2px solid #4e4e4e;
   background: rgb(50, 50, 61);
   overflow: hidden;
@@ -698,6 +1029,7 @@ function switchPage(page: number) {
   display: flex;
   height: 50px;
   flex-shrink: 0;
+  align-items: center;
 }
 .outline-tab {
   flex: 1;
@@ -705,10 +1037,11 @@ function switchPage(page: number) {
   align-items: center;
   justify-content: center;
   background: transparent;
-  border: none;
+  border: 0px solid transparent;
   border-bottom: 3px solid rgb(47, 47, 47);
   color: rgb(128, 128, 128);
   font-size: 13px;
+  padding: 8px 8px 4px 8px;
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -720,7 +1053,7 @@ function switchPage(page: number) {
   flex: 1;
   min-height: 0;
   position: relative;
-  background: rgb(41, 44, 52);
+  background: rgb(30, 30, 30);
 }
 .outline-list {
   height: 100%;
@@ -744,24 +1077,33 @@ function switchPage(page: number) {
   padding: 5px;
   border-radius: 6px;
   cursor: pointer;
-  transition: background 0.12s;
+  min-width: 0;
 }
 .resource-grid-item:hover { background: rgb(55, 58, 65); }
 .resource-grid-item-active {
   background: rgb(60, 60, 60);
-  outline: 2px solid rgb(255, 85, 85);
-  outline-offset: -2px;
+  box-shadow: inset 0 0 0 2px rgb(91, 199, 114);
 }
+.resource-grid-item-active:hover { box-shadow: inset 0 0 0 2px rgb(91, 199, 114); }
 .resource-thumb {
-  width: 48px;
-  height: 48px;
-  background: rgb(74, 144, 226);
+  width: 56px;
+  height: 56px;
+  background: transparent;
   border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 16px;
   color: white;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.resource-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: pixelated;
+  flex-shrink: 0;
 }
 .resource-thumb-map { background: rgb(61, 64, 72); }
 .resource-thumb-sound { background: rgb(232, 167, 53); }
@@ -772,7 +1114,20 @@ function switchPage(page: number) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 74px;
+  width: 100%;
+}
+.sprite-rename-input {
+  width: 74px;
+  height: 18px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: rgb(200, 200, 200);
+  font-size: 11px;
+  padding: 0;
+  text-align: center;
+  outline: none;
+  caret-color: white;
 }
 .resource-card-del {
   position: absolute;
@@ -804,10 +1159,11 @@ function switchPage(page: number) {
   gap: 12px;
   padding: 8px 15px;
   cursor: pointer;
-  transition: background 0.12s;
   position: relative;
 }
 .resource-code-item:hover { background: rgb(61, 64, 72); }
+.resource-code-item-active { background: rgb(55, 58, 65); }
+.resource-code-item-active:hover { background: rgb(55, 58, 65); }
 .resource-code-icon { width: 20px; height: 20px; flex-shrink: 0; }
 .resource-code-name {
   font-size: 14px;
@@ -816,6 +1172,21 @@ function switchPage(page: number) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.code-rename-input {
+  width: 0;
+  min-width: 60px;
+  max-width: 180px;
+  flex: 1;
+  height: 22px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+  color: #e8e8e8;
+  font-size: 14px;
+  padding: 0 4px;
+  outline: none;
+  caret-color: white;
 }
 .resource-code-actions {
   display: flex;
@@ -885,6 +1256,13 @@ function switchPage(page: number) {
   border-right: 1px solid rgb(34, 37, 43);
   flex-shrink: 0;
   transition: all 0.15s;
+  max-width: 120px;
+  overflow: hidden;
+}
+.tab-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .tab-item:hover { color: white; background: rgb(41, 44, 52); }
 .tab-item-active { color: white; background: rgb(41, 44, 52); border-bottom: 2px solid rgb(91, 251, 132); }
@@ -900,6 +1278,21 @@ function switchPage(page: number) {
 }
 .tab-item:hover .tab-close { opacity: 0.6; }
 .tab-close:hover { opacity: 1 !important; }
+.tab-rename-input {
+  width: 0;
+  min-width: 60px;
+  max-width: 96px;
+  flex: 1;
+  height: 20px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+  color: #e8e8e8;
+  font-size: 12px;
+  padding: 0 4px;
+  outline: none;
+  caret-color: white;
+}
 .tab-add {
   display: flex;
   align-items: center;
@@ -989,7 +1382,6 @@ function switchPage(page: number) {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 4px 0;
 }
 .fullscreen-toolbar {
   display: flex;
@@ -999,12 +1391,12 @@ function switchPage(page: number) {
   padding: 0 5px;
   gap: 5px;
   flex-shrink: 0;
+  background: rgb(34, 37, 43);
 }
 .fullscreen-game-frame {
   flex: 1;
   min-height: 0;
   width: 100%;
-  max-width: 960px;
   border: 2px solid #4e4e4e;
   background: rgb(50, 50, 61);
   overflow: hidden;
@@ -1090,4 +1482,24 @@ function switchPage(page: number) {
   z-index: 50;
 }
 .console-toggle:hover { color: white; background: rgb(41, 44, 52); }
+
+/* ═══ 角色右键菜单 ═══ */
+.sprite-ctx-menu {
+  position: fixed;
+  background: rgb(34, 37, 43);
+  border: 1px solid rgb(60, 60, 60);
+  border-radius: 6px;
+  padding: 4px 0;
+  z-index: 9999;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  min-width: 100px;
+}
+.sprite-ctx-item {
+  padding: 6px 14px;
+  font-size: 12px;
+  color: rgb(200, 200, 200);
+  cursor: pointer;
+}
+.sprite-ctx-item:hover { background: rgb(61, 64, 72); color: white; }
+.sprite-ctx-del:hover { background: rgb(95, 45, 39); color: white; }
 </style>
