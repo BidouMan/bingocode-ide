@@ -404,19 +404,19 @@ function codeDisplayName(name: string) {
         </div>
 
         <!-- 代码 (图标+文字) -->
-        <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.activeEditorMode === 'code' }" @click="editorStore.setActiveEditorMode('code'); editorStore.setGameMode(true)">
+        <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.resourceTab === 'code' }" @click="editorStore.setResourceTab('code')">
           <img src="../../assets/icons/代码编辑.svg" class="menu-icon" />
           <span>代码</span>
         </button>
 
         <!-- 角色 (图标+文字) -->
-        <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.activeEditorMode === 'sprite' }" @click="editorStore.setActiveEditorMode('sprite'); editorStore.setGameMode(false)">
+        <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.resourceTab === 'sprite' }" @click="editorStore.setResourceTab('sprite')">
           <img src="../../assets/icons/角色精灵.svg" class="menu-icon" />
           <span>角色</span>
         </button>
 
         <!-- 地图 (图标+文字) -->
-        <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.activeEditorMode === 'map' }" @click="editorStore.setActiveEditorMode('map'); editorStore.setGameMode(false)">
+        <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.resourceTab === 'map' }" @click="editorStore.setResourceTab('map')">
           <img src="../../assets/icons/addons.svg" class="menu-icon" />
           <span>地图</span>
         </button>

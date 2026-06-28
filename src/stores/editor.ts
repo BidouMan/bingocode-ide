@@ -29,7 +29,7 @@ export const useEditorStore = defineStore('editor', () => {
   const isGameMode = ref(true)
   const activeEditorMode = ref<EditorMode>('code')
   const isRunning = ref(false)
-  const resourceTab = ref<ResourceTab>('code')
+  const resourceTab = ref<ResourceTab>('sprite')
 
   // ─── 游戏模式标签 ───
   const gameTabs = ref<Tab[]>([createDefaultTab()])
@@ -62,6 +62,9 @@ export const useEditorStore = defineStore('editor', () => {
 
   function toggleGameMode() {
     isGameMode.value = !isGameMode.value
+    if (!isGameMode.value) {
+      activeEditorMode.value = 'code'
+    }
   }
 
   function setActiveEditorMode(mode: EditorMode) {
@@ -109,6 +112,16 @@ export const useEditorStore = defineStore('editor', () => {
     }
   }
 
+  function renameTab(id: string, newName: string) {
+    const tabs = currentTabs.value
+    const idx = tabs.findIndex(t => t.id === id)
+    if (idx >= 0) {
+      // 自动补 .py 后缀
+      const name = newName.endsWith('.py') ? newName : newName + '.py'
+      tabs[idx] = { ...tabs[idx], name, path: name }
+    }
+  }
+
   function setActiveTab(index: number) {
     const tabs = currentTabs.value
     if (index >= 0 && index < tabs.length) {
@@ -148,6 +161,7 @@ export const useEditorStore = defineStore('editor', () => {
     setResourceTab,
     createTab,
     closeTab,
+    renameTab,
     setActiveTab,
     saveCurrentTab,
     setRunning,
