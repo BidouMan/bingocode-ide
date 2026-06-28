@@ -9,18 +9,36 @@ export const useTerminalStore = defineStore('terminal', () => {
   let pendingText = ''
   let flushTimer: ReturnType<typeof setTimeout> | null = null
   let terminalInstance: any = null
+  const earlyBuffer: string[] = []
+  const waitingForInput = ref(false)
 
   function bindTerminal(terminal: any) {
     terminalInstance = terminal
+    for (const line of earlyBuffer) {
+      terminalInstance.writeln(line)
+    }
+    earlyBuffer.length = 0
+    if (lines.value.length > 0) {
+      terminalInstance.scrollToBottom()
+    }
   }
 
   function appendLine(text: string) {
-    if (!terminalInstance) return
-    terminalInstance.writeln(text)
     lines.value.push(text)
     if (lines.value.length > MAX_LINES) {
       const excess = lines.value.length - MAX_LINES
       lines.value.splice(0, excess)
+    }
+    if (terminalInstance) {
+      terminalInstance.writeln(text)
+    } else {
+      earlyBuffer.push(text)
+    }
+  }
+
+  function writeRaw(text: string) {
+    if (terminalInstance) {
+      terminalInstance.write(text)
     }
   }
 
@@ -46,13 +64,18 @@ export const useTerminalStore = defineStore('terminal', () => {
     const waiting = text.includes('__BINGO_WAITING_INPUT__')
     const cleaned = text.replace('__BINGO_WAITING_INPUT__', '')
 
-    for (const line of cleaned.split('\n')) {
-      if (!line) continue
-      const stripped = line.trim()
+    const parts = cleaned.split('\n')
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i]
+      const stripped = part.trim()
       if (stripped.startsWith('{"type":') && stripped.endsWith('}')) {
         continue
       }
-      appendLine(line)
+      if (i < parts.length - 1) {
+        appendLine(part)
+      } else if (part) {
+        writeRaw(part)
+      }
     }
 
     if (waiting && terminalInstance) {
@@ -62,13 +85,46 @@ export const useTerminalStore = defineStore('terminal', () => {
 
   function handleStdout(data: string) {
     appendBatch(data)
+    checkWaitingForInput(data)
   }
 
   function handleStderr(data: string) {
-    appendLine(`\x1b[31m❌ ${data}\x1b[0m`)
+    appendBatch(`\x1b[31m❌ ${data}\x1b[0m`)
+    checkWaitingForInput(data)
+  }
+
+  function checkWaitingForInput(data: string) {
+    const hasNewline = data.includes('\n') || data.includes('\r')
+    const hasPrompt = /[?:：]\s*$/.test(data.trimEnd())
+    if (!hasNewline || hasPrompt) {
+      waitingForInput.value = true
+    }
+  }
+
+  function consumeInput() {
+    waitingForInput.value = false
+  }
+
+  function resetInputState() {
+    waitingForInput.value = false
+  }
+
+  function handleStderr(data: string) {
+    appendBatch(`\x1b[31m❌ ${data}\x1b[0m`)
+  }
+
+  function flushNow() {
+    if (flushTimer) {
+      clearTimeout(flushTimer)
+      flushTimer = null
+    }
+    if (pendingText) {
+      flush()
+    }
   }
 
   function clear() {
+    earlyBuffer.length = 0
     if (terminalInstance) {
       terminalInstance.clear()
     }
@@ -85,11 +141,15 @@ export const useTerminalStore = defineStore('terminal', () => {
 
   return {
     lines,
+    waitingForInput,
     bindTerminal,
     appendLine,
     appendBatch,
     handleStdout,
     handleStderr,
+    flushNow,
+    consumeInput,
+    resetInputState,
     clear,
     destroy,
   }

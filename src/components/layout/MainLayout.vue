@@ -112,7 +112,8 @@ async function toggleRun() {
   if (editorStore.isRunning) {
     await engine.stop()
   } else {
-    if (!editorStore.isGameMode) consoleVisible.value = true
+    consoleVisible.value = true
+    await nextTick()
     await engine.run()
   }
 }
@@ -442,7 +443,7 @@ function codeDisplayName(name: string) {
           <span>保存</span>
         </button>
 
-        <!-- 运行/停止 -->
+        <!-- 运行/停止 (代码模式单个切换) -->
         <button class="menu-btn" @click="toggleRun" :title="editorStore.isRunning ? '停止' : '运行'">
           <img v-if="!editorStore.isRunning" src="../../assets/icons/codemode_运行.svg" class="menu-icon" />
           <img v-else src="../../assets/icons/codemode_停止.svg" class="menu-icon" />
@@ -494,8 +495,7 @@ function codeDisplayName(name: string) {
           <div class="sidebar">
             <div class="sidebar-toolbar">
               <button class="tool-btn" :class="{ 'tool-btn-active': editorStore.isRunning }" @click="toggleRun" title="运行">
-                <img v-if="!editorStore.isRunning" src="../../assets/icons/icon--play.svg" width="16" height="16" />
-                <img v-else src="../../assets/icons/icon--stop-all.svg" width="16" height="16" />
+                <img src="../../assets/icons/icon--play.svg" width="16" height="16" />
               </button>
               <button class="tool-btn" @click="engine.stop()" title="停止">
                 <img src="../../assets/icons/icon--stop-all.svg" width="16" height="16" />
@@ -627,8 +627,7 @@ function codeDisplayName(name: string) {
             <div class="code-area">
               <div class="code-splitter">
                 <div class="code-editor-pane">
-                  <CodeEditor v-if="!editorStore.isRunning" />
-                  <GameCanvas v-else class="game-canvas-full" />
+                  <CodeEditor />
                 </div>
               </div>
               <TerminalPanel v-model:visible="consoleVisible" />
@@ -669,8 +668,7 @@ function codeDisplayName(name: string) {
         <div class="fullscreen-wrapper">
           <div class="fullscreen-toolbar">
             <button class="tool-btn" :class="{ 'tool-btn-active': editorStore.isRunning }" @click="toggleRun">
-              <img v-if="!editorStore.isRunning" src="../../assets/icons/icon--play.svg" width="16" height="16" />
-              <img v-else src="../../assets/icons/icon--stop-all.svg" width="16" height="16" />
+              <img src="../../assets/icons/icon--play.svg" width="16" height="16" />
             </button>
             <button class="tool-btn" @click="engine.stop()">
               <img src="../../assets/icons/icon--stop-all.svg" width="16" height="16" />

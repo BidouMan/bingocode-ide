@@ -110,8 +110,8 @@ export function useEngine() {
     cleanup()
 
     const unlisten1 = await listen<string>('engine:stdout', (event) => {
-      const line = event.payload
-      const stripped = line.trim()
+      const data = event.payload
+      const stripped = data.trim()
 
       if (stripped.startsWith('{') && stripped.endsWith('}')) {
         const cmd = parseInstruction(stripped)
@@ -121,20 +121,39 @@ export function useEngine() {
         }
       }
 
-      terminalStore.handleStdout(line + '\n')
+      terminalStore.handleStdout(data)
     })
 
     const unlisten2 = await listen<string>('engine:stderr', (event) => {
       terminalStore.handleStderr(event.payload)
     })
 
+    let stdoutEnded = false
+
     const unlisten3 = await listen('engine:finished', () => {
-      editorStore.setRunning(false)
-      terminalStore.appendLine('\x1b[33m[进程已退出]\x1b[0m')
+      const finish = () => {
+        terminalStore.flushNow()
+        terminalStore.resetInputState()
+        editorStore.setRunning(false)
+        terminalStore.appendLine('\x1b[33m[运行完毕]\x1b[0m')
+        const projectDir = projectStore.root || ''
+        if (projectDir) {
+          invoke('cleanup_temp_script', { projectDir }).catch(() => {})
+        }
+      }
+      if (stdoutEnded) {
+        finish()
+      } else {
+        const unlistenEnd = listen('engine:stdout:end', () => {
+          stdoutEnded = true
+          unlistenEnd.then(fn => fn())
+          finish()
+        })
+      }
     })
 
     const unlisten4 = await listen('engine:stdout:end', () => {
-      // stdout stream closed
+      stdoutEnded = true
     })
 
     unlisteners.push(
@@ -163,14 +182,22 @@ export function useEngine() {
     await setupListeners()
 
     try {
+      const projectDir = projectStore.root || ''
+
+      // 将编辑器内容写入临时文件
+      const scriptPath = await invoke<string>('save_temp_script', {
+        projectDir,
+        content: tab.content,
+      })
+
       const env = await invoke<{
         python_path: string
         engine_dir: string
         working_dir: string
-      }>('resolve_engine_env', { scriptPath: tab.path })
+      }>('resolve_engine_env', { scriptPath, projectRoot: projectDir || undefined })
 
       await invoke('run_script', {
-        scriptPath: tab.path,
+        scriptPath,
         workingDir: env.working_dir,
         pythonPath: env.python_path,
         engineDir: env.engine_dir,
@@ -186,7 +213,8 @@ export function useEngine() {
       await invoke('stop_script')
     } catch {}
     editorStore.setRunning(false)
-    terminalStore.appendLine('\x1b[33m[已停止]\x1b[0m')
+    terminalStore.resetInputState()
+    terminalStore.appendLine('\x1b[33m[已停止运行]\x1b[0m')
   }
 
   async function sendInput(data: string) {

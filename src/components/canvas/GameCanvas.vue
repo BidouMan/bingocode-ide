@@ -144,7 +144,7 @@ function gameLoop() {
 }
 
 function onKeyDown(e: KeyboardEvent) {
-  if (editorStore.isRunning) {
+  if (editorStore.isRunning && usesEngine()) {
     e.stopPropagation()
     const key = mapKey(e.key)
     engine.sendKey(key, true)
@@ -152,15 +152,20 @@ function onKeyDown(e: KeyboardEvent) {
 }
 
 function onKeyUp(e: KeyboardEvent) {
-  if (editorStore.isRunning) {
+  if (editorStore.isRunning && usesEngine()) {
     e.stopPropagation()
     const key = mapKey(e.key)
     engine.sendKey(key, false)
   }
 }
 
+function usesEngine(): boolean {
+  const code = editorStore.currentTab?.content || ''
+  return code.includes('bingo_engine')
+}
+
 function onCanvasMouseMove(e: MouseEvent) {
-  if (!app || !containerRef.value || !editorStore.isRunning) return
+  if (!app || !containerRef.value || !editorStore.isRunning || !usesEngine()) return
   const rect = containerRef.value.getBoundingClientRect()
   const scaleX = rect.width / LOGIC_W
   const scaleY = rect.height / LOGIC_H
@@ -173,14 +178,14 @@ function onCanvasMouseMove(e: MouseEvent) {
 }
 
 function onCanvasMouseDown(e: MouseEvent) {
-  if (editorStore.isRunning) {
+  if (editorStore.isRunning && usesEngine()) {
     e.stopPropagation()
     engine.sendMouseDown()
   }
 }
 
 function onCanvasMouseUp(e: MouseEvent) {
-  if (editorStore.isRunning) {
+  if (editorStore.isRunning && usesEngine()) {
     e.stopPropagation()
     engine.sendMouseUp()
   }

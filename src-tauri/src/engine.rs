@@ -1,7 +1,6 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufReader, Write};
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 use crate::EngineState;
 
@@ -35,30 +34,40 @@ pub fn run_script(
         .spawn()
         .map_err(|e| format!("Failed to spawn Python process: {}", e))?;
 
+    let pid = child.id();
+
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
     let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
 
-    let app_clone = app.clone();
+    let app_stdout = app.clone();
     std::thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            match line {
-                Ok(line) => {
-                    let _ = app_clone.emit("engine:stdout", line);
+        use std::io::Read;
+        let mut reader = BufReader::new(stdout);
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let chunk = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let _ = app_stdout.emit_to("main", "engine:stdout", chunk);
                 }
                 Err(_) => break,
             }
         }
-        let _ = app_clone.emit("engine:stdout:end", ());
+        let _ = app_stdout.emit_to("main", "engine:stdout:end", ());
     });
 
-    let app_clone = app.clone();
+    let app_stderr = app.clone();
     std::thread::spawn(move || {
-        let reader = BufReader::new(stderr);
-        for line in reader.lines() {
-            match line {
-                Ok(line) => {
-                    let _ = app_clone.emit("engine:stderr", line);
+        use std::io::Read;
+        let mut reader = BufReader::new(stderr);
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let chunk = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let _ = app_stderr.emit_to("main", "engine:stderr", chunk);
                 }
                 Err(_) => break,
             }
@@ -66,34 +75,14 @@ pub fn run_script(
     });
 
     *process_guard = Some(RunningProcess { child });
+    drop(process_guard);
 
-    let app_clone = app.clone();
-    let state_ptr = &*state as *const EngineState;
+    let app_finish = app.clone();
     std::thread::spawn(move || {
-        let pid;
-        {
-            if let Ok(mut guard) = state_ptr.lock() {
-                pid = guard.as_ref().map(|p| p.child.id());
-            } else {
-                return;
-            }
+        unsafe {
+            libc::waitpid(pid as i32, std::ptr::null_mut(), 0);
         }
-
-        if let Some(pid) = pid {
-            unsafe {
-                libc::kill(pid as i32, libc::SIGTERM);
-            }
-        }
-
-        {
-            if let Ok(mut guard) = state_ptr.lock() {
-                if let Some(mut proc) = guard.take() {
-                    let _ = proc.child.wait();
-                }
-            }
-        }
-
-        let _ = app_clone.emit("engine:finished", ());
+        let _ = app_finish.emit_to("main", "engine:finished", ());
     });
 
     Ok(())

@@ -74,10 +74,47 @@ fn path_exists(path: String) -> bool {
 }
 
 #[tauri::command]
-fn resolve_engine_env(app: tauri::AppHandle, script_path: String) -> Result<EngineEnv, String> {
+fn save_temp_script(project_dir: String, content: String) -> Result<String, String> {
+    let dir = if project_dir.is_empty() {
+        std::env::temp_dir()
+    } else {
+        std::path::PathBuf::from(&project_dir)
+    };
+    let temp_path = dir.join(".temp_run.py");
+    if let Some(parent) = temp_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建临时目录失败: {}", e))?;
+    }
+    std::fs::write(&temp_path, &content).map_err(|e| format!("写入临时文件失败: {}", e))?;
+    Ok(temp_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn cleanup_temp_script(project_dir: String) -> Result<(), String> {
+    let dir = if project_dir.is_empty() {
+        std::env::temp_dir()
+    } else {
+        std::path::PathBuf::from(&project_dir)
+    };
+    let temp_path = dir.join(".temp_run.py");
+    if temp_path.exists() {
+        std::fs::remove_file(&temp_path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: Option<String>) -> Result<EngineEnv, String> {
     let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
 
-    let engine_dir = resource_dir.join("engine");
+    // 开发模式：resource_dir 是 src-tauri/，引擎在项目根目录的 engine/
+    // 打包模式：resource_dir 包含 engine/
+    let engine_dir = if resource_dir.join("engine").exists() {
+        resource_dir.join("engine")
+    } else if let Some(ref root) = project_root {
+        std::path::Path::new(root).join("engine")
+    } else {
+        resource_dir.join("engine")
+    };
     let venv_python = if cfg!(target_os = "windows") {
         engine_dir.join("venv/Scripts/python.exe")
     } else {
@@ -86,14 +123,27 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String) -> Result<Engi
 
     let python_path = if venv_python.exists() {
         venv_python.to_string_lossy().to_string()
+    } else if let Some(ref root) = project_root {
+        let dev_venv = if cfg!(target_os = "windows") {
+            std::path::Path::new(root).join("engine/venv/Scripts/python.exe")
+        } else {
+            std::path::Path::new(root).join("engine/venv/bin/python3")
+        };
+        if dev_venv.exists() {
+            dev_venv.to_string_lossy().to_string()
+        } else {
+            find_system_python()?
+        }
     } else {
         find_system_python()?
     };
 
-    let working_dir = std::path::Path::new(&script_path)
-        .parent()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| std::env::current_dir().unwrap().to_string_lossy().to_string());
+    let working_dir = project_root.clone().unwrap_or_else(|| {
+        std::path::Path::new(&script_path)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| std::env::current_dir().unwrap().to_string_lossy().to_string())
+    });
 
     Ok(EngineEnv {
         python_path,
@@ -160,6 +210,8 @@ pub fn run() {
             create_dir,
             delete_path,
             path_exists,
+            save_temp_script,
+            cleanup_temp_script,
             resolve_engine_env,
             engine::run_script,
             engine::stop_script,

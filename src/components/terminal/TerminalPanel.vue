@@ -5,6 +5,8 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { useTerminalStore } from '../../stores/terminal'
+import { useEditorStore } from '../../stores/editor'
+import { useEngine } from '../../composables/useEngine'
 
 const props = defineProps<{
   visible: boolean
@@ -15,14 +17,17 @@ const emit = defineEmits<{
 }>()
 
 const terminalStore = useTerminalStore()
+const editorStore = useEditorStore()
+const engine = useEngine()
 const containerRef = ref<HTMLDivElement>()
 let terminal: Terminal | null = null
 let fitAddon: FitAddon | null = null
 const MAX_LINES = 5000
-const collapsed = ref(false)
+const collapsed = ref(true)
+let inputBuffer = ''
 
 function createTerminal() {
-  if (!containerRef.value) return
+  if (!containerRef.value || terminal) return
 
   terminal = new Terminal({
     fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
@@ -48,7 +53,7 @@ function createTerminal() {
     convertEol: true,
     cursorBlink: true,
     cursorStyle: 'bar',
-    fontSize: 13,
+    cursorInactiveStyle: 'none',
     allowProposedApi: true,
   })
 
@@ -57,9 +62,41 @@ function createTerminal() {
   terminal.loadAddon(new WebLinksAddon())
 
   terminal.open(containerRef.value)
-  fitAddon.fit()
-
   terminalStore.bindTerminal(terminal)
+
+  terminal.onData((data: string) => {
+    if (!editorStore.isRunning) return
+
+    if (data === '\r') {
+      terminalStore.consumeInput()
+      terminal!.write('\r\n')
+      engine.sendInput(inputBuffer)
+      inputBuffer = ''
+    } else if (data === '\x7f') {
+      if (inputBuffer.length > 0) {
+        inputBuffer = inputBuffer.slice(0, -1)
+        terminal!.write('\b \b')
+      }
+    } else if (data >= ' ') {
+      inputBuffer += data
+      terminal!.write(data)
+    }
+  })
+}
+
+function fitTerminal() {
+  if (!fitAddon || !terminal) return
+  const vp = (terminal as any).viewport
+  if (!vp || !vp.scrollBarWidth) return
+  fitAddon.fit()
+}
+
+function clearInputBuffer() {
+  inputBuffer = ''
+}
+
+function onBodyClick() {
+  setTimeout(() => terminal?.focus(), 0)
 }
 
 function close() {
@@ -70,7 +107,7 @@ function toggleCollapse() {
   collapsed.value = !collapsed.value
   if (!collapsed.value) {
     nextTick(() => {
-      fitAddon?.fit()
+      createTerminal()
       terminal?.focus()
     })
   }
@@ -79,33 +116,51 @@ function toggleCollapse() {
 watch(
   () => props.visible,
   async (val) => {
-    if (val && !terminal) {
+    if (val) {
+      collapsed.value = false
       await nextTick()
       createTerminal()
-    }
-    if (val) {
-      await nextTick()
-      fitAddon?.fit()
       terminal?.focus()
     }
   }
 )
 
-onMounted(() => {
-  if (props.visible) {
-    createTerminal()
+watch(
+  () => terminalStore.waitingForInput,
+  (waiting) => {
+    if (waiting && editorStore.isRunning) {
+      nextTick(() => terminal?.focus())
+    }
   }
-  window.addEventListener('resize', () => fitAddon?.fit())
+)
+
+watch(
+  () => editorStore.isRunning,
+  (running) => {
+    if (running) {
+      nextTick(() => terminal?.focus())
+    } else {
+      clearInputBuffer()
+    }
+  }
+)
+
+let resizeObserver: ResizeObserver | null = null
+
+onMounted(() => {
+  window.addEventListener('resize', () => fitTerminal())
+  resizeObserver = new ResizeObserver(() => fitTerminal())
+  if (containerRef.value) resizeObserver.observe(containerRef.value)
 })
 
 onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
   terminal?.dispose()
 })
 </script>
 
 <template>
   <div class="console-panel" :class="{ collapsed }">
-    <!-- 标题栏 -->
     <div class="console-header">
       <div class="console-header-left">
         <svg class="console-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -123,15 +178,14 @@ onBeforeUnmount(() => {
         </button>
         <button class="console-action" @click="toggleCollapse" :title="collapsed ? '展开' : '收起'">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline v-if="collapsed" points="6,9 12,15 18,9" />
-            <polyline v-else points="6,15 12,9 18,15" />
+            <polyline v-if="collapsed" points="6,15 12,9 18,15" />
+            <polyline v-else points="6,9 12,15 18,9" />
           </svg>
         </button>
       </div>
     </div>
 
-    <!-- 终端内容 -->
-    <div v-show="!collapsed" ref="containerRef" class="console-body" />
+    <div v-show="!collapsed" ref="containerRef" class="console-body" @mousedown="onBodyClick" />
   </div>
 </template>
 
@@ -139,24 +193,23 @@ onBeforeUnmount(() => {
 .console-panel {
   display: flex;
   flex-direction: column;
-  border-top: 1px solid rgb(12, 12, 12);
+  border-top: 1px solid rgb(60, 60, 60);
   background: #1e1e1e;
   flex-shrink: 0;
   height: 200px;
-  transition: height 0.2s ease;
 }
 .console-panel.collapsed {
-  height: 32px;
+  height: 26px;
 }
 
 .console-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 32px;
-  padding: 0 12px;
+  height: 26px;
+  padding: 0 10px;
   background: #252526;
-  border-bottom: 1px solid rgb(12, 12, 12);
+  border-bottom: 1px solid rgb(60, 60, 60);
   flex-shrink: 0;
 }
 
@@ -205,5 +258,13 @@ onBeforeUnmount(() => {
 .console-body {
   flex: 1;
   min-height: 0;
+  background: #1e1e1e;
+}
+.console-body :deep(.xterm) {
+  padding-left: 8px;
+  background: #1e1e1e;
+}
+.console-body :deep(.xterm-viewport) {
+  background: #1e1e1e !important;
 }
 </style>

@@ -40,7 +40,7 @@ async function initMonaco() {
       { token: 'function', foreground: '7aa2f7' },
       { token: 'variable', foreground: 'c0caf5' },
       { token: 'operator', foreground: '89ddff' },
-      { token: 'delimiter', foreground: '89ddff' },
+      { token: 'delimiter', foreground: 'e2b78d' },
       { token: 'identifier', foreground: 'c0caf5' },
     ],
     colors: {
@@ -74,8 +74,10 @@ async function initMonaco() {
     builtin: ['print','len','range','int','str','float','list','dict','tuple','set','type','input','open','True','False','None','self','cls'],
     tokenizer: {
       root: [
-        [/"{3}([\s\S]*?"{3})?/, 'string'],
-        [/'{3}([\s\S]*?'{3})?/, 'string'],
+        [/"""/, 'string', '@multiString'],
+        [/'''/, 'string', '@multiString'],
+        [/''/, 'string'],
+        [/""/, 'string'],
         [/"(?!")/, 'string', '@dblString'],
         [/'(?!')/, 'string', '@sglString'],
         [/#.*$/, 'comment'],
@@ -88,6 +90,7 @@ async function initMonaco() {
           },
         }],
         [/[ \t]+/, 'white'],
+        [/[(){}[\]]/, 'delimiter'],
         [/./, 'source'],
       ],
       dblString: [
@@ -99,6 +102,14 @@ async function initMonaco() {
         [/[^'\\]+/, 'string'],
         [/\\./, 'string.escape'],
         [/'/, 'string', '@pop'],
+      ],
+      multiString: [
+        [/[^"']+/, 'string'],
+        [/"""/, 'string', '@pop'],
+        [/'''/, 'string', '@pop'],
+        [/""/, 'string'],
+        [/''/, 'string'],
+        [/["']/, 'string'],
       ],
     },
   })
@@ -116,6 +127,7 @@ async function initMonaco() {
     scrollBeyondLastLine: false,
     renderWhitespace: 'selection',
     bracketPairColorization: { enabled: false },
+    matchBrackets: 'never',
     guides: { bracketPairs: false },
     highlightActiveBracketPair: false,
     selectionHighlight: false,
