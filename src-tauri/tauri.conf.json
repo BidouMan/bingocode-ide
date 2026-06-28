@@ -7,18 +7,21 @@
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build"
+    "beforeBuildCommand": "pnpm build",
+    "withGlobalTauri": true
   },
   "app": {
     "windows": [
       {
         "title": "BingoCode IDE",
-        "width": 1280,
-        "height": 800,
+        "width": 1000,
+        "height": 650,
         "minWidth": 960,
         "minHeight": 600,
         "resizable": true,
-        "decorations": false,
+        "decorations": true,
+        "titleBarStyle": "Transparent",
+        "hiddenTitle": true,
         "transparent": false,
         "center": true
       }
@@ -37,12 +40,8 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": [
-      "engine/python"
-    ],
-    "resources": [
-      "engine/**/*"
-    ]
+    "externalBin": [],
+    "resources": []
   },
   "plugins": {
     "shell": {
