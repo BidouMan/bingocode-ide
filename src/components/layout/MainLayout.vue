@@ -404,19 +404,19 @@ function codeDisplayName(name: string) {
         </div>
 
         <!-- 代码 (图标+文字) -->
-        <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.resourceTab === 'code' }" @click="editorStore.setResourceTab('code')">
+        <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.activeEditorMode === 'code' }" @click="editorStore.setActiveEditorMode('code')">
           <img src="../../assets/icons/代码编辑.svg" class="menu-icon" />
           <span>代码</span>
         </button>
 
         <!-- 角色 (图标+文字) -->
-        <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.resourceTab === 'sprite' }" @click="editorStore.setResourceTab('sprite')">
+        <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.activeEditorMode === 'sprite' }" @click="editorStore.setActiveEditorMode('sprite')">
           <img src="../../assets/icons/角色精灵.svg" class="menu-icon" />
           <span>角色</span>
         </button>
 
         <!-- 地图 (图标+文字) -->
-        <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.resourceTab === 'map' }" @click="editorStore.setResourceTab('map')">
+        <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.activeEditorMode === 'map' }" @click="editorStore.setActiveEditorMode('map')">
           <img src="../../assets/icons/addons.svg" class="menu-icon" />
           <span>地图</span>
         </button>
@@ -479,8 +479,18 @@ function codeDisplayName(name: string) {
       <!-- ─── page 0: edit_stage_frame ─── -->
       <div v-show="currentPage === 0" class="edit-stage-frame">
 
-        <!-- ═══ Page 0: 游戏模式 (侧边栏 + 标签 + 代码编辑 + 控制台) ═══ -->
-        <div v-if="editorStore.isGameMode" class="editor-page-game">
+        <!-- ═══ Page 0: 游戏模式 — 角色编辑器 ═══ -->
+        <div v-if="editorStore.isGameMode && editorStore.activeEditorMode === 'sprite'" class="editor-page-full">
+          <SpriteEditorView />
+        </div>
+
+        <!-- ═══ Page 0: 游戏模式 — 地图编辑器 ═══ -->
+        <div v-else-if="editorStore.isGameMode && editorStore.activeEditorMode === 'map'" class="editor-page-full">
+          <MapEditorView />
+        </div>
+
+        <!-- ═══ Page 0: 游戏模式 — 代码编辑 (侧边栏 + 标签 + 代码编辑 + 控制台) ═══ -->
+        <div v-else-if="editorStore.isGameMode" class="editor-page-game">
           <div class="sidebar">
             <div class="sidebar-toolbar">
               <button class="tool-btn" :class="{ 'tool-btn-active': editorStore.isRunning }" @click="toggleRun" title="运行">
@@ -624,16 +634,6 @@ function codeDisplayName(name: string) {
               <TerminalPanel v-model:visible="consoleVisible" />
             </div>
           </div>
-        </div>
-
-        <!-- ═══ Page 1: 角色编辑器 (全宽) ═══ -->
-        <div v-else-if="editorStore.activeEditorMode === 'sprite'" class="editor-page-full">
-          <SpriteEditorView />
-        </div>
-
-        <!-- ═══ Page 2: 地图编辑器 (全宽) ═══ -->
-        <div v-else-if="editorStore.activeEditorMode === 'map'" class="editor-page-full">
-          <MapEditorView />
         </div>
 
         <!-- ═══ Page 3: 代码模式 IDE (全宽) ═══ -->
