@@ -659,7 +659,7 @@ function codeDisplayName(name: string) {
           <div class="ide-editor-area">
             <CodeEditor />
           </div>
-          <TerminalPanel v-model:visible="consoleVisible" />
+          <TerminalPanel v-show="consoleVisible" v-model:visible="consoleVisible" />
         </div>
 
       </div>
