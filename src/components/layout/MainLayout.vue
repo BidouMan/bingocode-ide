@@ -12,6 +12,8 @@ import MapEditorView from '../map-editor/MapEditorView.vue'
 import TerminalPanel from '../terminal/TerminalPanel.vue'
 import UploadDrawer from '../resource-panel/UploadDrawer.vue'
 import SpriteLibPage from '../resource-panel/SpriteLibPage.vue'
+import MapLibraryPage from '../resource-panel/MapLibraryPage.vue'
+import MapResourceLibPage from '../resource-panel/MapResourceLibPage.vue'
 
 const editorStore = useEditorStore()
 const resourceStore = useResourceStore()
@@ -158,8 +160,10 @@ function onResourceUploaded(type: string, name: string, content?: string) {
 function onOpenLibrary(type: string) {
   if (type === 'sprite') {
     currentPage.value = 3  // sprite_lib page
+  } else if (type === 'map') {
+    currentPage.value = 2  // map_lib page
   }
-  // TODO: map=2, sound=5
+  // TODO: sound=5
 }
 
 function onSpriteLibImported(id: string, name: string, bgsUrl: string) {
@@ -167,6 +171,16 @@ function onSpriteLibImported(id: string, name: string, bgsUrl: string) {
   currentPage.value = 0
   editorStore.setResourceTab('sprite')
   editorStore.setActiveEditorMode('sprite')
+}
+
+function onMapLibImported(path: string) {
+  currentPage.value = 0
+  editorStore.setActiveEditorMode('map')
+}
+
+function onResLibImported(path: string) {
+  currentPage.value = 0
+  editorStore.setActiveEditorMode('map')
 }
 
 function renameResource(item: { id: string; name: string; type: string }) {
@@ -384,7 +398,7 @@ function codeDisplayName(name: string) {
     <div class="menu-bar">
       <!-- Logo (固定宽度) -->
       <button class="menu-logo">
-        <img src="../../assets/icons/logo.svg" style="width:90px;height:40px;" />
+        <img src="../../assets/icons/logo.svg" class="menu-logo-img" />
       </button>
 
       <!-- ═══ 游戏模式菜单 ═══ -->
@@ -686,15 +700,7 @@ function codeDisplayName(name: string) {
 
       <!-- ─── page 2: 地图库 ─── -->
       <div v-show="currentPage === 2" class="lib-page">
-        <div class="lib-toolbar">
-          <input class="lib-search" placeholder="搜索..." />
-          <div class="lib-spacer"></div>
-          <span class="lib-hint">请选择地图</span>
-          <div class="lib-spacer"></div>
-          <div style="width:120px"></div>
-          <button class="lib-return-btn" @click="switchPage(0)">返回</button>
-        </div>
-        <div class="lib-list"><div class="resource-placeholder">暂无地图</div></div>
+        <MapLibraryPage @close="switchPage(0)" @imported="onMapLibImported" />
       </div>
 
       <!-- ─── page 3: 角色库 (独立全屏页面) ─── -->
@@ -704,17 +710,7 @@ function codeDisplayName(name: string) {
 
       <!-- ─── page 4: 素材库 ─── -->
       <div v-show="currentPage === 4" class="lib-page">
-        <div class="lib-toolbar">
-          <input class="lib-search" placeholder="搜索..." />
-          <div class="lib-spacer"></div>
-          <button class="lib-tab-btn lib-tab-active">图像</button>
-          <button class="lib-tab-btn">图块</button>
-          <button class="lib-tab-btn">集合</button>
-          <div class="lib-spacer"></div>
-          <div style="width:120px"></div>
-          <button class="lib-return-btn" @click="switchPage(0)">返回</button>
-        </div>
-        <div class="lib-list"><div class="resource-placeholder">暂无素材</div></div>
+        <MapResourceLibPage @close="switchPage(0)" @imported="onResLibImported" />
       </div>
 
       <!-- ─── page 5: 声音库 ─── -->
@@ -793,11 +789,15 @@ function codeDisplayName(name: string) {
   justify-content: center;
   width: 60px;
   flex-shrink: 0;
-  background: transparent;
+  background: rgb(34, 37, 43);
   border: none;
   cursor: pointer;
 }
-.menu-logo:hover { background: rgb(61, 64, 72); }
+.menu-logo-img {
+  width: 90px;
+  height: 38px;
+  object-fit: contain;
+}
 .menu-icon {
   width: 20px;
   height: 20px;
@@ -823,7 +823,6 @@ function codeDisplayName(name: string) {
   white-space: nowrap;
 }
 .menu-btn:hover { background: rgb(61, 64, 72); }
-.menu-btn-active { background: rgb(61, 64, 72); }
 .menu-btn-help {
   width: 40px;
   min-width: 40px;
@@ -839,10 +838,12 @@ function codeDisplayName(name: string) {
   position: relative;
   display: flex;
   align-items: stretch;
-  height: 40px;
 }
 .menu-btn-file {
-  height: 100%;
+  overflow: hidden;
+}
+.menu-btn-file:hover {
+  margin-bottom: 1px;
 }
 .file-menu-dropdown {
   position: absolute;
