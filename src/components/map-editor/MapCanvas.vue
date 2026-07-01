@@ -648,6 +648,20 @@ function onPointerLeave() {
 
 function preventDragOver(e: DragEvent) { e.preventDefault(); e.dataTransfer!.dropEffect = 'copy' }
 
+function setupInteraction() {
+  if (!app || !app.canvas) return
+  const canvas = app.canvas as HTMLCanvasElement
+  console.log('[MapCanvas] setupInteraction called, canvas:', canvas)
+
+  canvas.addEventListener('wheel', onWheel, { passive: false })
+  canvas.addEventListener('pointerdown', onPointerDown)
+  canvas.addEventListener('pointermove', onPointerMove)
+  canvas.addEventListener('pointerup', onPointerUp)
+  canvas.addEventListener('pointerleave', onPointerLeave)
+  canvas.addEventListener('contextmenu', onContextMenu)
+  console.log('[MapCanvas] canvas event listeners registered')
+}
+
 function onDragOver(e: DragEvent) {
   e.preventDefault()
   if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
