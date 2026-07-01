@@ -255,10 +255,17 @@ function loadCollision() {
 
   const globalIdx = mapStore.globalResourceOffset + mapStore.selectedResourceIndex
   const tileSet = mapStore.mapData.tileSets[globalIdx]
-  if (tileSet && tileSet.tiles[tileIndex]) {
-    tileSet.tiles[tileIndex].collisionShape = {
-      points: collisionPoints.value.map(p => [p.x / tileSize, p.y / tileSize])
-    }
+  if (tileSet && tileSet.tiles[tileIndex]?.collisionShape?.points) {
+    collisionPoints.value = tileSet.tiles[tileIndex].collisionShape!.points.map(
+      (p: number[]) => ({ x: p[0] * tileSize, y: p[1] * tileSize })
+    )
+  } else {
+    collisionPoints.value = [
+      { x: 0, y: 0 },
+      { x: tileSize, y: 0 },
+      { x: tileSize, y: tileSize },
+      { x: 0, y: tileSize },
+    ]
   }
 }
 
