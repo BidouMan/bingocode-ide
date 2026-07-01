@@ -42,9 +42,11 @@ let sourceImageCache: Map<string, any> = new Map() // "resourcePath" -> HTMLImag
 let tileContainer: any = null
 
 async function initPixi() {
+  console.log('initPixi called, canvasRef:', canvasRef.value)
   if (!canvasRef.value) return
 
   PIXI = await import('pixi.js')
+  console.log('PIXI loaded')
   app = new PIXI.Application()
   await app.init({
     background: '#1e1e1e',
@@ -53,6 +55,7 @@ async function initPixi() {
     resolution: window.devicePixelRatio || 1,
     autoDensity: true,
   })
+  console.log('PixiJS app created')
   canvasRef.value.appendChild(app.canvas)
 
   tileContainer = new PIXI.Container()
