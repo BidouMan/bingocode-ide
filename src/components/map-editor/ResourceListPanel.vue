@@ -22,7 +22,11 @@ const mapStore = useMapStore()
 const showImportDialog = ref(false)
 
 // 当前图层的资源列表
-const currentResources = computed(() => mapStore.activeLayer?.resources ?? [])
+const currentResources = computed(() => {
+  const layer = mapStore.activeLayer
+  console.log('activeLayer:', layer?.name, 'type:', layer?.type)
+  return layer?.resources ?? []
+})
 
 // Tile thumbnail cache
 const tileThumbnails = ref<Map<string, string>>(new Map())
@@ -125,8 +129,22 @@ function onResourceImported(options: { path: string; mode: 'image' | 'tileset'; 
 }
 
 function onDragStart(e: DragEvent, rIdx: number, tIdx: number) {
-  e.dataTransfer?.setData('application/x-bingo-tile', JSON.stringify({ resourceIndex: rIdx, tileIndex: tIdx }))
+  const isImageLayer = mapStore.activeLayer?.type === 'image'
+  if (isImageLayer) {
+    e.dataTransfer?.setData('application/x-bingo-image', JSON.stringify({ resourceIndex: rIdx }))
+  } else {
+    e.dataTransfer?.setData('application/x-bingo-tile', JSON.stringify({ resourceIndex: rIdx, tileIndex: tIdx }))
+  }
   e.dataTransfer!.effectAllowed = 'copy'
+}
+
+function onResourceClick(rIdx: number) {
+  const isImageLayer = mapStore.activeLayer?.type === 'image'
+  if (isImageLayer) {
+    mapStore.selectTile(rIdx, -1)
+  } else {
+    mapStore.selectTile(rIdx, 0)
+  }
 }
 </script>
 
@@ -154,7 +172,19 @@ function onDragStart(e: DragEvent, rIdx: number, tIdx: number) {
         class="resource-group"
       >
         <div class="resource-name">{{ resource.name }}</div>
-        <div class="tile-grid">
+        <!-- 图像图层：显示完整图片 -->
+        <div
+          v-if="mapStore.activeLayer?.type === 'image'"
+          class="image-resource-card"
+          :class="{ 'image-selected': mapStore.selectedResourceIndex === rIdx }"
+          draggable="true"
+          @dragstart="onDragStart($event, rIdx, 0)"
+          @click="onResourceClick(rIdx)"
+        >
+          <img :src="resource.path" class="image-preview" />
+        </div>
+        <!-- 绘制图层：显示瓦片网格 -->
+        <div v-else class="tile-grid">
           <div
             v-for="tIdx in getTileCount(resource)"
             :key="tIdx"
@@ -312,6 +342,34 @@ function onDragStart(e: DragEvent, rIdx: number, tIdx: number) {
 .tile-selected {
   border-color: rgb(91, 199, 114) !important;
   background: rgb(60, 65, 75);
+}
+
+.image-resource-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  margin: 2px;
+  background: rgb(50, 53, 62);
+  border: 2px solid transparent;
+  border-radius: 4px;
+  cursor: grab;
+  transition: all 0.15s;
+}
+
+.image-resource-card:hover {
+  border-color: rgb(91, 199, 114);
+}
+
+.image-selected {
+  border-color: rgb(91, 251, 132) !important;
+  background: rgb(60, 65, 75);
+}
+
+.image-preview {
+  max-width: 100%;
+  max-height: 80px;
+  object-fit: contain;
 }
 
 .resource-empty {

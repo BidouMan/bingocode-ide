@@ -203,6 +203,7 @@ export const useMapStore = defineStore('map', () => {
       name,
       type,
       visible: true,
+      locked: false,
       tiles: {},
       resources: [],
       images: [],
