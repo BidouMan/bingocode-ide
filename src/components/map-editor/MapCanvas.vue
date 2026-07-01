@@ -972,11 +972,16 @@ onMounted(() => {
   nextTick(initPixi)
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
+  // 在 document 上注册 drop 事件，确保能接收拖放
+  document.addEventListener('dragover', onDragOver)
+  document.addEventListener('drop', onDrop)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
+  document.removeEventListener('dragover', onDragOver)
+  document.removeEventListener('drop', onDrop)
   if (app?.canvas) {
     const canvas = app.canvas as HTMLCanvasElement
     canvas.removeEventListener('wheel', onWheel)
@@ -1001,8 +1006,6 @@ defineExpose({ redraw, cursorGridPos, renderAllLayers, showTransformBox, removeT
     ref="canvasRef"
     class="map-canvas"
     @mousedown="onMouseDown"
-    @dragover.prevent="onDragOver"
-    @drop.prevent="onDrop"
   />
 </template>
 
