@@ -24,8 +24,13 @@ const showImportDialog = ref(false)
 // 当前图层的资源列表
 const currentResources = computed(() => {
   const layer = mapStore.activeLayer
-  console.log('activeLayer:', layer?.name, 'type:', layer?.type)
+  console.log('ResourceListPanel - activeLayer:', JSON.stringify({ name: layer?.name, type: layer?.type, resourceCount: layer?.resources?.length }))
   return layer?.resources ?? []
+})
+
+// 监听图层变化
+watch(() => mapStore.activeLayerIndex, (newIdx) => {
+  console.log('activeLayerIndex changed to:', newIdx, 'layer:', JSON.stringify(mapStore.activeLayer))
 })
 
 // Tile thumbnail cache
