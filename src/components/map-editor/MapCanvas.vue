@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
-import { useMapStore } from '../../stores/map'
+import { useMapStore, type MapResource } from '../../stores/map'
 
 const emit = defineEmits<{
   'tile-painted': [x: number, y: number, tileId: number]
@@ -17,7 +17,6 @@ let gridGraphics: any = null
 let axisX: any = null
 let axisY: any = null
 let gameWindowRect: any = null
-let tileContainer: any = null
 let previewTile: any = null
 let isPanning = false
 let isSpaceHeld = false
@@ -25,10 +24,22 @@ let lastPointer = { x: 0, y: 0 }
 let currentScale = 1.6
 let lastPaintedKey = ''
 
+// Move tool state
+let moveStartPos: { x: number; y: number } | null = null
+let moveTileId = 0
+let movePreview: any = null
+
 const mapStore = useMapStore()
 
 const LOGIC_W = 640
 const LOGIC_H = 480
+
+// Tile rendering state
+let layerContainers: Map<number, any> = new Map()
+let tileSprites: Map<string, any> = new Map() // "layerId:x,y" -> Sprite
+let tileTextures: Map<string, any> = new Map() // "resourcePath:tileIndex" -> Texture
+let sourceImageCache: Map<string, any> = new Map() // "resourcePath" -> HTMLImageElement
+let tileContainer: any = null
 
 async function initPixi() {
   if (!canvasRef.value) return
@@ -53,7 +64,200 @@ async function initPixi() {
   setupInteraction()
   applyScale()
   centerView()
+  renderAllLayers()
 }
+
+// --- Tile Rendering ---
+
+async function loadImage(src: string): Promise<HTMLImageElement> {
+  if (sourceImageCache.has(src)) return sourceImageCache.get(src)
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      sourceImageCache.set(src, img)
+      resolve(img)
+    }
+    img.onerror = reject
+    img.src = src
+  })
+}
+
+async function getTileTexture(resource: MapResource, tileIndex: number): Promise<any> {
+  const key = `${resource.path}:${tileIndex}:${resource.tileWidth}x${resource.tileHeight}`
+  if (tileTextures.has(key)) return tileTextures.get(key)
+
+  try {
+    const img = await loadImage(resource.path)
+    const cols = Math.floor(img.width / resource.tileWidth)
+    const row = Math.floor(tileIndex / cols)
+    const col = tileIndex % cols
+
+    const canvas = document.createElement('canvas')
+    canvas.width = resource.tileWidth
+    canvas.height = resource.tileHeight
+    const ctx = canvas.getContext('2d')!
+    ctx.drawImage(
+      img,
+      col * resource.tileWidth, row * resource.tileHeight,
+      resource.tileWidth, resource.tileHeight,
+      0, 0,
+      resource.tileWidth, resource.tileHeight
+    )
+
+    const texture = PIXI.Texture.from(canvas)
+    tileTextures.set(key, texture)
+    return texture
+  } catch {
+    return null
+  }
+}
+
+function decodeTileId(tileId: number): { resourceIndex: number; tileIndex: number } {
+  return {
+    resourceIndex: Math.floor(tileId / 1000) - 1,
+    tileIndex: (tileId % 1000) - 1,
+  }
+}
+
+function getLayerContainer(layerId: number): any {
+  if (layerContainers.has(layerId)) return layerContainers.get(layerId)
+  const container = new PIXI.Container()
+  container.label = `layer_${layerId}`
+  tileContainer.addChild(container)
+  layerContainers.set(layerId, container)
+  return container
+}
+
+function ensureLayerOrder() {
+  const layers = mapStore.mapData.layers
+  for (let i = 0; i < layers.length; i++) {
+    const container = layerContainers.get(layers[i].id)
+    if (container) {
+      container.zIndex = i
+      container.visible = layers[i].visible
+    }
+  }
+  tileContainer.sortChildren()
+}
+
+async function renderTile(layerId: number, x: number, y: number, tileId: number) {
+  if (tileId === 0) {
+    removeTile(layerId, x, y)
+    return
+  }
+
+  const key = `${layerId}:${x},${y}`
+  const { resourceIndex, tileIndex } = decodeTileId(tileId)
+
+  // 从所有图层的资源中查找对应的资源
+  let globalIdx = 0
+  let resource: MapResource | null = null
+  for (const layer of mapStore.mapData.layers) {
+    for (const res of layer.resources) {
+      if (globalIdx === resourceIndex) {
+        resource = res
+        break
+      }
+      globalIdx++
+    }
+    if (resource) break
+  }
+  if (!resource) return
+
+  const texture = await getTileTexture(resource, tileIndex)
+  if (!texture) return
+
+  let sprite = tileSprites.get(key)
+  const tileSize = mapStore.mapData.tileSize
+
+  if (sprite) {
+    sprite.texture = texture
+  } else {
+    sprite = new PIXI.Sprite(texture)
+    sprite.x = x * tileSize
+    sprite.y = y * tileSize
+    sprite.width = tileSize
+    sprite.height = tileSize
+    const container = getLayerContainer(layerId)
+    container.addChild(sprite)
+    tileSprites.set(key, sprite)
+  }
+}
+
+function removeTile(layerId: number, x: number, y: number) {
+  const key = `${layerId}:${x},${y}`
+  const sprite = tileSprites.get(key)
+  if (sprite) {
+    sprite.parent?.removeChild(sprite)
+    sprite.destroy()
+    tileSprites.delete(key)
+  }
+}
+
+async function renderAllLayers() {
+  if (!app || !PIXI) return
+
+  // Clear existing
+  for (const [, container] of layerContainers) {
+    tileContainer.removeChild(container)
+    container.destroy({ children: true })
+  }
+  layerContainers.clear()
+  tileSprites.clear()
+
+  const layers = mapStore.mapData.layers
+  for (let i = 0; i < layers.length; i++) {
+    const layer = layers[i]
+    const container = getLayerContainer(layer.id)
+    container.zIndex = i
+    container.visible = layer.visible
+
+    if (layer.type === 'drawing') {
+      for (const [posKey, tileId] of Object.entries(layer.tiles)) {
+        const [x, y] = posKey.split(',').map(Number)
+        await renderTile(layer.id, x, y, tileId)
+      }
+    } else if (layer.type === 'image') {
+      for (const imgData of layer.images) {
+        await renderImageLayer(container, imgData)
+      }
+    }
+  }
+  tileContainer.sortChildren()
+}
+
+async function renderImageLayer(container: any, imgData: any) {
+  if (!imgData?.imagePath) return
+  try {
+    const img = await loadImage(imgData.imagePath)
+    const texture = PIXI.Texture.from(img)
+    const sprite = new PIXI.Sprite(texture)
+
+    sprite.x = imgData.position?.[0] ?? 0
+    sprite.y = imgData.position?.[1] ?? 0
+
+    const scaleX = (imgData.scaleX ?? imgData.scale ?? 1)
+    const scaleY = (imgData.scaleY ?? imgData.scale ?? 1)
+    sprite.scale.set(scaleX, scaleY)
+
+    sprite.rotation = (imgData.rotation ?? 0) * Math.PI / 180
+    sprite.alpha = imgData.opacity ?? 1
+
+    container.addChild(sprite)
+  } catch {
+    // image load failed
+  }
+}
+
+async function updateTileAt(layerIndex: number, x: number, y: number) {
+  const layer = mapStore.mapData.layers[layerIndex]
+  if (!layer) return
+  const tileId = layer.tiles[`${x},${y}`] ?? 0
+  await renderTile(layer.id, x, y, tileId)
+}
+
+// --- Grid / Axes ---
 
 function drawGrid() {
   if (!app || !PIXI) return
@@ -128,8 +332,24 @@ function centerView() {
   app.stage.y = (vpH - mapPixelH * currentScale) / 2
 }
 
+// --- Interaction ---
+
 function onWheel(e: WheelEvent) {
   e.preventDefault()
+
+  // Scroll wheel on selected image: scale it
+  if (selectedImageData) {
+    const delta = e.deltaY > 0 ? 0.95 : 1.05
+    const newScale = Math.max(0.1, Math.min(10, (selectedImageData.scaleX ?? selectedImageData.scale ?? 1) * delta))
+    selectedImageData.scaleX = newScale
+    selectedImageData.scaleY = newScale
+    selectedImageData.scale = newScale
+    updateTransformBox()
+    renderAllLayers()
+    return
+  }
+
+  // Default: zoom canvas
   const rect = canvasRef.value?.getBoundingClientRect()
   if (!rect) return
   const mouseX = e.clientX - rect.left
@@ -152,19 +372,60 @@ function onPointerDown(e: PointerEvent) {
     return
   }
 
+  // Right click: rotate selected image
+  if (e.button === 2 && selectedImageData) {
+    isRotating = true
+    const rect = canvasRef.value?.getBoundingClientRect()
+    if (rect) {
+      const cx = selectedImageData.position[0] + (selectedImageData.width || 64) / 2
+      const cy = selectedImageData.position[1] + (selectedImageData.height || 64) / 2
+      const mx = (e.clientX - rect.left - app.stage.x) / currentScale
+      const my = (e.clientY - rect.top - app.stage.y) / currentScale
+      rotationStartAngle = Math.atan2(my - cy, mx - cx)
+    }
+    lastPointer = { x: e.clientX, y: e.clientY }
+    e.preventDefault()
+    return
+  }
+
   if (e.button === 0 && !e.altKey && !isSpaceHeld) {
-    if (mapStore.currentTool === 'draw' || mapStore.currentTool === 'erase') {
-      const pos = screenToGrid(e)
-      if (pos) {
-        if (mapStore.currentTool === 'draw' && mapStore.selectedTileIndex >= 0) {
-          const tileId = (mapStore.selectedResourceIndex + 1) * 1000 + mapStore.selectedTileIndex
-          mapStore.setTile(pos.x, pos.y, tileId)
-          lastPaintedKey = `${pos.x},${pos.y}`
-          emit('tile-painted', pos.x, pos.y, tileId)
-        } else if (mapStore.currentTool === 'erase') {
-          mapStore.setTile(pos.x, pos.y, 0)
-          lastPaintedKey = `${pos.x},${pos.y}`
-          emit('tile-erased', pos.x, pos.y)
+    const pos = screenToGrid(e)
+    if (pos) {
+      const globalIdx = mapStore.globalResourceOffset + mapStore.selectedResourceIndex
+      if (mapStore.currentTool === 'draw' && mapStore.selectedTileIndex >= 0) {
+        const tileId = (globalIdx + 1) * 1000 + mapStore.selectedTileIndex
+        mapStore.setTile(pos.x, pos.y, tileId)
+        lastPaintedKey = `${pos.x},${pos.y}`
+        updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
+        emit('tile-painted', pos.x, pos.y, tileId)
+      } else if (mapStore.currentTool === 'erase') {
+        mapStore.setTile(pos.x, pos.y, 0)
+        lastPaintedKey = `${pos.x},${pos.y}`
+        updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
+        emit('tile-erased', pos.x, pos.y)
+      } else if (mapStore.currentTool === 'fill' && mapStore.selectedTileIndex >= 0) {
+        const tileId = (globalIdx + 1) * 1000 + mapStore.selectedTileIndex
+        floodFill(pos.x, pos.y, tileId)
+      } else if (mapStore.currentTool === 'move') {
+        // Pick up tile for moving
+        const layer = mapStore.activeLayer
+        if (layer && layer.type === 'drawing') {
+          const tileId = layer.tiles[`${pos.x},${pos.y}`] ?? 0
+          if (tileId !== 0) {
+            moveStartPos = pos
+            moveTileId = tileId
+            // Show preview
+            if (!movePreview) {
+              movePreview = new PIXI.Graphics()
+              app.stage.addChild(movePreview)
+            }
+            const tileSize = mapStore.mapData.tileSize
+            movePreview.clear()
+            movePreview.rect(pos.x * tileSize, pos.y * tileSize, tileSize, tileSize)
+            movePreview.stroke({ width: 1, color: 0x528bff, alpha: 0.8 })
+            movePreview.fill({ color: 0x528bff, alpha: 0.15 })
+            movePreview.visible = true
+          }
         }
       }
     }
@@ -181,6 +442,58 @@ function onPointerMove(e: PointerEvent) {
     return
   }
 
+  // Right-click rotation
+  if (isRotating && selectedImageData) {
+    const rect = canvasRef.value?.getBoundingClientRect()
+    if (rect) {
+      const cx = selectedImageData.position[0] + (selectedImageData.width || 64) / 2
+      const cy = selectedImageData.position[1] + (selectedImageData.height || 64) / 2
+      const mx = (e.clientX - rect.left - app.stage.x) / currentScale
+      const my = (e.clientY - rect.top - app.stage.y) / currentScale
+      const angle = Math.atan2(my - cy, mx - cx)
+      selectedImageData.rotation = (angle * 180 / Math.PI)
+      updateTransformBox()
+      renderAllLayers()
+    }
+    return
+  }
+
+  // Transform drag
+  if (transformDragging && selectedImageData && transformHandleIndex >= 0) {
+    const rect = canvasRef.value?.getBoundingClientRect()
+    if (!rect) return
+    const dx = (e.clientX - lastPointer.x) / currentScale
+    const dy = (e.clientY - lastPointer.y) / currentScale
+    lastPointer = { x: e.clientX, y: e.clientY }
+
+    const origW = transformStartRect.w
+    const origH = transformStartRect.h
+    const origX = transformStartRect.x
+    const origY = transformStartRect.y
+    const idx = transformHandleIndex
+
+    let newX = selectedImageData.position[0]
+    let newY = selectedImageData.position[1]
+    let newW = origW
+    let newH = origH
+
+    if (idx === 0 || idx === 6 || idx === 7) { newX += dx }
+    if (idx === 2 || idx === 3 || idx === 4) { newW += dx }
+    if (idx === 0 || idx === 1 || idx === 2) { newY += dy }
+    if (idx === 4 || idx === 5 || idx === 6) { newH += dy }
+    if (idx === 6) { newW -= dx; newX += dx }
+    if (idx === 0) { newW -= dx; newX += dx; newH -= dy; newY += dy }
+    if (idx === 2) { newH -= dy; newY += dy }
+
+    if (newW > 10 && newH > 10) {
+      selectedImageData.position = [newX, newY]
+      selectedImageData.width = Math.abs(newW) / (selectedImageData.scaleX ?? selectedImageData.scale ?? 1)
+      selectedImageData.height = Math.abs(newH) / (selectedImageData.scaleY ?? selectedImageData.scale ?? 1)
+      updateTransformBox()
+    }
+    return
+  }
+
   const gridPos = screenToGrid(e)
   if (gridPos) {
     cursorGridPos.value = gridPos
@@ -189,19 +502,35 @@ function onPointerMove(e: PointerEvent) {
     cursorGridPos.value = null
   }
 
-  if (mapStore.currentTool === 'draw' || mapStore.currentTool === 'erase') {
+  // Move tool preview
+  if (moveStartPos && moveTileId && movePreview) {
+    const pos = screenToGrid(e)
+    if (pos) {
+      const tileSize = mapStore.mapData.tileSize
+      movePreview.clear()
+      movePreview.rect(pos.x * tileSize, pos.y * tileSize, tileSize, tileSize)
+      movePreview.stroke({ width: 1, color: 0x528bff, alpha: 0.8 })
+      movePreview.fill({ color: 0x528bff, alpha: 0.15 })
+      movePreview.visible = true
+    }
+  }
+
+  if (mapStore.currentTool === 'draw' || mapStore.currentTool === 'erase' || mapStore.currentTool === 'fill') {
     const pos = screenToGrid(e)
     updatePreview(pos)
 
-    if (pos && (mapStore.currentTool === 'draw' || mapStore.currentTool === 'erase') && e.buttons === 1) {
+    if (pos && e.buttons === 1) {
       const key = `${pos.x},${pos.y}`
       if (key !== lastPaintedKey) {
+        const globalIdx = mapStore.globalResourceOffset + mapStore.selectedResourceIndex
         if (mapStore.currentTool === 'draw' && mapStore.selectedTileIndex >= 0) {
-          const tileId = (mapStore.selectedResourceIndex + 1) * 1000 + mapStore.selectedTileIndex
+          const tileId = (globalIdx + 1) * 1000 + mapStore.selectedTileIndex
           mapStore.setTile(pos.x, pos.y, tileId)
+          updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
           emit('tile-painted', pos.x, pos.y, tileId)
         } else if (mapStore.currentTool === 'erase') {
           mapStore.setTile(pos.x, pos.y, 0)
+          updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
           emit('tile-erased', pos.x, pos.y)
         }
         lastPaintedKey = key
@@ -211,6 +540,39 @@ function onPointerMove(e: PointerEvent) {
 }
 
 function onPointerUp() {
+  if (isRotating) {
+    isRotating = false
+    return
+  }
+
+  if (transformDragging) {
+    transformDragging = false
+    transformHandleIndex = -1
+    renderAllLayers()
+    return
+  }
+
+  // Move tool: drop tile at new position
+  if (moveStartPos && moveTileId) {
+    const pos = cursorGridPos.value
+    if (pos && (pos.x !== moveStartPos.x || pos.y !== moveStartPos.y)) {
+      const layer = mapStore.activeLayer
+      if (layer && layer.type === 'drawing') {
+        // Remove from old position
+        mapStore.setTile(moveStartPos.x, moveStartPos.y, 0)
+        // Place at new position
+        mapStore.setTile(pos.x, pos.y, moveTileId)
+        updateTileAt(mapStore.activeLayerIndex, moveStartPos.x, moveStartPos.y)
+        updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
+      }
+    }
+    moveStartPos = null
+    moveTileId = 0
+    if (movePreview) {
+      movePreview.visible = false
+    }
+  }
+
   isPanning = false
   lastPaintedKey = ''
   if (app?.canvas) (app.canvas as HTMLCanvasElement).style.cursor = 'default'
@@ -225,6 +587,8 @@ function onPointerLeave() {
   }
 }
 
+function preventDragOver(e: DragEvent) { e.preventDefault(); e.dataTransfer!.dropEffect = 'copy' }
+
 function setupInteraction() {
   if (!app || !app.canvas) return
   const canvas = app.canvas as HTMLCanvasElement
@@ -234,12 +598,43 @@ function setupInteraction() {
   canvas.addEventListener('pointermove', onPointerMove)
   canvas.addEventListener('pointerup', onPointerUp)
   canvas.addEventListener('pointerleave', onPointerLeave)
+  canvas.addEventListener('dragover', preventDragOver)
+  canvas.addEventListener('drop', onDrop)
+  canvas.addEventListener('contextmenu', onContextMenu)
+}
+
+function onDrop(e: DragEvent) {
+  e.preventDefault()
+  const data = e.dataTransfer?.getData('application/x-bingo-tile')
+  if (!data) return
+
+  try {
+    const { resourceIndex, tileIndex } = JSON.parse(data)
+    const pos = screenToGrid(e as any)
+    if (!pos) return
+
+    const globalIdx = mapStore.globalResourceOffset + resourceIndex
+    const tileId = (globalIdx + 1) * 1000 + tileIndex
+    mapStore.setTile(pos.x, pos.y, tileId)
+    updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
+  } catch {}
 }
 
 function onKeyDown(e: KeyboardEvent) {
   if (e.code === 'Space' && !e.repeat) {
     isSpaceHeld = true
     if (app?.canvas) (app.canvas as HTMLCanvasElement).style.cursor = 'grab'
+    return
+  }
+  // Tool shortcuts (only when not typing in an input)
+  if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return
+  switch (e.key.toLowerCase()) {
+    case 'b': mapStore.setTool('draw'); break
+    case 'e': mapStore.setTool('erase'); break
+    case 'g': mapStore.toggleGrid(); break
+    case 'm': mapStore.setTool('move'); break
+    case 'v': mapStore.setTool('select'); break
+    case 'f': mapStore.setTool('fill'); break
   }
 }
 
@@ -291,7 +686,145 @@ function redraw() {
 
 function onMouseDown(e: MouseEvent) {
   e.stopPropagation()
+  if (e.button === 2) e.preventDefault()
 }
+
+function onContextMenu(e: MouseEvent) {
+  e.preventDefault()
+}
+
+// --- Flood Fill ---
+
+function floodFill(startX: number, startY: number, fillTileId: number) {
+  const layer = mapStore.activeLayer
+  if (!layer || layer.type !== 'drawing') return
+
+  const targetTileId = layer.tiles[`${startX},${startY}`] ?? 0
+  if (targetTileId === fillTileId) return
+
+  const { width, height } = mapStore.mapData
+  const stack: [number, number][] = [[startX, startY]]
+  const visited = new Set<string>()
+
+  while (stack.length > 0) {
+    const [x, y] = stack.pop()!
+    const key = `${x},${y}`
+    if (visited.has(key)) continue
+    visited.add(key)
+
+    if (x < 0 || x >= width || y < 0 || y >= height) continue
+
+    const currentId = layer.tiles[key] ?? 0
+    if (currentId !== targetTileId) continue
+
+    mapStore.setTile(x, y, fillTileId)
+
+    stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1])
+  }
+
+  renderAllLayers()
+}
+
+// --- Transform Tool ---
+
+let transformBox: any = null
+let transformHandles: any[] = []
+let selectedImageData: any = null
+let selectedImageLayerId: number = -1
+let selectedImageIndex: number = -1
+let transformDragging = false
+let transformHandleIndex = -1
+let transformStartPos = { x: 0, y: 0 }
+let transformStartRect = { x: 0, y: 0, w: 0, h: 0 }
+let isRotating = false
+let rotationStartAngle = 0
+
+function showTransformBox(imgData: any) {
+  removeTransformBox()
+  if (!app || !PIXI) return
+
+  selectedImageData = imgData
+  const pos = imgData.position || [0, 0]
+  const w = (imgData.width || 64) * (imgData.scaleX ?? imgData.scale ?? 1)
+  const h = (imgData.height || 64) * (imgData.scaleY ?? imgData.scale ?? 1)
+
+  // Bounding box
+  transformBox = new PIXI.Graphics()
+  transformBox.rect(pos[0], pos[1], w, h)
+  transformBox.stroke({ width: 1, color: 0x528bff, alpha: 0.8 })
+  transformBox.fill({ color: 0x528bff, alpha: 0.05 })
+  app.stage.addChild(transformBox)
+
+  // 8 handles: 4 corners + 4 edge midpoints
+  const handlePositions = [
+    [pos[0], pos[1]], [pos[0] + w / 2, pos[1]], [pos[0] + w, pos[1]],
+    [pos[0] + w, pos[1] + h / 2],
+    [pos[0] + w, pos[1] + h], [pos[0] + w / 2, pos[1] + h], [pos[0], pos[1] + h],
+    [pos[0], pos[1] + h / 2],
+  ]
+
+  transformHandles = handlePositions.map((hp, i) => {
+    const handle = new PIXI.Graphics()
+    handle.rect(hp[0] - 4, hp[1] - 4, 8, 8)
+    handle.fill({ color: 0xffffff })
+    handle.stroke({ width: 1, color: 0x528bff })
+    handle.cursor = ['nw-resize', 'n-resize', 'ne-resize', 'e-resize', 'se-resize', 's-resize', 'sw-resize', 'w-resize'][i]
+    handle.eventMode = 'static'
+    handle.on('pointerdown', (e: any) => {
+      e.stopPropagation()
+      transformDragging = true
+      transformHandleIndex = i
+      transformStartPos = { x: e.globalX, y: e.globalY }
+      transformStartRect = { x: pos[0], y: pos[1], w, h }
+    })
+    app.stage.addChild(handle)
+    return handle
+  })
+}
+
+function removeTransformBox() {
+  if (transformBox) {
+    app?.stage.removeChild(transformBox)
+    transformBox.destroy()
+    transformBox = null
+  }
+  for (const h of transformHandles) {
+    app?.stage.removeChild(h)
+    h.destroy()
+  }
+  transformHandles = []
+  selectedImageData = null
+}
+
+function updateTransformBox() {
+  if (!selectedImageData || !transformBox) return
+  const pos = selectedImageData.position || [0, 0]
+  const w = (selectedImageData.width || 64) * (selectedImageData.scaleX ?? selectedImageData.scale ?? 1)
+  const h = (selectedImageData.height || 64) * (selectedImageData.scaleY ?? selectedImageData.scale ?? 1)
+
+  transformBox.clear()
+  transformBox.rect(pos[0], pos[1], w, h)
+  transformBox.stroke({ width: 1, color: 0x528bff, alpha: 0.8 })
+  transformBox.fill({ color: 0x528bff, alpha: 0.05 })
+
+  const handlePositions = [
+    [pos[0], pos[1]], [pos[0] + w / 2, pos[1]], [pos[0] + w, pos[1]],
+    [pos[0] + w, pos[1] + h / 2],
+    [pos[0] + w, pos[1] + h], [pos[0] + w / 2, pos[1] + h], [pos[0], pos[1] + h],
+    [pos[0], pos[1] + h / 2],
+  ]
+
+  transformHandles.forEach((h, i) => {
+    h.clear()
+    h.rect(handlePositions[i][0] - 4, handlePositions[i][1] - 4, 8, 8)
+    h.fill({ color: 0xffffff })
+    h.stroke({ width: 1, color: 0x528bff })
+  })
+}
+
+// --- Keyboard Shortcuts ---
+
+// --- Watchers ---
 
 watch(() => mapStore.showGrid, () => {
   if (gridGraphics) gridGraphics.visible = mapStore.showGrid
@@ -299,16 +832,45 @@ watch(() => mapStore.showGrid, () => {
 
 watch(
   () => [mapStore.mapData.width, mapStore.mapData.height, mapStore.mapData.tileSize],
-  () => {
-    redraw()
-  }
+  () => { redraw() }
 )
 
 watch(
   () => mapStore.currentTool,
   (tool) => {
-    if (tool !== 'draw' && tool !== 'erase') {
+    if (tool !== 'draw' && tool !== 'erase' && tool !== 'fill') {
       if (previewTile) previewTile.visible = false
+    }
+  }
+)
+
+// Watch layer visibility changes
+watch(
+  () => mapStore.mapData.layers.map(l => `${l.id}:${l.visible}`),
+  () => { ensureLayerOrder() }
+)
+
+// Watch for layer add/remove -> re-render all
+watch(
+  () => mapStore.mapData.layers.length,
+  () => { renderAllLayers() }
+)
+
+// Watch tile changes on active layer (for external modifications like undo)
+let renderQueued = false
+watch(
+  () => {
+    const layer = mapStore.activeLayer
+    if (!layer || layer.type !== 'drawing') return ''
+    return JSON.stringify(layer.tiles)
+  },
+  () => {
+    if (!renderQueued) {
+      renderQueued = true
+      nextTick(() => {
+        renderAllLayers()
+        renderQueued = false
+      })
     }
   }
 )
@@ -329,6 +891,9 @@ onBeforeUnmount(() => {
     canvas.removeEventListener('pointermove', onPointerMove)
     canvas.removeEventListener('pointerup', onPointerUp)
     canvas.removeEventListener('pointerleave', onPointerLeave)
+    canvas.removeEventListener('dragover', preventDragOver)
+    canvas.removeEventListener('drop', onDrop)
+    canvas.removeEventListener('contextmenu', onContextMenu)
   }
   if (app) {
     app.destroy(true)
@@ -337,7 +902,7 @@ onBeforeUnmount(() => {
   PIXI = null
 })
 
-defineExpose({ redraw, cursorGridPos })
+defineExpose({ redraw, cursorGridPos, renderAllLayers, showTransformBox, removeTransformBox })
 </script>
 
 <template>

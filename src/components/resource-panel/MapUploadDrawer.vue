@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import iconFileUpload from '../../assets/icons/icon--file-upload.svg'
+import iconEdit from '../../assets/icons/编辑.svg'
+import iconSelectSprite from '../../assets/icons/icon--select--sprite.svg'
+import iconMapUpload from '../../assets/icons/map_upload.svg'
 
 const emit = defineEmits<{
   'import-file': []
@@ -32,18 +36,18 @@ function onAction(action: string) {
     <transition name="slide-up">
       <div v-show="menuVisible" class="drawer-menu">
         <button class="drawer-btn" @click="onAction('import')" title="从文件导入">
-          <img src="../../assets/icons/icon--file-upload.svg" class="drawer-icon" />
+          <img :src="iconFileUpload" class="drawer-icon" />
         </button>
         <button class="drawer-btn" @click="onAction('create')" title="创建地图">
-          <img src="../../assets/icons/编辑.svg" class="drawer-icon" />
+          <img :src="iconEdit" class="drawer-icon" />
         </button>
         <button class="drawer-btn" @click="onAction('library')" title="选择库文件">
-          <img src="../../assets/icons/icon--select--sprite.svg" class="drawer-icon" />
+          <img :src="iconSelectSprite" class="drawer-icon" />
         </button>
       </div>
     </transition>
     <button class="drawer-main-btn" @mouseenter="onMouseEnter">
-      <img src="../../assets/icons/map_upload.svg" class="drawer-main-icon" />
+      <img :src="iconMapUpload" class="drawer-main-icon" />
     </button>
   </div>
 </template>

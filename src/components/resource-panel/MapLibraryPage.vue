@@ -1,21 +1,30 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
+import { useMapLibStore } from '../../stores/mapLib'
 
 const emit = defineEmits<{
   'close': []
-  'imported': [path: string]
+  'imported': [bgmUrl: string, name: string]
 }>()
 
+const mapLibStore = useMapLibStore()
 const searchQuery = ref('')
 
-// Placeholder for built-in map library
-const maps = ref<{ name: string; path: string; thumbnail?: string }[]>([])
+onMounted(() => {
+  mapLibStore.loadBuiltinLibrary()
+})
+
+const filteredMaps = computed(() => {
+  if (!searchQuery.value) return mapLibStore.items
+  const q = searchQuery.value.toLowerCase()
+  return mapLibStore.items.filter(m => m.name.toLowerCase().includes(q))
+})
 </script>
 
 <template>
   <div class="map-lib-page">
     <div class="lib-toolbar">
-      <input v-model="searchQuery" class="lib-search" placeholder="搜索..." />
+      <input v-model="searchQuery" class="lib-search" placeholder="搜索地图..." />
       <div class="lib-spacer" />
       <span class="lib-hint">请选择地图</span>
       <div class="lib-spacer" />
@@ -23,14 +32,19 @@ const maps = ref<{ name: string; path: string; thumbnail?: string }[]>([])
       <button class="lib-return-btn" @click="emit('close')">返回</button>
     </div>
     <div class="lib-grid">
-      <div v-for="map in maps" :key="map.path" class="lib-card" @click="emit('imported', map.path)">
+      <div
+        v-for="map in filteredMaps"
+        :key="map.bgmUrl"
+        class="lib-card"
+        @click="emit('imported', map.bgmUrl, map.name)"
+      >
         <div class="lib-card-thumb">
-          <img v-if="map.thumbnail" :src="map.thumbnail" />
+          <img v-if="map.thumbUrl" :src="map.thumbUrl" />
           <span v-else class="lib-card-placeholder">{{ map.name.charAt(0) }}</span>
         </div>
         <div class="lib-card-name">{{ map.name }}</div>
       </div>
-      <div v-if="maps.length === 0" class="lib-empty">暂无地图</div>
+      <div v-if="filteredMaps.length === 0" class="lib-empty">暂无地图</div>
     </div>
   </div>
 </template>
@@ -101,15 +115,20 @@ const maps = ref<{ name: string; path: string; thumbnail?: string }[]>([])
   padding: 8px;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  grid-auto-rows: max-content;
   gap: 8px;
+  align-content: start;
 }
 
 .lib-card {
+  aspect-ratio: 1;
   background: rgb(45, 45, 45);
   border-radius: 8px;
   padding: 8px;
   cursor: pointer;
   transition: background 0.15s;
+  display: flex;
+  flex-direction: column;
 }
 
 .lib-card:hover {
@@ -117,8 +136,8 @@ const maps = ref<{ name: string; path: string; thumbnail?: string }[]>([])
 }
 
 .lib-card-thumb {
-  width: 150px;
-  height: 110px;
+  flex: 1;
+  min-height: 0;
   margin: 0 auto 8px;
   background: rgb(61, 61, 61);
   border-radius: 4px;

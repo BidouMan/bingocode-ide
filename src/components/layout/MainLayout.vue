@@ -2,6 +2,7 @@
 import { ref, nextTick, onMounted, watch } from 'vue'
 import { useEditorStore } from '../../stores/editor'
 import { useResourceStore } from '../../stores/resource'
+import { useMapStore } from '../../stores/map'
 import { useEngine } from '../../composables/useEngine'
 import { useFileDialog } from '../../composables/useFileDialog'
 import JSZip from 'jszip'
@@ -14,9 +15,29 @@ import UploadDrawer from '../resource-panel/UploadDrawer.vue'
 import SpriteLibPage from '../resource-panel/SpriteLibPage.vue'
 import MapLibraryPage from '../resource-panel/MapLibraryPage.vue'
 import MapResourceLibPage from '../resource-panel/MapResourceLibPage.vue'
+import iconLogo from '../../assets/icons/logo.svg'
+import iconFile from '../../assets/icons/icon--file.svg'
+import iconCodeEdit from '../../assets/icons/代码编辑.svg'
+import iconSprite from '../../assets/icons/角色精灵.svg'
+import iconMap from '../../assets/icons/addons.svg'
+import iconNewMap from '../../assets/icons/新建地图.svg'
+import iconCodeOpen from '../../assets/icons/codemode_打开.svg'
+import iconCodeSave from '../../assets/icons/codemode_保存.svg'
+import iconCodeRun from '../../assets/icons/codemode_运行.svg'
+import iconCodeStop from '../../assets/icons/codemode_停止.svg'
+import iconSettings from '../../assets/icons/icon--settings.svg'
+import iconHelp from '../../assets/icons/help.svg'
+import iconPlay from '../../assets/icons/icon--play.svg'
+import iconStop from '../../assets/icons/icon--stop-all.svg'
+import iconFullscreen from '../../assets/icons/icon--fullscreen.svg'
+import iconUnfullscreen from '../../assets/icons/icon--unfullscreen.svg'
+import iconPython from '../../assets/icons/python_file_1.svg'
+import iconUndo from '../../assets/icons/undo.svg'
+import iconRedo from '../../assets/icons/redo.svg'
 
 const editorStore = useEditorStore()
 const resourceStore = useResourceStore()
+const mapStore = useMapStore()
 const engine = useEngine()
 const fileDialog = useFileDialog()
 
@@ -29,6 +50,8 @@ const selectedResource = ref<string | null>(null)
 
 // 角色缩略图缓存
 const spriteThumbnails = ref<Record<string, string>>({})
+// 地图缩略图缓存
+const mapThumbnails = ref<Record<string, string>>({})
 // 角色右键菜单
 const spriteContextMenu = ref<{ show: boolean; x: number; y: number; item: { id: string; name: string } | null }>({ show: false, x: 0, y: 0, item: null })
 const spriteRenameId = ref<string | null>(null)
@@ -38,6 +61,11 @@ const codeContextMenu = ref<{ show: boolean; x: number; y: number; item: { id: s
 const codeRenameId = ref<string | null>(null)
 const codeRenameValue = ref('')
 const spriteRenameValue = ref('')
+
+// 地图右键菜单
+const mapContextMenu = ref<{ show: boolean; x: number; y: number; item: { id: string; name: string } | null }>({ show: false, x: 0, y: 0, item: null })
+const mapRenameId = ref<string | null>(null)
+const mapRenameValue = ref('')
 
 // 角色列表变化时立即加载缩略图
 function loadAllSpriteThumbnails() {
@@ -51,6 +79,81 @@ function loadAllSpriteThumbnails() {
 watch(() => [...resourceStore.sprites], loadAllSpriteThumbnails)
 
 onMounted(loadAllSpriteThumbnails)
+
+// 地图列表变化时加载缩略图
+function loadAllMapThumbnails() {
+  for (const item of resourceStore.maps) {
+    if (item.path && !mapThumbnails.value[item.id]) {
+      loadMapThumbnail(item)
+    }
+  }
+}
+
+watch(() => [...resourceStore.maps], loadAllMapThumbnails)
+
+onMounted(loadAllMapThumbnails)
+
+// 新项目默认地图
+onMounted(() => {
+  if (resourceStore.maps.length === 0) {
+    resourceStore.addItem({ name: '地图1', type: 'map', path: '' })
+  }
+})
+
+// 自动选中第一个资源
+function autoSelectFirst() {
+  const tab = editorStore.resourceTab
+  if (tab === 'sprite') {
+    if (resourceStore.sprites.length > 0 && !resourceStore.selectedSpriteId) {
+      resourceStore.selectedSpriteId = resourceStore.sprites[0].id
+    }
+  } else if (tab === 'map') {
+    if (resourceStore.maps.length > 0 && !selectedResource.value) {
+      selectedResource.value = resourceStore.maps[0].id
+    }
+  } else if (tab === 'sound') {
+    if (resourceStore.sounds.length > 0 && !selectedResource.value) {
+      selectedResource.value = resourceStore.sounds[0].id
+    }
+  }
+}
+
+// 切换标签时自动选中第一个
+watch(() => editorStore.resourceTab, autoSelectFirst)
+
+// 列表变化时保持选中有效
+watch(() => [...resourceStore.maps], () => {
+  if (editorStore.resourceTab === 'map') {
+    if (resourceStore.maps.length > 0 && !resourceStore.maps.find(m => m.id === selectedResource.value)) {
+      selectedResource.value = resourceStore.maps[0].id
+    } else if (resourceStore.maps.length === 0) {
+      selectedResource.value = null
+    }
+  }
+})
+
+watch(() => [...resourceStore.sounds], () => {
+  if (editorStore.resourceTab === 'sound') {
+    if (resourceStore.sounds.length > 0 && !resourceStore.sounds.find(s => s.id === selectedResource.value)) {
+      selectedResource.value = resourceStore.sounds[0].id
+    } else if (resourceStore.sounds.length === 0) {
+      selectedResource.value = null
+    }
+  }
+})
+
+watch(() => [...resourceStore.sprites], () => {
+  if (editorStore.resourceTab === 'sprite') {
+    if (resourceStore.sprites.length > 0 && !resourceStore.sprites.find(s => s.id === resourceStore.selectedSpriteId)) {
+      resourceStore.selectedSpriteId = resourceStore.sprites[0].id
+    } else if (resourceStore.sprites.length === 0) {
+      resourceStore.selectedSpriteId = null
+    }
+  }
+})
+
+// 初始化时也自动选中
+onMounted(autoSelectFirst)
 
 function toggleFileMenu() {
   fileMenuVisible.value = !fileMenuVisible.value
@@ -150,6 +253,37 @@ function openResource(item: { id: string; name: string; type: string; content?: 
       editorStore.setGameMode(true)
       editorStore.setActiveTab(idx)
     }
+  } else if (item.type === 'map') {
+    // 打开地图编辑器
+    mapStore.setMapPath(item.name)
+    mapStore.loadMap({
+      name: item.name,
+      version: 5,
+      width: 40,
+      height: 30,
+      tileSize: 16,
+      offsetX: 0,
+      offsetY: 0,
+      gravity: false,
+      collisionType: '图像',
+      collisionEnabled: false,
+      layers: [
+        {
+          id: 0,
+          name: '图层',
+          type: 'drawing',
+          visible: true,
+          locked: false,
+          tiles: {},
+          resources: [],
+          images: [],
+        },
+      ],
+      tileSets: [],
+    })
+    editorStore.setGameMode(true)
+    editorStore.setActiveEditorMode('map')
+    editorStore.setResourceTab('map')
   }
 }
 
@@ -168,19 +302,33 @@ function onOpenLibrary(type: string) {
 
 function onSpriteLibImported(id: string, name: string, bgsUrl: string) {
   resourceStore.selectedSpriteId = id
-  currentPage.value = 0
   editorStore.setResourceTab('sprite')
-  editorStore.setActiveEditorMode('sprite')
+  currentPage.value = 0
 }
 
-function onMapLibImported(path: string) {
+function onMapLibImported(bgmUrl: string, name: string) {
+  resourceStore.addItem({ name, type: 'map', path: bgmUrl })
+  editorStore.setResourceTab('map')
   currentPage.value = 0
-  editorStore.setActiveEditorMode('map')
 }
 
 function onResLibImported(path: string) {
-  currentPage.value = 0
+  // 将资源添加到当前图层的资源列表（作为瓦片集）
+  const name = path.split('/').pop()?.split('.')[0] || '资源'
+  const tileSize = mapStore.mapData.tileSize
+  mapStore.addResource({
+    name,
+    path,
+    resourceType: 'tileset',
+    tileWidth: tileSize,
+    tileHeight: tileSize,
+    collisionType: '图像',
+    collisionEnabled: false,
+    tileSetIndex: 0,
+  })
   editorStore.setActiveEditorMode('map')
+  editorStore.setResourceTab('map')
+  currentPage.value = 0
 }
 
 function renameResource(item: { id: string; name: string; type: string }) {
@@ -231,6 +379,21 @@ async function loadSpriteThumbnail(item: { id: string; path: string }) {
   }
 }
 
+async function loadMapThumbnail(item: { id: string; path: string }) {
+  if (mapThumbnails.value[item.id]) return
+  try {
+    const resp = await fetch(item.path)
+    const blob = await resp.blob()
+    const zip = await JSZip.loadAsync(blob)
+    const thumbEntry = zip.file('thumbnail.png')
+    if (!thumbEntry) return
+    const thumbBlob = await thumbEntry.async('blob')
+    mapThumbnails.value[item.id] = URL.createObjectURL(thumbBlob)
+  } catch {
+    // thumbnail load failed
+  }
+}
+
 // 角色右键菜单
 function onSpriteContextMenu(e: MouseEvent, item: { id: string; name: string }) {
   e.preventDefault()
@@ -277,6 +440,49 @@ function cancelSpriteRename() {
 
 function closeSpriteContextMenus() {
   spriteContextMenu.value.show = false
+  mapContextMenu.value.show = false
+  codeContextMenu.value.show = false
+}
+
+// 地图右键菜单
+function onMapContextMenu(e: MouseEvent, item: { id: string; name: string }) {
+  e.preventDefault()
+  e.stopPropagation()
+  mapContextMenu.value = { show: true, x: e.clientX, y: e.clientY, item }
+}
+
+function deleteMapFromContext(id: string) {
+  resourceStore.removeItem(id, 'map')
+  if (selectedResource.value === id) {
+    selectedResource.value = resourceStore.maps.length > 0 ? resourceStore.maps[0].id : null
+  }
+  mapContextMenu.value.show = false
+}
+
+function startMapRename(id: string) {
+  const item = resourceStore.maps.find(i => i.id === id)
+  if (!item) return
+  mapRenameId.value = id
+  mapRenameValue.value = item.name
+  mapContextMenu.value.show = false
+  nextTick(() => nextTick(() => {
+    const input = document.querySelector('.map-rename-input') as HTMLInputElement | null
+    if (input) {
+      input.focus()
+      input.setSelectionRange(input.value.length, input.value.length)
+    }
+  }))
+}
+
+function confirmMapRename() {
+  if (!mapRenameId.value) return
+  const val = mapRenameValue.value.trim()
+  if (val) resourceStore.renameItem(mapRenameId.value, val)
+  mapRenameId.value = null
+}
+
+function cancelMapRename() {
+  mapRenameId.value = null
 }
 
 // 同步游戏模式标签和代码资源管理器
@@ -398,14 +604,14 @@ function codeDisplayName(name: string) {
     <div class="menu-bar">
       <!-- Logo (固定宽度) -->
       <button class="menu-logo">
-        <img src="../../assets/icons/logo.svg" class="menu-logo-img" />
+        <img :src="iconLogo" class="menu-logo-img" />
       </button>
 
       <!-- ═══ 游戏模式菜单 ═══ -->
       <template v-if="editorStore.isGameMode">
         <div class="menu-file-wrapper" @mouseleave="closeFileMenu">
           <button class="menu-btn menu-btn-file" title="文件" @click="toggleFileMenu">
-            <img src="../../assets/icons/icon--file.svg" class="menu-icon" />
+            <img :src="iconFile" class="menu-icon" />
             <span>文件</span>
           </button>
           <div v-show="fileMenuVisible" class="file-menu-dropdown">
@@ -420,19 +626,19 @@ function codeDisplayName(name: string) {
 
         <!-- 代码 (图标+文字) -->
         <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.activeEditorMode === 'code' }" @click="editorStore.setActiveEditorMode('code')">
-          <img src="../../assets/icons/代码编辑.svg" class="menu-icon" />
+          <img :src="iconCodeEdit" class="menu-icon" />
           <span>代码</span>
         </button>
 
         <!-- 角色 (图标+文字) -->
         <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.activeEditorMode === 'sprite' }" @click="editorStore.setActiveEditorMode('sprite')">
-          <img src="../../assets/icons/角色精灵.svg" class="menu-icon" />
+          <img :src="iconSprite" class="menu-icon" />
           <span>角色</span>
         </button>
 
         <!-- 地图 (图标+文字) -->
         <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.activeEditorMode === 'map' }" @click="editorStore.setActiveEditorMode('map')">
-          <img src="../../assets/icons/addons.svg" class="menu-icon" />
+          <img :src="iconMap" class="menu-icon" />
           <span>地图</span>
         </button>
       </template>
@@ -441,33 +647,33 @@ function codeDisplayName(name: string) {
       <template v-else>
         <!-- 新建 -->
         <button class="menu-btn" @click="editorStore.createTab('未命名.py', '')" title="新建">
-          <img src="../../assets/icons/新建地图.svg" class="menu-icon" />
+          <img :src="iconNewMap" class="menu-icon" />
           <span>新建</span>
         </button>
 
         <!-- 打开 -->
         <button class="menu-btn" @click="fileMenuAction('open')" title="打开">
-          <img src="../../assets/icons/codemode_打开.svg" class="menu-icon" />
+          <img :src="iconCodeOpen" class="menu-icon" />
           <span>打开</span>
         </button>
 
         <!-- 保存 -->
         <button class="menu-btn" @click="fileMenuAction('save')" title="保存">
-          <img src="../../assets/icons/codemode_保存.svg" class="menu-icon" />
+          <img :src="iconCodeSave" class="menu-icon" />
           <span>保存</span>
         </button>
 
         <!-- 运行/停止 (代码模式单个切换) -->
         <button class="menu-btn" @click="toggleRun" :title="editorStore.isRunning ? '停止' : '运行'">
-          <img v-if="!editorStore.isRunning" src="../../assets/icons/codemode_运行.svg" class="menu-icon" />
-          <img v-else src="../../assets/icons/codemode_停止.svg" class="menu-icon" />
+          <img v-if="!editorStore.isRunning" :src="iconCodeRun" class="menu-icon" />
+          <img v-else :src="iconCodeStop" class="menu-icon" />
           <span>{{ editorStore.isRunning ? '停止' : '运行' }}</span>
         </button>
       </template>
 
       <!-- 设置 (两种模式都有) -->
       <button class="menu-btn">
-        <img src="../../assets/icons/icon--settings.svg" class="menu-icon" />
+        <img :src="iconSettings" class="menu-icon" />
         <span>设置</span>
       </button>
 
@@ -484,7 +690,7 @@ function codeDisplayName(name: string) {
 
       <!-- 帮助 (仅图标) -->
       <button class="menu-btn menu-btn-help" title="帮助">
-        <img src="../../assets/icons/help.svg" width="24" height="24" />
+        <img :src="iconHelp" width="24" height="24" />
       </button>
     </div>
 
@@ -501,7 +707,7 @@ function codeDisplayName(name: string) {
 
         <!-- ═══ Page 0: 游戏模式 — 地图编辑器 ═══ -->
         <div v-else-if="editorStore.isGameMode && editorStore.activeEditorMode === 'map'" class="editor-page-full">
-          <MapEditorView />
+          <MapEditorView @open-resource-lib="currentPage = 4" />
         </div>
 
         <!-- ═══ Page 0: 游戏模式 — 代码编辑 (侧边栏 + 标签 + 代码编辑 + 控制台) ═══ -->
@@ -509,14 +715,14 @@ function codeDisplayName(name: string) {
           <div class="sidebar">
             <div class="sidebar-toolbar">
               <button class="tool-btn" :class="{ 'tool-btn-active': editorStore.isRunning }" @click="toggleRun" title="运行">
-                <img src="../../assets/icons/icon--play.svg" width="16" height="16" />
+                <img :src="iconPlay" width="16" height="16" />
               </button>
               <button class="tool-btn" @click="engine.stop()" title="停止">
-                <img src="../../assets/icons/icon--stop-all.svg" width="16" height="16" />
+                <img :src="iconStop" width="16" height="16" />
               </button>
               <div class="tool-spacer"></div>
               <button class="tool-btn" @click="switchPage(1)" title="全屏">
-                <img src="../../assets/icons/icon--fullscreen.svg" width="20" height="20" />
+                <img :src="iconFullscreen" width="20" height="20" />
               </button>
             </div>
             <div class="game-preview-wrapper">
@@ -528,7 +734,7 @@ function codeDisplayName(name: string) {
               </div>
             </div>
             <div class="outline-tabs">
-              <button v-for="t in ['sprite','map','sound','code']" :key="t" class="outline-tab" :class="{ 'outline-tab-active': editorStore.resourceTab === t }" @click="editorStore.setResourceTab(t)">
+              <button v-for="t in ['sprite','map','sound','code']" :key="t" class="outline-tab" :class="{ 'outline-tab-active': editorStore.resourceTab === t }" @click="editorStore.setResourceTab(t); closeSpriteContextMenus()">
                 {{ t === 'sprite' ? '角色' : t === 'map' ? '场景' : t === 'sound' ? '声音' : '代码' }}
               </button>
             </div>
@@ -572,9 +778,24 @@ function codeDisplayName(name: string) {
                     :class="{ 'resource-grid-item-active': selectedResource === item.id }"
                     @click="selectedResource = item.id"
                     @dblclick="openResource(item)"
+                    @contextmenu="onMapContextMenu($event, item)"
                   >
-                    <div class="resource-thumb resource-thumb-map"><span>{{ item.name.charAt(0) }}</span></div>
-                    <span class="resource-grid-name">{{ item.name }}</span>
+                    <div class="resource-thumb resource-thumb-checker">
+                      <img v-if="mapThumbnails[item.id]" :src="mapThumbnails[item.id]" class="resource-thumb-img" />
+                    </div>
+                    <template v-if="mapRenameId === item.id">
+                      <input
+                        class="map-rename-input"
+                        v-model="mapRenameValue"
+                        @blur="confirmMapRename"
+                        @keydown.enter.prevent="confirmMapRename"
+                        @keydown.escape="cancelMapRename"
+                        @click.stop
+                      />
+                    </template>
+                    <template v-else>
+                      <span class="resource-grid-name">{{ item.name }}</span>
+                    </template>
                   </div>
                   <div v-if="resourceStore.maps.length === 0" class="resource-empty"></div>
                 </div>
@@ -601,7 +822,7 @@ function codeDisplayName(name: string) {
                     @dblclick="openResource(item)"
                     @contextmenu="onCodeContextMenu($event, item)"
                   >
-                    <img src="../../assets/icons/python_file_1.svg" class="resource-code-icon" />
+                    <img :src="iconPython" class="resource-code-icon" />
                     <template v-if="codeRenameId === item.id">
                       <input
                         class="code-rename-input"
@@ -665,8 +886,8 @@ function codeDisplayName(name: string) {
               <button class="tab-add" @click="editorStore.createTab('未命名.py', '')" title="新建文件">+</button>
             </div>
             <div class="ide-toolbar">
-              <button class="ide-tool-btn" title="撤销" @click="editorUndo"><img src="../../assets/icons/undo.svg" width="18" height="18" /></button>
-              <button class="ide-tool-btn" title="重做" @click="editorRedo"><img src="../../assets/icons/redo.svg" width="18" height="18" /></button>
+              <button class="ide-tool-btn" title="撤销" @click="editorUndo"><img :src="iconUndo" width="18" height="18" /></button>
+              <button class="ide-tool-btn" title="重做" @click="editorRedo"><img :src="iconRedo" width="18" height="18" /></button>
             </div>
           </div>
           <div class="ide-editor-area">
@@ -682,14 +903,14 @@ function codeDisplayName(name: string) {
         <div class="fullscreen-wrapper">
           <div class="fullscreen-toolbar">
             <button class="tool-btn" :class="{ 'tool-btn-active': editorStore.isRunning }" @click="toggleRun">
-              <img src="../../assets/icons/icon--play.svg" width="16" height="16" />
+              <img :src="iconPlay" width="16" height="16" />
             </button>
             <button class="tool-btn" @click="engine.stop()">
-              <img src="../../assets/icons/icon--stop-all.svg" width="16" height="16" />
+              <img :src="iconStop" width="16" height="16" />
             </button>
             <div class="tool-spacer"></div>
             <button class="tool-btn" @click="switchPage(0)">
-              <img src="../../assets/icons/icon--unfullscreen.svg" width="20" height="20" />
+              <img :src="iconUnfullscreen" width="20" height="20" />
             </button>
           </div>
           <div class="fullscreen-game-frame">
@@ -754,6 +975,19 @@ function codeDisplayName(name: string) {
       >
         <div class="sprite-ctx-item" @click="startCodeRename(codeContextMenu.item!.id)">重命名</div>
         <div class="sprite-ctx-item sprite-ctx-del" @click="deleteCodeFromContext(codeContextMenu.item!.id)">删除</div>
+      </div>
+    </Teleport>
+
+    <!-- 地图右键菜单 -->
+    <Teleport to="body">
+      <div
+        v-if="mapContextMenu.show"
+        class="sprite-ctx-menu"
+        :style="{ left: mapContextMenu.x + 'px', top: mapContextMenu.y + 'px' }"
+        @click.stop
+      >
+        <div class="sprite-ctx-item" @click="startMapRename(mapContextMenu.item!.id)">重命名</div>
+        <div class="sprite-ctx-item sprite-ctx-del" @click="deleteMapFromContext(mapContextMenu.item!.id)">删除</div>
       </div>
     </Teleport>
   </div>
@@ -1110,6 +1344,16 @@ function codeDisplayName(name: string) {
 }
 .resource-thumb-map { background: rgb(61, 64, 72); }
 .resource-thumb-sound { background: rgb(232, 167, 53); }
+.resource-thumb-checker {
+  background-color: #2a2a2a;
+  background-image:
+    linear-gradient(45deg, #3a3a3a 25%, transparent 25%),
+    linear-gradient(-45deg, #3a3a3a 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #3a3a3a 75%),
+    linear-gradient(-45deg, transparent 75%, #3a3a3a 75%);
+  background-size: 10px 10px;
+  background-position: 0 0, 0 5px, 5px -5px, -5px 0;
+}
 .resource-grid-name {
   font-size: 11px;
   color: rgb(200, 200, 200);
@@ -1120,6 +1364,19 @@ function codeDisplayName(name: string) {
   width: 100%;
 }
 .sprite-rename-input {
+  width: 74px;
+  height: 18px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: rgb(200, 200, 200);
+  font-size: 11px;
+  padding: 0;
+  text-align: center;
+  outline: none;
+  caret-color: white;
+}
+.map-rename-input {
   width: 74px;
   height: 18px;
   background: transparent;

@@ -1,27 +1,44 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
+import { useMapResourceLibStore } from '../../stores/mapResourceLib'
 
 const emit = defineEmits<{
   'close': []
   'imported': [path: string]
 }>()
 
+const store = useMapResourceLibStore()
 const searchQuery = ref('')
-const activeCategory = ref<'images' | 'tiles' | 'tilesets'>('images')
+const activeCategory = ref<'all' | 'images' | 'tiles' | 'tilesets'>('all')
 
 const categories = [
+  { id: 'all' as const, label: '全部' },
   { id: 'images' as const, label: '图像' },
   { id: 'tiles' as const, label: '图块' },
   { id: 'tilesets' as const, label: '集合' },
 ]
 
-const resources = ref<{ name: string; path: string; thumbnail?: string }[]>([])
+onMounted(() => {
+  store.loadBuiltinResources()
+})
+
+const filteredResources = computed(() => {
+  let list = store.items
+  if (activeCategory.value !== 'all') {
+    list = list.filter(r => r.category === activeCategory.value)
+  }
+  if (searchQuery.value) {
+    const q = searchQuery.value.toLowerCase()
+    list = list.filter(r => r.name.toLowerCase().includes(q))
+  }
+  return list
+})
 </script>
 
 <template>
   <div class="map-res-lib-page">
     <div class="lib-toolbar">
-      <input v-model="searchQuery" class="lib-search" placeholder="搜索..." />
+      <input v-model="searchQuery" class="lib-search" placeholder="搜索素材..." />
       <div style="width:10px" />
       <button
         v-for="cat in categories"
@@ -37,14 +54,18 @@ const resources = ref<{ name: string; path: string; thumbnail?: string }[]>([])
       <button class="lib-return-btn" @click="emit('close')">返回</button>
     </div>
     <div class="lib-grid">
-      <div v-for="res in resources" :key="res.path" class="lib-card" @click="emit('imported', res.path)">
+      <div
+        v-for="res in filteredResources"
+        :key="res.path"
+        class="lib-card"
+        @click="emit('imported', res.path)"
+      >
         <div class="lib-card-thumb">
-          <img v-if="res.thumbnail" :src="res.thumbnail" />
-          <span v-else class="lib-card-placeholder">{{ res.name.charAt(0) }}</span>
+          <img :src="res.thumbnail" />
         </div>
         <div class="lib-card-name">{{ res.name }}</div>
       </div>
-      <div v-if="resources.length === 0" class="lib-empty">暂无素材</div>
+      <div v-if="filteredResources.length === 0" class="lib-empty">暂无素材</div>
     </div>
   </div>
 </template>
@@ -131,15 +152,20 @@ const resources = ref<{ name: string; path: string; thumbnail?: string }[]>([])
   padding: 8px;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  grid-auto-rows: max-content;
   gap: 8px;
+  align-content: start;
 }
 
 .lib-card {
+  aspect-ratio: 1;
   background: rgb(45, 45, 45);
   border-radius: 8px;
   padding: 8px;
   cursor: pointer;
   transition: background 0.15s;
+  display: flex;
+  flex-direction: column;
 }
 
 .lib-card:hover {
@@ -147,8 +173,8 @@ const resources = ref<{ name: string; path: string; thumbnail?: string }[]>([])
 }
 
 .lib-card-thumb {
-  width: 150px;
-  height: 110px;
+  flex: 1;
+  min-height: 0;
   margin: 0 auto 8px;
   background: rgb(61, 61, 61);
   border-radius: 4px;
@@ -162,11 +188,6 @@ const resources = ref<{ name: string; path: string; thumbnail?: string }[]>([])
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-}
-
-.lib-card-placeholder {
-  font-size: 16px;
-  color: rgb(230, 230, 230);
 }
 
 .lib-card-name {

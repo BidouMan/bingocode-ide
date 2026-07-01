@@ -102,12 +102,16 @@ function selectSprite(item: { name: string; bgsUrl: string }) {
   padding: 16px;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 12px;
+  grid-auto-rows: max-content;
+  gap: 8px;
+  align-content: start;
 }
 .sprite-card {
+  aspect-ratio: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   padding: 12px 8px;
   background: rgb(45, 45, 45);
@@ -120,8 +124,8 @@ function selectSprite(item: { name: string; bgsUrl: string }) {
   transform: translateY(-2px);
 }
 .sprite-thumb {
-  width: 140px;
-  height: 110px;
+  flex: 1;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;

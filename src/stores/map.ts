@@ -24,8 +24,25 @@ export interface MapLayer {
   name: string
   type: 'drawing' | 'image'
   visible: boolean
+  locked: boolean
   tiles: Record<string, number>
-  images?: any[]
+  resources: MapResource[]
+  images: ImageData[]
+}
+
+export interface ImageData {
+  imagePath: string
+  position: [number, number]
+  rotation: number
+  scale: number
+  scaleX: number
+  scaleY: number
+  opacity: number
+  width: number
+  height: number
+  collisionType: string
+  collisionEnabled: boolean
+  collisionShape?: { points: number[][] }
 }
 
 export interface MapResource {
@@ -48,12 +65,15 @@ export interface MapData {
   offsetX: number
   offsetY: number
   gravity: boolean
+  collisionType: string
+  collisionEnabled: boolean
   layers: MapLayer[]
   tileSets: TileSet[]
   layerResourcesMap?: Record<number, number[]>
 }
 
-export type MapTool = 'move' | 'select' | 'draw' | 'erase'
+export type MapTool = 'move' | 'select' | 'draw' | 'erase' | 'fill'
+export type CollisionTool = 'move' | 'add' | 'delete' | 'reset'
 
 export const useMapStore = defineStore('map', () => {
   const currentMapPath = ref('')
@@ -66,13 +86,18 @@ export const useMapStore = defineStore('map', () => {
     offsetX: 0,
     offsetY: 0,
     gravity: false,
+    collisionType: '图像',
+    collisionEnabled: false,
     layers: [
       {
         id: 0,
         name: '图层',
         type: 'drawing',
         visible: true,
+        locked: false,
         tiles: {},
+        resources: [],
+        images: [],
       },
     ],
     tileSets: [],
@@ -85,8 +110,23 @@ export const useMapStore = defineStore('map', () => {
   const selectedTileIndex = ref(-1)
   const mapResources = ref<MapResource[]>([])
   const layerResources = ref<Record<number, MapResource[]>>({})
+  const collisionTool = ref<CollisionTool>('move')
+  const snapToPixel = ref(true)
+  const cursorX = ref<number | null>(null)
+  const cursorY = ref<number | null>(null)
 
   const activeLayer = computed(() => mapData.value.layers[activeLayerIndex.value] ?? null)
+  const selectedResource = computed(() => activeLayer.value?.resources[selectedResourceIndex.value] ?? null)
+
+  // 计算当前图层资源在全局 tileSets 中的起始索引
+  const globalResourceOffset = computed(() => {
+    let offset = 0
+    for (const l of mapData.value.layers) {
+      if (l.id === activeLayer.value?.id) break
+      offset += l.resources.length
+    }
+    return offset
+  })
 
   function setMapPath(path: string) {
     currentMapPath.value = path
@@ -109,13 +149,18 @@ export const useMapStore = defineStore('map', () => {
       offsetX: 0,
       offsetY: 0,
       gravity: false,
+      collisionType: '图像',
+      collisionEnabled: false,
       layers: [
         {
           id: 0,
           name: '图层',
           type: 'drawing',
           visible: true,
+        locked: false,
           tiles: {},
+          resources: [],
+          images: [],
         },
       ],
       tileSets: [],
@@ -134,7 +179,7 @@ export const useMapStore = defineStore('map', () => {
 
   function setTile(x: number, y: number, tileId: number) {
     const layer = activeLayer.value
-    if (!layer || layer.type !== 'drawing') return
+    if (!layer || layer.type !== 'drawing' || layer.locked) return
     const key = `${x},${y}`
     if (tileId === 0) {
       delete layer.tiles[key]
@@ -150,13 +195,17 @@ export const useMapStore = defineStore('map', () => {
   }
 
   function addLayer(name: string, type: 'drawing' | 'image' = 'drawing') {
-    const id = mapData.value.layers.length
+    const id = mapData.value.layers.length > 0
+      ? Math.max(...mapData.value.layers.map(l => l.id)) + 1
+      : 0
     mapData.value.layers.push({
       id,
       name,
       type,
       visible: true,
       tiles: {},
+      resources: [],
+      images: [],
     })
     activeLayerIndex.value = mapData.value.layers.length - 1
     return id
@@ -173,25 +222,36 @@ export const useMapStore = defineStore('map', () => {
 
   function moveLayerUp(index: number) {
     if (index < mapData.value.layers.length - 1) {
-      const temp = mapData.value.layers[index]
-      mapData.value.layers[index] = mapData.value.layers[index + 1]
-      mapData.value.layers[index + 1] = temp
+      const layers = mapData.value.layers
+      const temp = layers[index]
+      layers[index] = layers[index + 1]
+      layers[index + 1] = temp
       activeLayerIndex.value = index + 1
+      // 触发响应式更新
+      mapData.value.layers = [...layers]
     }
   }
 
   function moveLayerDown(index: number) {
     if (index > 0) {
-      const temp = mapData.value.layers[index]
-      mapData.value.layers[index] = mapData.value.layers[index - 1]
-      mapData.value.layers[index - 1] = temp
+      const layers = mapData.value.layers
+      const temp = layers[index]
+      layers[index] = layers[index - 1]
+      layers[index - 1] = temp
       activeLayerIndex.value = index - 1
+      // 触发响应式更新
+      mapData.value.layers = [...layers]
     }
   }
 
   function toggleLayerVisibility(index: number) {
     const layer = mapData.value.layers[index]
     if (layer) layer.visible = !layer.visible
+  }
+
+  function toggleLayerLock(index: number) {
+    const layer = mapData.value.layers[index]
+    if (layer) layer.locked = !layer.locked
   }
 
   function renameLayer(index: number, name: string) {
@@ -215,21 +275,83 @@ export const useMapStore = defineStore('map', () => {
   }
 
   function addResource(resource: MapResource) {
-    mapResources.value.push(resource)
+    const layer = activeLayer.value
+    if (!layer) return
+    layer.resources.push(resource)
+    // 同时创建对应的 TileSet 以支持碰撞数据
+    mapData.value.tileSets.push({
+      name: resource.name,
+      imagePath: resource.path,
+      resourceType: resource.resourceType,
+      tileWidth: resource.tileWidth,
+      tileHeight: resource.tileHeight,
+      collisionType: resource.collisionType,
+      collisionEnabled: resource.collisionEnabled,
+      tiles: [],
+    })
   }
 
   function removeResource(index: number) {
-    if (index >= 0 && index < mapResources.value.length) {
-      mapResources.value.splice(index, 1)
+    const layer = activeLayer.value
+    if (!layer || index < 0 || index >= layer.resources.length) return
+    const removedResource = layer.resources[index]
+    layer.resources.splice(index, 1)
+    // 移除对应的 TileSet
+    let globalIdx = 0
+    for (const l of mapData.value.layers) {
+      if (l.id === layer.id) break
+      globalIdx += l.resources.length
+    }
+    globalIdx += index
+    if (globalIdx < mapData.value.tileSets.length) {
+      mapData.value.tileSets.splice(globalIdx, 1)
+    }
+    // 清理画布上的相关瓦片
+    if (removedResource) {
+      for (const l of mapData.value.layers) {
+        for (const key of Object.keys(l.tiles)) {
+          const tileId = l.tiles[key]
+          const resIdx = Math.floor(tileId / 1000) - 1
+          if (resIdx === globalIdx) {
+            delete l.tiles[key]
+          }
+        }
+      }
     }
   }
 
   function clearResources() {
-    mapResources.value = []
+    const layer = activeLayer.value
+    if (!layer) return
+    let startIdx = 0
+    for (const l of mapData.value.layers) {
+      if (l.id === layer.id) break
+      startIdx += l.resources.length
+    }
+    const count = layer.resources.length
+    mapData.value.tileSets.splice(startIdx, count)
+    layer.resources = []
+    // 清空该图层的所有瓦片
+    if (layer.type === 'drawing') {
+      layer.tiles = {}
+    }
   }
 
   function updateMapProperty(key: keyof MapData, value: any) {
     ;(mapData.value as any)[key] = value
+  }
+
+  function setCollisionTool(tool: CollisionTool) {
+    collisionTool.value = tool
+  }
+
+  function toggleSnapToPixel() {
+    snapToPixel.value = !snapToPixel.value
+  }
+
+  function setCursorPos(x: number | null, y: number | null) {
+    cursorX.value = x
+    cursorY.value = y
   }
 
   function setTileCollision(tileSetIndex: number, tileIndex: number, collision: boolean) {
@@ -237,7 +359,7 @@ export const useMapStore = defineStore('map', () => {
     if (!tileSet) return
     while (tileSet.tiles.length <= tileIndex) {
       tileSet.tiles.push({
-        collision: true,
+        collision: false,
         tag: '',
         collisionType: '图像',
       })
@@ -255,7 +377,13 @@ export const useMapStore = defineStore('map', () => {
     selectedTileIndex,
     mapResources,
     layerResources,
+    collisionTool,
+    snapToPixel,
+    cursorX,
+    cursorY,
     activeLayer,
+    selectedResource,
+    globalResourceOffset,
     setMapPath,
     loadMap,
     newMap,
@@ -267,6 +395,7 @@ export const useMapStore = defineStore('map', () => {
     moveLayerUp,
     moveLayerDown,
     toggleLayerVisibility,
+    toggleLayerLock,
     renameLayer,
     setActiveLayer,
     toggleGrid,
@@ -276,5 +405,8 @@ export const useMapStore = defineStore('map', () => {
     clearResources,
     updateMapProperty,
     setTileCollision,
+    setCollisionTool,
+    toggleSnapToPixel,
+    setCursorPos,
   }
 })
