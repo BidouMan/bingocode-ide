@@ -251,6 +251,7 @@ async function renderImageLayer(container: any, imgData: any) {
 }
 
 async function placeImage(layer: any, resource: any, x: number, y: number) {
+  console.log('placeImage called', { resourceName: resource.name, x, y })
   let imgData: any
   try {
     const img = await loadImage(resource.path)
@@ -644,6 +645,11 @@ function onPointerLeave() {
 
 function preventDragOver(e: DragEvent) { e.preventDefault(); e.dataTransfer!.dropEffect = 'copy' }
 
+function onDragOver(e: DragEvent) {
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+}
+
 function setupInteraction() {
   if (!app || !app.canvas) return
   const canvas = app.canvas as HTMLCanvasElement
@@ -653,26 +659,30 @@ function setupInteraction() {
   canvas.addEventListener('pointermove', onPointerMove)
   canvas.addEventListener('pointerup', onPointerUp)
   canvas.addEventListener('pointerleave', onPointerLeave)
-  canvas.addEventListener('dragover', preventDragOver)
-  canvas.addEventListener('drop', onDrop)
   canvas.addEventListener('contextmenu', onContextMenu)
 }
 
 function onDrop(e: DragEvent) {
   e.preventDefault()
   const layer = mapStore.activeLayer
+  console.log('onDrop called', { layerType: layer?.type, resourceCount: layer?.resources?.length })
 
   // 图像拖放（使用精确坐标）
   const imageData = e.dataTransfer?.getData('application/x-bingo-image')
+  console.log('imageData:', imageData)
   if (imageData && layer && layer.type === 'image') {
     try {
       const { resourceIndex } = JSON.parse(imageData)
       const resource = layer.resources[resourceIndex]
+      console.log('resource:', resource)
       const worldPos = screenToWorld(e)
+      console.log('worldPos:', worldPos)
       if (resource && worldPos) {
         placeImage(layer, resource, worldPos.x, worldPos.y)
       }
-    } catch {}
+    } catch (err) {
+      console.error('drop error:', err)
+    }
     return
   }
 
@@ -974,8 +984,6 @@ onBeforeUnmount(() => {
     canvas.removeEventListener('pointermove', onPointerMove)
     canvas.removeEventListener('pointerup', onPointerUp)
     canvas.removeEventListener('pointerleave', onPointerLeave)
-    canvas.removeEventListener('dragover', preventDragOver)
-    canvas.removeEventListener('drop', onDrop)
     canvas.removeEventListener('contextmenu', onContextMenu)
   }
   if (app) {
@@ -993,6 +1001,8 @@ defineExpose({ redraw, cursorGridPos, renderAllLayers, showTransformBox, removeT
     ref="canvasRef"
     class="map-canvas"
     @mousedown="onMouseDown"
+    @dragover.prevent="onDragOver"
+    @drop.prevent="onDrop"
   />
 </template>
 
