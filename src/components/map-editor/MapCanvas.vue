@@ -651,47 +651,44 @@ function preventDragOver(e: DragEvent) { e.preventDefault(); e.dataTransfer!.dro
 function onDragOver(e: DragEvent) {
   e.preventDefault()
   if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
-}
-
-function setupInteraction() {
-  if (!app || !app.canvas) return
-  const canvas = app.canvas as HTMLCanvasElement
-
-  canvas.addEventListener('wheel', onWheel, { passive: false })
-  canvas.addEventListener('pointerdown', onPointerDown)
-  canvas.addEventListener('pointermove', onPointerMove)
-  canvas.addEventListener('pointerup', onPointerUp)
-  canvas.addEventListener('pointerleave', onPointerLeave)
-  canvas.addEventListener('contextmenu', onContextMenu)
+  console.log('[MapCanvas] onDragOver fired, target:', e.target?.className || e.target?.tagName)
 }
 
 function onDrop(e: DragEvent) {
   e.preventDefault()
-  const layer = mapStore.activeLayer
-  console.log('onDrop called', { layerType: layer?.type, resourceCount: layer?.resources?.length })
+  e.stopPropagation()
+  console.log('[MapCanvas] onDrop fired!')
+  console.log('[MapCanvas] drop target:', e.target?.className || e.target?.tagName)
+  console.log('[MapCanvas] drop currentTarget:', e.currentTarget?.className || e.currentTarget?.tagName)
 
-  // 图像拖放（使用精确坐标）
+  const layer = mapStore.activeLayer
+  console.log('[MapCanvas] layer:', layer ? { name: layer.name, type: layer.type, resourceCount: layer.resources?.length } : null)
+
   const imageData = e.dataTransfer?.getData('application/x-bingo-image')
-  console.log('imageData:', imageData)
+  console.log('[MapCanvas] imageData:', imageData)
+
   if (imageData && layer && layer.type === 'image') {
     try {
       const { resourceIndex } = JSON.parse(imageData)
       const resource = layer.resources[resourceIndex]
-      console.log('resource:', resource)
+      console.log('[MapCanvas] resource:', resource)
       const worldPos = screenToWorld(e)
-      console.log('worldPos:', worldPos)
+      console.log('[MapCanvas] worldPos:', worldPos)
       if (resource && worldPos) {
         placeImage(layer, resource, worldPos.x, worldPos.y)
       }
     } catch (err) {
-      console.error('drop error:', err)
+      console.error('[MapCanvas] drop error:', err)
     }
     return
   }
 
-  // 瓦片拖放（使用网格坐标）
+  // 瓦片拖放
   const tileData = e.dataTransfer?.getData('application/x-bingo-tile')
-  if (!tileData) return
+  if (!tileData) {
+    console.log('[MapCanvas] no drag data found')
+    return
+  }
 
   const pos = screenToGrid(e as any)
   if (!pos) return
@@ -978,6 +975,7 @@ onMounted(() => {
   // 在 document 上注册 drop 事件，确保能接收拖放
   document.addEventListener('dragover', onDragOver)
   document.addEventListener('drop', onDrop)
+  console.log('[MapCanvas] document dragover and drop listeners registered')
 })
 
 onBeforeUnmount(() => {
