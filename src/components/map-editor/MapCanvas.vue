@@ -250,6 +250,43 @@ async function renderImageLayer(container: any, imgData: any) {
   }
 }
 
+async function placeImage(layer: any, resource: any, x: number, y: number) {
+  try {
+    const img = await loadImage(resource.path)
+    const imgData = {
+      imagePath: resource.path,
+      position: [x, y],
+      rotation: 0,
+      scale: 1,
+      scaleX: 1,
+      scaleY: 1,
+      opacity: 1,
+      width: img.naturalWidth || 64,
+      height: img.naturalHeight || 64,
+      collisionType: '图像',
+      collisionEnabled: false,
+    }
+    layer.images.push(imgData)
+    renderAllLayers()
+  } catch {
+    const imgData = {
+      imagePath: resource.path,
+      position: [x, y],
+      rotation: 0,
+      scale: 1,
+      scaleX: 1,
+      scaleY: 1,
+      opacity: 1,
+      width: 64,
+      height: 64,
+      collisionType: '图像',
+      collisionEnabled: false,
+    }
+    layer.images.push(imgData)
+    renderAllLayers()
+  }
+}
+
 async function updateTileAt(layerIndex: number, x: number, y: number) {
   const layer = mapStore.mapData.layers[layerIndex]
   if (!layer) return
@@ -390,6 +427,17 @@ function onPointerDown(e: PointerEvent) {
 
   if (e.button === 0 && !e.altKey && !isSpaceHeld) {
     const pos = screenToGrid(e)
+    const layer = mapStore.activeLayer
+
+    // 图像图层：点击放置图像
+    if (layer && layer.type === 'image' && mapStore.selectedResourceIndex >= 0) {
+      const resource = layer.resources[mapStore.selectedResourceIndex]
+      if (resource && pos) {
+        placeImage(layer, resource, pos.x * mapStore.mapData.tileSize, pos.y * mapStore.mapData.tileSize)
+        return
+      }
+    }
+
     if (pos) {
       const globalIdx = mapStore.globalResourceOffset + mapStore.selectedResourceIndex
       if (mapStore.currentTool === 'draw' && mapStore.selectedTileIndex >= 0) {
@@ -605,14 +653,29 @@ function setupInteraction() {
 
 function onDrop(e: DragEvent) {
   e.preventDefault()
-  const data = e.dataTransfer?.getData('application/x-bingo-tile')
-  if (!data) return
+  const layer = mapStore.activeLayer
+  const pos = screenToGrid(e as any)
+  if (!pos) return
+
+  // 图像拖放
+  const imageData = e.dataTransfer?.getData('application/x-bingo-image')
+  if (imageData && layer && layer.type === 'image') {
+    try {
+      const { resourceIndex } = JSON.parse(imageData)
+      const resource = layer.resources[resourceIndex]
+      if (resource) {
+        placeImage(layer, resource, pos.x * mapStore.mapData.tileSize, pos.y * mapStore.mapData.tileSize)
+      }
+    } catch {}
+    return
+  }
+
+  // 瓦片拖放
+  const tileData = e.dataTransfer?.getData('application/x-bingo-tile')
+  if (!tileData) return
 
   try {
-    const { resourceIndex, tileIndex } = JSON.parse(data)
-    const pos = screenToGrid(e as any)
-    if (!pos) return
-
+    const { resourceIndex, tileIndex } = JSON.parse(tileData)
     const globalIdx = mapStore.globalResourceOffset + resourceIndex
     const tileId = (globalIdx + 1) * 1000 + tileIndex
     mapStore.setTile(pos.x, pos.y, tileId)
