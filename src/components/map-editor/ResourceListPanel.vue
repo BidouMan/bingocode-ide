@@ -24,13 +24,21 @@ const showImportDialog = ref(false)
 // 当前图层的资源列表
 const currentResources = computed(() => {
   const layer = mapStore.activeLayer
-  console.log('ResourceListPanel - activeLayer:', JSON.stringify({ name: layer?.name, type: layer?.type, resourceCount: layer?.resources?.length }))
+  console.log('[ResourceListPanel] computed currentResources:', {
+    activeLayerIndex: mapStore.activeLayerIndex,
+    layerName: layer?.name,
+    layerType: layer?.type,
+    resourceCount: layer?.resources?.length,
+    allLayers: mapStore.mapData.layers.map(l => ({ name: l.name, type: l.type }))
+  })
   return layer?.resources ?? []
 })
 
 // 监听图层变化
 watch(() => mapStore.activeLayerIndex, (newIdx) => {
-  console.log('activeLayerIndex changed to:', newIdx, 'layer:', JSON.stringify(mapStore.activeLayer))
+  console.log('[ResourceListPanel] activeLayerIndex changed to:', newIdx)
+  const layer = mapStore.mapData.layers[newIdx]
+  console.log('[ResourceListPanel] layer at newIdx:', layer ? { name: layer.name, type: layer.type } : null)
 })
 
 // Tile thumbnail cache
