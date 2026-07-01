@@ -251,9 +251,10 @@ async function renderImageLayer(container: any, imgData: any) {
 }
 
 async function placeImage(layer: any, resource: any, x: number, y: number) {
+  let imgData: any
   try {
     const img = await loadImage(resource.path)
-    const imgData = {
+    imgData = {
       imagePath: resource.path,
       position: [x, y],
       rotation: 0,
@@ -266,10 +267,8 @@ async function placeImage(layer: any, resource: any, x: number, y: number) {
       collisionType: '图像',
       collisionEnabled: false,
     }
-    layer.images.push(imgData)
-    renderAllLayers()
   } catch {
-    const imgData = {
+    imgData = {
       imagePath: resource.path,
       position: [x, y],
       rotation: 0,
@@ -282,9 +281,16 @@ async function placeImage(layer: any, resource: any, x: number, y: number) {
       collisionType: '图像',
       collisionEnabled: false,
     }
-    layer.images.push(imgData)
-    renderAllLayers()
   }
+  layer.images.push(imgData)
+  await renderAllLayers()
+
+  // 放置后选中该图像并显示变换框，切换到移动模式
+  selectedImageData = imgData
+  selectedImageLayerId = layer.id
+  selectedImageIndex = layer.images.length - 1
+  showTransformBox(imgData)
+  mapStore.setTool('move')
 }
 
 async function updateTileAt(layerIndex: number, x: number, y: number) {
@@ -426,18 +432,19 @@ function onPointerDown(e: PointerEvent) {
   }
 
   if (e.button === 0 && !e.altKey && !isSpaceHeld) {
-    const pos = screenToGrid(e)
     const layer = mapStore.activeLayer
 
-    // 图像图层：点击放置图像
+    // 图像图层：点击放置图像（使用精确坐标）
     if (layer && layer.type === 'image' && mapStore.selectedResourceIndex >= 0) {
       const resource = layer.resources[mapStore.selectedResourceIndex]
-      if (resource && pos) {
-        placeImage(layer, resource, pos.x * mapStore.mapData.tileSize, pos.y * mapStore.mapData.tileSize)
+      const worldPos = screenToWorld(e)
+      if (resource && worldPos) {
+        placeImage(layer, resource, worldPos.x, worldPos.y)
         return
       }
     }
 
+    const pos = screenToGrid(e)
     if (pos) {
       const globalIdx = mapStore.globalResourceOffset + mapStore.selectedResourceIndex
       if (mapStore.currentTool === 'draw' && mapStore.selectedTileIndex >= 0) {
@@ -654,25 +661,27 @@ function setupInteraction() {
 function onDrop(e: DragEvent) {
   e.preventDefault()
   const layer = mapStore.activeLayer
-  const pos = screenToGrid(e as any)
-  if (!pos) return
 
-  // 图像拖放
+  // 图像拖放（使用精确坐标）
   const imageData = e.dataTransfer?.getData('application/x-bingo-image')
   if (imageData && layer && layer.type === 'image') {
     try {
       const { resourceIndex } = JSON.parse(imageData)
       const resource = layer.resources[resourceIndex]
-      if (resource) {
-        placeImage(layer, resource, pos.x * mapStore.mapData.tileSize, pos.y * mapStore.mapData.tileSize)
+      const worldPos = screenToWorld(e)
+      if (resource && worldPos) {
+        placeImage(layer, resource, worldPos.x, worldPos.y)
       }
     } catch {}
     return
   }
 
-  // 瓦片拖放
+  // 瓦片拖放（使用网格坐标）
   const tileData = e.dataTransfer?.getData('application/x-bingo-tile')
   if (!tileData) return
+
+  const pos = screenToGrid(e as any)
+  if (!pos) return
 
   try {
     const { resourceIndex, tileIndex } = JSON.parse(tileData)
@@ -717,6 +726,17 @@ function screenToGrid(e: PointerEvent): { x: number; y: number } | null {
   return {
     x: Math.floor(sx / tileSize),
     y: Math.floor(sy / tileSize),
+  }
+}
+
+function screenToWorld(e: PointerEvent | DragEvent): { x: number; y: number } | null {
+  if (!canvasRef.value || !app) return null
+  const rect = canvasRef.value.getBoundingClientRect()
+  const clientX = 'clientX' in e ? e.clientX : 0
+  const clientY = 'clientY' in e ? e.clientY : 0
+  return {
+    x: (clientX - rect.left - app.stage.x) / currentScale,
+    y: (clientY - rect.top - app.stage.y) / currentScale,
   }
 }
 
