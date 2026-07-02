@@ -8,9 +8,6 @@ const emit = defineEmits<{
   'cursor-move': [x: number, y: number]
 }>()
 
-// Preload PIXI eagerly so canvas mounts instantly
-const pixiPromise = import('pixi.js')
-
 const cursorGridPos = ref<{ x: number; y: number } | null>(null)
 
 const canvasRef = ref<HTMLDivElement>()
@@ -52,7 +49,7 @@ let tileContainer: any = null
 async function initPixi() {
   if (!canvasRef.value) return
 
-  PIXI = await pixiPromise
+  PIXI = await import('pixi.js')
   app = new PIXI.Application()
   await app.init({
     background: '#1e1e1e',
@@ -1184,13 +1181,7 @@ watch(
   }
 )
 
-// 监听 mapData 变化，检查图片是否被添加
-watch(() => JSON.stringify(mapStore.mapData), (newVal) => {
-  const data = JSON.parse(newVal)
-  const imageCount = data.layers.reduce((sum: number, l: any) => sum + (l.images?.length || 0), 0)
-  if (imageCount > 0) {
-  }
-})
+// 监听图层可见性变化
 watch(
   () => mapStore.mapData.layers.map(l => `${l.id}:${l.visible}`),
   () => { ensureLayerOrder() }

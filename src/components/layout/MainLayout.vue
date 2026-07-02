@@ -738,13 +738,13 @@ function codeDisplayName(name: string) {
           <SpriteEditorView />
         </div>
 
-        <!-- ═══ Page 0: 游戏模式 — 地图编辑器 ═══ -->
-        <div v-else-if="editorStore.isGameMode && editorStore.activeEditorMode === 'map'" class="editor-page-full">
+        <!-- ═══ Page 0: 游戏模式 — 地图编辑器 (v-show 保持 PixiJS 实例存活) ═══ -->
+        <div v-show="editorStore.isGameMode && editorStore.activeEditorMode === 'map'" class="editor-page-full">
           <MapEditorView @open-resource-lib="currentPage = 4" />
         </div>
 
         <!-- ═══ Page 0: 游戏模式 — 代码编辑 (侧边栏 + 标签 + 代码编辑 + 控制台) ═══ -->
-        <div v-else-if="editorStore.isGameMode" class="editor-page-game">
+        <div v-if="editorStore.isGameMode && editorStore.activeEditorMode !== 'sprite' && editorStore.activeEditorMode !== 'map'" class="editor-page-game">
           <div class="sidebar">
             <div class="sidebar-toolbar">
               <button class="tool-btn" :class="{ 'tool-btn-active': editorStore.isRunning }" @click="toggleRun" title="运行">
@@ -904,7 +904,7 @@ function codeDisplayName(name: string) {
         </div>
 
         <!-- ═══ Page 3: 代码模式 IDE (全宽) ═══ -->
-        <div v-else class="editor-page-full">
+        <div v-if="!editorStore.isGameMode" class="editor-page-full">
           <div class="ide-tab-bar">
             <div class="tab-bar-tabs">
               <div v-for="(tab, index) in editorStore.currentTabs" :key="tab.id" class="tab-item" :class="{ 'tab-item-active': editorStore.activeTabIndex === index }" @click="editorStore.setActiveTab(index)">
