@@ -96,3 +96,19 @@ pnpm install
 Frontend: Vue 3, Pinia, PixiJS 8, Monaco Editor, xterm.js, TailwindCSS, JSZip
 Desktop: Tauri v2, Rust, tauri-plugin-shell
 Engine: Python 3, Pillow, NumPy (in `engine/venv/`)
+
+## Cross-computer sync
+
+```
+bash setup.sh        # 首次: 创建 MEMORY.md 符号链接
+bash sync-memory.sh  # 日常: 同步记忆 ↔ .mimocode/memory/
+```
+
+**Workflow:**
+1. 公司电脑: `git pull` → `bash setup.sh` → `bash sync-memory.sh`
+2. 编码
+3. 公司电脑: `bash sync-memory.sh` → `git add .mimocode/memory/` → `git commit && git push`
+4. 家里电脑: `git pull` → `bash setup.sh` → `bash sync-memory.sh`
+5. 编码...
+6. 家里电脑: 同步骤 3
+7. 公司电脑: 同步骤 1
