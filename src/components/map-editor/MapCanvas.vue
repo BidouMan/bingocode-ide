@@ -449,6 +449,7 @@ function onPointerDown(e: PointerEvent) {
     if (layer && layer.type === 'image' && mapStore.selectedResourceIndex >= 0) {
       const resource = layer.resources[mapStore.selectedResourceIndex]
       const worldPos = screenToWorld(e)
+      console.log('[MapCanvas] image mode click:', { resource: resource?.name, worldPos })
       if (resource && worldPos) {
         placeImage(layer, resource, worldPos.x, worldPos.y)
         return
