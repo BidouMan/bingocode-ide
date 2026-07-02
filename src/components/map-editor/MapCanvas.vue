@@ -8,6 +8,9 @@ const emit = defineEmits<{
   'cursor-move': [x: number, y: number]
 }>()
 
+// Preload PIXI eagerly so canvas mounts instantly
+const pixiPromise = import('pixi.js')
+
 const cursorGridPos = ref<{ x: number; y: number } | null>(null)
 
 const canvasRef = ref<HTMLDivElement>()
@@ -49,7 +52,7 @@ let tileContainer: any = null
 async function initPixi() {
   if (!canvasRef.value) return
 
-  PIXI = await import('pixi.js')
+  PIXI = await pixiPromise
   app = new PIXI.Application()
   await app.init({
     background: '#1e1e1e',
@@ -1272,29 +1275,17 @@ onBeforeUnmount(() => {
 function getThumbnailDataUrl(): string | null {
   if (!app || !PIXI || !app.renderer) return null
   try {
-    // Hide UI overlays for a clean map thumbnail
-    if (gridGraphics) gridGraphics.visible = false
-    if (axisX) axisX.visible = false
-    if (axisY) axisY.visible = false
-    if (gameWindowRect) gameWindowRect.visible = false
-    if (transformBox) transformBox.visible = false
-    for (const h of transformHandles) h.visible = false
-    if (rotationHandle) rotationHandle.visible = false
-    if (rotationLine) rotationLine.visible = false
+    const tileSize = mapStore.mapData.tileSize
+    const mapW = mapStore.mapData.width * tileSize
+    const mapH = mapStore.mapData.height * tileSize
+    if (mapW <= 0 || mapH <= 0) return null
 
-    app.renderer.render(app.stage)
-    const dataUrl = app.canvas.toDataURL('image/png')
-
-    // Restore UI overlays
-    if (gridGraphics) gridGraphics.visible = mapStore.showGrid
-    if (axisX) axisX.visible = true
-    if (axisY) axisY.visible = true
-    if (gameWindowRect) gameWindowRect.visible = true
-    if (transformBox) transformBox.visible = true
-    for (const h of transformHandles) h.visible = true
-    if (rotationHandle) rotationHandle.visible = true
-    if (rotationLine) rotationLine.visible = true
-
+    // Render only the tile container to a render texture at map size
+    const rt = PIXI.RenderTexture.create({ width: Math.ceil(mapW), height: Math.ceil(mapH) })
+    app.renderer.render(tileContainer, { renderTexture: rt })
+    const canvas = app.renderer.extract.canvas(rt)
+    const dataUrl = canvas.toDataURL('image/png')
+    rt.destroy(true)
     return dataUrl
   } catch {
     return null
