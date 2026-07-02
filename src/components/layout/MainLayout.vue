@@ -1356,8 +1356,8 @@ function codeDisplayName(name: string) {
 }
 .resource-grid-item-active:hover { box-shadow: inset 0 0 0 2px rgb(91, 199, 114); }
 .resource-thumb {
-  width: 56px;
-  height: 56px;
+  width: 100%;
+  aspect-ratio: 1;
   background: transparent;
   border-radius: 6px;
   display: flex;
