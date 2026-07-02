@@ -42,6 +42,7 @@ legacy/
 
 # MiMoCode internal
 .mimocode/
+!.mimocode/memory/
 
 # Tauri generated
 src-tauri/gen/
