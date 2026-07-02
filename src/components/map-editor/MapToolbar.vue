@@ -30,7 +30,7 @@ const mapOptions = computed(() => {
 })
 
 watch(() => mapStore.currentMapPath, (path) => {
-  const item = resourceStore.maps.find(m => m.path === path || m.name === path)
+  const item = resourceStore.maps.find(m => m.id === path || m.path === path || m.name === path)
   if (item) selectedMap.value = item.id
 }, { immediate: true })
 

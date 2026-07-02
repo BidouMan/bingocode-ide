@@ -80,16 +80,31 @@ watch(() => [...resourceStore.sprites], loadAllSpriteThumbnails)
 
 onMounted(loadAllSpriteThumbnails)
 
-// 地图列表变化时加载缩略图
+// 地图缩略图：只在切换到地图标签时刷新（不用实时）
 function loadAllMapThumbnails() {
   for (const item of resourceStore.maps) {
-    if (item.path && !mapThumbnails.value[item.id]) {
+    if (item.path) {
       loadMapThumbnail(item)
     }
   }
 }
 
-watch(() => [...resourceStore.maps], loadAllMapThumbnails)
+// 地图列表变化时不自动加载缩略图（改为切换标签时刷新）
+watch(() => editorStore.resourceTab, (tab) => {
+  if (tab === 'map') {
+    // 切换到地图标签时刷新缩略图
+    mapThumbnails.value = {}
+    loadAllMapThumbnails()
+  }
+})
+
+// 监听编辑器模式切换（从地图编辑器返回时刷新）
+watch(() => editorStore.activeEditorMode, (mode) => {
+  if (mode !== 'map' && editorStore.resourceTab === 'map') {
+    mapThumbnails.value = {}
+    loadAllMapThumbnails()
+  }
+})
 
 onMounted(loadAllMapThumbnails)
 
@@ -254,8 +269,26 @@ function openResource(item: { id: string; name: string; type: string; content?: 
       editorStore.setActiveTab(idx)
     }
   } else if (item.type === 'map') {
-    // 打开地图编辑器
-    mapStore.setMapPath(item.name)
+    // 打开地图编辑器 — 如果有保存的数据则加载
+    mapStore.setMapPath(item.id)
+    if (item.path) {
+      try {
+        const resp = await fetch(item.path)
+        const blob = await resp.blob()
+        const zip = await JSZip.loadAsync(blob)
+        const mapJsonEntry = zip.file('map.json')
+        if (mapJsonEntry) {
+          const data = JSON.parse(await mapJsonEntry.async('text'))
+          mapStore.loadMap(data)
+          editorStore.setGameMode(true)
+          editorStore.setActiveEditorMode('map')
+          editorStore.setResourceTab('map')
+          return
+        }
+      } catch {
+        // fall through to empty map
+      }
+    }
     mapStore.loadMap({
       name: item.name,
       version: 5,

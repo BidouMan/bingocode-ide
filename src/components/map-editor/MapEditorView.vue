@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { watch } from 'vue'
+import { ref, watch } from 'vue'
 import MapToolbar from './MapToolbar.vue'
 import MapCanvas from './MapCanvas.vue'
 import ResourceListPanel from './ResourceListPanel.vue'
@@ -12,11 +12,13 @@ import JSZip from 'jszip'
 const mapStore = useMapStore()
 const resourceStore = useResourceStore()
 
+const mapCanvasRef = ref<InstanceType<typeof MapCanvas>>()
+
 const emit = defineEmits<{
   'open-resource-lib': []
 }>()
 
-// 自动保存到 localStorage（防抖 500ms）
+// 自动保存到 localStorage + 资源列表（防抖 500ms）
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
 watch(() => JSON.stringify(mapStore.mapData), () => {
   if (autoSaveTimer) clearTimeout(autoSaveTimer)
@@ -25,15 +27,41 @@ watch(() => JSON.stringify(mapStore.mapData), () => {
       try {
         localStorage.setItem(`map_autosave_${mapStore.currentMapPath}`, JSON.stringify(mapStore.mapData))
       } catch {}
+      saveMapToResource()
     }
   }, 500)
 })
 
+async function saveMapToResource() {
+  const path = mapStore.currentMapPath
+  if (!path) return
+  const item = resourceStore.maps.find(m => m.id === path || m.name === path || m.path === path)
+  if (!item) return
+
+  try {
+    const zip = new JSZip()
+    zip.file('map.json', JSON.stringify(mapStore.mapData))
+
+    // Get thumbnail from canvas
+    const thumbDataUrl = mapCanvasRef.value?.getThumbnailDataUrl()
+    if (thumbDataUrl) {
+      const blob = await (await fetch(thumbDataUrl)).blob()
+      zip.file('thumbnail.png', blob)
+    }
+
+    const blob = await zip.generateAsync({ type: 'blob' })
+    const url = URL.createObjectURL(blob)
+    // Revoke old URL to avoid memory leak
+    if (item.path && item.path.startsWith('blob:')) URL.revokeObjectURL(item.path)
+    item.path = url
+  } catch {}
+}
+
 function onNewMap() {
   const mapCount = resourceStore.maps.length
   const name = `地图${mapCount + 1}`
-  resourceStore.addItem({ name, type: 'map', path: '' })
-  mapStore.setMapPath(name)
+  const id = resourceStore.addItem({ name, type: 'map', path: '' })
+  mapStore.setMapPath(id)
   mapStore.loadMap({
     name,
     version: 5,
@@ -311,6 +339,13 @@ async function onExportMap() {
   a.download = `${data.name}.bgm`
   a.click()
   URL.revokeObjectURL(url)
+
+  // Also save to resource store
+  const item = resourceStore.maps.find(m => m.id === mapStore.currentMapPath || m.name === data.name)
+  if (item) {
+    if (item.path && item.path.startsWith('blob:')) URL.revokeObjectURL(item.path)
+    item.path = url
+  }
 }
 
 function onOpenLibrary() {
@@ -335,7 +370,7 @@ function onCursorMove(x: number, y: number) {
           @import-map="onImportMap"
           @export-map="onExportMap"
         />
-        <MapCanvas class="map-canvas-area" @cursor-move="onCursorMove" />
+        <MapCanvas ref="mapCanvasRef" class="map-canvas-area" @cursor-move="onCursorMove" />
         <div class="map-info-bar">
           <span class="info-spacer" />
           <span class="info-label">ID:{{ mapStore.currentMapPath ? mapStore.currentMapPath.split('/').pop()?.split('.')[0] ?? '--' : '--' }}</span>
