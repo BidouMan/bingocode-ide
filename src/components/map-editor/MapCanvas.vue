@@ -666,6 +666,8 @@ function setupInteraction() {
   canvas.addEventListener('pointerup', onPointerUp)
   canvas.addEventListener('pointerleave', onPointerLeave)
   canvas.addEventListener('contextmenu', onContextMenu)
+  // 测试 canvas 是否接收事件
+  canvas.addEventListener('click', () => console.log('[MapCanvas] canvas clicked!'))
   console.log('[MapCanvas] canvas event listeners registered')
 }
 
@@ -958,7 +960,15 @@ watch(
   }
 )
 
-// Watch layer visibility changes
+// 监听 mapData 变化，检查图片是否被添加
+watch(() => JSON.stringify(mapStore.mapData), (newVal) => {
+  const data = JSON.parse(newVal)
+  const imageCount = data.layers.reduce((sum: number, l: any) => sum + (l.images?.length || 0), 0)
+  console.log('[MapCanvas] mapData changed, total images:', imageCount)
+  if (imageCount > 0) {
+    console.log('[MapCanvas] images found:', data.layers.map((l: any) => ({ name: l.name, imageCount: l.images?.length })))
+  }
+})
 watch(
   () => mapStore.mapData.layers.map(l => `${l.id}:${l.visible}`),
   () => { ensureLayerOrder() }
