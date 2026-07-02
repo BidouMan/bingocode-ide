@@ -237,9 +237,14 @@ async function renderAllLayers() {
 }
 
 async function renderImageLayer(container: any, imgData: any) {
-  if (!imgData?.imagePath) return
+  console.log('[MapCanvas] renderImageLayer called:', { imagePath: imgData?.imagePath, position: imgData?.position })
+  if (!imgData?.imagePath) {
+    console.log('[MapCanvas] renderImageLayer: no imagePath')
+    return
+  }
   try {
     const img = await loadImage(imgData.imagePath)
+    console.log('[MapCanvas] image loaded:', { width: img.naturalWidth, height: img.naturalHeight })
     const texture = PIXI.Texture.from(img)
     const sprite = new PIXI.Sprite(texture)
 
@@ -254,8 +259,9 @@ async function renderImageLayer(container: any, imgData: any) {
     sprite.alpha = imgData.opacity ?? 1
 
     container.addChild(sprite)
-  } catch {
-    // image load failed
+    console.log('[MapCanvas] sprite added to container, container children:', container.children.length)
+  } catch (err) {
+    console.error('[MapCanvas] renderImageLayer error:', err)
   }
 }
 
