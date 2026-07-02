@@ -145,10 +145,21 @@ function onDragStart(e: DragEvent, rIdx: number, tIdx: number) {
   const isImageLayer = mapStore.activeLayer?.type === 'image'
   if (isImageLayer) {
     e.dataTransfer?.setData('application/x-bingo-image', JSON.stringify({ resourceIndex: rIdx }))
+    // 设置拖拽状态，供 canvas 检测
+    window.__dragImageData = { resourceIndex: rIdx }
   } else {
     e.dataTransfer?.setData('application/x-bingo-tile', JSON.stringify({ resourceIndex: rIdx, tileIndex: tIdx }))
+    window.__dragTileData = { resourceIndex: rIdx, tileIndex: tIdx }
   }
   e.dataTransfer!.effectAllowed = 'copy'
+}
+
+function onDragEnd() {
+  // 拖拽结束后清理状态（如果 drop 没有触发）
+  setTimeout(() => {
+    window.__dragImageData = null
+    window.__dragTileData = null
+  }, 100)
 }
 
 function onResourceClick(rIdx: number) {
@@ -192,6 +203,7 @@ function onResourceClick(rIdx: number) {
           :class="{ 'image-selected': mapStore.selectedResourceIndex === rIdx }"
           draggable="true"
           @dragstart="onDragStart($event, rIdx, 0)"
+          @dragend="onDragEnd"
           @click="onResourceClick(rIdx)"
         >
           <img :src="resource.path" class="image-preview" />

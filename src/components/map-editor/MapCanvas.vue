@@ -24,6 +24,10 @@ let lastPointer = { x: 0, y: 0 }
 let currentScale = 1.6
 let lastPaintedKey = ''
 
+// 拖拽状态追踪
+let isDraggingFromResource = false
+let dragResourceData: any = null
+
 // Move tool state
 let moveStartPos: { x: number; y: number } | null = null
 let moveTileId = 0
@@ -610,7 +614,7 @@ function onPointerMove(e: PointerEvent) {
   }
 }
 
-function onPointerUp() {
+function onPointerUp(e?: PointerEvent) {
   if (isRotating) {
     isRotating = false
     return
@@ -620,6 +624,36 @@ function onPointerUp() {
     transformDragging = false
     transformHandleIndex = -1
     renderAllLayers()
+    return
+  }
+
+  // 检测从资源面板拖拽过来的图像
+  if (window.__dragImageData && e) {
+    const layer = mapStore.activeLayer
+    if (layer && layer.type === 'image') {
+      const resourceIndex = window.__dragImageData.resourceIndex
+      const resource = layer.resources[resourceIndex]
+      const worldPos = screenToWorld(e)
+      console.log('[MapCanvas] drag-and-drop image:', { resource: resource?.name, worldPos })
+      if (resource && worldPos) {
+        placeImage(layer, resource, worldPos.x, worldPos.y)
+      }
+    }
+    window.__dragImageData = null
+    return
+  }
+
+  // 检测从资源面板拖拽过来的瓦片
+  if (window.__dragTileData && e) {
+    const pos = screenToGrid(e)
+    if (pos) {
+      const { resourceIndex, tileIndex } = window.__dragTileData
+      const globalIdx = mapStore.globalResourceOffset + resourceIndex
+      const tileId = (globalIdx + 1) * 1000 + tileIndex
+      mapStore.setTile(pos.x, pos.y, tileId)
+      updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
+    }
+    window.__dragTileData = null
     return
   }
 
