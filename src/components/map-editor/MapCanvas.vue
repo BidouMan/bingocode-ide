@@ -67,7 +67,9 @@ async function initPixi() {
   setupInteraction()
   applyScale()
   centerView()
-  renderAllLayers()
+  console.log('[MapCanvas] before renderAllLayers')
+  await renderAllLayers()
+  console.log('[MapCanvas] after renderAllLayers, stage children:', app.stage.children.length)
 }
 
 // --- Tile Rendering ---
@@ -307,7 +309,11 @@ async function updateTileAt(layerIndex: number, x: number, y: number) {
 // --- Grid / Axes ---
 
 function drawGrid() {
-  if (!app || !PIXI) return
+  console.log('[MapCanvas] drawGrid called')
+  if (!app || !PIXI) {
+    console.log('[MapCanvas] drawGrid: app or PIXI not ready')
+    return
+  }
   if (gridGraphics) {
     app.stage.removeChild(gridGraphics)
     gridGraphics.destroy()
@@ -333,6 +339,7 @@ function drawGrid() {
 
   gridGraphics.visible = mapStore.showGrid
   app.stage.addChildAt(gridGraphics, 0)
+  console.log('[MapCanvas] drawGrid completed, stage children:', app.stage.children.length)
 }
 
 function drawAxes() {
