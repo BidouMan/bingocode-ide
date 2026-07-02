@@ -2,90 +2,92 @@
 _Durable project-level knowledge. Persists across all sessions in this project. Edit only content under italic instructions._
 
 ## Project context
-_BingoCodeIDE_ is a Tauri v2 + Vue 3 + PixiJS desktop IDE for a custom 2D game engine ("BingoEngine"), refactored from a PySide6 version. Visual game development with sprites, tile-based maps, sounds, and Python scripting. Two modes: game mode (visual editors + code editor + live preview) and IDE mode (pure code editing). Python engine runs as subprocess, communicates via JSON commands over stdin/stdout. Original PySide6 version preserved in `backup/pre-refactor` branch.
+_BingoCodeIDE_ — Tauri v2 + Vue 3 + PixiJS desktop IDE for game development with a Python engine (`bingo_engine.py`). Refactored from a PySide6 version (see sibling project MyIDE for legacy knowledge). Two modes: game mode (visual editors + code + preview) and IDE mode (Python editing + run/stop). Engine runs in subprocess, communicates via JSON over stdout/stdin.
 
 ## Rules
 _Hard constraints from user that every session must respect._
 
-- AGENTS.md should be maintained at repo root: `/Users/amixc/MyWorkSpace/CodeStaction/BingoCodeIDE/AGENTS.md`
-- **ALWAYS reference original PySide6 UI files before implementing ANY UI**: Read `legacy/ui/*.py` and `legacy/assets/qss/*.qss` first. Never design UI from scratch — the original has carefully crafted layouts, colors, and interaction patterns. Match them exactly.
-- **NEVER reinvent the wheel for solved problems**: Before implementing any feature, research how established apps (Scratch, Godot, Unity, etc.) solve the same problem. Use proven libraries and patterns. Drag-and-drop, file operations, undo/redo, etc. are solved problems — find and use existing solutions. Only deviate if the original truly doesn't cover the case.
-- **Systematic debugging before fixes**: User explicitly rejects guesswork. Must add debug logging, trace execution paths bottom-up, identify exact failure point first.
+- Reference original PySide6 UI files before implementing any UI — never design from scratch (see AGENTS.md for file list)
+- Comments and some variable names are in Chinese — do not change
+- Respond to user in Chinese
+- Game stage size is hardcoded to 640x480 throughout the codebase
+- Engine uses unbuffered stdout — do not change
+- Target audience is elementary school students — API must be extremely simple
+- **Never reinvent the wheel** — always check official docs or peer implementations before coding custom solutions [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **Research before implementing** — do not guess at APIs; when a fix fails, research the correct documentation before retrying [ses_0f76eaddaffe8JtDDqJfrCUqkd]
 
 ## Architecture decisions
-_Major design choices with rationale. The "why" matters more than the "what" for future sessions._
+_Major design choices with rationale._
 
-- **Engine as subprocess**: `bingo_engine.py` runs as a Tauri-spawned subprocess (Rust `Command::spawn()`). Isolates user script crashes from IDE. Engine sends JSON commands to stdout; keyboard input piped via stdin.
-- **JSON command protocol (15 types)**: CREATE, UPDATE, DELETE, SAY, CREATE_BATCH, CAMERA_UPDATE, SCENE_UPDATE, PLAY_SOUND, DRAW_TEXT, STOP_SOUND, SCREEN_SHAKE, FPS_UPDATE, UI_COMMAND, PLAY_ANIMATION, RESET. Engine sends absolute paths — web version needs file:// URL resolution.
-- **Full rewrite to Tauri + Vue 3 + PixiJS**: Old PySide6 version in `backup/pre-refactor` (commit `87bbc32`). Engine stays Python; only IDE shell and renderer replaced.
-- **Tauri v2 as desktop shell**: File I/O, Python process spawning, stdout streaming. Rust core minimal — no business logic.
-- **PixiJS replaces QGraphicsView**: WebGL rendering for tiles, sprites, collision. Spatial Hashing + Chunked Map Data for infinite maps. Texture Atlas limit 2048×2048.
-- **Standard stage**: 640×480 fixed engine resolution. All collision, camera, rendering assumes this.
+- **Refactored from PySide6 to Tauri v2**: Original PySide6 app (~22K lines Python) → Tauri v2 + Vue 3 + PixiJS for modern desktop experience. Python engine retained as subprocess.
+- **Subprocess engine pattern**: User scripts run in Python subprocess (not IDE process). Engine sends JSON commands (CREATE/UPDATE/DESTROY) to frontend via stdout. Input events sent via stdin.
 - **Two separate tab systems**: `gameTabs` (game mode) and `codeTabs` (IDE mode). Switching mode preserves both.
-- **UI layout must match original PySide6**: Left sidebar (340px): game preview (320×240) + resource tabs/lists. Right: tab bar + code editor + console splitter. NOT VS Code-like.
-- **Editor area uses stacked-page architecture**: Like original `editor_stacked` QStackedWidget — each mode (game/sprite/map/code) is a full independent page. Sprite/map/IDE editors hide sidebar+tabs+console entirely.
-- **Map format → JSON**: User confirmed migrating back to JSON (originally JSON before binary). Must preserve all functionality.
-- **Map editor features after full audit**: Move tool, right-click image rotation, scroll-wheel scaling, collision polygon closing/edge insertion, auto-save (500ms debounce to localStorage), layer locking, context menu prevention.
-- **Sprite library uses built-in .bgs files**: 14 packs in `public/sprite_lib/`. Read via JSZip in browser. Sprite editor also reads .bgs directly via JSZip.
-- **Code tab has no upload drawer**: User explicitly requested. Only sprite/map/sound tabs show upload button. Drawer overlaps upload button via negative margin.
-- **Terminal throttling**: 30ms throttle buffer + 5000 line cap on frontend.
-- **Environment isolation**: All deps project-local. Python uses `engine/venv/`.
+- **GameCanvas only mounts when running**: Prevents PixiJS from capturing mouse events when not needed.
+- **Event listeners scoped to canvas**: Keyboard/mouse events only on GameCanvas element, not window, to avoid blocking Monaco editor.
+- **Game mode has three sub-pages**: Game mode contains three switchable views controlled by `activeEditorMode`: (1) `'code'` — default with sidebar+code editor+preview, (2) `'sprite'` — independent full-width sprite editor, (3) `'map'` — independent full-width map editor. Top menu buttons (代码/角色/地图) switch between these sub-pages WITHIN game mode. `setResourceTab()` is ONLY for sidebar tab switching (角色/场景/声音/代码), NOT for page switching.
+- **Code mode fully isolated**: Code mode (`isGameMode=false`) has its own menu (新建/打开/保存/运行) and only operates on code tabs. Never modifies game-mode state or vice versa.
+- **Two execution modes in game mode**: (1) Default Python — run .py files directly, output to terminal panel. (2) Game engine mode — run via bingo_engine.py with PixiJS rendering. Default Python comes first as the simpler path. [ses_0f3269dafffe7c1hmFD6MKVa6w]
+- **Python bundled with app**: Must include a bundled Python binary (python-build-standalone recommended) so end users never need to install Python separately. `resolve_engine_env` fallback: bundled python → venv python → system python. [ses_0f3269dafffe7c1hmFD6MKVa6w]
+
+## compose-preferences
+
+- execution-style: subagent
 
 ## Discovered durable knowledge
-_Cross-task facts that survive across sessions. Promoted from session checkpoints' §7 when proven durable._
+_Cross-task facts that survive across sessions._
 
-### Toolchain & framework quirks
-- **`@monaco-editor/loader` dynamic import**: Returns `{ default: loaderFunction }`. Use `const loader = mod.default || mod` before `loader.init()`.
-- **Monaco editor sizing in flex**: `flex: 1; min-height: 0` on parent+child. `nextTick(() => { editor.layout(); editor.focus() })` after creation. Focus issues: `position: absolute; inset: 0` on container.
-- **Vite SVG icon import (MANDATORY)**: All icons via ES module `import` in `<script setup>`, NEVER raw `src` strings. Dynamic `:src="`...${var}`"` doesn't work. Type declarations at `src/types/assets.d.ts`. Enforced project-wide.
-- **PixiJS captures events globally**: Use `v-if` to prevent mounting when not needed. Scope event listeners to canvas element. Canvas intercepts drag events — must register on `document` or parent HTML.
-- **Vite 8 uses rolldown bundler**, needs `esbuild` (`pnpm approve-builds`), build target `es2020` (not `safari13`).
-- **TypeScript 6.0 deprecates `baseUrl`**: Need `"ignoreDeprecations": "6.0"` in tsconfig.json.
-- **TailwindCSS 4**: Uses `@tailwindcss/vite` plugin (not PostCSS).
-- **Vite cache stale code**: Clear `node_modules/.vite` + `dist/`, restart dev server, hard-refresh (Cmd+Shift+R) after changes.
-- **Tauri devtools**: `Cmd+Option+I` on macOS (not F12). Console tab for JS logs.
-
-### Vue patterns
-- **Vue reactivity**: Direct array index assignment doesn't trigger reactivity. Use `splice()`, `push()`, `pop()`, or `toSpliced()`.
-- **Vue `v-for="n in count"` is 1-based**: Data is 0-indexed — use `i-1` offset.
-- **Native `<select>` can't be styled**: Dropdown popup is system-controlled. Use `CustomSelect.vue` for full theme control.
-
-### File formats
-- **`.bgs` (sprite pack)**: ZIP with `config.json` + PNG frames. Config: `{ name, count, frames[], segments[{name, start, end}] }`. Read via JSZip.
-- **`.bgm` (map data)**: ZIP with .info/.tiles/.collision/.resources + `thumbnail.png`. Same JSZip pattern. Thumbnail 150×110.
-- **`.bingo` (zipped game project)**.
-- **Tile ID encoding**: `(global_resource_index + 1) * 1000 + tile_index + 1`. Resource 0 tile 0 = 1001.
-
-### Map editor
-- **Per-layer resource isolation**: Each layer has its own `resources: MapResource[]`. Flat global `mapResources` is dead code after refactor — causes rendering bugs.
-- **Two modes**: Image mode (`activeLayer.type === 'image'`) for placing full images freely. Drawing mode (`activeLayer.type === 'drawing'`) for painting tiles on grid. ResourceListPanel branches UI on layer type.
-- **ImageData interface**: `{ imagePath, position: [x,y], rotation, scale, scaleX, scaleY, opacity, width, height, collisionType, collisionEnabled, collisionShape? }`.
-- **`placeImage`**: Loads actual image dimensions via `loadImage(path)`, fallback 64×64. Stored in `layer.images[]` (part of `mapData`, auto-saved).
-- **Resource library adds tilesets, not maps**: `onResLibImported` calls `mapStore.addResource()`. Never `resourceStore.addItem({ type: 'map' })`.
-- **Tile rendering (PixiJS 8)**: Per-layer `PIXI.Container` with `zIndex`. Tile textures sliced via offscreen canvas. Source images cached in `Map<string, HTMLImageElement>`.
-- **Collision editor**: tileSet index must use `globalResourceOffset` (layer-local → global). `loadCollision` reads points into editor state — don't invert.
-- **`addResource` must create matching TileSet**: Otherwise `setTileCollision()` silently fails.
-- **Flood fill bounds check mandatory**: Without it, filling empty map crashes browser.
-- **`addLayer` ID must use `Math.max`**: `layers.length` collides with imported IDs.
-- **Map switching must preserve/restore data**: Fresh empty maps discard tile work. Load from saved state or localStorage.
-- **PixiJS drag events in Tauri**: HTML5 drag-and-drop API (`dragover`/`drop`) never fires in Tauri webview — not on `app.canvas`, not on `document`, not anywhere. This is a Tauri/Electron compatibility issue, not a PixiJS issue. Use mousedown/mousemove/mouseup pattern with CustomEvent dispatch instead (proven by Scratch, Godot, etc.). See `ResourceListPanel.vue` `onResourceMouseDown` and `MapCanvas.vue` `onScratchDrop` for implementation.
-- **Click-to-place vs drag-and-drop**: Both call `placeImage()` → `renderAllLayers()` pipeline. Click-to-place (via `screenToWorld()`) works. Scratch-style drag (via manual coordinate calculation in `onScratchDrop`) may produce wrong world coordinates if `app.stage.x/y` or `currentScale` values are unexpected. Always use `screenToWorld()` for coordinate conversion.
-
-### Map editor UI conventions (match original PySide6)
-- **Panel width**: Left/right 272px = 256px content + 8px margin each side. Content areas `margin: 0 8px`, `background: rgb(30,30,30)` for visual distinction.
-- **No blue focus borders**: User rejected `#528bff`. Focus = hover color (`rgb(65,69,82)`).
-- **PropertyPanel**: att-frame gap 16px. Physical attribute tag input only shows when "自定义" selected.
-- **Import callback rule**: Library imports return to main page (`currentPage = 0`) but must NOT call `setActiveEditorMode`. Only double-click navigates to editor.
-- **Square card grid pattern**: `aspect-ratio: 1` on `.lib-card`, `grid-auto-rows: max-content` + `align-content: start`. Gap 8px.
-
-### Engine & subprocess
-- **macOS stdin writing**: Must hold `child.stdin` handle from `Command::spawn()` and write via `stdin.write_all()`.
-- **Physics runs at 60Hz** with accumulator pattern. Camera follow triggers re-render when movement ≥ `tile_size // 2`.
-- **Engine sends absolute paths** in CREATE/UPDATE commands — web version needs file:// URL resolution.
-- **Python deps (Pillow/NumPy) are for engine, not IDE**.
-
-### User workflow rules
-- **Systematic debugging before fixes**: User explicitly rejects guesswork. Must add debug logging, trace execution paths bottom-up, identify exact failure point first.
-- **Honest code-trace audit required**: "Function exists" ≠ "function works". Must verify actual execution, not just code presence.
-- **Browser file ops**: `<input type="file">` for open, `<a download>` for save. Temporary Tauri replacement.
-- **Resource auto-selection**: Sidebar lists auto-select first item on tab switch and list changes.
+- **pnpm PATH gotcha (2026-06-26)**: `npm install -g pnpm` installs to `/opt/homebrew/Cellar/node/26.0.0/bin/pnpm` but does NOT add it to PATH. Use full path or `npx` as workaround. `npm bin -g` removed in npm v11 — use `npm prefix -g` instead. [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **Engine API design for kids**: (1) No import needed. (2) Auto-concat args. (3) One-line configs. (4) Blocking patterns harmful in game loops. Inherited from original PySide6 BingoIDE. [MyIDE MEMORY]
+- **`__all__` requirement**: Any new function/class in `bingo_engine.py` MUST be added to `__all__` or won't be importable via `*`. [MyIDE MEMORY]
+- **PySide6 shutdown crash**: During `Py_FinalizeEx`, PySide6's `destroyQCoreApplication()` destroys widget tree. Any Python `eventFilter` triggers SIGSEGV. Mitigation: `removeEventFilter` in cleanup, `window.hide()` + `deleteLater()` + `processEvents()`. [MyIDE MEMORY — relevant for engine subprocess]
+- **Console throttled buffer**: Signal → `_pending_text` string buffer → 30ms QTimer flushes batch to UI via `_raw_append`. Matches VSCode/PyCharm pattern. Output capped at 5000 lines. [AGENTS.md]
+- **Tauri dev mode skips resource bundling**: `tauri.conf.json` `externalBin` and `resources` arrays can be emptied for dev — `find_system_python()` in `lib.rs` resolves Python at runtime. The Python binary reference (`engine/python-aarch64-apple-darwin`) only needed for production bundle. [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **Engine cleanup thread uses waitpid**: `engine.rs` cleanup thread captures PID before dropping MutexGuard, uses `libc::waitpid` directly. Original raw-pointer `*const EngineState` + `.lock()` pattern doesn't compile in Rust. [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **macOS IMK warning is harmless**: `error messaging the mach port for IMKCFRunLoopWakeUpReliable` is Input Method Kit noise, not a real error. [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **Tauri v2 capabilities mandatory for window ops**: `src-tauri/capabilities/default.json` must declare permissions for `core:window:allow-close`, `core:window:allow-minimize`, `core:window:allow-toggle-maximize`, `core:window:allow-start-dragging`. Without it, all JS window API calls silently fail. This is the #1 trap when custom title bars don't work. [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **Tauri v2 `emit_to("main", ...)` required over `emit()` from background threads**: When emitting events from spawned `std::thread` in engine.rs, `app.emit()` does NOT reliably deliver to frontend listeners. Must use `app.emit_to("main", event, payload)` to explicitly target the main window. Also requires `"core:event:default"` in `capabilities/default.json`. [ses_0f3269dafffe7c1hmFD6MKVa6w]
+- **Tauri v2 official title bar pattern**: Use `data-tauri-drag-region` on drag zone + `document.getElementById` + `addEventListener` in `onMounted`. Follow https://v2.tauri.app/learn/window-customization/ exactly. Vue `@click` bindings work but the official pattern uses raw JS event listeners. [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **macOS rounded corners requires native decorations**: CSS `border-radius` cannot create window-level rounded corners. Must use `decorations: true` + `titleBarStyle: "Transparent"` + `hiddenTitle: true`. On Windows, `titleBarStyle`/`hiddenTitle` are ignored (standard titlebar). [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **Original icon files in `src/assets/icons/`**: Use `icon--play.svg`, `icon--stop-all.svg`, `icon--fullscreen.svg`, `icon--unfullscreen.svg` for toolbar buttons instead of inline SVGs. [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **Qt QLayout stretches widgets to fill frame**: When translating Qt layouts to CSS flexbox, remember that `QLayout` stretches child widgets to fill available space. The QSS `padding` creates internal spacing within the stretched widget. To match in CSS: use `align-self: stretch` on the flex child + `padding: Npx` on all sides + inner alignment. Do NOT assume widgets keep their natural size. [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **macOS dock icon safe zone**: `iconutil -c icns` generates correct format. If icon appears too large on dock, content extends too close to canvas edges. macOS applies a rounded-rect mask — content must fit within an invisible circle (more restrictive than 80% square). Need to reduce content further for proper dock sizing. [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **Console panel always-render pattern**: For collapsible bottom panels, keep the panel always rendered and use internal `collapsed` state to hide content. Header bar (26px) stays visible as an interactive element. `v-if` or `v-show` on the wrapper hides the entire panel which is NOT the desired behavior — user wants the panel always present at bottom with collapse toggle. [ses_0fca6436bffeFjyYRHjEP7Aa14, ses_0f376fc72ffez7id3W15c9zIFx]
+- **Resource panel default state**: Default resource tab is `'sprite'` (角色). Console starts collapsed. Background `rgb(30,30,30)` for sunken look vs sidebar `rgb(34,37,43)`. [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **Sprite data model format**: JSON config with `{name, frames[], segments[{name, start, end, fps, loop}]}`. Frames are PNG files in same directory. Segments define animation ranges over frames. [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **Sprite editor original architecture**: Three-panel layout — costume list (100px left), canvas (center), preview panel (264px right). Preview contains 256x256 preview box, FPS slider (1-60), 6 action buttons, animation state list with inline editing. [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **PNG must be RGBA for Tauri icons**: `generate_context!()` panics with "icon is not RGBA" if PNGs in `src-tauri/icons/` are not RGBA mode. Use `Image.convert('RGBA')` before saving. [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **macOS .app icon requires release build**: `tauri dev` doesn't apply icon mask. Must use `tauri build` for proper rounded corners on dock. [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **CSS transform calc(-50% + X) unreliable in Vue :style**: `calc(-50% + ${panX}px)` in reactive style bindings doesn't resolve correctly. Use nested flex container for centering + separate transform wrapper with `transform-origin: 0 0`. [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **SVG checkerboard over CSS gradients**: CSS linear gradients cause sub-pixel white diagonal lines during zoom. Use SVG data URI pattern for clean rendering. [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **box-shadow inset for selection highlights**: `box-shadow: inset 0 0 0 2px color` avoids layout shifts vs `border: 2px solid color`. Prevents jitter on selection. [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **Sprite editor three-frame-index pattern**: `selectedFrameIndex` (animation), `canvasDisplayIndex` (canvas), `costumeHighlightIndex` (list) must be separate. Animation playback should NOT drive canvas or list highlight. [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **Vue v-if + ref timing requires double nextTick**: When element is conditionally rendered with `v-if` and you need its ref, a single `nextTick` may not be enough. Use `nextTick(() => nextTick(() => { ... }))` or `document.querySelector` as robust fallback. [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **Vue watch with array spread for mutation detection**: `watch(() => [...array])` creates new reference each time, ensuring watcher fires on in-place mutations. Plain `watch(() => array)` with `deep: true` may miss mutations. [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **Renaming requires reactive object replacement in Pinia**: `obj.name = newName` on a Pinia ref may not trigger watchers. Use `tabs[idx] = { ...tabs[idx], name: newName }` to create new object reference. [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **Blur event on dynamic v-if input loses value**: When input removed from DOM by v-if after blur fires, event target value may be stale. Use `v-model` bound to separate ref variable, not event.target.value. [ses_0fca6436bffeFjyYRHjEP7Aa14]
+- **`.editor-page-full` must use `flex: 1` not `height: 100%`**: In flex column parents, `height: 100%` is unreliable and causes children to not get proper height. Use `flex: 1; min-height: 0;` on `.editor-page-full` and ensure `.edit-stage-frame` has `display: flex; flex-direction: column;`. [ses_0f376fc72ffez7id3W15c9zIFx]
+- **TerminalPanel always-render pattern (updated)**: For collapsible bottom panels, the panel should ALWAYS be rendered with internal `collapsed` state. Header bar (26px) stays visible. Do NOT use `v-show` or `v-if` on the wrapper — user wants the panel always present at bottom with collapse toggle. [ses_0f376fc72ffez7id3W15c9zIFx]
+- **Code mode menu bar design pattern**: Use `v-if="editorStore.isGameMode"` on template to conditionally render game-mode menu items; `v-else` for code-mode items. Settings button shared. Run/stop icon toggles via `editorStore.isRunning`. [ses_0f376fc72ffez7id3W15c9zIFx]
+- **Tauri v2 `withGlobalTauri` placement**: NOT valid in `build` section — causes JSON schema validation error. Tauri HMR works via Vite WebSocket, not through `withGlobalTauri`. [ses_0f376fc72ffez7id3W15c9zIFx]
+- See MEMORY-MonacoIME.md (9 entries) — Monaco editor IME and configuration history (loader, caret animation, IME jitter, line numbers, color detection)
+- See MEMORY-TerminalEditor.md (14 entries) — terminal, xterm.js, Monaco editor, and code-mode patterns
+- **Map editor architecture (original PySide6)**: Three-panel layout: left (resource list + collision editor), center (toolbar with draw/erase/select/move tools + canvas + info bar), right (map properties + layer list). Uses event filter pattern on QGraphicsView, auto-save on every change, per-layer resource isolation, dual coordinate systems (grid vs pixel), object pool for tile sprites. [ses_0f2715ca4ffebfM0NnVYJ9P2n6]
+- **Map binary format v5**: `.info` (metadata JSON with version field), `.tiles` (tile data), `.collision` (collision shapes), `.resources` (resource paths). Per-layer resources merged on save via `layer_resources_map`. [ses_0f2715ca4ffebfM0NnVYJ9P2n6]
+- **`.bgm` format**: Zip file containing map data files + thumbnail.png. Used for map library storage and export. Map library loads from `assets/map_lib/`, extracts to `assets/maps/`. [ses_0f2715ca4ffebfM0NnVYJ9P2n6]
+- **Map resource library categories**: images (loose images), tiles (tile images), tilesets (tileset sheets). Stored under `assets/map_res_lib/{category}/`. On click, imports resource to current map via `map_editor.add_resource_from_path()`. [ses_0f2715ca4ffebfM0NnVYJ9P2n6]
+- **PixiJS 8 `require()` fails in Vite**: Plan code used `require('pixi.js')` in multiple functions — must store PIXI reference from the initial dynamic `import('pixi.js')` call and reuse it everywhere. Vite is ESM-only. [ses_0f2715ca4ffebfM0NnVYJ9P2n6]
+- **PixiJS 8 Application init**: Constructor is gone; must use `new PIXI.Application()` then `await app.init({...})`. [ses_0f2715ca4ffebfM0NnVYJ9P2n6]
+- **`$store.map` is Vuex syntax**: Vue 3 Composition API with Pinia must use `useMapStore()` directly, not `$store.map?.mapData`. [ses_0f2715ca4ffebfM0NnVYJ9P2n6]
+- **Library page CSS pattern**: `SpriteLibPage.vue` and `MapLibraryPage.vue` share identical toolbar/grid CSS class names (`.lib-toolbar`, `.lib-search`, `.lib-grid`) — could be extracted to shared stylesheet. [ses_0f2715ca4ffebfM0NnVYJ9P2n6]
+- **Pre-existing TS errors**: `MainLayout.vue` (unused vars, null type mismatches), `UploadDrawer.vue` (missing SVG module declarations), `SpriteEditorView.vue` (missing SVG imports), `TerminalPanel.vue` (CSS import), `useEngine.ts` (unrecognized REMOVE type), `terminal.ts` (duplicate functions), `theme.ts` (unused watch). Not blocking builds. [ses_0f2715ca4ffebfM0NnVYJ9P2n6]
+- **Map editor image drag has THREE mechanisms**: (1) HTML5 `dataTransfer` drag (`application/x-bingo-image`), (2) scratch-drag via mousedown/mousemove/mouseup with fixed-position HTML `<img>` + `scratch-drop` CustomEvent on canvas, (3) select-tool click-and-drag via `hitTestImage()` + `isDraggingImage` state for repositioning placed images. All in MapCanvas.vue. [ses_0df6b173cffe2iIZ1i2Wee8su7]
+- **Godot/Scratch select tool interaction pattern**: Select tool = default active tool. Click selects object, then drag moves it. 8 resize handles on bounding box edges/corners. Dedicated rotation handle (circle above top-center connected by line) — not right-click. Select tool is single-purpose for image layers. Move tool is ONLY for tile layers. [ses_0df6b173cffe2iIZ1i2Wee8su7]
+- **Tauri webview CSS `background: url()` unreliable for local files**: CSS `background: url(localPath)` doesn't reliably load local file paths in Tauri webview. Use `<img src>` element instead. Changed drag preview in ResourceListPanel.vue from div+CSS to `<img>`. [ses_0df6b173cffe2iIZ1i2Wee8su7]
+- **Scratch 8-handle anchor resize pattern**: Each handle's opposite corner/edge is the fixed anchor. Clockwise from top-left: a(0)↔e(4), b(1)↔f(5), c(2)↔g(6), d(3)↔h(7). Width/height = distance from anchor to mouse. Position adjusts to keep anchor fixed. Edge handles constrain to one axis. Implemented as data-driven `handleEdges[8][4]` table (`[left,top,right,bottom]`) — no switch cases. [ses_0df6b173cffe2iIZ1i2Wee8su7]
+- **PixiJS sprite scale vs data model width/height**: PIXI.Sprite display size = `texture.naturalWidth * scaleX`. Data model `width`/`height` must represent natural (unscaled) dimensions and stay constant. Visual resize must update `scaleX`/`scaleY`, never `width`/`height`. [ses_0df6b173cffe2iIZ1i2Wee8su7]
+- **Sprite caching for smooth drag**: Store `selectedImageSprite` reference set during `renderImageLayer` (when `imgData === selectedImageData`). For sprites rendered before selection, `cacheSelectedImageSprite()` iterates the layer container's children to find the sprite by index. Drag/resize/rotation then updates the cached sprite directly per frame; full `renderAllLayers()` only on pointer up. Boolean `isImageDragging` guard suppresses the `JSON.stringify(layer.images)` watcher mid-drag. [ses_0df6b173cffe2iIZ1i2Wee8su7]
+- **PixiJS/DOM event ordering**: When using PixiJS `eventMode = 'static'` handles + DOM listeners on same canvas, PixiJS processes events AFTER DOM listeners. Use `nextTick()` deferral to let PixiJS set flags first. [ses_0df6b173cffe2iIZ1i2Wee8su7]
+- **Avoid `JSON.stringify` in watcher getters**: Vue watcher getters run on EVERY dependency check. `JSON.stringify(layer.tiles)` in a getter is O(n) on every change notification. Use revision counters (`tileRevision`, `imageRevision`) incremented at mutation site, return the number from the getter. [ses_0df6b173cffe2iIZ1i2Wee8su7]
+- **Keep PixiJS alive with `v-show`**: Switching map editor with `v-if` destroys+recreates PixiJS (WebGL context init is expensive, ~1s). Use `v-show` instead to keep the component mounted and PixiJS rendering. Avoids re-init latency on every mode switch. [ses_0df6b173cffe2iIZ1i2Wee8su7]
+- **Map .bgm thumbnail from tileContainer only**: Use `PIXI.RenderTexture` sized to exact map pixel dimensions (`mapWidth * tileSize × mapHeight * tileSize`), render only `tileContainer` into it. Produces clean thumbnails without dark canvas borders/UI overlays. [ses_0df6b173cffe2iIZ1i2Wee8su7]
+- **Auto-save throttle to 2000ms**: Generating .bgm zip + thumbnail on every save is CPU-heavy. 2000ms debounce is sufficient; 500ms causes perceived lag on older machines. [ses_0df6b173cffe2iIZ1i2Wee8su7]
