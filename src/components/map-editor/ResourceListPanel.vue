@@ -161,8 +161,10 @@ function onResourceMouseDown(e: MouseEvent, rIdx: number) {
   if (!resource) return
 
   // 创建拖拽预览元素
-  const preview = document.createElement('div')
+  const preview = document.createElement('img')
   preview.id = 'drag-preview'
+  preview.src = resource.path
+  preview.draggable = false
   preview.style.cssText = `
     position: fixed;
     pointer-events: none;
@@ -170,7 +172,7 @@ function onResourceMouseDown(e: MouseEvent, rIdx: number) {
     opacity: 0.8;
     width: 64px;
     height: 64px;
-    background: url(${resource.path}) center/contain no-repeat;
+    object-fit: contain;
     transform: translate(-50%, -50%);
   `
   preview.style.left = e.clientX + 'px'

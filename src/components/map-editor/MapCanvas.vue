@@ -24,14 +24,15 @@ let lastPointer = { x: 0, y: 0 }
 let currentScale = 1.6
 let lastPaintedKey = ''
 
-// 拖拽状态追踪
-let isDraggingFromResource = false
-let dragResourceData: any = null
-
 // Move tool state
 let moveStartPos: { x: number; y: number } | null = null
 let moveTileId = 0
 let movePreview: any = null
+
+// Image drag state
+let isDraggingImage = false
+let imageDragStartWorld = { x: 0, y: 0 }
+let imageDragStartPos = [0, 0]
 
 const mapStore = useMapStore()
 
@@ -255,11 +256,23 @@ async function renderImageLayer(container: any, imgData: any) {
     const scaleY = (imgData.scaleY ?? imgData.scale ?? 1)
     sprite.scale.set(scaleX, scaleY)
 
-    sprite.rotation = (imgData.rotation ?? 0) * Math.PI / 180
+    const rotation = (imgData.rotation ?? 0) * Math.PI / 180
+    // PixiJS rotation is around the anchor point; we want around center
+    // Convert: set anchor to center, rotate, then offset position
+    sprite.anchor.set(0.5, 0.5)
+    sprite.x += (imgData.width || 64) * scaleX / 2
+    sprite.y += (imgData.height || 64) * scaleY / 2
+    sprite.rotation = rotation
+
     sprite.alpha = imgData.opacity ?? 1
 
     container.addChild(sprite)
     console.log('[MapCanvas] sprite added to container, container children:', container.children.length)
+
+    // Cache sprite reference for the currently selected image
+    if (selectedImageData && imgData === selectedImageData) {
+      selectedImageSprite = sprite
+    }
   } catch (err) {
     console.error('[MapCanvas] renderImageLayer error:', err)
   }
@@ -307,7 +320,7 @@ async function placeImage(layer: any, resource: any, x: number, y: number) {
   selectedImageLayerId = layer.id
   selectedImageIndex = layer.images.length - 1
   showTransformBox(imgData)
-  mapStore.setTool('move')
+  mapStore.setTool('select')
 }
 
 async function updateTileAt(layerIndex: number, x: number, y: number) {
@@ -437,38 +450,40 @@ function onPointerDown(e: PointerEvent) {
     return
   }
 
-  // Right click: rotate selected image
-  if (e.button === 2 && selectedImageData) {
-    isRotating = true
-    const rect = canvasRef.value?.getBoundingClientRect()
-    if (rect) {
-      const cx = selectedImageData.position[0] + (selectedImageData.width || 64) / 2
-      const cy = selectedImageData.position[1] + (selectedImageData.height || 64) / 2
-      const mx = (e.clientX - rect.left - app.stage.x) / currentScale
-      const my = (e.clientY - rect.top - app.stage.y) / currentScale
-      rotationStartAngle = Math.atan2(my - cy, mx - cx)
-    }
-    lastPointer = { x: e.clientX, y: e.clientY }
-    e.preventDefault()
-    return
-  }
+  // If transform handle or rotation handle was clicked, don't process further
+  if (transformDragging || isRotating) return
 
   if (e.button === 0 && !e.altKey && !isSpaceHeld) {
     const layer = mapStore.activeLayer
 
-    // 图像图层：点击放置图像
-    if (layer && layer.type === 'image') {
-      // 如果没有选中资源，自动选择第一个
-      if (mapStore.selectedResourceIndex < 0 && layer.resources.length > 0) {
-        mapStore.selectTile(0, -1)
-      }
-      const resource = layer.resources[mapStore.selectedResourceIndex]
+    if (mapStore.currentTool === 'select' && layer && layer.type === 'image') {
       const worldPos = screenToWorld(e)
-      console.log('[MapCanvas] image mode click:', { resource: resource?.name, worldPos, selectedIdx: mapStore.selectedResourceIndex })
-      if (resource && worldPos) {
-        placeImage(layer, resource, worldPos.x, worldPos.y)
-        return
+      if (worldPos) {
+        const hit = hitTestImage(worldPos.x, worldPos.y)
+        if (hit) {
+          if (selectedImageData !== hit.imageData) {
+            // New image selected — build transform box
+            selectedImageData = hit.imageData
+            selectedImageLayerId = hit.layerId
+            selectedImageIndex = hit.imageIndex
+            showTransformBox(hit.imageData)
+            cacheSelectedImageSprite()
+          }
+          imageDragStartWorld = { x: worldPos.x, y: worldPos.y }
+          imageDragStartPos = [...hit.imageData.position]
+          // Defer drag start so PixiJS handles can set their flags first
+          nextTick(() => {
+            if (!transformDragging && !isRotating) {
+              isDraggingImage = true
+              isImageDragging = true
+            }
+          })
+          return
+        } else {
+          removeTransformBox()
+        }
       }
+      return
     }
 
     const pos = screenToGrid(e)
@@ -524,54 +539,117 @@ function onPointerMove(e: PointerEvent) {
     return
   }
 
-  // Right-click rotation
+  // Rotation via handle
   if (isRotating && selectedImageData) {
-    const rect = canvasRef.value?.getBoundingClientRect()
-    if (rect) {
-      const cx = selectedImageData.position[0] + (selectedImageData.width || 64) / 2
-      const cy = selectedImageData.position[1] + (selectedImageData.height || 64) / 2
-      const mx = (e.clientX - rect.left - app.stage.x) / currentScale
-      const my = (e.clientY - rect.top - app.stage.y) / currentScale
-      const angle = Math.atan2(my - cy, mx - cx)
-      selectedImageData.rotation = (angle * 180 / Math.PI)
+    const pos = selectedImageData.position || [0, 0]
+    const w = (selectedImageData.width || 64) * (selectedImageData.scaleX ?? selectedImageData.scale ?? 1)
+    const h = (selectedImageData.height || 64) * (selectedImageData.scaleY ?? selectedImageData.scale ?? 1)
+    const cx = pos[0] + w / 2
+    const cy = pos[1] + h / 2
+    const worldPos = screenToWorld(e)
+    if (worldPos) {
+      const angle = Math.atan2(worldPos.y - cy, worldPos.x - cx)
+      selectedImageData.rotation = ((angle - rotationStartAngle) * 180 / Math.PI)
       updateTransformBox()
-      renderAllLayers()
+      updateSelectedImageSprite()
     }
     return
   }
 
-  // Transform drag
+  // Transform handle drag
   if (transformDragging && selectedImageData && transformHandleIndex >= 0) {
-    const rect = canvasRef.value?.getBoundingClientRect()
-    if (!rect) return
-    const dx = (e.clientX - lastPointer.x) / currentScale
-    const dy = (e.clientY - lastPointer.y) / currentScale
-    lastPointer = { x: e.clientX, y: e.clientY }
-
-    const origW = transformStartRect.w
-    const origH = transformStartRect.h
-    const origX = transformStartRect.x
-    const origY = transformStartRect.y
+    const worldPos = screenToWorld(e)
+    if (!worldPos) return
     const idx = transformHandleIndex
+    const mx = worldPos.x
+    const my = worldPos.y
 
-    let newX = selectedImageData.position[0]
-    let newY = selectedImageData.position[1]
-    let newW = origW
-    let newH = origH
+    // Each handle controls specific edges: [left, top, right, bottom]
+    // Uncontrolled edges stay fixed at their initial position
+    const handleEdges = [
+      [true,  true,  false, false], // 0 top-left
+      [false, true,  false, false], // 1 top-center
+      [false, true,  true,  false], // 2 top-right
+      [false, false, true,  false], // 3 right-center
+      [false, false, true,  true ], // 4 bottom-right
+      [false, false, false, true ], // 5 bottom-center
+      [true,  false, false, true ], // 6 bottom-left
+      [true,  false, false, false], // 7 left-center
+    ]
+    const edges = handleEdges[idx]
 
-    if (idx === 0 || idx === 6 || idx === 7) { newX += dx }
-    if (idx === 2 || idx === 3 || idx === 4) { newW += dx }
-    if (idx === 0 || idx === 1 || idx === 2) { newY += dy }
-    if (idx === 4 || idx === 5 || idx === 6) { newH += dy }
-    if (idx === 6) { newW -= dx; newX += dx }
-    if (idx === 0) { newW -= dx; newX += dx; newH -= dy; newY += dy }
-    if (idx === 2) { newH -= dy; newY += dy }
+    let newLeft   = edges[0] ? mx : transformStartBox.left
+    let newTop    = edges[1] ? my : transformStartBox.top
+    let newRight  = edges[2] ? mx : transformStartBox.right
+    let newBottom = edges[3] ? my : transformStartBox.bottom
 
-    if (newW > 10 && newH > 10) {
-      selectedImageData.position = [newX, newY]
-      selectedImageData.width = Math.abs(newW) / (selectedImageData.scaleX ?? selectedImageData.scale ?? 1)
-      selectedImageData.height = Math.abs(newH) / (selectedImageData.scaleY ?? selectedImageData.scale ?? 1)
+    const minPx = 10
+
+    // Corner handles (0,2,4,6): maintain aspect ratio
+    const isCorner = idx % 2 === 0
+    if (isCorner) {
+      const origPW = transformStartBox.right - transformStartBox.left
+      const origPH = transformStartBox.bottom - transformStartBox.top
+      const ratio = origPW / origPH
+      // Anchor is the opposite corner (fixed)
+      let rawW: number, rawH: number
+      if (idx === 0) { // top-left → anchor is bottom-right
+        rawW = transformStartBox.right - mx
+        rawH = transformStartBox.bottom - my
+      } else if (idx === 2) { // top-right → anchor is bottom-left
+        rawW = mx - transformStartBox.left
+        rawH = transformStartBox.bottom - my
+      } else if (idx === 4) { // bottom-right → anchor is top-left
+        rawW = mx - transformStartBox.left
+        rawH = my - transformStartBox.top
+      } else { // idx === 6, bottom-left → anchor is top-right
+        rawW = transformStartBox.right - mx
+        rawH = my - transformStartBox.top
+      }
+      // Constrain to ratio using the dominant axis
+      rawW = Math.max(rawW, minPx)
+      rawH = Math.max(rawH, minPx)
+      if (rawW / rawH > ratio) {
+        rawH = rawW / ratio
+      } else {
+        rawW = rawH * ratio
+      }
+      // Recompute edges from anchor + constrained size
+      if (idx === 0) { newLeft = transformStartBox.right - rawW; newTop = transformStartBox.bottom - rawH }
+      else if (idx === 2) { newTop = transformStartBox.bottom - rawH; newRight = transformStartBox.left + rawW }
+      else if (idx === 4) { newRight = transformStartBox.left + rawW; newBottom = transformStartBox.top + rawH }
+      else { newLeft = transformStartBox.right - rawW; newBottom = transformStartBox.top + rawH }
+    }
+
+    let pixelW = Math.abs(newRight - newLeft)
+    let pixelH = Math.abs(newBottom - newTop)
+    if (pixelW < minPx) pixelW = minPx
+    if (pixelH < minPx) pixelH = minPx
+
+    selectedImageData.position = [
+      Math.min(newLeft, newRight),
+      Math.min(newTop, newBottom),
+    ]
+    // Update scale to match new pixel size, keeping natural width/height constant
+    const origW = selectedImageData.width || 64
+    const origH = selectedImageData.height || 64
+    selectedImageData.scaleX = pixelW / origW
+    selectedImageData.scaleY = pixelH / origH
+    selectedImageData.scale = selectedImageData.scaleX
+    updateTransformBox()
+    updateSelectedImageSprite()
+    return
+  }
+
+  // Image body drag
+  if (isDraggingImage && selectedImageData) {
+    const worldPos = screenToWorld(e)
+    if (worldPos) {
+      const dx = worldPos.x - imageDragStartWorld.x
+      const dy = worldPos.y - imageDragStartWorld.y
+      selectedImageData.position = [imageDragStartPos[0] + dx, imageDragStartPos[1] + dy]
       updateTransformBox()
+      updateSelectedImageSprite()
     }
     return
   }
@@ -621,46 +699,29 @@ function onPointerMove(e: PointerEvent) {
   }
 }
 
-function onPointerUp(e?: PointerEvent) {
-  if (isRotating) {
-    isRotating = false
-    return
-  }
-
+function onPointerUp() {
   if (transformDragging) {
     transformDragging = false
     transformHandleIndex = -1
+    isImageDragging = false
+    updateSelectedImageSprite()
     renderAllLayers()
     return
   }
 
-  // 检测从资源面板拖拽过来的图像
-  if (window.__dragImageData && e) {
-    const layer = mapStore.activeLayer
-    if (layer && layer.type === 'image') {
-      const resourceIndex = window.__dragImageData.resourceIndex
-      const resource = layer.resources[resourceIndex]
-      const worldPos = screenToWorld(e)
-      console.log('[MapCanvas] drag-and-drop image:', { resource: resource?.name, worldPos })
-      if (resource && worldPos) {
-        placeImage(layer, resource, worldPos.x, worldPos.y)
-      }
-    }
-    window.__dragImageData = null
+  if (isRotating) {
+    isRotating = false
+    isImageDragging = false
+    updateSelectedImageSprite()
+    renderAllLayers()
     return
   }
 
-  // 检测从资源面板拖拽过来的瓦片
-  if (window.__dragTileData && e) {
-    const pos = screenToGrid(e)
-    if (pos) {
-      const { resourceIndex, tileIndex } = window.__dragTileData
-      const globalIdx = mapStore.globalResourceOffset + resourceIndex
-      const tileId = (globalIdx + 1) * 1000 + tileIndex
-      mapStore.setTile(pos.x, pos.y, tileId)
-      updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
-    }
-    window.__dragTileData = null
+  if (isDraggingImage) {
+    isDraggingImage = false
+    isImageDragging = false
+    updateSelectedImageSprite()
+    renderAllLayers()
     return
   }
 
@@ -698,8 +759,6 @@ function onPointerLeave() {
     previewTile.visible = false
   }
 }
-
-function preventDragOver(e: DragEvent) { e.preventDefault(); e.dataTransfer!.dropEffect = 'copy' }
 
 function setupInteraction() {
   if (!app || !app.canvas) return
@@ -837,6 +896,27 @@ function screenToWorld(e: PointerEvent | DragEvent): { x: number; y: number } | 
   }
 }
 
+function hitTestImage(worldX: number, worldY: number): { layerId: number; imageIndex: number; imageData: any } | null {
+  const layer = mapStore.activeLayer
+  if (!layer || layer.type !== 'image') return null
+
+  // Check images in reverse order (top-most first)
+  for (let i = layer.images.length - 1; i >= 0; i--) {
+    const img = layer.images[i]
+    const pos = img.position || [0, 0]
+    const scaleX = img.scaleX ?? img.scale ?? 1
+    const scaleY = img.scaleY ?? img.scale ?? 1
+    const w = (img.width || 64) * scaleX
+    const h = (img.height || 64) * scaleY
+
+    if (worldX >= pos[0] && worldX <= pos[0] + w &&
+        worldY >= pos[1] && worldY <= pos[1] + h) {
+      return { layerId: layer.id, imageIndex: i, imageData: img }
+    }
+  }
+  return null
+}
+
 function updatePreview(pos: { x: number; y: number } | null) {
   if (!app || !PIXI) return
 
@@ -909,15 +989,18 @@ function floodFill(startX: number, startY: number, fillTileId: number) {
 
 let transformBox: any = null
 let transformHandles: any[] = []
+let rotationHandle: any = null
+let rotationLine: any = null
+let selectedImageSprite: any = null
 let selectedImageData: any = null
 let selectedImageLayerId: number = -1
 let selectedImageIndex: number = -1
 let transformDragging = false
 let transformHandleIndex = -1
-let transformStartPos = { x: 0, y: 0 }
-let transformStartRect = { x: 0, y: 0, w: 0, h: 0 }
+let transformStartBox = { left: 0, top: 0, right: 0, bottom: 0 }
 let isRotating = false
 let rotationStartAngle = 0
+let isImageDragging = false
 
 function showTransformBox(imgData: any) {
   removeTransformBox()
@@ -927,6 +1010,8 @@ function showTransformBox(imgData: any) {
   const pos = imgData.position || [0, 0]
   const w = (imgData.width || 64) * (imgData.scaleX ?? imgData.scale ?? 1)
   const h = (imgData.height || 64) * (imgData.scaleY ?? imgData.scale ?? 1)
+  const cx = pos[0] + w / 2
+  const cy = pos[1] + h / 2
 
   // Bounding box
   transformBox = new PIXI.Graphics()
@@ -954,12 +1039,79 @@ function showTransformBox(imgData: any) {
       e.stopPropagation()
       transformDragging = true
       transformHandleIndex = i
-      transformStartPos = { x: e.globalX, y: e.globalY }
-      transformStartRect = { x: pos[0], y: pos[1], w, h }
+      isImageDragging = true
+      // Read current data at click time — not closure vars that may be stale
+      const p = selectedImageData.position || [0, 0]
+      const s = selectedImageData.scaleX ?? selectedImageData.scale ?? 1
+      const sy = selectedImageData.scaleY ?? selectedImageData.scale ?? 1
+      transformStartBox = {
+        left: p[0], top: p[1],
+        right: p[0] + (selectedImageData.width || 64) * s,
+        bottom: p[1] + (selectedImageData.height || 64) * sy,
+      }
     })
     app.stage.addChild(handle)
     return handle
   })
+
+  // Rotation handle: circle above top-center, connected by a line
+  const rotX = cx
+  const rotY = pos[1] - 30
+
+  rotationLine = new PIXI.Graphics()
+  rotationLine.moveTo(cx, pos[1])
+  rotationLine.lineTo(rotX, rotY)
+  rotationLine.stroke({ width: 1, color: 0x528bff, alpha: 0.8 })
+  app.stage.addChild(rotationLine)
+
+  rotationHandle = new PIXI.Graphics()
+  rotationHandle.circle(rotX, rotY, 6)
+  rotationHandle.fill({ color: 0xffffff })
+  rotationHandle.stroke({ width: 1.5, color: 0x528bff })
+  rotationHandle.cursor = 'crosshair'
+  rotationHandle.eventMode = 'static'
+  rotationHandle.on('pointerdown', (e: any) => {
+    e.stopPropagation()
+    isRotating = true
+    isImageDragging = true
+    const angle = Math.atan2(e.globalY - cy, e.globalX - cx)
+    rotationStartAngle = angle - (selectedImageData.rotation ?? 0) * Math.PI / 180
+  })
+  app.stage.addChild(rotationHandle)
+}
+
+function updateSelectedImageSprite() {
+  if (!selectedImageSprite || !selectedImageData) return
+  const pos = selectedImageData.position || [0, 0]
+  const scaleX = selectedImageData.scaleX ?? selectedImageData.scale ?? 1
+  const scaleY = selectedImageData.scaleY ?? selectedImageData.scale ?? 1
+  const w = (selectedImageData.width || 64) * scaleX
+  const h = (selectedImageData.height || 64) * scaleY
+  selectedImageSprite.x = pos[0] + w / 2
+  selectedImageSprite.y = pos[1] + h / 2
+  selectedImageSprite.rotation = (selectedImageData.rotation ?? 0) * Math.PI / 180
+  selectedImageSprite.scale.set(scaleX, scaleY)
+  selectedImageSprite.alpha = selectedImageData.opacity ?? 1
+  selectedImageSprite.visible = true
+}
+
+function cacheSelectedImageSprite() {
+  selectedImageSprite = null
+  if (selectedImageLayerId < 0) return
+  const container = layerContainers.get(selectedImageLayerId)
+  if (!container) return
+  // Image sprites are added in order as children of the layer container
+  const children = container.children
+  let imgIdx = 0
+  for (const child of children) {
+    if (child instanceof PIXI.Sprite) {
+      if (imgIdx === selectedImageIndex) {
+        selectedImageSprite = child
+        return
+      }
+      imgIdx++
+    }
+  }
 }
 
 function removeTransformBox() {
@@ -973,7 +1125,18 @@ function removeTransformBox() {
     h.destroy()
   }
   transformHandles = []
+  if (rotationHandle) {
+    app?.stage.removeChild(rotationHandle)
+    rotationHandle.destroy()
+    rotationHandle = null
+  }
+  if (rotationLine) {
+    app?.stage.removeChild(rotationLine)
+    rotationLine.destroy()
+    rotationLine = null
+  }
   selectedImageData = null
+  selectedImageSprite = null
 }
 
 function updateTransformBox() {
@@ -1000,6 +1163,26 @@ function updateTransformBox() {
     h.fill({ color: 0xffffff })
     h.stroke({ width: 1, color: 0x528bff })
   })
+
+  // Update rotation handle position
+  const cx = pos[0] + w / 2
+  const cy = pos[1] + h / 2
+  const rotX = cx
+  const rotY = pos[1] - 30
+
+  if (rotationLine) {
+    rotationLine.clear()
+    rotationLine.moveTo(cx, pos[1])
+    rotationLine.lineTo(rotX, rotY)
+    rotationLine.stroke({ width: 1, color: 0x528bff, alpha: 0.8 })
+  }
+
+  if (rotationHandle) {
+    rotationHandle.clear()
+    rotationHandle.circle(rotX, rotY, 6)
+    rotationHandle.fill({ color: 0xffffff })
+    rotationHandle.stroke({ width: 1.5, color: 0x528bff })
+  }
 }
 
 // --- Keyboard Shortcuts ---
@@ -1072,6 +1255,7 @@ watch(
     return JSON.stringify(layer.images)
   },
   () => {
+    if (isImageDragging) return
     if (!imageRenderQueued) {
       imageRenderQueued = true
       nextTick(() => {

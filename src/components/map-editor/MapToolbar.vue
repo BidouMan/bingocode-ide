@@ -78,8 +78,8 @@ function onMapChange(value: string) {
 }
 
 const tools: { id: MapTool; icon: string; label: string }[] = [
-  { id: 'move', icon: iconMove, label: '移动' },
   { id: 'select', icon: iconSelect, label: '选取' },
+  { id: 'move', icon: iconMove, label: '移动' },
   { id: 'draw', icon: iconPaint, label: '绘制' },
   { id: 'erase', icon: iconErase, label: '擦除' },
   { id: 'fill', icon: iconFill, label: '填充' },

@@ -105,7 +105,7 @@ export const useMapStore = defineStore('map', () => {
 
   const activeLayerIndex = ref(0)
   const showGrid = ref(true)
-  const currentTool = ref<MapTool>('move')
+  const currentTool = ref<MapTool>('select')
   const selectedResourceIndex = ref(-1)
   const selectedTileIndex = ref(-1)
   const mapResources = ref<MapResource[]>([])
