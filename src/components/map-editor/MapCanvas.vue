@@ -1063,6 +1063,24 @@ watch(
   }
 )
 
+// Watch image changes on active layer
+watch(
+  () => {
+    const layer = mapStore.activeLayer
+    if (!layer || layer.type !== 'image') return ''
+    return JSON.stringify(layer.images)
+  },
+  () => {
+    if (!renderQueued) {
+      renderQueued = true
+      nextTick(() => {
+        renderAllLayers()
+        renderQueued = false
+      })
+    }
+  }
+)
+
 onMounted(() => {
   nextTick(initPixi)
   window.addEventListener('keydown', onKeyDown)
