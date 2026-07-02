@@ -47,11 +47,9 @@ let sourceImageCache: Map<string, any> = new Map() // "resourcePath" -> HTMLImag
 let tileContainer: any = null
 
 async function initPixi() {
-  console.log('initPixi called, canvasRef:', canvasRef.value)
   if (!canvasRef.value) return
 
   PIXI = await import('pixi.js')
-  console.log('PIXI loaded')
   app = new PIXI.Application()
   await app.init({
     background: '#1e1e1e',
@@ -60,7 +58,6 @@ async function initPixi() {
     resolution: window.devicePixelRatio || 1,
     autoDensity: true,
   })
-  console.log('PixiJS app created')
   canvasRef.value.appendChild(app.canvas)
 
   tileContainer = new PIXI.Container()
@@ -72,9 +69,7 @@ async function initPixi() {
   setupInteraction()
   applyScale()
   centerView()
-  console.log('[MapCanvas] before renderAllLayers')
   await renderAllLayers()
-  console.log('[MapCanvas] after renderAllLayers, stage children:', app.stage.children.length)
 }
 
 // --- Tile Rendering ---
@@ -238,14 +233,11 @@ async function renderAllLayers() {
 }
 
 async function renderImageLayer(container: any, imgData: any) {
-  console.log('[MapCanvas] renderImageLayer called:', { imagePath: imgData?.imagePath, position: imgData?.position })
   if (!imgData?.imagePath) {
-    console.log('[MapCanvas] renderImageLayer: no imagePath')
     return
   }
   try {
     const img = await loadImage(imgData.imagePath)
-    console.log('[MapCanvas] image loaded:', { width: img.naturalWidth, height: img.naturalHeight })
     const texture = PIXI.Texture.from(img)
     const sprite = new PIXI.Sprite(texture)
 
@@ -267,7 +259,6 @@ async function renderImageLayer(container: any, imgData: any) {
     sprite.alpha = imgData.opacity ?? 1
 
     container.addChild(sprite)
-    console.log('[MapCanvas] sprite added to container, container children:', container.children.length)
 
     // Cache sprite reference for the currently selected image
     if (selectedImageData && imgData === selectedImageData) {
@@ -279,7 +270,6 @@ async function renderImageLayer(container: any, imgData: any) {
 }
 
 async function placeImage(layer: any, resource: any, x: number, y: number) {
-  console.log('placeImage called', { resourceName: resource.name, x, y })
   let imgData: any
   try {
     const img = await loadImage(resource.path)
@@ -333,9 +323,7 @@ async function updateTileAt(layerIndex: number, x: number, y: number) {
 // --- Grid / Axes ---
 
 function drawGrid() {
-  console.log('[MapCanvas] drawGrid called')
   if (!app || !PIXI) {
-    console.log('[MapCanvas] drawGrid: app or PIXI not ready')
     return
   }
   if (gridGraphics) {
@@ -363,7 +351,6 @@ function drawGrid() {
 
   gridGraphics.visible = mapStore.showGrid
   app.stage.addChildAt(gridGraphics, 0)
-  console.log('[MapCanvas] drawGrid completed, stage children:', app.stage.children.length)
 }
 
 function drawAxes() {
@@ -763,7 +750,6 @@ function onPointerLeave() {
 function setupInteraction() {
   if (!app || !app.canvas) return
   const canvas = app.canvas as HTMLCanvasElement
-  console.log('[MapCanvas] setupInteraction called, canvas:', canvas)
 
   canvas.addEventListener('wheel', onWheel, { passive: false })
   canvas.addEventListener('pointerdown', onPointerDown)
@@ -773,13 +759,11 @@ function setupInteraction() {
   canvas.addEventListener('contextmenu', onContextMenu)
   // Scratch 风格拖拽：监听自定义事件
   canvas.addEventListener('scratch-drop', onScratchDrop as EventListener)
-  console.log('[MapCanvas] canvas event listeners registered')
 }
 
 function onScratchDrop(e: CustomEvent) {
   const { resourceIndex, clientX, clientY } = e.detail
   const layer = mapStore.activeLayer
-  console.log('[MapCanvas] scratch-drop received:', { resourceIndex, clientX, clientY })
 
   if (!layer || layer.type !== 'image') return
   const resource = layer.resources[resourceIndex]
@@ -790,36 +774,27 @@ function onScratchDrop(e: CustomEvent) {
   const worldX = (clientX - rect.left - app.stage.x) / currentScale
   const worldY = (clientY - rect.top - app.stage.y) / currentScale
 
-  console.log('[MapCanvas] placing image at:', { worldX, worldY })
   placeImage(layer, resource, worldX, worldY)
 }
 
 function onDragOver(e: DragEvent) {
   e.preventDefault()
   if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
-  console.log('[MapCanvas] onDragOver fired, target:', e.target?.className || e.target?.tagName)
 }
 
 function onDrop(e: DragEvent) {
   e.preventDefault()
   e.stopPropagation()
-  console.log('[MapCanvas] onDrop fired!')
-  console.log('[MapCanvas] drop target:', e.target?.className || e.target?.tagName)
-  console.log('[MapCanvas] drop currentTarget:', e.currentTarget?.className || e.currentTarget?.tagName)
 
   const layer = mapStore.activeLayer
-  console.log('[MapCanvas] layer:', layer ? { name: layer.name, type: layer.type, resourceCount: layer.resources?.length } : null)
 
   const imageData = e.dataTransfer?.getData('application/x-bingo-image')
-  console.log('[MapCanvas] imageData:', imageData)
 
   if (imageData && layer && layer.type === 'image') {
     try {
       const { resourceIndex } = JSON.parse(imageData)
       const resource = layer.resources[resourceIndex]
-      console.log('[MapCanvas] resource:', resource)
       const worldPos = screenToWorld(e)
-      console.log('[MapCanvas] worldPos:', worldPos)
       if (resource && worldPos) {
         placeImage(layer, resource, worldPos.x, worldPos.y)
       }
@@ -832,7 +807,6 @@ function onDrop(e: DragEvent) {
   // 瓦片拖放
   const tileData = e.dataTransfer?.getData('application/x-bingo-tile')
   if (!tileData) {
-    console.log('[MapCanvas] no drag data found')
     return
   }
 
@@ -1211,9 +1185,7 @@ watch(
 watch(() => JSON.stringify(mapStore.mapData), (newVal) => {
   const data = JSON.parse(newVal)
   const imageCount = data.layers.reduce((sum: number, l: any) => sum + (l.images?.length || 0), 0)
-  console.log('[MapCanvas] mapData changed, total images:', imageCount)
   if (imageCount > 0) {
-    console.log('[MapCanvas] images found:', data.layers.map((l: any) => ({ name: l.name, imageCount: l.images?.length })))
   }
 })
 watch(
@@ -1273,7 +1245,6 @@ onMounted(() => {
   // 在 document 上注册 drop 事件，确保能接收拖放
   document.addEventListener('dragover', onDragOver)
   document.addEventListener('drop', onDrop)
-  console.log('[MapCanvas] document dragover and drop listeners registered')
 })
 
 onBeforeUnmount(() => {

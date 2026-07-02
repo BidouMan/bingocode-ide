@@ -117,7 +117,6 @@ export const useMapStore = defineStore('map', () => {
 
   const activeLayer = computed(() => {
     const layer = mapData.value.layers[activeLayerIndex.value] ?? null
-    console.log('[mapStore] activeLayer computed:', { index: activeLayerIndex.value, layer: layer ? { name: layer.name, type: layer.type } : null })
     return layer
   })
   const selectedResource = computed(() => activeLayer.value?.resources[selectedResourceIndex.value] ?? null)
@@ -199,7 +198,6 @@ export const useMapStore = defineStore('map', () => {
   }
 
   function addLayer(name: string, type: 'drawing' | 'image' = 'drawing') {
-    console.log('[mapStore] addLayer called:', { name, type })
     const id = mapData.value.layers.length > 0
       ? Math.max(...mapData.value.layers.map(l => l.id)) + 1
       : 0
@@ -213,11 +211,8 @@ export const useMapStore = defineStore('map', () => {
       resources: [],
       images: [],
     }
-    console.log('[mapStore] new layer:', JSON.stringify(newLayer))
     mapData.value.layers.push(newLayer)
     activeLayerIndex.value = mapData.value.layers.length - 1
-    console.log('[mapStore] activeLayerIndex set to:', activeLayerIndex.value)
-    console.log('[mapStore] all layers:', mapData.value.layers.map(l => ({ name: l.name, type: l.type })))
     return id
   }
 
@@ -270,9 +265,7 @@ export const useMapStore = defineStore('map', () => {
   }
 
   function setActiveLayer(index: number) {
-    console.log('[mapStore] setActiveLayer called:', { index, totalLayers: mapData.value.layers.length })
     const layer = mapData.value.layers[index]
-    console.log('[mapStore] layer at index:', layer ? { name: layer.name, type: layer.type } : null)
     activeLayerIndex.value = index
     selectedResourceIndex.value = -1
     selectedTileIndex.value = -1
