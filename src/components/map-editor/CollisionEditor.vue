@@ -308,9 +308,6 @@ onMounted(() => {
       @mouseup="onMouseUp"
       @mouseleave="onMouseUp"
     />
-    <div class="col-actions">
-      <button class="col-reset-btn" @click="resetCollision">重置碰撞</button>
-    </div>
   </div>
 </template>
 
@@ -333,27 +330,5 @@ onMounted(() => {
   border-radius: 4px;
   cursor: crosshair;
   image-rendering: pixelated;
-}
-
-.col-actions {
-  display: flex;
-  gap: 4px;
-}
-
-.col-reset-btn {
-  height: 22px;
-  padding: 0 8px;
-  background: rgb(52, 55, 62);
-  border: 1px solid rgb(73, 76, 86);
-  border-radius: 4px;
-  color: rgb(150, 150, 150);
-  font-size: 11px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.col-reset-btn:hover {
-  background: rgb(62, 65, 72);
-  color: white;
 }
 </style>
