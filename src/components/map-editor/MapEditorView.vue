@@ -29,7 +29,7 @@ watch(() => JSON.stringify(mapStore.mapData), () => {
       } catch {}
       saveMapToResource()
     }
-  }, 500)
+  }, 2000)
 })
 
 async function saveMapToResource() {
@@ -79,6 +79,7 @@ function onNewMap() {
         name: '图层',
         type: 'drawing',
         visible: true,
+        locked: false,
         tiles: {},
         resources: [],
         images: [],

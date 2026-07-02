@@ -302,6 +302,7 @@ async function placeImage(layer: any, resource: any, x: number, y: number) {
     }
   }
   layer.images.push(imgData)
+  mapStore.imageRevision++
   // 不要在这里调用 renderAllLayers，让 watcher 处理
   // renderAllLayers() 会导致竞态条件
 
@@ -410,7 +411,7 @@ function onWheel(e: WheelEvent) {
     selectedImageData.scaleY = newScale
     selectedImageData.scale = newScale
     updateTransformBox()
-    renderAllLayers()
+    updateSelectedImageSprite()
     return
   }
 
@@ -1193,15 +1194,13 @@ watch(
   () => { renderAllLayers() }
 )
 
-// Watch tile changes on active layer (for external modifications like undo)
+// Watch tile changes on active layer (using cheap revision counter)
 let renderQueued = false
 watch(
+  () => mapStore.tileRevision,
   () => {
     const layer = mapStore.activeLayer
-    if (!layer || layer.type !== 'drawing') return ''
-    return JSON.stringify(layer.tiles)
-  },
-  () => {
+    if (!layer || layer.type !== 'drawing') return
     if (!renderQueued) {
       renderQueued = true
       nextTick(() => {
@@ -1215,12 +1214,10 @@ watch(
 // Watch image changes on active layer
 let imageRenderQueued = false
 watch(
+  () => mapStore.imageRevision,
   () => {
     const layer = mapStore.activeLayer
-    if (!layer || layer.type !== 'image') return ''
-    return JSON.stringify(layer.images)
-  },
-  () => {
+    if (!layer || layer.type !== 'image') return
     if (isImageDragging) return
     if (!imageRenderQueued) {
       imageRenderQueued = true

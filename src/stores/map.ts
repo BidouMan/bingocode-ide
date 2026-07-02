@@ -115,6 +115,10 @@ export const useMapStore = defineStore('map', () => {
   const cursorX = ref<number | null>(null)
   const cursorY = ref<number | null>(null)
 
+  // Revision counters for cheap watcher dependency tracking (avoid expensive JSON.stringify in watcher getters)
+  const tileRevision = ref(0)
+  const imageRevision = ref(0)
+
   const activeLayer = computed(() => {
     const layer = mapData.value.layers[activeLayerIndex.value] ?? null
     return layer
@@ -189,6 +193,7 @@ export const useMapStore = defineStore('map', () => {
     } else {
       layer.tiles[key] = tileId
     }
+    tileRevision.value++
   }
 
   function getTile(x: number, y: number): number {
@@ -265,7 +270,6 @@ export const useMapStore = defineStore('map', () => {
   }
 
   function setActiveLayer(index: number) {
-    const layer = mapData.value.layers[index]
     activeLayerIndex.value = index
     selectedResourceIndex.value = -1
     selectedTileIndex.value = -1
@@ -414,5 +418,7 @@ export const useMapStore = defineStore('map', () => {
     setCollisionTool,
     toggleSnapToPixel,
     setCursorPos,
+    tileRevision,
+    imageRevision,
   }
 })
