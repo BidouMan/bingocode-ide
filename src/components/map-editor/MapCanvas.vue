@@ -299,7 +299,8 @@ async function placeImage(layer: any, resource: any, x: number, y: number) {
     }
   }
   layer.images.push(imgData)
-  await renderAllLayers()
+  // 不要在这里调用 renderAllLayers，让 watcher 处理
+  // renderAllLayers() 会导致竞态条件
 
   // 放置后选中该图像并显示变换框，切换到移动模式
   selectedImageData = imgData
