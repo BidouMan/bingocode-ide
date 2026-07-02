@@ -145,21 +145,75 @@ function onDragStart(e: DragEvent, rIdx: number, tIdx: number) {
   const isImageLayer = mapStore.activeLayer?.type === 'image'
   if (isImageLayer) {
     e.dataTransfer?.setData('application/x-bingo-image', JSON.stringify({ resourceIndex: rIdx }))
-    // 设置拖拽状态，供 canvas 检测
-    window.__dragImageData = { resourceIndex: rIdx }
   } else {
     e.dataTransfer?.setData('application/x-bingo-tile', JSON.stringify({ resourceIndex: rIdx, tileIndex: tIdx }))
-    window.__dragTileData = { resourceIndex: rIdx, tileIndex: tIdx }
   }
   e.dataTransfer!.effectAllowed = 'copy'
 }
 
-function onDragEnd() {
-  // 拖拽结束后清理状态（如果 drop 没有触发）
-  setTimeout(() => {
-    window.__dragImageData = null
-    window.__dragTileData = null
-  }, 100)
+// Scratch 风格拖拽：mousedown 开始
+function onResourceMouseDown(e: MouseEvent, rIdx: number) {
+  if (e.button !== 0) return
+  const isImageLayer = mapStore.activeLayer?.type === 'image'
+  if (!isImageLayer) return
+
+  const resource = currentResources.value[rIdx]
+  if (!resource) return
+
+  // 创建拖拽预览元素
+  const preview = document.createElement('div')
+  preview.id = 'drag-preview'
+  preview.style.cssText = `
+    position: fixed;
+    pointer-events: none;
+    z-index: 9999;
+    opacity: 0.8;
+    width: 64px;
+    height: 64px;
+    background: url(${resource.path}) center/contain no-repeat;
+    transform: translate(-50%, -50%);
+  `
+  preview.style.left = e.clientX + 'px'
+  preview.style.top = e.clientY + 'px'
+  document.body.appendChild(preview)
+
+  // 存储拖拽数据
+  window.__scratchDragData = { resourceIndex: rIdx }
+
+  // 监听 mousemove 和 mouseup
+  const onMouseMove = (ev: MouseEvent) => {
+    preview.style.left = ev.clientX + 'px'
+    preview.style.top = ev.clientY + 'px'
+  }
+
+  const onMouseUp = (ev: MouseEvent) => {
+    document.removeEventListener('mousemove', onMouseMove)
+    document.removeEventListener('mouseup', onMouseUp)
+    preview.remove()
+
+    // 检查是否在 canvas 区域释放
+    const canvasEl = document.querySelector('.map-canvas canvas')
+    if (canvasEl) {
+      const rect = canvasEl.getBoundingClientRect()
+      if (ev.clientX >= rect.left && ev.clientX <= rect.right &&
+          ev.clientY >= rect.top && ev.clientY <= rect.bottom) {
+        // 触发自定义事件，通知 canvas 放置图像
+        const event = new CustomEvent('scratch-drop', {
+          detail: {
+            resourceIndex: window.__scratchDragData?.resourceIndex,
+            clientX: ev.clientX,
+            clientY: ev.clientY,
+          }
+        })
+        canvasEl.dispatchEvent(event)
+      }
+    }
+
+    window.__scratchDragData = null
+  }
+
+  document.addEventListener('mousemove', onMouseMove)
+  document.addEventListener('mouseup', onMouseUp)
 }
 
 function onResourceClick(rIdx: number) {
@@ -201,9 +255,7 @@ function onResourceClick(rIdx: number) {
           v-if="mapStore.activeLayer?.type === 'image'"
           class="image-resource-card"
           :class="{ 'image-selected': mapStore.selectedResourceIndex === rIdx }"
-          draggable="true"
-          @dragstart="onDragStart($event, rIdx, 0)"
-          @dragend="onDragEnd"
+          @mousedown="onResourceMouseDown($event, rIdx)"
           @click="onResourceClick(rIdx)"
         >
           <img :src="resource.path" class="image-preview" />

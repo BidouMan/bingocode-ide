@@ -705,9 +705,27 @@ function setupInteraction() {
   canvas.addEventListener('pointerup', onPointerUp)
   canvas.addEventListener('pointerleave', onPointerLeave)
   canvas.addEventListener('contextmenu', onContextMenu)
-  // 测试 canvas 是否接收事件
-  canvas.addEventListener('click', () => console.log('[MapCanvas] canvas clicked!'))
+  // Scratch 风格拖拽：监听自定义事件
+  canvas.addEventListener('scratch-drop', onScratchDrop as EventListener)
   console.log('[MapCanvas] canvas event listeners registered')
+}
+
+function onScratchDrop(e: CustomEvent) {
+  const { resourceIndex, clientX, clientY } = e.detail
+  const layer = mapStore.activeLayer
+  console.log('[MapCanvas] scratch-drop received:', { resourceIndex, clientX, clientY })
+
+  if (!layer || layer.type !== 'image') return
+  const resource = layer.resources[resourceIndex]
+  if (!resource) return
+
+  // 将屏幕坐标转换为世界坐标
+  const rect = (e.target as HTMLElement).getBoundingClientRect()
+  const worldX = (clientX - rect.left - app.stage.x) / currentScale
+  const worldY = (clientY - rect.top - app.stage.y) / currentScale
+
+  console.log('[MapCanvas] placing image at:', { worldX, worldY })
+  placeImage(layer, resource, worldX, worldY)
 }
 
 function onDragOver(e: DragEvent) {
@@ -1061,6 +1079,7 @@ onBeforeUnmount(() => {
     canvas.removeEventListener('pointerup', onPointerUp)
     canvas.removeEventListener('pointerleave', onPointerLeave)
     canvas.removeEventListener('contextmenu', onContextMenu)
+    canvas.removeEventListener('scratch-drop', onScratchDrop as EventListener)
   }
   if (app) {
     app.destroy(true)
