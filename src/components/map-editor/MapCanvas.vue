@@ -445,11 +445,15 @@ function onPointerDown(e: PointerEvent) {
   if (e.button === 0 && !e.altKey && !isSpaceHeld) {
     const layer = mapStore.activeLayer
 
-    // 图像图层：点击放置图像（使用精确坐标）
-    if (layer && layer.type === 'image' && mapStore.selectedResourceIndex >= 0) {
+    // 图像图层：点击放置图像
+    if (layer && layer.type === 'image') {
+      // 如果没有选中资源，自动选择第一个
+      if (mapStore.selectedResourceIndex < 0 && layer.resources.length > 0) {
+        mapStore.selectTile(0, -1)
+      }
       const resource = layer.resources[mapStore.selectedResourceIndex]
       const worldPos = screenToWorld(e)
-      console.log('[MapCanvas] image mode click:', { resource: resource?.name, worldPos })
+      console.log('[MapCanvas] image mode click:', { resource: resource?.name, worldPos, selectedIdx: mapStore.selectedResourceIndex })
       if (resource && worldPos) {
         placeImage(layer, resource, worldPos.x, worldPos.y)
         return
