@@ -260,7 +260,7 @@ async function uploadResource(type: 'sprite' | 'map' | 'sound' | 'code') {
   }
 }
 
-function openResource(item: { id: string; name: string; type: string; content?: string }) {
+async function openResource(item: { id: string; name: string; type: string; content?: string }) {
   if (item.type === 'code') {
     // 在游戏模式标签中查找
     const idx = editorStore.gameTabs.findIndex(t => t.id === item.id)
