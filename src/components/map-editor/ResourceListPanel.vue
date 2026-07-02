@@ -255,10 +255,10 @@ function onResourceClick(rIdx: number) {
           v-if="mapStore.activeLayer?.type === 'image'"
           class="image-resource-card"
           :class="{ 'image-selected': mapStore.selectedResourceIndex === rIdx }"
-          @mousedown="onResourceMouseDown($event, rIdx)"
+          @mousedown.prevent="onResourceMouseDown($event, rIdx)"
           @click="onResourceClick(rIdx)"
         >
-          <img :src="resource.path" class="image-preview" />
+          <img :src="resource.path" class="image-preview" draggable="false" />
         </div>
         <!-- 绘制图层：显示瓦片网格 -->
         <div v-else class="tile-grid">

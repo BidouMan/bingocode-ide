@@ -1064,6 +1064,7 @@ watch(
 )
 
 // Watch image changes on active layer
+let imageRenderQueued = false
 watch(
   () => {
     const layer = mapStore.activeLayer
@@ -1071,11 +1072,11 @@ watch(
     return JSON.stringify(layer.images)
   },
   () => {
-    if (!renderQueued) {
-      renderQueued = true
+    if (!imageRenderQueued) {
+      imageRenderQueued = true
       nextTick(() => {
         renderAllLayers()
-        renderQueued = false
+        imageRenderQueued = false
       })
     }
   }
