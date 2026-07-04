@@ -41,15 +41,18 @@ pub fn run_script(
 
     let app_stdout = app.clone();
     std::thread::spawn(move || {
-        use std::io::Read;
+        use std::io::BufRead;
         let mut reader = BufReader::new(stdout);
-        let mut buf = [0u8; 4096];
+        let mut line = String::new();
         loop {
-            match reader.read(&mut buf) {
+            line.clear();
+            match reader.read_line(&mut line) {
                 Ok(0) => break,
-                Ok(n) => {
-                    let chunk = String::from_utf8_lossy(&buf[..n]).to_string();
-                    let _ = app_stdout.emit_to("main", "engine:stdout", chunk);
+                Ok(_) => {
+                    let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
+                    if !trimmed.is_empty() {
+                        let _ = app_stdout.emit_to("main", "engine:stdout", trimmed.to_string());
+                    }
                 }
                 Err(_) => break,
             }
@@ -59,15 +62,18 @@ pub fn run_script(
 
     let app_stderr = app.clone();
     std::thread::spawn(move || {
-        use std::io::Read;
+        use std::io::BufRead;
         let mut reader = BufReader::new(stderr);
-        let mut buf = [0u8; 4096];
+        let mut line = String::new();
         loop {
-            match reader.read(&mut buf) {
+            line.clear();
+            match reader.read_line(&mut line) {
                 Ok(0) => break,
-                Ok(n) => {
-                    let chunk = String::from_utf8_lossy(&buf[..n]).to_string();
-                    let _ = app_stderr.emit_to("main", "engine:stderr", chunk);
+                Ok(_) => {
+                    let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
+                    if !trimmed.is_empty() {
+                        let _ = app_stderr.emit_to("main", "engine:stderr", trimmed.to_string());
+                    }
                 }
                 Err(_) => break,
             }

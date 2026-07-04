@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { ref, nextTick, onMounted, watch } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import { useEditorStore } from '../../stores/editor'
 import { useResourceStore } from '../../stores/resource'
+import { useProjectStore } from '../../stores/project'
 import { useMapStore } from '../../stores/map'
 import { useEngine } from '../../composables/useEngine'
 import { useFileDialog } from '../../composables/useFileDialog'
-import JSZip from 'jszip'
 import GameCanvas from '../canvas/GameCanvas.vue'
 import CodeEditor from '../editor/CodeEditor.vue'
 import SpriteEditorView from '../sprite-editor/SpriteEditorView.vue'
@@ -37,6 +38,7 @@ import iconRedo from '../../assets/icons/redo.svg'
 
 const editorStore = useEditorStore()
 const resourceStore = useResourceStore()
+const projectStore = useProjectStore()
 const mapStore = useMapStore()
 const engine = useEngine()
 const fileDialog = useFileDialog()
@@ -46,6 +48,8 @@ const currentPage = ref(0)
 const consoleVisible = ref(false)
 const consoleExpanded = ref(true)
 const fileMenuVisible = ref(false)
+const settingsMenuVisible = ref(false)
+const settingsSubmenu = ref<string | null>(null)
 const selectedResource = ref<string | null>(null)
 
 // 角色缩略图缓存
@@ -108,11 +112,10 @@ watch(() => editorStore.activeEditorMode, (mode) => {
 
 onMounted(loadAllMapThumbnails)
 
-// 新项目默认地图
-onMounted(() => {
-  if (resourceStore.maps.length === 0) {
-    resourceStore.addItem({ name: '地图1', type: 'map', path: '' })
-  }
+// 新项目不预创建地图，用户通过按钮创建
+onMounted(async () => {
+  // 初始化默认项目目录
+  await projectStore.initProject()
 })
 
 // 自动选中第一个资源
@@ -176,6 +179,20 @@ function toggleFileMenu() {
 
 function closeFileMenu() {
   fileMenuVisible.value = false
+}
+
+function toggleSettingsMenu() {
+  settingsMenuVisible.value = !settingsMenuVisible.value
+  settingsSubmenu.value = null
+}
+
+function closeSettingsMenu() {
+  settingsMenuVisible.value = false
+  settingsSubmenu.value = null
+}
+
+function openSettingsSubmenu(name: string) {
+  settingsSubmenu.value = name
 }
 
 async function fileMenuAction(action: string) {
@@ -269,51 +286,8 @@ async function openResource(item: { id: string; name: string; type: string; cont
       editorStore.setActiveTab(idx)
     }
   } else if (item.type === 'map') {
-    // 打开地图编辑器 — 如果有保存的数据则加载
+    // 只设置路径，实际加载由 MapEditorView 的 switchToMap 统一处理
     mapStore.setMapPath(item.id)
-    if (item.path) {
-      try {
-        const resp = await fetch(item.path)
-        const blob = await resp.blob()
-        const zip = await JSZip.loadAsync(blob)
-        const mapJsonEntry = zip.file('map.json')
-        if (mapJsonEntry) {
-          const data = JSON.parse(await mapJsonEntry.async('text'))
-          mapStore.loadMap(data)
-          editorStore.setGameMode(true)
-          editorStore.setActiveEditorMode('map')
-          editorStore.setResourceTab('map')
-          return
-        }
-      } catch {
-        // fall through to empty map
-      }
-    }
-    mapStore.loadMap({
-      name: item.name,
-      version: 5,
-      width: 40,
-      height: 30,
-      tileSize: 16,
-      offsetX: 0,
-      offsetY: 0,
-      gravity: false,
-      collisionType: '图像',
-      collisionEnabled: false,
-      layers: [
-        {
-          id: 0,
-          name: '图层',
-          type: 'drawing',
-          visible: true,
-          locked: false,
-          tiles: {},
-          resources: [],
-          images: [],
-        },
-      ],
-      tileSets: [],
-    })
     editorStore.setGameMode(true)
     editorStore.setActiveEditorMode('map')
     editorStore.setResourceTab('map')
@@ -333,28 +307,111 @@ function onOpenLibrary(type: string) {
   // TODO: sound=5
 }
 
+async function onCreateMap() {
+  const projectRoot = projectStore.root
+  if (!projectRoot) return
+
+  const mapCount = resourceStore.maps.length
+  const name = `地图${mapCount + 1}`
+
+  // 创建地图目录
+  const mapDir = `${projectRoot}/assets/maps/${name}`
+  await invoke('create_dir', { path: mapDir })
+
+  // 保存空地图数据
+  const mapData = {
+    name,
+    version: 5,
+    width: 40,
+    height: 30,
+    tileSize: 16,
+    offsetX: 0,
+    offsetY: 0,
+    gravity: false,
+    layers: [
+      {
+        id: 0,
+        name: '图像图层',
+        type: 'imagelayer',
+        visible: true,
+        locked: false,
+        data: '',
+        images: [],
+      },
+    ],
+    tilesets: [],
+  }
+  await invoke('write_file', {
+    path: `${mapDir}/map.json`,
+    content: JSON.stringify(mapData, null, 2),
+  })
+
+  // 添加到资源管理器
+  const id = resourceStore.addItem({ name, type: 'map', path: mapDir })
+  editorStore.setResourceTab('map')
+}
+
 function onSpriteLibImported(id: string, name: string, bgsUrl: string) {
   resourceStore.selectedSpriteId = id
   editorStore.setResourceTab('sprite')
   currentPage.value = 0
 }
 
-function onMapLibImported(bgmUrl: string, name: string) {
-  resourceStore.addItem({ name, type: 'map', path: bgmUrl })
+async function onMapLibImported(bgmUrl: string, name: string) {
+  const projectRoot = projectStore.root
+  if (!projectRoot) return
+
+  // 获取引擎素材目录，找到 .bgm 文件
+  const engineAssetsDir = await invoke<string>('get_engine_assets_dir')
+  const bgmPath = `${engineAssetsDir}/maps/packages/${name}.bgm`
+
+  // 解压 .bgm 到项目目录
+  try {
+    await invoke<string>('extract_bgm_to_project', {
+      bgmPath,
+      projectRoot,
+      mapName: name,
+    })
+  } catch (e) {
+    console.error('[MapLib] 解压失败:', e)
+    return
+  }
+
+  const projectPath = `${projectRoot}/assets/maps/${name}`
+  resourceStore.addItem({ name, type: 'map', path: projectPath })
   editorStore.setResourceTab('map')
   currentPage.value = 0
 }
 
-function onResLibImported(path: string) {
-  // 将资源添加到当前图层的资源列表（作为瓦片集）
+async function onResLibImported(path: string) {
   const name = path.split('/').pop()?.split('.')[0] || '资源'
   const tileSize = mapStore.mapData.tileSize
+  const isImageLayer = mapStore.activeLayer?.type === 'image'
+
+  // 复制资源文件到项目地图目录
+  let relativePath = path
+  try {
+    const engineDir = await invoke<string>('get_engine_assets_dir')
+    const fullSrc = `${engineDir}${path}`
+    const projectRoot = projectStore.root
+    const mapName = mapStore.mapData.name || '未命名地图'
+    const fileName = path.split('/').pop() || 'resource.png'
+    relativePath = `assets/maps/${mapName}/images/${fileName}`
+    await invoke<string>('copy_file_to_project', {
+      src: fullSrc,
+      projectRoot,
+      relativePath,
+    })
+  } catch (e) {
+    console.error('复制资源到项目目录失败:', e)
+  }
+
   mapStore.addResource({
     name,
-    path,
-    resourceType: 'tileset',
-    tileWidth: tileSize,
-    tileHeight: tileSize,
+    path: relativePath,
+    resourceType: isImageLayer ? 'image' : 'tileset',
+    tileWidth: isImageLayer ? 64 : tileSize,
+    tileHeight: isImageLayer ? 64 : tileSize,
     collisionType: '图像',
     collisionEnabled: false,
     tileSetIndex: 0,
@@ -391,22 +448,16 @@ function openSpriteEditor(item: { id: string; name: string; path: string }) {
   editorStore.setGameMode(false)
 }
 
-// 加载角色缩略图
+// 加载角色缩略图（通过 Rust 命令从解压目录读取）
 async function loadSpriteThumbnail(item: { id: string; path: string }) {
   if (spriteThumbnails.value[item.id]) return
+  if (!item.path) return
   try {
-    const resp = await fetch(item.path)
-    const blob = await resp.blob()
-    const zip = await JSZip.loadAsync(blob)
-    const configEntry = zip.file('config.json')
-    if (!configEntry) return
-    const config = JSON.parse(await configEntry.async('text'))
-    const firstFrame = (config.frames || [])[0]
-    if (!firstFrame) return
-    const entry = zip.file(firstFrame)
-    if (!entry) return
-    const frameBlob = await entry.async('blob')
-    spriteThumbnails.value[item.id] = URL.createObjectURL(frameBlob)
+    const { invoke } = await import('@tauri-apps/api/core')
+    const dataUrl = await invoke<string>('get_sprite_thumbnail', {
+      path: item.path,
+    })
+    spriteThumbnails.value[item.id] = dataUrl
   } catch (e) {
     console.warn('Failed to load sprite thumbnail:', e)
   }
@@ -414,14 +465,15 @@ async function loadSpriteThumbnail(item: { id: string; path: string }) {
 
 async function loadMapThumbnail(item: { id: string; path: string }) {
   if (mapThumbnails.value[item.id]) return
+  if (!item.path) return
   try {
-    const resp = await fetch(item.path)
-    const blob = await resp.blob()
-    const zip = await JSZip.loadAsync(blob)
-    const thumbEntry = zip.file('thumbnail.png')
-    if (!thumbEntry) return
-    const thumbBlob = await thumbEntry.async('blob')
-    mapThumbnails.value[item.id] = URL.createObjectURL(thumbBlob)
+    const { convertFileSrc } = await import('@tauri-apps/api/core')
+    // 解压后的地图目录中有 thumbnail.png
+    const thumbUrl = convertFileSrc(`${item.path}/thumbnail.png`)
+    const resp = await fetch(thumbUrl)
+    if (resp.ok) {
+      mapThumbnails.value[item.id] = thumbUrl
+    }
   } catch {
     // thumbnail load failed
   }
@@ -510,8 +562,62 @@ function startMapRename(id: string) {
 function confirmMapRename() {
   if (!mapRenameId.value) return
   const val = mapRenameValue.value.trim()
-  if (val) resourceStore.renameItem(mapRenameId.value, val)
-  mapRenameId.value = null
+  if (!val) { mapRenameId.value = null; return }
+  
+  const item = resourceStore.maps.find(i => i.id === mapRenameId.value)
+  const oldName = item?.name
+  if (!item || !oldName || oldName === val) { mapRenameId.value = null; return }
+  
+  // 先执行目录迁移，再改名字
+  migrateMapDir(oldName, val).then(() => {
+    resourceStore.renameItem(mapRenameId.value!, val)
+    // 更新 item.path
+    if (projectStore.root) {
+      item.path = `${projectStore.root}/assets/maps/${val}`
+    }
+    mapRenameId.value = null
+  })
+}
+
+async function migrateMapDir(oldName: string, newName: string) {
+  if (!projectStore.root) return
+  const oldDir = `${projectStore.root}/assets/maps/${oldName}`
+  const newDir = `${projectStore.root}/assets/maps/${newName}`
+  try {
+    const exists = await invoke<boolean>('path_exists', { path: oldDir })
+    if (!exists) return
+
+    // 原子重命名整个目录
+    await invoke('rename_path', { oldPath: oldDir, newPath: newDir })
+
+    // 更新 map.json 中的资源路径（旧名→新名）
+    const jsonPath = `${newDir}/map.json`
+    const jsonExists = await invoke<boolean>('path_exists', { path: jsonPath })
+    if (jsonExists) {
+      const json = await invoke<string>('read_file', { path: jsonPath })
+      const data = JSON.parse(json)
+      let changed = false
+      for (const layer of data.layers || []) {
+        for (const res of layer.resources || []) {
+          if (res.path?.startsWith(`assets/maps/${oldName}/`)) {
+            res.path = res.path.replace(`assets/maps/${oldName}/`, `assets/maps/${newName}/`)
+            changed = true
+          }
+        }
+        for (const img of layer.images || []) {
+          if (img.imagePath?.startsWith(`assets/maps/${oldName}/`)) {
+            img.imagePath = img.imagePath.replace(`assets/maps/${oldName}/`, `assets/maps/${newName}/`)
+            changed = true
+          }
+        }
+      }
+      if (changed) {
+        await invoke('write_file', { path: jsonPath, content: JSON.stringify(data) })
+      }
+    }
+  } catch (e) {
+    console.error('[MainLayout] 迁移地图目录失败:', e)
+  }
 }
 
 function cancelMapRename() {
@@ -705,10 +811,72 @@ function codeDisplayName(name: string) {
       </template>
 
       <!-- 设置 (两种模式都有) -->
-      <button class="menu-btn">
-        <img :src="iconSettings" class="menu-icon" />
-        <span>设置</span>
-      </button>
+      <div class="menu-file-wrapper" @mouseleave="closeSettingsMenu">
+        <button class="menu-btn" @click="toggleSettingsMenu">
+          <img :src="iconSettings" class="menu-icon" />
+          <span>设置</span>
+        </button>
+        <div v-show="settingsMenuVisible" class="file-menu-dropdown settings-menu">
+          <!-- 渲染模式 -->
+          <div class="settings-item-group" @mouseenter="openSettingsSubmenu('renderMode')">
+            <div class="file-menu-item settings-menu-item">
+              <span>渲染模式</span>
+              <span class="settings-arrow">›</span>
+            </div>
+            <div v-show="settingsSubmenu === 'renderMode'" class="settings-submenu">
+              <button class="file-menu-item" :class="{ 'settings-item-active': editorStore.renderMode === 'smooth' }" @click="editorStore.setRenderMode('smooth'); closeSettingsMenu()">
+                Smooth
+              </button>
+              <button class="file-menu-item" :class="{ 'settings-item-active': editorStore.renderMode === 'pixelated' }" @click="editorStore.setRenderMode('pixelated'); closeSettingsMenu()">
+                Pixelated
+              </button>
+            </div>
+          </div>
+          <!-- 主题 -->
+          <div class="settings-item-group" @mouseenter="openSettingsSubmenu('theme')">
+            <div class="file-menu-item settings-menu-item">
+              <span>主题</span>
+              <span class="settings-arrow">›</span>
+            </div>
+            <div v-show="settingsSubmenu === 'theme'" class="settings-submenu">
+              <button class="file-menu-item settings-item-disabled">Dark (默认)</button>
+              <button class="file-menu-item settings-item-disabled">Light</button>
+              <button class="file-menu-item settings-item-disabled">One Dark</button>
+            </div>
+          </div>
+          <!-- 插件库 -->
+          <div class="settings-item-group" @mouseenter="openSettingsSubmenu('plugins')">
+            <div class="file-menu-item settings-menu-item">
+              <span>插件库</span>
+              <span class="settings-arrow">›</span>
+            </div>
+            <div v-show="settingsSubmenu === 'plugins'" class="settings-submenu">
+              <button class="file-menu-item settings-item-disabled">暂无插件</button>
+            </div>
+          </div>
+          <!-- 快捷键 -->
+          <div class="settings-item-group" @mouseenter="openSettingsSubmenu('shortcuts')">
+            <div class="file-menu-item settings-menu-item">
+              <span>快捷键</span>
+              <span class="settings-arrow">›</span>
+            </div>
+            <div v-show="settingsSubmenu === 'shortcuts'" class="settings-submenu">
+              <button class="file-menu-item settings-item-disabled">编辑快捷键</button>
+            </div>
+          </div>
+          <!-- 引擎设置 -->
+          <div class="settings-item-group" @mouseenter="openSettingsSubmenu('engine')">
+            <div class="file-menu-item settings-menu-item">
+              <span>引擎设置</span>
+              <span class="settings-arrow">›</span>
+            </div>
+            <div v-show="settingsSubmenu === 'engine'" class="settings-submenu">
+              <button class="file-menu-item settings-item-disabled">Python 路径</button>
+              <button class="file-menu-item settings-item-disabled">引擎参数</button>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <!-- 弹性空间 (占6份) -->
       <div class="menu-spacer"></div>
@@ -784,7 +952,7 @@ function codeDisplayName(name: string) {
                     @contextmenu="onSpriteContextMenu($event, item)"
                   >
                     <div class="resource-thumb">
-                      <img v-if="spriteThumbnails[item.id]" :src="spriteThumbnails[item.id]" class="resource-thumb-img" />
+                      <img v-if="spriteThumbnails[item.id]" :src="spriteThumbnails[item.id]" class="resource-thumb-img" :style="{ imageRendering: editorStore.renderMode === 'pixelated' ? 'pixelated' : 'auto' }" />
                       <span v-else>{{ item.name.charAt(0) }}</span>
                     </div>
                     <template v-if="spriteRenameId === item.id">
@@ -814,7 +982,7 @@ function codeDisplayName(name: string) {
                     @contextmenu="onMapContextMenu($event, item)"
                   >
                     <div class="resource-thumb resource-thumb-checker">
-                      <img v-if="mapThumbnails[item.id]" :src="mapThumbnails[item.id]" class="resource-thumb-img" />
+                      <img v-if="mapThumbnails[item.id]" :src="mapThumbnails[item.id]" class="resource-thumb-img" :style="{ imageRendering: editorStore.renderMode === 'pixelated' ? 'pixelated' : 'auto' }" />
                     </div>
                     <template v-if="mapRenameId === item.id">
                       <input
@@ -872,7 +1040,7 @@ function codeDisplayName(name: string) {
                   </div>
                 </div>
               </div>
-              <UploadDrawer v-if="editorStore.resourceTab !== 'code'" :type="editorStore.resourceTab" @uploaded="onResourceUploaded" @open-library="onOpenLibrary" />
+              <UploadDrawer v-if="editorStore.resourceTab !== 'code'" :type="editorStore.resourceTab" @uploaded="onResourceUploaded" @open-library="onOpenLibrary" @create-map="onCreateMap" />
             </div>
           </div>
 
@@ -1116,7 +1284,7 @@ function codeDisplayName(name: string) {
   position: absolute;
   top: 100%;
   left: 0;
-  width: 180px;
+  width: 144px;
   background: rgb(34, 37, 43);
   border-radius: 6px;
   padding: 4px 0;
@@ -1141,6 +1309,41 @@ function codeDisplayName(name: string) {
 }
 .file-menu-item:hover {
   background: rgb(61, 64, 72);
+}
+.settings-menu {
+  width: 144px;
+}
+.settings-item-group {
+  position: relative;
+}
+.settings-menu-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.settings-arrow {
+  font-size: 14px;
+  color: rgb(120, 120, 120);
+}
+.settings-submenu {
+  position: absolute;
+  left: 100%;
+  top: -4px;
+  width: 128px;
+  background: rgb(34, 37, 43);
+  border-radius: 6px;
+  padding: 4px 0;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+.settings-item-active {
+  color: #5BFB84;
+}
+.settings-item-disabled {
+  color: rgb(100, 100, 100);
+  cursor: default;
+}
+.settings-item-disabled:hover {
+  background: transparent;
 }
 
 /* 模式切换开关 */
@@ -1372,7 +1575,6 @@ function codeDisplayName(name: string) {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  image-rendering: pixelated;
   flex-shrink: 0;
 }
 .resource-thumb-map { background: rgb(61, 64, 72); }

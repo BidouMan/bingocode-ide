@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 
 export interface ProjectState {
   root: string
@@ -17,6 +18,7 @@ export const useProjectStore = defineStore('project', () => {
   const runTarget = ref('')
   const codeDirty = ref(false)
   const resourceDirty = ref(false)
+  const initialized = ref(false)
 
   const projectName = computed(() => name.value || '未命名项目')
   const isDirty = computed(() => codeDirty.value || resourceDirty.value)
@@ -26,6 +28,20 @@ export const useProjectStore = defineStore('project', () => {
     name.value = projectName
     codeDirty.value = false
     resourceDirty.value = false
+  }
+
+  async function initProject() {
+    if (initialized.value) return root.value
+    try {
+      const projectRoot = await invoke<string>('init_default_project')
+      root.value = projectRoot
+      name.value = 'default'
+      initialized.value = true
+      return projectRoot
+    } catch (e) {
+      console.error('[Project] 初始化失败:', e)
+      return ''
+    }
   }
 
   function setRunTarget(path: string) {
@@ -52,9 +68,11 @@ export const useProjectStore = defineStore('project', () => {
     runTarget,
     codeDirty,
     resourceDirty,
+    initialized,
     projectName,
     isDirty,
     setProject,
+    initProject,
     setRunTarget,
     markCodeDirty,
     markResourceDirty,

@@ -8,20 +8,24 @@ import iconMove from '../../assets/icons/移动工具.svg'
 import iconSelect from '../../assets/icons/选取工具.svg'
 import iconPaint from '../../assets/icons/icon--paint.svg'
 import iconErase from '../../assets/icons/清空.svg'
-import iconFill from '../../assets/icons/填充.svg'
 import iconNewMap from '../../assets/icons/新建地图.svg'
 import iconImportMap from '../../assets/icons/导入地图.svg'
 import iconExportMap from '../../assets/icons/导出地图.svg'
 import iconGrid from '../../assets/icons/显示网格.svg'
+import iconDelete from '../../assets/icons/选中删除.svg'
 
 const emit = defineEmits<{
   'new-map': []
   'import-map': []
   'export-map': []
+  'switch-map': [itemId: string]
+  'delete-image': []
 }>()
 
 const mapStore = useMapStore()
 const resourceStore = useResourceStore()
+
+const isImageLayer = computed(() => mapStore.activeLayer?.type === 'image')
 
 const selectedMap = ref('')
 
@@ -29,60 +33,29 @@ const mapOptions = computed(() => {
   return resourceStore.maps.map(m => ({ label: m.name, value: m.id }))
 })
 
+// 当外部（如新建/导入）改变 currentMapPath 时，同步下拉框
 watch(() => mapStore.currentMapPath, (path) => {
-  const item = resourceStore.maps.find(m => m.id === path || m.path === path || m.name === path)
-  if (item) selectedMap.value = item.id
+  if (path && resourceStore.maps.find(m => m.id === path)) {
+    selectedMap.value = path
+  }
 }, { immediate: true })
 
 function onMapChange(value: string) {
-  selectedMap.value = value
-  const item = resourceStore.maps.find(m => m.id === value)
-  if (item) {
-    mapStore.setMapPath(item.path || item.name)
-    // 尝试从 localStorage 加载已保存的地图数据
-    const saved = localStorage.getItem(`map_autosave_${item.path || item.name}`)
-    if (saved) {
-      try {
-        const data = JSON.parse(saved)
-        mapStore.loadMap(data)
-        return
-      } catch {}
-    }
-    // 没有保存的数据，创建新地图
-    mapStore.loadMap({
-      name: item.name,
-      version: 5,
-      width: 40,
-      height: 30,
-      tileSize: 16,
-      offsetX: 0,
-      offsetY: 0,
-      gravity: false,
-      collisionType: '图像',
-      collisionEnabled: false,
-      layers: [
-        {
-          id: 0,
-          name: '图层',
-          type: 'drawing',
-          visible: true,
-          locked: false,
-          tiles: {},
-          resources: [],
-          images: [],
-        },
-      ],
-      tileSets: [],
-    })
-  }
+  // 不要在这里设置 selectedMap —— 让 currentMapPath watcher 来同步
+  // 直接在 emit 前设置会导致竞态：async switchToMap 的 await 期间 watcher 会覆盖它
+  emit('switch-map', value)
 }
 
-const tools: { id: MapTool; icon: string; label: string }[] = [
-  { id: 'select', icon: iconSelect, label: '选取' },
-  { id: 'move', icon: iconMove, label: '移动' },
+// 绘制模式专属工具（绘制 → 擦除 → 移动）
+const drawingTools: { id: MapTool; icon: string; label: string }[] = [
   { id: 'draw', icon: iconPaint, label: '绘制' },
   { id: 'erase', icon: iconErase, label: '擦除' },
-  { id: 'fill', icon: iconFill, label: '填充' },
+  { id: 'move', icon: iconMove, label: '移动' },
+]
+
+// 图像模式工具（选取 + 删除）
+const imageTools: { id: MapTool; icon: string; label: string }[] = [
+  { id: 'select', icon: iconSelect, label: '选取' },
 ]
 </script>
 
@@ -100,16 +73,39 @@ const tools: { id: MapTool; icon: string; label: string }[] = [
 
     <div class="toolbar-separator" />
 
-    <button
-      v-for="tool in tools"
-      :key="tool.id"
-      class="toolbar-btn"
-      :class="{ 'toolbar-btn-active': mapStore.currentTool === tool.id }"
-      :title="tool.label"
-      @click="mapStore.setTool(tool.id)"
-    >
-      <img :src="tool.icon" class="toolbar-icon" />
-    </button>
+    <!-- 图像模式：选取 + 删除 -->
+    <template v-if="isImageLayer">
+      <button
+        v-for="tool in imageTools"
+        :key="tool.id"
+        class="toolbar-btn"
+        :class="{ 'toolbar-btn-active': mapStore.currentTool === tool.id }"
+        :title="tool.label"
+        @click="mapStore.setTool(tool.id)"
+      >
+        <img :src="tool.icon" class="toolbar-icon" />
+      </button>
+      <button
+        class="toolbar-btn"
+        title="删除选中图像"
+        @click="emit('delete-image')"
+      >
+        <img :src="iconDelete" class="toolbar-icon" />
+      </button>
+    </template>
+    <!-- 绘制模式：选取、绘制、擦除、移动 -->
+    <template v-else>
+      <button
+        v-for="tool in drawingTools"
+        :key="tool.id"
+        class="toolbar-btn"
+        :class="{ 'toolbar-btn-active': mapStore.currentTool === tool.id }"
+        :title="tool.label"
+        @click="mapStore.setTool(tool.id)"
+      >
+        <img :src="tool.icon" class="toolbar-icon" />
+      </button>
+    </template>
 
     <div class="toolbar-separator" />
 
@@ -125,7 +121,7 @@ const tools: { id: MapTool; icon: string; label: string }[] = [
     <div class="toolbar-spacer" />
 
     <div class="toolbar-select-wrapper">
-      <CustomSelect v-model="selectedMap" :options="mapOptions" @update:modelValue="onMapChange" />
+      <CustomSelect :model-value="selectedMap" :options="mapOptions" @update:model-value="onMapChange" />
     </div>
   </div>
 </template>

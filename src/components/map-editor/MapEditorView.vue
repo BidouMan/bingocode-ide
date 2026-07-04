@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import MapToolbar from './MapToolbar.vue'
 import MapCanvas from './MapCanvas.vue'
 import ResourceListPanel from './ResourceListPanel.vue'
@@ -7,10 +8,13 @@ import PropertyPanel from './PropertyPanel.vue'
 import LayerPanel from './LayerPanel.vue'
 import { useMapStore } from '../../stores/map'
 import { useResourceStore } from '../../stores/resource'
+import { useProjectStore } from '../../stores/project'
 import JSZip from 'jszip'
+import { serializeMap, deserializeMap } from '../../utils/mapSerializer'
 
 const mapStore = useMapStore()
 const resourceStore = useResourceStore()
+const projectStore = useProjectStore()
 
 const mapCanvasRef = ref<InstanceType<typeof MapCanvas>>()
 
@@ -18,51 +22,81 @@ const emit = defineEmits<{
   'open-resource-lib': []
 }>()
 
-// 自动保存到 localStorage + 资源列表（防抖 500ms）
-let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
-watch(() => JSON.stringify(mapStore.mapData), () => {
-  if (autoSaveTimer) clearTimeout(autoSaveTimer)
-  autoSaveTimer = setTimeout(() => {
-    if (mapStore.currentMapPath) {
-      try {
-        localStorage.setItem(`map_autosave_${mapStore.currentMapPath}`, JSON.stringify(mapStore.mapData))
-      } catch {}
-      saveMapToResource()
-    }
-  }, 2000)
-})
+// ====== 统一数据源：项目目录 maps/<地图名>/map.json ======
 
-async function saveMapToResource() {
-  const path = mapStore.currentMapPath
-  if (!path) return
-  const item = resourceStore.maps.find(m => m.id === path || m.name === path || m.path === path)
-  if (!item) return
-
-  try {
-    const zip = new JSZip()
-    zip.file('map.json', JSON.stringify(mapStore.mapData))
-
-    // Get thumbnail from canvas
-    const thumbDataUrl = mapCanvasRef.value?.getThumbnailDataUrl()
-    if (thumbDataUrl) {
-      const blob = await (await fetch(thumbDataUrl)).blob()
-      zip.file('thumbnail.png', blob)
-    }
-
-    const blob = await zip.generateAsync({ type: 'blob' })
-    const url = URL.createObjectURL(blob)
-    // Revoke old URL to avoid memory leak
-    if (item.path && item.path.startsWith('blob:')) URL.revokeObjectURL(item.path)
-    item.path = url
-  } catch {}
+// 获取某个地图对应的目录和文件路径（使用地图名，直观可读）
+function mapDirPath(mapName: string): string {
+  return `${projectStore.root}/assets/maps/${mapName}`
+}
+function mapJsonPath(mapName: string): string {
+  return `${mapDirPath(mapName)}/map.json`
 }
 
-function onNewMap() {
-  const mapCount = resourceStore.maps.length
-  const name = `地图${mapCount + 1}`
-  const id = resourceStore.addItem({ name, type: 'map', path: '' })
-  mapStore.setMapPath(id)
-  mapStore.loadMap({
+// 保存当前地图到项目目录
+async function saveMapToProject(mapName?: string): Promise<void> {
+  const name = mapName ?? mapStore.mapData.name
+  if (!name) {
+    console.warn('[MapEditor] saveMapToProject: 地图名为空，跳过保存')
+    return
+  }
+  if (!projectStore.root) {
+    await projectStore.initProject()
+  }
+  if (!projectStore.root) {
+    console.warn('[MapEditor] saveMapToProject: 项目目录未就绪，无法保存')
+    return
+  }
+  const dirPath = mapDirPath(name)
+  const savePath = mapJsonPath(name)
+  try {
+    const saveData = serializeMap(mapStore.mapData)
+    const json = JSON.stringify(saveData)
+    await invoke('write_file', { path: savePath, content: json })
+
+    // 同时生成 thumbnail.png 快照
+    const thumbDataUrl = mapCanvasRef.value?.getThumbnailDataUrl()
+    if (thumbDataUrl && thumbDataUrl.startsWith('data:image/')) {
+      const base64 = thumbDataUrl.split(',')[1]
+      const raw = Uint8Array.from(atob(base64), c => c.charCodeAt(0))
+      await invoke('write_binary', { path: `${dirPath}/thumbnail.png`, data: Array.from(raw) })
+    }
+
+    // 更新 resource store 中该 map 的 path，供左侧缩略图加载
+    const item = resourceStore.maps.find(m => m.name === name)
+    if (item) item.path = dirPath
+  } catch (e) {
+    console.error('[MapEditor] 保存地图到项目目录失败:', e)
+  }
+}
+
+// 从项目目录加载地图数据
+async function loadMapFromProject(itemId: string): Promise<boolean> {
+  if (!projectStore.root) {
+    await projectStore.initProject()
+  }
+  if (!projectStore.root) return false
+  // 查找地图名：优先用 resourceStore 中的 name（可能被用户重命名过）
+  const item = resourceStore.maps.find(m => m.id === itemId)
+  const mapName = item?.name ?? mapStore.mapData.name
+  if (!mapName) return false
+  const filePath = mapJsonPath(mapName)
+  try {
+    const exists = await invoke<boolean>('path_exists', { path: filePath })
+    if (!exists) return false
+    const json = await invoke<string>('read_file', { path: filePath })
+    const saveData = JSON.parse(json)
+    const mapData = deserializeMap(saveData)
+    mapStore.loadMap(mapData)
+    return true
+  } catch (e) {
+    console.error(`[MapEditor] loadMapFromProject: 失败 path=${filePath}`, e)
+    return false
+  }
+}
+
+// 创建空地图数据（资源项刚创建时使用）
+function createEmptyMapData(name: string): import('../../stores/map').MapData {
+  return {
     name,
     version: 5,
     width: 40,
@@ -76,17 +110,79 @@ function onNewMap() {
     layers: [
       {
         id: 0,
-        name: '图层',
-        type: 'drawing',
+        name: '图像图层',
+        type: 'image' as const,
         visible: true,
         locked: false,
-        tiles: {},
+        tiles: {} as Record<string, number>,
         resources: [],
         images: [],
       },
     ],
     tileSets: [],
-  })
+  }
+}
+
+// ====== 统一入口：currentMapPath 变化时自动保存当前 + 加载目标 ======
+// 新建地图时设此标志跳过 watcher 的加载流程
+let skipNextPathWatch = false
+watch(() => mapStore.currentMapPath, async (newPath, oldPath) => {
+  if (!newPath || newPath === oldPath) return
+  if (skipNextPathWatch) { skipNextPathWatch = false; return }
+  if (!resourceStore.maps.find(m => m.id === newPath)) return
+
+  if (oldPath) {
+    // 根据 UUID 找到旧地图的名称，用名称路径保存（名称可能已被重命名）
+    const oldItem = resourceStore.maps.find(m => m.id === oldPath)
+    if (oldItem) await saveMapToProject(oldItem.name)
+  }
+  const loaded = await loadMapFromProject(newPath)
+  // 无论加载成功或创建空地图，都确保 item.path 指向地图目录（供缩略图使用）
+  const mapItem = resourceStore.maps.find(m => m.id === newPath)
+  if (mapItem && projectStore.root) {
+    mapItem.path = mapDirPath(mapItem.name)
+  }
+  if (!loaded) {
+    const item = resourceStore.maps.find(m => m.id === newPath)
+    if (item) {
+      mapStore.loadMap(createEmptyMapData(item.name))
+    }
+  }
+})
+
+// ====== 自动保存（编辑时防抖保存到项目目录） ======
+let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
+let savingItemId = ''
+watch(() => JSON.stringify(mapStore.mapData), () => {
+  if (autoSaveTimer) clearTimeout(autoSaveTimer)
+  savingItemId = mapStore.currentMapPath
+  autoSaveTimer = setTimeout(() => {
+    if (mapStore.currentMapPath && mapStore.currentMapPath === savingItemId) {
+      saveMapToProject()
+    }
+  }, 2000)
+})
+
+// ====== 公开方法（供 MapToolbar 调用） ======
+
+// 切换地图（MapToolbar dropdown 使用）：设 path → watcher 自动保存当前 + 加载目标
+function switchToMap(itemId: string) {
+  mapStore.setMapPath(itemId)
+}
+
+async function onNewMap() {
+  if (mapStore.currentMapPath) {
+    await saveMapToProject()
+  }
+
+  const mapCount = resourceStore.maps.length
+  const name = `地图${mapCount + 1}`
+  const id = resourceStore.addItem({ name, type: 'map', path: '' })
+  const item = resourceStore.maps.find(m => m.id === id)
+  if (item && projectStore.root) item.path = mapDirPath(name)
+  skipNextPathWatch = true
+  mapStore.setMapPath(id)
+  mapStore.loadMap(createEmptyMapData(name))
 }
 
 async function onImportMap() {
@@ -100,143 +196,26 @@ async function onImportMap() {
     try {
       const zip = await JSZip.loadAsync(file)
 
-      // Try to read map.json (our format)
       const mapJsonEntry = zip.file('map.json')
       if (mapJsonEntry) {
-        const data = JSON.parse(await mapJsonEntry.async('text'))
-        mapStore.loadMap(data)
-        mapStore.setMapPath(file.name)
+        const saveData = JSON.parse(await mapJsonEntry.async('text'))
+        const mapData = deserializeMap(saveData)
+        mapStore.loadMap(mapData)
+        // 导入到项目目录，使用文件名作为资源名
+        const name = file.name.replace(/\.bgm$/i, '')
+        const id = resourceStore.addItem({ name, type: 'map', path: '' })
+        skipNextPathWatch = true
+        mapStore.setMapPath(id)
+        mapData.name = name
+        // 先设 path 让 saveMapToProject 能找到资源项
+        const importItem = resourceStore.maps.find(m => m.id === id)
+        if (importItem && projectStore.root) importItem.path = mapDirPath(name)
+        await saveMapToProject()
         return
       }
 
-      // Try to read legacy binary format (.info file)
-      const infoFile = zip.file(/.*\.info$/)
-      if (infoFile.length > 0) {
-        const infoData = await infoFile[0].async('arraybuffer')
-        const view = new DataView(infoData)
-        let offset = 0
-
-        // Read magic number
-        const magic = view.getUint32(offset, false)
-        offset += 4
-        if (magic !== 0x4D415050) { // "MAP_"
-          alert('无效的地图文件格式')
-          return
-        }
-
-        // Read version
-        const version = view.getUint32(offset, true)
-        offset += 4
-
-        // Read name
-        const nameLen = view.getUint32(offset, true)
-        offset += 4
-        const nameBytes = new Uint8Array(infoData, offset, nameLen)
-        const name = new TextDecoder().decode(nameBytes)
-        offset += nameLen
-
-        // Read dimensions
-        const width = view.getUint32(offset, true)
-        offset += 4
-        const height = view.getUint32(offset, true)
-        offset += 4
-        const tileSize = view.getUint32(offset, true)
-        offset += 4
-        const offsetX = view.getInt32(offset, true)
-        offset += 4
-        const offsetY = view.getInt32(offset, true)
-        offset += 4
-
-        // Skip layer count (read from tiles file)
-        offset += 4
-
-        // Read gravity (v5+)
-        let gravity = false
-        if (version >= 5 && offset + 1 <= infoData.byteLength) {
-          gravity = view.getUint8(offset) !== 0
-          offset += 1
-        }
-
-        // Read tiles file for layer data
-        const layers: any[] = []
-        const tilesFile = zip.file(/.*\.tiles$/)
-        if (tilesFile.length > 0) {
-          const tilesData = await tilesFile[0].async('arraybuffer')
-          const tView = new DataView(tilesData)
-          let tOffset = 0
-
-          // Tiles magic
-          const tMagic = tView.getUint32(tOffset, false)
-          tOffset += 4
-          if (tMagic !== 0x54494C45) { // "TILE"
-            alert('无效的瓦片文件格式')
-            return
-          }
-
-          const tLayerCount = tView.getUint32(tOffset, true)
-          tOffset += 4
-
-          for (let i = 0; i < tLayerCount; i++) {
-            // Layer name
-            const lNameLen = tView.getUint32(tOffset, true)
-            tOffset += 4
-            const lNameBytes = new Uint8Array(tilesData, tOffset, lNameLen)
-            const lName = new TextDecoder().decode(lNameBytes)
-            tOffset += lNameLen
-
-            // Visible
-            const visible = tView.getUint8(tOffset) !== 0
-            tOffset += 1
-
-            // Type
-            const typeCode = tView.getUint8(tOffset)
-            tOffset += 1
-            const type = typeCode === 1 ? 'image' : 'drawing'
-
-            // Layer ID
-            const layerId = tView.getUint32(tOffset, true)
-            tOffset += 4
-
-            // Read tile data (width * height * uint16)
-            const tiles: Record<string, number> = {}
-            for (let y = 0; y < height; y++) {
-              for (let x = 0; x < width; x++) {
-                const tileId = tView.getUint16(tOffset, true)
-                tOffset += 2
-                if (tileId !== 0) {
-                  tiles[`${x},${y}`] = tileId
-                }
-              }
-            }
-
-            layers.push({ id: layerId, name: lName, type, visible, tiles, resources: [], images: [] })
-          }
-        }
-
-        if (layers.length === 0) {
-          layers.push({ id: 0, name: '图层', type: 'drawing', visible: true, locked: false, tiles: {}, resources: [], images: [] })
-        }
-
-        mapStore.loadMap({
-          name,
-          version,
-          width,
-          height,
-          tileSize,
-          offsetX,
-          offsetY,
-          gravity,
-          collisionType: '图像',
-          collisionEnabled: false,
-          layers,
-          tileSets: [],
-        })
-        mapStore.setMapPath(file.name)
-      } else {
-        alert('无法识别的地图文件格式')
-      }
+      alert('无效的地图文件格式，请使用 .bgm 格式')
     } catch (err) {
-      console.error('导入地图失败:', err)
       alert('导入地图失败: ' + (err as Error).message)
     }
   }
@@ -244,108 +223,46 @@ async function onImportMap() {
 }
 
 async function onExportMap() {
-  const zip = new JSZip()
-  const data = mapStore.mapData
+  try {
+    const zip = new JSZip()
+    const data = mapStore.mapData
 
-  // Save as JSON (compact format)
-  zip.file('map.json', JSON.stringify(data))
+    const saveData = serializeMap(data)
+    zip.file('map.json', JSON.stringify(saveData, null, 2))
 
-  // Also create legacy binary format
-  // .info file
-  const nameBytes = new TextEncoder().encode(data.name)
-  const infoSize = 4 + 4 + 4 + nameBytes.length + 4 + 4 + 4 + 4 + 4 + 4 + 1
-  const infoBuilder = new ArrayBuffer(infoSize)
-  const infoView = new DataView(infoBuilder)
-  let offset = 0
-
-  // Magic
-  infoView.setUint32(offset, 0x4D415050, false)
-  offset += 4
-  // Version
-  infoView.setUint32(offset, data.version, true)
-  offset += 4
-  // Name
-  infoView.setUint32(offset, nameBytes.length, true)
-  offset += 4
-  new Uint8Array(infoBuilder, offset, nameBytes.length).set(nameBytes)
-  offset += nameBytes.length
-  // Dimensions
-  infoView.setUint32(offset, data.width, true)
-  offset += 4
-  infoView.setUint32(offset, data.height, true)
-  offset += 4
-  infoView.setUint32(offset, data.tileSize, true)
-  offset += 4
-  infoView.setInt32(offset, data.offsetX, true)
-  offset += 4
-  infoView.setInt32(offset, data.offsetY, true)
-  offset += 4
-  // Layer count
-  infoView.setUint32(offset, data.layers.length, true)
-  offset += 4
-  // Gravity
-  infoView.setUint8(offset, data.gravity ? 1 : 0)
-  offset += 1
-
-  zip.file(`${data.name}.info`, infoBuilder.slice(0, offset))
-
-  // .tiles file
-  const tilesSize = 8 + data.layers.reduce((sum, layer) => {
-    return sum + 4 + layer.name.length + 1 + 1 + 4 + data.width * data.height * 2
-  }, 0)
-  const tilesBuilder = new ArrayBuffer(tilesSize)
-  const tilesView = new DataView(tilesBuilder)
-  let tOffset = 0
-
-  // Magic
-  tilesView.setUint32(tOffset, 0x54494C45, false)
-  tOffset += 4
-  // Layer count
-  tilesView.setUint32(tOffset, data.layers.length, true)
-  tOffset += 4
-
-  for (const layer of data.layers) {
-    // Name
-    const lNameBytes = new TextEncoder().encode(layer.name)
-    tilesView.setUint32(tOffset, lNameBytes.length, true)
-    tOffset += 4
-    new Uint8Array(tilesBuilder, tOffset, lNameBytes.length).set(lNameBytes)
-    tOffset += lNameBytes.length
-    // Visible
-    tilesView.setUint8(tOffset, layer.visible ? 1 : 0)
-    tOffset += 1
-    // Type
-    tilesView.setUint8(tOffset, layer.type === 'image' ? 1 : 0)
-    tOffset += 1
-    // Layer ID
-    tilesView.setUint32(tOffset, layer.id, true)
-    tOffset += 4
-    // Tile data
-    for (let y = 0; y < data.height; y++) {
-      for (let x = 0; x < data.width; x++) {
-        const tileId = layer.tiles[`${x},${y}`] ?? 0
-        tilesView.setUint16(tOffset, tileId, true)
-        tOffset += 2
-      }
+    const thumbDataUrl = mapCanvasRef.value?.getThumbnailDataUrl()
+    if (thumbDataUrl && thumbDataUrl.startsWith('data:')) {
+      const base64 = thumbDataUrl.split(',')[1]
+      zip.file('thumbnail.png', base64, { base64: true })
     }
-  }
 
-  zip.file(`${data.name}.tiles`, tilesBuilder.slice(0, tOffset))
+    const blob = await zip.generateAsync({ type: 'blob' })
 
-  // Generate zip and download
-  const blob = await zip.generateAsync({ type: 'blob' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${data.name}.bgm`
-  a.click()
-  URL.revokeObjectURL(url)
-
-  // Also save to resource store
-  const item = resourceStore.maps.find(m => m.id === mapStore.currentMapPath || m.name === data.name)
-  if (item) {
-    if (item.path && item.path.startsWith('blob:')) URL.revokeObjectURL(item.path)
-    item.path = url
+    // 尝试用 File System API（现代浏览器）
+    if ('showSaveFilePicker' in window) {
+      const handle = await (window as any).showSaveFilePicker({
+        suggestedName: `${data.name}.bgm`,
+        types: [{ description: '地图文件', accept: { 'application/zip': ['.bgm'] } }],
+      })
+      const writable = await handle.createWritable()
+      await writable.write(blob)
+      await writable.close()
+    } else {
+      // 回退到 blob URL 下载
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.style.display = 'none'
+      link.href = url
+      link.download = `${data.name}.bgm`
+      document.body.appendChild(link)
+      link.click()
+      setTimeout(() => {
+        document.body.removeChild(link)
+        URL.revokeObjectURL(url)
+      }, 100)
+    }
+  } catch (e) {
+    console.error('导出地图失败:', e)
   }
 }
 
@@ -356,6 +273,12 @@ function onOpenLibrary() {
 function onCursorMove(x: number, y: number) {
   mapStore.setCursorPos(x, y)
 }
+
+function onDeleteImage() {
+  mapCanvasRef.value?.deleteSelectedImage()
+}
+
+defineExpose({ switchToMap })
 </script>
 
 <template>
@@ -370,6 +293,8 @@ function onCursorMove(x: number, y: number) {
           @new-map="onNewMap"
           @import-map="onImportMap"
           @export-map="onExportMap"
+          @switch-map="switchToMap"
+          @delete-image="onDeleteImage"
         />
         <MapCanvas ref="mapCanvasRef" class="map-canvas-area" @cursor-move="onCursorMove" />
         <div class="map-info-bar">

@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, computed } from 'vue'
+import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { useMapStore, type MapResource } from '../../stores/map'
+import { useProjectStore } from '../../stores/project'
+import { useEditorStore } from '../../stores/editor'
 import CollisionEditor from './CollisionEditor.vue'
 import MapResourceImportDialog from '../resource-panel/MapResourceImportDialog.vue'
 import iconLibrary from '../../assets/icons/图片库.svg'
@@ -19,7 +22,25 @@ const emit = defineEmits<{
 }>()
 
 const mapStore = useMapStore()
+const projectStore = useProjectStore()
+const editorStore = useEditorStore()
 const showImportDialog = ref(false)
+const collisionEditorRef = ref<InstanceType<typeof CollisionEditor>>()
+
+// 将资源文件复制到当前地图目录，返回相对路径
+async function copyResourceToMapDir(srcPath: string): Promise<string> {
+  const projectRoot = projectStore.root
+  const mapName = mapStore.mapData.name
+  if (!projectRoot || !mapName) throw new Error('地图未就绪')
+  const fileName = srcPath.split('/').pop() || 'resource.png'
+  const relativePath = `assets/maps/${mapName}/images/${fileName}`
+  await invoke<string>('copy_file_to_project', {
+    src: srcPath,
+    projectRoot,
+    relativePath,
+  })
+  return relativePath
+}
 
 // 当前图层的资源列表
 const currentResources = computed(() => {
@@ -30,27 +51,63 @@ const currentResources = computed(() => {
 // 监听图层变化
 watch(() => mapStore.activeLayerIndex, () => {})
 
-// Tile thumbnail cache
-const tileThumbnails = ref<Map<string, string>>(new Map())
-const tileCounts = ref<Map<number, number>>(new Map())
-const imageLoadCache = ref<Map<string, HTMLImageElement>>(new Map())
+// ====== 全局缓存（跨图层切换复用，不清空） ======
+// URL 缓存：path → data URL / convertFileSrc URL
+const globalUrlCache = new Map<string, string>()
+// 瓦片缩略图缓存：resourcePath → tileThumbnails[]
+const globalTileCache = new Map<string, { count: number; thumbnails: string[] }>()
+// 图片元素缓存
+const imageLoadCache = new Map<string, HTMLImageElement>()
+
+// ====== 当前图层的响应式数据（每次切换只更新这个） ======
+const currentTileCounts = ref<Map<number, number>>(new Map())
+const currentTileThumbnails = ref<Map<string, string>>(new Map())
+const resolvedUrls = ref<Map<string, string>>(new Map())
+
+async function getResourceUrl(path: string): Promise<string> {
+  const cached = globalUrlCache.get(path)
+  if (cached) return cached
+
+  let url: string
+  if (path.startsWith('/maps/')) {
+    // 内置资源：引擎 assets 目录
+    try {
+      const engineDir = await invoke<string>('get_engine_assets_dir')
+      url = await invoke<string>('read_image_as_data_url', { path: `${engineDir}${path}` })
+    } catch (e) {
+      console.warn('加载内置资源失败:', path, e)
+      url = ''
+    }
+  } else if (path.startsWith('assets/')) {
+    // 项目目录中的相对路径
+    const fullPath = `${projectStore.root}/${path}`
+    url = convertFileSrc(fullPath)
+  } else {
+    // 绝对文件系统路径（用户导入的原始文件）
+    url = convertFileSrc(path)
+  }
+
+  globalUrlCache.set(path, url)
+  return url
+}
 
 function getTileCount(resource: MapResource): number {
   const idx = currentResources.value.indexOf(resource)
-  return tileCounts.value.get(idx) ?? 0
+  return currentTileCounts.value.get(idx) ?? 0
 }
 
 function getTileThumbnail(rIdx: number, tIdx: number): string {
-  return tileThumbnails.value.get(`${rIdx}:${tIdx}`) || ''
+  return currentTileThumbnails.value.get(`${rIdx}:${tIdx}`) || ''
 }
 
 async function loadImage(src: string): Promise<HTMLImageElement> {
-  if (imageLoadCache.value.has(src)) return imageLoadCache.value.get(src)!
+  const cached = imageLoadCache.get(src)
+  if (cached) return cached
   return new Promise((resolve, reject) => {
     const img = new Image()
     img.crossOrigin = 'anonymous'
     img.onload = () => {
-      imageLoadCache.value.set(src, img)
+      imageLoadCache.set(src, img)
       resolve(img)
     }
     img.onerror = reject
@@ -58,48 +115,114 @@ async function loadImage(src: string): Promise<HTMLImageElement> {
   })
 }
 
-async function generateTileThumbnails(resource: MapResource, rIdx: number) {
-  try {
-    const img = await loadImage(resource.path)
-    const cols = Math.floor(img.width / resource.tileWidth)
-    const rows = Math.floor(img.height / resource.tileHeight)
-    const count = cols * rows
-    tileCounts.value.set(rIdx, count)
+// 为绘制图层生成瓦片缩略图（结果缓存到 globalTileCache）
+async function generateTileThumbnailsForLayer() {
+  const layer = mapStore.activeLayer
+  if (!layer || layer.type !== 'drawing') return
 
-    for (let tIdx = 0; tIdx < count; tIdx++) {
-      const row = Math.floor(tIdx / cols)
-      const col = tIdx % cols
-      const canvas = document.createElement('canvas')
-      canvas.width = resource.tileWidth
-      canvas.height = resource.tileHeight
-      const ctx = canvas.getContext('2d')!
-      ctx.drawImage(
-        img,
-        col * resource.tileWidth, row * resource.tileHeight,
-        resource.tileWidth, resource.tileHeight,
-        0, 0,
-        resource.tileWidth, resource.tileHeight
-      )
-      tileThumbnails.value.set(`${rIdx}:${tIdx}`, canvas.toDataURL())
-    }
-  } catch {
-    tileCounts.value.set(rIdx, 0)
-  }
-}
+  const batchCounts = new Map<number, number>()
+  const batchThumbs = new Map<string, string>()
 
-async function refreshAllThumbnails() {
-  tileThumbnails.value.clear()
-  tileCounts.value.clear()
   for (let i = 0; i < currentResources.value.length; i++) {
-    await generateTileThumbnails(currentResources.value[i], i)
+    const res = currentResources.value[i]
+    const cached = globalTileCache.get(res.path)
+    if (cached) {
+      batchCounts.set(i, cached.count)
+      for (let t = 0; t < cached.count; t++) {
+        batchThumbs.set(`${i}:${t}`, cached.thumbnails[t] || '')
+      }
+      continue
+    }
+
+    try {
+      const url = await getResourceUrl(res.path)
+      if (!url) { batchCounts.set(i, 0); continue }
+      const img = await loadImage(url)
+      const cols = Math.floor(img.width / res.tileWidth)
+      const rows = Math.floor(img.height / res.tileHeight)
+      const count = cols * rows
+      batchCounts.set(i, count)
+
+      const thumbs: string[] = []
+      for (let tIdx = 0; tIdx < count; tIdx++) {
+        const row = Math.floor(tIdx / cols)
+        const col = tIdx % cols
+        const canvas = document.createElement('canvas')
+        canvas.width = res.tileWidth
+        canvas.height = res.tileHeight
+        const ctx = canvas.getContext('2d')!
+        ctx.drawImage(
+          img,
+          col * res.tileWidth, row * res.tileHeight,
+          res.tileWidth, res.tileHeight,
+          0, 0,
+          res.tileWidth, res.tileHeight
+        )
+        const dataUrl = canvas.toDataURL()
+        thumbs.push(dataUrl)
+        batchThumbs.set(`${i}:${tIdx}`, dataUrl)
+      }
+      globalTileCache.set(res.path, { count, thumbnails: thumbs })
+    } catch {
+      batchCounts.set(i, 0)
+    }
+  }
+
+  currentTileCounts.value = batchCounts
+  currentTileThumbnails.value = batchThumbs
+}
+
+// 切换图层时刷新：只解析 URL（快），绘制图层才生成瓦片缩略图
+async function refreshAllThumbnails() {
+  const urlMap = new Map<string, string>()
+  const resources = currentResources.value
+  await Promise.all(resources.map(async (res) => {
+    if (!urlMap.has(res.path)) {
+      urlMap.set(res.path, await getResourceUrl(res.path))
+    }
+  }))
+  resolvedUrls.value = urlMap
+
+  // 绘制图层才生成瓦片缩略图
+  const layer = mapStore.activeLayer
+  if (layer?.type === 'drawing') {
+    await generateTileThumbnailsForLayer()
+  } else {
+    currentTileCounts.value = new Map()
+    currentTileThumbnails.value = new Map()
   }
 }
 
-// 切换图层时刷新
+function getResolvedUrl(path: string): string {
+  return resolvedUrls.value.get(path) || ''
+}
+
+// 切换图层或图块尺寸变化时刷新
 watch(() => mapStore.activeLayerIndex, refreshAllThumbnails)
 watch(() => currentResources.value.length, refreshAllThumbnails)
+watch(() => mapStore.mapData.tileSize, () => {
+  // 图块尺寸变化时清空瓦片缓存并重新生成
+  globalTileCache.clear()
+  refreshAllThumbnails()
+})
+// 地图加载时精确刷新缩略图（loadMap 递增 mapLoadCount，此时 currentResources 已更新）
+// 不清理 globalTileCache：相同路径的 tileset 复用缓存，无需重新生成
+watch(() => mapStore.mapLoadCount, () => {
+  refreshAllThumbnails()
+})
+
+// 渲染模式变化时刷新缩略图
+watch(() => editorStore.renderMode, () => {
+  globalTileCache.clear()
+  refreshAllThumbnails()
+})
 
 onMounted(refreshAllThumbnails)
+
+// 根据渲染模式返回 CSS image-rendering 值
+const imageRenderingStyle = computed(() => {
+  return editorStore.renderMode === 'pixelated' ? 'pixelated' : 'auto'
+})
 
 function onDeleteResource() {
   const idx = mapStore.selectedResourceIndex
@@ -114,14 +237,23 @@ function onClearResources() {
   refreshAllThumbnails()
 }
 
-function onResourceImported(options: { path: string; mode: 'image' | 'tileset'; size: string }) {
+async function onResourceImported(options: { path: string; mode: 'image' | 'tileset'; size: string }) {
+  const isImageLayer = mapStore.activeLayer?.type === 'image'
+  // 复制资源文件到项目地图目录
+  let relativePath: string
+  try {
+    relativePath = await copyResourceToMapDir(options.path)
+  } catch (e) {
+    console.error('复制资源到项目目录失败:', e)
+    relativePath = options.path
+  }
   const [tw, th] = options.size.split('x').map(Number)
   mapStore.addResource({
     name: options.path.split('/').pop()?.split('.')[0] || '资源',
-    path: options.path,
-    resourceType: options.mode,
-    tileWidth: tw,
-    tileHeight: th,
+    path: relativePath,
+    resourceType: isImageLayer ? 'image' : options.mode,
+    tileWidth: isImageLayer ? 64 : tw,
+    tileHeight: isImageLayer ? 64 : th,
     collisionType: '图像',
     collisionEnabled: false,
     tileSetIndex: 0,
@@ -152,7 +284,7 @@ function onResourceMouseDown(e: MouseEvent, rIdx: number) {
   // 创建拖拽预览元素
   const preview = document.createElement('img')
   preview.id = 'drag-preview'
-  preview.src = resource.path
+  preview.src = getResolvedUrl(resource.path)
   preview.draggable = false
   preview.style.cssText = `
     position: fixed;
@@ -249,7 +381,7 @@ function onResourceClick(rIdx: number) {
           @mousedown.prevent="onResourceMouseDown($event, rIdx)"
           @click="onResourceClick(rIdx)"
         >
-          <img :src="resource.path" class="image-preview" draggable="false" />
+          <img :src="getResolvedUrl(resource.path)" class="image-preview" draggable="false" :style="{ imageRendering: imageRenderingStyle }" />
         </div>
         <!-- 绘制图层：显示瓦片网格 -->
         <div v-else class="tile-grid">
@@ -260,7 +392,7 @@ function onResourceClick(rIdx: number) {
             :class="{
               'tile-selected': mapStore.selectedResourceIndex === rIdx && mapStore.selectedTileIndex === tIdx - 1
             }"
-            :style="getTileThumbnail(rIdx, tIdx - 1) ? { backgroundImage: `url(${getTileThumbnail(rIdx, tIdx - 1)})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center' } : {}"
+            :style="getTileThumbnail(rIdx, tIdx - 1) ? { backgroundImage: `url(${getTileThumbnail(rIdx, tIdx - 1)})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', imageRendering: imageRenderingStyle } : {}"
             draggable="true"
             @dragstart="onDragStart($event, rIdx, tIdx - 1)"
             @click="emit('select-tile', rIdx, tIdx - 1)"
@@ -300,7 +432,7 @@ function onResourceClick(rIdx: number) {
       <button
         class="col-tool-btn"
         title="重置锚点"
-        @click="mapStore.setCollisionTool('reset')"
+        @click="collisionEditorRef?.resetCollision()"
       >
         <img :src="iconResetAnchor" class="col-tool-icon" />
       </button>
@@ -314,7 +446,8 @@ function onResourceClick(rIdx: number) {
       </button>
     </div>
 
-    <CollisionEditor />
+    <!-- 碰撞编辑器：选中资源时始终显示（预览图片），碰撞工具在非图像模式时显示 -->
+    <CollisionEditor ref="collisionEditorRef" />
 
     <div class="res-info-bar">
       <span class="res-info-text">资源:{{ mapStore.selectedResourceIndex >= 0 ? (currentResources[mapStore.selectedResourceIndex]?.name || '--') : '--' }}</span>
@@ -322,6 +455,7 @@ function onResourceClick(rIdx: number) {
 
     <MapResourceImportDialog
       v-if="showImportDialog"
+      :layer-type="mapStore.activeLayer?.type || 'image'"
       @close="showImportDialog = false"
       @imported="onResourceImported"
     />

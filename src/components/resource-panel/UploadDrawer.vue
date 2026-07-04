@@ -21,6 +21,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   uploaded: [type: string, name: string, content?: string]
   openLibrary: [type: string]
+  createMap: []
 }>()
 
 const resourceStore = useResourceStore()
@@ -116,7 +117,11 @@ async function handleAction(key: string) {
     case 'library':
     case 'paint':
     case 'create':
-      emit('openLibrary', props.type)
+      if (props.type === 'map' && key === 'create') {
+        emit('createMap')
+      } else {
+        emit('openLibrary', props.type)
+      }
       break
   }
 }

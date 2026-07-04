@@ -54,6 +54,8 @@ src/
     useEngine.ts                # Tauri IPC: run/stop/sendInput, event listeners
     useFileDialog.ts            # Browser file open/save (Tauri-ready)
     useSpriteData.ts            # .bgs (zip) reader via JSZip
+  utils/
+    mapSerializer.ts            # Map JSON serialization with compression
   types/engine.ts               # Engine JSON protocol types
 src-tauri/
   src/lib.rs                    # Tauri commands (file I/O, Python process)
@@ -61,8 +63,25 @@ src-tauri/
 engine/
   bingo_engine.py               # Game engine (runs in Python subprocess)
   models/                       # Data models
-  assets/                       # Built-in sprites, maps, sounds
+  assets/                       # 唯一游戏资源库（Vite publicDir 指向此处）
+    sprites/
+      packages/                 # .bgs 精灵包文件
+      images/                   # 精灵图片资源
+    maps/
+      packages/                 # .bgm 地图包文件（JSON格式）
+      images/                   # 地图图像素材
+      tiles/                    # 单张瓦片图片
+      tilesets/                 # 瓦片集图片
+    sounds/                     # 音效资源（.wav）
+    ui/                         # UI 资源（favicon, icons）
 ```
+
+## Rules
+
+- **Never reinvent the wheel** — always check official docs or peer implementations before coding custom solutions
+- **Reference original PySide6 UI files before implementing any UI** — never design from scratch
+- **Comments and some variable names are in Chinese** — do not change
+- **Respond to user in Chinese**
 
 ## Key quirks
 
@@ -73,7 +92,9 @@ engine/
 - **Monaco editor**: Custom `bingo-dark` theme matching original QSS colors. `automaticLayout` + `nextTick layout()` for proper sizing.
 - **GameCanvas only mounts when running**: Prevents PixiJS from capturing mouse events when not needed.
 - **Event listeners scoped to canvas**: Keyboard/mouse events only on GameCanvas element, not window, to avoid blocking Monaco.
-- **Browser file ops**: Open uses `<input type="file">`, save uses `<a download>`. Will be replaced by Tauri native dialogs.
+- **Asset directory**: `engine/assets/` is the single source of truth for all game resources. Vite serves static files from here via `publicDir` config. No `public/` directory - everything goes through `engine/assets/`.
+- **Map format**: JSON with base64+zlib compressed tile data. `.bgm` files are zips containing `map.json` + `thumbnail.png`. No binary format.
+- **Default project directory**: `~/BingoCodeIDE/Projects/default/` - cleaned on startup, stores user-created sprites and maps.
 
 ## Original QSS color reference
 
@@ -93,7 +114,7 @@ engine/
 pnpm install
 ```
 
-Frontend: Vue 3, Pinia, PixiJS 8, Monaco Editor, xterm.js, TailwindCSS, JSZip
+Frontend: Vue 3, Pinia, PixiJS 8, Monaco Editor, xterm.js, TailwindCSS, JSZip, pako
 Desktop: Tauri v2, Rust, tauri-plugin-shell
 Engine: Python 3, Pillow, NumPy (in `engine/venv/`)
 

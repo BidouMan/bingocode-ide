@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import { useSpriteLibStore } from '../../stores/spriteLib'
 import { useResourceStore } from '../../stores/resource'
+import { useProjectStore } from '../../stores/project'
 
 const emit = defineEmits<{
   close: []
@@ -10,17 +12,37 @@ const emit = defineEmits<{
 
 const spriteLibStore = useSpriteLibStore()
 const resourceStore = useResourceStore()
+const projectStore = useProjectStore()
 const searchText = ref('')
 
 onMounted(() => {
   spriteLibStore.loadBuiltinLibrary()
 })
 
-function selectSprite(item: { name: string; bgsUrl: string }) {
+async function selectSprite(item: { name: string; bgsUrl: string }) {
+  const projectRoot = projectStore.root
+  if (!projectRoot) return
+
+  const engineAssetsDir = await invoke<string>('get_engine_assets_dir')
+  const bgsPath = `${engineAssetsDir}/sprites/packages/${item.name}.bgs`
+
+  try {
+    await invoke<string>('extract_bgs_to_project', {
+      bgsPath,
+      projectRoot,
+      spriteName: item.name,
+    })
+  } catch (e) {
+    console.error('[SpriteLib] 复制失败:', e)
+    return
+  }
+
+  // 添加到资源管理器
+  const projectPath = `${projectRoot}/assets/sprites/${item.name}`
   const id = resourceStore.addItem({
     name: item.name,
     type: 'sprite',
-    path: item.bgsUrl,
+    path: projectPath,
   })
   emit('imported', id as string, item.name, item.bgsUrl)
 }

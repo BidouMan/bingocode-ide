@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { useMapStore, type MapResource } from '../../stores/map'
+import { useProjectStore } from '../../stores/project'
+import { useEditorStore } from '../../stores/editor'
 
 const emit = defineEmits<{
   'tile-painted': [x: number, y: number, tileId: number]
@@ -27,7 +30,8 @@ let lastPaintedKey = ''
 // Move tool state
 let moveStartPos: { x: number; y: number } | null = null
 let moveTileId = 0
-let movePreview: any = null
+let moveStartSprite: any = null
+let moveDragSprite: any = null
 
 // Image drag state
 let isDraggingImage = false
@@ -35,6 +39,32 @@ let imageDragStartWorld = { x: 0, y: 0 }
 let imageDragStartPos = [0, 0]
 
 const mapStore = useMapStore()
+const projectStore = useProjectStore()
+const editorStore = useEditorStore()
+
+// 解析资源路径为浏览器可加载的 URL
+const resolvedPathCache = new Map<string, string>()
+async function resolveImagePath(path: string): Promise<string> {
+  const cached = resolvedPathCache.get(path)
+  if (cached) return cached
+
+  let url: string
+  if (path.startsWith('/maps/')) {
+    try {
+      const engineDir = await invoke<string>('get_engine_assets_dir')
+      url = await invoke<string>('read_image_as_data_url', { path: `${engineDir}${path}` })
+    } catch {
+      url = ''
+    }
+  } else if (path.startsWith('assets/')) {
+    url = convertFileSrc(`${projectStore.root}/${path}`)
+  } else {
+    url = convertFileSrc(path)
+  }
+
+  resolvedPathCache.set(path, url)
+  return url
+}
 
 const LOGIC_W = 640
 const LOGIC_H = 480
@@ -60,7 +90,11 @@ async function initPixi() {
   })
   canvasRef.value.appendChild(app.canvas)
 
+  // 应用初始渲染模式
+  applyRenderMode()
+
   tileContainer = new PIXI.Container()
+  tileContainer.sortableChildren = true
   app.stage.addChild(tileContainer)
 
   drawGrid()
@@ -74,17 +108,31 @@ async function initPixi() {
 
 // --- Tile Rendering ---
 
+// 当前渲染模式的 scaleMode
+let currentScaleMode: 'nearest' | 'linear' = 'linear'
+
+function applyRenderMode() {
+  if (!PIXI) return
+  const mode = editorStore.renderMode
+  currentScaleMode = mode === 'pixelated' ? 'nearest' : 'linear'
+  // 清空纹理缓存，强制使用新的 scaleMode 重新创建
+  tileTextures.clear()
+}
+
 async function loadImage(src: string): Promise<HTMLImageElement> {
-  if (sourceImageCache.has(src)) return sourceImageCache.get(src)
+  // 先解析路径
+  const url = await resolveImagePath(src)
+  if (!url) throw new Error(`无法加载图片: ${src}`)
+  if (sourceImageCache.has(url)) return sourceImageCache.get(url)
   return new Promise((resolve, reject) => {
     const img = new Image()
     img.crossOrigin = 'anonymous'
     img.onload = () => {
-      sourceImageCache.set(src, img)
+      sourceImageCache.set(url, img)
       resolve(img)
     }
     img.onerror = reject
-    img.src = src
+    img.src = url
   })
 }
 
@@ -111,6 +159,7 @@ async function getTileTexture(resource: MapResource, tileIndex: number): Promise
     )
 
     const texture = PIXI.Texture.from(canvas)
+    texture.source.scaleMode = currentScaleMode
     tileTextures.set(key, texture)
     return texture
   } catch {
@@ -118,20 +167,64 @@ async function getTileTexture(resource: MapResource, tileIndex: number): Promise
   }
 }
 
-function decodeTileId(tileId: number): { resourceIndex: number; tileIndex: number } {
-  return {
-    resourceIndex: Math.floor(tileId / 1000) - 1,
-    tileIndex: (tileId % 1000) - 1,
-  }
+// 编码 tileId: 使用Tiled标准，GID = firstgid + tileIndex
+// firstgid 由 tileSets 数组中的瓦片集确定
+function encodeTileId(_layerId: number, localRIdx: number, tileIndex: number): number {
+  const globalTsIdx = mapStore.globalResourceOffset + localRIdx
+  const tileSet = mapStore.mapData.tileSets[globalTsIdx]
+  if (!tileSet) return tileIndex + 1
+  return tileSet.firstgid + tileIndex
 }
 
-function getLayerContainer(layerId: number): any {
+function decodeTileId(tileId: number, layerId?: number): { resourceIndex: number; tileIndex: number } {
+  // 通过firstgid范围查找瓦片集
+  const tileSets = mapStore.mapData.tileSets
+  let globalTsIdx = 0
+  for (let i = tileSets.length - 1; i >= 0; i--) {
+    if (tileId >= tileSets[i].firstgid) {
+      globalTsIdx = i
+      break
+    }
+  }
+  const tileIndex = tileId - tileSets[globalTsIdx].firstgid
+
+  // 转换为图层内的资源索引
+  let resourceIndex = globalTsIdx
+  if (layerId !== undefined) {
+    const layer = mapStore.mapData.layers.find(l => l.id === layerId)
+    if (layer) {
+      let offset = 0
+      for (const l of mapStore.mapData.layers) {
+        if (l.id === layerId) break
+        offset += l.resources.length
+      }
+      resourceIndex = globalTsIdx - offset
+    }
+  }
+  return { resourceIndex, tileIndex }
+}
+
+// 获取或创建图层容器
+function getOrCreateLayerContainer(layerId: number): any {
   if (layerContainers.has(layerId)) return layerContainers.get(layerId)
   const container = new PIXI.Container()
   container.label = `layer_${layerId}`
-  tileContainer.addChild(container)
   layerContainers.set(layerId, container)
   return container
+}
+
+// 清空某个图层容器内的所有子元素
+function clearLayerContainer(layerId: number) {
+  const container = layerContainers.get(layerId)
+  if (!container) return
+  const children = [...container.children]
+  container.removeChildren()
+  for (const child of children) child.destroy()
+  const keysToRemove: string[] = []
+  for (const [key] of tileSprites) {
+    if (key.startsWith(`${layerId}:`)) keysToRemove.push(key)
+  }
+  for (const key of keysToRemove) tileSprites.delete(key)
 }
 
 function ensureLayerOrder() {
@@ -153,21 +246,13 @@ async function renderTile(layerId: number, x: number, y: number, tileId: number)
   }
 
   const key = `${layerId}:${x},${y}`
-  const { resourceIndex, tileIndex } = decodeTileId(tileId)
+  const { resourceIndex, tileIndex } = decodeTileId(tileId, layerId)
 
-  // 从所有图层的资源中查找对应的资源
-  let globalIdx = 0
-  let resource: MapResource | null = null
-  for (const layer of mapStore.mapData.layers) {
-    for (const res of layer.resources) {
-      if (globalIdx === resourceIndex) {
-        resource = res
-        break
-      }
-      globalIdx++
-    }
-    if (resource) break
-  }
+  // 按 GID 解码后的资源索引查找资源
+  const tileLayer = mapStore.mapData.layers.find(l => l.id === layerId)
+  const resource: MapResource | null = (tileLayer && resourceIndex >= 0 && resourceIndex < tileLayer.resources.length)
+    ? tileLayer.resources[resourceIndex]
+    : null
   if (!resource) return
 
   const texture = await getTileTexture(resource, tileIndex)
@@ -184,7 +269,7 @@ async function renderTile(layerId: number, x: number, y: number, tileId: number)
     sprite.y = y * tileSize
     sprite.width = tileSize
     sprite.height = tileSize
-    const container = getLayerContainer(layerId)
+    const container = getOrCreateLayerContainer(layerId)
     container.addChild(sprite)
     tileSprites.set(key, sprite)
   }
@@ -203,64 +288,74 @@ function removeTile(layerId: number, x: number, y: number) {
 async function renderAllLayers() {
   if (!app || !PIXI) return
 
-  // Clear existing
-  for (const [, container] of layerContainers) {
-    tileContainer.removeChild(container)
-    container.destroy({ children: true })
-  }
-  layerContainers.clear()
-  tileSprites.clear()
-
   const layers = mapStore.mapData.layers
+
+  // 移除不再存在的图层容器
+  const activeIds = new Set(layers.map(l => l.id))
+  for (const [id, container] of layerContainers) {
+    if (!activeIds.has(id)) {
+      tileContainer.removeChild(container)
+      container.destroy({ children: true })
+      layerContainers.delete(id)
+    }
+  }
+
+  // 确保每个图层都有容器，设置 zIndex 和可见性（但不 addChild）
   for (let i = 0; i < layers.length; i++) {
     const layer = layers[i]
-    const container = getLayerContainer(layer.id)
+    const container = getOrCreateLayerContainer(layer.id)
     container.zIndex = i
     container.visible = layer.visible
+  }
 
+  // 先清空所有图层容器的内容
+  for (const layer of layers) {
+    clearLayerContainer(layer.id)
+  }
+
+  // 逐图层重建内容
+  for (const layer of layers) {
     if (layer.type === 'drawing') {
       for (const [posKey, tileId] of Object.entries(layer.tiles)) {
         const [x, y] = posKey.split(',').map(Number)
         await renderTile(layer.id, x, y, tileId)
       }
     } else if (layer.type === 'image') {
+      const container = getOrCreateLayerContainer(layer.id)
       for (const imgData of layer.images) {
         await renderImageLayer(container, imgData)
       }
     }
   }
-  tileContainer.sortChildren()
+
+  // 按逆序添加容器到 tileContainer（后添加的在上面）
+  // 这样绘制图层（index 大）自然在图像图层（index 小）上面
+  tileContainer.removeChildren()
+  for (let i = layers.length - 1; i >= 0; i--) {
+    const container = layerContainers.get(layers[i].id)
+    if (container) tileContainer.addChild(container)
+  }
 }
 
 async function renderImageLayer(container: any, imgData: any) {
-  if (!imgData?.imagePath) {
-    return
-  }
+  if (!imgData?.imagePath) return
   try {
     const img = await loadImage(imgData.imagePath)
     const texture = PIXI.Texture.from(img)
+    texture.source.scaleMode = currentScaleMode
     const sprite = new PIXI.Sprite(texture)
-
     sprite.x = imgData.position?.[0] ?? 0
     sprite.y = imgData.position?.[1] ?? 0
-
     const scaleX = (imgData.scaleX ?? imgData.scale ?? 1)
     const scaleY = (imgData.scaleY ?? imgData.scale ?? 1)
     sprite.scale.set(scaleX, scaleY)
-
     const rotation = (imgData.rotation ?? 0) * Math.PI / 180
-    // PixiJS rotation is around the anchor point; we want around center
-    // Convert: set anchor to center, rotate, then offset position
     sprite.anchor.set(0.5, 0.5)
     sprite.x += (imgData.width || 64) * scaleX / 2
     sprite.y += (imgData.height || 64) * scaleY / 2
     sprite.rotation = rotation
-
     sprite.alpha = imgData.opacity ?? 1
-
     container.addChild(sprite)
-
-    // Cache sprite reference for the currently selected image
     if (selectedImageData && imgData === selectedImageData) {
       selectedImageSprite = sprite
     }
@@ -389,13 +484,12 @@ function applyScale() {
 
 function centerView() {
   if (!app || !canvasRef.value) return
-  const { tileSize } = mapStore.mapData
-  const mapPixelW = mapStore.mapData.width * tileSize
-  const mapPixelH = mapStore.mapData.height * tileSize
-  const vpW = canvasRef.value.clientWidth
-  const vpH = canvasRef.value.clientHeight
-  app.stage.x = (vpW - mapPixelW * currentScale) / 2
-  app.stage.y = (vpH - mapPixelH * currentScale) / 2
+  // 重置为 1.0 缩放，让用户看到坐标原点 (0,0) 和游戏窗口 (640x480)
+  currentScale = 1.0
+  applyScale()
+  // 留 30px 边距，原点在左上，游戏窗口完整可见
+  app.stage.x = 30
+  app.stage.y = 30
 }
 
 // --- Interaction ---
@@ -403,19 +497,7 @@ function centerView() {
 function onWheel(e: WheelEvent) {
   e.preventDefault()
 
-  // Scroll wheel on selected image: scale it
-  if (selectedImageData) {
-    const delta = e.deltaY > 0 ? 0.95 : 1.05
-    const newScale = Math.max(0.1, Math.min(10, (selectedImageData.scaleX ?? selectedImageData.scale ?? 1) * delta))
-    selectedImageData.scaleX = newScale
-    selectedImageData.scaleY = newScale
-    selectedImageData.scale = newScale
-    updateTransformBox()
-    updateSelectedImageSprite()
-    return
-  }
-
-  // Default: zoom canvas
+  // Zoom canvas
   const rect = canvasRef.value?.getBoundingClientRect()
   if (!rect) return
   const mouseX = e.clientX - rect.left
@@ -476,40 +558,54 @@ function onPointerDown(e: PointerEvent) {
 
     const pos = screenToGrid(e)
     if (pos) {
-      const globalIdx = mapStore.globalResourceOffset + mapStore.selectedResourceIndex
-      if (mapStore.currentTool === 'draw' && mapStore.selectedTileIndex >= 0) {
-        const tileId = (globalIdx + 1) * 1000 + mapStore.selectedTileIndex
-        mapStore.setTile(pos.x, pos.y, tileId)
-        lastPaintedKey = `${pos.x},${pos.y}`
-        updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
-        emit('tile-painted', pos.x, pos.y, tileId)
+      // 绘制工具：左键绘制，右键擦除
+      if (mapStore.currentTool === 'draw' && mapStore.activeLayer && mapStore.activeLayer.type === 'drawing') {
+        if (e.button === 0 && mapStore.selectedTileIndex >= 0) {
+          const tileId = encodeTileId(mapStore.activeLayer.id, mapStore.selectedResourceIndex, mapStore.selectedTileIndex)
+          mapStore.setTile(pos.x, pos.y, tileId)
+          lastPaintedKey = `${pos.x},${pos.y}`
+          updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
+          emit('tile-painted', pos.x, pos.y, tileId)
+        } else if ((e.button as number) === 2) {
+          mapStore.setTile(pos.x, pos.y, 0)
+          lastPaintedKey = `${pos.x},${pos.y}`
+          updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
+          emit('tile-erased', pos.x, pos.y)
+        }
       } else if (mapStore.currentTool === 'erase') {
         mapStore.setTile(pos.x, pos.y, 0)
         lastPaintedKey = `${pos.x},${pos.y}`
         updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
         emit('tile-erased', pos.x, pos.y)
-      } else if (mapStore.currentTool === 'fill' && mapStore.selectedTileIndex >= 0) {
-        const tileId = (globalIdx + 1) * 1000 + mapStore.selectedTileIndex
+      } else if (mapStore.currentTool === 'fill' && mapStore.selectedTileIndex >= 0 && mapStore.activeLayer) {
+        const tileId = encodeTileId(mapStore.activeLayer.id, mapStore.selectedResourceIndex, mapStore.selectedTileIndex)
         floodFill(pos.x, pos.y, tileId)
       } else if (mapStore.currentTool === 'move') {
-        // Pick up tile for moving
         const layer = mapStore.activeLayer
         if (layer && layer.type === 'drawing') {
           const tileId = layer.tiles[`${pos.x},${pos.y}`] ?? 0
           if (tileId !== 0) {
             moveStartPos = pos
             moveTileId = tileId
-            // Show preview
-            if (!movePreview) {
-              movePreview = new PIXI.Graphics()
-              app.stage.addChild(movePreview)
-            }
+            const spriteKey = `${layer.id}:${pos.x},${pos.y}`
+            moveStartSprite = tileSprites.get(spriteKey) ?? null
+            if (moveStartSprite) moveStartSprite.visible = false
+            // 异步加载纹理创建拖拽 sprite
             const tileSize = mapStore.mapData.tileSize
-            movePreview.clear()
-            movePreview.rect(pos.x * tileSize, pos.y * tileSize, tileSize, tileSize)
-            movePreview.stroke({ width: 1, color: 0x528bff, alpha: 0.8 })
-            movePreview.fill({ color: 0x528bff, alpha: 0.15 })
-            movePreview.visible = true
+            const { resourceIndex, tileIndex: tIdx } = decodeTileId(tileId, layer.id)
+            const texLayer = mapStore.mapData.layers.find(l => l.id === layer.id)
+            const texRes = texLayer?.resources[resourceIndex]
+            if (texRes) {
+              getTileTexture(texRes, tIdx).then(texture => {
+                if (!texture || !moveTileId) return
+                moveDragSprite = new PIXI.Sprite(texture)
+                moveDragSprite.width = tileSize
+                moveDragSprite.height = tileSize
+                moveDragSprite.x = pos.x * tileSize
+                moveDragSprite.y = pos.y * tileSize
+                app.stage.addChild(moveDragSprite)
+              }).catch(() => {})
+            }
           }
         }
       }
@@ -651,15 +747,12 @@ function onPointerMove(e: PointerEvent) {
   }
 
   // Move tool preview
-  if (moveStartPos && moveTileId && movePreview) {
+  if (moveStartPos && moveTileId && moveDragSprite) {
     const pos = screenToGrid(e)
     if (pos) {
       const tileSize = mapStore.mapData.tileSize
-      movePreview.clear()
-      movePreview.rect(pos.x * tileSize, pos.y * tileSize, tileSize, tileSize)
-      movePreview.stroke({ width: 1, color: 0x528bff, alpha: 0.8 })
-      movePreview.fill({ color: 0x528bff, alpha: 0.15 })
-      movePreview.visible = true
+      moveDragSprite.x = pos.x * tileSize
+      moveDragSprite.y = pos.y * tileSize
     }
   }
 
@@ -667,15 +760,20 @@ function onPointerMove(e: PointerEvent) {
     const pos = screenToGrid(e)
     updatePreview(pos)
 
-    if (pos && e.buttons === 1) {
+    if (pos && (e.buttons === 1 || e.buttons === 2)) {
       const key = `${pos.x},${pos.y}`
       if (key !== lastPaintedKey) {
-        const globalIdx = mapStore.globalResourceOffset + mapStore.selectedResourceIndex
-        if (mapStore.currentTool === 'draw' && mapStore.selectedTileIndex >= 0) {
-          const tileId = (globalIdx + 1) * 1000 + mapStore.selectedTileIndex
-          mapStore.setTile(pos.x, pos.y, tileId)
-          updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
-          emit('tile-painted', pos.x, pos.y, tileId)
+        // 绘制工具：左键绘制，右键擦除
+        if (mapStore.currentTool === 'draw' && mapStore.activeLayer && mapStore.activeLayer.type === 'drawing') {
+          if (e.buttons === 2) {
+            mapStore.setTile(pos.x, pos.y, 0)
+            updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
+          } else if (mapStore.selectedTileIndex >= 0) {
+            const tileId = encodeTileId(mapStore.activeLayer.id, mapStore.selectedResourceIndex, mapStore.selectedTileIndex)
+            mapStore.setTile(pos.x, pos.y, tileId)
+            updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
+            emit('tile-painted', pos.x, pos.y, tileId)
+          }
         } else if (mapStore.currentTool === 'erase') {
           mapStore.setTile(pos.x, pos.y, 0)
           updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
@@ -693,7 +791,7 @@ function onPointerUp() {
     transformHandleIndex = -1
     isImageDragging = false
     updateSelectedImageSprite()
-    renderAllLayers()
+    scheduleRender()
     return
   }
 
@@ -701,7 +799,7 @@ function onPointerUp() {
     isRotating = false
     isImageDragging = false
     updateSelectedImageSprite()
-    renderAllLayers()
+    scheduleRender()
     return
   }
 
@@ -709,7 +807,7 @@ function onPointerUp() {
     isDraggingImage = false
     isImageDragging = false
     updateSelectedImageSprite()
-    renderAllLayers()
+    scheduleRender()
     return
   }
 
@@ -719,18 +817,22 @@ function onPointerUp() {
     if (pos && (pos.x !== moveStartPos.x || pos.y !== moveStartPos.y)) {
       const layer = mapStore.activeLayer
       if (layer && layer.type === 'drawing') {
-        // Remove from old position
         mapStore.setTile(moveStartPos.x, moveStartPos.y, 0)
-        // Place at new position
         mapStore.setTile(pos.x, pos.y, moveTileId)
         updateTileAt(mapStore.activeLayerIndex, moveStartPos.x, moveStartPos.y)
         updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
       }
+    } else if (moveStartSprite) {
+      // 未移动，恢复原始 sprite 可见
+      moveStartSprite.visible = true
     }
     moveStartPos = null
     moveTileId = 0
-    if (movePreview) {
-      movePreview.visible = false
+    moveStartSprite = null
+    if (moveDragSprite) {
+      app.stage.removeChild(moveDragSprite)
+      moveDragSprite.destroy()
+      moveDragSprite = null
     }
   }
 
@@ -816,10 +918,11 @@ function onDrop(e: DragEvent) {
 
   try {
     const { resourceIndex, tileIndex } = JSON.parse(tileData)
-    const globalIdx = mapStore.globalResourceOffset + resourceIndex
-    const tileId = (globalIdx + 1) * 1000 + tileIndex
-    mapStore.setTile(pos.x, pos.y, tileId)
-    updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
+    if (mapStore.activeLayer) {
+      const tileId = encodeTileId(mapStore.activeLayer.id, resourceIndex, tileIndex)
+      mapStore.setTile(pos.x, pos.y, tileId)
+      updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
+    }
   } catch {}
 }
 
@@ -831,6 +934,13 @@ function onKeyDown(e: KeyboardEvent) {
   }
   // Tool shortcuts (only when not typing in an input)
   if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return
+  // Delete/Backspace 删除选中图像（图像图层时）
+  if ((e.key === 'Delete' || e.key === 'Backspace') && mapStore.activeLayer?.type === 'image') {
+    e.preventDefault()
+    deleteSelectedImage()
+    return
+  }
+
   switch (e.key.toLowerCase()) {
     case 'b': mapStore.setTool('draw'); break
     case 'e': mapStore.setTool('erase'); break
@@ -957,9 +1067,8 @@ function floodFill(startX: number, startY: number, fillTileId: number) {
     stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1])
   }
 
-  renderAllLayers()
+  scheduleRender()
 }
-
 // --- Transform Tool ---
 
 let transformBox: any = null
@@ -1162,6 +1271,21 @@ function updateTransformBox() {
 
 // --- Keyboard Shortcuts ---
 
+// 切换地图时清理所有选中状态、变换框、拖拽状态
+function resetCanvasState() {
+  removeTransformBox()
+  selectedImageData = null
+  selectedImageLayerId = -1
+  selectedImageIndex = -1
+  selectedImageSprite = null
+  moveStartPos = null
+  moveTileId = 0
+  isDraggingImage = false
+  isImageDragging = false
+  isRotating = false
+  if (moveDragSprite) { app?.stage.removeChild(moveDragSprite); moveDragSprite.destroy(); moveDragSprite = null }
+}
+
 // --- Watchers ---
 
 watch(() => mapStore.showGrid, () => {
@@ -1170,7 +1294,25 @@ watch(() => mapStore.showGrid, () => {
 
 watch(
   () => [mapStore.mapData.width, mapStore.mapData.height, mapStore.mapData.tileSize],
-  () => { redraw() }
+  () => {
+    redraw()
+    // tileSize 变化时需要重新渲染所有瓦片（sprite 尺寸依赖 tileSize）
+    if (app) {
+      tileTextures.clear()
+      scheduleRender()
+    }
+  }
+)
+
+// 监听渲染模式变化
+watch(
+  () => editorStore.renderMode,
+  () => {
+    if (app) {
+      applyRenderMode()
+      scheduleRender()
+    }
+  }
 )
 
 watch(
@@ -1182,6 +1324,24 @@ watch(
   }
 )
 
+// 切换地图时清理选中状态并重置视角
+watch(
+  () => mapStore.currentMapPath,
+  () => {
+    resetCanvasState()
+    nextTick(() => {
+      centerView()
+      scheduleRender()
+    })
+  }
+)
+
+// 切换图层时清除图像变换框（防止绘制图层上残留图像的选择框）
+watch(
+  () => mapStore.activeLayerIndex,
+  () => { removeTransformBox() }
+)
+
 // 监听图层可见性变化
 watch(
   () => mapStore.mapData.layers.map(l => `${l.id}:${l.visible}`),
@@ -1191,43 +1351,43 @@ watch(
 // Watch for layer add/remove -> re-render all
 watch(
   () => mapStore.mapData.layers.length,
-  () => { renderAllLayers() }
+  () => { scheduleRender() }
 )
 
-// Watch tile changes on active layer (using cheap revision counter)
+// Watch tile changes (using cheap revision counter)
 let renderQueued = false
+let pendingRender = false
+
 watch(
   () => mapStore.tileRevision,
   () => {
-    const layer = mapStore.activeLayer
-    if (!layer || layer.type !== 'drawing') return
-    if (!renderQueued) {
-      renderQueued = true
-      nextTick(() => {
-        renderAllLayers()
-        renderQueued = false
-      })
-    }
+    scheduleRender()
   }
 )
 
-// Watch image changes on active layer
-let imageRenderQueued = false
+// Watch image changes
 watch(
   () => mapStore.imageRevision,
   () => {
-    const layer = mapStore.activeLayer
-    if (!layer || layer.type !== 'image') return
     if (isImageDragging) return
-    if (!imageRenderQueued) {
-      imageRenderQueued = true
-      nextTick(() => {
-        renderAllLayers()
-        imageRenderQueued = false
-      })
-    }
+    scheduleRender()
   }
 )
+
+// 统一的渲染调度：合并多次变更，用锁防止并发渲染
+function scheduleRender() {
+  pendingRender = true
+  if (!renderQueued) {
+    renderQueued = true
+    nextTick(async () => {
+      renderQueued = false
+      while (pendingRender) {
+        pendingRender = false
+        await renderAllLayers()
+      }
+    })
+  }
+}
 
 onMounted(() => {
   nextTick(initPixi)
@@ -1280,7 +1440,17 @@ function getThumbnailDataUrl(): string | null {
   }
 }
 
-defineExpose({ redraw, cursorGridPos, renderAllLayers, showTransformBox, removeTransformBox, getThumbnailDataUrl })
+function deleteSelectedImage() {
+  if (!selectedImageData || selectedImageIndex < 0) return
+  const layer = mapStore.mapData.layers.find(l => l.id === selectedImageLayerId)
+  if (!layer) return
+  layer.images.splice(selectedImageIndex, 1)
+  removeTransformBox()
+  mapStore.imageRevision++
+  scheduleRender()
+}
+
+defineExpose({ redraw, cursorGridPos, renderAllLayers, showTransformBox, removeTransformBox, resetCanvasState, getThumbnailDataUrl, deleteSelectedImage })
 </script>
 
 <template>

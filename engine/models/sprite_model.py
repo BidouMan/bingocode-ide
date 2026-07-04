@@ -1,17 +1,12 @@
 # models/sprite_model.py
 import json
 import os
-from PySide6.QtCore import QObject, Signal
 
-class SpriteDataModel(QObject):
+class SpriteDataModel:
     """
     角色数据模型：负责 config.json 的内存映射与逻辑运算
     """
-    # 信号：type="COSTUME" (造型变动), "ANIMATION" (动作变动), "ALL" (加载)
-    data_changed = Signal(str, dict)
-
     def __init__(self, project_path):
-        super().__init__()
         self.project_path = project_path
         self.config_path = os.path.join(project_path, "config.json")
         self.name = os.path.basename(project_path)
@@ -49,7 +44,9 @@ class SpriteDataModel(QObject):
             except Exception as e:
                 print(f"❌ [Model] 解析 JSON 失败: {e}")
         
-        self.data_changed.emit("ALL", {})
+        if hasattr(self, '_data_changed_callbacks'):
+            for cb in self._data_changed_callbacks:
+                cb("ALL", {})
 
     def get_costume_path(self, display_index):
         """1-Base 映射获取路径"""
@@ -123,4 +120,6 @@ class SpriteDataModel(QObject):
                 to_del.append(name)
         for name in to_del: del self.animations[name]
         
-        self.data_changed.emit("COSTUME", {"deleted": deleted_idx})
+        if hasattr(self, '_data_changed_callbacks'):
+            for cb in self._data_changed_callbacks:
+                cb("COSTUME", {"deleted": deleted_idx})

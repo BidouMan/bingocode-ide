@@ -15,9 +15,6 @@ if project_root not in sys.path:
 # 设置标准输出为无缓冲模式
 sys.stdout = os.fdopen(sys.stdout.fileno(), "w", buffering=1)
 
-# 导入地图模型
-from models.map_model import MapDataModel
-
 _PRESSED_KEYS = set()
 _PRESSED_KEYS_PREV = set()
 _WAIT_TIMERS = {}
@@ -45,7 +42,6 @@ _FOLLOW_TARGET = None  # 摄像机跟随目标
 
 # 渲染缓存
 _RENDERED_TILES = set()  # 已渲染的瓦片缓存
-_LAST_RENDER_TIME = 0  # 上次渲染时间
 
 
 class _MouseType:
@@ -154,6 +150,9 @@ class Sprite:
         # 🚀 2. 资源解析逻辑升级
         # 尝试寻找解压后的角色文件夹 (例如 assets/sprites/洛克人)
         self.sprite_dir = os.path.join("assets", "sprites", filename)
+
+        # 注意：角色资源必须由用户在资源管理器中添加后才会存在于项目目录
+        # 不再自动从引擎内置素材解压
         self.config = self._load_sprite_config()
 
         if self.config:
@@ -162,34 +161,21 @@ class Sprite:
 
             # 检查 frames 或 costumes 字段
             if "frames" in self.config:
-                # 新格式：frames 是字符串列表
                 first_frame = self.config["frames"][0]
                 self.image = os.path.join(self.sprite_dir, first_frame)
-                print(f"✅ [BingoEngine] 加载 BGS 角色包 (frames 格式): {filename}")
-                print(f"   - 角色目录: {self.sprite_dir}")
-                print(f"   - 第一个造型: {first_frame}")
-                print(f"   - 完整路径: {self.image}")
             elif "costumes" in self.config:
-                # 旧格式：costumes 是字典列表
                 first_frame = self.config["costumes"][0]["file"]
                 self.image = os.path.join(self.sprite_dir, first_frame)
-                print(f"✅ [BingoEngine] 加载 BGS 角色包 (costumes 格式): {filename}")
-                print(f"   - 角色目录: {self.sprite_dir}")
-                print(f"   - 第一个造型: {first_frame}")
-                print(f"   - 完整路径: {self.image}")
         else:
-            # 兼容旧逻辑：寻找单张图片
             self.image = self._resolve_path(filename, "sprites")
             self.sprite_dir = None
             self.config = None
-            print(f"⚠️ [BingoEngine] 尝试加载单张图片: {filename}")
-            print(f"   - 图片路径: {self.image}")
 
-        # 检查图片文件是否存在
         if not os.path.exists(self.image):
-            print(f"❌ [BingoEngine] 资源文件不存在: {self.image}")
-        else:
-            print(f"✅ [BingoEngine] 资源文件存在: {self.image}")
+            print(f"❌ 角色 '{filename}' 不存在，请先在资源管理器中添加")
+            self._is_deleted = True
+            stop()
+            return
 
         # 3. 渲染预设缓存
         self._cached_image = None
@@ -1289,7 +1275,6 @@ class Sprite:
 
     def _setup_hitbox(self):
         """通用型高性能采样：支持任何尺寸图片，自动定位内容重心"""
-        from PySide6.QtCore import QRectF
 
         if hasattr(self, "_content_w") and self._cached_image == self.image:
             return self._cached_hitbox
@@ -1306,23 +1291,21 @@ class Sprite:
                     self._content_h = b - t
                     self._content_bbox = bbox  # 保存非透明区域边界
 
-                    # 🚀 算法核心：计算内容的中心点相对于图片物理中心的偏移
-                    # 例如：128x128的图，内容在左上角，offset会是负值
                     self._visual_offset_x = (l + r) / 2.0 - self._orig_w / 2.0
                     self._visual_offset_y = (t + b) / 2.0 - self._orig_h / 2.0
 
                 else:
-                    # 全透明或无内容图
                     self._content_w, self._content_h = self._orig_w, self._orig_h
                     self._visual_offset_x = self._visual_offset_y = 0
 
-                self._cached_hitbox = QRectF(0, 0, self._content_w, self._content_h)
+                self._cached_hitbox = [0, 0, self._content_w, self._content_h]
                 self._cached_image = self.image
         except:
-            # 兜底：防止路径错误导致崩溃
             self._content_w = self._content_h = 50
             self._visual_offset_x = self._visual_offset_y = 0
-            self._cached_hitbox = QRectF(0, 0, 50, 50)
+            self._orig_w = self._orig_h = 50
+            self._content_bbox = (0, 0, 50, 50)
+            self._cached_hitbox = [0, 0, 50, 50]
             self._cached_image = self.image
 
         return self._cached_hitbox
@@ -1702,45 +1685,106 @@ def load_map(map_name):
         # 使用当前工作目录（项目根目录）
         map_dir = os.path.join(os.getcwd(), "assets", "maps", map_name)
         _MAP_DIR = map_dir
-        map_file = os.path.join(map_dir, f"{map_name}.info")
+        json_file = os.path.join(map_dir, "map.json")
+
+        # 如果地图目录不存在，尝试自动解压 .bgm 文件
+        if not os.path.exists(map_dir):
+            _try_extract_bgm(map_name)
 
         print(f"✅ [BingoEngine] 加载地图: {map_name}")
-        print(f"   - 地图文件: {map_file}")
 
-        if not os.path.exists(map_file):
-            print(f"❌ [BingoEngine] 地图文件不存在: {map_file}")
+        if not os.path.exists(json_file):
+            print(f"❌ [BingoEngine] 地图文件不存在: {json_file}")
             return False
 
-        # 加载地图数据
-        map_model = MapDataModel()
-        if not map_model.load(map_file):
-            print(f"❌ [BingoEngine] 加载地图失败: {map_file}")
-            return False
+        with open(json_file, "r", encoding="utf-8") as f:
+            save_data = json.load(f)
 
-        _CURRENT_MAP = map_model.map_data
-        _MAP_MODEL = map_model
-        print(f"✅ [BingoEngine] 地图加载成功: {map_name}")
-        print(f"   - 实际尺寸: {_CURRENT_MAP['width']}x{_CURRENT_MAP['height']} 瓦片")
-        print(
-            f"   - 实际像素尺寸: {_CURRENT_MAP['width'] * _CURRENT_MAP.get('tile_size', 16)}x{_CURRENT_MAP['height'] * _CURRENT_MAP.get('tile_size', 16)} 像素"
-        )
-        print(f"   - 图层数: {len(_CURRENT_MAP['layers'])}")
-        print(
-            f"   - 偏移量: ({_CURRENT_MAP.get('offset_x', 0)}, {_CURRENT_MAP.get('offset_y', 0)})"
-        )
-        print(f"   - 重力: {_CURRENT_MAP.get('gravity', False)}")
+        # 解析行业标准格式（带 firstgid 和压缩瓦片数据）
+        tilesets_raw = save_data.get("tilesets", save_data.get("tileSets", []))
+        tilesets = []
+        for ts in tilesets_raw:
+            tilesets.append({
+                "name": ts.get("name", ""),
+                "image_path": ts.get("image", ts.get("image_path", "")),
+                "tile_width": ts.get("tileWidth", ts.get("tile_width", 16)),
+                "tile_height": ts.get("tileHeight", ts.get("tile_height", 16)),
+                "firstgid": ts.get("firstgid", 1),
+                "tiles": ts.get("tiles", []),
+            })
 
-        # 打印图层信息
-        for i, layer in enumerate(_CURRENT_MAP["layers"]):
-            print(f"   - 图层 {i} ({layer['name']}): {len(layer['tiles'])} 个瓦片")
-            if "images" in layer:
-                print(f"     图像数量: {len(layer['images'])}")
-                for j, img in enumerate(layer["images"]):
-                    print(
-                        f"     图像 {j}: collision_type={img.get('collision_type', 'N/A')}, collision_enabled={img.get('collision_enabled', False)}, pos={img.get('position', 'N/A')}"
-                    )
+        # 解析图层数据
+        layers_raw = save_data.get("layers", [])
+        layers = []
+        for layer_raw in layers_raw:
+            layer_type = layer_raw.get("type", "drawing")
+            if layer_type in ("tilelayer", "drawing"):
+                tiles = {}
+                data_str = layer_raw.get("data")
+                if data_str:
+                    # 解压 base64+zlib 瓦片数据（GID格式，含firstgid偏移）
+                    tiles = _decompress_tiles(data_str, save_data["width"], save_data["height"])
+                elif "tiles" in layer_raw:
+                    # 兼容旧格式（稀疏字典）
+                    raw_tiles = layer_raw["tiles"]
+                    for key, val in raw_tiles.items():
+                        if isinstance(key, str) and "," in key:
+                            parts = key.split(",")
+                            tiles[(int(parts[0]), int(parts[1]))] = val
+                        else:
+                            tiles[key] = val
+                layers.append({
+                    "name": layer_raw.get("name", "图层"),
+                    "type": "drawing",
+                    "visible": layer_raw.get("visible", True),
+                    "locked": layer_raw.get("locked", False),
+                    "tiles": tiles,
+                    "images": layer_raw.get("images", []),
+                })
+            elif layer_type == "imagelayer":
+                # 兼容两种格式：images（带位置）和 resources（资源引用，无位置）
+                images = layer_raw.get("images", [])
+                if not images:
+                    # 将 resources 转换为 images 格式（资源默认放在 0,0）
+                    for res in layer_raw.get("resources", []):
+                        images.append({
+                            "imagePath": res.get("path", ""),
+                            "image_path": res.get("path", ""),
+                            "position": [0, 0],
+                            "rotation": 0,
+                            "scale": 1,
+                            "scaleX": 1,
+                            "scaleY": 1,
+                            "opacity": 1,
+                            "width": res.get("tileWidth", 64),
+                            "height": res.get("tileHeight", 64),
+                            "collisionType": res.get("collisionType", "none"),
+                            "collisionEnabled": res.get("collisionEnabled", False),
+                        })
+                layers.append({
+                    "name": layer_raw.get("name", "图像层"),
+                    "type": "image",
+                    "visible": layer_raw.get("visible", True),
+                    "locked": layer_raw.get("locked", False),
+                    "tiles": {},
+                    "images": images,
+                })
 
-        # 发送场景更新指令，更新SceneRect
+        map_data = {
+            "name": save_data.get("name", ""),
+            "width": save_data["width"],
+            "height": save_data["height"],
+            "tile_size": save_data.get("tileSize", save_data.get("tile_size", 16)),
+            "offset_x": save_data.get("offsetX", save_data.get("offset_x", 0)),
+            "offset_y": save_data.get("offsetY", save_data.get("offset_y", 0)),
+            "gravity": save_data.get("gravity", False),
+            "layers": layers,
+            "tile_sets": tilesets,
+        }
+
+        _CURRENT_MAP = map_data
+        _MAP_MODEL = None
+
         tile_size = _CURRENT_MAP.get("tile_size", 16)
         map_width_px = _CURRENT_MAP["width"] * tile_size
         map_height_px = _CURRENT_MAP["height"] * tile_size
@@ -1790,10 +1834,6 @@ def load_map(map_name):
         }
         _CURRENT_MAP["world_bounds"] = world_bounds
 
-        print(
-            f"[SCENE] map_tiles=({_CURRENT_MAP['width']},{_CURRENT_MAP['height']}) map_px=({map_width_px},{map_height_px}) ts={tile_size} bounds=({world_bounds['left']},{world_bounds['top']},{world_bounds['right']},{world_bounds['bottom']})"
-        )
-
         scene_update_packet = {
             "type": "SCENE_UPDATE",
             "data": {
@@ -1813,6 +1853,57 @@ def load_map(map_name):
         import traceback
 
         traceback.print_exc()
+        return False
+
+
+def _decompress_tiles(base64_data, width, height):
+    """解压 base64+zlib 瓦片数据为稀疏字典
+    格式：每瓦片4字节uint32小端序，存储GID（含firstgid偏移）
+    """
+    import base64
+    import zlib
+    compressed = base64.b64decode(base64_data)
+    decompressed = zlib.decompress(compressed)
+    flat_array = list(decompressed)
+    tiles = {}
+    for y in range(height):
+        for x in range(width):
+            idx = (y * width + x) * 4
+            if idx + 3 < len(flat_array):
+                # uint32小端序
+                gid = flat_array[idx] | (flat_array[idx + 1] << 8) | (flat_array[idx + 2] << 16) | (flat_array[idx + 3] << 24)
+                if gid > 0:
+                    tiles[(x, y)] = gid
+    return tiles
+
+
+def _find_tileset_for_gid(gid, tile_sets):
+    """通过GID查找所属瓦片集索引和本地瓦片索引（Tiled标准）
+    返回 (tileset_index, local_tile_index)，未找到返回 (0, 0)
+    """
+    for i in range(len(tile_sets) - 1, -1, -1):
+        firstgid = tile_sets[i].get("firstgid", 1)
+        if gid >= firstgid:
+            return i, gid - firstgid
+    return 0, gid
+
+
+def _try_extract_bgm(map_name):
+    """自动解压 .bgm 地图包到 assets/maps/ 目录"""
+    import zipfile
+    engine_dir = os.path.dirname(os.path.abspath(__file__))
+    bgm_path = os.path.join(engine_dir, "assets", "maps", "packages", f"{map_name}.bgm")
+    if not os.path.exists(bgm_path):
+        return False
+    try:
+        target_dir = os.path.join(os.getcwd(), "assets", "maps", map_name)
+        os.makedirs(target_dir, exist_ok=True)
+        with zipfile.ZipFile(bgm_path, 'r') as zf:
+            zf.extractall(target_dir)
+        print(f"✅ [BingoEngine] 自动解压 .bgm: {map_name} → {target_dir}")
+        return True
+    except Exception as e:
+        print(f"❌ [BingoEngine] 解压 .bgm 失败: {e}")
         return False
 
 
@@ -1893,18 +1984,14 @@ def _handle_physics_collision():
 
 def _render_map():
     """渲染地图 - 优化版本"""
-    global _CURRENT_MAP, _MAP_SPRITES, _RENDERED_TILES, _LAST_RENDER_TIME, _MAP_DIR
+    global _CURRENT_MAP, _MAP_SPRITES, _RENDERED_TILES, _MAP_DIR
 
     if not _CURRENT_MAP:
         return
 
-    start_time = time.time()
-
     tile_size = _CURRENT_MAP["tile_size"]
 
     batch_commands = []
-    rendered_count = 0
-    visible_count = 0
 
     # 遍历所有图层
     for layer_idx, layer in enumerate(_CURRENT_MAP["layers"]):
@@ -1929,8 +2016,8 @@ def _render_map():
                 scale_y = image.get("scale_y", scale)
                 opacity = image.get("opacity", 1.0)
 
-                # 获取图像路径并转换为绝对路径
-                image_path = image.get("image_path", "")
+                # 获取图像路径并转换为绝对路径（兼容 camelCase 和 snake_case）
+                image_path = image.get("imagePath", image.get("image_path", ""))
                 if image_path:
                     # 如果是相对路径，转换为绝对路径
                     if not os.path.isabs(image_path):
@@ -1988,7 +2075,6 @@ def _render_map():
                 }
 
                 batch_commands.append(image_data)
-                rendered_count += 1
 
         # 处理绘制图层的瓦片
         if "tiles" in layer:
@@ -1997,32 +2083,16 @@ def _render_map():
                 if tile_id <= 0:
                     continue
 
-                # 解析tile_id：格式为 resource_index * 1000 + tile_index + 1（图块集模式）
-                # 或 resource_index + 1（单张图片模式）
-                # 确保转换为Python原生类型，避免numpy类型导致JSON序列化失败
                 tile_id_int = int(tile_id)
 
-                # 判断是图块集模式还是单张图片模式
-                if tile_id_int < 1000:
-                    # 单张图片模式：tile_id = resource_index + 1（旧格式兼容）
-                    resource_index = tile_id_int - 1
-                    actual_tile_index = 0
-                else:
-                    # 图块集模式：tile_id = (resource_index + 1) * 1000 + tile_index + 1
-                    resource_index = (tile_id_int // 1000) - 1
-                    actual_tile_index = (tile_id_int % 1000) - 1
+                # 使用Tiled标准：通过firstgid范围查找瓦片集
+                resource_index, actual_tile_index = _find_tileset_for_gid(
+                    tile_id_int, _CURRENT_MAP["tile_sets"]
+                )
 
-                # 调试信息
                 if resource_index >= len(_CURRENT_MAP["tile_sets"]):
-                    print(
-                        f"DEBUG: 资源索引超出范围: {resource_index}, 瓦片集数量: {len(_CURRENT_MAP['tile_sets'])}"
-                    )
-                    print(
-                        f"DEBUG: 瓦片ID: {tile_id_int}, 实际瓦片索引: {actual_tile_index}"
-                    )
                     continue
 
-                # 生成唯一的瓦片ID
                 sprite_id = f"tile_{layer_idx}_{x}_{y}"
                 tile_key = (layer_idx, x, y)
 
@@ -2055,7 +2125,6 @@ def _render_map():
 
                 batch_commands.append(tile_data)
                 _RENDERED_TILES.add(tile_key)
-                rendered_count += 1
 
     # 批量渲染：一次性发送所有可见瓦片和图像的渲染指令
     if batch_commands:
@@ -2102,17 +2171,6 @@ def _render_map():
         # 更新已渲染的精灵字典
         for tile_data in batch_commands:
             _MAP_SPRITES[tile_data["id"]] = tile_data
-
-    # 在静态图层烘焙模式下，不需要清理瓦片（所有瓦片都已渲染）
-    # 只有在动态渲染模式下才需要清理视口外的瓦片
-
-    # 性能监控
-    render_time = (time.time() - start_time) * 1000  # 转换为毫秒
-    _LAST_RENDER_TIME = render_time
-
-    print(
-        f"[RENDER] tiles_visible={visible_count} tiles_rendered={rendered_count} batch={len(batch_commands)} time={render_time:.1f}ms"
-    )
 
 
 def run():

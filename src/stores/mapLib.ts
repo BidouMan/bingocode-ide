@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import JSZip from 'jszip'
+import { invoke } from '@tauri-apps/api/core'
 
 export interface MapLibItem {
   name: string
@@ -13,17 +13,19 @@ export const useMapLibStore = defineStore('mapLib', () => {
   const items = ref<MapLibItem[]>([])
   const loading = ref(false)
 
-  const BUILTIN_MAPS = ['草地', '森林01']
+  // 内置地图列表
+  const BUILTIN_MAPS = ['草地']
 
   async function loadBuiltinLibrary() {
     if (items.value.length > 0) return
     loading.value = true
 
+    const engineDir = await invoke<string>('get_engine_assets_dir')
+
     for (const name of BUILTIN_MAPS) {
-      const bgmUrl = `/map_lib/${name}.bgm`
       items.value.push({
         name,
-        bgmUrl,
+        bgmUrl: `${engineDir}/maps/packages/${name}.bgm`,
         thumbUrl: '',
         loaded: false,
       })
@@ -31,25 +33,13 @@ export const useMapLibStore = defineStore('mapLib', () => {
 
     for (const item of items.value) {
       try {
-        const resp = await fetch(item.bgmUrl)
-        const blob = await resp.blob()
-        const zip = await JSZip.loadAsync(blob)
-
-        const thumbEntry = zip.file('thumbnail.png')
-        if (thumbEntry) {
-          const thumbBlob = await thumbEntry.async('blob')
-          item.thumbUrl = URL.createObjectURL(thumbBlob)
-        }
-
-        const infoFile = zip.file(/.*\.info$/)
-        if (infoFile.length > 0) {
-          const infoName = infoFile[0].name.replace('.info', '')
-          item.name = infoName
-        }
-
+        const dataUrl = await invoke<string>('get_sprite_thumbnail', {
+          path: item.bgmUrl,
+        })
+        item.thumbUrl = dataUrl
         item.loaded = true
-      } catch {
-        // thumbnail load failed
+      } catch (e) {
+        console.error(`[MapLib] ${item.name}: 加载缩略图失败`, e)
       }
     }
 

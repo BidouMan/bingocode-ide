@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 
 export type EditorMode = 'code' | 'sprite' | 'map'
 export type ResourceTab = 'sprite' | 'map' | 'sound' | 'code'
+export type RenderMode = 'smooth' | 'pixelated'
 
 export interface Tab {
   id: string
@@ -30,6 +31,7 @@ export const useEditorStore = defineStore('editor', () => {
   const activeEditorMode = ref<EditorMode>('code')
   const isRunning = ref(false)
   const resourceTab = ref<ResourceTab>('sprite')
+  const renderMode = ref<RenderMode>('smooth')
 
   // ─── 游戏模式标签 ───
   const gameTabs = ref<Tab[]>([createDefaultTab()])
@@ -143,11 +145,16 @@ export const useEditorStore = defineStore('editor', () => {
     isRunning.value = !isRunning.value
   }
 
+  function setRenderMode(mode: RenderMode) {
+    renderMode.value = mode
+  }
+
   return {
     isGameMode,
     activeEditorMode,
     isRunning,
     resourceTab,
+    renderMode,
     gameTabs,
     gameActiveTabIndex,
     codeTabs,
@@ -159,6 +166,7 @@ export const useEditorStore = defineStore('editor', () => {
     toggleGameMode,
     setActiveEditorMode,
     setResourceTab,
+    setRenderMode,
     createTab,
     closeTab,
     renameTab,

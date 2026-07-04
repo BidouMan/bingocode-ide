@@ -57,10 +57,39 @@ export interface SayCommand extends EngineCommand {
 export interface CreateBatchCommand extends EngineCommand {
   type: 'CREATE_BATCH'
   data: {
-    tiles: any[]
-    tile_sets: any[]
+    tiles: TileData[]
+    tile_sets: TileSetData[]
     tile_size: number
   }
+}
+
+export interface TileData {
+  id: string
+  x: number
+  y: number
+  type: 'tile' | 'image'
+  tile_id?: number
+  tile_set_index?: number
+  layer: number
+  tile_size: number
+  angle?: number
+  scale?: number
+  scale_x?: number
+  scale_y?: number
+  opacity?: number
+  image_path?: string
+}
+
+export interface TileSetData {
+  name: string
+  image_path: string
+  image?: string
+  resource_type?: string
+  tile_width: number
+  tile_height: number
+  collision_type?: string
+  collision_enabled?: boolean
+  tiles?: any[]
 }
 
 export interface CameraUpdateCommand extends EngineCommand {

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import type { TileData, TileSetData } from '../types/engine'
 
 export interface SpriteData {
   id: string
@@ -14,6 +15,25 @@ export interface SpriteData {
   imagePath: string
 }
 
+export interface SayData {
+  spriteId: string
+  text: string
+  x: number
+  y: number
+}
+
+export interface DrawTextData {
+  id: string
+  text: string
+  x: number
+  y: number
+}
+
+export interface HitboxData {
+  spriteId: string
+  rect: number[] | null
+}
+
 export interface CameraData {
   x: number
   y: number
@@ -24,8 +44,38 @@ export interface CameraData {
   limitBottom: number
 }
 
+export interface RenderTileData {
+  id: string
+  x: number
+  y: number
+  layer: number
+  type: 'tile' | 'image'
+  tileId?: number
+  tileSetIndex?: number
+  tileSize: number
+  imagePath?: string
+  angle?: number
+  scale?: number
+  scaleX?: number
+  scaleY?: number
+  opacity?: number
+}
+
+export interface TileSetInfo {
+  name: string
+  imagePath: string
+  tileWidth: number
+  tileHeight: number
+}
+
 export const useRenderStore = defineStore('render', () => {
   const sprites = ref<Map<string, SpriteData>>(new Map())
+  const tiles = ref<Map<string, RenderTileData>>(new Map())
+  const tileSets = ref<TileSetInfo[]>([])
+  const tileGridSize = ref(16)
+  const sayTexts = ref<Map<string, SayData>>(new Map())
+  const drawTexts = ref<Map<string, DrawTextData>>(new Map())
+  const hitboxes = ref<Map<string, HitboxData>>(new Map())
   const camera = ref<CameraData>({
     x: 320,
     y: 240,
@@ -68,8 +118,44 @@ export const useRenderStore = defineStore('render', () => {
     sprites.value.delete(id)
   }
 
+  function createBatch(data: { tiles: TileData[]; tile_sets: TileSetData[]; tile_size: number }) {
+    tiles.value.clear()
+    tileSets.value = data.tile_sets.map(ts => ({
+      name: ts.name,
+      imagePath: ts.image || ts.image_path,
+      tileWidth: ts.tile_width,
+      tileHeight: ts.tile_height,
+    }))
+    tileGridSize.value = data.tile_size
+
+    for (const tile of data.tiles) {
+      tiles.value.set(tile.id, {
+        id: tile.id,
+        x: tile.x,
+        y: tile.y,
+        layer: tile.layer,
+        type: tile.type,
+        tileId: tile.tile_id,
+        tileSetIndex: tile.tile_set_index,
+        tileSize: tile.tile_size,
+        imagePath: tile.image_path,
+        angle: tile.angle,
+        scale: tile.scale,
+        scaleX: tile.scale_x,
+        scaleY: tile.scale_y,
+        opacity: tile.opacity,
+      })
+    }
+  }
+
   function clearAll() {
     sprites.value.clear()
+    tiles.value.clear()
+    tileSets.value = []
+    tileGridSize.value = 16
+    sayTexts.value.clear()
+    drawTexts.value.clear()
+    hitboxes.value.clear()
     camera.value = {
       x: 320,
       y: 240,
@@ -114,18 +200,65 @@ export const useRenderStore = defineStore('render', () => {
     }
   }
 
+  function setSayText(spriteId: string, text: string) {
+    if (!text) {
+      sayTexts.value.delete(spriteId)
+      return
+    }
+    const sprite = sprites.value.get(spriteId)
+    if (sprite) {
+      sayTexts.value.set(spriteId, {
+        spriteId,
+        text,
+        x: sprite.x,
+        y: sprite.y - 40,
+      })
+    }
+  }
+
+  function setDrawText(id: string, text: string, x: number, y: number) {
+    if (!text) {
+      drawTexts.value.delete(id)
+      return
+    }
+    drawTexts.value.set(id, { id, text, x, y })
+  }
+
+  function setHitbox(spriteId: string, rect: number[] | null) {
+    if (!rect) {
+      hitboxes.value.delete(spriteId)
+      return
+    }
+    hitboxes.value.set(spriteId, { spriteId, rect })
+  }
+
+  function removeHitbox(spriteId: string) {
+    hitboxes.value.delete(spriteId)
+  }
+
   return {
     sprites,
+    tiles,
+    tileSets,
+    tileGridSize,
+    sayTexts,
+    drawTexts,
+    hitboxes,
     camera,
     fps,
     isPaused,
     createSprite,
     updateSprite,
     deleteSprite,
+    createBatch,
     clearAll,
     updateCamera,
     setFps,
     triggerShake,
     getShakeOffset,
+    setSayText,
+    setDrawText,
+    setHitbox,
+    removeHitbox,
   }
 })

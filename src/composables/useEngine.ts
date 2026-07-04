@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useEditorStore } from '../stores/editor'
 import { useRenderStore } from '../stores/render'
@@ -23,6 +23,9 @@ export function useEngine() {
     } catch {}
     return null
   }
+
+  // 活跃音频元素
+  const activeAudios = new Map<string, HTMLAudioElement>()
 
   function dispatchInstruction(cmd: AnyEngineCommand) {
     switch (cmd.type) {
@@ -52,11 +55,36 @@ export function useEngine() {
           layer: cmd.data.layer,
           imagePath: cmd.data.image,
         })
+        // 更新碰撞盒
+        if (cmd.data.hitbox) {
+          renderStore.setHitbox(cmd.id!, cmd.data.hitbox)
+        } else {
+          renderStore.removeHitbox(cmd.id!)
+        }
+        // 同步气泡位置
+        const sayText = renderStore.sayTexts.get(cmd.id!)
+        if (sayText) {
+          sayText.x = cmd.data.x
+          sayText.y = cmd.data.y - 40
+        }
         break
 
       case 'DELETE':
-      case 'REMOVE':
         renderStore.deleteSprite(cmd.id!)
+        renderStore.removeHitbox(cmd.id!)
+        renderStore.sayTexts.delete(cmd.id!)
+        break
+
+      case 'SAY':
+        renderStore.setSayText(cmd.id!, cmd.data.text)
+        break
+
+      case 'CREATE_BATCH':
+        renderStore.createBatch({
+          tiles: cmd.data.tiles,
+          tile_sets: cmd.data.tile_sets,
+          tile_size: cmd.data.tile_size,
+        })
         break
 
       case 'CAMERA_UPDATE':
@@ -84,24 +112,35 @@ export function useEngine() {
         break
 
       case 'PLAY_SOUND':
-        // Sound playback handled separately
+        try {
+          const url = convertFileSrc(cmd.data.sound)
+          const audio = new Audio(url)
+          audio.loop = cmd.data.loop
+          activeAudios.set(cmd.data.sound, audio)
+          audio.play().catch(() => {})
+        } catch {}
         break
 
       case 'STOP_SOUND':
+        if (cmd.data.sound) {
+          const audio = activeAudios.get(cmd.data.sound)
+          if (audio) {
+            audio.pause()
+            audio.currentTime = 0
+            activeAudios.delete(cmd.data.sound)
+          }
+        } else {
+          activeAudios.forEach(a => { a.pause(); a.currentTime = 0 })
+          activeAudios.clear()
+        }
         break
 
       case 'DRAW_TEXT':
-        // Text rendering handled by PixiJS
+        renderStore.setDrawText(cmd.id!, cmd.data.text, cmd.data.x, cmd.data.y)
         break
 
       case 'SCREEN_SHAKE':
         renderStore.triggerShake(cmd.data.intensity, cmd.data.duration)
-        break
-
-      case 'SAY':
-        renderStore.updateSprite(cmd.id!, {
-          // Store say text as custom property
-        } as any)
         break
     }
   }
@@ -125,7 +164,23 @@ export function useEngine() {
     })
 
     const unlisten2 = await listen<string>('engine:stderr', (event) => {
-      terminalStore.handleStderr(event.payload)
+      const msg = event.payload
+      // 学生友好的错误提示
+      if (msg.includes('No such file') && msg.includes('.temp_run.py')) {
+        terminalStore.handleStderr('❌ 程序文件出错了，请再试一次运行\n')
+      } else if (msg.includes('ModuleNotFoundError')) {
+        const match = msg.match(/No module named '(\w+)'/)
+        const moduleName = match ? match[1] : '未知模块'
+        terminalStore.handleStderr(`❌ 找不到模块 "${moduleName}"，请检查代码中的 import 语句\n`)
+      } else if (msg.includes('SyntaxError')) {
+        terminalStore.handleStderr('❌ 代码语法有误，请检查拼写和括号是否正确\n')
+      } else if (msg.includes('NameError')) {
+        const match = msg.match(/name '(\w+)'/)
+        const name = match ? match[1] : '未知'
+        terminalStore.handleStderr(`❌ 变量或函数 "${name}" 未定义，请检查拼写\n`)
+      } else {
+        terminalStore.handleStderr(msg)
+      }
     })
 
     let stdoutEnded = false
@@ -184,17 +239,37 @@ export function useEngine() {
     try {
       const projectDir = projectStore.root || ''
 
-      // 将编辑器内容写入临时文件
+      // 先写入原始内容获取临时文件路径
       const scriptPath = await invoke<string>('save_temp_script', {
         projectDir,
         content: tab.content,
       })
 
+      // 获取引擎环境（python路径、engine目录、工作目录）
       const env = await invoke<{
         python_path: string
         engine_dir: string
         working_dir: string
       }>('resolve_engine_env', { scriptPath, projectRoot: projectDir || undefined })
+
+      // 构建注入后的脚本内容：sys.path + 自动 import
+      let codeToRun = tab.content
+      const gameKeywords = ['run()', 'Sprite(', 'load_map(', 'key_down(', 'key_pressed(', 'Timer(', 'mouse', 'wait(']
+      const hasImport = codeToRun.includes('from bingo_engine import') || codeToRun.includes('import bingo_engine')
+      const needsEngine = !hasImport && gameKeywords.some(kw => codeToRun.includes(kw))
+
+      if (needsEngine) {
+        const escapedPath = env.engine_dir.replace(/\\/g, '\\\\')
+        codeToRun = `import sys\nif "${escapedPath}" not in sys.path:\n    sys.path.insert(0, "${escapedPath}")\nfrom bingo_engine import *\n` + codeToRun
+      }
+
+      // 用注入后的内容重新写入临时文件
+      if (needsEngine) {
+        await invoke<string>('save_temp_script', {
+          projectDir,
+          content: codeToRun,
+        })
+      }
 
       await invoke('run_script', {
         scriptPath,

@@ -1,5 +1,10 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
+
+const props = defineProps<{
+  layerType: 'image' | 'drawing'
+}>()
 
 const emit = defineEmits<{
   'close': []
@@ -12,22 +17,22 @@ const tileSize = ref('16x16')
 
 const sizes = ['16x16', '32x32', '64x64']
 
-function onBrowse() {
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.accept = '.png,.jpg,.jpeg,.bmp,.gif'
-  input.onchange = (e: Event) => {
-    const file = (e.target as HTMLInputElement).files?.[0]
-    if (file) resourcePath.value = file.name
+async function onBrowse() {
+  try {
+    const path = await invoke<string | null>('pick_image_file')
+    if (path) resourcePath.value = path
+  } catch (e) {
+    console.error('选择文件失败:', e)
   }
-  input.click()
 }
 
 function onConfirm() {
+  if (!resourcePath.value) return
+  const isImageLayer = props.layerType === 'image'
   emit('imported', {
     path: resourcePath.value,
-    mode: mode.value,
-    size: tileSize.value,
+    mode: isImageLayer ? 'image' : mode.value,
+    size: isImageLayer ? '64x64' : tileSize.value,
   })
 }
 </script>
@@ -37,26 +42,34 @@ function onConfirm() {
     <div class="dialog-box">
       <div class="dialog-row">
         <label class="dialog-label">资源路径:</label>
-        <input v-model="resourcePath" class="dialog-input" />
+        <input v-model="resourcePath" class="dialog-input" readonly />
         <button class="dialog-btn" @click="onBrowse">浏览</button>
       </div>
 
-      <div class="dialog-row">
-        <label class="dialog-radio-group">
-          <input type="radio" v-model="mode" value="image" />
-          <span>图像模式</span>
-        </label>
-        <label class="dialog-radio-group">
-          <input type="radio" v-model="mode" value="tileset" />
-          <span>图块集合</span>
-        </label>
+      <!-- 绘制图层才显示模式和尺寸选择 -->
+      <template v-if="layerType === 'drawing'">
+        <div class="dialog-row">
+          <label class="dialog-radio-group">
+            <input type="radio" v-model="mode" value="image" />
+            <span>图像模式</span>
+          </label>
+          <label class="dialog-radio-group">
+            <input type="radio" v-model="mode" value="tileset" />
+            <span>图块集合</span>
+          </label>
 
-        <div class="dialog-spacer" />
+          <div class="dialog-spacer" />
 
-        <label class="dialog-label">尺寸:</label>
-        <select v-model="tileSize" class="dialog-select">
-          <option v-for="s in sizes" :key="s" :value="s">{{ s }}</option>
-        </select>
+          <label class="dialog-label">尺寸:</label>
+          <select v-model="tileSize" class="dialog-select">
+            <option v-for="s in sizes" :key="s" :value="s">{{ s }}</option>
+          </select>
+        </div>
+      </template>
+
+      <!-- 图像图层提示 -->
+      <div v-else class="dialog-hint">
+        图像图层：资源将作为整图导入
       </div>
 
       <div class="dialog-row dialog-actions">
@@ -164,6 +177,12 @@ function onConfirm() {
   font-size: 12px;
   color: rgb(156, 160, 164);
   cursor: pointer;
+}
+
+.dialog-hint {
+  font-size: 12px;
+  color: rgb(120, 160, 120);
+  padding: 4px 0;
 }
 
 .dialog-spacer { flex: 1; }

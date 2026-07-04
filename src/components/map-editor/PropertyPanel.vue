@@ -19,12 +19,35 @@ const collisionTypeOptions = [
 
 const tileSizeValue = computed(() => `${mapStore.mapData.tileSize}x${mapStore.mapData.tileSize}`)
 function onTileSizeChange(val: string) {
-  mapStore.updateMapProperty('tileSize', Number(val.split('x')[0]))
+  const newSize = Number(val.split('x')[0])
+  mapStore.updateTileSize(newSize)
 }
 
-const collisionTypeValue = computed(() => mapStore.mapData.collisionType || '图像')
+const collisionTypeValue = computed(() => {
+  // 优先显示选中资源的碰撞类型
+  const resource = mapStore.selectedResource
+  if (resource) return resource.collisionType || '图像'
+  return mapStore.mapData.collisionType || '图像'
+})
+
 function onCollisionTypeChange(val: string) {
   mapStore.updateMapProperty('collisionType', val)
+  // 同步更新选中资源的碰撞类型
+  const resource = mapStore.selectedResource
+  if (resource) {
+    resource.collisionType = val
+    resource.collisionEnabled = val !== '图像'
+    // 切换碰撞类型时清空旧碰撞数据，让碰撞编辑器根据图片尺寸重新生成
+    if (val !== '图像') {
+      resource.collisionShape = undefined
+    }
+  }
+  // 联动：图像 → 取消碰撞，墙体/跳板 → 自动勾选碰撞
+  if (val === '图像') {
+    mapStore.updateMapProperty('collisionEnabled', false)
+  } else {
+    mapStore.updateMapProperty('collisionEnabled', true)
+  }
 }
 
 const customCollisionType = computed(() => mapStore.mapData.collisionType || '')
