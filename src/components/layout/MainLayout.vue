@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, nextTick, onMounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { open, save } from '@tauri-apps/plugin-dialog'
 import { useEditorStore } from '../../stores/editor'
 import { useResourceStore } from '../../stores/resource'
 import { useProjectStore } from '../../stores/project'
 import { useMapStore } from '../../stores/map'
+import { useRenderStore } from '../../stores/render'
 import { useEngine } from '../../composables/useEngine'
 import { useFileDialog } from '../../composables/useFileDialog'
 import GameCanvas from '../canvas/GameCanvas.vue'
@@ -40,6 +42,7 @@ const editorStore = useEditorStore()
 const resourceStore = useResourceStore()
 const projectStore = useProjectStore()
 const mapStore = useMapStore()
+const renderStore = useRenderStore()
 const engine = useEngine()
 const fileDialog = useFileDialog()
 
@@ -199,46 +202,143 @@ function openSettingsSubmenu(name: string) {
 async function fileMenuAction(action: string) {
   closeFileMenu()
 
+  // 任何项目操作都先停止运行
+  if (editorStore.isRunning) {
+    await engine.stop()
+    renderStore.clearAll()
+  }
+
   switch (action) {
     case 'new': {
-      const name = `未命名-${editorStore.currentTabs.length + 1}.py`
-      editorStore.createTab(name, '', 'print("Hello Bingo!")\n')
+      const projectRoot = await projectStore.newProject()
+      if (!projectRoot) break
+      // 清空所有旧数据
+      resourceStore.clearAllResources()
+      renderStore.clearAll()
+      const gameTabs = editorStore.gameTabs
+      gameTabs.splice(0, gameTabs.length)
+      editorStore.gameActiveTabIndex = 0
+      await nextTick()
+      // 创建新项目默认代码文件
+      const name = '未命名-1.py'
+      const code = 'print("Hello Bingo!")\n'
+      await invoke('create_dir', { path: `${projectRoot}/code` })
+      await invoke('write_file', { path: `${projectRoot}/code/${name}`, content: code })
+      editorStore.createTab(name, `${projectRoot}/code/${name}`, code)
+      resourceStore.addItem({ name, type: 'code', path: `${projectRoot}/code/${name}`, content: code })
       break
     }
 
     case 'open': {
-      const file = await fileDialog.openFile('.py,.bingo,.json')
-      if (!file) break
-      if (file.name.endsWith('.bingo') || file.name.endsWith('.json')) {
-        // 项目文件：解析后加载
-        // TODO: Tauri 模式下解包 .bingo
-        editorStore.createTab(file.name, file.name, file.content)
-      } else {
-        // 普通 Python 文件
-        editorStore.createTab(file.name, file.name, file.content)
+      const path = await open({
+        title: '打开项目',
+        filters: [{ name: 'Bingo 项目', extensions: ['bingo'] }],
+      })
+      if (!path) break
+      await projectStore.openProject(path)
+      const root = projectStore.root
+      if (!root) break
+
+      // 清空全部旧数据
+      resourceStore.clearAllResources()
+      renderStore.clearAll()
+      const editorTabs = editorStore.gameTabs
+      editorTabs.splice(0, editorTabs.length)
+      editorStore.gameActiveTabIndex = 0
+      await nextTick()
+
+      // ── 预加载代码文件 ──
+      try {
+        const files = await invoke<string[]>('list_dir', { path: `${root}/code` })
+        for (const file of files) {
+          if (file.endsWith('.py')) {
+            const content = await invoke<string>('read_file', { path: `${root}/code/${file}` })
+            editorStore.createTab(file, `${root}/code/${file}`, content)
+            resourceStore.addItem({ name: file, type: 'code', path: `${root}/code/${file}`, content })
+          }
+        }
+      } catch { /* code 目录可能不存在 */ }
+
+      // ── 预加载地图资源 ──
+      try {
+        const mapEntries = await invoke<string[]>('list_dir', { path: `${root}/assets/maps` })
+        for (const entry of mapEntries) {
+          const mapName = entry.replace(/\/$/, '')
+          const jsonPath = `${root}/assets/maps/${mapName}/map.json`
+          const exists = await invoke<boolean>('path_exists', { path: jsonPath })
+          if (!exists) continue
+          const json = await invoke<string>('read_file', { path: jsonPath })
+          const saveData = JSON.parse(json)
+          const { deserializeMap } = await import('../../utils/mapSerializer')
+          const mapData = deserializeMap(saveData)
+          const mapId = resourceStore.addItem({ name: mapName, type: 'map', path: `${root}/assets/maps/${mapName}` })
+          resourceStore.setCachedMapData(mapId, mapData)
+        }
+      } catch { /* assets/maps 可能不存在 */ }
+
+      // ── 预加载精灵资源 ──
+      try {
+        const spriteEntries = await invoke<string[]>('list_dir', { path: `${root}/assets/sprites` })
+        for (const entry of spriteEntries) {
+          const dirName = entry.replace(/\/$/, '')
+          if (!dirName) continue
+          const dirPath = `${root}/assets/sprites/${dirName}`
+          resourceStore.addItem({ name: dirName, type: 'sprite', path: dirPath })
+        }
+      } catch { /* assets/sprites 可能不存在 */ }
+
+      // ── 预加载声音资源 ──
+      try {
+        const soundFiles = await invoke<string[]>('list_dir', { path: `${root}/assets/sounds` })
+        for (const file of soundFiles) {
+          if (file.endsWith('.wav') || file.endsWith('.mp3') || file.endsWith('.ogg')) {
+            const name = file.replace(/\.\w+$/, '')
+            resourceStore.addItem({ name, type: 'sound', path: `${root}/assets/sounds/${file}` })
+          }
+        }
+      } catch { /* assets/sounds 可能不存在 */ }
+
+      // 刷新缩略图
+      loadAllSpriteThumbnails()
+      loadAllMapThumbnails()
+
+      // 切换到第一个代码标签（如有）
+      if (editorStore.currentTabs.length > 0) {
+        editorStore.setActiveTab(0)
       }
+      editorStore.setGameMode(true)
+      editorStore.setActiveEditorMode('code')
+      editorStore.setResourceTab('code')
       break
     }
 
     case 'save': {
-      const tab = editorStore.currentTab
-      if (!tab) break
-      const filename = tab.name || '未命名.py'
-      fileDialog.saveFile(filename, tab.content)
-      tab.modified = false
+      if (projectStore.bingoPath) {
+        // 已有保存路径，直接保存
+        await projectStore.saveProject()
+      } else {
+        // 首次保存，弹窗选择路径
+        const path = await save({
+          title: '保存项目',
+          filters: [{ name: 'Bingo 项目', extensions: ['bingo'] }],
+          defaultPath: `${projectStore.name || '未命名项目'}.bingo`,
+        })
+        if (!path) break
+        await projectStore.saveProjectAs(path)
+      }
       break
     }
 
     case 'saveAs': {
-      const tab = editorStore.currentTab
-      if (!tab) break
-      fileDialog.saveFile(tab.name || '未命名.py', tab.content)
+      const path = await save({
+        title: '另存为',
+        filters: [{ name: 'Bingo 项目', extensions: ['bingo'] }],
+        defaultPath: `${projectStore.name || '未命名项目'}.bingo`,
+      })
+      if (!path) break
+      await projectStore.saveProjectAs(path)
       break
     }
-
-    case 'close':
-      editorStore.closeTab(editorStore.activeTabIndex)
-      break
 
     case 'exit':
       window.close()
@@ -247,13 +347,15 @@ async function fileMenuAction(action: string) {
 }
 
 async function toggleRun() {
+  // 点击总是重新运行：如果正在运行先停掉
   if (editorStore.isRunning) {
     await engine.stop()
-  } else {
-    consoleVisible.value = true
-    await nextTick()
-    await engine.run()
+    // 等一帧确保引擎完全释放
+    await new Promise(r => setTimeout(r, 50))
   }
+  consoleVisible.value = true
+  await nextTick()
+  await engine.run()
 }
 
 async function uploadResource(type: 'sprite' | 'map' | 'sound' | 'code') {
@@ -492,9 +594,23 @@ function closeSpriteContextMenu() {
 }
 
 function deleteSpriteFromContext(id: string) {
+  const item = resourceStore.sprites.find(i => i.id === id)
   resourceStore.removeItem(id, 'sprite')
   if (resourceStore.selectedSpriteId === id) resourceStore.selectedSpriteId = null
   spriteContextMenu.value.show = false
+  // 同步删除项目目录中的文件
+  if (item?.path) invoke('delete_path', { path: item.path }).catch(() => {})
+}
+
+function deleteMapFromContext(id: string) {
+  const item = resourceStore.maps.find(i => i.id === id)
+  resourceStore.removeItem(id, 'map')
+  if (selectedResource.value === id) {
+    selectedResource.value = resourceStore.maps.length > 0 ? resourceStore.maps[0].id : null
+  }
+  mapContextMenu.value.show = false
+  // 同步删除项目目录中的文件
+  if (item?.path) invoke('delete_path', { path: item.path }).catch(() => {})
 }
 
 function startSpriteRename(id: string) {
@@ -535,14 +651,6 @@ function onMapContextMenu(e: MouseEvent, item: { id: string; name: string }) {
   e.preventDefault()
   e.stopPropagation()
   mapContextMenu.value = { show: true, x: e.clientX, y: e.clientY, item }
-}
-
-function deleteMapFromContext(id: string) {
-  resourceStore.removeItem(id, 'map')
-  if (selectedResource.value === id) {
-    selectedResource.value = resourceStore.maps.length > 0 ? resourceStore.maps[0].id : null
-  }
-  mapContextMenu.value.show = false
 }
 
 function startMapRename(id: string) {
@@ -651,10 +759,14 @@ function closeCodeContextMenu() {
 }
 
 function deleteCodeFromContext(id: string) {
+  const item = resourceStore.codes.find(c => c.id === id)
   const tabs = editorStore.gameTabs
   const idx = tabs.findIndex(t => t.id === id)
   if (idx >= 0) editorStore.closeTab(idx)
+  resourceStore.removeItem(id, 'code')
   codeContextMenu.value.show = false
+  // 同步删除项目目录中的文件
+  if (item?.path) invoke('delete_path', { path: item.path }).catch(() => {})
 }
 
 function startCodeRename(id: string) {
@@ -750,16 +862,16 @@ function codeDisplayName(name: string) {
       <!-- ═══ 游戏模式菜单 ═══ -->
       <template v-if="editorStore.isGameMode">
         <div class="menu-file-wrapper" @mouseleave="closeFileMenu">
-          <button class="menu-btn menu-btn-file" title="文件" @click="toggleFileMenu">
+          <button class="menu-btn menu-btn-file" title="项目" @click="toggleFileMenu">
             <img :src="iconFile" class="menu-icon" />
-            <span>文件</span>
+            <span>项目</span>
           </button>
           <div v-show="fileMenuVisible" class="file-menu-dropdown">
-            <button class="file-menu-item" @click="fileMenuAction('new')">新建</button>
-            <button class="file-menu-item" @click="fileMenuAction('open')">打开</button>
-            <button class="file-menu-item" @click="fileMenuAction('save')">保存</button>
-            <button class="file-menu-item" @click="fileMenuAction('saveAs')">另存为</button>
-            <button class="file-menu-item" @click="fileMenuAction('close')">关闭</button>
+            <button class="file-menu-item" @click="fileMenuAction('new')">新建项目</button>
+            <button class="file-menu-item" @click="fileMenuAction('open')">打开项目</button>
+            <button class="file-menu-item" @click="fileMenuAction('save')">保存项目</button>
+            <button class="file-menu-item" @click="fileMenuAction('saveAs')">另存为...</button>
+            <div class="file-menu-divider"></div>
             <button class="file-menu-item" @click="fileMenuAction('exit')">退出</button>
           </div>
         </div>
@@ -1312,6 +1424,11 @@ function codeDisplayName(name: string) {
 }
 .file-menu-item:hover {
   background: rgb(61, 64, 72);
+}
+.file-menu-divider {
+  height: 1px;
+  margin: 4px 12px;
+  background: rgb(50, 53, 60);
 }
 .settings-menu {
   width: 144px;
