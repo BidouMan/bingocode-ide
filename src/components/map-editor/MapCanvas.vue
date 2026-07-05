@@ -246,13 +246,24 @@ async function renderTile(layerId: number, x: number, y: number, tileId: number)
   }
 
   const key = `${layerId}:${x},${y}`
-  const { resourceIndex, tileIndex } = decodeTileId(tileId, layerId)
 
-  // 按 GID 解码后的资源索引查找资源
+  // 通过 firstgid 范围找到对应的 tileSet
+  const tileSets = mapStore.mapData.tileSets
+  let matchedTileSet: any = null
+  for (let i = tileSets.length - 1; i >= 0; i--) {
+    if (tileId >= tileSets[i].firstgid) {
+      matchedTileSet = tileSets[i]
+      break
+    }
+  }
+  if (!matchedTileSet) return
+  const tileIndex = tileId - matchedTileSet.firstgid
+
+  // 在当前图层的 resources 中通过 imagePath 匹配，避免 offset 偏移计算错误
   const tileLayer = mapStore.mapData.layers.find(l => l.id === layerId)
-  const resource: MapResource | null = (tileLayer && resourceIndex >= 0 && resourceIndex < tileLayer.resources.length)
-    ? tileLayer.resources[resourceIndex]
-    : null
+  const resource: MapResource | null = tileLayer?.resources.find(
+    (r: MapResource) => r.path === matchedTileSet.imagePath
+  ) ?? null
   if (!resource) return
 
   const texture = await getTileTexture(resource, tileIndex)
@@ -592,9 +603,16 @@ function onPointerDown(e: PointerEvent) {
             if (moveStartSprite) moveStartSprite.visible = false
             // 异步加载纹理创建拖拽 sprite
             const tileSize = mapStore.mapData.tileSize
-            const { resourceIndex, tileIndex: tIdx } = decodeTileId(tileId, layer.id)
+            const tileSets = mapStore.mapData.tileSets
+            let matchedTs: any = null
+            for (let i = tileSets.length - 1; i >= 0; i--) {
+              if (tileId >= tileSets[i].firstgid) { matchedTs = tileSets[i]; break }
+            }
+            const tIdx = matchedTs ? tileId - matchedTs.firstgid : 0
             const texLayer = mapStore.mapData.layers.find(l => l.id === layer.id)
-            const texRes = texLayer?.resources[resourceIndex]
+            const texRes = matchedTs ? texLayer?.resources.find(
+              (r: MapResource) => r.path === matchedTs.imagePath
+            ) : null
             if (texRes) {
               getTileTexture(texRes, tIdx).then(texture => {
                 if (!texture || !moveTileId) return
@@ -1380,11 +1398,11 @@ function scheduleRender() {
   if (!renderQueued) {
     renderQueued = true
     nextTick(async () => {
+      renderQueued = false
       while (pendingRender) {
         pendingRender = false
         await renderAllLayers()
       }
-      renderQueued = false
     })
   }
 }
