@@ -96,15 +96,17 @@ fn init_default_project() -> Result<String, String> {
     let sprites_dir = project_root.join("assets").join("sprites");
     let maps_dir = project_root.join("assets").join("maps");
     let sounds_dir = project_root.join("assets").join("sounds");
+    let code_dir = project_root.join("code");
     std::fs::create_dir_all(&sprites_dir).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&maps_dir).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&sounds_dir).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&code_dir).map_err(|e| e.to_string())?;
 
     Ok(project_root.to_string_lossy().to_string())
 }
 
 fn clean_default_project_assets(project_root: &std::path::Path) -> Result<(), String> {
-    for subdir in &["assets/sprites", "assets/maps", "assets/sounds"] {
+    for subdir in &["assets/sprites", "assets/maps", "assets/sounds", "code"] {
         let dir = project_root.join(subdir);
         if dir.exists() {
             if let Ok(entries) = std::fs::read_dir(&dir) {
@@ -201,6 +203,7 @@ fn get_engine_assets_dir(app: tauri::AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 fn save_temp_script(project_dir: String, content: String) -> Result<String, String> {
+    use std::io::Write;
     let dir = if project_dir.is_empty() {
         std::env::temp_dir()
     } else {
@@ -210,7 +213,9 @@ fn save_temp_script(project_dir: String, content: String) -> Result<String, Stri
     if let Some(parent) = temp_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("创建临时目录失败: {}", e))?;
     }
-    std::fs::write(&temp_path, &content).map_err(|e| format!("写入临时文件失败: {}", e))?;
+    let mut file = std::fs::File::create(&temp_path).map_err(|e| format!("创建临时文件失败: {}", e))?;
+    file.write_all(content.as_bytes()).map_err(|e| format!("写入临时文件失败: {}", e))?;
+    file.sync_all().map_err(|e| format!("同步临时文件失败: {}", e))?;
     Ok(temp_path.to_string_lossy().to_string())
 }
 
@@ -363,6 +368,97 @@ pub struct EngineEnv {
 }
 
 #[tauri::command]
+fn pack_bingo(workspace_dir: String, output_path: String) -> Result<(), String> {
+    use std::io::{Write, Read};
+    use zip::write::FileOptions;
+
+    let workspace = std::path::Path::new(&workspace_dir);
+    if !workspace.exists() {
+        return Err("工作目录不存在".to_string());
+    }
+
+    let output = std::path::Path::new(&output_path);
+    if let Some(parent) = output.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+    }
+
+    let file = std::fs::File::create(output)
+        .map_err(|e| format!("创建 .bingo 文件失败: {}", e))?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options = FileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .compression_level(Some(6));
+
+    // 递归添加工作目录中的所有文件
+    fn add_dir_to_zip(
+        zip: &mut zip::ZipWriter<std::fs::File>,
+        base: &std::path::Path,
+        current: &std::path::Path,
+        options: zip::write::FileOptions,
+    ) -> Result<(), String> {
+        let entries = std::fs::read_dir(current)
+            .map_err(|e| format!("读取目录失败: {}", e))?;
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path.strip_prefix(base)
+                .map_err(|e| format!("路径错误: {}", e))?
+                .to_string_lossy()
+                .to_string();
+
+            if path.is_dir() {
+                // 跳过隐藏目录和 __pycache__
+                let dir_name = entry.file_name().to_string_lossy().to_string();
+                if dir_name.starts_with('.') || dir_name == "__pycache__" {
+                    continue;
+                }
+                add_dir_to_zip(zip, base, &path, options)?;
+            } else {
+                // 跳过隐藏文件和临时文件
+                let file_name = entry.file_name().to_string_lossy().to_string();
+                if file_name.starts_with('.') || file_name == ".temp_run.py" {
+                    continue;
+                }
+
+                let mut f = std::fs::File::open(&path)
+                    .map_err(|e| format!("打开文件失败 {}: {}", path.display(), e))?;
+                let mut buffer = Vec::new();
+                f.read_to_end(&mut buffer)
+                    .map_err(|e| format!("读取文件失败: {}", e))?;
+
+                zip.start_file(&name, options)
+                    .map_err(|e| format!("创建 zip 条目失败: {}", e))?;
+                zip.write_all(&buffer)
+                    .map_err(|e| format!("写入 zip 失败: {}", e))?;
+            }
+        }
+        Ok(())
+    }
+
+    add_dir_to_zip(&mut zip, workspace, workspace, options)?;
+    zip.finish().map_err(|e| format!("完成 zip 写入失败: {}", e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+fn unpack_bingo(bingo_path: String, target_dir: String) -> Result<(), String> {
+    let data = std::fs::read(&bingo_path)
+        .map_err(|e| format!("读取 .bingo 文件失败: {}", e))?;
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(data))
+        .map_err(|e| format!("解析 .bingo 文件失败: {}", e))?;
+
+    let target = std::path::Path::new(&target_dir);
+    std::fs::create_dir_all(target)
+        .map_err(|e| format!("创建目标目录失败: {}", e))?;
+
+    archive.extract(target)
+        .map_err(|e| format!("解压 .bingo 文件失败: {}", e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
 fn get_sprite_thumbnail(path: String) -> Result<String, String> {
     use std::io::Read;
 
@@ -479,6 +575,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
         .manage(EngineState {
             process: Mutex::new(None),
         })
@@ -503,6 +600,8 @@ pub fn run() {
             pick_image_file,
             read_image_as_data_url,
             rename_path,
+            pack_bingo,
+            unpack_bingo,
             engine::run_script,
             engine::stop_script,
             engine::send_stdin,

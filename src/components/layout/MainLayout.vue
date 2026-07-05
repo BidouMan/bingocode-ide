@@ -46,6 +46,7 @@ const fileDialog = useFileDialog()
 // change_page: 0=编辑器, 1=全屏, 2=地图库, 3=角色库, 4=素材库, 5=声音库
 const currentPage = ref(0)
 const consoleVisible = ref(false)
+const canvasOffsetX = ref(0)
 const consoleExpanded = ref(true)
 const fileMenuVisible = ref(false)
 const settingsMenuVisible = ref(false)
@@ -740,7 +741,7 @@ function codeDisplayName(name: string) {
 <template>
   <div class="app-root">
     <!-- ═══════════ 顶部菜单栏 ═══════════ -->
-    <div class="menu-bar">
+    <div v-show="currentPage !== 1" class="menu-bar">
       <!-- Logo (固定宽度) -->
       <button class="menu-logo">
         <img :src="iconLogo" class="menu-logo-img" />
@@ -1099,24 +1100,26 @@ function codeDisplayName(name: string) {
 
       </div>
 
-      <!-- ─── page 1: fullscreen ─── -->
+      <!-- ─── page 1: fullscreen (Scratch 风格) ─── -->
       <div v-show="currentPage === 1" class="fullscreen-page">
-        <div class="fullscreen-wrapper">
-          <div class="fullscreen-toolbar">
+        <div class="fullscreen-toolbar">
+          <div class="toolbar-left" :style="{ paddingLeft: canvasOffsetX + 'px' }">
             <button class="tool-btn" :class="{ 'tool-btn-active': editorStore.isRunning }" @click="toggleRun">
               <img :src="iconPlay" width="16" height="16" />
             </button>
             <button class="tool-btn" @click="engine.stop()">
               <img :src="iconStop" width="16" height="16" />
             </button>
-            <div class="tool-spacer"></div>
+          </div>
+          <div class="tool-spacer"></div>
+          <div class="toolbar-right" :style="{ paddingRight: canvasOffsetX + 'px' }">
             <button class="tool-btn" @click="switchPage(0)">
               <img :src="iconUnfullscreen" width="20" height="20" />
             </button>
           </div>
-          <div class="fullscreen-game-frame">
-            <GameCanvas v-if="currentPage === 1" class="fullscreen-canvas" />
-          </div>
+        </div>
+        <div class="fullscreen-stage-area">
+          <GameCanvas v-if="currentPage === 1" @offset-update="canvasOffsetX = $event" />
         </div>
       </div>
 
@@ -1864,39 +1867,38 @@ function codeDisplayName(name: string) {
 }
 .console-btn:hover { color: rgb(200, 200, 200); }
 
-/* ═══ 全屏页 ═══ */
+/* ═══ 全屏页 (Scratch 风格：toolbar 全宽顶栏，canvas 居中) ═══ */
 .fullscreen-page {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: rgb(41, 44, 52);
-}
-.fullscreen-wrapper {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  background: rgb(18, 20, 24);
 }
 .fullscreen-toolbar {
   display: flex;
   align-items: center;
-  height: 30px;
-  width: 100%;
-  padding: 0 5px;
-  gap: 5px;
+  height: 34px;
   flex-shrink: 0;
   background: rgb(34, 37, 43);
+  border-bottom: 1px solid rgb(12, 12, 12);
+  gap: 4px;
+  padding: 0;
 }
-.fullscreen-game-frame {
+.toolbar-left,
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.fullscreen-stage-area {
   flex: 1;
   min-height: 0;
-  width: 100%;
-  border: 2px solid #4e4e4e;
-  background: rgb(50, 50, 61);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   overflow: hidden;
 }
-.fullscreen-canvas { width: 100%; height: 100%; }
 
 /* ═══ 资源库页 ═══ */
 .lib-page {

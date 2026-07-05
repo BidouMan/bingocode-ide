@@ -6,6 +6,7 @@ import random
 import math
 import threading
 from PIL import Image
+from models.map_model import MapModel
 
 # 添加项目根目录到Python路径（确保在任何目录运行都能找到models模块）
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -229,7 +230,7 @@ class Sprite:
         """
         global _CURRENT_MAP, _MAP_MODEL
 
-        if not _CURRENT_MAP or not _MAP_MODEL:
+        if not _CURRENT_MAP:
             return
 
         tile_size = _CURRENT_MAP.get("tile_size", 16)
@@ -248,17 +249,17 @@ class Sprite:
             # --- 图像图层碰撞检测（优先于瓦片碰撞） ---
             if layer.get("type") == "image" and "images" in layer:
                 for image in layer["images"]:
-                    collision_enabled = image.get("collision_enabled", False)
+                    collision_enabled = image.get("collisionEnabled", image.get("collision_enabled", False))
                     if not collision_enabled:
                         continue
 
-                    col_type = image.get("collision_type", "图像")
+                    col_type = image.get("collisionType", image.get("collision_type", "图像"))
                     is_one_way = col_type == "跳板"
 
                     pos = image.get("position", [0, 0])
                     scale = image.get("scale", 1.0)
-                    scale_x = image.get("scale_x", scale)
-                    scale_y = image.get("scale_y", scale)
+                    scale_x = image.get("scaleX", image.get("scale_x", scale))
+                    scale_y = image.get("scaleY", image.get("scale_y", scale))
 
                     # 计算图像碰撞包围盒（世界坐标）
                     collision_shape = image.get("collision_shape", None)
@@ -280,8 +281,8 @@ class Sprite:
                         img_right = max(p[0] for p in world_points)
                         img_bottom = max(p[1] for p in world_points)
                     else:
-                        img_w = image.get("_cache_w", 0)
-                        img_h = image.get("_cache_h", 0)
+                        img_w = image.get("width", image.get("_cache_w", 0))
+                        img_h = image.get("height", image.get("_cache_h", 0))
                         if img_w <= 0 or img_h <= 0:
                             continue
                         img_left = pos[0]
@@ -377,117 +378,115 @@ class Sprite:
                 min_tile_y = math.floor(sprite_rect[1] / tile_size)
                 max_tile_y = math.floor(sprite_rect[3] / tile_size)
 
-            # 检查范围内的每个图块
+            # 检查范围内的每个图块（需要 _MAP_MODEL 提供瓦片碰撞数据）
             collision_found = False
-            for tile_x in range(min_tile_x, max_tile_x + 1):
-                for tile_y in range(min_tile_y, max_tile_y + 1):
-                    tile_pos = (tile_x, tile_y)
-                    if tile_pos in tiles:
-                        tile_id = tiles[tile_pos]
-                        if tile_id > 0:
-                            # 解析tile_id获取资源索引和图块索引
-                            tile_id_int = int(tile_id)
-                            if tile_id_int < 1000:
-                                resource_index = tile_id_int - 1
-                                tile_index = 0
-                            else:
-                                resource_index = (tile_id_int // 1000) - 1
-                                tile_index = (tile_id_int % 1000) - 1
-
-                            # 获取图块碰撞状态
-                            collision_enabled = _MAP_MODEL.get_tile_collision(
-                                resource_index, tile_index
-                            )
-                            if collision_enabled:
-                                col_type = _MAP_MODEL.get_tile_collision_type(
-                                    resource_index, tile_index
-                                )
-                                is_one_way = col_type == "跳板"
-
-                                if is_one_way and axis == "x":
-                                    continue
-
-                                if is_one_way and self._drop_through:
-                                    continue
-
-                                collision_shape = _MAP_MODEL.get_tile_collision_shape(
-                                    resource_index, tile_index
+            if _MAP_MODEL:
+                for tile_x in range(min_tile_x, max_tile_x + 1):
+                    for tile_y in range(min_tile_y, max_tile_y + 1):
+                        tile_pos = (tile_x, tile_y)
+                        if tile_pos in tiles:
+                            tile_id = tiles[tile_pos]
+                            if tile_id > 0:
+                                # 使用Tiled标准：通过firstgid范围查找瓦片集
+                                tile_id_int = int(tile_id)
+                                resource_index, tile_index = _find_tileset_for_gid(
+                                    tile_id_int, _CURRENT_MAP["tile_sets"]
                                 )
 
-                                if collision_shape and "points" in collision_shape:
-                                    points = collision_shape["points"]
-                                    world_points = [
-                                        (
-                                            tile_x * tile_size + p[0],
-                                            tile_y * tile_size + p[1],
-                                        )
-                                        for p in points
-                                    ]
-                                    tile_left = min(p[0] for p in world_points)
-                                    tile_top = min(p[1] for p in world_points)
-                                    tile_right = max(p[0] for p in world_points)
-                                    tile_bottom = max(p[1] for p in world_points)
-                                else:
-                                    tile_left = tile_x * tile_size
-                                    tile_top = tile_y * tile_size
-                                    tile_right = tile_left + tile_size
-                                    tile_bottom = tile_top + tile_size
+                                # 获取图块碰撞状态
+                                collision_enabled = _MAP_MODEL.get_tile_collision(
+                                    resource_index, tile_index
+                                )
+                                if collision_enabled:
+                                    col_type = _MAP_MODEL.get_tile_collision_type(
+                                        resource_index, tile_index
+                                    )
+                                    is_one_way = col_type == "跳板"
 
-                                overlap_left = max(sprite_rect[0], tile_left)
-                                overlap_top = max(sprite_rect[1], tile_top)
-                                overlap_right = min(sprite_rect[2], tile_right)
-                                overlap_bottom = min(sprite_rect[3], tile_bottom)
-
-                                overlap_x = overlap_right - overlap_left
-                                overlap_y = overlap_bottom - overlap_top
-                                if overlap_x > 0 and overlap_y > 0:
-                                    if is_one_way and axis == "y":
-                                        if self._prev_bottom_y <= tile_top:
-                                            rect = self._get_hitbox_rect()
-                                            if rect:
-                                                self._y = (
-                                                    tile_top
-                                                    - (rect[3] - self._y)
-                                                    - 0.05
-                                                )
-                                                self.on_ground = True
-                                                self.vy = 0
-                                            return
+                                    if is_one_way and axis == "x":
                                         continue
 
-                                    if axis == "x":
-                                        dist_to_right = abs(sprite_rect[0] - tile_right)
-                                        dist_to_left = abs(sprite_rect[2] - tile_left)
+                                    if is_one_way and self._drop_through:
+                                        continue
 
-                                        if dist_to_right < dist_to_left:
-                                            center_to_left = self._x - sprite_rect[0]
-                                            self._x = tile_right + center_to_left + 0.05
-                                        else:
-                                            center_to_right = sprite_rect[2] - self._x
-                                            self._x = tile_left - center_to_right - 0.05
-                                        return
+                                    collision_shape = _MAP_MODEL.get_tile_collision_shape(
+                                        resource_index, tile_index
+                                    )
 
-                                    elif axis == "y":
-                                        if sprite_rect[3] <= tile_top + tile_size:
-                                            rect = self._get_hitbox_rect()
-                                            if rect:
-                                                self._y = (
-                                                    tile_top
-                                                    - (rect[3] - self._y)
-                                                    - 0.05
-                                                )
-                                                self.on_ground = True
-                                                self.vy = 0
-                                        elif sprite_rect[1] >= tile_bottom - tile_size:
-                                            rect = self._get_hitbox_rect()
-                                            if rect:
-                                                self._y = (
-                                                    tile_bottom
-                                                    + (self._y - rect[1])
-                                                    + 0.05
-                                                )
-                                                self.vy = 0
-                                        return
+                                    if collision_shape and "points" in collision_shape:
+                                        points = collision_shape["points"]
+                                        world_points = [
+                                            (
+                                                tile_x * tile_size + p[0],
+                                                tile_y * tile_size + p[1],
+                                            )
+                                            for p in points
+                                        ]
+                                        tile_left = min(p[0] for p in world_points)
+                                        tile_top = min(p[1] for p in world_points)
+                                        tile_right = max(p[0] for p in world_points)
+                                        tile_bottom = max(p[1] for p in world_points)
+                                    else:
+                                        tile_left = tile_x * tile_size
+                                        tile_top = tile_y * tile_size
+                                        tile_right = tile_left + tile_size
+                                        tile_bottom = tile_top + tile_size
+
+                                    overlap_left = max(sprite_rect[0], tile_left)
+                                    overlap_top = max(sprite_rect[1], tile_top)
+                                    overlap_right = min(sprite_rect[2], tile_right)
+                                    overlap_bottom = min(sprite_rect[3], tile_bottom)
+
+                                    overlap_x = overlap_right - overlap_left
+                                    overlap_y = overlap_bottom - overlap_top
+                                    if overlap_x > 0 and overlap_y > 0:
+                                        if is_one_way and axis == "y":
+                                            if self._prev_bottom_y <= tile_top:
+                                                rect = self._get_hitbox_rect()
+                                                if rect:
+                                                    self._y = (
+                                                        tile_top
+                                                        - (rect[3] - self._y)
+                                                        - 0.05
+                                                    )
+                                                    self.on_ground = True
+                                                    self.vy = 0
+                                                return
+                                            continue
+
+                                        if axis == "x":
+                                            dist_to_right = abs(sprite_rect[0] - tile_right)
+                                            dist_to_left = abs(sprite_rect[2] - tile_left)
+
+                                            if dist_to_right < dist_to_left:
+                                                center_to_left = self._x - sprite_rect[0]
+                                                self._x = tile_right + center_to_left + 0.05
+                                            else:
+                                                center_to_right = sprite_rect[2] - self._x
+                                                self._x = tile_left - center_to_right - 0.05
+                                            return
+
+                                        elif axis == "y":
+                                            if sprite_rect[3] <= tile_top + tile_size:
+                                                rect = self._get_hitbox_rect()
+                                                if rect:
+                                                    self._y = (
+                                                        tile_top
+                                                        - (rect[3] - self._y)
+                                                        - 0.05
+                                                    )
+                                                    self.on_ground = True
+                                                    self.vy = 0
+                                            elif sprite_rect[1] >= tile_bottom - tile_size:
+                                                rect = self._get_hitbox_rect()
+                                                if rect:
+                                                    self._y = (
+                                                        tile_bottom
+                                                        + (self._y - rect[1])
+                                                        + 0.05
+                                                    )
+                                                    self.vy = 0
+                                            return
 
         # 地图边界碰撞检测
         bounds = _CURRENT_MAP.get(
@@ -945,9 +944,10 @@ class Sprite:
                                 min_tile_x <= tile_x <= max_tile_x
                                 and min_tile_y <= tile_y <= max_tile_y
                             ):
-                                # 解析tile_id获取资源索引和图块索引
-                                resource_index = tile_id // 1000
-                                tile_index = (tile_id % 1000) - 1
+                                # 使用Tiled标准：通过firstgid范围查找瓦片集
+                                resource_index, tile_index = _find_tileset_for_gid(
+                                    tile_id, _CURRENT_MAP["tile_sets"]
+                                )
 
                                 # 获取图块标签
                                 if _MAP_MODEL:
@@ -1077,17 +1077,17 @@ class Sprite:
             # --- 图像图层地面检测 ---
             if layer.get("type") == "image" and "images" in layer:
                 for image in layer["images"]:
-                    collision_enabled = image.get("collision_enabled", False)
+                    collision_enabled = image.get("collisionEnabled", image.get("collision_enabled", False))
                     if not collision_enabled:
                         continue
 
-                    col_type = image.get("collision_type", "图像")
+                    col_type = image.get("collisionType", image.get("collision_type", "图像"))
                     is_one_way = col_type == "跳板"
 
                     pos = image.get("position", [0, 0])
                     scale = image.get("scale", 1.0)
-                    scale_x = image.get("scale_x", scale)
-                    scale_y = image.get("scale_y", scale)
+                    scale_x = image.get("scaleX", image.get("scale_x", scale))
+                    scale_y = image.get("scaleY", image.get("scale_y", scale))
 
                     collision_shape = image.get("collision_shape", None)
                     if (
@@ -1108,8 +1108,8 @@ class Sprite:
                         img_right = max(p[0] for p in world_points)
                         img_bottom = max(p[1] for p in world_points)
                     else:
-                        img_w = image.get("_cache_w", 0)
-                        img_h = image.get("_cache_h", 0)
+                        img_w = image.get("width", image.get("_cache_w", 0))
+                        img_h = image.get("height", image.get("_cache_h", 0))
                         if img_w <= 0 or img_h <= 0:
                             continue
                         img_left = pos[0]
@@ -1139,14 +1139,11 @@ class Sprite:
                 if tile_pos in tiles:
                     tile_id = tiles[tile_pos]
                     if tile_id > 0:
-                        # 解析tile_id获取资源索引和图块索引
+                        # 使用Tiled标准：通过firstgid范围查找瓦片集
                         tile_id_int = int(tile_id)
-                        if tile_id_int < 1000:
-                            resource_index = tile_id_int - 1
-                            tile_index = 0
-                        else:
-                            resource_index = (tile_id_int // 1000) - 1
-                            tile_index = (tile_id_int % 1000) - 1
+                        resource_index, tile_index = _find_tileset_for_gid(
+                            tile_id_int, _CURRENT_MAP["tile_sets"]
+                        )
 
                         # 获取图块碰撞状态
                         if _MAP_MODEL:
@@ -1710,6 +1707,8 @@ def load_map(map_name):
                 "tile_width": ts.get("tileWidth", ts.get("tile_width", 16)),
                 "tile_height": ts.get("tileHeight", ts.get("tile_height", 16)),
                 "firstgid": ts.get("firstgid", 1),
+                "collisionType": ts.get("collisionType", ts.get("collision_type", "图像")),
+                "collisionEnabled": ts.get("collisionEnabled", ts.get("collision_enabled", False)),
                 "tiles": ts.get("tiles", []),
             })
 
@@ -1770,20 +1769,34 @@ def load_map(map_name):
                     "images": images,
                 })
 
+        # 用图层中资源的碰撞信息补全 tileset（用户可能在 PropertyPanel 中设置了 tileset 级的碰撞）
+        resource_collision_map = {}
+        for layer_raw in layers_raw:
+            for res in layer_raw.get("resources", []):
+                rname = res.get("name", "")
+                if rname and res.get("collisionEnabled", False):
+                    resource_collision_map[rname] = {
+                        "collisionType": res.get("collisionType", "图像"),
+                        "collisionEnabled": True,
+                    }
+        for ts in tilesets:
+            rname = ts.get("name", "")
+            if rname in resource_collision_map:
+                ts["collisionType"] = resource_collision_map[rname]["collisionType"]
+                ts["collisionEnabled"] = True
+
         map_data = {
             "name": save_data.get("name", ""),
             "width": save_data["width"],
             "height": save_data["height"],
             "tile_size": save_data.get("tileSize", save_data.get("tile_size", 16)),
-            "offset_x": save_data.get("offsetX", save_data.get("offset_x", 0)),
-            "offset_y": save_data.get("offsetY", save_data.get("offset_y", 0)),
             "gravity": save_data.get("gravity", False),
             "layers": layers,
             "tile_sets": tilesets,
         }
 
         _CURRENT_MAP = map_data
-        _MAP_MODEL = None
+        _MAP_MODEL = MapModel(tilesets)
 
         tile_size = _CURRENT_MAP.get("tile_size", 16)
         map_width_px = _CURRENT_MAP["width"] * tile_size
@@ -1927,7 +1940,7 @@ def _handle_physics_collision():
     """处理物理碰撞检测和位移修正"""
     global _CURRENT_MAP, _SPRITES, _MAP_MODEL
 
-    if not _CURRENT_MAP or not _MAP_MODEL:
+    if not _CURRENT_MAP:
         return
 
     # 遍历所有精灵

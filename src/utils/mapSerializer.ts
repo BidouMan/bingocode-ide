@@ -5,8 +5,6 @@ export interface MapSaveData {
   width: number
   height: number
   tileSize: number
-  offsetX: number
-  offsetY: number
   gravity: boolean
   collisionType: string
   collisionEnabled: boolean
@@ -60,7 +58,7 @@ export interface TilesetSaveData {
   tileHeight: number
   collisionType: string
   collisionEnabled: boolean
-  tiles?: { id: number; collision: string; tag?: string }[]
+  tiles?: { id: number; collision: string; tag?: string; collisionType?: string; collisionShape?: { points: number[][] } }[]
 }
 
 export interface MapLoadData {
@@ -69,8 +67,6 @@ export interface MapLoadData {
   width: number
   height: number
   tileSize: number
-  offsetX: number
-  offsetY: number
   gravity: boolean
   collisionType: string
   collisionEnabled: boolean
@@ -143,7 +139,9 @@ export function serializeMap(mapData: any): MapSaveData {
       tiles: ts.tiles?.map((t: any, i: number) => ({
         id: i,
         collision: t.collision ? 'solid' : 'none',
+        collisionType: t.collisionType || '图像',
         tag: t.tag || undefined,
+        collisionShape: t.collisionShape,
       })),
     }
   })
@@ -199,8 +197,6 @@ export function serializeMap(mapData: any): MapSaveData {
     width: mapData.width,
     height: mapData.height,
     tileSize: mapData.tileSize,
-    offsetX: mapData.offsetX,
-    offsetY: mapData.offsetY,
     gravity: mapData.gravity,
     collisionType: mapData.collisionType || '图像',
     collisionEnabled: mapData.collisionEnabled || false,
@@ -225,7 +221,8 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
     tiles: ts.tiles?.map(t => ({
       collision: t.collision === 'solid',
       tag: t.tag || '',
-      collisionType: t.collision,
+      collisionType: t.collisionType || '图像',
+      collisionShape: t.collisionShape,
     })) || [],
   }))
 
@@ -265,8 +262,6 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
     width: data.width,
     height: data.height,
     tileSize: data.tileSize,
-    offsetX: data.offsetX,
-    offsetY: data.offsetY,
     gravity: data.gravity,
     collisionType: data.collisionType || '图像',
     collisionEnabled: data.collisionEnabled || false,

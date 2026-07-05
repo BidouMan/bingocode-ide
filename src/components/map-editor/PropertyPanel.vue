@@ -27,26 +27,83 @@ function onTileSizeChange(val: string) {
   mapStore.updateTileSize(newSize)
 }
 
+// 选中的瓦片数据（仅绘制图层 + 选中瓦片时有值）
+const selectedTileData = computed(() => {
+  if (mapStore.selectedTileIndex < 0) return null
+  const layer = mapStore.activeLayer
+  if (!layer || layer.type !== 'drawing') return null
+  const globalIdx = mapStore.globalResourceOffset + mapStore.selectedResourceIndex
+  const tileSet = mapStore.mapData.tileSets[globalIdx]
+  if (!tileSet) return null
+  return tileSet.tiles[mapStore.selectedTileIndex] ?? null
+})
+
 const collisionTypeValue = computed(() => {
-  // 优先显示选中资源的碰撞类型
+  // 优先显示选中瓦片的碰撞类型
+  const tileData = selectedTileData.value
+  if (tileData) return tileData.collisionType || '图像'
+  // 其次显示选中资源的碰撞类型
   const resource = mapStore.selectedResource
   if (resource) return resource.collisionType || '图像'
   return mapStore.mapData.collisionType || '图像'
 })
 
+// 碰撞checkbox：直接根据物理属性类型决定勾选状态
+const collisionEnabledValue = computed(() => {
+  // 选中瓦片时，使用该瓦片的碰撞状态
+  if (mapStore.selectedTileIndex >= 0) {
+    const layer = mapStore.activeLayer
+    if (layer?.type === 'drawing') {
+      const globalIdx = mapStore.globalResourceOffset + mapStore.selectedResourceIndex
+      const tileSet = mapStore.mapData.tileSets[globalIdx]
+      if (tileSet && tileSet.tiles[mapStore.selectedTileIndex]) {
+        return tileSet.tiles[mapStore.selectedTileIndex].collision
+      }
+    }
+  }
+  // 选中资源时，优先资源的collisionEnabled，其次看物理属性类型
+  const resource = mapStore.selectedResource
+  if (resource) {
+    if (resource.collisionType === '图像') return false
+    return resource.collisionEnabled
+  }
+  // 地图级别
+  if (mapStore.mapData.collisionType === '图像') return false
+  return mapStore.mapData.collisionEnabled
+})
+
 function onCollisionTypeChange(val: string) {
+  // 如果选中了单个瓦片，只更新该瓦片的碰撞类型
+  if (selectedTileData.value && mapStore.selectedTileIndex >= 0) {
+    const layer = mapStore.activeLayer
+    if (layer?.type === 'drawing') {
+      const globalIdx = mapStore.globalResourceOffset + mapStore.selectedResourceIndex
+      mapStore.setTileCollisionType(globalIdx, mapStore.selectedTileIndex, val)
+      return
+    }
+  }
+
+  // 否则更新图块集/资源级别的碰撞类型
   mapStore.updateMapProperty('collisionType', val)
-  // 同步更新选中资源的碰撞类型
   const resource = mapStore.selectedResource
   if (resource) {
     resource.collisionType = val
     resource.collisionEnabled = val !== '图像'
-    // 切换碰撞类型时清空旧碰撞数据，让碰撞编辑器根据图片尺寸重新生成
+    const ts = mapStore.mapData.tileSets.find(t => t.name === resource.name)
+    if (ts) {
+      ts.collisionType = val
+      ts.collisionEnabled = val !== '图像'
+      // 设为"图像"时清除该图块集中所有瓦片的碰撞标记
+      if (val === '图像') {
+        for (const tile of ts.tiles) {
+          tile.collision = false
+        }
+      }
+    }
     if (val !== '图像') {
       resource.collisionShape = undefined
     }
   }
-  // 联动：图像 → 取消碰撞，墙体/跳板 → 自动勾选碰撞
   if (val === '图像') {
     mapStore.updateMapProperty('collisionEnabled', false)
   } else {
@@ -57,6 +114,29 @@ function onCollisionTypeChange(val: string) {
 const customCollisionType = computed(() => mapStore.mapData.collisionType || '')
 function onCustomCollisionTypeChange(val: string) {
   mapStore.updateMapProperty('collisionType', val)
+}
+
+function onCollisionEnabledChange(enabled: boolean) {
+  // 如果选中了单个瓦片，更新该瓦片的碰撞状态
+  if (selectedTileData.value && mapStore.selectedTileIndex >= 0) {
+    const layer = mapStore.activeLayer
+    if (layer?.type === 'drawing') {
+      const globalIdx = mapStore.globalResourceOffset + mapStore.selectedResourceIndex
+      const tileSet = mapStore.mapData.tileSets[globalIdx]
+      if (tileSet && tileSet.tiles[mapStore.selectedTileIndex]) {
+        tileSet.tiles[mapStore.selectedTileIndex].collision = enabled
+      }
+      return
+    }
+  }
+  // 否则更新图块集/地图级别
+  mapStore.updateMapProperty('collisionEnabled', enabled)
+  const resource = mapStore.selectedResource
+  if (resource) {
+    resource.collisionEnabled = enabled
+    const ts = mapStore.mapData.tileSets.find(t => t.name === resource.name)
+    if (ts) ts.collisionEnabled = enabled
+  }
 }
 </script>
 
@@ -104,34 +184,6 @@ function onCustomCollisionTypeChange(val: string) {
       </div>
 
       <div class="att-row">
-        <span class="att-label">偏移量</span>
-        <div class="att-size-group">
-          <span class="att-size-label">X</span>
-          <input
-            class="att-input att-input-no-spin"
-            type="number"
-            :value="mapStore.mapData.offsetX"
-            :disabled="disabled"
-            @input="mapStore.updateMapProperty('offsetX', Number(($event.target as HTMLInputElement).value))"
-          />
-        </div>
-      </div>
-
-      <div class="att-row">
-        <span class="att-label"></span>
-        <div class="att-size-group">
-          <span class="att-size-label">Y</span>
-          <input
-            class="att-input att-input-no-spin"
-            type="number"
-            :value="mapStore.mapData.offsetY"
-            :disabled="disabled"
-            @input="mapStore.updateMapProperty('offsetY', Number(($event.target as HTMLInputElement).value))"
-          />
-        </div>
-      </div>
-
-      <div class="att-row">
         <span class="att-label">地图重力</span>
         <label class="att-checkbox">
           <input
@@ -164,9 +216,9 @@ function onCustomCollisionTypeChange(val: string) {
         <label class="att-checkbox">
           <input
             type="checkbox"
-            :checked="mapStore.mapData.collisionEnabled"
+            :checked="collisionEnabledValue"
             :disabled="disabled"
-            @change="mapStore.updateMapProperty('collisionEnabled', ($event.target as HTMLInputElement).checked)"
+            @change="onCollisionEnabledChange(($event.target as HTMLInputElement).checked)"
           />
           <span class="att-checkbox-text">启用</span>
         </label>

@@ -186,25 +186,22 @@ export function useEngine() {
     let stdoutEnded = false
 
     const unlisten3 = await listen('engine:finished', () => {
-      const finish = () => {
-        terminalStore.flushNow()
-        terminalStore.resetInputState()
-        editorStore.setRunning(false)
-        terminalStore.appendLine('\x1b[33m[运行完毕]\x1b[0m')
-        const projectDir = projectStore.root || ''
-        if (projectDir) {
-          invoke('cleanup_temp_script', { projectDir }).catch(() => {})
+      const tryFinish = () => {
+        // 等待 stdoutEnded 标志，最多重试 20 次（约 1 秒）
+        if (stdoutEnded) {
+          terminalStore.flushNow()
+          terminalStore.resetInputState()
+          editorStore.setRunning(false)
+          terminalStore.appendLine('\x1b[33m[运行完毕]\x1b[0m')
+          const projectDir = projectStore.root || ''
+          if (projectDir) {
+            invoke('cleanup_temp_script', { projectDir }).catch(() => {})
+          }
+        } else {
+          setTimeout(tryFinish, 50)
         }
       }
-      if (stdoutEnded) {
-        finish()
-      } else {
-        const unlistenEnd = listen('engine:stdout:end', () => {
-          stdoutEnded = true
-          unlistenEnd.then(fn => fn())
-          finish()
-        })
-      }
+      tryFinish()
     })
 
     const unlisten4 = await listen('engine:stdout:end', () => {
@@ -225,10 +222,21 @@ export function useEngine() {
   }
 
   async function run() {
-    const tab = editorStore.currentTab
+    // 等待项目初始化完成（onMounted 可能尚未完成）
+    if (!projectStore.root) {
+      terminalStore.appendLine('\x1b[33m⏳ 正在初始化项目...\x1b[0m')
+      await projectStore.initProject()
+    }
+
+    let tab = editorStore.currentTab
     if (!tab) {
-      terminalStore.appendLine('\x1b[31m❌ 没有打开的文件\x1b[0m')
-      return
+      // 可能是 newProject 期间的竞态，等待下一次事件循环再重试
+      await new Promise(r => setTimeout(r, 50))
+      tab = editorStore.currentTab
+      if (!tab) {
+        terminalStore.appendLine('\x1b[31m❌ 没有打开的文件\x1b[0m')
+        return
+      }
     }
 
     renderStore.clearAll()
@@ -239,10 +247,16 @@ export function useEngine() {
     try {
       const projectDir = projectStore.root || ''
 
+      // 构建最终脚本内容：sys.path + 自动 import
+      let codeToRun = tab.content
+      const gameKeywords = ['run()', 'Sprite(', 'load_map(', 'key_down(', 'key_pressed(', 'Timer(', 'mouse', 'wait(']
+      const hasImport = codeToRun.includes('from bingo_engine import') || codeToRun.includes('import bingo_engine')
+      const needsEngine = !hasImport && gameKeywords.some(kw => codeToRun.includes(kw))
+
       // 先写入原始内容获取临时文件路径
       const scriptPath = await invoke<string>('save_temp_script', {
         projectDir,
-        content: tab.content,
+        content: codeToRun,
       })
 
       // 获取引擎环境（python路径、engine目录、工作目录）
@@ -252,19 +266,10 @@ export function useEngine() {
         working_dir: string
       }>('resolve_engine_env', { scriptPath, projectRoot: projectDir || undefined })
 
-      // 构建注入后的脚本内容：sys.path + 自动 import
-      let codeToRun = tab.content
-      const gameKeywords = ['run()', 'Sprite(', 'load_map(', 'key_down(', 'key_pressed(', 'Timer(', 'mouse', 'wait(']
-      const hasImport = codeToRun.includes('from bingo_engine import') || codeToRun.includes('import bingo_engine')
-      const needsEngine = !hasImport && gameKeywords.some(kw => codeToRun.includes(kw))
-
+      // 如果需要引擎，注入 sys.path 和 import 并重新写入
       if (needsEngine) {
         const escapedPath = env.engine_dir.replace(/\\/g, '\\\\')
         codeToRun = `import sys\nif "${escapedPath}" not in sys.path:\n    sys.path.insert(0, "${escapedPath}")\nfrom bingo_engine import *\n` + codeToRun
-      }
-
-      // 用注入后的内容重新写入临时文件
-      if (needsEngine) {
         await invoke<string>('save_temp_script', {
           projectDir,
           content: codeToRun,

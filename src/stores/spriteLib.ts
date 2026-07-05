@@ -13,40 +13,42 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
   const items = ref<SpriteLibItem[]>([])
   const loading = ref(false)
 
-  const BUILTIN_SPRITES = [
-    '皮卡丘', '林克', '男剑士', '女忍者', '弓箭手',
-    '魔女', '魔术师', '达奥斯', '喷火龙', '太鼓达人',
-    '女武神', '男换装术士', '男孩-迷你', '女孩-迷你',
-  ]
-
   async function loadBuiltinLibrary() {
     if (items.value.length > 0) return
     loading.value = true
 
-    // 获取引擎资源目录
-    const engineDir = await invoke<string>('get_engine_assets_dir')
+    try {
+      const engineDir = await invoke<string>('get_engine_assets_dir')
+      const packagesDir = `${engineDir}/sprites/packages`
+      const files = await invoke<string[]>('list_dir', { path: packagesDir })
 
-    // 创建所有条目
-    for (const name of BUILTIN_SPRITES) {
-      items.value.push({
-        name,
-        bgsUrl: `${engineDir}/sprites/packages/${name}.bgs`,
-        thumbUrl: '',
-        loaded: false,
-      })
-    }
+      // 过滤出 .bgs 文件，去掉扩展名作为名称
+      const spriteNames = files
+        .filter(f => f.endsWith('.bgs'))
+        .map(f => f.replace(/\.bgs$/, ''))
 
-    // 通过 Tauri 命令加载缩略图（从 .bgs zip 读取）
-    for (const item of items.value) {
-      try {
-        const dataUrl = await invoke<string>('get_sprite_thumbnail', {
-          path: item.bgsUrl,
+      for (const name of spriteNames) {
+        items.value.push({
+          name,
+          bgsUrl: `${packagesDir}/${name}.bgs`,
+          thumbUrl: '',
+          loaded: false,
         })
-        item.thumbUrl = dataUrl
-        item.loaded = true
-      } catch (e) {
-        console.error(`[SpriteLib] ${item.name}: 加载缩略图失败`, e)
       }
+
+      for (const item of items.value) {
+        try {
+          const dataUrl = await invoke<string>('get_sprite_thumbnail', {
+            path: item.bgsUrl,
+          })
+          item.thumbUrl = dataUrl
+          item.loaded = true
+        } catch (e) {
+          console.error(`[SpriteLib] ${item.name}: 加载缩略图失败`, e)
+        }
+      }
+    } catch (e) {
+      console.error('[SpriteLib] 加载内置角色库失败:', e)
     }
 
     loading.value = false

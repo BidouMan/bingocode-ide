@@ -64,8 +64,6 @@ export interface MapData {
   width: number
   height: number
   tileSize: number
-  offsetX: number
-  offsetY: number
   gravity: boolean
   collisionType: string
   collisionEnabled: boolean
@@ -85,8 +83,6 @@ export const useMapStore = defineStore('map', () => {
     width: 40,
     height: 30,
     tileSize: 16,
-    offsetX: 0,
-    offsetY: 0,
     gravity: false,
     collisionType: '图像',
     collisionEnabled: false,
@@ -163,8 +159,6 @@ export const useMapStore = defineStore('map', () => {
       width: 40,
       height: 30,
       tileSize: 16,
-      offsetX: 0,
-      offsetY: 0,
       gravity: false,
       collisionType: '图像',
       collisionEnabled: false,
@@ -436,6 +430,20 @@ export const useMapStore = defineStore('map', () => {
     tileSet.tiles[tileIndex].collision = collision
   }
 
+  function setTileCollisionType(tileSetIndex: number, tileIndex: number, collisionType: string) {
+    const tileSet = mapData.value.tileSets[tileSetIndex]
+    if (!tileSet) return
+    while (tileSet.tiles.length <= tileIndex) {
+      tileSet.tiles.push({
+        collision: false,
+        tag: '',
+        collisionType: '图像',
+      })
+    }
+    tileSet.tiles[tileIndex].collisionType = collisionType
+    tileSet.tiles[tileIndex].collision = collisionType !== '图像'
+  }
+
   return {
     currentMapPath,
     mapData,
@@ -475,6 +483,7 @@ export const useMapStore = defineStore('map', () => {
     updateMapProperty,
     updateTileSize,
     setTileCollision,
+    setTileCollisionType,
     setCollisionTool,
     toggleSnapToPixel,
     setCursorPos,

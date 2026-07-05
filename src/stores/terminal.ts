@@ -109,10 +109,6 @@ export const useTerminalStore = defineStore('terminal', () => {
     waitingForInput.value = false
   }
 
-  function handleStderr(data: string) {
-    appendBatch(`\x1b[31m❌ ${data}\x1b[0m`)
-  }
-
   function flushNow() {
     if (flushTimer) {
       clearTimeout(flushTimer)

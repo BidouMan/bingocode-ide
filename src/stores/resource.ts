@@ -17,6 +17,9 @@ export const useResourceStore = defineStore('resource', () => {
   const codes = ref<ResourceItem[]>([])
   const selectedSpriteId = ref<string | null>(null)
 
+  // 地图数据预解析缓存：mapId → deserialized MapData
+  const mapDataCache = ref<Map<string, any>>(new Map())
+
   function getList(type: ResourceItem['type']) {
     switch (type) {
       case 'sprite': return sprites
@@ -71,5 +74,26 @@ export const useResourceStore = defineStore('resource', () => {
     return getList(type).value.find(i => i.id === id)
   }
 
-  return { sprites, maps, sounds, codes, selectedSpriteId, addItem, removeItem, renameItem, clearAll, getItem }
+  function clearAllResources() {
+    sprites.value = []
+    maps.value = []
+    sounds.value = []
+    codes.value = []
+    selectedSpriteId.value = null
+    mapDataCache.value.clear()
+  }
+
+  function setCachedMapData(mapId: string, data: any) {
+    mapDataCache.value.set(mapId, data)
+  }
+
+  function getCachedMapData(mapId: string): any | undefined {
+    return mapDataCache.value.get(mapId)
+  }
+
+  function clearMapDataCache() {
+    mapDataCache.value.clear()
+  }
+
+  return { sprites, maps, sounds, codes, selectedSpriteId, addItem, removeItem, renameItem, clearAll, getItem, clearAllResources, setCachedMapData, getCachedMapData, clearMapDataCache }
 })

@@ -77,7 +77,15 @@ async function loadMapFromProject(itemId: string): Promise<boolean> {
     await projectStore.initProject()
   }
   if (!projectStore.root) return false
-  // 查找地图名：优先用 resourceStore 中的 name（可能被用户重命名过）
+
+  // 优先从预解析缓存读取
+  const cached = resourceStore.getCachedMapData(itemId)
+  if (cached) {
+    mapStore.loadMap(cached)
+    return true
+  }
+
+  // 缓存未命中，从磁盘读取
   const item = resourceStore.maps.find(m => m.id === itemId)
   const mapName = item?.name ?? mapStore.mapData.name
   if (!mapName) return false
@@ -104,8 +112,6 @@ function createEmptyMapData(name: string): import('../../stores/map').MapData {
     width: 40,
     height: 30,
     tileSize: 16,
-    offsetX: 0,
-    offsetY: 0,
     gravity: false,
     collisionType: '图像',
     collisionEnabled: false,
@@ -205,10 +211,20 @@ async function onImportMap() {
         mapStore.loadMap(mapData)
         // 导入到项目目录，使用文件名作为资源名
         const name = file.name.replace(/\.bgm$/i, '')
+        // 获取原始地图名，用于更新瓦片集图片路径
+        const originalName = saveData.name || mapData.name
         const id = resourceStore.addItem({ name, type: 'map', path: '' })
         skipNextPathWatch = true
         mapStore.setMapPath(id)
         mapData.name = name
+        // 更新瓦片集的图片路径：将原始地图名替换为新地图名
+        if (originalName && originalName !== name) {
+          for (const tileSet of mapData.tileSets) {
+            if (tileSet.imagePath && tileSet.imagePath.includes(originalName)) {
+              tileSet.imagePath = tileSet.imagePath.replace(originalName, name)
+            }
+          }
+        }
         // 先设 path 让 saveMapToProject 能找到资源项
         const importItem = resourceStore.maps.find(m => m.id === id)
         if (importItem && projectStore.root) importItem.path = mapDirPath(name)
@@ -236,6 +252,23 @@ async function onExportMap() {
     if (thumbDataUrl && thumbDataUrl.startsWith('data:')) {
       const base64 = thumbDataUrl.split(',')[1]
       zip.file('thumbnail.png', base64, { base64: true })
+    }
+
+    // 打包 images 目录中的图片
+    if (projectStore.root && data.name) {
+      const imagesDir = mapDirPath(data.name) + '/images'
+      try {
+        const entries = await invoke<string[]>('list_dir', { path: imagesDir })
+        for (const entry of entries) {
+          if (!entry.endsWith('/')) {
+            const filePath = `${imagesDir}/${entry}`
+            const content = await invoke<number[]>('read_binary', { path: filePath })
+            zip.file(`images/${entry}`, new Uint8Array(content))
+          }
+        }
+      } catch (e) {
+        // images 目录可能不存在，忽略
+      }
     }
 
     const blob = await zip.generateAsync({ type: 'blob' })

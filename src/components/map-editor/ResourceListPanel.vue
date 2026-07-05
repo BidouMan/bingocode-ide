@@ -450,7 +450,7 @@ function onResourceClick(rIdx: number) {
       </button>
     </div>
 
-    <!-- 碰撞编辑器：选中资源时始终显示（预览图片），碰撞工具在非图像模式时显示 -->
+    <!-- 碰撞编辑器 -->
     <CollisionEditor ref="collisionEditorRef" />
 
     <div class="res-info-bar">

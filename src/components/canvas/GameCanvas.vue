@@ -5,14 +5,14 @@ import { useRenderStore } from '../../stores/render'
 import { useEditorStore } from '../../stores/editor'
 import { useEngine } from '../../composables/useEngine'
 
-const props = defineProps<{
-  previewMode?: boolean
-}>()
-
 const renderStore = useRenderStore()
 const editorStore = useEditorStore()
 const engine = useEngine()
 const containerRef = ref<HTMLDivElement>()
+
+const emit = defineEmits<{
+  'offset-update': [offset: number]
+}>()
 
 let app: any = null
 let PIXI: any = null
@@ -26,6 +26,7 @@ let tilesetFrameCache: Map<string, Map<number, any>> = new Map()
 let gameContainer: any = null
 let stageContainer: any = null
 let currentScaleMode: 'nearest' | 'linear' = 'linear'
+let resizeObserver: ResizeObserver | null = null
 let tilesSyncing = false
 let spritesSyncing = false
 
@@ -39,24 +40,27 @@ async function initPixi() {
 
   app = new PIXI.Application()
   await app.init({
-    background: '#1e1e1e',
-    resizeTo: containerRef.value,
+    background: '#1a1c21',
+    backgroundAlpha: 1,
     antialias: true,
     resolution: window.devicePixelRatio || 1,
     autoDensity: true,
   })
 
   containerRef.value.appendChild(app.canvas)
+  // 挡住 WebGL resize 时 canvas 属性重设导致的黑闪
+  app.canvas.style.background = '#1a1c21'
 
   stageContainer = new PIXI.Container()
   gameContainer = new PIXI.Container()
+
+  const gameBg = new PIXI.Graphics()
+  gameBg.rect(0, 0, LOGIC_W, LOGIC_H)
+  gameBg.fill({ color: 0x363a45 })
+  stageContainer.addChild(gameBg)
+
   stageContainer.addChild(gameContainer)
   app.stage.addChild(stageContainer)
-
-  const border = new PIXI.Graphics()
-  border.rect(0, 0, LOGIC_W, LOGIC_H)
-  border.stroke({ width: 2, color: 0x3778c8 })
-  stageContainer.addChild(border)
 
   const mask = new PIXI.Graphics()
   mask.rect(0, 0, LOGIC_W, LOGIC_H)
@@ -64,8 +68,21 @@ async function initPixi() {
   stageContainer.mask = mask
   stageContainer.addChild(mask)
 
+  handleResize()
+
+  const ro = new ResizeObserver(() => handleResize())
+  ro.observe(containerRef.value)
+  resizeObserver = ro
+}
+
+/** resize 后立即同步渲染，避免 WebGL buffer 重置导致的空帧闪烁 */
+function handleResize() {
+  if (!app || !containerRef.value) return
+  const vp = containerRef.value
+  app.renderer.resize(vp.clientWidth, vp.clientHeight)
   fitStage()
-  window.addEventListener('resize', fitStage)
+  // 同步渲染一帧，填满新 buffer，等下一帧不会闪烁
+  app.renderer.render(app.stage)
 }
 
 function fitStage() {
@@ -77,6 +94,7 @@ function fitStage() {
   stageContainer.x = (vp.clientWidth - LOGIC_W * scale) / 2
   stageContainer.y = (vp.clientHeight - LOGIC_H * scale) / 2
   stageContainer.scale.set(scale)
+  emit('offset-update', stageContainer.x)
 }
 
 function applyRenderMode() {
@@ -507,7 +525,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   removeGameListeners()
-  window.removeEventListener('resize', fitStage)
+  resizeObserver?.disconnect()
 
   if (app) {
     app.ticker.remove(gameLoop)
@@ -540,7 +558,7 @@ onBeforeUnmount(() => {
 .game-canvas-container {
   width: 100%;
   height: 100%;
-  background: #1a1a1a;
+  background: rgb(26, 28, 33);
   outline: none;
 }
 </style>

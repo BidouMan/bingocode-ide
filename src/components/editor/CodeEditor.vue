@@ -19,13 +19,18 @@ function updateLineNumberWidth() {
 }
 
 async function initMonaco() {
-  const mod = await import('@monaco-editor/loader')
-  const loader = mod.default || mod
+  // 配置 Monaco web worker（ES 模块模式必须手动指定）
+  window.MonacoEnvironment = {
+    getWorker(_: any, label: string) {
+      return new Worker(new URL('monaco-editor/esm/vs/editor/editor.worker.js', import.meta.url), { type: 'module' })
+    },
+  }
+
+  // 直接从本地 npm 包加载 Monaco（ES 模块），不走 CDN 也不走 @monaco-editor/loader 的脚本注入
+  const m = await import('monaco-editor/esm/vs/editor/editor.main.js')
+  monaco = m
 
   if (!containerRef.value) return
-
-  const m = await loader.init()
-  monaco = m
 
   // Tokyo Night 风格主题
   m.editor.defineTheme('bingo-dark', {

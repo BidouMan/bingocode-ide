@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { ref, nextTick } from 'vue'
 import { useMapStore } from '../../stores/map'
+import iconShow from '../../assets/icons/icon_show.svg'
+import iconHide from '../../assets/icons/icon_hide.svg'
+import iconLibrary from '../../assets/icons/图片库.svg'
+import iconAdd from '../../assets/icons/btn_preview_add.svg'
+import iconDelete from '../../assets/icons/icon--delete.svg'
+import iconUp from '../../assets/icons/上移图层.svg'
+import iconDown from '../../assets/icons/下移图层.svg'
 
 const props = defineProps<{
   disabled?: boolean

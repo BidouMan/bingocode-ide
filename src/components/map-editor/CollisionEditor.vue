@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, nextTick } from 'vue'
+import { ref, watch, computed, onMounted, nextTick } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { useMapStore, type MapResource } from '../../stores/map'
 import { useProjectStore } from '../../stores/project'
@@ -128,8 +128,8 @@ function render() {
     }
   }
 
-  // Collision polygon
-  if (collisionPoints.value.length >= 2) {
+  // Collision polygon — 仅在碰撞启用时绘制
+  if (currentCollisionEnabled.value && collisionPoints.value.length >= 2) {
     ctx.beginPath()
     ctx.moveTo(collisionPoints.value[0].x, collisionPoints.value[0].y)
     for (let i = 1; i < collisionPoints.value.length; i++) {
@@ -143,15 +143,17 @@ function render() {
     ctx.stroke()
   }
 
-  // Anchor points
-  for (let i = 0; i < collisionPoints.value.length; i++) {
-    const p = collisionPoints.value[i]
-    const size = 6
-    ctx.fillStyle = i === 0 ? '#5BFB84' : '#FF5050'
-    ctx.fillRect(p.x - size / 2, p.y - size / 2, size, size)
-    ctx.strokeStyle = '#fff'
-    ctx.lineWidth = 1
-    ctx.strokeRect(p.x - size / 2, p.y - size / 2, size, size)
+  // Anchor points — 仅在碰撞启用时绘制
+  if (currentCollisionEnabled.value) {
+    for (let i = 0; i < collisionPoints.value.length; i++) {
+      const p = collisionPoints.value[i]
+      const size = 6
+      ctx.fillStyle = i === 0 ? '#5BFB84' : '#FF5050'
+      ctx.fillRect(p.x - size / 2, p.y - size / 2, size, size)
+      ctx.strokeStyle = '#fff'
+      ctx.lineWidth = 1
+      ctx.strokeRect(p.x - size / 2, p.y - size / 2, size, size)
+    }
   }
 
   // Grid overlay
@@ -352,12 +354,27 @@ async function resetCollision() {
 
 let lastResource: MapResource | null = null
 
+// 当前碰撞是否启用（响应式，用于触发重绘）
+const currentCollisionEnabled = computed(() => {
+  const resource = mapStore.selectedResource
+  const isImageLayer = mapStore.activeLayer?.type === 'image'
+  if (isImageLayer) return resource?.collisionEnabled ?? false
+  const tileIndex = mapStore.selectedTileIndex
+  if (tileIndex >= 0) {
+    const ts = mapStore.mapData.tileSets[mapStore.globalResourceOffset + mapStore.selectedResourceIndex]
+    return ts?.tiles[tileIndex]?.collision ?? false
+  }
+  const ts = mapStore.mapData.tileSets.find(t => t.name === resource?.name)
+  return ts?.collisionEnabled ?? false
+})
+
 watch(
   () => [
     mapStore.selectedResourceIndex,
     mapStore.selectedTileIndex,
     mapStore.activeLayerIndex,
     mapStore.selectedResource?.collisionType,
+    mapStore.selectedResource?.collisionEnabled,
   ],
   async () => {
     if (lastResource && collisionPoints.value.length > 0) saveCollision(lastResource)
@@ -367,6 +384,11 @@ watch(
     nextTick(render)
   }
 )
+
+// 实时监听碰撞启用状态变化，重绘画布
+watch(currentCollisionEnabled, () => {
+  if (ctx) nextTick(render)
+})
 
 onMounted(async () => {
   if (canvasRef.value) {

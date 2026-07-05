@@ -11,13 +11,15 @@
     "engine:setup": "cd engine && bash setup.sh"
   },
   "dependencies": {
-    "@monaco-editor/loader": "^1.7.0",
     "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-shell": "^2.3.5",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-web-links": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "jszip": "^3.10.1",
+    "monaco-editor": "0.55.1",
     "pako": "^3.0.0",
     "pinia": "^3.0.4",
     "pixi.js": "^8.19.0",
