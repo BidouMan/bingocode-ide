@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, watch, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue'
 import { useResourceStore } from '../../stores/resource'
+import { useEditorStore } from '../../stores/editor'
 import type { SpriteData, SpriteFrame, SpriteAnimation } from '../../composables/useSpriteData'
 import { readBgsFromUrl } from '../../composables/useSpriteData'
 
@@ -15,6 +16,11 @@ import iconLoop from '../../assets/icons/anim_loop.svg'
 import iconLoopOff from '../../assets/icons/anim_loop_off.svg'
 
 const resourceStore = useResourceStore()
+const editorStore = useEditorStore()
+
+const imageRenderingStyle = computed(() => {
+  return editorStore.renderMode === 'pixelated' ? 'pixelated' : 'auto'
+})
 
 const currentSprite = ref<SpriteData | null>(null)
 const selectedFrameIndex = ref(0)
@@ -316,7 +322,7 @@ onBeforeUnmount(() => {
         @click="selectFrame(idx)"
         @contextmenu="onCostumeContextMenu($event, idx)"
       >
-        <img :src="frame.url" class="costume-thumb" />
+        <img :src="frame.url" class="costume-thumb" :style="{ imageRendering: imageRenderingStyle }" />
         <span class="costume-frame-num">帧 {{ idx + 1 }}</span>
       </div>
     </div>
@@ -344,6 +350,7 @@ onBeforeUnmount(() => {
             v-if="currentSprite?.frames[canvasDisplayIndex]"
             :src="currentSprite.frames[canvasDisplayIndex].url"
             class="canvas-sprite"
+            :style="{ imageRendering: imageRenderingStyle }"
           />
         </div>
       </div>
@@ -360,7 +367,7 @@ onBeforeUnmount(() => {
             v-if="currentSprite?.frames[selectedFrameIndex]"
             :src="currentSprite.frames[selectedFrameIndex].url"
             class="preview-image"
-            :style="{ transform: `scale(${previewScale})` }"
+            :style="{ transform: `scale(${previewScale})`, imageRendering: imageRenderingStyle }"
           />
           <!-- FPS 滑块 (悬浮在预览底部) -->
           <div class="fps-slider-overlay">
@@ -507,7 +514,6 @@ onBeforeUnmount(() => {
   width: 78px;
   height: 60px;
   object-fit: contain;
-  image-rendering: pixelated;
 }
 .costume-frame-num {
   font-size: 10px;
@@ -539,7 +545,6 @@ onBeforeUnmount(() => {
 }
 .canvas-sprite {
   display: block;
-  image-rendering: pixelated;
   background-color: #ffffff;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='16' height='16' fill='%23fff'/%3E%3Crect width='8' height='8' fill='%23e0e0e0'/%3E%3Crect x='8' y='8' width='8' height='8' fill='%23e0e0e0'/%3E%3C/svg%3E");
 }
@@ -587,7 +592,6 @@ onBeforeUnmount(() => {
 .preview-image {
   max-width: 248px;
   max-height: 248px;
-  image-rendering: pixelated;
 }
 
 /* FPS 滑块 (悬浮在预览底部) */

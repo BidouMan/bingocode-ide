@@ -7,6 +7,7 @@ import { useProjectStore } from '../stores/project'
 import type { AnyEngineCommand } from '../types/engine'
 
 let unlisteners: (() => void)[] = []
+let runGeneration = 0
 
 export function useEngine() {
   const editorStore = useEditorStore()
@@ -184,19 +185,16 @@ export function useEngine() {
     })
 
     let stdoutEnded = false
+    const myGeneration = runGeneration
 
     const unlisten3 = await listen('engine:finished', () => {
       const tryFinish = () => {
-        // 等待 stdoutEnded 标志，最多重试 20 次（约 1 秒）
+        if (runGeneration !== myGeneration) return // 新的 run 已启动，放弃
         if (stdoutEnded) {
           terminalStore.flushNow()
           terminalStore.resetInputState()
           editorStore.setRunning(false)
           terminalStore.appendLine('\x1b[33m[运行完毕]\x1b[0m')
-          const projectDir = projectStore.root || ''
-          if (projectDir) {
-            invoke('cleanup_temp_script', { projectDir }).catch(() => {})
-          }
         } else {
           setTimeout(tryFinish, 50)
         }
@@ -242,10 +240,16 @@ export function useEngine() {
     renderStore.clearAll()
     terminalStore.clear()
     editorStore.setRunning(true)
+    runGeneration++
     await setupListeners()
 
     try {
       const projectDir = projectStore.root || ''
+
+      // 先清理上一次的临时文件，再写入新文件，避免旧 cleanup 删掉新文件的竞态
+      if (projectDir) {
+        await invoke('cleanup_temp_script', { projectDir }).catch(() => {})
+      }
 
       // 构建最终脚本内容：sys.path + 自动 import
       let codeToRun = tab.content

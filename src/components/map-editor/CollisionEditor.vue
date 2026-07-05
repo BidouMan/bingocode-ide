@@ -3,9 +3,15 @@ import { ref, watch, computed, onMounted, nextTick } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { useMapStore, type MapResource } from '../../stores/map'
 import { useProjectStore } from '../../stores/project'
+import { useEditorStore } from '../../stores/editor'
 
 const mapStore = useMapStore()
 const projectStore = useProjectStore()
+const editorStore = useEditorStore()
+
+const imageRenderingStyle = computed(() => {
+  return editorStore.renderMode === 'pixelated' ? 'pixelated' : 'auto'
+})
 
 const resolvedPathCache = new Map<string, string>()
 async function resolveImagePath(path: string): Promise<string> {
@@ -409,6 +415,7 @@ defineExpose({ resetCollision })
       :width="tileSize"
       :height="tileSize"
       class="col-canvas"
+      :style="{ imageRendering: imageRenderingStyle }"
       @mousedown="onMouseDown"
       @mousemove="onMouseMove"
       @mouseup="onMouseUp"
@@ -435,6 +442,5 @@ defineExpose({ resetCollision })
   border: 1px solid rgb(55, 59, 68);
   border-radius: 4px;
   cursor: crosshair;
-  image-rendering: pixelated;
 }
 </style>

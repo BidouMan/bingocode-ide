@@ -38,6 +38,9 @@ async function initPixi() {
 
   PIXI = await import('pixi.js')
 
+  // 根据当前渲染模式设置初始 scaleMode
+  currentScaleMode = editorStore.renderMode === 'pixelated' ? 'nearest' : 'linear'
+
   app = new PIXI.Application()
   await app.init({
     background: '#1a1c21',
@@ -114,8 +117,22 @@ async function getTexture(imagePath: string): Promise<any> {
   try {
     const isLocal = imagePath.startsWith('/') || imagePath.match(/^[A-Z]:\\/i)
     const url = isLocal ? convertFileSrc(imagePath) : imagePath
-    const texture = await PIXI.Assets.load(url)
-    texture.source.scaleMode = currentScaleMode
+    // 手动加载图片，绕过 PixiJS Assets 全局缓存，
+    // 确保每次清缓存后能用新的 scaleMode 重建纹理
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image()
+      el.crossOrigin = 'anonymous'
+      el.onload = () => resolve(el)
+      el.onerror = reject
+      el.src = url
+    })
+    // 手动创建 BaseTexture，绕过 PixiJS Texture.from 的内部 URL 缓存，
+    // 确保 scaleMode 在 GPU 上传前就设置好
+    const source = new PIXI.BufferImageSource({
+      resource: img,
+      scaleMode: currentScaleMode,
+    })
+    const texture = new PIXI.Texture(source)
     textureCache.set(imagePath, texture)
     return texture
   } catch (e) {
