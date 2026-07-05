@@ -1380,11 +1380,11 @@ function scheduleRender() {
   if (!renderQueued) {
     renderQueued = true
     nextTick(async () => {
-      renderQueued = false
       while (pendingRender) {
         pendingRender = false
         await renderAllLayers()
       }
+      renderQueued = false
     })
   }
 }
