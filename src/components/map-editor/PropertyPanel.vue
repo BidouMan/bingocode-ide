@@ -3,6 +3,10 @@ import { computed } from 'vue'
 import { useMapStore } from '../../stores/map'
 import CustomSelect from '../common/CustomSelect.vue'
 
+const props = defineProps<{
+  disabled?: boolean
+}>()
+
 const mapStore = useMapStore()
 
 const tileSizeOptions = [
@@ -66,6 +70,7 @@ function onCustomCollisionTypeChange(val: string) {
         <input
           class="att-input"
           :value="mapStore.mapData.name"
+          :disabled="disabled"
           @input="mapStore.updateMapProperty('name', ($event.target as HTMLInputElement).value)"
         />
       </div>
@@ -78,6 +83,7 @@ function onCustomCollisionTypeChange(val: string) {
             class="att-input att-input-no-spin"
             type="number"
             :value="mapStore.mapData.width"
+            :disabled="disabled"
             @input="mapStore.updateMapProperty('width', Number(($event.target as HTMLInputElement).value))"
           />
         </div>
@@ -91,6 +97,7 @@ function onCustomCollisionTypeChange(val: string) {
             class="att-input att-input-no-spin"
             type="number"
             :value="mapStore.mapData.height"
+            :disabled="disabled"
             @input="mapStore.updateMapProperty('height', Number(($event.target as HTMLInputElement).value))"
           />
         </div>
@@ -104,6 +111,7 @@ function onCustomCollisionTypeChange(val: string) {
             class="att-input att-input-no-spin"
             type="number"
             :value="mapStore.mapData.offsetX"
+            :disabled="disabled"
             @input="mapStore.updateMapProperty('offsetX', Number(($event.target as HTMLInputElement).value))"
           />
         </div>
@@ -117,6 +125,7 @@ function onCustomCollisionTypeChange(val: string) {
             class="att-input att-input-no-spin"
             type="number"
             :value="mapStore.mapData.offsetY"
+            :disabled="disabled"
             @input="mapStore.updateMapProperty('offsetY', Number(($event.target as HTMLInputElement).value))"
           />
         </div>
@@ -128,6 +137,7 @@ function onCustomCollisionTypeChange(val: string) {
           <input
             type="checkbox"
             :checked="mapStore.mapData.gravity"
+            :disabled="disabled"
             @change="mapStore.updateMapProperty('gravity', ($event.target as HTMLInputElement).checked)"
           />
           <span class="att-checkbox-text">启用</span>
@@ -136,17 +146,17 @@ function onCustomCollisionTypeChange(val: string) {
 
       <div class="att-row">
         <span class="att-label">图块尺寸</span>
-        <CustomSelect :model-value="tileSizeValue" :options="tileSizeOptions" @update:model-value="onTileSizeChange" />
+        <CustomSelect :model-value="tileSizeValue" :options="tileSizeOptions" :disabled="disabled" @update:model-value="onTileSizeChange" />
       </div>
 
       <div class="att-row">
         <span class="att-label">物理属性</span>
-        <CustomSelect :model-value="collisionTypeValue" :options="collisionTypeOptions" @update:model-value="onCollisionTypeChange" />
+        <CustomSelect :model-value="collisionTypeValue" :options="collisionTypeOptions" :disabled="disabled" @update:model-value="onCollisionTypeChange" />
       </div>
 
       <div v-if="collisionTypeValue === '自定义'" class="att-row">
         <span class="att-label"></span>
-        <input class="att-input" :value="customCollisionType" @input="onCustomCollisionTypeChange(($event.target as HTMLInputElement).value)" placeholder="输入自定义类型" />
+        <input class="att-input" :value="customCollisionType" :disabled="disabled" @input="onCustomCollisionTypeChange(($event.target as HTMLInputElement).value)" placeholder="输入自定义类型" />
       </div>
 
       <div class="att-row">
@@ -155,6 +165,7 @@ function onCustomCollisionTypeChange(val: string) {
           <input
             type="checkbox"
             :checked="mapStore.mapData.collisionEnabled"
+            :disabled="disabled"
             @change="mapStore.updateMapProperty('collisionEnabled', ($event.target as HTMLInputElement).checked)"
           />
           <span class="att-checkbox-text">启用</span>
@@ -234,6 +245,16 @@ function onCustomCollisionTypeChange(val: string) {
 
 .att-input-no-spin[type="number"] {
   -moz-appearance: textfield;
+}
+
+.att-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.att-checkbox input[type="checkbox"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .att-size-group {

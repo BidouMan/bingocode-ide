@@ -1,13 +1,10 @@
 <script setup lang="ts">
 import { ref, nextTick } from 'vue'
 import { useMapStore } from '../../stores/map'
-import iconShow from '../../assets/icons/icon_show.svg'
-import iconHide from '../../assets/icons/icon_hide.svg'
-import iconLibrary from '../../assets/icons/图片库.svg'
-import iconAdd from '../../assets/icons/btn_preview_add.svg'
-import iconDelete from '../../assets/icons/选中删除.svg'
-import iconUp from '../../assets/icons/上移图层.svg'
-import iconDown from '../../assets/icons/下移图层.svg'
+
+const props = defineProps<{
+  disabled?: boolean
+}>()
 
 const mapStore = useMapStore()
 const editingLayerIndex = ref<number | null>(null)
@@ -80,19 +77,19 @@ function cancelRename() {
     </div>
 
     <div class="layer-toolbar">
-      <button class="layer-tool-btn" title="新建图像图层" @click="mapStore.addLayer('图像图层', 'image')">
+      <button class="layer-tool-btn" title="新建图像图层" :disabled="disabled" @click="mapStore.addLayer('图像图层', 'image')">
         <img :src="iconLibrary" class="layer-tool-icon" />
       </button>
-      <button class="layer-tool-btn" title="新建绘制图层" @click="mapStore.addLayer('绘制图层', 'drawing')">
+      <button class="layer-tool-btn" title="新建绘制图层" :disabled="disabled" @click="mapStore.addLayer('绘制图层', 'drawing')">
         <img :src="iconAdd" class="layer-tool-icon" />
       </button>
-      <button class="layer-tool-btn" title="删除图层" @click="mapStore.removeLayer(mapStore.activeLayerIndex)">
+      <button class="layer-tool-btn" title="删除图层" :disabled="disabled" @click="mapStore.removeLayer(mapStore.activeLayerIndex)">
         <img :src="iconDelete" class="layer-tool-icon" />
       </button>
-      <button class="layer-tool-btn" title="上移图层" @click="mapStore.moveLayerUp(mapStore.activeLayerIndex)">
+      <button class="layer-tool-btn" title="上移图层" :disabled="disabled" @click="mapStore.moveLayerUp(mapStore.activeLayerIndex)">
         <img :src="iconUp" class="layer-tool-icon" />
       </button>
-      <button class="layer-tool-btn" title="下移图层" @click="mapStore.moveLayerDown(mapStore.activeLayerIndex)">
+      <button class="layer-tool-btn" title="下移图层" :disabled="disabled" @click="mapStore.moveLayerDown(mapStore.activeLayerIndex)">
         <img :src="iconDown" class="layer-tool-icon" />
       </button>
     </div>
@@ -147,6 +144,11 @@ function cancelRename() {
 
 .layer-tool-btn:hover {
   background: rgb(61, 64, 72);
+}
+
+.layer-tool-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .layer-tool-icon {

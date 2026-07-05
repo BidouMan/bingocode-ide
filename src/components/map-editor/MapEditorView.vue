@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import MapToolbar from './MapToolbar.vue'
 import MapCanvas from './MapCanvas.vue'
@@ -15,6 +15,8 @@ import { serializeMap, deserializeMap } from '../../utils/mapSerializer'
 const mapStore = useMapStore()
 const resourceStore = useResourceStore()
 const projectStore = useProjectStore()
+
+const hasMaps = computed(() => resourceStore.maps.length > 0)
 
 const mapCanvasRef = ref<InstanceType<typeof MapCanvas>>()
 
@@ -283,20 +285,22 @@ defineExpose({ switchToMap })
 
 <template>
   <div class="map-editor-view">
-    <div class="map-editor-body">
+    <div class="map-editor-body" :class="{ disabled: !hasMaps }">
       <ResourceListPanel
+        :disabled="!hasMaps"
         @open-library="onOpenLibrary"
         @select-tile="(rIdx, tIdx) => mapStore.selectTile(rIdx, tIdx)"
       />
       <div class="map-editor-center">
         <MapToolbar
+          :disabled="!hasMaps"
           @new-map="onNewMap"
           @import-map="onImportMap"
           @export-map="onExportMap"
           @switch-map="switchToMap"
           @delete-image="onDeleteImage"
         />
-        <MapCanvas ref="mapCanvasRef" class="map-canvas-area" @cursor-move="onCursorMove" />
+        <MapCanvas ref="mapCanvasRef" class="map-canvas-area" :class="{ disabled: !hasMaps }" @cursor-move="onCursorMove" />
         <div class="map-info-bar">
           <span class="info-spacer" />
           <span class="info-label">ID:{{ mapStore.currentMapPath ? mapStore.currentMapPath.split('/').pop()?.split('.')[0] ?? '--' : '--' }}</span>
@@ -307,8 +311,21 @@ defineExpose({ switchToMap })
         </div>
       </div>
       <div class="map-editor-right">
-        <PropertyPanel />
-        <LayerPanel />
+        <PropertyPanel :disabled="!hasMaps" />
+        <LayerPanel :disabled="!hasMaps" />
+      </div>
+    </div>
+    <div v-if="!hasMaps" class="map-empty-banner">
+      <div class="empty-content">
+        <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <path d="M3 9h18M9 21V9" />
+        </svg>
+        <p class="empty-text">请先创建或导入地图</p>
+        <div class="empty-actions">
+          <button class="empty-btn" @click="onNewMap">创建地图</button>
+          <button class="empty-btn empty-btn-secondary" @click="onImportMap">导入地图</button>
+        </div>
       </div>
     </div>
   </div>
@@ -321,6 +338,7 @@ defineExpose({ switchToMap })
   display: flex;
   flex-direction: column;
   background: rgb(30, 30, 30);
+  position: relative;
 }
 
 .map-editor-body {
@@ -368,5 +386,72 @@ defineExpose({ switchToMap })
   min-width: 272px;
   border-left: 1px solid rgb(12, 12, 12);
   background: rgb(34, 37, 43);
+}
+
+.map-empty-banner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: rgba(41, 44, 52, 0.95);
+  z-index: 10;
+}
+
+.empty-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.empty-icon {
+  width: 48px;
+  height: 48px;
+  color: #3D4048;
+}
+
+.empty-text {
+  color: #8B8FA3;
+  font-size: 14px;
+  margin: 0;
+}
+
+.empty-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.empty-btn {
+  padding: 8px 24px;
+  border-radius: 6px;
+  border: 1px solid #3D4048;
+  background: #4B9B5C;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.empty-btn:hover {
+  background: #5bc772;
+  border-color: #5bc772;
+}
+
+.empty-btn-secondary {
+  background: #3D4048;
+}
+
+.empty-btn-secondary:hover {
+  background: #4D5058;
+  border-color: #4D5058;
+}
+
+.map-editor-body.disabled,
+.map-canvas-area.disabled {
+  opacity: 0.6;
+  pointer-events: none;
 }
 </style>

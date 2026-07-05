@@ -16,6 +16,10 @@ import iconDelAnchor from '../../assets/icons/删除锚点.svg'
 import iconResetAnchor from '../../assets/icons/重置锚点.svg'
 import iconSnapAnchor from '../../assets/icons/吸附锚点.svg'
 
+const props = defineProps<{
+  disabled?: boolean
+}>()
+
 const emit = defineEmits<{
   'open-library': []
   'select-tile': [resourceIndex: number, tileIndex: number]
@@ -355,7 +359,7 @@ function onResourceClick(rIdx: number) {
       <button class="res-tool-btn" title="打开资源库" @click="emit('open-library')">
         <img :src="iconLibrary" class="res-tool-icon" />
       </button>
-      <button class="res-tool-btn" title="上传本地资源" @click="showImportDialog = true">
+      <button class="res-tool-btn import-btn" title="上传本地资源" :disabled="disabled" @click="showImportDialog = true">
         <img :src="iconUpload" class="res-tool-icon" />
       </button>
       <button class="res-tool-btn" title="选中删除" @click="onDeleteResource">
@@ -497,6 +501,11 @@ function onResourceClick(rIdx: number) {
 
 .res-tool-btn:hover {
   background: rgb(61, 64, 72);
+}
+
+.import-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .res-tool-icon {

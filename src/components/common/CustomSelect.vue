@@ -9,6 +9,7 @@ interface Option {
 const props = defineProps<{
   modelValue: string
   options: Option[]
+  disabled?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -24,6 +25,7 @@ const selectedLabel = computed(() => {
 })
 
 function toggle() {
+  if (props.disabled) return
   isOpen.value = !isOpen.value
 }
 
@@ -48,7 +50,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="selectRef" class="custom-select" :class="{ open: isOpen }" @click="toggle">
+  <div ref="selectRef" class="custom-select" :class="{ open: isOpen, disabled }" @click="toggle">
     <span class="custom-select-value">{{ selectedLabel }}</span>
     <span class="custom-select-arrow">
       <svg width="10" height="6" viewBox="0 0 10 6" fill="none">
@@ -86,6 +88,11 @@ onBeforeUnmount(() => {
   cursor: pointer;
   user-select: none;
   transition: background 0.15s, border-color 0.15s;
+}
+
+.custom-select.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .custom-select:hover {

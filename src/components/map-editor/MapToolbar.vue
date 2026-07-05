@@ -14,6 +14,10 @@ import iconExportMap from '../../assets/icons/导出地图.svg'
 import iconGrid from '../../assets/icons/显示网格.svg'
 import iconDelete from '../../assets/icons/选中删除.svg'
 
+const props = defineProps<{
+  disabled?: boolean
+}>()
+
 const emit = defineEmits<{
   'new-map': []
   'import-map': []
@@ -80,6 +84,7 @@ const imageTools: { id: MapTool; icon: string; label: string }[] = [
         :key="tool.id"
         class="toolbar-btn"
         :class="{ 'toolbar-btn-active': mapStore.currentTool === tool.id }"
+        :disabled="disabled"
         :title="tool.label"
         @click="mapStore.setTool(tool.id)"
       >
@@ -88,6 +93,7 @@ const imageTools: { id: MapTool; icon: string; label: string }[] = [
       <button
         class="toolbar-btn"
         title="删除选中图像"
+        :disabled="disabled"
         @click="emit('delete-image')"
       >
         <img :src="iconDelete" class="toolbar-icon" />
@@ -100,6 +106,7 @@ const imageTools: { id: MapTool; icon: string; label: string }[] = [
         :key="tool.id"
         class="toolbar-btn"
         :class="{ 'toolbar-btn-active': mapStore.currentTool === tool.id }"
+        :disabled="disabled"
         :title="tool.label"
         @click="mapStore.setTool(tool.id)"
       >
@@ -155,6 +162,15 @@ const imageTools: { id: MapTool; icon: string; label: string }[] = [
 
 .toolbar-btn:hover {
   background: rgb(61, 64, 72);
+}
+
+.toolbar-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toolbar-btn:disabled:hover {
+  background: transparent;
 }
 
 .toolbar-btn:active {
