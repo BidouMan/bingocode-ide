@@ -108,7 +108,11 @@ function toggleCollapse() {
   if (!collapsed.value) {
     nextTick(() => {
       createTerminal()
-      terminal?.focus()
+      if (editorStore.isRunning) {
+        terminal?.blur()
+      } else {
+        terminal?.focus()
+      }
     })
   }
 }
@@ -120,7 +124,9 @@ watch(
       collapsed.value = false
       await nextTick()
       createTerminal()
-      terminal?.focus()
+      if (editorStore.isRunning) {
+        terminal?.blur()
+      }
     }
   }
 )
@@ -137,9 +143,7 @@ watch(
 watch(
   () => editorStore.isRunning,
   (running) => {
-    if (running) {
-      nextTick(() => terminal?.focus())
-    } else {
+    if (!running) {
       clearInputBuffer()
     }
   }

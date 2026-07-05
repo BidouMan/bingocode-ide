@@ -458,6 +458,7 @@ function onCanvasMouseMove(e: MouseEvent) {
 }
 
 function onCanvasMouseDown(e: MouseEvent) {
+  containerRef.value?.focus()
   if (editorStore.isRunning && usesEngine()) {
     e.stopPropagation()
     engine.sendMouseDown()

@@ -78,27 +78,20 @@ export const useTerminalStore = defineStore('terminal', () => {
       }
     }
 
-    if (waiting && terminalInstance) {
-      terminalInstance.write('\r\n> ')
+    if (waiting) {
+      waitingForInput.value = true
+      if (terminalInstance) {
+        terminalInstance.write('\r\n> ')
+      }
     }
   }
 
   function handleStdout(data: string) {
     appendBatch(data)
-    checkWaitingForInput(data)
   }
 
   function handleStderr(data: string) {
     appendBatch(`\x1b[31m❌ ${data}\x1b[0m`)
-    checkWaitingForInput(data)
-  }
-
-  function checkWaitingForInput(data: string) {
-    const hasNewline = data.includes('\n') || data.includes('\r')
-    const hasPrompt = /[?:：]\s*$/.test(data.trimEnd())
-    if (!hasNewline || hasPrompt) {
-      waitingForInput.value = true
-    }
   }
 
   function consumeInput() {
