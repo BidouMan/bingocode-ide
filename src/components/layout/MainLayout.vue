@@ -18,6 +18,7 @@ import UploadDrawer from '../resource-panel/UploadDrawer.vue'
 import SpriteLibPage from '../resource-panel/SpriteLibPage.vue'
 import MapLibraryPage from '../resource-panel/MapLibraryPage.vue'
 import MapResourceLibPage from '../resource-panel/MapResourceLibPage.vue'
+import HelpPanel from '../help/HelpPanel.vue'
 import iconLogo from '../../assets/icons/logo.svg'
 import iconFile from '../../assets/icons/icon--file.svg'
 import iconCodeEdit from '../../assets/icons/代码编辑.svg'
@@ -55,6 +56,7 @@ const fileMenuVisible = ref(false)
 const settingsMenuVisible = ref(false)
 const settingsSubmenu = ref<string | null>(null)
 const selectedResource = ref<string | null>(null)
+const helpVisible = ref(false)
 
 // 角色缩略图缓存
 const spriteThumbnails = ref<Record<string, string>>({})
@@ -1005,7 +1007,7 @@ function codeDisplayName(name: string) {
       </div>
 
       <!-- 帮助 (仅图标) -->
-      <button class="menu-btn menu-btn-help" title="帮助">
+      <button class="menu-btn menu-btn-help" title="帮助" @click="helpVisible = !helpVisible">
         <img :src="iconHelp" width="24" height="24" />
       </button>
     </div>
@@ -1308,6 +1310,9 @@ function codeDisplayName(name: string) {
         <div class="sprite-ctx-item sprite-ctx-del" @click="deleteMapFromContext(mapContextMenu.item!.id)">删除</div>
       </div>
     </Teleport>
+
+    <!-- 帮助面板 -->
+    <HelpPanel :visible="helpVisible" @close="helpVisible = false" />
   </div>
 </template>
 
