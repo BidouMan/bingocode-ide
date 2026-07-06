@@ -210,23 +210,22 @@ async function fileMenuAction(action: string) {
     case 'new': {
       const projectRoot = await projectStore.newProject()
       if (!projectRoot) break
-      // 先切换到游戏模式，确保后续 createTab 加入 gameTabs
-      editorStore.setGameMode(true)
-      editorStore.setActiveEditorMode('code')
-      // 清空所有旧数据
+      // 清空所有旧数据（两套标签页都要清）
       resourceStore.clearAllResources()
       renderStore.clearAll()
-      const gameTabs = editorStore.gameTabs
-      gameTabs.splice(0, gameTabs.length)
+      editorStore.gameTabs.splice(0, editorStore.gameTabs.length)
+      editorStore.codeTabs.splice(0, editorStore.codeTabs.length)
       editorStore.gameActiveTabIndex = 0
+      editorStore.codeActiveTabIndex = 0
       await nextTick()
-      // 创建新项目默认代码文件
+      // 创建新项目默认代码文件（createTab 会根据当前 isGameMode 加入对应列表）
       const name = '未命名-1.py'
       const code = 'print("Hello Bingo!")\n'
       await invoke('create_dir', { path: `${projectRoot}/code` })
       await invoke('write_file', { path: `${projectRoot}/code/${name}`, content: code })
       editorStore.createTab(name, `${projectRoot}/code/${name}`, code)
       resourceStore.addItem({ name, type: 'code', path: `${projectRoot}/code/${name}`, content: code })
+      editorStore.setActiveEditorMode('code')
       editorStore.setResourceTab('sprite')
       currentPage.value = 0
       break
@@ -242,19 +241,16 @@ async function fileMenuAction(action: string) {
       const root = projectStore.root
       if (!root) break
 
-      // 先切换到游戏模式，确保后续 createTab 加入 gameTabs
-      editorStore.setGameMode(true)
-      editorStore.setActiveEditorMode('code')
-
-      // 清空全部旧数据
+      // 清空全部旧数据（两套标签页都要清）
       resourceStore.clearAllResources()
       renderStore.clearAll()
-      const editorTabs = editorStore.gameTabs
-      editorTabs.splice(0, editorTabs.length)
+      editorStore.gameTabs.splice(0, editorStore.gameTabs.length)
+      editorStore.codeTabs.splice(0, editorStore.codeTabs.length)
       editorStore.gameActiveTabIndex = 0
+      editorStore.codeActiveTabIndex = 0
       await nextTick()
 
-      // ── 预加载代码文件 ──
+      // ── 预加载代码文件（createTab 根据当前模式加入对应列表）──
       try {
         const files = await invoke<string[]>('list_dir', { path: `${root}/code` })
         for (const file of files) {
