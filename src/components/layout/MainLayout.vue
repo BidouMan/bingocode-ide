@@ -210,6 +210,9 @@ async function fileMenuAction(action: string) {
     case 'new': {
       const projectRoot = await projectStore.newProject()
       if (!projectRoot) break
+      // 先切换到游戏模式，确保后续 createTab 加入 gameTabs
+      editorStore.setGameMode(true)
+      editorStore.setActiveEditorMode('code')
       // 清空所有旧数据
       resourceStore.clearAllResources()
       renderStore.clearAll()
@@ -224,8 +227,6 @@ async function fileMenuAction(action: string) {
       await invoke('write_file', { path: `${projectRoot}/code/${name}`, content: code })
       editorStore.createTab(name, `${projectRoot}/code/${name}`, code)
       resourceStore.addItem({ name, type: 'code', path: `${projectRoot}/code/${name}`, content: code })
-      editorStore.setGameMode(true)
-      editorStore.setActiveEditorMode('code')
       editorStore.setResourceTab('sprite')
       currentPage.value = 0
       break
@@ -240,6 +241,10 @@ async function fileMenuAction(action: string) {
       await projectStore.openProject(path)
       const root = projectStore.root
       if (!root) break
+
+      // 先切换到游戏模式，确保后续 createTab 加入 gameTabs
+      editorStore.setGameMode(true)
+      editorStore.setActiveEditorMode('code')
 
       // 清空全部旧数据
       resourceStore.clearAllResources()
@@ -307,8 +312,6 @@ async function fileMenuAction(action: string) {
       if (editorStore.currentTabs.length > 0) {
         editorStore.setActiveTab(0)
       }
-      editorStore.setGameMode(true)
-      editorStore.setActiveEditorMode('code')
       editorStore.setResourceTab('sprite')
       // 确保回到主页面
       currentPage.value = 0
