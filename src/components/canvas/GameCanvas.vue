@@ -4,6 +4,7 @@ import { convertFileSrc } from '@tauri-apps/api/core'
 import { useRenderStore } from '../../stores/render'
 import { useEditorStore } from '../../stores/editor'
 import { useEngine } from '../../composables/useEngine'
+import { signalGameCanvasReady, registerGameCanvasMount, unregisterGameCanvasMount } from '../../utils/gameCanvasReady'
 
 const renderStore = useRenderStore()
 const editorStore = useEditorStore()
@@ -532,18 +533,26 @@ watch(
 )
 
 onMounted(async () => {
-  await initPixi()
-  if (app) {
-    app.ticker.add(gameLoop)
-  }
-  if (editorStore.isRunning) {
-    nextTick(addGameListeners)
+  registerGameCanvasMount()
+  try {
+    await initPixi()
+    if (app) {
+      app.ticker.add(gameLoop)
+    }
+    if (editorStore.isRunning) {
+      nextTick(addGameListeners)
+    }
+  } catch (e) {
+    console.error('[GameCanvas] PixiJS 初始化失败:', e)
+  } finally {
+    signalGameCanvasReady()
   }
 })
 
 onBeforeUnmount(() => {
   removeGameListeners()
   resizeObserver?.disconnect()
+  unregisterGameCanvasMount()
 
   if (app) {
     app.ticker.remove(gameLoop)

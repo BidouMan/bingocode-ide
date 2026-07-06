@@ -76,12 +76,11 @@ const mapRenameId = ref<string | null>(null)
 const mapRenameValue = ref('')
 
 // 角色列表变化时立即加载缩略图
-function loadAllSpriteThumbnails() {
-  for (const item of resourceStore.sprites) {
-    if (item.path && !spriteThumbnails.value[item.id]) {
-      loadSpriteThumbnail(item)
-    }
-  }
+async function loadAllSpriteThumbnails() {
+  const promises = resourceStore.sprites
+    .filter(item => item.path && !spriteThumbnails.value[item.id])
+    .map(item => loadSpriteThumbnail(item))
+  await Promise.all(promises)
 }
 
 watch(() => [...resourceStore.sprites], loadAllSpriteThumbnails)
@@ -89,12 +88,11 @@ watch(() => [...resourceStore.sprites], loadAllSpriteThumbnails)
 onMounted(loadAllSpriteThumbnails)
 
 // 地图缩略图：只在切换到地图标签时刷新（不用实时）
-function loadAllMapThumbnails() {
-  for (const item of resourceStore.maps) {
-    if (item.path) {
-      loadMapThumbnail(item)
-    }
-  }
+async function loadAllMapThumbnails() {
+  const promises = resourceStore.maps
+    .filter(item => item.path)
+    .map(item => loadMapThumbnail(item))
+  await Promise.all(promises)
 }
 
 // 地图列表变化时不自动加载缩略图（改为切换标签时刷新）
@@ -226,6 +224,10 @@ async function fileMenuAction(action: string) {
       await invoke('write_file', { path: `${projectRoot}/code/${name}`, content: code })
       editorStore.createTab(name, `${projectRoot}/code/${name}`, code)
       resourceStore.addItem({ name, type: 'code', path: `${projectRoot}/code/${name}`, content: code })
+      editorStore.setGameMode(true)
+      editorStore.setActiveEditorMode('code')
+      editorStore.setResourceTab('sprite')
+      currentPage.value = 0
       break
     }
 
@@ -298,9 +300,8 @@ async function fileMenuAction(action: string) {
         }
       } catch { /* assets/sounds 可能不存在 */ }
 
-      // 刷新缩略图
-      loadAllSpriteThumbnails()
-      loadAllMapThumbnails()
+      // 刷新缩略图（并行加载，不阻塞后续流程）
+      Promise.all([loadAllSpriteThumbnails(), loadAllMapThumbnails()])
 
       // 切换到第一个代码标签（如有）
       if (editorStore.currentTabs.length > 0) {
@@ -308,7 +309,9 @@ async function fileMenuAction(action: string) {
       }
       editorStore.setGameMode(true)
       editorStore.setActiveEditorMode('code')
-      editorStore.setResourceTab('code')
+      editorStore.setResourceTab('sprite')
+      // 确保回到主页面
+      currentPage.value = 0
       break
     }
 
@@ -1231,7 +1234,7 @@ function codeDisplayName(name: string) {
           </div>
         </div>
         <div class="fullscreen-stage-area">
-          <GameCanvas v-if="currentPage === 1" @offset-update="canvasOffsetX = $event" />
+          <GameCanvas v-if="currentPage === 1 && editorStore.isRunning" @offset-update="canvasOffsetX = $event" />
         </div>
       </div>
 

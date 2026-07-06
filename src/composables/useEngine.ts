@@ -1,9 +1,11 @@
+import { nextTick } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useEditorStore } from '../stores/editor'
 import { useRenderStore } from '../stores/render'
 import { useTerminalStore } from '../stores/terminal'
 import { useProjectStore } from '../stores/project'
+import { waitForGameCanvasReady } from '../utils/gameCanvasReady'
 import type { AnyEngineCommand } from '../types/engine'
 
 let unlisteners: (() => void)[] = []
@@ -241,6 +243,16 @@ export function useEngine() {
     terminalStore.clear()
     editorStore.setRunning(true)
     runGeneration++
+
+    // 等待 GameCanvas 挂载并完成 PixiJS 初始化
+    // 确保引擎发送渲染指令时 PixiJS 已就绪
+    // 仅在 GameCanvas 会挂载时才等待（游戏模式 + 代码编辑器）
+    const canvasWillMount = editorStore.isGameMode && editorStore.activeEditorMode === 'code'
+    if (canvasWillMount) {
+      await nextTick() // 让 Vue 处理 DOM 更新，触发 GameCanvas 挂载
+      await waitForGameCanvasReady()
+    }
+
     await setupListeners()
 
     try {
