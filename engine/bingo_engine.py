@@ -148,6 +148,13 @@ class Sprite:
         self._on_hit_callbacks = []
         self._auto_destroy = False
 
+        # 3. 渲染预设缓存（必须在 early return 之前初始化，避免 deleted 精灵崩溃）
+        self._cached_image = None
+        self._cached_hitbox = None
+        self._visual_offset_x = 0
+        self._visual_offset_y = 0
+        self._show_hitbox = False
+
         # 🚀 2. 资源解析逻辑升级
         # 尝试寻找解压后的角色文件夹 (例如 assets/sprites/洛克人)
         self.sprite_dir = os.path.join("assets", "sprites", filename)
@@ -177,13 +184,6 @@ class Sprite:
             self._is_deleted = True
             stop()
             return
-
-        # 3. 渲染预设缓存
-        self._cached_image = None
-        self._cached_hitbox = None
-        self._visual_offset_x = 0
-        self._visual_offset_y = 0
-        self._show_hitbox = False
 
         # 4. 初始计算碰撞箱和图片信息
         self._setup_hitbox()
@@ -961,6 +961,8 @@ class Sprite:
         # 🚀 4. 原有的 Sprite 间碰撞逻辑
         if target is None or not hasattr(target, "_visible") or not target._visible:
             return False
+        if hasattr(target, "_is_deleted") and target._is_deleted:
+            return False
 
         if not isinstance(target, Sprite):
             return False
@@ -1259,7 +1261,7 @@ class Sprite:
         return None
 
     def _resolve_path(self, filename, category):
-        """通用路径解析：工程根目录优先，其次是 assets/分类/"""
+        """通用路径解析：工程根目录优先，其次是 assets/分类/，自动补全图片扩展名"""
         if os.path.exists(filename):
             return filename
 
@@ -1267,6 +1269,11 @@ class Sprite:
         guessed_path = os.path.join("assets", category, filename)
         if os.path.exists(guessed_path):
             return guessed_path
+
+        # 尝试常见图片扩展名（如 "火球子弹" → "火球子弹.png"）
+        for ext in (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"):
+            if os.path.exists(guessed_path + ext):
+                return guessed_path + ext
 
         return filename  # 实在找不到就返回原名，让错误显现出来
 
@@ -1601,6 +1608,15 @@ def play_sound(sound_name, loop=False):
             candidate = os.path.join(sounds_dir, sound_name + ext)
             if os.path.exists(candidate):
                 sound_path = candidate
+                break
+    # 递归搜索子目录（如 effects/、loop/）
+    if not sound_path:
+        for root, dirs, files in os.walk(sounds_dir):
+            for f in files:
+                if f == sound_name or f.rsplit(".", 1)[0] == sound_name:
+                    sound_path = os.path.join(root, f)
+                    break
+            if sound_path:
                 break
     if not sound_path:
         return
