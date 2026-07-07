@@ -652,11 +652,37 @@ function startSpriteRename(id: string) {
   }))
 }
 
+async function migrateSpriteDir(oldName: string, newName: string) {
+  if (!projectStore.root) return
+  const oldDir = `${projectStore.root}/assets/sprites/${oldName}`
+  const newDir = `${projectStore.root}/assets/sprites/${newName}`
+  try {
+    const exists = await invoke<boolean>('path_exists', { path: oldDir })
+    if (!exists) return
+    await invoke('rename_path', { oldPath: oldDir, newPath: newDir })
+  } catch (e) {
+    console.error('[MainLayout] 迁移角色目录失败:', e)
+  }
+}
+
 function confirmSpriteRename() {
   if (!spriteRenameId.value) return
   const val = spriteRenameValue.value.trim()
-  if (val) resourceStore.renameItem(spriteRenameId.value, val)
-  spriteRenameId.value = null
+  if (!val) { spriteRenameId.value = null; return }
+
+  const item = resourceStore.sprites.find(i => i.id === spriteRenameId.value)
+  const oldName = item?.name
+  if (!item || !oldName || oldName === val) { spriteRenameId.value = null; return }
+
+  // 先执行目录迁移，再改名字
+  migrateSpriteDir(oldName, val).then(() => {
+    resourceStore.renameItem(spriteRenameId.value!, val)
+    // 更新 item.path
+    if (projectStore.root) {
+      item.path = `${projectStore.root}/assets/sprites/${val}`
+    }
+    spriteRenameId.value = null
+  })
 }
 
 function cancelSpriteRename() {
@@ -829,20 +855,47 @@ function startCodeRename(id: string) {
   })
 }
 
+async function migrateCodeFile(oldName: string, newName: string) {
+  if (!projectStore.root) return
+  const oldFile = `${projectStore.root}/code/${oldName}`
+  const newFile = `${projectStore.root}/code/${newName}`
+  try {
+    const exists = await invoke<boolean>('path_exists', { path: oldFile })
+    if (!exists) return
+    await invoke('rename_path', { oldPath: oldFile, newPath: newFile })
+  } catch (e) {
+    console.error('[MainLayout] 迁移代码文件失败:', e)
+  }
+}
+
 function confirmCodeRename() {
   if (!codeRenameId.value) return
   const val = codeRenameValue.value.trim()
-  if (val && val !== '') {
-    const nameWithPy = val.endsWith('.py') ? val : val + '.py'
+  if (!val) { codeRenameId.value = null; codeRenameValue.value = ''; return }
+
+  const nameWithPy = val.endsWith('.py') ? val : val + '.py'
+  const item = resourceStore.codes.find(c => c.id === codeRenameId.value)
+  const oldName = item?.name
+  if (!item || !oldName || oldName === nameWithPy) {
+    codeRenameId.value = null
+    codeRenameValue.value = ''
+    return
+  }
+
+  // 先执行文件迁移，再改名字
+  migrateCodeFile(oldName, nameWithPy).then(() => {
     // 同步更新标签页名称
     const tab = editorStore.gameTabs.find(t => t.id === codeRenameId.value)
     if (tab) tab.name = nameWithPy
     // 同步更新资源管理器
-    const codeItem = resourceStore.codes.find(c => c.id === codeRenameId.value)
-    if (codeItem) codeItem.name = nameWithPy
-  }
-  codeRenameId.value = null
-  codeRenameValue.value = ''
+    item.name = nameWithPy
+    // 更新 item.path
+    if (projectStore.root) {
+      item.path = `${projectStore.root}/code/${nameWithPy}`
+    }
+    codeRenameId.value = null
+    codeRenameValue.value = ''
+  })
 }
 
 function cancelCodeRename() {
@@ -869,16 +922,29 @@ function startTabRename(id: string) {
 function confirmTabRename() {
   if (!tabRenameId.value) return
   const val = tabRenameValue.value.trim()
-  if (val) {
-    const nameWithPy = val.endsWith('.py') ? val : val + '.py'
-    const tab = editorStore.currentTabs.find(t => t.id === tabRenameId.value)
-    if (tab) tab.name = nameWithPy
-    // 同步资源管理器
-    const codeItem = resourceStore.codes.find(c => c.id === tabRenameId.value)
-    if (codeItem) codeItem.name = nameWithPy
+  if (!val) { tabRenameId.value = null; tabRenameValue.value = ''; return }
+
+  const nameWithPy = val.endsWith('.py') ? val : val + '.py'
+  const tab = editorStore.currentTabs.find(t => t.id === tabRenameId.value)
+  const item = resourceStore.codes.find(c => c.id === tabRenameId.value)
+  const oldName = item?.name
+  if (!tab || !item || !oldName || oldName === nameWithPy) {
+    tabRenameId.value = null
+    tabRenameValue.value = ''
+    return
   }
-  tabRenameId.value = null
-  tabRenameValue.value = ''
+
+  // 先执行文件迁移，再改名字
+  migrateCodeFile(oldName, nameWithPy).then(() => {
+    tab.name = nameWithPy
+    item.name = nameWithPy
+    // 更新 item.path
+    if (projectStore.root) {
+      item.path = `${projectStore.root}/code/${nameWithPy}`
+    }
+    tabRenameId.value = null
+    tabRenameValue.value = ''
+  })
 }
 
 function cancelTabRename() {
