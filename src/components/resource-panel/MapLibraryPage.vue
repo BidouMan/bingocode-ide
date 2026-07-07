@@ -162,6 +162,9 @@ const filteredMaps = computed(() => {
   text-align: center;
   font-size: 10px;
   color: rgb(230, 230, 230);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .lib-empty {

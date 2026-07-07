@@ -18,6 +18,7 @@ import UploadDrawer from '../resource-panel/UploadDrawer.vue'
 import SpriteLibPage from '../resource-panel/SpriteLibPage.vue'
 import MapLibraryPage from '../resource-panel/MapLibraryPage.vue'
 import MapResourceLibPage from '../resource-panel/MapResourceLibPage.vue'
+import SoundLibPage from '../resource-panel/SoundLibPage.vue'
 import HelpPanel from '../help/HelpPanel.vue'
 import iconLogo from '../../assets/icons/logo.svg'
 import iconFile from '../../assets/icons/icon--file.svg'
@@ -38,6 +39,7 @@ import iconUnfullscreen from '../../assets/icons/icon--unfullscreen.svg'
 import iconPython from '../../assets/icons/python_file_1.svg'
 import iconUndo from '../../assets/icons/undo.svg'
 import iconRedo from '../../assets/icons/redo.svg'
+import iconSoundIcon from '../../assets/icons/sound_icon.svg'
 
 const editorStore = useEditorStore()
 const resourceStore = useResourceStore()
@@ -76,6 +78,9 @@ const spriteRenameValue = ref('')
 const mapContextMenu = ref<{ show: boolean; x: number; y: number; item: { id: string; name: string } | null }>({ show: false, x: 0, y: 0, item: null })
 const mapRenameId = ref<string | null>(null)
 const mapRenameValue = ref('')
+
+// 声音右键菜单
+const soundContextMenu = ref<{ show: boolean; x: number; y: number; item: { id: string; name: string } | null }>({ show: false, x: 0, y: 0, item: null })
 
 // 角色列表变化时立即加载缩略图
 async function loadAllSpriteThumbnails() {
@@ -410,8 +415,9 @@ function onOpenLibrary(type: string) {
     currentPage.value = 3  // sprite_lib page
   } else if (type === 'map') {
     currentPage.value = 2  // map_lib page
+  } else if (type === 'sound') {
+    currentPage.value = 5  // sound_lib page
   }
-  // TODO: sound=5
 }
 
 async function onCreateMap() {
@@ -461,6 +467,12 @@ async function onCreateMap() {
 function onSpriteLibImported(id: string, name: string, bgsUrl: string) {
   resourceStore.selectedSpriteId = id
   editorStore.setResourceTab('sprite')
+  currentPage.value = 0
+}
+
+function onSoundLibImported(id: string, name: string) {
+  selectedResource.value = id
+  editorStore.setResourceTab('sound')
   currentPage.value = 0
 }
 
@@ -648,6 +660,7 @@ function closeSpriteContextMenus() {
   spriteContextMenu.value.show = false
   mapContextMenu.value.show = false
   codeContextMenu.value.show = false
+  soundContextMenu.value.show = false
 }
 
 // 地图右键菜单
@@ -735,6 +748,24 @@ async function migrateMapDir(oldName: string, newName: string) {
 
 function cancelMapRename() {
   mapRenameId.value = null
+}
+
+// 声音右键菜单
+function onSoundContextMenu(e: MouseEvent, item: { id: string; name: string }) {
+  e.preventDefault()
+  e.stopPropagation()
+  soundContextMenu.value = { show: true, x: e.clientX, y: e.clientY, item }
+}
+
+function deleteSoundFromContext(id: string) {
+  const item = resourceStore.sounds.find(i => i.id === id)
+  resourceStore.removeItem(id, 'sound')
+  if (selectedResource.value === id) {
+    selectedResource.value = resourceStore.sounds.length > 0 ? resourceStore.sounds[0].id : null
+  }
+  soundContextMenu.value.show = false
+  // 同步删除项目目录中的文件
+  if (item?.path) invoke('delete_path', { path: item.path }).catch(() => {})
 }
 
 // 同步游戏模式标签和代码资源管理器
@@ -1117,15 +1148,16 @@ function codeDisplayName(name: string) {
                   </div>
                   <div v-if="resourceStore.maps.length === 0" class="resource-empty"></div>
                 </div>
-                <div v-else-if="editorStore.resourceTab === 'sound'" class="resource-grid">
+                <div v-else-if="editorStore.resourceTab === 'sound'" class="resource-grid" @click="closeSpriteContextMenus">
                   <div
                     v-for="item in resourceStore.sounds"
                     :key="item.id"
                     class="resource-grid-item"
                     :class="{ 'resource-grid-item-active': selectedResource === item.id }"
                     @click="selectedResource = item.id"
+                    @contextmenu="onSoundContextMenu($event, item)"
                   >
-                    <div class="resource-thumb resource-thumb-sound"><span>{{ item.name.charAt(0) }}</span></div>
+                    <div class="resource-thumb resource-thumb-sound"><img :src="iconSoundIcon" class="resource-thumb-img" /></div>
                     <span class="resource-grid-name">{{ item.name }}</span>
                   </div>
                   <div v-if="resourceStore.sounds.length === 0" class="resource-empty"></div>
@@ -1256,16 +1288,7 @@ function codeDisplayName(name: string) {
 
       <!-- ─── page 5: 声音库 ─── -->
       <div v-show="currentPage === 5" class="lib-page">
-        <div class="lib-toolbar">
-          <input class="lib-search" placeholder="搜索..." />
-          <div style="width:10px"></div>
-          <button class="lib-tab-btn lib-tab-active">全部</button>
-          <button class="lib-tab-btn">效果</button>
-          <button class="lib-tab-btn">音乐</button>
-          <div class="lib-spacer"></div>
-          <button class="lib-return-btn" @click="switchPage(0)">返回</button>
-        </div>
-        <div class="lib-list"><div class="resource-placeholder">暂无声音</div></div>
+        <SoundLibPage @close="switchPage(0)" @imported="onSoundLibImported" />
       </div>
 
     </div>
@@ -1308,6 +1331,18 @@ function codeDisplayName(name: string) {
       >
         <div class="sprite-ctx-item" @click="startMapRename(mapContextMenu.item!.id)">重命名</div>
         <div class="sprite-ctx-item sprite-ctx-del" @click="deleteMapFromContext(mapContextMenu.item!.id)">删除</div>
+      </div>
+    </Teleport>
+
+    <!-- 声音右键菜单 -->
+    <Teleport to="body">
+      <div
+        v-if="soundContextMenu.show"
+        class="sprite-ctx-menu"
+        :style="{ left: soundContextMenu.x + 'px', top: soundContextMenu.y + 'px' }"
+        @click.stop
+      >
+        <div class="sprite-ctx-item sprite-ctx-del" @click="deleteSoundFromContext(soundContextMenu.item!.id)">删除</div>
       </div>
     </Teleport>
 
@@ -1705,7 +1740,7 @@ function codeDisplayName(name: string) {
   flex-shrink: 0;
 }
 .resource-thumb-map { background: rgb(61, 64, 72); }
-.resource-thumb-sound { background: rgb(232, 167, 53); }
+.resource-thumb-sound { background: rgb(61, 61, 61); }
 .resource-thumb-checker {
   background-color: #2a2a2a;
   background-image:

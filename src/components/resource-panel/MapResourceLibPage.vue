@@ -108,24 +108,27 @@ const filteredResources = computed(() => {
 .lib-spacer { flex: 1; }
 
 .lib-tab-btn {
-  padding: 4px 16px;
+  min-width: 80px;
+  height: 28px;
+  padding: 4px 10px;
   background: transparent;
-  border: 1px solid rgb(73, 76, 86);
+  border: none;
   border-radius: 4px;
-  color: rgb(128, 128, 128);
+  color: #9ca0a4;
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .lib-tab-btn:hover {
+  background: rgb(61, 64, 72);
   color: white;
 }
 
 .lib-tab-active {
-  background: rgb(55, 120, 200);
+  background: rgb(46, 49, 58);
+  border: 1px solid rgb(55, 59, 68);
   color: white;
-  border-color: rgb(55, 120, 200);
 }
 
 .lib-return-btn {
@@ -194,6 +197,9 @@ const filteredResources = computed(() => {
   text-align: center;
   font-size: 10px;
   color: rgb(230, 230, 230);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .lib-empty {

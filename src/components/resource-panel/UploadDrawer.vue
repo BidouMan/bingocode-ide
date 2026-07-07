@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import JSZip from 'jszip'
 import { useFileDialog } from '../../composables/useFileDialog'
 import { useResourceStore } from '../../stores/resource'
 import { useEditorStore } from '../../stores/editor'
+import { useProjectStore } from '../../stores/project'
 
 import iconFileUpload from '../../assets/icons/icon--file-upload.svg'
 import iconPaint from '../../assets/icons/icon--paint.svg'
@@ -26,6 +28,7 @@ const emit = defineEmits<{
 
 const resourceStore = useResourceStore()
 const editorStore = useEditorStore()
+const projectStore = useProjectStore()
 const fileDialog = useFileDialog()
 const menuOpen = ref(false)
 
@@ -102,10 +105,45 @@ async function handleAction(key: string) {
         editorStore.createTab(result.name, result.name, result.content || '')
         emit('uploaded', 'code', result.name, result.content || undefined)
       } else {
-        // 图片/声音文件：直接添加
-        const objectUrl = URL.createObjectURL(result.file)
-        resourceStore.addItem({ name: result.name, type: props.type, path: objectUrl })
-        emit('uploaded', props.type, result.name)
+        // 声音文件：复制到项目目录
+        if (props.type === 'sound') {
+          const projectRoot = projectStore.root
+          if (projectRoot) {
+            try {
+              // 读取文件内容为 ArrayBuffer
+              const arrayBuffer = await result.file.arrayBuffer()
+              const uint8Array = new Uint8Array(arrayBuffer)
+              
+              // 写入项目目录
+              const relativePath = `assets/sounds/${result.name}`
+              await invoke('write_binary', {
+                path: `${projectRoot}/${relativePath}`,
+                data: Array.from(uint8Array),
+              })
+              
+              // 添加到资源管理器
+              const projectPath = `${projectRoot}/${relativePath}`
+              resourceStore.addItem({ name: result.name, type: 'sound', path: projectPath })
+              emit('uploaded', 'sound', result.name)
+            } catch (e) {
+              console.error('[UploadDrawer] 复制声音文件失败:', e)
+              // 回退：使用 object URL
+              const objectUrl = URL.createObjectURL(result.file)
+              resourceStore.addItem({ name: result.name, type: 'sound', path: objectUrl })
+              emit('uploaded', 'sound', result.name)
+            }
+          } else {
+            // 没有项目目录，使用 object URL
+            const objectUrl = URL.createObjectURL(result.file)
+            resourceStore.addItem({ name: result.name, type: 'sound', path: objectUrl })
+            emit('uploaded', 'sound', result.name)
+          }
+        } else {
+          // 其他图片文件：直接添加
+          const objectUrl = URL.createObjectURL(result.file)
+          resourceStore.addItem({ name: result.name, type: props.type, path: objectUrl })
+          emit('uploaded', props.type, result.name)
+        }
       }
       break
     }
