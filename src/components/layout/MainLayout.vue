@@ -770,6 +770,13 @@ async function migrateMapDir(oldName: string, newName: string) {
           }
         }
       }
+      // 更新 tilesets 中的 image 路径
+      for (const ts of data.tilesets || []) {
+        if (ts.image?.startsWith(`assets/maps/${oldName}/`)) {
+          ts.image = ts.image.replace(`assets/maps/${oldName}/`, `assets/maps/${newName}/`)
+          changed = true
+        }
+      }
       if (changed) {
         await invoke('write_file', { path: jsonPath, content: JSON.stringify(data) })
       }
