@@ -511,6 +511,11 @@ fn get_sprite_thumbnail(path: String) -> Result<String, String> {
             png_entry.read_to_end(&mut png_buf).map_err(|e| e.to_string())?;
         }
         png_data = png_buf;
+    } else if path.ends_with(".png") || path.ends_with(".jpg") || path.ends_with(".jpeg")
+        || path.ends_with(".gif") || path.ends_with(".bmp") || path.ends_with(".webp") {
+        // 常规图片文件：直接读取
+        png_data = std::fs::read(&path)
+            .map_err(|e| format!("读取图片失败: {}", e))?;
     } else {
         // 从解压后的目录读取
         let config_path = format!("{}/config.json", path);

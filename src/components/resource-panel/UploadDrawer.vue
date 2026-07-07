@@ -74,6 +74,12 @@ const menuConfig: Record<string, { items: { key: string; icon: string }[]; uploa
 
 const config = computed(() => menuConfig[props.type])
 
+const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']
+function isImageFile(filename: string): boolean {
+  const lower = filename.toLowerCase()
+  return IMAGE_EXTS.some(ext => lower.endsWith(ext))
+}
+
 async function handleAction(key: string) {
   menuOpen.value = false
   switch (key) {
@@ -99,6 +105,31 @@ async function handleAction(key: string) {
           }
         } catch (e) {
           console.error('Failed to parse .bgs:', e)
+        }
+      } else if (props.type === 'sprite' && isImageFile(result.name)) {
+        // 图片文件：复制到项目目录
+        const projectRoot = projectStore.root
+        if (projectRoot) {
+          try {
+            const arrayBuffer = await result.file.arrayBuffer()
+            const uint8Array = new Uint8Array(arrayBuffer)
+            const relativePath = `assets/sprites/${result.name}`
+            const projectPath = await invoke<string>('write_binary', {
+              path: `${projectRoot}/${relativePath}`,
+              data: Array.from(uint8Array),
+            })
+            resourceStore.addItem({ name: result.name.replace(/\.[^.]+$/, ''), type: 'sprite', path: projectPath })
+            emit('uploaded', 'sprite', result.name)
+          } catch (e) {
+            console.error('[UploadDrawer] 复制图片文件失败:', e)
+            const objectUrl = URL.createObjectURL(result.file)
+            resourceStore.addItem({ name: result.name, type: 'sprite', path: objectUrl })
+            emit('uploaded', 'sprite', result.name)
+          }
+        } else {
+          const objectUrl = URL.createObjectURL(result.file)
+          resourceStore.addItem({ name: result.name, type: 'sprite', path: objectUrl })
+          emit('uploaded', 'sprite', result.name)
         }
       } else if (props.type === 'code') {
         resourceStore.addItem({ name: result.name, type: 'code', path: result.name, content: result.content || undefined })

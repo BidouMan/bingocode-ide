@@ -19,32 +19,51 @@ onMounted(() => {
   spriteLibStore.loadBuiltinLibrary()
 })
 
-async function selectSprite(item: { name: string; bgsUrl: string }) {
+async function selectSprite(item: { name: string; filePath: string; type: string }) {
   const projectRoot = projectStore.root
   if (!projectRoot) return
 
-  const engineAssetsDir = await invoke<string>('get_engine_assets_dir')
-  const bgsPath = `${engineAssetsDir}/sprites/packages/${item.name}.bgs`
+  if (item.type === 'bgs') {
+    // .bgs 包文件：解压到项目目录
+    try {
+      await invoke<string>('extract_bgs_to_project', {
+        bgsPath: item.filePath,
+        projectRoot,
+        spriteName: item.name,
+      })
+    } catch (e) {
+      console.error('[SpriteLib] 解压 .bgs 失败:', e)
+      return
+    }
 
-  try {
-    await invoke<string>('extract_bgs_to_project', {
-      bgsPath,
-      projectRoot,
-      spriteName: item.name,
+    const projectPath = `${projectRoot}/assets/sprites/${item.name}`
+    const id = resourceStore.addItem({
+      name: item.name,
+      type: 'sprite',
+      path: projectPath,
     })
-  } catch (e) {
-    console.error('[SpriteLib] 复制失败:', e)
-    return
-  }
+    emit('imported', id as string, item.name, item.filePath)
+  } else {
+    // 常规图片文件：复制到项目目录
+    try {
+      const ext = item.filePath.split('.').pop() || 'png'
+      const relativePath = `assets/sprites/${item.name}.${ext}`
+      const projectPath = await invoke<string>('copy_file_to_project', {
+        src: item.filePath,
+        projectRoot,
+        relativePath,
+      })
 
-  // 添加到资源管理器
-  const projectPath = `${projectRoot}/assets/sprites/${item.name}`
-  const id = resourceStore.addItem({
-    name: item.name,
-    type: 'sprite',
-    path: projectPath,
-  })
-  emit('imported', id as string, item.name, item.bgsUrl)
+      const id = resourceStore.addItem({
+        name: item.name,
+        type: 'sprite',
+        path: projectPath,
+      })
+      emit('imported', id as string, item.name, item.filePath)
+    } catch (e) {
+      console.error('[SpriteLib] 复制图片失败:', e)
+    }
+  }
 }
 </script>
 
@@ -62,7 +81,7 @@ async function selectSprite(item: { name: string; bgsUrl: string }) {
     <div class="lib-grid">
       <div
         v-for="item in spriteLibStore.items"
-        :key="item.name"
+        :key="item.filePath"
         v-show="!searchText || item.name.toLowerCase().includes(searchText.toLowerCase())"
         class="sprite-card"
         @click="selectSprite(item)"

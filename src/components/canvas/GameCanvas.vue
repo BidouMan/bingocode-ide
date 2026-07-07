@@ -26,6 +26,9 @@ let hitboxDisplayObjects: Map<string, any> = new Map()
 let textureCache: Map<string, any> = new Map()
 let tilesetFrameCache: Map<string, Map<number, any>> = new Map()
 let gameContainer: any = null
+let tileLayerContainer: any = null
+let spriteContainer: any = null
+let uiContainer: any = null
 let stageContainer: any = null
 let currentScaleMode: 'nearest' | 'linear' = 'linear'
 let resizeObserver: ResizeObserver | null = null
@@ -58,6 +61,16 @@ async function initPixi() {
 
   stageContainer = new PIXI.Container()
   gameContainer = new PIXI.Container()
+
+  // 分层容器：瓦片层 / 精灵层 / UI层
+  tileLayerContainer = new PIXI.Container()
+  tileLayerContainer.sortableChildren = true
+  spriteContainer = new PIXI.Container()
+  spriteContainer.sortableChildren = true
+  uiContainer = new PIXI.Container()
+  gameContainer.addChild(tileLayerContainer)
+  gameContainer.addChild(spriteContainer)
+  gameContainer.addChild(uiContainer)
 
   const gameBg = new PIXI.Graphics()
   gameBg.rect(0, 0, LOGIC_W, LOGIC_H)
@@ -188,14 +201,14 @@ async function getTileFrame(tileSetIndex: number, tileId: number): Promise<any> 
 }
 
 async function syncSprites() {
-  if (!app || !gameContainer || spritesSyncing) return
+  if (!app || !spriteContainer || spritesSyncing) return
   spritesSyncing = true
 
   const currentSpriteIds = new Set(renderStore.sprites.keys())
 
   for (const [id, displayObj] of spriteDisplayObjects) {
     if (!currentSpriteIds.has(id)) {
-      gameContainer.removeChild(displayObj)
+      spriteContainer.removeChild(displayObj)
       displayObj.destroy()
       spriteDisplayObjects.delete(id)
     }
@@ -211,7 +224,7 @@ async function syncSprites() {
       // 同步创建：先用 1x1 透明占位，避免 await 导致并发重复创建
       displayObj = new PIXI.Sprite(PIXI.Texture.EMPTY)
       displayObj.anchor = { x: 0.5, y: 0.5 }
-      gameContainer.addChild(displayObj)
+      spriteContainer.addChild(displayObj)
       spriteDisplayObjects.set(spriteData.id, displayObj)
 
       // 异步加载真实纹理后替换
@@ -238,22 +251,23 @@ async function syncSprites() {
     displayObj.scale.x = spriteData.scale * spriteData.scaleX
     displayObj.scale.y = spriteData.scale * spriteData.scaleY
     displayObj.visible = spriteData.visible
+    // 精灵在独立 spriteContainer 中，zIndex 用于容器内排序
     displayObj.zIndex = spriteData.layer
   }
 
-  gameContainer.sortChildren()
+  spriteContainer.sortChildren()
   spritesSyncing = false
 }
 
 async function syncTiles() {
-  if (!app || !gameContainer || tilesSyncing) return
+  if (!app || !tileLayerContainer || tilesSyncing) return
   tilesSyncing = true
 
   const currentTileIds = new Set(renderStore.tiles.keys())
 
   for (const [id, displayObj] of tileDisplayObjects) {
     if (!currentTileIds.has(id)) {
-      gameContainer.removeChild(displayObj)
+      tileLayerContainer.removeChild(displayObj)
       displayObj.destroy()
       tileDisplayObjects.delete(id)
     }
@@ -279,7 +293,7 @@ async function syncTiles() {
       }
 
       if (displayObj) {
-        gameContainer.addChild(displayObj)
+        tileLayerContainer.addChild(displayObj)
         tileDisplayObjects.set(tileData.id, displayObj)
       }
     }
@@ -292,49 +306,67 @@ async function syncTiles() {
       displayObj.scale.x = s * (tileData.scaleX ?? 1)
       displayObj.scale.y = s * (tileData.scaleY ?? 1)
       displayObj.alpha = tileData.opacity ?? 1
-      displayObj.zIndex = tileData.layer * 1000 - 1
+      displayObj.zIndex = tileData.layer
+
+      // 视口裁剪：只渲染相机视口内的瓦片，减少 GPU 负担
+      const tileSize = tileData.tileSize || renderStore.tileGridSize
+      const cam = renderStore.camera
+      const viewLeft = cam.x - LOGIC_W / 2 - tileSize
+      const viewRight = cam.x + LOGIC_W / 2 + tileSize
+      const viewTop = cam.y - LOGIC_H / 2 - tileSize
+      const viewBottom = cam.y + LOGIC_H / 2 + tileSize
+      displayObj.visible = tileData.x + tileSize > viewLeft
+        && tileData.x < viewRight
+        && tileData.y + tileSize > viewTop
+        && tileData.y < viewBottom
     }
   }
 
-  gameContainer.sortChildren()
+  tileLayerContainer.sortChildren()
   tilesSyncing = false
 }
 
 function syncSayTexts() {
-  if (!app || !gameContainer) return
+  if (!app || !uiContainer) return
 
-  const currentIds = new Set(renderStore.sayTexts.keys())
-
-  for (const [id, obj] of sayDisplayObjects) {
-    if (!currentIds.has(id)) {
-      gameContainer.removeChild(obj)
-      obj.destroy()
-      sayDisplayObjects.delete(id)
+  // 回收不再需要的气泡对象（隐藏而非销毁，供后续复用）
+  for (const [id, container] of sayDisplayObjects) {
+    if (!renderStore.sayTexts.has(id)) {
+      container.visible = false
     }
   }
 
   for (const [id, sayData] of renderStore.sayTexts) {
     let container = sayDisplayObjects.get(id)
     if (!container) {
-      container = new PIXI.Container()
-      // 气泡背景
-      const bg = new PIXI.Graphics()
-      container.addChild(bg)
-      // 文字
-      const text = new PIXI.Text({
-        text: sayData.text,
-        style: { fill: 0x000000, fontSize: 14, fontFamily: 'Arial' },
-      })
-      text.anchor = { x: 0.5, y: 1 }
-      container.addChild(text)
-      gameContainer.addChild(container)
+      // 优先复用被隐藏的气泡对象
+      for (const [, pooled] of sayDisplayObjects) {
+        if (!pooled.visible) {
+          container = pooled
+          sayDisplayObjects.delete(id)
+          // 重新绑定到新 id
+          break
+        }
+      }
+      if (!container) {
+        container = new PIXI.Container()
+        const bg = new PIXI.Graphics()
+        container.addChild(bg)
+        const text = new PIXI.Text({
+          text: '',
+          style: { fill: 0x000000, fontSize: 14, fontFamily: 'Arial' },
+        })
+        text.anchor = { x: 0.5, y: 1 }
+        container.addChild(text)
+        uiContainer.addChild(container)
+      }
       sayDisplayObjects.set(id, container)
     }
 
-    // 更新位置和文字
+    container.visible = true
     container.x = sayData.x
     container.y = sayData.y
-    container.zIndex = 99999
+    container.zIndex = 1
 
     const textObj = container.children[1]
     if (textObj && textObj.text !== undefined) {
@@ -356,13 +388,13 @@ function syncSayTexts() {
 }
 
 function syncDrawTexts() {
-  if (!app || !gameContainer) return
+  if (!app || !uiContainer) return
 
   const currentIds = new Set(renderStore.drawTexts.keys())
 
   for (const [id, obj] of drawTextDisplayObjects) {
     if (!currentIds.has(id)) {
-      gameContainer.removeChild(obj)
+      uiContainer.removeChild(obj)
       obj.destroy()
       drawTextDisplayObjects.delete(id)
     }
@@ -375,8 +407,8 @@ function syncDrawTexts() {
         text: data.text,
         style: { fill: 0xffffff, fontSize: 16, fontFamily: 'Arial', stroke: { color: 0x000000, width: 2 } },
       })
-      textObj.zIndex = 100000
-      gameContainer.addChild(textObj)
+      textObj.zIndex = 2
+      uiContainer.addChild(textObj)
       drawTextDisplayObjects.set(id, textObj)
     }
     textObj.text = data.text
@@ -386,13 +418,13 @@ function syncDrawTexts() {
 }
 
 function syncHitboxes() {
-  if (!app || !gameContainer) return
+  if (!app || !uiContainer) return
 
   const currentIds = new Set(renderStore.hitboxes.keys())
 
   for (const [id, obj] of hitboxDisplayObjects) {
     if (!currentIds.has(id)) {
-      gameContainer.removeChild(obj)
+      uiContainer.removeChild(obj)
       obj.destroy()
       hitboxDisplayObjects.delete(id)
     }
@@ -402,8 +434,8 @@ function syncHitboxes() {
     let graphics = hitboxDisplayObjects.get(id)
     if (!graphics) {
       graphics = new PIXI.Graphics()
-      graphics.zIndex = 99998
-      gameContainer.addChild(graphics)
+      graphics.zIndex = 0
+      uiContainer.addChild(graphics)
       hitboxDisplayObjects.set(id, graphics)
     }
     graphics.clear()

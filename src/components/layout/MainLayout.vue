@@ -1833,7 +1833,7 @@ function codeDisplayName(name: string) {
 .resource-thumb-img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   flex-shrink: 0;
 }
 .resource-thumb-map { background: rgb(61, 64, 72); }

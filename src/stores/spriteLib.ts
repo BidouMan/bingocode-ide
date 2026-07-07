@@ -2,12 +2,19 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 
+export type SpriteLibType = 'bgs' | 'image'
+
 export interface SpriteLibItem {
   name: string
-  bgsUrl: string
+  /** .bgs 文件路径 或 图片文件路径 */
+  filePath: string
+  /** 资源类型 */
+  type: SpriteLibType
   thumbUrl: string
   loaded: boolean
 }
+
+const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']
 
 export const useSpriteLibStore = defineStore('spriteLib', () => {
   const items = ref<SpriteLibItem[]>([])
@@ -19,27 +26,57 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
 
     try {
       const engineDir = await invoke<string>('get_engine_assets_dir')
+
+      // 加载 .bgs 包文件
       const packagesDir = `${engineDir}/sprites/packages`
-      const files = await invoke<string[]>('list_dir', { path: packagesDir })
+      try {
+        const files = await invoke<string[]>('list_dir', { path: packagesDir })
+        const bgsNames = files
+          .filter(f => f.endsWith('.bgs'))
+          .map(f => f.replace(/\.bgs$/, ''))
 
-      // 过滤出 .bgs 文件，去掉扩展名作为名称
-      const spriteNames = files
-        .filter(f => f.endsWith('.bgs'))
-        .map(f => f.replace(/\.bgs$/, ''))
-
-      for (const name of spriteNames) {
-        items.value.push({
-          name,
-          bgsUrl: `${packagesDir}/${name}.bgs`,
-          thumbUrl: '',
-          loaded: false,
-        })
+        for (const name of bgsNames) {
+          items.value.push({
+            name,
+            filePath: `${packagesDir}/${name}.bgs`,
+            type: 'bgs',
+            thumbUrl: '',
+            loaded: false,
+          })
+        }
+      } catch (e) {
+        console.error('[SpriteLib] 加载 .bgs 列表失败:', e)
       }
 
+      // 加载 images/ 目录下的常规图片文件
+      const imagesDir = `${engineDir}/sprites/images`
+      try {
+        const files = await invoke<string[]>('list_dir', { path: imagesDir })
+        const imageFiles = files.filter(f => {
+          const lower = f.toLowerCase()
+          return IMAGE_EXTS.some(ext => lower.endsWith(ext))
+        })
+
+        for (const filename of imageFiles) {
+          const name = filename.replace(/\.[^.]+$/, '')
+          items.value.push({
+            name,
+            filePath: `${imagesDir}/${filename}`,
+            type: 'image',
+            thumbUrl: '',
+            loaded: false,
+          })
+        }
+      } catch (e) {
+        // images 目录可能为空或不存在，静默处理
+        console.warn('[SpriteLib] 加载图片列表:', e)
+      }
+
+      // 批量加载缩略图
       for (const item of items.value) {
         try {
           const dataUrl = await invoke<string>('get_sprite_thumbnail', {
-            path: item.bgsUrl,
+            path: item.filePath,
           })
           item.thumbUrl = dataUrl
           item.loaded = true
