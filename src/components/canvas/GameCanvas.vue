@@ -9,6 +9,7 @@ import { signalGameCanvasReady, registerGameCanvasMount, unregisterGameCanvasMou
 const renderStore = useRenderStore()
 const editorStore = useEditorStore()
 const engine = useEngine()
+
 const containerRef = ref<HTMLDivElement>()
 
 const emit = defineEmits<{
@@ -115,6 +116,9 @@ async function getTexture(imagePath: string): Promise<any> {
     return textureCache.get(imagePath)
   }
 
+  // 增加总数计数
+  renderStore.setTextureTotal(renderStore.textureTotal + 1)
+
   try {
     const isLocal = imagePath.startsWith('/') || imagePath.match(/^[A-Z]:\\/i)
     const url = isLocal ? convertFileSrc(imagePath) : imagePath
@@ -135,6 +139,8 @@ async function getTexture(imagePath: string): Promise<any> {
     })
     const texture = new PIXI.Texture(source)
     textureCache.set(imagePath, texture)
+    // 增加已加载计数
+    renderStore.incrementTextureLoaded()
     return texture
   } catch (e) {
     const g = new PIXI.Graphics()
@@ -142,6 +148,8 @@ async function getTexture(imagePath: string): Promise<any> {
     g.fill({ color: 0xff00ff })
     const placeholder = app.renderer.generateTexture(g)
     textureCache.set(imagePath, placeholder)
+    // 增加已加载计数（失败也算加载完成）
+    renderStore.incrementTextureLoaded()
     return placeholder
   }
 }

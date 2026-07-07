@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick, onMounted, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { useEditorStore } from '../../stores/editor'
@@ -48,6 +48,12 @@ const mapStore = useMapStore()
 const renderStore = useRenderStore()
 const engine = useEngine()
 const fileDialog = useFileDialog()
+
+// loading进度
+const loadingProgress = computed(() => {
+  if (renderStore.textureTotal === 0) return 0
+  return Math.floor((renderStore.textureLoaded / renderStore.textureTotal) * 100)
+})
 
 // change_page: 0=编辑器, 1=全屏, 2=地图库, 3=角色库, 4=素材库, 5=声音库
 const currentPage = ref(0)
@@ -1080,6 +1086,21 @@ function codeDisplayName(name: string) {
                 <div v-else class="game-preview-placeholder">
                   <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="rgb(80,80,80)" stroke-width="1.5"><polygon points="5,3 19,12 5,21" /></svg>
                 </div>
+                <!-- Loading覆盖层 -->
+                <div v-if="renderStore.isLoadingTextures" class="loading-overlay">
+                  <div class="loading-content">
+                    <div class="loading-balls">
+                      <div class="ball ball-1"></div>
+                      <div class="ball ball-2"></div>
+                      <div class="ball ball-3"></div>
+                    </div>
+                    <div class="loading-text">加载资源中...</div>
+                    <div class="loading-progress">{{ loadingProgress }}%</div>
+                    <div class="loading-bar">
+                      <div class="loading-bar-fill" :style="{ width: loadingProgress + '%' }"></div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
             <div class="outline-tabs">
@@ -1657,6 +1678,82 @@ function codeDisplayName(name: string) {
   align-items: center;
   justify-content: center;
   background: rgb(50, 50, 61);
+}
+
+/* Loading覆盖层 */
+.loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(26, 28, 33, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.loading-content {
+  text-align: center;
+  color: white;
+}
+
+.loading-balls {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.ball {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #5BFB84;
+  animation: bounce 1.4s ease-in-out infinite;
+}
+
+.ball-1 { animation-delay: -0.32s; }
+.ball-2 { animation-delay: -0.16s; }
+
+@keyframes bounce {
+  0%, 80%, 100% {
+    transform: scale(0.6);
+    opacity: 0.5;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.loading-text {
+  font-size: 12px;
+  margin-bottom: 6px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.loading-progress {
+  font-size: 10px;
+  color: #5BFB84;
+  font-family: monospace;
+  margin-bottom: 6px;
+}
+
+.loading-bar {
+  width: 120px;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  overflow: hidden;
+  margin: 0 auto;
+}
+
+.loading-bar-fill {
+  height: 100%;
+  background: #5BFB84;
+  transition: width 0.3s ease;
 }
 
 /* 资源标签 */

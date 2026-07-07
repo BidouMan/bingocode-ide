@@ -92,6 +92,11 @@ export const useRenderStore = defineStore('render', () => {
   const shakeDuration = ref(0)
   const shakeStartTime = ref(0)
 
+  // 资源加载跟踪
+  const textureTotal = ref(0)
+  const textureLoaded = ref(0)
+  const isLoadingTextures = ref(false)
+
   function createSprite(id: string, data: Partial<SpriteData>) {
     sprites.value.set(id, {
       id,
@@ -167,6 +172,29 @@ export const useRenderStore = defineStore('render', () => {
     }
     fps.value = 0
     shakeIntensity.value = 0
+    resetTextureLoading()
+  }
+
+  function resetTextureLoading() {
+    textureTotal.value = 0
+    textureLoaded.value = 0
+    isLoadingTextures.value = false
+  }
+
+  function setTextureTotal(total: number) {
+    textureTotal.value = total
+    isLoadingTextures.value = total > 0
+  }
+
+  function incrementTextureLoaded() {
+    textureLoaded.value++
+    if (textureLoaded.value >= textureTotal.value && textureTotal.value > 0) {
+      isLoadingTextures.value = false
+    }
+  }
+
+  function setLoadingState(loading: boolean) {
+    isLoadingTextures.value = loading
   }
 
   function updateCamera(data: Partial<CameraData>) {
@@ -247,6 +275,9 @@ export const useRenderStore = defineStore('render', () => {
     camera,
     fps,
     isPaused,
+    textureTotal,
+    textureLoaded,
+    isLoadingTextures,
     createSprite,
     updateSprite,
     deleteSprite,
@@ -260,5 +291,9 @@ export const useRenderStore = defineStore('render', () => {
     setDrawText,
     setHitbox,
     removeHitbox,
+    resetTextureLoading,
+    setTextureTotal,
+    incrementTextureLoaded,
+    setLoadingState,
   }
 })

@@ -240,6 +240,7 @@ export function useEngine() {
     }
 
     renderStore.clearAll()
+    renderStore.resetTextureLoading()
     terminalStore.clear()
     editorStore.setRunning(true)
     runGeneration++
@@ -309,6 +310,7 @@ export function useEngine() {
       await invoke('stop_script')
     } catch {}
     editorStore.setRunning(false)
+    renderStore.resetTextureLoading()
     terminalStore.resetInputState()
     terminalStore.appendLine('\x1b[33m[已停止运行]\x1b[0m')
   }
