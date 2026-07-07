@@ -196,6 +196,13 @@ export const useMapStore = defineStore('map', () => {
       delete layer.tiles[key]
     } else {
       layer.tiles[key] = tileId
+      // 自动扩展地图尺寸以容纳超出边界的砖块
+      if (x + 1 > mapData.value.width) {
+        mapData.value.width = x + 1
+      }
+      if (y + 1 > mapData.value.height) {
+        mapData.value.height = y + 1
+      }
     }
     tileRevision.value++
   }

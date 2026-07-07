@@ -85,6 +85,9 @@ export const useRenderStore = defineStore('render', () => {
     limitTop: 0,
     limitBottom: 480,
   })
+  const prevCamera = ref<CameraData>({ ...camera.value })
+  const targetCamera = ref<CameraData>({ ...camera.value })
+  const cameraUpdateTime = ref(0)
   const fps = ref(0)
   const isPaused = ref(false)
 
@@ -170,6 +173,9 @@ export const useRenderStore = defineStore('render', () => {
       limitTop: 0,
       limitBottom: 480,
     }
+    prevCamera.value = { ...camera.value }
+    targetCamera.value = { ...camera.value }
+    cameraUpdateTime.value = 0
     fps.value = 0
     shakeIntensity.value = 0
     resetTextureLoading()
@@ -198,7 +204,24 @@ export const useRenderStore = defineStore('render', () => {
   }
 
   function updateCamera(data: Partial<CameraData>) {
+    prevCamera.value = { ...camera.value }
     Object.assign(camera.value, data)
+    targetCamera.value = { ...camera.value }
+    cameraUpdateTime.value = performance.now()
+  }
+
+  function getInterpolatedCamera(): CameraData {
+    const dt = performance.now() - cameraUpdateTime.value
+    const t = Math.min(dt / 16.67, 1) // 归一化到 [0, 1]，16.67ms = 60fps 周期
+    return {
+      x: prevCamera.value.x + (targetCamera.value.x - prevCamera.value.x) * t,
+      y: prevCamera.value.y + (targetCamera.value.y - prevCamera.value.y) * t,
+      zoom: prevCamera.value.zoom + (targetCamera.value.zoom - prevCamera.value.zoom) * t,
+      limitLeft: targetCamera.value.limitLeft,
+      limitRight: targetCamera.value.limitRight,
+      limitTop: targetCamera.value.limitTop,
+      limitBottom: targetCamera.value.limitBottom,
+    }
   }
 
   function setFps(value: number) {
@@ -284,6 +307,7 @@ export const useRenderStore = defineStore('render', () => {
     createBatch,
     clearAll,
     updateCamera,
+    getInterpolatedCamera,
     setFps,
     triggerShake,
     getShakeOffset,

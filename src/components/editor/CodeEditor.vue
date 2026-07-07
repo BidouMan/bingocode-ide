@@ -253,7 +253,7 @@ function switchTab() {
 }
 
 watch(
-  () => editorStore.activeTabIndex,
+  () => editorStore.currentTab,
   () => {
     nextTick(switchTab)
   }

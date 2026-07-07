@@ -93,14 +93,21 @@ async function initPixi() {
   resizeObserver = ro
 }
 
-/** resize 后立即同步渲染，避免 WebGL buffer 重置导致的空帧闪烁 */
+let resizeTicking = false
+
+/** resize 后立即同步渲染，避免 WebGL buffer 重置导致的空帧闪烁，使用 RAF 防抖 */
 function handleResize() {
   if (!app || !containerRef.value) return
-  const vp = containerRef.value
-  app.renderer.resize(vp.clientWidth, vp.clientHeight)
-  fitStage()
-  // 同步渲染一帧，填满新 buffer，等下一帧不会闪烁
-  app.renderer.render(app.stage)
+  if (resizeTicking) return
+  resizeTicking = true
+  requestAnimationFrame(() => {
+    resizeTicking = false
+    if (!app || !containerRef.value) return
+    const vp = containerRef.value
+    app.renderer.resize(vp.clientWidth, vp.clientHeight)
+    fitStage()
+    app.renderer.render(app.stage)
+  })
 }
 
 function fitStage() {
@@ -245,14 +252,23 @@ async function syncSprites() {
       })
     }
 
-    displayObj.x = spriteData.x
-    displayObj.y = spriteData.y
-    displayObj.rotation = (spriteData.angle * Math.PI) / 180
-    displayObj.scale.x = spriteData.scale * spriteData.scaleX
-    displayObj.scale.y = spriteData.scale * spriteData.scaleY
-    displayObj.visible = spriteData.visible
-    // 精灵在独立 spriteContainer 中，zIndex 用于容器内排序
-    displayObj.zIndex = spriteData.layer
+    if (displayObj) {
+      // 脏检查：只在实际数据变化时更新属性
+      const displayAngle = spriteData.angle * Math.PI / 180
+      const s = spriteData.scale * spriteData.scaleX
+      const sy = spriteData.scale * spriteData.scaleY
+      const propsKey = `${spriteData.x.toFixed(1)},${spriteData.y.toFixed(1)},${displayAngle.toFixed(4)},${spriteData.visible},${spriteData.layer},${s.toFixed(4)},${sy.toFixed(4)}`
+      if (displayObj._lastPropsKey !== propsKey) {
+        displayObj._lastPropsKey = propsKey
+        displayObj.x = Math.round(spriteData.x)
+        displayObj.y = Math.round(spriteData.y)
+        displayObj.rotation = (spriteData.angle * Math.PI) / 180
+        displayObj.scale.x = spriteData.scale * spriteData.scaleX
+        displayObj.scale.y = spriteData.scale * spriteData.scaleY
+        displayObj.visible = spriteData.visible
+        displayObj.zIndex = spriteData.layer
+      }
+    }
   }
 
   spriteContainer.sortChildren()
@@ -299,15 +315,19 @@ async function syncTiles() {
     }
 
     if (displayObj) {
-      displayObj.x = tileData.x
-      displayObj.y = tileData.y
-      displayObj.rotation = ((tileData.angle ?? 0) * Math.PI) / 180
-      const s = tileData.scale ?? 1
-      displayObj.scale.x = s * (tileData.scaleX ?? 1)
-      displayObj.scale.y = s * (tileData.scaleY ?? 1)
-      displayObj.alpha = tileData.opacity ?? 1
-      displayObj.zIndex = tileData.layer
-
+      // 脏检查：只在实际数据变化时更新属性
+      const tileScale = tileData.scale ?? 1
+      const propsKey = `${tileData.x},${tileData.y},${tileData.angle ?? 0},${tileScale},${tileData.scaleX ?? 1},${tileData.scaleY ?? 1},${tileData.opacity ?? 1},${tileData.layer}`
+      if (displayObj._lastPropsKey !== propsKey) {
+        displayObj._lastPropsKey = propsKey
+        displayObj.x = tileData.x
+        displayObj.y = tileData.y
+        displayObj.rotation = ((tileData.angle ?? 0) * Math.PI) / 180
+        displayObj.scale.x = tileScale * (tileData.scaleX ?? 1)
+        displayObj.scale.y = tileScale * (tileData.scaleY ?? 1)
+        displayObj.alpha = tileData.opacity ?? 1
+        displayObj.zIndex = tileData.layer
+      }
       // 视口裁剪：只渲染相机视口内的瓦片，减少 GPU 负担
       const tileSize = tileData.tileSize || renderStore.tileGridSize
       const cam = renderStore.camera
@@ -370,19 +390,20 @@ function syncSayTexts() {
 
     const textObj = container.children[1]
     if (textObj && textObj.text !== undefined) {
-      textObj.text = sayData.text
-    }
-
-    // 重绘背景
-    const bg = container.children[0]
-    if (bg && textObj) {
-      bg.clear()
-      const padding = 6
-      const w = textObj.width + padding * 2
-      const h = textObj.height + padding * 2
-      bg.roundRect(-w / 2, -h, w, h, 6)
-      bg.fill({ color: 0xffffff, alpha: 0.9 })
-      bg.stroke({ width: 1, color: 0x333333 })
+      if (textObj.text !== sayData.text) {
+        textObj.text = sayData.text
+        // 仅当文本变化时重绘背景
+        const bg = container.children[0]
+        if (bg) {
+          const padding = 6
+          const w = textObj.width + padding * 2
+          const h = textObj.height + padding * 2
+          bg.clear()
+          bg.roundRect(-w / 2, -h, w, h, 6)
+          bg.fill({ color: 0xffffff, alpha: 0.9 })
+          bg.stroke({ width: 1, color: 0x333333 })
+        }
+      }
     }
   }
 }
@@ -411,7 +432,8 @@ function syncDrawTexts() {
       uiContainer.addChild(textObj)
       drawTextDisplayObjects.set(id, textObj)
     }
-    textObj.text = data.text
+    // 脏检查：只在文本变化时设置
+    if (textObj.text !== data.text) textObj.text = data.text
     textObj.x = data.x
     textObj.y = data.y
   }
@@ -437,12 +459,18 @@ function syncHitboxes() {
       graphics.zIndex = 0
       uiContainer.addChild(graphics)
       hitboxDisplayObjects.set(id, graphics)
+      graphics._lastRect = null
     }
-    graphics.clear()
-    if (data.rect) {
-      const [left, top, right, bottom] = data.rect
-      graphics.rect(left, top, right - left, bottom - top)
-      graphics.stroke({ width: 1, color: 0x00ff00 })
+    // 脏检查：仅碰撞盒数据变化时重绘
+    const rectStr = data.rect ? data.rect.join(',') : ''
+    if (graphics._lastRect !== rectStr) {
+      graphics.clear()
+      if (data.rect) {
+        const [left, top, right, bottom] = data.rect
+        graphics.rect(left, top, right - left, bottom - top)
+        graphics.stroke({ width: 1, color: 0x00ff00 })
+      }
+      graphics._lastRect = rectStr
     }
   }
 }
@@ -450,9 +478,11 @@ function syncHitboxes() {
 function gameLoop() {
   if (!app) return
 
+  const cam = renderStore.getInterpolatedCamera()
   const shake = renderStore.getShakeOffset()
-  gameContainer.x = -renderStore.camera.x + LOGIC_W / 2 + shake.x
-  gameContainer.y = -renderStore.camera.y + LOGIC_H / 2 + shake.y
+  // 整数像素对齐：消除子像素渲染导致的模糊/撕裂
+  gameContainer.x = Math.round(-cam.x + LOGIC_W / 2) + shake.x
+  gameContainer.y = Math.round(-cam.y + LOGIC_H / 2) + shake.y
 
   syncSprites()
   syncTiles()
@@ -477,25 +507,48 @@ function onKeyUp(e: KeyboardEvent) {
   }
 }
 
-function usesEngine(): boolean {
-  const code = editorStore.currentTab?.content || ''
-  if (code.includes('bingo_engine')) return true
-  // 检测游戏关键词（与 useEngine.ts 的自动注入逻辑一致）
-  const gameKeywords = ['run()', 'Sprite(', 'load_map(', 'key_down(', 'key_pressed(', 'Timer(', 'mouse', 'wait(']
-  return gameKeywords.some(kw => code.includes(kw))
+let usesEngineCache = { valid: false, value: false }
+
+function invalidateUsesEngineCache() {
+  usesEngineCache.valid = false
 }
+
+function usesEngine(): boolean {
+  if (usesEngineCache.valid) return usesEngineCache.value
+  const code = editorStore.currentTab?.content || ''
+  if (code.includes('bingo_engine')) {
+    usesEngineCache.value = true
+  } else {
+    const gameKeywords = ['run()', 'Sprite(', 'load_map(', 'key_down(', 'key_pressed(', 'Timer(', 'mouse', 'wait(']
+    usesEngineCache.value = gameKeywords.some(kw => code.includes(kw))
+  }
+  usesEngineCache.valid = true
+  return usesEngineCache.value
+}
+
+let pendingMouseMove: MouseEvent | null = null
+let rafId: number | null = null
 
 function onCanvasMouseMove(e: MouseEvent) {
   if (!app || !containerRef.value || !editorStore.isRunning || !usesEngine()) return
-  const rect = containerRef.value.getBoundingClientRect()
-  const scaleX = rect.width / LOGIC_W
-  const scaleY = rect.height / LOGIC_H
-  const scale = Math.min(scaleX, scaleY)
-  const offsetX = (rect.width - LOGIC_W * scale) / 2
-  const offsetY = (rect.height - LOGIC_H * scale) / 2
-  const x = (e.clientX - rect.left - offsetX) / scale
-  const y = (e.clientY - rect.top - offsetY) / scale
-  engine.sendMouseMove(x, y)
+  pendingMouseMove = e
+  if (rafId === null) {
+    rafId = requestAnimationFrame(() => {
+      rafId = null
+      const evt = pendingMouseMove
+      pendingMouseMove = null
+      if (!evt || !containerRef.value) return
+      const rect = containerRef.value.getBoundingClientRect()
+      const scaleX = rect.width / LOGIC_W
+      const scaleY = rect.height / LOGIC_H
+      const scale = Math.min(scaleX, scaleY)
+      const offsetX = (rect.width - LOGIC_W * scale) / 2
+      const offsetY = (rect.height - LOGIC_H * scale) / 2
+      const x = (evt.clientX - rect.left - offsetX) / scale
+      const y = (evt.clientY - rect.top - offsetY) / scale
+      engine.sendMouseMove(x, y)
+    })
+  }
 }
 
 function onCanvasMouseDown(e: MouseEvent) {
@@ -570,6 +623,12 @@ watch(
       syncTiles()
     }
   }
+)
+
+// 监听标签切换，使 usesEngine 缓存失效
+watch(
+  () => editorStore.currentTab?.content,
+  () => invalidateUsesEngineCache()
 )
 
 onMounted(async () => {

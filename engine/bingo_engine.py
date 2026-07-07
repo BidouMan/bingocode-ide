@@ -43,6 +43,8 @@ _FOLLOW_TARGET = None  # 摄像机跟随目标
 
 # 渲染缓存
 _RENDERED_TILES = set()  # 已渲染的瓦片缓存
+_IMAGE_SIZE_CACHE = {}   # 图像尺寸缓存，避免重复磁盘IO
+_FRAME_UPDATES = []      # 每帧精灵更新缓冲，帧末合并发送
 
 
 class _MouseType:
@@ -1315,7 +1317,9 @@ class Sprite:
         return self._cached_hitbox
 
     def _get_hitbox_rect(self):
-        """获取当前角色在舞台上的真实内容包围盒 [left, top, right, bottom]"""
+        """获取当前角色在舞台上的真实内容包围盒 [left, top, right, bottom]
+        同一帧内重复调用使用缓存，减少计算量
+        """
         self._setup_hitbox()  # 确保内容宽高和偏移量已算出
 
         # 获取非透明区域边界
@@ -1325,6 +1329,13 @@ class Sprite:
         bbox = self._content_bbox
         if not bbox:
             return None
+
+        # 帧级缓存：同一帧内位置不变时复用结果
+        if hasattr(self, "_cached_rect_frame") and self._cached_rect_frame == _PERF_STATS["frame_count"]:
+            if (abs(self._cached_rect_x - self._x) < 0.01 and 
+                abs(self._cached_rect_y - self._y) < 0.01 and
+                self._cached_rect_scale == self._scale):
+                return self._cached_rect
 
         # 计算缩放系数
         s = self._scale / 100.0
@@ -1341,6 +1352,13 @@ class Sprite:
         content_bottom = center_y + (bbox[3] - img_h / 2) * s
 
         rect = [content_left, content_top, content_right, content_bottom]
+
+        # 更新帧级缓存
+        self._cached_rect = rect
+        self._cached_rect_frame = _PERF_STATS["frame_count"]
+        self._cached_rect_x = self._x
+        self._cached_rect_y = self._y
+        self._cached_rect_scale = self._scale
 
         return rect
 
@@ -1370,6 +1388,17 @@ class Sprite:
             display_angle = 0
             final_scale_x = base_scale
 
+        # 🚀 缓存比对：如果上次发送值相同，跳过发送以减少管道压力
+        current_key = (
+            round(self._x, 1), round(self._y, 1), round(display_angle, 1),
+            round(base_scale, 4), round(final_scale_x, 4), round(final_scale_y, 4),
+            self._visible, self._layer,
+            os.path.abspath(self.image) if hasattr(self, "image") and self.image else None,
+        )
+        if getattr(self, "_last_update_key", None) == current_key:
+            return
+        self._last_update_key = current_key
+
         # 🚀 发送指令：确保携带 scale_y 和图像信息
         update_data = {
             "x": self._x,
@@ -1392,7 +1421,9 @@ class Sprite:
         if hasattr(self, "image") and self.image:
             update_data["image"] = os.path.abspath(self.image)
 
-        self._send_command("UPDATE", update_data)
+        # 加入帧缓冲，帧末合并发送以减少管道写入次数
+        update_data["id"] = self.id
+        _FRAME_UPDATES.append(update_data)
 
     def _update_animation_frame(self):
         """更新动画帧"""
@@ -1437,8 +1468,8 @@ class Sprite:
     def _send_command(self, cmd_type, data_dict):
         """核心:所有指令都是通过它发送出去并执行的"""
         packet = {"type": cmd_type, "id": self.id, "data": data_dict}
-        # 🚀 必须取消注释，且必须 flush=True 保证实时性
-        print(json.dumps(packet), flush=True)
+        # stdout 已经是行缓冲模式（buffering=1），print 自动带换行会刷缓冲
+        print(json.dumps(packet))
 
 
 def _input_sync_listener():
@@ -1555,7 +1586,7 @@ def show_fps(visible=True):
     global _SHOW_FPS
     _SHOW_FPS = visible
     packet = {"type": "UI_COMMAND", "data": {"visible": visible}}
-    print(json.dumps(packet), flush=True)
+    print(json.dumps(packet))
 
 
 def random_int(min_val, max_val):
@@ -1574,7 +1605,7 @@ def shake(intensity=5, duration=0.3):
         "type": "SCREEN_SHAKE",
         "data": {"intensity": intensity, "duration": duration},
     }
-    print(json.dumps(packet), flush=True)
+    print(json.dumps(packet))
 
 
 def stop_sound(sound_name=None):
@@ -1583,7 +1614,7 @@ def stop_sound(sound_name=None):
         "type": "STOP_SOUND",
         "data": {"sound": sound_name} if sound_name else {},
     }
-    print(json.dumps(packet), flush=True)
+    print(json.dumps(packet))
 
 
 def draw_text(x, y, *args):
@@ -1595,7 +1626,7 @@ def draw_text(x, y, *args):
         "type": "DRAW_TEXT",
         "data": {"id": f"text_{x}_{y}", "text": text, "x": x, "y": y},
     }
-    print(json.dumps(packet), flush=True)
+    print(json.dumps(packet))
 
 
 def play_sound(sound_name, loop=False):
@@ -1627,7 +1658,7 @@ def play_sound(sound_name, loop=False):
             "loop": loop,
         },
     }
-    print(json.dumps(packet), flush=True)
+    print(json.dumps(packet))
 
 
 def show_collision(sprite):
@@ -1641,7 +1672,7 @@ def show_collision(sprite):
 def _send_fps_to_ide(fps):
     """内部统计并发送 FPS 数值"""
     packet = {"type": "FPS_UPDATE", "data": {"fps": round(fps, 1)}}
-    print(json.dumps(packet), flush=True)
+    print(json.dumps(packet))
 
 
 def get_main_player():
@@ -1666,7 +1697,17 @@ def _send_camera_update(x, y, world_bounds=None):
         "type": "CAMERA_UPDATE",
         "data": data,
     }
-    print(json.dumps(camera_packet), flush=True)
+    print(json.dumps(camera_packet))
+
+
+def _flush_frame_updates():
+    """将帧缓冲中的精灵更新合并为一条 JSON 发送，大幅减少管道写入次数"""
+    global _FRAME_UPDATES
+    if not _FRAME_UPDATES:
+        return
+    packet = {"type": "UPDATE_BATCH", "data": {"updates": _FRAME_UPDATES}}
+    print(json.dumps(packet))
+    _FRAME_UPDATES = []
 
 
 def follow(sprite):
@@ -1871,7 +1912,7 @@ def load_map(map_name):
                 "world_bounds": world_bounds,
             },
         }
-        print(json.dumps(scene_update_packet), flush=True)
+        print(json.dumps(scene_update_packet))
 
         # 渲染地图
         _render_map()
@@ -1908,13 +1949,23 @@ def _decompress_tiles(base64_data, width, height):
 
 def _find_tileset_for_gid(gid, tile_sets):
     """通过GID查找所属瓦片集索引和本地瓦片索引（Tiled标准）
+    使用二分查找优化（tile_sets按firstgid升序排列）
     返回 (tileset_index, local_tile_index)，未找到返回 (0, 0)
     """
-    for i in range(len(tile_sets) - 1, -1, -1):
-        firstgid = tile_sets[i].get("firstgid", 1)
+    if not tile_sets:
+        return 0, gid
+    # 二分查找：找到最后一个 firstgid <= gid 的瓦片集
+    lo, hi = 0, len(tile_sets) - 1
+    result = 0
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        firstgid = tile_sets[mid].get("firstgid", 1)
         if gid >= firstgid:
-            return i, gid - firstgid
-    return 0, gid
+            result = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return result, gid - tile_sets[result].get("firstgid", 1)
 
 
 def _try_extract_bgm(map_name):
@@ -1943,7 +1994,7 @@ def _clear_map():
     # 删除地图瓦片精灵
     for sprite_id in list(_MAP_SPRITES.keys()):
         packet = {"type": "DELETE", "id": sprite_id}
-        print(json.dumps(packet), flush=True)
+        print(json.dumps(packet))
         del _MAP_SPRITES[sprite_id]
 
     _CURRENT_MAP = None
@@ -2069,16 +2120,21 @@ def _render_map():
                                 if os.path.exists(absolute_path):
                                     image_path = absolute_path
 
-                # 获取图像原始尺寸
+                # 获取图像原始尺寸（使用缓存避免重复磁盘IO）
                 original_width, original_height = 1, 1
                 if image_path:
-                    try:
-                        from PIL import Image
+                    cache_key = image_path
+                    if cache_key in _IMAGE_SIZE_CACHE:
+                        original_width, original_height = _IMAGE_SIZE_CACHE[cache_key]
+                    else:
+                        try:
+                            from PIL import Image
 
-                        with Image.open(image_path) as img:
-                            original_width, original_height = img.size
-                    except:
-                        pass
+                            with Image.open(image_path) as img:
+                                original_width, original_height = img.size
+                            _IMAGE_SIZE_CACHE[cache_key] = (original_width, original_height)
+                        except:
+                            pass
 
                 # 直接使用左上角坐标，因为update_map_image方法会处理中心点计算
                 center_x = screen_x
@@ -2195,7 +2251,7 @@ def _render_map():
                 "tile_size": packet_tile_size,
             },
         }
-        print(json.dumps(packet), flush=True)
+        print(json.dumps(packet))
 
         # 更新已渲染的精灵字典
         for tile_data in batch_commands:
@@ -2215,13 +2271,13 @@ def run():
 
     _PERF_STATS["last_time"] = time.time()
     accumulator = 0.0
-    prev_time = time.time()
+    prev_time = time.perf_counter()
 
     while True:
         if _STOPPED:
             break
 
-        now = time.time()
+        now = time.perf_counter()
         frame_time = min(now - prev_time, _MAX_FRAME_TIME)
         prev_time = now
         accumulator += frame_time
@@ -2284,30 +2340,27 @@ def run():
 
             if not _PAUSED:
                 for sprite in list(_SPRITES.values()):
-                    if sprite._is_deleted or sprite._speed <= 0:
+                    if sprite._is_deleted:
                         continue
-                    sprite.move(sprite._speed)
-
-                for sprite in list(_SPRITES.values()):
-                    if sprite._is_deleted or not sprite._auto_destroy:
-                        continue
-                    if sprite.is_out_side():
+                    # 运动
+                    if sprite._speed > 0:
+                        sprite.move(sprite._speed)
+                    # 自动销毁
+                    if sprite._auto_destroy and sprite.is_out_side():
                         sprite.delete()
-
-                for sprite in list(_SPRITES.values()):
-                    if sprite._is_deleted or not sprite._on_hit_callbacks:
-                        continue
-                    for group_name, callback in list(sprite._on_hit_callbacks):
-                        for other in list(_GROUPS.get(group_name, [])):
-                            if other is sprite or other._is_deleted:
-                                continue
-                            if sprite.is_touch(other):
-                                if callback:
-                                    callback(sprite, other)
-                                else:
-                                    sprite.delete()
-                                    other.delete()
-                                break
+                    # 碰撞回调
+                    if sprite._on_hit_callbacks:
+                        for group_name, callback in list(sprite._on_hit_callbacks):
+                            for other in list(_GROUPS.get(group_name, [])):
+                                if other is sprite or other._is_deleted:
+                                    continue
+                                if sprite.is_touch(other):
+                                    if callback:
+                                        callback(sprite, other)
+                                    else:
+                                        sprite.delete()
+                                        other.delete()
+                                    break
 
                 if _CURRENT_MAP:
                     _handle_physics_collision()
@@ -2318,14 +2371,17 @@ def run():
         if accumulator > _PHYSICS_DT * _MAX_PHYSICS_STEPS:
             accumulator = 0.0
 
-        if _CURRENT_MAP and _FOLLOW_TARGET:
+        if _FOLLOW_TARGET:
             global _CAMERA_X, _CAMERA_Y
             old_camera_x = _CAMERA_X
             old_camera_y = _CAMERA_Y
 
-            bounds = _CURRENT_MAP.get(
-                "world_bounds", {"left": 0, "top": 0, "right": 640, "bottom": 480}
-            )
+            if _CURRENT_MAP:
+                bounds = _CURRENT_MAP.get(
+                    "world_bounds", {"left": 0, "top": 0, "right": 640, "bottom": 480}
+                )
+            else:
+                bounds = {"left": 0, "top": 0, "right": 640, "bottom": 480}
             view_w, view_h = 640, 480
 
             _CAMERA_X = max(
@@ -2337,14 +2393,18 @@ def run():
                 min(_FOLLOW_TARGET.y, bounds["bottom"] - view_h / 2),
             )
 
-            _send_camera_update(_CAMERA_X, _CAMERA_Y, bounds)
+            _send_camera_update(_CAMERA_X, _CAMERA_Y, bounds if _CURRENT_MAP else None)
 
-            tile_size = _CURRENT_MAP.get("tile_size", 16)
-            if (
-                abs(_CAMERA_X - old_camera_x) >= tile_size // 2
-                or abs(_CAMERA_Y - old_camera_y) >= tile_size // 2
-            ):
-                _render_map()
+            if _CURRENT_MAP:
+                tile_size = _CURRENT_MAP.get("tile_size", 16)
+                if (
+                    abs(_CAMERA_X - old_camera_x) >= tile_size // 2
+                    or abs(_CAMERA_Y - old_camera_y) >= tile_size // 2
+                ):
+                    _render_map()
+
+        # 合并发送本帧所有精灵更新
+        _flush_frame_updates()
 
         _MOUSE_STATE["last_down"] = _MOUSE_STATE["down"]
         _PRESSED_KEYS_PREV = _PRESSED_KEYS.copy()
@@ -2358,3 +2418,19 @@ def run():
                 _send_fps_to_ide(fps)
             _PERF_STATS["frame_count"] = 0
             _PERF_STATS["last_time"] = t
+
+        # 帧率限制：混合等待策略。time.sleep() 睡大部分时间省电，
+        # 末尾用精确自旋补齐 macOS time.sleep() 的精度不足
+        target_frame_time = 1.0 / 60.0
+        elapsed = time.perf_counter() - now
+        remaining = target_frame_time - elapsed
+        if remaining > 0.003:
+            # 用 sleep 睡大部分时间（省电），留约 1.5ms 给自旋
+            time.sleep(remaining - 0.0015)
+            # 精确自旋补齐剩余时间
+            while time.perf_counter() - now < target_frame_time:
+                pass
+        elif remaining > 0:
+            # 剩余时间很少，直接自旋（避免 sleep 精度问题）
+            while time.perf_counter() - now < target_frame_time:
+                pass

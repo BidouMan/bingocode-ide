@@ -90,6 +90,32 @@ export function useEngine() {
         })
         break
 
+      case 'UPDATE_BATCH':
+        for (const update of cmd.data.updates) {
+          renderStore.updateSprite(update.id, {
+            x: update.x,
+            y: update.y,
+            angle: update.angle,
+            scale: update.scale,
+            scaleX: update.scale_x,
+            scaleY: update.scale_y,
+            visible: update.visible ?? true,
+            layer: update.layer,
+          })
+          if (update.hitbox) {
+            renderStore.setHitbox(update.id, update.hitbox)
+          } else {
+            renderStore.removeHitbox(update.id)
+          }
+          // 同步气泡位置
+          const sayText = renderStore.sayTexts.get(update.id)
+          if (sayText) {
+            sayText.x = update.x
+            sayText.y = update.y - 40
+          }
+        }
+        break
+
       case 'CAMERA_UPDATE':
         renderStore.updateCamera({
           x: cmd.data.x,

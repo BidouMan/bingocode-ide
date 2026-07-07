@@ -19,7 +19,7 @@ let app: any = null
 let gridGraphics: any = null
 let axisX: any = null
 let axisY: any = null
-let gameWindowRect: any = null
+let mapBorderRect: any = null
 let previewTile: any = null
 let isPanning = false
 let isSpaceHeld = false
@@ -65,9 +65,6 @@ async function resolveImagePath(path: string): Promise<string> {
   resolvedPathCache.set(path, url)
   return url
 }
-
-const LOGIC_W = 640
-const LOGIC_H = 480
 
 // Tile rendering state
 let layerContainers: Map<number, any> = new Map()
@@ -480,12 +477,16 @@ function drawAxes() {
 
 function drawGameWindow() {
   if (!app || !PIXI) return
-  if (gameWindowRect) { app.stage.removeChild(gameWindowRect); gameWindowRect.destroy() }
+  if (mapBorderRect) { app.stage.removeChild(mapBorderRect); mapBorderRect.destroy() }
 
-  gameWindowRect = new PIXI.Graphics()
-  gameWindowRect.rect(0, 0, LOGIC_W, LOGIC_H)
-  gameWindowRect.stroke({ width: 1, color: 0xB4B4FF, alpha: 0.6, dash: [6, 4] })
-  app.stage.addChild(gameWindowRect)
+  const mapW = mapStore.mapData.width * mapStore.mapData.tileSize
+  const mapH = mapStore.mapData.height * mapStore.mapData.tileSize
+  if (mapW <= 0 || mapH <= 0) return
+
+  mapBorderRect = new PIXI.Graphics()
+  mapBorderRect.rect(0, 0, mapW, mapH)
+  mapBorderRect.stroke({ width: 1, color: 0x4A90D9, alpha: 0.6 })
+  app.stage.addChild(mapBorderRect)
 }
 
 function applyScale() {

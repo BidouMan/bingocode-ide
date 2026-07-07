@@ -321,6 +321,7 @@ async function fileMenuAction(action: string) {
       if (editorStore.currentTabs.length > 0) {
         editorStore.setActiveTab(0)
       }
+      editorStore.setActiveEditorMode('code')
       editorStore.setResourceTab('sprite')
       // 确保回到主页面
       currentPage.value = 0

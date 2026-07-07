@@ -63,6 +63,29 @@ export interface CreateBatchCommand extends EngineCommand {
   }
 }
 
+export interface UpdateBatchCommand extends EngineCommand {
+  type: 'UPDATE_BATCH'
+  data: {
+    updates: Array<{
+      id: string
+      x: number
+      y: number
+      angle: number
+      scale: number
+      scale_x: number
+      scale_y: number
+      visible?: boolean
+      layer: number
+      hitbox?: number[] | null
+      vox: number
+      voy: number
+      cw: number
+      ch: number
+      image?: string
+    }>
+  }
+}
+
 export interface TileData {
   id: string
   x: number
@@ -149,6 +172,7 @@ export type AnyEngineCommand =
   | DeleteCommand
   | SayCommand
   | CreateBatchCommand
+  | UpdateBatchCommand
   | CameraUpdateCommand
   | SceneUpdateCommand
   | PlaySoundCommand
