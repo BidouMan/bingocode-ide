@@ -55,7 +55,23 @@ def transform_while_true(source_code: str) -> str:
     new_tree = transformer.visit(tree)
     ast.fix_missing_locations(new_tree)
 
-    return ast.unparse(new_tree)
+    # 将整个模块包装在 def __game__() generator 函数中
+    transformed = ast.unparse(new_tree)
+    lines = transformed.split('\n')
+
+    # 第一行是原模块的内容，后面所有行缩进
+    indented_lines = []
+    for line in lines:
+        if line.strip():
+            indented_lines.append('    ' + line)
+        else:
+            indented_lines.append(line)
+
+    indented_body = '\n'.join(indented_lines)
+
+    wrapped = f'def __game__():\n{indented_body}'
+
+    return wrapped
 
 if __name__ == "__main__":
     # 测试
