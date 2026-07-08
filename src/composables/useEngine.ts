@@ -285,8 +285,9 @@ export function useEngine() {
     try {
       const projectDir = projectStore.root || ''
 
-      // 先清理上一次的临时文件，再写入新文件，避免旧 cleanup 删掉新文件的竞态
+      // 将所有代码标签页写入磁盘，确保引擎能发现所有文件
       if (projectDir) {
+        await projectStore.flushCodeTabs().catch(() => {})
         await invoke('cleanup_temp_script', { projectDir }).catch(() => {})
       }
 

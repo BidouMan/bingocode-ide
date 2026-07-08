@@ -168,5 +168,6 @@ export const useProjectStore = defineStore('project', () => {
     markCodeDirty,
     markResourceDirty,
     resetDirty,
+    flushCodeTabs,
   }
 })
