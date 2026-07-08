@@ -231,7 +231,7 @@ function onCollisionEnabledChange(enabled: boolean) {
 .property-panel {
   display: flex;
   flex-direction: column;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
 }
 
 .att-tag-name {
@@ -249,7 +249,7 @@ function onCollisionEnabledChange(enabled: boolean) {
   flex-direction: column;
   gap: 10px;
   padding: 8px 16px 10px 16px;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
 }
 
 .att-row {
@@ -269,7 +269,7 @@ function onCollisionEnabledChange(enabled: boolean) {
   width: 100%;
   height: 24px;
   background: rgb(40, 43, 52);
-  border: 1px solid rgb(55, 59, 68);
+  border: 1px solid var(--border-light);
   border-radius: 4px;
   color: white;
   padding: 0 6px;
@@ -284,7 +284,7 @@ function onCollisionEnabledChange(enabled: boolean) {
 }
 
 .att-input:focus {
-  background: rgb(55, 59, 68);
+  background: var(--border-light);
   border: 1px solid rgb(65, 69, 82);
   color: white;
 }

@@ -94,8 +94,8 @@ function onConfirm() {
 }
 
 .dialog-box {
-  background: rgb(34, 37, 43);
-  border: 1px solid rgb(55, 59, 68);
+  background: var(--bg-root);
+  border: 1px solid var(--border-light);
   border-radius: 8px;
   padding: 20px;
   min-width: 380px;
@@ -120,7 +120,7 @@ function onConfirm() {
   flex: 1;
   height: 28px;
   background: rgb(40, 43, 52);
-  border: 1px solid rgb(55, 59, 68);
+  border: 1px solid var(--border-light);
   border-radius: 4px;
   color: white;
   padding: 0 8px;
@@ -135,7 +135,7 @@ function onConfirm() {
 .dialog-select {
   height: 28px;
   background: rgb(40, 43, 52);
-  border: 1px solid rgb(55, 59, 68);
+  border: 1px solid var(--border-light);
   border-radius: 4px;
   color: white;
   padding: 0 8px;
@@ -189,6 +189,6 @@ function onConfirm() {
 
 .dialog-actions {
   padding-top: 8px;
-  border-top: 1px solid rgb(55, 59, 68);
+  border-top: 1px solid var(--border-light);
 }
 </style>

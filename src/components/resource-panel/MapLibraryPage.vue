@@ -55,7 +55,7 @@ const filteredMaps = computed(() => {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
 }
 
 .lib-toolbar {
@@ -65,46 +65,46 @@ const filteredMaps = computed(() => {
   padding: 0 5px;
   gap: 0;
   flex-shrink: 0;
-  border-bottom: 1px solid rgb(12, 12, 12);
+  border-bottom: 1px solid var(--border);
 }
 
 .lib-search {
   width: 200px;
   height: 28px;
   padding: 0 8px;
-  background: rgb(52, 55, 62);
-  border: 1px solid rgb(73, 76, 86);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
   border-radius: 6px;
-  color: rgb(150, 150, 150);
+  color: var(--text-secondary);
   font-size: 12px;
   outline: none;
 }
 
 .lib-search:focus {
-  border-color: rgb(91, 251, 132);
+  border-color: var(--accent);
 }
 
 .lib-spacer { flex: 1; }
 
 .lib-hint {
   font-size: 12px;
-  color: rgb(128, 128, 128);
+  color: var(--text-muted);
 }
 
 .lib-return-btn {
   width: 80px;
   height: 28px;
-  background: rgb(52, 55, 62);
-  border: 1px solid rgb(73, 76, 86);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
   border-radius: 4px;
-  color: rgb(150, 150, 150);
+  color: var(--text-secondary);
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .lib-return-btn:hover {
-  background: rgb(62, 65, 72);
+  background: var(--bg-hover);
   color: white;
 }
 
@@ -132,14 +132,14 @@ const filteredMaps = computed(() => {
 }
 
 .lib-card:hover {
-  background: rgb(60, 60, 60);
+  background: var(--bg-active);
 }
 
 .lib-card-thumb {
   flex: 1;
   min-height: 0;
   margin: 0 auto 8px;
-  background: rgb(61, 61, 61);
+  background: var(--bg-hover);
   border-radius: 4px;
   display: flex;
   align-items: center;

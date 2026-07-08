@@ -40,12 +40,14 @@ import iconPython from '../../assets/icons/python_file_1.svg'
 import iconUndo from '../../assets/icons/undo.svg'
 import iconRedo from '../../assets/icons/redo.svg'
 import iconSoundIcon from '../../assets/icons/sound_icon.svg'
+import { useThemeStore } from '../../stores/theme'
 
 const editorStore = useEditorStore()
 const resourceStore = useResourceStore()
 const projectStore = useProjectStore()
 const mapStore = useMapStore()
 const renderStore = useRenderStore()
+const themeStore = useThemeStore()
 const engine = useEngine()
 const fileDialog = useFileDialog()
 
@@ -129,7 +131,7 @@ onMounted(loadAllMapThumbnails)
 
 // 新项目不预创建地图，用户通过按钮创建
 onMounted(async () => {
-  // 初始化默认项目目录
+  themeStore.initTheme()
   await projectStore.initProject()
 })
 
@@ -1067,9 +1069,15 @@ function codeDisplayName(name: string) {
               <span class="settings-arrow">›</span>
             </div>
             <div v-show="settingsSubmenu === 'theme'" class="settings-submenu">
-              <button class="file-menu-item settings-item-disabled">Dark (默认)</button>
-              <button class="file-menu-item settings-item-disabled">Light</button>
-              <button class="file-menu-item settings-item-disabled">One Dark</button>
+              <button
+                v-for="themeName in themeStore.getThemeNames()"
+                :key="themeName"
+                class="file-menu-item"
+                :class="{ 'settings-item-active': themeStore.currentTheme === themeName }"
+                @click="themeStore.setTheme(themeName); closeSettingsMenu()"
+              >
+                {{ themeStore.getThemeDisplayName(themeName) }}
+              </button>
             </div>
           </div>
           <!-- 插件库 -->
@@ -1158,7 +1166,7 @@ function codeDisplayName(name: string) {
               <div class="game-preview-container">
                 <GameCanvas v-if="editorStore.isRunning" class="game-preview-canvas" />
                 <div v-else class="game-preview-placeholder">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="rgb(80,80,80)" stroke-width="1.5"><polygon points="5,3 19,12 5,21" /></svg>
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5"><polygon points="5,3 19,12 5,21" /></svg>
                 </div>
                 <!-- Loading覆盖层 -->
                 <div v-if="renderStore.isLoadingTextures" class="loading-overlay">
@@ -1454,7 +1462,7 @@ function codeDisplayName(name: string) {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
   color: white;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
@@ -1467,8 +1475,8 @@ function codeDisplayName(name: string) {
   min-height: 40px;
   padding: 0;
   flex-shrink: 0;
-  border-bottom: 1px solid rgb(12, 12, 12);
-  background: rgb(34, 37, 43);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-root);
 }
 .menu-logo {
   display: flex;
@@ -1476,7 +1484,7 @@ function codeDisplayName(name: string) {
   justify-content: center;
   width: 60px;
   flex-shrink: 0;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
   border: none;
   cursor: pointer;
 }
@@ -1509,7 +1517,7 @@ function codeDisplayName(name: string) {
   line-height: 1;
   white-space: nowrap;
 }
-.menu-btn:hover { background: rgb(61, 64, 72); }
+.menu-btn:hover { background: var(--bg-hover); }
 .menu-btn-help {
   width: 40px;
   min-width: 40px;
@@ -1537,7 +1545,7 @@ function codeDisplayName(name: string) {
   top: 100%;
   left: 0;
   width: 144px;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
   border-radius: 6px;
   padding: 4px 0;
   z-index: 100;
@@ -1560,7 +1568,7 @@ function codeDisplayName(name: string) {
   transition: background 0.12s;
 }
 .file-menu-item:hover {
-  background: rgb(61, 64, 72);
+  background: var(--bg-hover);
 }
 .file-menu-divider {
   height: 1px;
@@ -1587,13 +1595,13 @@ function codeDisplayName(name: string) {
   left: 100%;
   top: -4px;
   width: 128px;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
   border-radius: 6px;
   padding: 4px 0;
   box-shadow: 0 4px 16px rgba(0,0,0,0.4);
 }
 .settings-item-active {
-  color: #5BFB84;
+  color: var(--accent);
 }
 .settings-item-disabled {
   color: rgb(100, 100, 100);
@@ -1612,7 +1620,7 @@ function codeDisplayName(name: string) {
 }
 .mode-label {
   font-size: 11px;
-  color: rgb(160, 160, 160);
+  color: var(--text-secondary);
 }
 .toggle-switch {
   position: relative;
@@ -1621,10 +1629,10 @@ function codeDisplayName(name: string) {
   border-radius: 10px;
   border: none;
   cursor: pointer;
-  background: rgb(55, 120, 200);
+  background: var(--accent);
   transition: background 0.2s;
 }
-.toggle-switch.toggle-on { background: rgb(91, 251, 132); }
+.toggle-switch.toggle-on { background: var(--accent); }
 .toggle-knob {
   position: absolute;
   top: 2px;
@@ -1665,7 +1673,7 @@ function codeDisplayName(name: string) {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: rgb(41, 44, 52);
+  background: var(--bg-base);
 }
 
 /* 游戏模式编辑区 */
@@ -1674,7 +1682,7 @@ function codeDisplayName(name: string) {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  background: rgb(41, 44, 52);
+  background: var(--bg-base);
 }
 
 /* IDE 模式标签栏 */
@@ -1682,7 +1690,7 @@ function codeDisplayName(name: string) {
   display: flex;
   align-items: center;
   height: 30px;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
   flex-shrink: 0;
 }
 
@@ -1701,8 +1709,8 @@ function codeDisplayName(name: string) {
   max-width: 340px;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid rgb(12, 12, 12);
-  background: rgb(34, 37, 43);
+  border-right: 1px solid var(--border);
+  background: var(--bg-root);
   padding: 0 8px;
 }
 .sidebar-toolbar {
@@ -1726,9 +1734,9 @@ function codeDisplayName(name: string) {
   cursor: pointer;
   transition: all 0.15s;
 }
-.tool-btn:hover { background: rgb(50, 29, 27); border-color: rgb(55, 59, 68); }
-.tool-btn:active { background: rgb(95, 45, 39); }
-.tool-btn-active { background: rgb(95, 45, 39); border-color: rgb(55, 59, 68); }
+.tool-btn:hover { background: var(--danger); border-color: var(--border-light); }
+.tool-btn:active { background: var(--danger); }
+.tool-btn-active { background: var(--danger); border-color: var(--border-light); }
 .tool-spacer { flex: 1; }
 
 /* 游戏预览 */
@@ -1740,7 +1748,7 @@ function codeDisplayName(name: string) {
   width: 324px;
   height: 244px;
   border: 2px solid #4e4e4e;
-  background: rgb(50, 50, 61);
+  background: var(--bg-panel);
   overflow: hidden;
   position: relative;
 }
@@ -1751,7 +1759,7 @@ function codeDisplayName(name: string) {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgb(50, 50, 61);
+  background: var(--bg-panel);
 }
 
 /* Loading覆盖层 */
@@ -1784,7 +1792,7 @@ function codeDisplayName(name: string) {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #5BFB84;
+  background: var(--accent);
   animation: bounce 1.4s ease-in-out infinite;
 }
 
@@ -1810,7 +1818,7 @@ function codeDisplayName(name: string) {
 
 .loading-progress {
   font-size: 10px;
-  color: #5BFB84;
+  color: var(--accent);
   font-family: monospace;
   margin-bottom: 6px;
 }
@@ -1826,7 +1834,7 @@ function codeDisplayName(name: string) {
 
 .loading-bar-fill {
   height: 100%;
-  background: #5BFB84;
+  background: var(--accent);
   transition: width 0.3s ease;
 }
 
@@ -1845,21 +1853,21 @@ function codeDisplayName(name: string) {
   background: transparent;
   border: 0px solid transparent;
   border-bottom: 3px solid rgb(47, 47, 47);
-  color: rgb(128, 128, 128);
+  color: var(--text-muted);
   font-size: 13px;
   padding: 8px 8px 4px 8px;
   cursor: pointer;
   transition: all 0.15s;
 }
 .outline-tab:hover { color: white; }
-.outline-tab-active { color: white; border-bottom-color: rgb(91, 251, 132); }
+.outline-tab-active { color: var(--text); border-bottom-color: var(--accent); }
 
 /* 资源列表 */
 .outline-list-wrapper {
   flex: 1;
   min-height: 0;
   position: relative;
-  background: rgb(30, 30, 30);
+  background: var(--bg-darker);
 }
 .outline-list {
   height: 100%;
@@ -1885,10 +1893,10 @@ function codeDisplayName(name: string) {
   cursor: pointer;
   min-width: 0;
 }
-.resource-grid-item:hover { background: rgb(55, 58, 65); }
+.resource-grid-item:hover { background: var(--bg-hover); }
 .resource-grid-item-active {
-  background: rgb(60, 60, 60);
-  box-shadow: inset 0 0 0 2px rgb(91, 199, 114);
+  background: var(--bg-active);
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 .resource-grid-item-active:hover { box-shadow: inset 0 0 0 2px rgb(91, 199, 114); }
 .resource-thumb {
@@ -1910,7 +1918,7 @@ function codeDisplayName(name: string) {
   object-fit: contain;
   flex-shrink: 0;
 }
-.resource-thumb-map { background: rgb(61, 64, 72); }
+.resource-thumb-map { background: var(--bg-hover); }
 .resource-thumb-sound { background: rgb(61, 61, 61); }
 .resource-thumb-checker {
   background-color: #2a2a2a;
@@ -1924,7 +1932,7 @@ function codeDisplayName(name: string) {
 }
 .resource-grid-name {
   font-size: 11px;
-  color: rgb(200, 200, 200);
+  color: var(--text-secondary);
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1937,7 +1945,7 @@ function codeDisplayName(name: string) {
   background: transparent;
   border: none;
   border-radius: 0;
-  color: rgb(200, 200, 200);
+  color: var(--text-secondary);
   font-size: 11px;
   padding: 0;
   text-align: center;
@@ -1950,7 +1958,7 @@ function codeDisplayName(name: string) {
   background: transparent;
   border: none;
   border-radius: 0;
-  color: rgb(200, 200, 200);
+  color: var(--text-secondary);
   font-size: 11px;
   padding: 0;
   text-align: center;
@@ -1963,7 +1971,7 @@ function codeDisplayName(name: string) {
   right: 2px;
   width: 18px;
   height: 18px;
-  background: rgb(255, 77, 79);
+  background: var(--danger);
   border: 2px solid rgb(45, 45, 45);
   border-radius: 9px;
   color: white;
@@ -1977,7 +1985,7 @@ function codeDisplayName(name: string) {
   line-height: 1;
 }
 .resource-grid-item:hover .resource-card-del { opacity: 1; }
-.resource-card-del:hover { background: rgb(255, 120, 117); }
+.resource-card-del:hover {   background: var(--danger-hover); }
 
 /* 代码列表视图 */
 .resource-code-list { padding: 4px 0; }
@@ -1989,13 +1997,13 @@ function codeDisplayName(name: string) {
   cursor: pointer;
   position: relative;
 }
-.resource-code-item:hover { background: rgb(61, 64, 72); }
-.resource-code-item-active { background: rgb(55, 58, 65); }
-.resource-code-item-active:hover { background: rgb(55, 58, 65); }
+.resource-code-item:hover { background: var(--bg-hover); }
+.resource-code-item-active { background: var(--bg-hover); }
+.resource-code-item-active:hover { background: var(--bg-hover); }
 .resource-code-icon { width: 20px; height: 20px; flex-shrink: 0; }
 .resource-code-name {
   font-size: 14px;
-  color: rgb(224, 224, 224);
+  color: var(--text-secondary);
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2044,7 +2052,7 @@ function codeDisplayName(name: string) {
   align-items: center;
   justify-content: center;
   height: 100px;
-  color: rgb(80, 80, 80);
+  color: var(--text-muted);
   font-size: 12px;
 }
 .outline-list-inner { padding: 8px; }
@@ -2055,7 +2063,7 @@ function codeDisplayName(name: string) {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  background: rgb(41, 44, 52);
+  background: var(--bg-base);
 }
 
 /* tab_bar */
@@ -2063,7 +2071,7 @@ function codeDisplayName(name: string) {
   display: flex;
   align-items: stretch;
   height: 30px;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
   flex-shrink: 0;
 }
 .tab-bar-tabs {
@@ -2079,9 +2087,9 @@ function codeDisplayName(name: string) {
   height: 30px;
   padding: 0 12px;
   font-size: 12px;
-  color: rgb(128, 128, 128);
+  color: var(--text-muted);
   cursor: pointer;
-  border-right: 1px solid rgb(34, 37, 43);
+  border-right: 1px solid var(--bg-root);
   flex-shrink: 0;
   transition: all 0.15s;
   max-width: 120px;
@@ -2092,8 +2100,8 @@ function codeDisplayName(name: string) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.tab-item:hover { color: white; background: rgb(41, 44, 52); }
-.tab-item-active { color: white; background: rgb(41, 44, 52); border-bottom: 2px solid rgb(91, 251, 132); }
+.tab-item:hover { color: var(--text); background: var(--bg-base); }
+.tab-item-active { color: var(--text); background: var(--bg-base); border-bottom: 2px solid var(--accent); }
 .tab-close {
   margin-left: 6px;
   background: transparent;
@@ -2129,12 +2137,12 @@ function codeDisplayName(name: string) {
   height: 100%;
   background: transparent;
   border: none;
-  color: rgb(128, 128, 128);
+  color: var(--text-muted);
   font-size: 16px;
   cursor: pointer;
   flex-shrink: 0;
 }
-.tab-add:hover { color: white; background: rgb(41, 44, 52); }
+.tab-add:hover { color: var(--text); background: var(--bg-base); }
 
 /* IDE 模式工具栏 */
 .ide-toolbar {
@@ -2158,8 +2166,8 @@ function codeDisplayName(name: string) {
   cursor: pointer;
   transition: all 0.15s;
 }
-.ide-tool-btn:hover { color: white; background: rgb(61, 64, 72); }
-.ide-tool-btn-active { color: rgb(200, 200, 200); background: rgb(95, 45, 39); }
+.ide-tool-btn:hover { color: var(--text); background: var(--bg-hover); }
+.ide-tool-btn-active { color: var(--text-secondary); background: var(--danger); }
 
 /* 代码区 */
 .code-area {
@@ -2210,8 +2218,8 @@ function codeDisplayName(name: string) {
   align-items: center;
   height: 34px;
   flex-shrink: 0;
-  background: rgb(34, 37, 43);
-  border-bottom: 1px solid rgb(12, 12, 12);
+  background: var(--bg-root);
+  border-bottom: 1px solid var(--border);
   gap: 4px;
   padding: 0;
 }
@@ -2236,7 +2244,7 @@ function codeDisplayName(name: string) {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
 }
 .lib-toolbar {
   display: flex;
@@ -2245,7 +2253,7 @@ function codeDisplayName(name: string) {
   padding: 0 5px;
   gap: 0;
   flex-shrink: 0;
-  border-bottom: 1px solid rgb(12, 12, 12);
+  border-bottom: 1px solid var(--border);
 }
 .lib-search {
   width: 200px;
@@ -2258,9 +2266,9 @@ function codeDisplayName(name: string) {
   font-size: 12px;
   outline: none;
 }
-.lib-search:focus { border-color: rgb(91, 251, 132); }
+.lib-search:focus { border-color: var(--accent); }
 .lib-spacer { flex: 1; }
-.lib-hint { font-size: 12px; color: rgb(128, 128, 128); }
+.lib-hint { font-size: 12px;   color: var(--text-secondary); }
 .lib-return-btn {
   width: 80px;
   height: 28px;
@@ -2278,13 +2286,13 @@ function codeDisplayName(name: string) {
   background: transparent;
   border: 1px solid rgb(73, 76, 86);
   border-radius: 4px;
-  color: rgb(128, 128, 128);
+  color: var(--text-muted);
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s;
 }
 .lib-tab-btn:hover { color: white; }
-.lib-tab-active { background: rgb(55, 120, 200); color: white; border-color: rgb(55, 120, 200); }
+.lib-tab-active { background: var(--accent); color: var(--text); border-color: var(--accent); }
 .lib-list {
   flex: 1;
   min-height: 0;
@@ -2299,21 +2307,21 @@ function codeDisplayName(name: string) {
   right: 0;
   padding: 4px 12px;
   font-size: 11px;
-  color: rgb(128, 128, 128);
-  background: rgb(34, 37, 43);
-  border: 1px solid rgb(12, 12, 12);
+  color: var(--text-muted);
+  background: var(--bg-root);
+  border: 1px solid var(--border);
   border-right: none;
   border-top: none;
   border-top-left-radius: 4px;
   cursor: pointer;
   z-index: 50;
 }
-.console-toggle:hover { color: white; background: rgb(41, 44, 52); }
+.console-toggle:hover { color: var(--text); background: var(--bg-base); }
 
 /* ═══ 角色右键菜单 ═══ */
 .sprite-ctx-menu {
   position: fixed;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
   border: 1px solid rgb(60, 60, 60);
   border-radius: 6px;
   padding: 4px 0;
@@ -2324,9 +2332,9 @@ function codeDisplayName(name: string) {
 .sprite-ctx-item {
   padding: 6px 14px;
   font-size: 12px;
-  color: rgb(200, 200, 200);
+  color: var(--text-secondary);
   cursor: pointer;
 }
-.sprite-ctx-item:hover { background: rgb(61, 64, 72); color: white; }
-.sprite-ctx-del:hover { background: rgb(95, 45, 39); color: white; }
+.sprite-ctx-item:hover { background: var(--bg-hover); color: var(--text); }
+.sprite-ctx-del:hover { background: var(--danger); color: var(--text); }
 </style>

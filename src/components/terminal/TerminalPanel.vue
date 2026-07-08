@@ -6,6 +6,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { useTerminalStore } from '../../stores/terminal'
 import { useEditorStore } from '../../stores/editor'
+import { useThemeStore } from '../../stores/theme'
 import { useEngine } from '../../composables/useEngine'
 
 const props = defineProps<{
@@ -18,6 +19,7 @@ const emit = defineEmits<{
 
 const terminalStore = useTerminalStore()
 const editorStore = useEditorStore()
+const themeStore = useThemeStore()
 const engine = useEngine()
 const containerRef = ref<HTMLDivElement>()
 let terminal: Terminal | null = null
@@ -33,22 +35,7 @@ function createTerminal() {
     fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
     fontSize: 13,
     lineHeight: 1.4,
-    theme: {
-      background: '#1e1e1e',
-      foreground: '#cccccc',
-      cursor: '#ffffff',
-      cursorAccent: '#1e1e1e',
-      selectionBackground: '#264f78',
-      selectionForeground: '#ffffff',
-      black: '#1e1e1e',
-      red: '#f44747',
-      green: '#6a9955',
-      yellow: '#dcdcaa',
-      blue: '#569cd6',
-      magenta: '#c586c0',
-      cyan: '#4ec9b0',
-      white: '#cccccc',
-    },
+    theme: themeStore.colors.terminalTheme as any,
     scrollback: MAX_LINES,
     convertEol: true,
     cursorBlink: true,
@@ -149,6 +136,15 @@ watch(
   }
 )
 
+watch(
+  () => themeStore.currentTheme,
+  () => {
+    if (terminal) {
+      terminal.options.theme = themeStore.colors.terminalTheme as any
+    }
+  }
+)
+
 let resizeObserver: ResizeObserver | null = null
 
 onMounted(() => {
@@ -224,7 +220,7 @@ onBeforeUnmount(() => {
 }
 
 .console-icon {
-  color: rgb(128, 128, 128);
+  color: var(--text-muted);
 }
 
 .console-title {
@@ -250,12 +246,12 @@ onBeforeUnmount(() => {
   background: transparent;
   border: none;
   border-radius: 3px;
-  color: rgb(128, 128, 128);
+  color: var(--text-muted);
   cursor: pointer;
   transition: all 0.12s;
 }
 .console-action:hover {
-  background: rgb(61, 64, 72);
+  background: var(--bg-hover);
   color: white;
 }
 

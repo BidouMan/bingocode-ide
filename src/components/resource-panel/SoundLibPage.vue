@@ -241,7 +241,7 @@ onBeforeUnmount(stopPlayback)
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: rgb(30, 30, 30);
+  background: var(--bg-darker);
 }
 
 /* ─── 工具栏 ─── */
@@ -252,8 +252,8 @@ onBeforeUnmount(stopPlayback)
   padding: 0 5px;
   gap: 0;
   flex-shrink: 0;
-  background: rgb(34, 37, 43);
-  border-bottom: 1px solid rgb(12, 12, 12);
+  background: var(--bg-root);
+  border-bottom: 1px solid var(--border);
 }
 
 .lib-search {
@@ -261,14 +261,14 @@ onBeforeUnmount(stopPlayback)
   height: 28px;
   padding: 0 8px;
   background: rgb(40, 43, 52);
-  border: 1px solid rgb(55, 59, 68);
+  border: 1px solid var(--border-light);
   border-radius: 4px;
   color: white;
   font-size: 12px;
   outline: none;
 }
 .lib-search:hover { background: rgb(50, 53, 62); border-color: rgb(65, 69, 82); }
-.lib-search:focus { background: rgb(55, 59, 68); border-color: #528bff; color: white; }
+.lib-search:focus { background: var(--border-light); border-color: #528bff; color: var(--text); }
 
 /* ─── 分类标签 ─── */
 .lib-tabs {
@@ -290,12 +290,12 @@ onBeforeUnmount(stopPlayback)
   transition: background 0.15s;
 }
 .lib-tab:hover {
-  background: rgb(61, 64, 72);
+  background: var(--bg-hover);
   color: white;
 }
 .lib-tab-active {
   background: rgb(46, 49, 58);
-  border: 1px solid rgb(55, 59, 68);
+  border: 1px solid var(--border-light);
   color: white;
 }
 
@@ -314,7 +314,7 @@ onBeforeUnmount(stopPlayback)
   transition: background 0.15s;
 }
 .lib-return-btn:hover {
-  background: rgb(61, 64, 72);
+  background: var(--bg-hover);
   color: white;
 }
 
@@ -324,7 +324,7 @@ onBeforeUnmount(stopPlayback)
   min-height: 0;
   overflow-y: auto;
   padding: 8px;
-  background: rgb(30, 30, 30);
+  background: var(--bg-darker);
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
   grid-auto-rows: max-content;

@@ -1,0 +1,575 @@
+{
+  "name": "地图1",
+  "width": 40,
+  "height": 30,
+  "tileSize": 16,
+  "gravity": false,
+  "collisionType": "墙体",
+  "collisionEnabled": true,
+  "layers": [
+    {
+      "id": 0,
+      "name": "图像图层",
+      "type": "imagelayer",
+      "visible": true,
+      "locked": false
+    },
+    {
+      "id": 1,
+      "name": "绘制图层",
+      "type": "tilelayer",
+      "visible": true,
+      "locked": false,
+      "data": "eJzt0LEJACAMRUEVHNL9F7EPCLFQRO7gdSk+KQUAAAD+1xedVkOvaaFbRvImuy/++VZxX/ZOe03WzgGx",
+      "resources": [
+        {
+          "name": "tileset",
+          "path": "assets/maps/地图1/images/tileset.png",
+          "resourceType": "tileset",
+          "tileWidth": 16,
+          "tileHeight": 16,
+          "collisionType": "墙体",
+          "collisionEnabled": true
+        }
+      ]
+    }
+  ],
+  "tilesets": [
+    {
+      "name": "tileset",
+      "image": "assets/maps/地图1/images/tileset.png",
+      "firstgid": 1,
+      "tileWidth": 16,
+      "tileHeight": 16,
+      "collisionType": "墙体",
+      "collisionEnabled": true,
+      "tiles": [
+        {
+          "id": 0,
+          "collision": "solid",
+          "collisionType": "图像",
+          "collisionShape": {
+            "points": [
+              [
+                0,
+                0
+              ],
+              [
+                1,
+                0
+              ],
+              [
+                1,
+                1
+              ],
+              [
+                0,
+                1
+              ]
+            ]
+          }
+        },
+        {
+          "id": 1,
+          "collision": "solid",
+          "collisionType": "墙体",
+          "collisionShape": {
+            "points": [
+              [
+                0,
+                0
+              ],
+              [
+                1,
+                0
+              ],
+              [
+                1,
+                1
+              ],
+              [
+                0,
+                1
+              ]
+            ]
+          }
+        },
+        {
+          "id": 2,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 3,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 4,
+          "collision": "solid",
+          "collisionType": "跳板",
+          "collisionShape": {
+            "points": [
+              [
+                0,
+                0
+              ],
+              [
+                1,
+                0
+              ],
+              [
+                1,
+                1
+              ],
+              [
+                0,
+                1
+              ]
+            ]
+          }
+        },
+        {
+          "id": 5,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 6,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 7,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 8,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 9,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 10,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 11,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 12,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 13,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 14,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 15,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 16,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 17,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 18,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 19,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 20,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 21,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 22,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 23,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 24,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 25,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 26,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 27,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 28,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 29,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 30,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 31,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 32,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 33,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 34,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 35,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 36,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 37,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 38,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 39,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 40,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 41,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 42,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 43,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 44,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 45,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 46,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 47,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 48,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 49,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 50,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 51,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 52,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 53,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 54,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 55,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 56,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 57,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 58,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 59,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 60,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 61,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 62,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 63,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 64,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 65,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 66,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 67,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 68,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 69,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 70,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 71,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 72,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 73,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 74,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 75,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 76,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 77,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 78,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 79,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 80,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 81,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 82,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 83,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 84,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 85,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 86,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 87,
+          "collision": "none",
+          "collisionType": "图像"
+        },
+        {
+          "id": 88,
+          "collision": "solid",
+          "collisionType": "图像",
+          "collisionShape": {
+            "points": [
+              [
+                0,
+                0
+              ],
+              [
+                1,
+                0
+              ],
+              [
+                1,
+                1
+              ],
+              [
+                0,
+                1
+              ]
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

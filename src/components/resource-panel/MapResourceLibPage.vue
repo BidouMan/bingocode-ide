@@ -76,7 +76,7 @@ const filteredResources = computed(() => {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
 }
 
 .lib-toolbar {
@@ -86,23 +86,23 @@ const filteredResources = computed(() => {
   padding: 0 5px;
   gap: 0;
   flex-shrink: 0;
-  border-bottom: 1px solid rgb(12, 12, 12);
+  border-bottom: 1px solid var(--border);
 }
 
 .lib-search {
   width: 200px;
   height: 28px;
   padding: 0 8px;
-  background: rgb(52, 55, 62);
-  border: 1px solid rgb(73, 76, 86);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
   border-radius: 6px;
-  color: rgb(150, 150, 150);
+  color: var(--text-secondary);
   font-size: 12px;
   outline: none;
 }
 
 .lib-search:focus {
-  border-color: rgb(91, 251, 132);
+  border-color: var(--accent);
 }
 
 .lib-spacer { flex: 1; }
@@ -121,30 +121,30 @@ const filteredResources = computed(() => {
 }
 
 .lib-tab-btn:hover {
-  background: rgb(61, 64, 72);
+  background: var(--bg-hover);
   color: white;
 }
 
 .lib-tab-active {
   background: rgb(46, 49, 58);
-  border: 1px solid rgb(55, 59, 68);
+  border: 1px solid var(--border-light);
   color: white;
 }
 
 .lib-return-btn {
   width: 80px;
   height: 28px;
-  background: rgb(52, 55, 62);
-  border: 1px solid rgb(73, 76, 86);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
   border-radius: 4px;
-  color: rgb(150, 150, 150);
+  color: var(--text-secondary);
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .lib-return-btn:hover {
-  background: rgb(62, 65, 72);
+  background: var(--bg-hover);
   color: white;
 }
 

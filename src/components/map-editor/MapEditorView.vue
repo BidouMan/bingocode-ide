@@ -398,7 +398,7 @@ defineExpose({ switchToMap })
   justify-content: center;
   height: 30px;
   gap: 20px;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
   flex-shrink: 0;
 }
 
@@ -417,8 +417,8 @@ defineExpose({ switchToMap })
   flex-direction: column;
   width: 272px;
   min-width: 272px;
-  border-left: 1px solid rgb(12, 12, 12);
-  background: rgb(34, 37, 43);
+  border-left: 1px solid var(--border);
+  background: var(--bg-root);
 }
 
 .map-empty-banner {

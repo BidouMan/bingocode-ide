@@ -472,8 +472,8 @@ function onResourceClick(rIdx: number) {
   flex-direction: column;
   width: 272px;
   min-width: 272px;
-  background: rgb(34, 37, 43);
-  border-right: 1px solid rgb(12, 12, 12);
+  background: var(--bg-root);
+  border-right: 1px solid var(--border);
 }
 
 .resource-toolbar {
@@ -500,7 +500,7 @@ function onResourceClick(rIdx: number) {
 }
 
 .res-tool-btn:hover {
-  background: rgb(61, 64, 72);
+  background: var(--bg-hover);
 }
 
 .import-btn:disabled {
@@ -573,7 +573,7 @@ function onResourceClick(rIdx: number) {
 }
 
 .image-selected {
-  border-color: rgb(91, 251, 132) !important;
+  border-color: var(--accent) !important;
   background: rgb(60, 65, 75);
 }
 
@@ -616,11 +616,11 @@ function onResourceClick(rIdx: number) {
 }
 
 .col-tool-btn:hover {
-  background: rgb(61, 64, 72);
+  background: var(--bg-hover);
 }
 
 .col-tool-active {
-  background: rgb(55, 59, 68);
+  background: var(--border-light);
   border: 1px solid rgb(65, 69, 82);
 }
 
@@ -634,7 +634,7 @@ function onResourceClick(rIdx: number) {
   align-items: center;
   justify-content: center;
   height: 30px;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
   flex-shrink: 0;
 }
 

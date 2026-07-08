@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useEditorStore } from '../../stores/editor'
+import { useThemeStore } from '../../stores/theme'
 
 const editorStore = useEditorStore()
+const themeStore = useThemeStore()
 const containerRef = ref<HTMLDivElement>()
 let editor: any = null
 let monaco: any = null
@@ -73,6 +75,88 @@ async function initMonaco() {
     },
   })
 
+  // Light theme
+  m.editor.defineTheme('bingo-light', {
+    base: 'vs',
+    inherit: true,
+    rules: [
+      { token: 'comment', foreground: 'a0a1a7', fontStyle: 'italic' },
+      { token: 'keyword', foreground: 'a626a4' },
+      { token: 'string', foreground: '50a14f' },
+      { token: 'number', foreground: '986801' },
+      { token: 'type', foreground: 'c18401' },
+      { token: 'function', foreground: '4078f2' },
+      { token: 'variable', foreground: '383a42' },
+      { token: 'operator', foreground: '383a42' },
+      { token: 'delimiter', foreground: '383a42' },
+      { token: 'identifier', foreground: '383a42' },
+    ],
+    colors: {
+      'editor.background': '#ffffff',
+      'editor.foreground': '#383a42',
+      'editor.lineHighlightBackground': '#f5f5f5',
+      'editor.selectionBackground': '#bfceff',
+      'editor.inactiveSelectionBackground': '#e5ebf6',
+      'editorCursor.foreground': '#526fff',
+      'editorWhitespace.foreground': '#d1d9e0',
+      'editorIndentGuide.background': '#e8eaed',
+      'editorIndentGuide.activeBackground': '#c4c7c9',
+      'editorLineNumber.foreground': '#a0a1a7',
+      'editorLineNumber.activeForeground': '#383a42',
+      'editorGutter.background': '#ffffff',
+      'editorGutter.border': 'transparent',
+      'editor.selectionHighlightBackground': '#bfceff55',
+      'editorBracketMatch.background': '#bfceff55',
+      'editorBracketMatch.border': '#a0a1a7',
+      'scrollbar.shadow': '#00000000',
+      'scrollbarSlider.background': '#383a4233',
+      'scrollbarSlider.hoverBackground': '#383a4255',
+      'scrollbarSlider.activeBackground': '#383a4288',
+      'minimap.background': '#ffffff',
+    },
+  })
+
+  // Warm theme (Gruvbox-style warm dark)
+  m.editor.defineTheme('bingo-warm', {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [
+      { token: 'comment', foreground: '928374', fontStyle: 'italic' },
+      { token: 'keyword', foreground: 'fb4934' },
+      { token: 'string', foreground: 'b8bb26' },
+      { token: 'number', foreground: 'd3869b' },
+      { token: 'type', foreground: '8ec07c' },
+      { token: 'function', foreground: 'fabd2f' },
+      { token: 'variable', foreground: 'ebdbb2' },
+      { token: 'operator', foreground: 'fb4934' },
+      { token: 'delimiter', foreground: 'ebdbb2' },
+      { token: 'identifier', foreground: 'ebdbb2' },
+    ],
+    colors: {
+      'editor.background': '#282828',
+      'editor.foreground': '#ebdbb2',
+      'editor.lineHighlightBackground': '#3c3836',
+      'editor.selectionBackground': '#504945',
+      'editor.inactiveSelectionBackground': '#3c3836',
+      'editorCursor.foreground': '#ebdbb2',
+      'editorWhitespace.foreground': '#665c54',
+      'editorIndentGuide.background': '#3c3836',
+      'editorIndentGuide.activeBackground': '#665c54',
+      'editorLineNumber.foreground': '#665c54',
+      'editorLineNumber.activeForeground': '#fabd2f',
+      'editorGutter.background': '#282828',
+      'editorGutter.border': 'transparent',
+      'editor.selectionHighlightBackground': '#50494555',
+      'editorBracketMatch.background': '#50494555',
+      'editorBracketMatch.border': '#928374',
+      'scrollbar.shadow': '#00000000',
+      'scrollbarSlider.background': '#665c5433',
+      'scrollbarSlider.hoverBackground': '#665c5455',
+      'scrollbarSlider.activeBackground': '#665c5488',
+      'minimap.background': '#282828',
+    },
+  })
+
   // Python Monarch tokenizer
   m.languages.setMonarchTokensProvider('python', {
     keywords: ['def','class','return','if','elif','else','for','while','import','from','as','try','except','finally','with','yield','lambda','pass','break','continue','raise','and','or','not','in','is','global','nonlocal','del','assert'],
@@ -122,7 +206,7 @@ async function initMonaco() {
   editor = m.editor.create(containerRef.value, {
     value: editorStore.currentTab?.content || '',
     language: 'python',
-    theme: 'bingo-dark',
+    theme: themeStore.colors.monacoTheme,
     fontSize: 16,
     lineHeight: 24,
     fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
@@ -256,6 +340,15 @@ watch(
   () => editorStore.currentTab,
   () => {
     nextTick(switchTab)
+  }
+)
+
+watch(
+  () => themeStore.currentTheme,
+  () => {
+    if (monaco && themeStore.colors.monacoTheme) {
+      monaco.editor.setTheme(themeStore.colors.monacoTheme)
+    }
   }
 )
 

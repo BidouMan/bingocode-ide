@@ -478,7 +478,7 @@ onBeforeUnmount(() => {
 .sprite-editor-page {
   display: flex;
   height: 100%;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
   user-select: none;
   -webkit-user-select: none;
 }
@@ -488,12 +488,12 @@ onBeforeUnmount(() => {
   width: 100px;
   min-width: 100px;
   padding: 8px 4px;
-  border-right: 1px solid rgb(12, 12, 12);
+  border-right: 1px solid var(--border);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
 }
 .costume-list::-webkit-scrollbar { width: 0; height: 0; }
 .costume-item {
@@ -502,14 +502,14 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   padding: 4px;
-  border: 1px solid #2d2d2d;
+  border: 1px solid var(--border);
   border-radius: 4px;
   cursor: pointer;
-  background: #1e1e1e;
+  background: var(--bg-darker);
 }
-.costume-item:hover { background: #3e4451; border-color: #4a4f58; }
-.costume-item.costume-item-active { border-color: transparent; background: #3e4451; box-shadow: inset 0 0 0 2px rgb(91, 199, 114); }
-.costume-item.costume-item-active:hover { box-shadow: inset 0 0 0 2px rgb(91, 199, 114); }
+.costume-item:hover { background: var(--bg-hover); border-color: var(--border-light); }
+.costume-item.costume-item-active { border-color: transparent; background: var(--bg-hover); box-shadow: inset 0 0 0 2px var(--accent); }
+.costume-item.costume-item-active:hover { box-shadow: inset 0 0 0 2px var(--accent); }
 .costume-thumb {
   width: 78px;
   height: 60px;
@@ -527,7 +527,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
   min-width: 0;
   overflow: hidden;
   cursor: default;
@@ -553,10 +553,10 @@ onBeforeUnmount(() => {
 .preview-panel {
   width: 264px;
   min-width: 264px;
-  border-left: 1px solid rgb(12, 12, 12);
+  border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
   padding: 0 8px;
 }
 
@@ -569,7 +569,7 @@ onBeforeUnmount(() => {
   padding: 0;
   margin: 0;
   border: none;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
   flex-shrink: 0;
 }
 
@@ -610,7 +610,7 @@ onBeforeUnmount(() => {
   height: 4px;
   -webkit-appearance: none;
   appearance: none;
-  background: rgb(55, 59, 68);
+  background: var(--border-light);
   border-radius: 2px;
   outline: none;
   margin: 0 4px;
@@ -668,7 +668,7 @@ onBeforeUnmount(() => {
   cursor: pointer;
   border-bottom: 1px solid rgba(255,255,255,0.05);
 }
-.anim-item:hover { background: #3e4451; }
+.anim-item:hover { background: var(--bg-hover); }
 .anim-item-active { background: #528bff; color: white; }
 .anim-item-active:hover { background: #528bff; }
 
@@ -739,7 +739,7 @@ onBeforeUnmount(() => {
 /* 右键菜单 */
 :global(.context-menu) {
   position: fixed;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
   border: 1px solid rgb(60, 60, 60);
   border-radius: 6px;
   padding: 4px 0;
@@ -755,7 +755,7 @@ onBeforeUnmount(() => {
   transition: background 0.1s;
 }
 :global(.context-menu-item:hover) {
-  background: rgb(61, 64, 72);
+  background: var(--bg-hover);
   color: white;
 }
 </style>

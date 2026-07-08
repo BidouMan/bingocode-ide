@@ -140,8 +140,8 @@ const imageTools: { id: MapTool; icon: string; label: string }[] = [
   height: 30px;
   padding: 0 8px;
   gap: 4px;
-  background: rgb(34, 37, 43);
-  border-bottom: 1px solid rgb(12, 12, 12);
+  background: var(--bg-root);
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
@@ -161,7 +161,7 @@ const imageTools: { id: MapTool; icon: string; label: string }[] = [
 }
 
 .toolbar-btn:hover {
-  background: rgb(61, 64, 72);
+  background: var(--bg-hover);
 }
 
 .toolbar-btn:disabled {
@@ -179,11 +179,11 @@ const imageTools: { id: MapTool; icon: string; label: string }[] = [
 
 .toolbar-btn-active {
   background: rgb(46, 49, 58);
-  border: 1px solid rgb(55, 59, 68);
+  border: 1px solid var(--border-light);
 }
 
 .toolbar-btn-active:hover {
-  background: rgb(55, 59, 68);
+  background: var(--border-light);
 }
 
 .toolbar-icon {
@@ -195,7 +195,7 @@ const imageTools: { id: MapTool; icon: string; label: string }[] = [
 .toolbar-separator {
   width: 1px;
   height: 20px;
-  background: rgb(55, 59, 68);
+  background: var(--border-light);
   margin: 0 2px;
 }
 

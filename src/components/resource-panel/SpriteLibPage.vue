@@ -100,7 +100,7 @@ async function selectSprite(item: { name: string; filePath: string; type: string
 .sprite-lib-page {
   width: 100%;
   height: 100%;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
   display: flex;
   flex-direction: column;
 }
@@ -110,33 +110,33 @@ async function selectSprite(item: { name: string; filePath: string; type: string
   height: 40px;
   padding: 0 5px;
   flex-shrink: 0;
-  border-bottom: 1px solid rgb(12, 12, 12);
+  border-bottom: 1px solid var(--border);
 }
 .lib-search {
   width: 200px;
   height: 28px;
   padding: 0 8px;
-  background: rgb(52, 55, 62);
-  border: 1px solid rgb(73, 76, 86);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
   border-radius: 6px;
-  color: rgb(150, 150, 150);
+  color: var(--text-secondary);
   font-size: 12px;
   outline: none;
 }
-.lib-search:focus { border-color: rgb(91, 251, 132); }
+.lib-search:focus {   border-color: var(--accent); }
 .lib-spacer { flex: 1; }
-.lib-hint { font-size: 12px; color: rgb(128, 128, 128); }
+.lib-hint { font-size: 12px;   color: var(--text-muted); }
 .lib-return-btn {
   width: 80px;
   height: 28px;
-  background: rgb(52, 55, 62);
-  border: 1px solid rgb(73, 76, 86);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
   border-radius: 4px;
-  color: rgb(150, 150, 150);
+  color: var(--text-secondary);
   font-size: 12px;
   cursor: pointer;
 }
-.lib-return-btn:hover { background: rgb(62, 65, 72); color: white; }
+.lib-return-btn:hover { background: var(--bg-hover); color: var(--text); }
 .lib-grid {
   flex: 1;
   overflow-y: auto;

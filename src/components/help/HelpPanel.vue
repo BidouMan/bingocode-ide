@@ -263,8 +263,8 @@ function getBadgeColor(type?: string) {
 .help-panel {
   width: 340px; max-width: 90vw; height: 100%;
   display: flex; flex-direction: column;
-  background: rgb(34, 37, 43);
-  border-left: 1px solid rgb(12, 12, 12);
+  background: var(--bg-root);
+  border-left: 1px solid var(--border);
   box-shadow: -4px 0 24px rgba(0, 0, 0, 0.4);
 }
 
@@ -272,7 +272,7 @@ function getBadgeColor(type?: string) {
 .help-header {
   display: flex; align-items: center; justify-content: space-between;
   height: 40px; min-height: 40px; padding: 0 16px;
-  border-bottom: 1px solid rgb(12, 12, 12);
+  border-bottom: 1px solid var(--border);
 }
 .help-title-row { display: flex; align-items: center; gap: 8px; }
 .help-header-icon { width: 20px; height: 20px; }
@@ -281,9 +281,9 @@ function getBadgeColor(type?: string) {
   display: flex; align-items: center; justify-content: center;
   width: 28px; height: 28px;
   background: transparent; border: none; border-radius: 4px;
-  color: rgb(150, 150, 150); cursor: pointer; transition: all 0.15s;
+  color: var(--text-secondary); cursor: pointer; transition: all 0.15s;
 }
-.help-close-btn:hover { background: rgb(61, 64, 72); color: white; }
+.help-close-btn:hover {   background: var(--bg-hover); color: white; }
 
 /* ── 主体布局 ── */
 .help-body {
@@ -295,7 +295,7 @@ function getBadgeColor(type?: string) {
 .help-sidebar {
   width: 40px; min-width: 40px;
   display: flex; flex-direction: column;
-  border-right: 1px solid rgb(12, 12, 12);
+  border-right: 1px solid var(--border);
   overflow-y: auto; padding: 0;
 }
 .help-sidebar::-webkit-scrollbar { display: none; }
@@ -350,7 +350,7 @@ function getBadgeColor(type?: string) {
 .help-card-list { display: flex; flex-direction: column; gap: 3px; }
 
 .help-func-card {
-  border-radius: 8px; border: 1px solid rgb(55, 59, 68);
+  border-radius: 8px; border: 1px solid var(--border-light);
   background: transparent; overflow: hidden; transition: background 0.12s;
 }
 .help-func-card:hover { background: rgba(255, 255, 255, 0.04); }
@@ -382,7 +382,7 @@ function getBadgeColor(type?: string) {
 .help-func-code {
   margin-bottom: 6px; padding: 6px 10px;
   background: rgb(28, 28, 32);
-  border-radius: 6px; border: 1px solid rgb(55, 59, 68);
+  border-radius: 6px; border: 1px solid var(--border-light);
 }
 .help-func-code code {
   font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;

@@ -113,7 +113,7 @@ function cancelRename() {
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
 }
 
 .layer-tag-name {
@@ -150,7 +150,7 @@ function cancelRename() {
 }
 
 .layer-tool-btn:hover {
-  background: rgb(61, 64, 72);
+  background: var(--bg-hover);
 }
 
 .layer-tool-btn:disabled {
@@ -179,11 +179,11 @@ function cancelRename() {
 }
 
 .layer-item:hover {
-  background: #2c313a;
+  background: var(--bg-panel);
 }
 
 .layer-item-active {
-  background: #2c313a;
+  background: var(--bg-panel);
   color: white;
 }
 
@@ -201,7 +201,7 @@ function cancelRename() {
 }
 
 .layer-vis-btn:hover {
-  background: rgb(61, 64, 72);
+  background: var(--bg-hover);
 }
 
 .vis-icon {
@@ -227,7 +227,7 @@ function cancelRename() {
 
 .layer-lock-btn:hover {
   opacity: 1;
-  background: rgb(61, 64, 72);
+  background: var(--bg-hover);
 }
 
 .layer-locked {
@@ -261,7 +261,7 @@ function cancelRename() {
   align-items: center;
   justify-content: center;
   height: 30px;
-  background: rgb(34, 37, 43);
+  background: var(--bg-root);
   flex-shrink: 0;
 }
 

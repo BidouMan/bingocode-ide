@@ -80,7 +80,7 @@ onBeforeUnmount(() => {
   align-items: center;
   height: 24px;
   background: rgb(40, 43, 52);
-  border: 1px solid rgb(55, 59, 68);
+  border: 1px solid var(--border-light);
   border-radius: 4px;
   color: white;
   padding: 0 6px;
@@ -96,12 +96,12 @@ onBeforeUnmount(() => {
 }
 
 .custom-select:hover {
-  background: rgb(50, 53, 62);
+  background: var(--bg-panel);
   border-color: rgb(65, 69, 82);
 }
 
 .custom-select.open {
-  background: rgb(55, 59, 68);
+  background: var(--border-light);
   border-color: rgb(65, 69, 82);
 }
 
@@ -130,8 +130,8 @@ onBeforeUnmount(() => {
   top: calc(100% + 2px);
   left: -1px;
   right: -1px;
-  background: rgb(34, 37, 43);
-  border: 1px solid rgb(55, 59, 68);
+  background: var(--bg-root);
+  border: 1px solid var(--border-light);
   border-radius: 4px;
   z-index: 1000;
   overflow: hidden;
@@ -146,7 +146,7 @@ onBeforeUnmount(() => {
 }
 
 .custom-select-option:hover {
-  background: rgb(50, 53, 62);
+  background: var(--bg-panel);
 }
 
 .custom-select-option.selected {

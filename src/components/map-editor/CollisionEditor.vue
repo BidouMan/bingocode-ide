@@ -439,7 +439,7 @@ defineExpose({ resetCollision })
   min-width: 256px;
   min-height: 256px;
   background: rgb(30, 30, 30);
-  border: 1px solid rgb(55, 59, 68);
+  border: 1px solid var(--border-light);
   border-radius: 4px;
   cursor: crosshair;
 }

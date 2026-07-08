@@ -1,9 +1,9 @@
 import { defineStore } from 'pinia'
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
 
-export type ThemeName = 'dark' | 'light' | 'one-dark' | 'nord' | 'gruvbox-dark'
+export type ThemeName = 'dark' | 'warm'
 
-interface ThemeColors {
+export interface ThemeColors {
   bgRoot: string
   bgDarker: string
   bgBase: string
@@ -19,6 +19,8 @@ interface ThemeColors {
   accentHover: string
   danger: string
   dangerHover: string
+  monacoTheme: string
+  terminalTheme: Record<string, string>
 }
 
 const THEMES: Record<ThemeName, ThemeColors> = {
@@ -38,85 +40,81 @@ const THEMES: Record<ThemeName, ThemeColors> = {
     accentHover: 'rgb(70, 220, 110)',
     danger: 'rgb(95, 45, 39)',
     dangerHover: 'rgb(120, 55, 48)',
+    monacoTheme: 'bingo-dark',
+    terminalTheme: {
+      background: '#1e1e1e',
+      foreground: '#cccccc',
+      cursor: '#ffffff',
+      cursorAccent: '#1e1e1e',
+      selectionBackground: '#264f78',
+      selectionForeground: '#ffffff',
+      black: '#1e1e1e',
+      red: '#f44747',
+      green: '#6a9955',
+      yellow: '#dcdcaa',
+      blue: '#569cd6',
+      magenta: '#c586c0',
+      cyan: '#4ec9b0',
+      white: '#cccccc',
+    },
   },
-  light: {
-    bgRoot: 'rgb(245, 245, 245)',
-    bgDarker: 'rgb(230, 230, 230)',
-    bgBase: 'white',
-    bgPanel: 'rgb(250, 250, 250)',
-    bgHover: 'rgb(230, 230, 230)',
-    bgActive: 'rgb(220, 220, 220)',
-    border: 'rgb(200, 200, 200)',
-    borderLight: 'rgb(180, 180, 180)',
-    text: 'rgb(30, 30, 30)',
-    textSecondary: 'rgb(80, 80, 80)',
-    textMuted: 'rgb(140, 140, 140)',
-    accent: 'rgb(55, 120, 200)',
-    accentHover: 'rgb(45, 100, 180)',
-    danger: 'rgb(200, 60, 60)',
-    dangerHover: 'rgb(180, 50, 50)',
-  },
-  'one-dark': {
-    bgRoot: '#282c34',
-    bgDarker: '#21252b',
-    bgBase: '#282c34',
-    bgPanel: '#2c313a',
-    bgHover: '#3e4451',
-    bgActive: '#3e4451',
-    border: '#181a1f',
-    borderLight: '#4b5263',
-    text: '#abb2bf',
-    textSecondary: '#808898',
-    textMuted: '#5c6370',
-    accent: '#98c379',
-    accentHover: '#7ab865',
-    danger: '#e06c75',
-    dangerHover: '#c75d65',
-  },
-  nord: {
-    bgRoot: '#2e3440',
-    bgDarker: '#2e3440',
-    bgBase: '#3b4252',
-    bgPanel: '#434c5e',
-    bgHover: '#4c566a',
-    bgActive: '#4c566a',
-    border: '#242933',
-    borderLight: '#4c566a',
-    text: '#eceff4',
-    textSecondary: '#d8dee9',
-    textMuted: '#4c566a',
-    accent: '#a3be8c',
-    accentHover: '#8fae78',
-    danger: '#bf616a',
-    dangerHover: '#a55058',
-  },
-  'gruvbox-dark': {
-    bgRoot: '#282828',
-    bgDarker: '#1d2021',
+  warm: {
+    bgRoot: '#1d2021',
+    bgDarker: '#171a1b',
     bgBase: '#282828',
     bgPanel: '#3c3836',
     bgHover: '#504945',
-    bgActive: '#504945',
-    border: '#1d2021',
-    borderLight: '#665c54',
+    bgActive: '#665c54',
+    border: '#0d0e0e',
+    borderLight: '#928374',
     text: '#ebdbb2',
     textSecondary: '#d5c4a1',
-    textMuted: '#665c54',
-    accent: '#b8bb26',
-    accentHover: '#a3a820',
+    textMuted: '#a89984',
+    accent: '#fabd2f',
+    accentHover: '#d79921',
     danger: '#fb4934',
-    dangerHover: '#e04030',
+    dangerHover: '#cc241d',
+    monacoTheme: 'bingo-warm',
+    terminalTheme: {
+      background: '#282828',
+      foreground: '#ebdbb2',
+      cursor: '#ebdbb2',
+      cursorAccent: '#282828',
+      selectionBackground: '#504945',
+      selectionForeground: '#ebdbb2',
+      black: '#282828',
+      red: '#fb4934',
+      green: '#b8bb26',
+      yellow: '#fabd2f',
+      blue: '#83a598',
+      magenta: '#d3869b',
+      cyan: '#8ec07c',
+      white: '#ebdbb2',
+    },
   },
 }
 
+const STORAGE_KEY = 'bingo-theme'
+
 export const useThemeStore = defineStore('theme', () => {
   const currentTheme = ref<ThemeName>('dark')
-  const colors = ref<THEME_COLORS>(THEMES.dark)
+  const colors = ref<ThemeColors>(THEMES.dark)
 
   function setTheme(name: ThemeName) {
+    if (!THEMES[name]) return
     currentTheme.value = name
     colors.value = THEMES[name]
     applyThemeToCSS(THEMES[name])
+    localStorage.setItem(STORAGE_KEY, name)
+  }
+
+  function initTheme() {
+    const saved = localStorage.getItem(STORAGE_KEY) as ThemeName | null
+    if (saved && THEMES[saved]) {
+      setTheme(saved)
+    } else {
+      setTheme('dark')
+    }
   }
 
   function applyThemeToCSS(c: ThemeColors) {
@@ -142,10 +140,20 @@ export const useThemeStore = defineStore('theme', () => {
     return Object.keys(THEMES) as ThemeName[]
   }
 
+  function getThemeDisplayName(name: ThemeName): string {
+    const names: Record<ThemeName, string> = {
+      dark: 'Dark',
+      warm: 'Warm',
+    }
+    return names[name] || name
+  }
+
   return {
     currentTheme,
     colors,
     setTheme,
+    initTheme,
     getThemeNames,
+    getThemeDisplayName,
   }
 })

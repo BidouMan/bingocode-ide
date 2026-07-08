@@ -1,0 +1,17 @@
+:root {
+  --bg-root: rgb(34, 37, 43);
+  --bg-darker: rgb(34, 37, 43);
+  --bg-base: rgb(41, 44, 52);
+  --bg-panel: rgb(50, 50, 61);
+  --bg-hover: rgb(61, 64, 72);
+  --bg-active: rgb(61, 64, 72);
+  --border: rgb(12, 12, 12);
+  --border-light: rgb(55, 59, 68);
+  --text: white;
+  --text-secondary: rgb(160, 160, 160);
+  --text-muted: rgb(128, 128, 128);
+  --accent: rgb(91, 251, 132);
+  --accent-hover: rgb(70, 220, 110);
+  --danger: rgb(95, 45, 39);
+  --danger-hover: rgb(120, 55, 48);
+}
