@@ -88,6 +88,11 @@ __all__ = [
     "draw_text",
     "stop_sound",
     "shake",
+    "start_game",
+    "register_generator",
+    "unregister_generator",
+    "GameStop",
+    "stop_game",
 ]
 
 
@@ -2453,7 +2458,7 @@ class GameStop(Exception):
     """游戏停止异常"""
     pass
 
-def stop():
+def stop_game():
     """停止游戏（抛出异常中断 generator）"""
     raise GameStop()
 
@@ -2503,7 +2508,7 @@ def start_game(project_dir=None):
             "pause": pause,
             "resume": resume,
             "is_paused": is_paused,
-            "stop": stop,
+            "stop": stop_game,
         }
         exec(script_content, exec_globals)
 
