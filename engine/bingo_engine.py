@@ -2434,3 +2434,214 @@ def run():
             # 剩余时间很少，直接自旋（避免 sleep 精度问题）
             while time.perf_counter() - now < target_frame_time:
                 pass
+
+
+# ========== 新增：Generator 调度模式 ==========
+
+_generators = []  # 所有活跃的 generator
+
+def register_generator(gen):
+    """注册一个 generator 到调度器"""
+    _generators.append(gen)
+
+def unregister_generator(gen):
+    """从调度器移除一个 generator"""
+    if gen in _generators:
+        _generators.remove(gen)
+
+class GameStop(Exception):
+    """游戏停止异常"""
+    pass
+
+def stop():
+    """停止游戏（抛出异常中断 generator）"""
+    raise GameStop()
+
+def start_game(project_dir=None):
+    """
+    新版游戏启动函数：使用 generator 调度模式
+
+    Args:
+        project_dir: 项目目录路径，用于自动发现 .py 文件
+    """
+    global _STOPPED, _PERF_STATS, _MOUSE_STATE
+
+    _STOPPED = False
+    _MOUSE_STATE["down"] = False
+
+    # 如果提供了项目目录，使用脚本发现模块
+    if project_dir:
+        from script_runner import discover_and_merge
+        script_content = discover_and_merge(project_dir)
+        if not script_content:
+            print("❌ 没有找到 Python 文件")
+            return
+
+        # 执行脚本，注册 generator
+        exec_globals = {
+            "__name__": "__main__",
+            "Sprite": Sprite,
+            "Timer": Timer,
+            "key_down": key_down,
+            "key_pressed": key_pressed,
+            "mouse": mouse,
+            "mouse_down": mouse_down,
+            "mouse_pressed": mouse_pressed,
+            "wait": wait,
+            "load_map": load_map,
+            "play_sound": play_sound,
+            "stop_sound": stop_sound,
+            "draw_text": draw_text,
+            "shake": shake,
+            "follow": follow,
+            "show_fps": show_fps,
+            "show_collision": show_collision,
+            "random_int": random_int,
+            "random_float": random_float,
+            "broadcast": broadcast,
+            "receive": receive,
+            "pause": pause,
+            "resume": resume,
+            "is_paused": is_paused,
+            "stop": stop,
+        }
+        exec(script_content, exec_globals)
+
+    # 主循环
+    _PERF_STATS["last_time"] = time.time()
+    _PHYSICS_DT = 1.0 / 60.0
+    _MAX_FRAME_TIME = 0.05
+    _MAX_PHYSICS_STEPS = 3
+    accumulator = 0.0
+    prev_time = time.perf_counter()
+
+    while True:
+        now = time.perf_counter()
+        frame_time = min(now - prev_time, _MAX_FRAME_TIME)
+        prev_time = now
+        accumulator += frame_time
+
+        # 物理步进
+        steps = 0
+        while accumulator >= _PHYSICS_DT and steps < _MAX_PHYSICS_STEPS:
+            if not _PAUSED:
+                # 动画更新
+                for sprite in _SPRITES.values():
+                    if hasattr(sprite, "animation_state") and sprite.animation_state:
+                        _update_sprite_animation(sprite)
+
+                # 执行所有 generator（每帧一次迭代）
+                for gen in list(_generators):
+                    try:
+                        next(gen)
+                    except StopIteration:
+                        _generators.remove(gen)
+                    except GameStop:
+                        _generators.clear()
+                        return
+                    except Exception as e:
+                        print(f"❌ Generator 错误: {e}")
+                        _generators.remove(gen)
+
+                # 精灵运动和碰撞
+                for sprite in list(_SPRITES.values()):
+                    if sprite._is_deleted:
+                        continue
+                    if sprite._speed > 0:
+                        sprite.move(sprite._speed)
+                    if sprite._auto_destroy and sprite.is_out_side():
+                        sprite.delete()
+                    if sprite._on_hit_callbacks:
+                        for group_name, callback in list(sprite._on_hit_callbacks):
+                            for other in list(_GROUPS.get(group_name, [])):
+                                if other is sprite or other._is_deleted:
+                                    continue
+                                if sprite.is_touch(other):
+                                    if callback:
+                                        callback(sprite, other)
+                                    else:
+                                        sprite.delete()
+                                        other.delete()
+                                    break
+
+                if _CURRENT_MAP:
+                    _handle_physics_collision()
+
+            accumulator -= _PHYSICS_DT
+            steps += 1
+
+        if accumulator > _PHYSICS_DT * _MAX_PHYSICS_STEPS:
+            accumulator = 0.0
+
+        # 相机跟随
+        if _FOLLOW_TARGET:
+            global _CAMERA_X, _CAMERA_Y
+            old_camera_x = _CAMERA_X
+            old_camera_y = _CAMERA_Y
+
+            if _CURRENT_MAP:
+                bounds = _CURRENT_MAP.get("world_bounds", {"left": 0, "top": 0, "right": 640, "bottom": 480})
+            else:
+                bounds = {"left": 0, "top": 0, "right": 640, "bottom": 480}
+            view_w, view_h = 640, 480
+
+            _CAMERA_X = max(bounds["left"] + view_w / 2, min(_FOLLOW_TARGET.x, bounds["right"] - view_w / 2))
+            _CAMERA_Y = max(bounds["top"] + view_h / 2, min(_FOLLOW_TARGET.y, bounds["bottom"] - view_h / 2))
+
+            _send_camera_update(_CAMERA_X, _CAMERA_Y, bounds if _CURRENT_MAP else None)
+
+            if _CURRENT_MAP:
+                tile_size = _CURRENT_MAP.get("tile_size", 16)
+                if abs(_CAMERA_X - old_camera_x) >= tile_size // 2 or abs(_CAMERA_Y - old_camera_y) >= tile_size // 2:
+                    _render_map()
+
+        # 帧合并发送
+        _flush_frame_updates()
+
+        # 状态更新
+        _MOUSE_STATE["last_down"] = _MOUSE_STATE["down"]
+        _PRESSED_KEYS_PREV = _PRESSED_KEYS.copy()
+
+        # FPS 统计
+        _PERF_STATS["frame_count"] += 1
+        t = time.time()
+        duration = t - _PERF_STATS["last_time"]
+        if duration >= 0.5:
+            fps = _PERF_STATS["frame_count"] / duration
+            if _SHOW_FPS:
+                _send_fps_to_ide(fps)
+            _PERF_STATS["frame_count"] = 0
+            _PERF_STATS["last_time"] = t
+
+        # 帧率限制
+        target_frame_time = 1.0 / 60.0
+        elapsed = time.perf_counter() - now
+        remaining = target_frame_time - elapsed
+        if remaining > 0.003:
+            time.sleep(remaining - 0.0015)
+            while time.perf_counter() - now < target_frame_time:
+                pass
+        elif remaining > 0:
+            while time.perf_counter() - now < target_frame_time:
+                pass
+
+def _update_sprite_animation(sprite):
+    """更新精灵动画帧"""
+    if not hasattr(sprite, "animation_state") or not sprite.animation_state:
+        return
+
+    sprite_state = sprite.animation_state
+    if not sprite_state.get("is_playing", True):
+        return
+
+    t = time.time()
+    if t - sprite_state["last_frame_time"] >= sprite_state["frame_duration"]:
+        sprite_state["current_frame"] += 1
+        if sprite_state["current_frame"] > sprite_state["end"]:
+            if sprite_state.get("loop", True):
+                sprite_state["current_frame"] = sprite_state["start"]
+            else:
+                sprite_state["current_frame"] = sprite_state["end"]
+                sprite_state["is_playing"] = False
+        sprite_state["last_frame_time"] = t
+        sprite._update_animation_frame()
