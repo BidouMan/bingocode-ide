@@ -56,7 +56,7 @@ pub fn run_script(
                 Ok(_) => {
                     let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
                     if !trimmed.is_empty() {
-                        let _ = app_stdout.emit_to("main", "engine:stdout", trimmed.to_string());
+                        let _ = app_stdout.emit_to("main", "engine:stdout", line.clone());
                     }
                 }
                 Err(_) => break,
@@ -77,7 +77,7 @@ pub fn run_script(
                 Ok(_) => {
                     let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
                     if !trimmed.is_empty() {
-                        let _ = app_stderr.emit_to("main", "engine:stderr", trimmed.to_string());
+                        let _ = app_stderr.emit_to("main", "engine:stderr", line.clone());
                     }
                 }
                 Err(_) => break,
