@@ -320,7 +320,6 @@ export function useEngine() {
       }
 
       await invoke('run_script', {
-        scriptPath,
         workingDir: env.working_dir,
         pythonPath: env.python_path,
         engineDir: env.engine_dir,

@@ -12,7 +12,6 @@ pub struct RunningProcess {
 pub fn run_script(
     app: AppHandle,
     state: tauri::State<'_, EngineState>,
-    script_path: String,
     working_dir: String,
     python_path: String,
     engine_dir: String,
@@ -23,9 +22,15 @@ pub fn run_script(
         stop_script_process(&mut process_guard)?;
     }
 
+    let start_cmd = format!(
+        "import sys; sys.path.insert(0, '{}'); from bingo_engine import start_game; start_game('{}')",
+        engine_dir, working_dir
+    );
+
     let mut child = Command::new(&python_path)
         .arg("-u")
-        .arg(&script_path)
+        .arg("-c")
+        .arg(&start_cmd)
         .current_dir(&working_dir)
         .env("PYTHONPATH", &engine_dir)
         .stdout(Stdio::piped())
