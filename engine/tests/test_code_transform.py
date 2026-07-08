@@ -44,13 +44,12 @@ while True:
     assert "def __game__()" in result
     assert "yield" in result
     # 验证生成的代码是有效的 Python 并产生 generator
-    exec_globals = {}
+    registered_gens = []
+    exec_globals = {"register_generator": lambda g: registered_gens.append(g)}
     exec(result, exec_globals)
-    game_func = exec_globals.get("__game__")
-    assert game_func is not None, "__game__ function not found"
+    assert len(registered_gens) == 1, "Expected 1 generator to be registered"
     import types
-    gen = game_func()
-    assert isinstance(gen, types.GeneratorType), "Not a generator"
+    assert isinstance(registered_gens[0], types.GeneratorType), "Not a generator"
 
 if __name__ == "__main__":
     test_simple_while_true()

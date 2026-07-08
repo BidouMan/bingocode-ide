@@ -2509,14 +2509,9 @@ def start_game(project_dir=None):
             "resume": resume,
             "is_paused": is_paused,
             "stop": stop_game,
+            "register_generator": register_generator,
         }
         exec(script_content, exec_globals)
-
-        # 从 exec_globals 中提取 __game__ 函数并注册为 generator
-        game_func = exec_globals.get("__game__")
-        if game_func and callable(game_func):
-            gen = game_func()
-            register_generator(gen)
 
     # 主循环
     _PERF_STATS["last_time"] = time.time()

@@ -4,7 +4,7 @@
 import os
 import ast
 import keyword
-from code_transform import transform_while_true
+from code_transform import transform_while_true, _has_while_true
 
 
 def _is_valid_identifier(name: str) -> bool:
@@ -24,53 +24,11 @@ def _list_py_files(directory: str) -> list:
     return files
 
 
-def find_main_file(search_dir: str) -> str:
-    """
-    查找包含 while True 的主文件
-
-    优先级：main.py > 包含 while True 的文件 > 第一个 .py 文件
-    """
-    py_files = _list_py_files(search_dir)
-    if not py_files:
-        return None
-
-    # 优先找 main.py
-    if 'main.py' in py_files:
-        return 'main.py'
-
-    # 找包含 while True 的文件
-    for f in py_files:
-        filepath = os.path.join(search_dir, f)
-        with open(filepath, 'r', encoding='utf-8') as fh:
-            content = fh.read()
-        try:
-            tree = ast.parse(content)
-            for node in ast.walk(tree):
-                if isinstance(node, ast.While):
-                    test = node.test
-                    if (isinstance(test, ast.Constant) and test.value is True) or \
-                       (isinstance(test, ast.Constant) and test.value == 1):
-                        return f
-        except SyntaxError:
-            continue
-
-    # 返回第一个 .py 文件
-    return py_files[0]
-
-
 def discover_and_merge(project_dir: str) -> str:
     """
     发现项目所有 .py 文件并合并为一个脚本
 
-    扫描策略：
-    1. 优先查找 project_dir/code/ 子目录
-    2. 如果不存在，扫描 project_dir 本身
-
-    Args:
-        project_dir: 项目目录路径
-
-    Returns:
-        合并后的 Python 脚本字符串
+    策略：每个文件的 while True 都变成独立的 generator，各自注册到调度器。
     """
     # 确定扫描目录：优先 code/ 子目录
     code_dir = os.path.join(project_dir, 'code')
@@ -84,36 +42,52 @@ def discover_and_merge(project_dir: str) -> str:
     if not py_files:
         return ''
 
-    # 查找主文件
-    main_file = find_main_file(search_dir)
-    if not main_file:
-        main_file = py_files[0]
+    # 收集所有 import 语句（去重）
+    all_imports = []
+    seen_imports = set()
 
-    # 读取主文件内容
-    main_path = os.path.join(search_dir, main_file)
-    with open(main_path, 'r', encoding='utf-8') as fh:
-        main_content = fh.read()
+    # 收集所有非 import 代码块
+    code_blocks = []
 
-    # 转换 while True
-    main_content = transform_while_true(main_content)
-
-    # 生成其他文件的 import 语句（只处理合法标识符的文件）
-    imports = []
     for f in py_files:
-        if f == main_file:
+        filepath = os.path.join(search_dir, f)
+        with open(filepath, 'r', encoding='utf-8') as fh:
+            content = fh.read()
+
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
             continue
-        module_name = f[:-3]
-        if _is_valid_identifier(module_name):
-            imports.append(f'from {module_name} import *')
 
-    # 拼接
-    if imports:
-        import_block = '\n'.join(imports) + '\n\n'
-        result = import_block + main_content
-    else:
-        result = main_content
+        # 提取 import 语句
+        for node in tree.body:
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                stmt_str = ast.unparse(node)
+                if stmt_str not in seen_imports:
+                    seen_imports.add(stmt_str)
+                    all_imports.append(stmt_str)
 
-    return result
+        # 检查是否有 while True
+        if _has_while_true(tree):
+            # 用文件名作为 generator 函数名（去掉 .py 后缀）
+            module_name = f[:-3]
+            func_name = f'__game_{module_name}__'
+            # 确保函数名合法
+            if not _is_valid_identifier(func_name):
+                func_name = f'__game_{py_files.index(f)}__'
+            transformed = transform_while_true(content, func_name=func_name)
+            code_blocks.append(transformed)
+        else:
+            # 没有 while True 的文件，直接作为模块级代码
+            code_blocks.append(content)
+
+    # 拼接：import 语句 + 所有代码块
+    parts = []
+    if all_imports:
+        parts.append('\n'.join(all_imports))
+    parts.extend(code_blocks)
+
+    return '\n\n'.join(parts)
 
 
 if __name__ == '__main__':
