@@ -610,7 +610,7 @@ pub fn run() {
         .setup(|app| {
             // 设置窗口背景色为深色，避免启动时白色闪烁
             let window = app.get_webview_window("main").unwrap();
-            window.set_background_color(tauri::window::Color(26, 26, 46, 255))?;
+            window.set_background_color(Some(tauri::window::Color(26, 26, 46, 255)))?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
