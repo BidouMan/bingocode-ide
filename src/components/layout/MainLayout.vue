@@ -1218,7 +1218,7 @@ else:
   }
 }
 
-// 格式化代码
+// 格式化代码 - 使用 black
 async function ideFormatCode() {
   const tab = editorStore.currentTab
   if (!tab) return
@@ -1226,46 +1226,62 @@ async function ideFormatCode() {
   const code = tab.content
   if (!code.trim()) return
 
-  // 简单的 Python 格式化：修复缩进
-  const lines = code.split('\n')
-  const formatted: string[] = []
-  let indentLevel = 0
-  const indentStr = '    ' // 4个空格
+  const projectRoot = projectStore.root || ''
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    const trimmed = line.trim()
+  try {
+    const env = await invoke<{
+      python_path: string
+      engine_dir: string
+      working_dir: string
+    }>('resolve_engine_env', { scriptPath: '', projectRoot: projectRoot || undefined })
 
-    if (!trimmed) {
-      formatted.push('')
-      continue
+    // 使用 base64 编码传递代码
+    const encoder = new TextEncoder()
+    const data = encoder.encode(code)
+    let binary = ''
+    for (let i = 0; i < data.length; i++) {
+      binary += String.fromCharCode(data[i])
     }
+    const base64Code = btoa(binary)
 
-    // 减少缩进的关键字
-    if (trimmed.startsWith('else:') || trimmed.startsWith('elif ') ||
-        trimmed.startsWith('except:') || trimmed.startsWith('except ') ||
-        trimmed.startsWith('finally:')) {
-      indentLevel = Math.max(0, indentLevel - 1)
+    // 使用 black 格式化
+    const formatScript = `
+import base64
+import black
+
+code = base64.b64decode("${base64Code}").decode('utf-8')
+try:
+    formatted = black.format_str(code, mode=black.Mode(
+        target_versions={black.TargetVersion.PY310},
+        line_length=88,
+    ))
+    print(formatted, end='')
+except black.NothingChanged:
+    print(code, end='')
+except Exception as e:
+    print(f"ERROR: {e}", end='')
+`
+
+    const formatPath = await invoke<string>('save_temp_script', {
+      projectDir: projectRoot,
+      content: formatScript,
+    })
+
+    const result = await invoke<string>('run_script_output', {
+      workingDir: env.working_dir,
+      pythonPath: env.python_path,
+      scriptPath: formatPath,
+    })
+
+    if (!result.startsWith('ERROR:') && result !== code) {
+      tab.content = result
+      tab.modified = true
+      // 通知 Monaco 编辑器刷新内容
+      window.dispatchEvent(new CustomEvent('editor-refresh-content'))
     }
-
-    // 添加当前行（带正确缩进）
-    formatted.push(indentStr.repeat(indentLevel) + trimmed)
-
-    // 增加缩进的关键字
-    if (trimmed.endsWith(':') && !trimmed.startsWith('#')) {
-      const keywords = ['def ', 'class ', 'if ', 'elif ', 'else:', 'for ', 'while ', 'try:', 'except', 'finally:', 'with ']
-      if (keywords.some(kw => trimmed.startsWith(kw) || trimmed.endsWith(':'))) {
-        indentLevel++
-      }
-    }
+  } catch {
+    // 静默失败
   }
-
-  tab.content = formatted.join('\n')
-  tab.modified = true
-
-  consoleVisible.value = true
-  await nextTick()
-  terminalStore.appendLine('\x1b[32m✅ 代码已格式化\x1b[0m')
 }
 
 // ═══ 代码检查与格式化结束 ═══
@@ -1390,6 +1406,13 @@ function codeDisplayName(name: string) {
           <span>保存</span>
         </button>
 
+        <!-- 运行/停止 -->
+        <button class="menu-btn" @click="toggleRun" :title="editorStore.isRunning ? '停止' : '运行'">
+          <img v-if="!editorStore.isRunning" :src="iconCodeRun" class="menu-icon" />
+          <img v-else :src="iconCodeStop" class="menu-icon" />
+          <span>{{ editorStore.isRunning ? '停止' : '运行' }}</span>
+        </button>
+
         <!-- 检查 -->
         <button class="menu-btn" @click="ideCheckCode" title="检查代码">
           <img :src="iconCodeCheck" class="menu-icon" />
@@ -1400,13 +1423,6 @@ function codeDisplayName(name: string) {
         <button class="menu-btn" @click="ideFormatCode" title="格式化代码">
           <img :src="iconCodeFormat" class="menu-icon" />
           <span>格式化</span>
-        </button>
-
-        <!-- 运行/停止 (代码模式单个切换) -->
-        <button class="menu-btn" @click="toggleRun" :title="editorStore.isRunning ? '停止' : '运行'">
-          <img v-if="!editorStore.isRunning" :src="iconCodeRun" class="menu-icon" />
-          <img v-else :src="iconCodeStop" class="menu-icon" />
-          <span>{{ editorStore.isRunning ? '停止' : '运行' }}</span>
         </button>
       </template>
 

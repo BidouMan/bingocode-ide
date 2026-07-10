@@ -357,6 +357,7 @@ onMounted(() => {
 
   window.addEventListener('editor-undo', handleUndo)
   window.addEventListener('editor-redo', handleRedo)
+  window.addEventListener('editor-refresh-content', handleRefreshContent)
 })
 
 function handleUndo() {
@@ -367,9 +368,23 @@ function handleRedo() {
   if (editor) editor.trigger('keyboard', 'redo')
 }
 
+function handleRefreshContent() {
+  if (!editor || !monaco) return
+  const tab = editorStore.currentTab
+  if (tab) {
+    ignoreChange = true
+    const model = editor.getModel()
+    if (model) {
+      model.setValue(tab.content || '')
+    }
+    ignoreChange = false
+  }
+}
+
 onBeforeUnmount(() => {
   window.removeEventListener('editor-undo', handleUndo)
   window.removeEventListener('editor-redo', handleRedo)
+  window.removeEventListener('editor-refresh-content', handleRefreshContent)
   if (editor) {
     editor.dispose()
     editor = null
