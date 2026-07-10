@@ -600,14 +600,37 @@ fn run_script_output(
 
 #[tauri::command]
 fn splash_complete(app: tauri::AppHandle) -> Result<(), String> {
-    let splash = app.get_webview_window("splashscreen").ok_or("splash window not found")?;
-    let main = app.get_webview_window("main").ok_or("main window not found")?;
-    splash.close().map_err(|e| e.to_string())?;
+    // 关闭 splash 窗口
+    if let Some(splash) = app.get_webview_window("splashscreen") {
+        splash.close().map_err(|e| e.to_string())?;
+    }
+
+    // 动态创建 main 窗口并立即设背景色后立刻显示
+    let main = WebviewWindowBuilder::new(
+        &app,
+        "main",
+        WebviewUrl::App("index.html".into()),
+    )
+    .title("BingoCode IDE")
+    .inner_size(1000.0, 650.0)
+    .min_inner_size(960.0, 600.0)
+    .resizable(true)
+    .decorations(true)
+    .center()
+    .visible(false)
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    // 设背景色 →
+    main.set_background_color(Some(tauri::window::Color(26, 26, 46, 255)))
+        .map_err(|e| e.to_string())?;
+    set_macos_bg_color(&main);
+
+    // → 再显示（此时窗口已是深色）
     main.show().map_err(|e| e.to_string())?;
     main.set_focus().map_err(|e| e.to_string())?;
     Ok(())
-}
-
+} 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -618,7 +641,7 @@ pub fn run() {
             process: Mutex::new(None),
         })
         .setup(|app| {
-            // ── 创建 splash screen 窗口（先设背景色，再显示） ──
+            // ── 创建 splash screen 窗口 ──
             let splash = WebviewWindowBuilder::new(
                 app,
                 "splashscreen",
@@ -629,28 +652,13 @@ pub fn run() {
             .resizable(false)
             .decorations(false)
             .center()
-            .visible(false)  // 先不显示，设置背景色后再显示
-            .build()
-            .map_err(|e| e.to_string())?;
-            set_window_bg_color(&splash);
-            splash.show().map_err(|e| e.to_string())?;
-
-            // ── 创建 main 窗口（先设背景色，保持隐藏） ──
-            let main = WebviewWindowBuilder::new(
-                app,
-                "main",
-                WebviewUrl::App("index.html".into()),
-            )
-            .title("BingoCode IDE")
-            .inner_size(1000.0, 650.0)
-            .min_inner_size(960.0, 600.0)
-            .resizable(true)
-            .decorations(true)
-            .center()
             .visible(false)
             .build()
             .map_err(|e| e.to_string())?;
-            set_window_bg_color(&main);
+            splash.set_background_color(Some(tauri::window::Color(26, 26, 46, 255)))
+                .map_err(|e| e.to_string())?;
+            set_macos_bg_color(&splash);
+            splash.show().map_err(|e| e.to_string())?;
 
             Ok(())
         })
@@ -688,14 +696,11 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-/// 设置窗口原生背景色为深色 #1a1a2e，消除启动时白色闪烁
-fn set_window_bg_color(window: &tauri::WebviewWindow) {
+/// macOS: 设置 NSWindow 原生背景色，确保窗口创建时就是深色
+fn set_macos_bg_color(window: &tauri::WebviewWindow) {
     #[cfg(target_os = "macos")]
     {
         use objc2_app_kit::{NSColor, NSWindow};
-        use objc2_foundation::NSAutoreleasePool;
-
-        let pool = unsafe { NSAutoreleasePool::new() };
         if let Ok(ns_ptr) = window.ns_window() {
             unsafe {
                 let ns_window = &*(ns_ptr as *mut NSWindow);
@@ -708,6 +713,5 @@ fn set_window_bg_color(window: &tauri::WebviewWindow) {
                 ns_window.setBackgroundColor(Some(&bg_color));
             }
         }
-        unsafe { pool.drain() };
     }
 }
