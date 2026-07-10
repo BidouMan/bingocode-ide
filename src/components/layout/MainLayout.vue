@@ -1704,6 +1704,15 @@ function codeDisplayName(name: string) {
               <div class="code-splitter">
                 <div class="code-editor-pane">
                   <CodeEditor />
+                  <!-- 浮动工具栏 -->
+                  <div class="ide-float-bar">
+                    <button class="ide-float-btn" title="缩小" @click="editorStore.zoomOut()"><img :src="iconReduceOne" width="16" height="16" /></button>
+                    <button class="ide-float-btn ide-float-zoom" title="重置缩放" @click="editorStore.resetZoom()">{{ editorStore.editorFontZoom }}%</button>
+                    <button class="ide-float-btn" title="放大" @click="editorStore.zoomIn()"><img :src="iconAddOne" width="16" height="16" /></button>
+                    <div class="ide-float-divider"></div>
+                    <button class="ide-float-btn" title="撤销" @click="editorUndo"><img :src="iconUndo" width="14" height="14" /></button>
+                    <button class="ide-float-btn" title="重做" @click="editorRedo"><img :src="iconRedo" width="14" height="14" /></button>
+                  </div>
                 </div>
               </div>
               <TerminalPanel v-model:visible="consoleVisible" />
@@ -2637,6 +2646,7 @@ function codeDisplayName(name: string) {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 .game-canvas-full {
   width: 100%;

@@ -282,21 +282,15 @@ async function initMonaco() {
     }
   }
 
-  // 自定义滚轮缩放：Cmd/Ctrl + 滚轮，每次加减 1px
-  // 使用捕获阶段拦截事件
+  // 自定义滚轮缩放：Cmd/Ctrl + 滚轮，每次加减 10%
   wheelHandler = (e: WheelEvent) => {
     if ((e.ctrlKey || e.metaKey) && containerRef.value?.contains(e.target as Node)) {
       e.preventDefault()
       e.stopPropagation()
-      const delta = e.deltaY > 0 ? -1 : 1
-      const currentSize = editorStore.editorFontSize
-      const newSize = Math.max(10, Math.min(64, currentSize + delta))
-      if (newSize !== currentSize) {
-        editorStore.editorFontSize = newSize
-        editorStore.editorFontZoom = Math.round(newSize / 16 * 100)
-        try {
-          localStorage.setItem('bingo-ide-font-zoom', String(editorStore.editorFontZoom))
-        } catch {}
+      if (e.deltaY > 0) {
+        editorStore.zoomOut()
+      } else {
+        editorStore.zoomIn()
       }
     }
   }
