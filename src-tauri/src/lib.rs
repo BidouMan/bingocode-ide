@@ -607,6 +607,12 @@ pub fn run() {
         .manage(EngineState {
             process: Mutex::new(None),
         })
+        .setup(|app| {
+            // 设置窗口背景色为深色，避免启动时白色闪烁
+            let window = app.get_webview_window("main").unwrap();
+            window.set_background_color(tauri::window::Color::Rgb(26, 26, 46))?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             read_file,
             write_file,

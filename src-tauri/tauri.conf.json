@@ -22,7 +22,8 @@
         "titleBarStyle": "Transparent",
         "hiddenTitle": true,
         "transparent": false,
-        "center": true
+        "center": true,
+        "backgroundColor": "#1a1a2e"
       }
     ],
     "security": {
