@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
-use tauri::Manager;
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 mod engine;
 
@@ -599,11 +599,12 @@ fn run_script_output(
 }
 
 #[tauri::command]
-fn navigate_to_main(app: tauri::AppHandle) -> Result<(), String> {
-    let window = app.get_webview_window("main").ok_or("Window not found")?;
-    // 切换到主页面
-    let url = tauri::Url::parse("tauri://localhost/").map_err(|e| e.to_string())?;
-    window.navigate(url).map_err(|e| e.to_string())?;
+fn splash_complete(app: tauri::AppHandle) -> Result<(), String> {
+    let splash = app.get_webview_window("splashscreen").ok_or("splash window not found")?;
+    let main = app.get_webview_window("main").ok_or("main window not found")?;
+    splash.close().map_err(|e| e.to_string())?;
+    main.show().map_err(|e| e.to_string())?;
+    main.set_focus().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -615,6 +616,17 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .manage(EngineState {
             process: Mutex::new(None),
+        })
+        .setup(|app| {
+            // 设置 splashscreen 窗口原生背景色，消除白色闪烁
+            if let Some(splash) = app.get_webview_window("splashscreen") {
+                set_window_bg_color(&splash);
+            }
+            // 设置 main 窗口原生背景色
+            if let Some(main) = app.get_webview_window("main") {
+                set_window_bg_color(&main);
+            }
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             read_file,
@@ -644,8 +656,32 @@ pub fn run() {
             engine::send_stdin,
             engine::run_script_file,
             run_script_output,
-            navigate_to_main,
+            splash_complete,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// 设置窗口原生背景色为深色 #1a1a2e，消除启动时白色闪烁
+fn set_window_bg_color(window: &tauri::WebviewWindow) {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::{NSColor, NSWindow};
+        use objc2_foundation::NSAutoreleasePool;
+
+        let pool = unsafe { NSAutoreleasePool::new() };
+        if let Some(ns_window) = window.ns_window() {
+            unsafe {
+                let ns_window = &*(ns_window as *mut NSWindow);
+                let bg_color = NSColor::colorWithRed_green_blue_alpha(
+                    26.0 / 255.0,
+                    26.0 / 255.0,
+                    46.0 / 255.0,
+                    1.0,
+                );
+                ns_window.setBackgroundColor(Some(&bg_color));
+            }
+        }
+        unsafe { pool.drain() };
+    }
 }

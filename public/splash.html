@@ -3,9 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <script type="module">
-    // 加载完成后切换到主页面
+    const { invoke } = window.__TAURI__.core;
+    // 加载完成后通知 Rust 关闭 splash，显示 main
     setTimeout(() => {
-      window.__TAURI__?.core?.invoke('navigate_to_main');
+      invoke('splash_complete');
     }, 2000);
   </script>
   <style>
