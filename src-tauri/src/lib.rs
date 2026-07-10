@@ -598,6 +598,15 @@ fn run_script_output(
     Ok(stdout)
 }
 
+#[tauri::command]
+fn navigate_to_main(app: tauri::AppHandle) -> Result<(), String> {
+    let window = app.get_webview_window("main").ok_or("Window not found")?;
+    // 切换到主页面
+    let url = tauri::Url::parse("tauri://localhost/").map_err(|e| e.to_string())?;
+    window.navigate(url).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -606,12 +615,6 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .manage(EngineState {
             process: Mutex::new(None),
-        })
-        .setup(|app| {
-            // 设置窗口背景色为深色，避免启动时白色闪烁
-            let window = app.get_webview_window("main").unwrap();
-            window.set_background_color(Some(tauri::window::Color(26, 26, 46, 255)))?;
-            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             read_file,
@@ -641,6 +644,7 @@ pub fn run() {
             engine::send_stdin,
             engine::run_script_file,
             run_script_output,
+            navigate_to_main,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
