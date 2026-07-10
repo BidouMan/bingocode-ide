@@ -10,34 +10,7 @@
     "beforeBuildCommand": "pnpm build"
   },
   "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "BingoCode IDE",
-        "width": 1000,
-        "height": 650,
-        "minWidth": 960,
-        "minHeight": 600,
-        "resizable": true,
-        "decorations": true,
-        "titleBarStyle": "Transparent",
-        "hiddenTitle": true,
-        "transparent": false,
-        "center": true,
-        "visible": false
-      },
-      {
-        "label": "splashscreen",
-        "title": "BingoCode IDE",
-        "width": 480,
-        "height": 320,
-        "resizable": false,
-        "decorations": false,
-        "transparent": false,
-        "center": true,
-        "url": "splash.html"
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null,
       "assetProtocol": {

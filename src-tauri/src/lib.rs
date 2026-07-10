@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
-use tauri::Manager;
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 mod engine;
 
@@ -618,14 +618,40 @@ pub fn run() {
             process: Mutex::new(None),
         })
         .setup(|app| {
-            // 设置 splashscreen 窗口原生背景色，消除白色闪烁
-            if let Some(splash) = app.get_webview_window("splashscreen") {
-                set_window_bg_color(&splash);
-            }
-            // 设置 main 窗口原生背景色
-            if let Some(main) = app.get_webview_window("main") {
-                set_window_bg_color(&main);
-            }
+            // ── 创建 splash screen 窗口（先设背景色，再显示） ──
+            let splash = WebviewWindowBuilder::new(
+                app,
+                "splashscreen",
+                WebviewUrl::App("splash.html".into()),
+            )
+            .title("BingoCode IDE")
+            .inner_size(480.0, 320.0)
+            .resizable(false)
+            .decorations(false)
+            .center()
+            .visible(false)  // 先不显示，设置背景色后再显示
+            .build()
+            .map_err(|e| e.to_string())?;
+            set_window_bg_color(&splash);
+            splash.show().map_err(|e| e.to_string())?;
+
+            // ── 创建 main 窗口（先设背景色，保持隐藏） ──
+            let main = WebviewWindowBuilder::new(
+                app,
+                "main",
+                WebviewUrl::App("index.html".into()),
+            )
+            .title("BingoCode IDE")
+            .inner_size(1000.0, 650.0)
+            .min_inner_size(960.0, 600.0)
+            .resizable(true)
+            .decorations(true)
+            .center()
+            .visible(false)
+            .build()
+            .map_err(|e| e.to_string())?;
+            set_window_bg_color(&main);
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
