@@ -575,6 +575,29 @@ fn read_image_as_data_url(path: String) -> Result<String, String> {
     Ok(format!("data:{};base64,{}", mime, b64))
 }
 
+#[tauri::command]
+fn run_script_output(
+    working_dir: String,
+    python_path: String,
+    script_path: String,
+) -> Result<String, String> {
+    let output = Command::new(&python_path)
+        .arg("-u")
+        .arg(&script_path)
+        .current_dir(&working_dir)
+        .output()
+        .map_err(|e| format!("Failed to run script: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if !output.status.success() {
+        return Err(format!("Script failed:\n{}", stderr));
+    }
+
+    Ok(stdout)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -610,6 +633,7 @@ pub fn run() {
             engine::run_script,
             engine::stop_script,
             engine::send_stdin,
+            run_script_output,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
