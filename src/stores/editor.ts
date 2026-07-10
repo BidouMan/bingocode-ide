@@ -20,14 +20,14 @@ function createDefaultTab(): Tab {
     id: `tab-${++tabIdCounter}`,
     name: '未命名-1.py',
     path: '',
-    content: 'print("Hello Bingo!")\n',
+    content: '',
     modified: false,
   }
 }
 
 export const useEditorStore = defineStore('editor', () => {
   // ─── 模式 ───
-  const isGameMode = ref(true)
+  const isGameMode = ref(false)
   const activeEditorMode = ref<EditorMode>('code')
   const isRunning = ref(false)
   const resourceTab = ref<ResourceTab>('sprite')

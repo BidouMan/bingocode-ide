@@ -912,6 +912,126 @@ function cancelCodeRename() {
   codeRenameValue.value = ''
 }
 
+// ═══ IDE 模式文件操作 ═══
+
+// 生成不重名的文件名
+function generateUniqueFileName(baseName: string): string {
+  const tabs = editorStore.codeTabs
+  let name = baseName
+  let counter = 1
+  while (tabs.some(t => t.name === name)) {
+    counter++
+    name = `${baseName.replace(/\.py$/, '')}-${counter}.py`
+  }
+  return name
+}
+
+// 新建 .py 文件（IDE 模式）
+async function ideNewFile() {
+  const name = generateUniqueFileName('未命名.py')
+  const projectRoot = projectStore.root
+  
+  if (projectRoot) {
+    // 有项目目录，直接创建文件
+    const filePath = `${projectRoot}/code/${name}`
+    await invoke('create_dir', { path: `${projectRoot}/code` })
+    await invoke('write_file', { path: filePath, content: '' })
+    editorStore.createTab(name, filePath, '')
+    resourceStore.addItem({ name, type: 'code', path: filePath, content: '' })
+  } else {
+    // 无项目目录，创建内存标签
+    editorStore.createTab(name, '', '')
+  }
+}
+
+// 打开 .py 文件（IDE 模式）
+async function ideOpenFile() {
+  const path = await open({
+    title: '打开 Python 文件',
+    filters: [{ name: 'Python 文件', extensions: ['py'] }],
+    multiple: true,
+  })
+  
+  if (!path) return
+  
+  // 处理单选或多选
+  const paths = Array.isArray(path) ? path : [path]
+  
+  for (const filePath of paths) {
+    try {
+      const content = await invoke<string>('read_file', { path: filePath })
+      const fileName = filePath.split('/').pop() || '未命名.py'
+      
+      // 检查是否已打开
+      const existing = editorStore.currentTabs.find(t => t.path === filePath)
+      if (existing) {
+        // 已打开，切换到该标签
+        const idx = editorStore.currentTabs.indexOf(existing)
+        editorStore.setActiveTab(idx)
+        continue
+      }
+      
+      // 创建新标签
+      editorStore.createTab(fileName, filePath, content)
+      resourceStore.addItem({ name: fileName, type: 'code', path: filePath, content })
+    } catch (e) {
+      console.error('[IDE] 打开文件失败:', e)
+    }
+  }
+}
+
+// 保存 .py 文件（IDE 模式）
+async function ideSaveFile() {
+  const tab = editorStore.currentTab
+  if (!tab) return
+  
+  if (tab.path) {
+    // 有文件路径，直接保存
+    try {
+      await invoke('write_file', { path: tab.path, content: tab.content })
+      editorStore.saveCurrentTab()
+    } catch (e) {
+      console.error('[IDE] 保存文件失败:', e)
+    }
+  } else {
+    // 无文件路径，弹窗选择保存位置
+    await ideSaveFileAs()
+  }
+}
+
+// 另存为（IDE 模式）
+async function ideSaveFileAs() {
+  const tab = editorStore.currentTab
+  if (!tab) return
+  
+  const path = await save({
+    title: '保存 Python 文件',
+    filters: [{ name: 'Python 文件', extensions: ['py'] }],
+    defaultPath: tab.name,
+  })
+  
+  if (!path) return
+  
+  try {
+    await invoke('write_file', { path, content: tab.content })
+    // 更新标签的路径和名称
+    const fileName = path.split('/').pop() || tab.name
+    tab.path = path
+    tab.name = fileName
+    tab.modified = false
+    // 同步更新资源管理器
+    const resource = resourceStore.codes.find(c => c.id === tab.id)
+    if (resource) {
+      resource.path = path
+      resource.name = fileName
+    }
+  } catch (e) {
+    console.error('[IDE] 另存为失败:', e)
+  }
+}
+
+// ═══ IDE 模式文件操作结束 ═══
+
 // 代码文件显示名：隐藏 .py 后缀
 // 代码标签重命名
 const tabRenameId = ref<string | null>(null)
@@ -1015,19 +1135,19 @@ function codeDisplayName(name: string) {
       <!-- ═══ 代码模式菜单 ═══ -->
       <template v-else>
         <!-- 新建 -->
-        <button class="menu-btn" @click="editorStore.createTab('未命名.py', '')" title="新建">
+        <button class="menu-btn" @click="ideNewFile" title="新建">
           <img :src="iconNewMap" class="menu-icon" />
           <span>新建</span>
         </button>
 
         <!-- 打开 -->
-        <button class="menu-btn" @click="fileMenuAction('open')" title="打开">
+        <button class="menu-btn" @click="ideOpenFile" title="打开">
           <img :src="iconCodeOpen" class="menu-icon" />
           <span>打开</span>
         </button>
 
         <!-- 保存 -->
-        <button class="menu-btn" @click="fileMenuAction('save')" title="保存">
+        <button class="menu-btn" @click="ideSaveFile" title="保存">
           <img :src="iconCodeSave" class="menu-icon" />
           <span>保存</span>
         </button>
