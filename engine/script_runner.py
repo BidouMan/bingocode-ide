@@ -24,12 +24,33 @@ def _list_py_files(directory: str) -> list:
     return files
 
 
-def discover_and_merge(project_dir: str) -> str:
+def discover_and_merge(project_dir: str, target_file: str = None) -> str:
     """
     发现项目所有 .py 文件并合并为一个脚本
 
+    Args:
+        project_dir: 项目目录
+        target_file: 指定要运行的文件路径（只运行这一个文件）
+
     策略：每个文件的 while True 都变成独立的 generator，各自注册到调度器。
     """
+    # 如果指定了目标文件，只运行这一个文件
+    if target_file and os.path.isfile(target_file):
+        with open(target_file, 'r', encoding='utf-8') as fh:
+            content = fh.read()
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            return ''
+
+        if _has_while_true(tree):
+            module_name = os.path.basename(target_file)[:-3]
+            func_name = f'__game_{module_name}__'
+            if not _is_valid_identifier(func_name):
+                func_name = '__game_main__'
+            return transform_while_true(content, func_name=func_name)
+        return content
+
     # 确定扫描目录：优先 code/ 子目录
     code_dir = os.path.join(project_dir, 'code')
     if os.path.isdir(code_dir):

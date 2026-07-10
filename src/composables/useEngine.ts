@@ -1,10 +1,12 @@
 import { nextTick } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { save } from '@tauri-apps/plugin-dialog'
 import { useEditorStore } from '../stores/editor'
 import { useRenderStore } from '../stores/render'
 import { useTerminalStore } from '../stores/terminal'
 import { useProjectStore } from '../stores/project'
+import { useResourceStore } from '../stores/resource'
 import { waitForGameCanvasReady } from '../utils/gameCanvasReady'
 import type { AnyEngineCommand } from '../types/engine'
 
@@ -16,6 +18,7 @@ export function useEngine() {
   const renderStore = useRenderStore()
   const terminalStore = useTerminalStore()
   const projectStore = useProjectStore()
+  const resourceStore = useResourceStore()
 
   function parseInstruction(jsonStr: string): AnyEngineCommand | null {
     try {
@@ -265,6 +268,30 @@ export function useEngine() {
       }
     }
 
+    // 如果文件未保存，弹窗让用户保存
+    if (!tab.path) {
+      const filePath = await save({
+        title: '保存 Python 文件',
+        filters: [{ name: 'Python 文件', extensions: ['py'] }],
+        defaultPath: tab.name,
+      })
+      if (!filePath) {
+        // 用户取消保存，不运行
+        terminalStore.appendLine('\x1b[33m已取消运行\x1b[0m')
+        return
+      }
+      // 保存文件
+      await invoke('write_file', { path: filePath, content: tab.content })
+      tab.path = filePath
+      tab.name = filePath.split('/').pop() || tab.name
+      // 同步更新资源管理器
+      const resource = resourceStore.codes.find(c => c.id === tab.id)
+      if (resource) {
+        resource.path = filePath
+        resource.name = tab.name
+      }
+    }
+
     renderStore.clearAll()
     renderStore.resetTextureLoading()
     terminalStore.clear()
@@ -285,9 +312,8 @@ export function useEngine() {
     try {
       const projectDir = projectStore.root || ''
 
-      // 将所有代码标签页写入磁盘，确保引擎能发现所有文件
+      // 清理临时脚本
       if (projectDir) {
-        await projectStore.flushCodeTabs().catch(() => {})
         await invoke('cleanup_temp_script', { projectDir }).catch(() => {})
       }
 
@@ -310,21 +336,39 @@ export function useEngine() {
         working_dir: string
       }>('resolve_engine_env', { scriptPath, projectRoot: projectDir || undefined })
 
-      // 如果需要引擎，注入 sys.path 和 import 并重新写入
-      if (needsEngine) {
-        const escapedPath = env.engine_dir.replace(/\\/g, '\\\\')
-        codeToRun = `import sys\nif "${escapedPath}" not in sys.path:\n    sys.path.insert(0, "${escapedPath}")\nfrom bingo_engine import *\n` + codeToRun
-        await invoke<string>('save_temp_script', {
+      // 根据模式决定如何运行
+      if (editorStore.isGameMode) {
+        // ═══ 游戏模式：使用游戏引擎运行 ═══
+        // 如果需要引擎，注入 sys.path 和 import 并重新写入
+        if (needsEngine) {
+          const escapedPath = env.engine_dir.replace(/\\/g, '\\\\')
+          codeToRun = `import sys\nif "${escapedPath}" not in sys.path:\n    sys.path.insert(0, "${escapedPath}")\nfrom bingo_engine import *\n` + codeToRun
+          await invoke<string>('save_temp_script', {
+            projectDir,
+            content: codeToRun,
+          })
+        }
+
+        await invoke('run_script', {
+          workingDir: env.working_dir,
+          pythonPath: env.python_path,
+          engineDir: env.engine_dir,
+        })
+      } else {
+        // ═══ 代码模式：直接运行 Python 脚本 ═══
+        // 代码模式是独立的 Python IDE，不通过游戏引擎
+        // 将当前文件写入临时脚本并异步运行
+        const scriptPath = await invoke<string>('save_temp_script', {
           projectDir,
           content: codeToRun,
         })
-      }
 
-      await invoke('run_script', {
-        workingDir: env.working_dir,
-        pythonPath: env.python_path,
-        engineDir: env.engine_dir,
-      })
+        await invoke('run_script_file', {
+          workingDir: env.working_dir,
+          pythonPath: env.python_path,
+          scriptPath,
+        })
+      }
     } catch (err) {
       terminalStore.appendLine(`\x1b[31m❌ 启动失败: ${err}\x1b[0m`)
       editorStore.setRunning(false)

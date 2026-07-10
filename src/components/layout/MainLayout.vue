@@ -369,15 +369,15 @@ async function fileMenuAction(action: string) {
 }
 
 async function toggleRun() {
-  // 点击总是重新运行：如果正在运行先停掉
   if (editorStore.isRunning) {
+    // 正在运行 → 停止
     await engine.stop()
-    // 等一帧确保引擎完全释放
-    await new Promise(r => setTimeout(r, 50))
+  } else {
+    // 未运行 → 开始运行
+    consoleVisible.value = true
+    await nextTick()
+    await engine.run()
   }
-  consoleVisible.value = true
-  await nextTick()
-  await engine.run()
 }
 
 async function uploadResource(type: 'sprite' | 'map' | 'sound' | 'code') {

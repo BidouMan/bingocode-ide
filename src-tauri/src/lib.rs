@@ -633,6 +633,7 @@ pub fn run() {
             engine::run_script,
             engine::stop_script,
             engine::send_stdin,
+            engine::run_script_file,
             run_script_output,
         ])
         .run(tauri::generate_context!())

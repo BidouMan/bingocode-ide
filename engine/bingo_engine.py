@@ -2462,12 +2462,13 @@ def stop_game():
     """停止游戏（抛出异常中断 generator）"""
     raise GameStop()
 
-def start_game(project_dir=None):
+def start_game(project_dir=None, target_file=None):
     """
     新版游戏启动函数：使用 generator 调度模式
 
     Args:
         project_dir: 项目目录路径，用于自动发现 .py 文件
+        target_file: 指定要运行的文件路径
     """
     global _STOPPED, _PERF_STATS, _MOUSE_STATE
 
@@ -2477,7 +2478,7 @@ def start_game(project_dir=None):
     # 如果提供了项目目录，使用脚本发现模块
     if project_dir:
         from script_runner import discover_and_merge
-        script_content = discover_and_merge(project_dir)
+        script_content = discover_and_merge(project_dir, target_file)
         if not script_content:
             print("❌ 没有找到 Python 文件")
             return

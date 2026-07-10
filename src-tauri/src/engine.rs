@@ -144,3 +144,88 @@ pub fn send_stdin(
 
     Ok(())
 }
+
+/// 代码模式：异步运行 Python 脚本文件
+#[tauri::command]
+pub fn run_script_file(
+    app: AppHandle,
+    state: tauri::State<'_, EngineState>,
+    working_dir: String,
+    python_path: String,
+    script_path: String,
+) -> Result<(), String> {
+    let mut process_guard = state.process.lock().map_err(|e| e.to_string())?;
+
+    if process_guard.is_some() {
+        stop_script_process(&mut process_guard)?;
+    }
+
+    let mut child = Command::new(&python_path)
+        .arg("-u")
+        .arg(&script_path)
+        .current_dir(&working_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn Python process: {}", e))?;
+
+    let pid = child.id();
+
+    let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
+    let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
+
+    let app_stdout = app.clone();
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        let mut reader = BufReader::new(stdout);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
+                    if !trimmed.is_empty() {
+                        let _ = app_stdout.emit_to("main", "engine:stdout", line.clone());
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        let _ = app_stdout.emit_to("main", "engine:stdout:end", ());
+    });
+
+    let app_stderr = app.clone();
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        let mut reader = BufReader::new(stderr);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
+                    if !trimmed.is_empty() {
+                        let _ = app_stderr.emit_to("main", "engine:stderr", line.clone());
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    *process_guard = Some(RunningProcess { child });
+    drop(process_guard);
+
+    let app_finish = app.clone();
+    std::thread::spawn(move || {
+        unsafe {
+            libc::waitpid(pid as i32, std::ptr::null_mut(), 0);
+        }
+        let _ = app_finish.emit_to("main", "engine:finished", ());
+    });
+
+    Ok(())
+}
