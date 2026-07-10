@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::Manager;
 
 mod engine;
 
@@ -670,9 +670,9 @@ fn set_window_bg_color(window: &tauri::WebviewWindow) {
         use objc2_foundation::NSAutoreleasePool;
 
         let pool = unsafe { NSAutoreleasePool::new() };
-        if let Some(ns_window) = window.ns_window() {
+        if let Ok(ns_ptr) = window.ns_window() {
             unsafe {
-                let ns_window = &*(ns_window as *mut NSWindow);
+                let ns_window = &*(ns_ptr as *mut NSWindow);
                 let bg_color = NSColor::colorWithRed_green_blue_alpha(
                     26.0 / 255.0,
                     26.0 / 255.0,
