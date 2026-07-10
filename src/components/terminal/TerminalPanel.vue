@@ -147,6 +147,58 @@ watch(
 
 let resizeObserver: ResizeObserver | null = null
 
+// ═══ 拖动调整大小 ═══
+const panelHeight = ref(200)
+const isDragging = ref(false)
+const showHighlight = ref(false)
+let highlightTimer: ReturnType<typeof setTimeout> | null = null
+let startY = 0
+let startHeight = 0
+
+function onDragHandleEnter() {
+  highlightTimer = setTimeout(() => {
+    showHighlight.value = true
+  }, 300)
+}
+
+function onDragHandleLeave() {
+  if (highlightTimer) {
+    clearTimeout(highlightTimer)
+    highlightTimer = null
+  }
+  if (!isDragging.value) {
+    showHighlight.value = false
+  }
+}
+
+function onDragStart(e: MouseEvent) {
+  isDragging.value = true
+  showHighlight.value = true
+  startY = e.clientY
+  startHeight = panelHeight.value
+  document.addEventListener('mousemove', onDragMove)
+  document.addEventListener('mouseup', onDragEnd)
+  document.body.style.cursor = 'row-resize'
+  document.body.style.userSelect = 'none'
+}
+
+function onDragMove(e: MouseEvent) {
+  if (!isDragging.value) return
+  const delta = startY - e.clientY
+  const newHeight = Math.max(100, Math.min(window.innerHeight * 0.7, startHeight + delta))
+  panelHeight.value = newHeight
+  fitTerminal()
+}
+
+function onDragEnd() {
+  isDragging.value = false
+  showHighlight.value = false
+  document.removeEventListener('mousemove', onDragMove)
+  document.removeEventListener('mouseup', onDragEnd)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+}
+
 onMounted(() => {
   window.addEventListener('resize', () => fitTerminal())
   resizeObserver = new ResizeObserver(() => fitTerminal())
@@ -156,11 +208,21 @@ onMounted(() => {
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   terminal?.dispose()
+  document.removeEventListener('mousemove', onDragMove)
+  document.removeEventListener('mouseup', onDragEnd)
+  if (highlightTimer) clearTimeout(highlightTimer)
 })
 </script>
 
 <template>
-  <div class="console-panel" :class="{ collapsed }">
+  <div class="console-panel" :class="{ collapsed }" :style="{ height: collapsed ? '26px' : panelHeight + 'px' }">
+    <div
+      class="console-drag-handle"
+      :class="{ 'console-drag-handle-active': showHighlight }"
+      @mouseenter="onDragHandleEnter"
+      @mouseleave="onDragHandleLeave"
+      @mousedown.prevent="onDragStart"
+    />
     <div class="console-header">
       <div class="console-header-left">
         <svg class="console-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -196,10 +258,33 @@ onBeforeUnmount(() => {
   border-top: 1px solid rgb(60, 60, 60);
   background: #1e1e1e;
   flex-shrink: 0;
-  height: 200px;
+  position: relative;
 }
 .console-panel.collapsed {
   height: 26px;
+}
+
+.console-drag-handle {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 7px;
+  cursor: row-resize;
+  z-index: 10;
+}
+.console-drag-handle::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: transparent;
+  transition: background 0.1s ease;
+}
+.console-drag-handle-active::after {
+  background: var(--accent);
 }
 
 .console-header {
