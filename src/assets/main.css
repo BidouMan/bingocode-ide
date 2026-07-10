@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+/* 内置 JetBrains Mono 字体 */
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('./fonts/JetBrainsMono-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 @theme {
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 }

@@ -25,13 +25,51 @@ function createDefaultTab(): Tab {
   }
 }
 
+// 从 localStorage 读取保存的模式
+function loadSavedMode(): boolean {
+  try {
+    const saved = localStorage.getItem('bingo-ide-game-mode')
+    return saved === 'true'
+  } catch {
+    return false
+  }
+}
+
+// 保存模式到 localStorage
+function saveMode(isGame: boolean) {
+  try {
+    localStorage.setItem('bingo-ide-game-mode', String(isGame))
+  } catch {}
+}
+
+// 从 localStorage 读取字体缩放
+function loadSavedZoom(): number {
+  try {
+    const saved = localStorage.getItem('bingo-ide-font-zoom')
+    if (saved) {
+      const val = parseInt(saved)
+      if (val >= 50 && val <= 400) return val
+    }
+  } catch {}
+  return 100
+}
+
+// 保存字体缩放到 localStorage
+function saveZoom(zoom: number) {
+  try {
+    localStorage.setItem('bingo-ide-font-zoom', String(zoom))
+  } catch {}
+}
+
 export const useEditorStore = defineStore('editor', () => {
   // ─── 模式 ───
-  const isGameMode = ref(false)
+  const isGameMode = ref(loadSavedMode())
   const activeEditorMode = ref<EditorMode>('code')
   const isRunning = ref(false)
   const resourceTab = ref<ResourceTab>('sprite')
   const renderMode = ref<RenderMode>('smooth')
+  const savedZoom = loadSavedZoom()
+  const editorFontSize = ref(Math.round(16 * savedZoom / 100))
 
   // ─── 游戏模式标签 ───
   const gameTabs = ref<Tab[]>([createDefaultTab()])
@@ -60,10 +98,12 @@ export const useEditorStore = defineStore('editor', () => {
   // ─── 模式切换 ───
   function setGameMode(on: boolean) {
     isGameMode.value = on
+    saveMode(on)
   }
 
   function toggleGameMode() {
     isGameMode.value = !isGameMode.value
+    saveMode(isGameMode.value)
     if (!isGameMode.value) {
       activeEditorMode.value = 'code'
     }
@@ -149,12 +189,35 @@ export const useEditorStore = defineStore('editor', () => {
     renderMode.value = mode
   }
 
+  // ─── 编辑器字体大小 ───
+  const editorFontZoom = ref(savedZoom) // 独立的缩放百分比
+
+  function zoomIn() {
+    editorFontZoom.value = Math.min(400, editorFontZoom.value + 10)
+    editorFontSize.value = Math.round(16 * editorFontZoom.value / 100)
+    saveZoom(editorFontZoom.value)
+  }
+
+  function zoomOut() {
+    editorFontZoom.value = Math.max(50, editorFontZoom.value - 10)
+    editorFontSize.value = Math.round(16 * editorFontZoom.value / 100)
+    saveZoom(editorFontZoom.value)
+  }
+
+  function resetZoom() {
+    editorFontZoom.value = 100
+    editorFontSize.value = 16
+    saveZoom(100)
+  }
+
   return {
     isGameMode,
     activeEditorMode,
     isRunning,
     resourceTab,
     renderMode,
+    editorFontSize,
+    editorFontZoom,
     gameTabs,
     gameActiveTabIndex,
     codeTabs,
@@ -174,5 +237,8 @@ export const useEditorStore = defineStore('editor', () => {
     saveCurrentTab,
     setRunning,
     toggleRun,
+    zoomIn,
+    zoomOut,
+    resetZoom,
   }
 })

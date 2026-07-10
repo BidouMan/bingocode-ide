@@ -43,6 +43,8 @@ import iconRedo from '../../assets/icons/redo.svg'
 import iconSoundIcon from '../../assets/icons/sound_icon.svg'
 import iconCodeCheck from '../../assets/icons/code_check.svg'
 import iconCodeFormat from '../../assets/icons/code_fomat.svg'
+import iconAddOne from '../../assets/icons/add-one.svg'
+import iconReduceOne from '../../assets/icons/reduce-one.svg'
 import { useThemeStore } from '../../stores/theme'
 
 const editorStore = useEditorStore()
@@ -1724,13 +1726,18 @@ function codeDisplayName(name: string) {
               </div>
               <button class="tab-add" @click="editorStore.createTab('未命名.py', '')" title="新建文件">+</button>
             </div>
-            <div class="ide-toolbar">
-              <button class="ide-tool-btn" title="撤销" @click="editorUndo"><img :src="iconUndo" width="18" height="18" /></button>
-              <button class="ide-tool-btn" title="重做" @click="editorRedo"><img :src="iconRedo" width="18" height="18" /></button>
-            </div>
           </div>
           <div class="ide-editor-area">
             <CodeEditor />
+            <!-- 浮动工具栏 -->
+            <div class="ide-float-bar">
+              <button class="ide-float-btn" title="缩小" @click="editorStore.zoomOut()"><img :src="iconReduceOne" width="16" height="16" /></button>
+              <button class="ide-float-btn ide-float-zoom" title="重置缩放" @click="editorStore.resetZoom()">{{ editorStore.editorFontZoom }}%</button>
+              <button class="ide-float-btn" title="放大" @click="editorStore.zoomIn()"><img :src="iconAddOne" width="16" height="16" /></button>
+              <div class="ide-float-divider"></div>
+              <button class="ide-float-btn" title="撤销" @click="editorUndo"><img :src="iconUndo" width="14" height="14" /></button>
+              <button class="ide-float-btn" title="重做" @click="editorRedo"><img :src="iconRedo" width="14" height="14" /></button>
+            </div>
           </div>
           <TerminalPanel v-model:visible="consoleVisible" />
         </div>
@@ -2086,6 +2093,7 @@ function codeDisplayName(name: string) {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 /* ═══ 左侧边栏 ═══ */
@@ -2554,6 +2562,61 @@ function codeDisplayName(name: string) {
 }
 .ide-tool-btn:hover { color: var(--text); background: var(--bg-hover); }
 .ide-tool-btn-active { color: var(--text-secondary); background: var(--danger); }
+
+/* IDE 浮动工具栏 */
+.ide-float-bar {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: rgba(30, 32, 40, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 4px;
+  z-index: 10;
+}
+.ide-float-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 26px;
+  padding: 0 6px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.ide-float-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+.ide-float-btn:active {
+  background: rgba(255, 255, 255, 0.12);
+}
+.ide-float-zoom {
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  min-width: 44px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.ide-float-zoom:hover {
+  color: var(--text);
+}
+.ide-float-divider {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 4px;
+}
 
 /* 代码区 */
 .code-area {
