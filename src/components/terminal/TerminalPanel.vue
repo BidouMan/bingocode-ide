@@ -45,14 +45,21 @@ function commitInputFromField() {
 
 function onInputKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter') {
+    e.preventDefault()
     commitInputFromField()
+    return
   }
-}
-
-function onInputCompositionend() {
-  // IME 输入完成时更新 inputBuffer
-  if (inputRef.value) {
-    inputBuffer = inputRef.value.value
+  if (e.key === 'Backspace') {
+    e.preventDefault()
+    inputBuffer = inputBuffer.slice(0, -1)
+    if (inputRef.value) inputRef.value.value = inputBuffer
+    return
+  }
+  // 用 event.key 直接取字符，绕过 IME 的 Shift 切换问题
+  if (e.key.length === 1 && !e.metaKey && !e.ctrlKey) {
+    e.preventDefault()
+    inputBuffer += e.key
+    if (inputRef.value) inputRef.value.value = inputBuffer
   }
 }
 
@@ -298,7 +305,6 @@ onBeforeUnmount(() => {
         class="console-input"
         placeholder="输入..."
         @keydown="onInputKeydown"
-        @compositionend="onInputCompositionend"
       />
       <button class="console-input-btn" @click="commitInputFromField">↵</button>
     </div>
