@@ -7,6 +7,9 @@ import { allEngineCompletions, dotCompletions, spriteDotDefault, pythonCompletio
 const editorStore = useEditorStore()
 const themeStore = useThemeStore()
 
+const isMac = navigator.platform.toUpperCase().includes('MAC')
+const modKey = isMac ? '⌘' : 'Ctrl'
+
 // ─── 右键菜单 ───
 const ctxMenu = ref({ show: false, x: 0, y: 0 })
 
@@ -632,24 +635,24 @@ onBeforeUnmount(() => {
       @click.stop
     >
       <div class="editor-ctx-item" @click="doUndo">
-        <span>撤销</span><span class="editor-ctx-shortcut">Ctrl+Z</span>
+        <span>撤销</span><span class="editor-ctx-shortcut">{{ modKey }}+Z</span>
       </div>
       <div class="editor-ctx-item" @click="doRedo">
-        <span>重做</span><span class="editor-ctx-shortcut">Ctrl+Shift+Z</span>
+        <span>重做</span><span class="editor-ctx-shortcut">{{ modKey }}+Shift+Z</span>
       </div>
       <div class="editor-ctx-divider" />
       <div class="editor-ctx-item" @click="doCut">
-        <span>剪切</span><span class="editor-ctx-shortcut">Ctrl+X</span>
+        <span>剪切</span><span class="editor-ctx-shortcut">{{ modKey }}+X</span>
       </div>
       <div class="editor-ctx-item" @click="doCopy">
-        <span>复制</span><span class="editor-ctx-shortcut">Ctrl+C</span>
+        <span>复制</span><span class="editor-ctx-shortcut">{{ modKey }}+C</span>
       </div>
       <div class="editor-ctx-item" @click="doPaste">
-        <span>粘贴</span><span class="editor-ctx-shortcut">Ctrl+V</span>
+        <span>粘贴</span><span class="editor-ctx-shortcut">{{ modKey }}+V</span>
       </div>
       <div class="editor-ctx-divider" />
       <div class="editor-ctx-item" @click="doComment">
-        <span>注释/取消注释</span><span class="editor-ctx-shortcut">Ctrl+/</span>
+        <span>注释/取消注释</span><span class="editor-ctx-shortcut">{{ modKey }}+/</span>
       </div>
       <div class="editor-ctx-divider" />
       <div class="editor-ctx-item" @click="doRun">
