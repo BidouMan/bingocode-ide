@@ -1355,7 +1355,7 @@ function codeDisplayName(name: string) {
       <!-- ═══ 游戏模式菜单 ═══ -->
       <template v-if="editorStore.isGameMode">
         <div class="menu-file-wrapper" @mouseleave="closeFileMenu">
-          <button class="menu-btn menu-btn-file" title="项目" @click="toggleFileMenu">
+          <button class="menu-btn menu-btn-file" v-tooltip="'项目'" @click="toggleFileMenu">
             <img :src="iconFile" class="menu-icon" />
             <span>项目</span>
           </button>
@@ -1391,38 +1391,38 @@ function codeDisplayName(name: string) {
       <!-- ═══ 代码模式菜单 ═══ -->
       <template v-else>
         <!-- 新建 -->
-        <button class="menu-btn" @click="ideNewFile" title="新建">
+        <button class="menu-btn" @click="ideNewFile" v-tooltip="'新建'">
           <img :src="iconNewMap" class="menu-icon" />
           <span>新建</span>
         </button>
 
         <!-- 打开 -->
-        <button class="menu-btn" @click="ideOpenFile" title="打开">
+        <button class="menu-btn" @click="ideOpenFile" v-tooltip="'打开'">
           <img :src="iconCodeOpen" class="menu-icon" />
           <span>打开</span>
         </button>
 
         <!-- 保存 -->
-        <button class="menu-btn" @click="ideSaveFile" title="保存">
+        <button class="menu-btn" @click="ideSaveFile" v-tooltip="'保存'">
           <img :src="iconCodeSave" class="menu-icon" />
           <span>保存</span>
         </button>
 
         <!-- 运行/停止 -->
-        <button class="menu-btn" @click="toggleRun" :title="editorStore.isRunning ? '停止' : '运行'">
+        <button class="menu-btn" @click="toggleRun" v-tooltip="editorStore.isRunning ? '停止' : '运行'">
           <img v-if="!editorStore.isRunning" :src="iconCodeRun" class="menu-icon" />
           <img v-else :src="iconCodeStop" class="menu-icon" />
           <span>{{ editorStore.isRunning ? '停止' : '运行' }}</span>
         </button>
 
         <!-- 检查 -->
-        <button class="menu-btn" @click="ideCheckCode" title="检查代码">
+        <button class="menu-btn" @click="ideCheckCode" v-tooltip="'检查代码'">
           <img :src="iconCodeCheck" class="menu-icon" />
           <span>检查</span>
         </button>
 
         <!-- 格式化 -->
-        <button class="menu-btn" @click="ideFormatCode" title="格式化代码">
+        <button class="menu-btn" @click="ideFormatCode" v-tooltip="'格式化代码'">
           <img :src="iconCodeFormat" class="menu-icon" />
           <span>格式化</span>
         </button>
@@ -1514,7 +1514,7 @@ function codeDisplayName(name: string) {
       </div>
 
       <!-- 帮助 (仅图标) -->
-      <button class="menu-btn menu-btn-help" title="帮助" @click="helpVisible = !helpVisible">
+      <button class="menu-btn menu-btn-help" v-tooltip="'帮助'" @click="helpVisible = !helpVisible">
         <img :src="iconHelp" width="24" height="24" />
       </button>
     </div>
@@ -1539,14 +1539,14 @@ function codeDisplayName(name: string) {
         <div v-if="editorStore.isGameMode && editorStore.activeEditorMode !== 'sprite' && editorStore.activeEditorMode !== 'map'" class="editor-page-game">
           <div class="sidebar">
             <div class="sidebar-toolbar">
-              <button class="tool-btn" :class="{ 'tool-btn-active': editorStore.isRunning }" @click="toggleRun" title="运行">
+              <button class="tool-btn" :class="{ 'tool-btn-active': editorStore.isRunning }" @click="toggleRun" v-tooltip="'运行'">
                 <img :src="iconPlay" width="16" height="16" />
               </button>
-              <button class="tool-btn" @click="engine.stop()" title="停止">
+              <button class="tool-btn" @click="engine.stop()" v-tooltip="'停止'">
                 <img :src="iconStop" width="16" height="16" />
               </button>
               <div class="tool-spacer"></div>
-              <button class="tool-btn" @click="switchPage(1)" title="全屏">
+              <button class="tool-btn" @click="switchPage(1)" v-tooltip="'全屏'">
                 <img :src="iconFullscreen" width="20" height="20" />
               </button>
             </div>
@@ -1697,7 +1697,7 @@ function codeDisplayName(name: string) {
                   </template>
                   <button class="tab-close" @click.stop="editorStore.closeTab(index)">×</button>
                 </div>
-                <button class="tab-add" @click="editorStore.createTab('未命名.py', '')" title="新建文件">+</button>
+                <button class="tab-add" @click="editorStore.createTab('未命名.py', '')" v-tooltip="'新建文件'">+</button>
               </div>
             </div>
             <div class="code-area">
@@ -1706,12 +1706,12 @@ function codeDisplayName(name: string) {
                   <CodeEditor />
                   <!-- 浮动工具栏 -->
                   <div class="ide-float-bar">
-                    <button class="ide-float-btn" title="缩小" @click="editorStore.zoomOut()"><img :src="iconReduceOne" width="16" height="16" /></button>
-                    <button class="ide-float-btn ide-float-zoom" title="重置缩放" @click="editorStore.resetZoom()">{{ editorStore.editorFontZoom }}%</button>
-                    <button class="ide-float-btn" title="放大" @click="editorStore.zoomIn()"><img :src="iconAddOne" width="16" height="16" /></button>
+                    <button class="ide-float-btn" v-tooltip="'缩小'" @click="editorStore.zoomOut()"><img :src="iconReduceOne" width="16" height="16" /></button>
+                    <button class="ide-float-btn ide-float-zoom" v-tooltip="'重置缩放'" @click="editorStore.resetZoom()">{{ editorStore.editorFontZoom }}%</button>
+                    <button class="ide-float-btn" v-tooltip="'放大'" @click="editorStore.zoomIn()"><img :src="iconAddOne" width="16" height="16" /></button>
                     <div class="ide-float-divider"></div>
-                    <button class="ide-float-btn" title="撤销" @click="editorUndo"><img :src="iconUndo" width="14" height="14" /></button>
-                    <button class="ide-float-btn" title="重做" @click="editorRedo"><img :src="iconRedo" width="14" height="14" /></button>
+                    <button class="ide-float-btn" v-tooltip="'撤销'" @click="editorUndo"><img :src="iconUndo" width="14" height="14" /></button>
+                    <button class="ide-float-btn" v-tooltip="'重做'" @click="editorRedo"><img :src="iconRedo" width="14" height="14" /></button>
                   </div>
                 </div>
               </div>
@@ -1733,19 +1733,19 @@ function codeDisplayName(name: string) {
                 </template>
                 <button class="tab-close" @click.stop="editorStore.closeTab(index)">×</button>
               </div>
-              <button class="tab-add" @click="editorStore.createTab('未命名.py', '')" title="新建文件">+</button>
+              <button class="tab-add" @click="editorStore.createTab('未命名.py', '')" v-tooltip="'新建文件'">+</button>
             </div>
           </div>
           <div class="ide-editor-area">
             <CodeEditor />
             <!-- 浮动工具栏 -->
             <div class="ide-float-bar">
-              <button class="ide-float-btn" title="缩小" @click="editorStore.zoomOut()"><img :src="iconReduceOne" width="16" height="16" /></button>
-              <button class="ide-float-btn ide-float-zoom" title="重置缩放" @click="editorStore.resetZoom()">{{ editorStore.editorFontZoom }}%</button>
-              <button class="ide-float-btn" title="放大" @click="editorStore.zoomIn()"><img :src="iconAddOne" width="16" height="16" /></button>
+              <button class="ide-float-btn" v-tooltip="'缩小'" @click="editorStore.zoomOut()"><img :src="iconReduceOne" width="16" height="16" /></button>
+              <button class="ide-float-btn ide-float-zoom" v-tooltip="'重置缩放'" @click="editorStore.resetZoom()">{{ editorStore.editorFontZoom }}%</button>
+              <button class="ide-float-btn" v-tooltip="'放大'" @click="editorStore.zoomIn()"><img :src="iconAddOne" width="16" height="16" /></button>
               <div class="ide-float-divider"></div>
-              <button class="ide-float-btn" title="撤销" @click="editorUndo"><img :src="iconUndo" width="14" height="14" /></button>
-              <button class="ide-float-btn" title="重做" @click="editorRedo"><img :src="iconRedo" width="14" height="14" /></button>
+              <button class="ide-float-btn" v-tooltip="'撤销'" @click="editorUndo"><img :src="iconUndo" width="14" height="14" /></button>
+              <button class="ide-float-btn" v-tooltip="'重做'" @click="editorRedo"><img :src="iconRedo" width="14" height="14" /></button>
             </div>
           </div>
           <TerminalPanel v-model:visible="consoleVisible" />
