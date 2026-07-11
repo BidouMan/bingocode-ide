@@ -43,6 +43,40 @@ function commitInputFromField() {
   if (inputRef.value) inputRef.value.value = ''
 }
 
+// 物理键盘码 → 字符映射（绕过 IME 对 Shift 的拦截）
+const KEY_MAP: Record<string, string> = {
+  'Space': ' ',
+  'Minus': '-', 'Equal': '=', 'BracketLeft': '[', 'BracketRight': ']',
+  'Backslash': '\\', 'Semicolon': ';', 'Quote': "'", 'Comma': ',',
+  'Period': '.', 'Slash': '/', 'Backquote': '`', 'IntlBackslash': '\\',
+  'NumpadDivide': '/', 'NumpadMultiply': '*', 'NumpadSubtract': '-',
+  'NumpadAdd': '+', 'NumpadDecimal': '.',
+}
+const SHIFT_KEY_MAP: Record<string, string> = {
+  'Minus': '_', 'Equal': '+', 'BracketLeft': '{', 'BracketRight': '}',
+  'Backslash': '|', 'Semicolon': ':', 'Quote': '"', 'Comma': '<',
+  'Period': '>', 'Slash': '?', 'Backquote': '~',
+}
+const DIGIT_SHIFT = ['!', '@', '#', '$', '%', '^', '&', '*', '(', ')']  // Shift+0 到 Shift+9
+
+function keydownToChar(e: KeyboardEvent): string | null {
+  if (e.key === 'Enter' || e.key === 'Backspace') return null
+  if (e.metaKey || e.ctrlKey || e.altKey) return null
+  // 数字小键盘特殊处理
+  if (e.location === KeyboardEvent.DOM_KEY_LOCATION_NUMPAD) {
+    return KEY_MAP[e.code] || null
+  }
+  // 用 e.code（物理按键位置，IME 无法篡改）映射字符
+  const match = e.code.match(/^Digit(\d)$/)
+  if (match) {
+    const digit = parseInt(match[1])
+    return e.shiftKey ? DIGIT_SHIFT[digit] : match[1]
+  }
+  // 非数字键
+  if (e.shiftKey) return SHIFT_KEY_MAP[e.code] || (e.key.length === 1 ? e.key : null)
+  return KEY_MAP[e.code] || (e.key.length === 1 ? e.key : null)
+}
+
 function onInputKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter') {
     e.preventDefault()
@@ -55,10 +89,10 @@ function onInputKeydown(e: KeyboardEvent) {
     if (inputRef.value) inputRef.value.value = inputBuffer
     return
   }
-  // 用 event.key 直接取字符，绕过 IME 的 Shift 切换问题
-  if (e.key.length === 1 && !e.metaKey && !e.ctrlKey) {
+  const char = keydownToChar(e)
+  if (char !== null) {
     e.preventDefault()
-    inputBuffer += e.key
+    inputBuffer += char
     if (inputRef.value) inputRef.value.value = inputBuffer
   }
 }
@@ -432,6 +466,8 @@ onBeforeUnmount(() => {
   font-size: 13px;
   font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
   outline: none;
+  line-height: 28px;
+  vertical-align: middle;
 }
 .console-input:focus {
   border-color: var(--accent, #5BFB84);
