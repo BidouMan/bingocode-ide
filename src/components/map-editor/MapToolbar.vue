@@ -65,13 +65,13 @@ const imageTools: { id: MapTool; icon: string; label: string }[] = [
 
 <template>
   <div class="map-toolbar">
-    <button class="toolbar-btn" title="新建地图" @click="emit('new-map')">
+    <button class="toolbar-btn" v-tooltip="'新建地图'" @click="emit('new-map')">
       <img :src="iconNewMap" class="toolbar-icon" />
     </button>
-    <button class="toolbar-btn" title="导入 .bgm" @click="emit('import-map')">
+    <button class="toolbar-btn" v-tooltip="'导入 .bgm'" @click="emit('import-map')">
       <img :src="iconImportMap" class="toolbar-icon" />
     </button>
-    <button class="toolbar-btn" title="导出 .bgm" @click="emit('export-map')">
+    <button class="toolbar-btn" v-tooltip="'导出 .bgm'" @click="emit('export-map')">
       <img :src="iconExportMap" class="toolbar-icon" />
     </button>
 
@@ -85,14 +85,14 @@ const imageTools: { id: MapTool; icon: string; label: string }[] = [
         class="toolbar-btn"
         :class="{ 'toolbar-btn-active': mapStore.currentTool === tool.id }"
         :disabled="disabled"
-        :title="tool.label"
+        v-tooltip="tool.label"
         @click="mapStore.setTool(tool.id)"
       >
         <img :src="tool.icon" class="toolbar-icon" />
       </button>
       <button
         class="toolbar-btn"
-        title="删除选中图像"
+        v-tooltip="'删除选中图像'"
         :disabled="disabled"
         @click="emit('delete-image')"
       >
@@ -107,7 +107,7 @@ const imageTools: { id: MapTool; icon: string; label: string }[] = [
         class="toolbar-btn"
         :class="{ 'toolbar-btn-active': mapStore.currentTool === tool.id }"
         :disabled="disabled"
-        :title="tool.label"
+        v-tooltip="tool.label"
         @click="mapStore.setTool(tool.id)"
       >
         <img :src="tool.icon" class="toolbar-icon" />
@@ -119,7 +119,7 @@ const imageTools: { id: MapTool; icon: string; label: string }[] = [
     <button
       class="toolbar-btn"
       :class="{ 'toolbar-btn-active': mapStore.showGrid }"
-      title="显示网格"
+      v-tooltip="'显示网格'"
       @click="mapStore.toggleGrid()"
     >
       <img :src="iconGrid" class="toolbar-icon" />
