@@ -5,6 +5,7 @@ import os
 import random
 import math
 import threading
+import queue
 from PIL import Image
 from models.map_model import MapModel
 
@@ -25,6 +26,7 @@ _PAUSED = False
 _STOPPED = False
 _SHOW_ALL_COLLISION = False
 _PENDING_RESPONSES = []  # 监听线程→主线程的待发响应
+_USER_INPUT_QUEUE = queue.Queue()  # 用户 input() 输入队列
 _PERF_STATS = {"last_time": time.time(), "frame_count": 0}
 _GROUPS = {}
 _MOUSE_STATE = {"down": False, "last_down": False, "x": 0, "y": 0}  # 用字典包装鼠标状态
@@ -1527,12 +1529,28 @@ def _input_sync_listener():
                 _SHOW_ALL_COLLISION = False
                 for sprite in _SPRITES.values():
                     sprite._show_hitbox = False
+            else:
+                # 不是控制命令 → 投喂给用户代码的 input()
+                _USER_INPUT_QUEUE.put(clean_line)
         except:
             time.sleep(0.01)
 
 
 # 确保线程启动 (代码末尾)
 threading.Thread(target=_input_sync_listener, daemon=True).start()
+
+
+def _custom_input(prompt=""):
+    """替代内置 input()，从 _USER_INPUT_QUEUE 读取，不跟 stdin 监听线程抢数据。"""
+    if prompt:
+        # 把提示文字输出到 stdout，前端控制台会显示
+        print(prompt, end="", flush=True)
+    # 通知前端弹出输入框
+    print("__BINGO_WAITING_INPUT__", flush=True)
+    try:
+        return _USER_INPUT_QUEUE.get(timeout=300)
+    except queue.Empty:
+        return ""
 
 
 def mouse_down():
@@ -2495,6 +2513,7 @@ def start_game(project_dir=None, target_file=None):
             "__name__": "__main__",
             "Sprite": Sprite,
             "Timer": Timer,
+            "input": _custom_input,
             "key_down": key_down,
             "key_pressed": key_pressed,
             "mouse": mouse,
