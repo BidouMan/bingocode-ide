@@ -36,6 +36,8 @@ src-tauri/Frameworks/
 engine/venv/
 engine/__pycache__/
 engine/**/*.pyc
+engine/tests/
+engine/test_projects/
 
 # Legacy old project (will be removed after refactor)
 legacy/
@@ -43,6 +45,7 @@ legacy/
 # MiMoCode internal
 .mimocode/
 !.mimocode/memory/
+sync-memory.sh
 
 # Tauri generated
 src-tauri/gen/

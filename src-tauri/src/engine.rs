@@ -90,8 +90,33 @@ pub fn run_script(
 
     let app_finish = app.clone();
     std::thread::spawn(move || {
+        #[cfg(unix)]
         unsafe {
             libc::waitpid(pid as i32, std::ptr::null_mut(), 0);
+        }
+        #[cfg(windows)]
+        {
+            let pid_str = pid.to_string();
+            loop {
+                let alive = std::process::Command::new("tasklist")
+                    .args(["/FI", &format!("PID eq {}", pid_str), "/NH"])
+                    .output()
+                    .ok()
+                    .and_then(|o| {
+                        let s = String::from_utf8_lossy(&o.stdout);
+                        // tasklist returns "INFO: No tasks running" when process is gone
+                        if s.contains("No tasks") || s.contains("ERROR") {
+                            Some(false)
+                        } else {
+                            Some(true)
+                        }
+                    })
+                    .unwrap_or(false);
+                if !alive {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
         }
         let _ = app_finish.emit_to("main", "engine:finished", ());
     });
@@ -221,8 +246,32 @@ pub fn run_script_file(
 
     let app_finish = app.clone();
     std::thread::spawn(move || {
+        #[cfg(unix)]
         unsafe {
             libc::waitpid(pid as i32, std::ptr::null_mut(), 0);
+        }
+        #[cfg(windows)]
+        {
+            let pid_str = pid.to_string();
+            loop {
+                let alive = std::process::Command::new("tasklist")
+                    .args(["/FI", &format!("PID eq {}", pid_str), "/NH"])
+                    .output()
+                    .ok()
+                    .and_then(|o| {
+                        let s = String::from_utf8_lossy(&o.stdout);
+                        if s.contains("No tasks") || s.contains("ERROR") {
+                            Some(false)
+                        } else {
+                            Some(true)
+                        }
+                    })
+                    .unwrap_or(false);
+                if !alive {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
         }
         let _ = app_finish.emit_to("main", "engine:finished", ());
     });
