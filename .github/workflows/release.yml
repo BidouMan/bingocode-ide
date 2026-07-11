@@ -4,6 +4,9 @@ on:
     tags:
       - 'v*'  # 推送 v0.1.0 等标签时触发
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
