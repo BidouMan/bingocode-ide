@@ -1542,10 +1542,9 @@ threading.Thread(target=_input_sync_listener, daemon=True).start()
 
 def _custom_input(prompt=""):
     """替代内置 input()，从 _USER_INPUT_QUEUE 读取，不跟 stdin 监听线程抢数据。"""
+    # 提示文字加换行，让 Rust read_line 能发送到前端
     if prompt:
-        # 把提示文字输出到 stdout，前端控制台会显示
-        print(prompt, end="", flush=True)
-    # 通知前端弹出输入框
+        print(prompt, flush=True)
     print("__BINGO_WAITING_INPUT__", flush=True)
     try:
         return _USER_INPUT_QUEUE.get(timeout=300)

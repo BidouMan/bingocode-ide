@@ -366,11 +366,18 @@ export function useEngine() {
         })
       } else {
         // ═══ 代码模式：直接运行 Python 脚本 ═══
-        // 代码模式是独立的 Python IDE，不通过游戏引擎
-        // 将当前文件写入临时脚本并异步运行
+        // 覆盖 input() 使提示文字带换行符，解决 Rust read_line 等不到 \n 的问题
+        const patchedCode = `import sys as _sys
+def _input(prompt=""):
+    _sys.stdout.write(prompt + "\\n")
+    _sys.stdout.flush()
+    return _sys.stdin.readline().rstrip("\\n")
+input = _input
+` + codeToRun
+
         const scriptPath = await invoke<string>('save_temp_script', {
           projectDir,
-          content: codeToRun,
+          content: patchedCode,
         })
 
         await invoke('run_script_file', {
