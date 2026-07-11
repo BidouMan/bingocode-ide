@@ -141,6 +141,11 @@ onMounted(async () => {
   await projectStore.initProject()
 })
 
+// 代码编辑器右键菜单事件
+window.addEventListener('editor-run', () => { toggleRun() })
+window.addEventListener('editor-check', () => { ideCheckCode() })
+window.addEventListener('editor-format', () => { ideFormatCode() })
+
 // 自动选中第一个资源
 function autoSelectFirst() {
   const tab = editorStore.resourceTab

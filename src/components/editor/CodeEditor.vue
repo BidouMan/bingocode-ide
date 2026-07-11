@@ -2,14 +2,122 @@
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useEditorStore } from '../../stores/editor'
 import { useThemeStore } from '../../stores/theme'
+import { allEngineCompletions, dotCompletions, spriteDotDefault, pythonCompletions, pythonDotCompletions } from './engine-completions'
 
 const editorStore = useEditorStore()
 const themeStore = useThemeStore()
+
+// ─── 右键菜单 ───
+const ctxMenu = ref({ show: false, x: 0, y: 0 })
+
+function onContextMenu(e: MouseEvent) {
+  e.preventDefault()
+  if (!editor) return
+  editor.focus()
+  // 边界检测：防止菜单超出屏幕
+  const menuW = 200
+  const menuH = 280
+  let x = e.clientX
+  let y = e.clientY
+  if (x + menuW > window.innerWidth) x = window.innerWidth - menuW
+  if (y + menuH > window.innerHeight) y = window.innerHeight - menuH
+  ctxMenu.value = { show: true, x, y }
+}
+
+function closeCtxMenu() {
+  ctxMenu.value.show = false
+}
+
+// ─── 菜单动作 ───
+function doUndo() { closeCtxMenu(); editor?.trigger('contextMenu', 'undo') }
+function doRedo() { closeCtxMenu(); editor?.trigger('contextMenu', 'redo') }
+function doCut() { closeCtxMenu(); document.execCommand('cut') }
+function doCopy() { closeCtxMenu(); document.execCommand('copy') }
+function doPaste() {
+  closeCtxMenu()
+  navigator.clipboard.readText().then(text => {
+    if (text && editor) {
+      const selection = editor.getSelection()
+      if (selection) {
+        editor.executeEdits('contextMenu', [{
+          range: selection,
+          text,
+          forceMoveMarkers: true,
+        }])
+      }
+    }
+  }).catch(() => {})
+}
+
+function doComment() {
+  closeCtxMenu()
+  if (!editor || !monaco) return
+  const model = editor.getModel()
+  if (!model) return
+  const selections = editor.getSelections()
+  if (!selections) return
+  const edits: any[] = []
+  let shouldComment = false
+  for (const sel of selections) {
+    const startLine = sel.startLineNumber
+    const endLine = sel.endLineNumber
+    for (let i = startLine; i <= endLine; i++) {
+      const lineContent = model.getLineContent(i)
+      if (lineContent.trimStart().startsWith('#')) {
+        shouldComment = false
+        break
+      } else if (lineContent.trim().length > 0) {
+        shouldComment = true
+      }
+    }
+    if (shouldComment) break
+  }
+  for (const sel of selections) {
+    for (let i = sel.startLineNumber; i <= sel.endLineNumber; i++) {
+      const lineContent = model.getLineContent(i)
+      if (shouldComment) {
+        edits.push({
+          range: new monaco.Range(i, 1, i, 1),
+          text: '# ',
+          forceMoveMarkers: true,
+        })
+      } else if (lineContent.trimStart().startsWith('#')) {
+        const hashIdx = lineContent.indexOf('#')
+        // 移除 # 和后面的空格（如果有）
+        const endCol = (lineContent.charAt(hashIdx + 1) === ' ') ? hashIdx + 3 : hashIdx + 2
+        edits.push({
+          range: new monaco.Range(i, hashIdx + 1, i, endCol),
+          text: '',
+          forceMoveMarkers: true,
+        })
+      }
+    }
+  }
+  if (edits.length > 0) {
+    editor.executeEdits('contextMenu', edits)
+  }
+}
+
+function doRun() {
+  closeCtxMenu()
+  window.dispatchEvent(new CustomEvent('editor-run'))
+}
+
+function doFormat() {
+  closeCtxMenu()
+  window.dispatchEvent(new CustomEvent('editor-format'))
+}
+
+function doCheck() {
+  closeCtxMenu()
+  window.dispatchEvent(new CustomEvent('editor-check'))
+}
 const containerRef = ref<HTMLDivElement>()
 let editor: any = null
 let monaco: any = null
 let ignoreChange = false
 let wheelHandler: ((e: WheelEvent) => void) | null = null
+let ctxMenuHandler: ((e: Event) => void) | null = null
 const tabStates = new Map<string, { viewState: any; content: string }>()
 
 function updateLineNumberWidth() {
@@ -162,6 +270,7 @@ async function initMonaco() {
   m.languages.setMonarchTokensProvider('python', {
     keywords: ['def','class','return','if','elif','else','for','while','import','from','as','try','except','finally','with','yield','lambda','pass','break','continue','raise','and','or','not','in','is','global','nonlocal','del','assert'],
     builtin: ['print','len','range','int','str','float','list','dict','tuple','set','type','input','open','True','False','None','self','cls'],
+    engine: ['Sprite','Timer','run','key_down','key_pressed','wait','broadcast','receive','pause','resume','is_paused','stop','show_fps','mouse_down','mouse_pressed','mouse','load_map','follow','play_sound','show_collision','random_int','random_float','draw_text','stop_sound','shake','start_game','register_generator','unregister_generator','GameStop','stop_game'],
     tokenizer: {
       root: [
         [/"""/, 'string', '@multiString'],
@@ -175,6 +284,7 @@ async function initMonaco() {
         [/[a-zA-Z_]\w*/, {
           cases: {
             '@keywords': 'keyword',
+            '@engine': 'type',
             '@builtin': 'type',
             '@default': 'identifier',
           },
@@ -246,8 +356,73 @@ async function initMonaco() {
     overviewRulerBorder: false,
     roundedSelection: true,
     selectOnLineNumbers: true,
-    suggest: { showUnused: false },
+    suggest: {
+      showMethods: true,
+      showFunctions: true,
+      showConstructors: true,
+      showFields: true,
+      showVariables: true,
+      showClasses: true,
+      showModules: true,
+      showKeywords: true,
+      showWords: true,
+      showSnippets: false,
+      showConstants: true,
+    },
     parameterHints: { enabled: false },
+    contextmenu: false,
+  })
+
+  // 注册智能补全（游戏模式 = 引擎 API + Python 标准库，代码模式 = Python 标准库）
+  m.languages.registerCompletionItemProvider('python', {
+    triggerCharacters: ['.', ' '],
+    provideCompletionItems(model, position) {
+      const textUntilPosition = model.getValueInRange({
+        startLineNumber: position.lineNumber,
+        startColumn: 1,
+        endLineNumber: position.lineNumber,
+        endColumn: position.column,
+      })
+
+      const wordInfo = model.getWordUntilPosition(position)
+      const range = {
+        startLineNumber: position.lineNumber,
+        endLineNumber: position.lineNumber,
+        startColumn: wordInfo.startColumn,
+        endColumn: wordInfo.endColumn,
+      }
+
+      // 点号后触发：根据模式过滤对应类的方法/属性
+      const dotMatch = textUntilPosition.match(/(\w+)\.\s*$/)
+      if (dotMatch) {
+        const varName = dotMatch[1].toLowerCase()
+        if (editorStore.isGameMode) {
+          // 游戏模式：优先匹配已知变量名，否则默认显示 Sprite 方法
+          const methods = dotCompletions[varName] || spriteDotDefault
+          return { suggestions: methods.map(item => ({ ...item, range })) }
+        } else {
+          // 代码模式：匹配 Python 类型方法
+          const methods = pythonDotCompletions[varName]
+          if (methods) {
+            return { suggestions: methods.map(item => ({ ...item, range })) }
+          }
+        }
+      }
+
+      // 普通触发：返回对应模式的补全项
+      if (editorStore.isGameMode) {
+        // 游戏模式：引擎 API + Python 标准库（去重）
+        const seen = new Set<string>()
+        const merged = [...pythonCompletions, ...allEngineCompletions].filter(item => {
+          if (seen.has(item.label)) return false
+          seen.add(item.label)
+          return true
+        })
+        return { suggestions: merged.map(item => ({ ...item, range })) }
+      } else {
+        return { suggestions: pythonCompletions.map(item => ({ ...item, range })) }
+      }
+    },
   })
 
   nextTick(() => {
@@ -256,6 +431,18 @@ async function initMonaco() {
       editor.focus()
     }
   })
+
+  // 在 window 捕获阶段监听右键，确保不被 Monaco 拦截
+  ctxMenuHandler = (e: Event) => {
+    const me = e as MouseEvent
+    const editorDom = editor?.getDomNode()
+    if (editorDom && editorDom.contains(me.target as Node)) {
+      me.preventDefault()
+      me.stopPropagation()
+      onContextMenu(me)
+    }
+  }
+  window.addEventListener('contextmenu', ctxMenuHandler, true)
 
   // IME 中文输入法处理
   // 抖动根因：组合期间 textarea 宽度变化 (1→59px) 触发容器重排
@@ -385,6 +572,8 @@ onMounted(() => {
   window.addEventListener('editor-undo', handleUndo)
   window.addEventListener('editor-redo', handleRedo)
   window.addEventListener('editor-refresh-content', handleRefreshContent)
+  window.addEventListener('click', closeCtxMenu)
+  window.addEventListener('contextmenu', closeCtxMenu)
 })
 
 function handleUndo() {
@@ -412,11 +601,21 @@ onBeforeUnmount(() => {
   window.removeEventListener('editor-undo', handleUndo)
   window.removeEventListener('editor-redo', handleRedo)
   window.removeEventListener('editor-refresh-content', handleRefreshContent)
+  window.removeEventListener('click', closeCtxMenu)
+  window.removeEventListener('contextmenu', closeCtxMenu)
+  if (ctxMenuHandler) {
+    window.removeEventListener('contextmenu', ctxMenuHandler, true)
+    ctxMenuHandler = null
+  }
   if (wheelHandler) {
     window.removeEventListener('wheel', wheelHandler, { capture: true } as any)
     wheelHandler = null
   }
   if (editor) {
+    const editorDom = editor.getDomNode()
+    if (editorDom) {
+      editorDom.removeEventListener('contextmenu', onContextMenu)
+    }
     editor.dispose()
     editor = null
   }
@@ -425,6 +624,45 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="containerRef" class="code-editor-container" />
+  <Teleport to="body">
+    <div
+      v-if="ctxMenu.show"
+      class="editor-ctx-menu"
+      :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
+      @click.stop
+    >
+      <div class="editor-ctx-item" @click="doUndo">
+        <span>撤销</span><span class="editor-ctx-shortcut">Ctrl+Z</span>
+      </div>
+      <div class="editor-ctx-item" @click="doRedo">
+        <span>重做</span><span class="editor-ctx-shortcut">Ctrl+Shift+Z</span>
+      </div>
+      <div class="editor-ctx-divider" />
+      <div class="editor-ctx-item" @click="doCut">
+        <span>剪切</span><span class="editor-ctx-shortcut">Ctrl+X</span>
+      </div>
+      <div class="editor-ctx-item" @click="doCopy">
+        <span>复制</span><span class="editor-ctx-shortcut">Ctrl+C</span>
+      </div>
+      <div class="editor-ctx-item" @click="doPaste">
+        <span>粘贴</span><span class="editor-ctx-shortcut">Ctrl+V</span>
+      </div>
+      <div class="editor-ctx-divider" />
+      <div class="editor-ctx-item" @click="doComment">
+        <span>注释/取消注释</span><span class="editor-ctx-shortcut">Ctrl+/</span>
+      </div>
+      <div class="editor-ctx-divider" />
+      <div class="editor-ctx-item" @click="doRun">
+        <span>运行</span><span class="editor-ctx-shortcut">F5</span>
+      </div>
+      <div class="editor-ctx-item" @click="doFormat">
+        <span>格式化代码</span><span class="editor-ctx-shortcut">Shift+Alt+F</span>
+      </div>
+      <div class="editor-ctx-item" @click="doCheck">
+        <span>检查语法</span><span class="editor-ctx-shortcut"></span>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -439,5 +677,40 @@ onBeforeUnmount(() => {
 }
 .code-editor-container :deep(.monaco-editor .margin) {
   padding-right: 4px;
+}
+
+.editor-ctx-menu {
+  position: fixed;
+  background: #1a1b26;
+  border: 1px solid #3b4261;
+  border-radius: 6px;
+  padding: 4px 0;
+  z-index: 10000;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  min-width: 180px;
+}
+.editor-ctx-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 14px;
+  font-size: 13px;
+  color: #a9b1d6;
+  cursor: pointer;
+  user-select: none;
+}
+.editor-ctx-item:hover {
+  background: #24283b;
+  color: #c0caf5;
+}
+.editor-ctx-shortcut {
+  font-size: 11px;
+  color: #565f89;
+  margin-left: 24px;
+}
+.editor-ctx-divider {
+  height: 1px;
+  background: #3b4261;
+  margin: 4px 8px;
 }
 </style>
