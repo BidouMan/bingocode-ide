@@ -31,10 +31,79 @@ let inputBuffer = ''
 // 符号按钮列表（IME 键盘按不了的符号，鼠标点击插入）
 const SYMBOL_BUTTONS = ['+', '-', '*', '/', '(', ')', '!', '@', '#', '$', '%', '^', '&', '=', ':', ';', '"', "'", ',', '.', '?', '<', '>', '[', ']', '{', '}', '|', '\\', '~', '`']
 
+// Shift+数字的符号映射（US 键盘布局）
+const DIGIT_SHIFT_MAP = ['!', '@', '#', '$', '%', '^', '&', '*', '(', ')']
+
 function insertSymbol(sym: string) {
   if (!terminal || !editorStore.isRunning) return
   inputBuffer += sym
   terminal.write(sym)
+}
+
+// 用物理按键码 + shiftKey 确定字符（IME 无法篡改，在 IME 处理前截获）
+function keydownToChar(e: KeyboardEvent): string | null {
+  if (e.key === 'Enter' || e.key === 'Backspace') return null
+  if (e.metaKey || e.ctrlKey || e.altKey) return null
+  // 数字键：用 shiftKey 物理状态判断 Shift+数字
+  const digitMatch = e.code.match(/^Digit(\d)$/)
+  if (digitMatch) {
+    const digit = parseInt(digitMatch[1])
+    return e.shiftKey ? DIGIT_SHIFT_MAP[digit] : digitMatch[1]
+  }
+  // 小键盘
+  if (e.code === 'NumpadMultiply') return '*'
+  if (e.code === 'NumpadAdd') return '+'
+  if (e.code === 'NumpadSubtract') return '-'
+  if (e.code === 'NumpadDivide') return '/'
+  if (e.code === 'NumpadDecimal') return '.'
+  // 符号键
+  const symMap: Record<string, [string, string]> = {
+    'Minus': ['-', '_'], 'Equal': ['=', '+'],
+    'BracketLeft': ['[', '{'], 'BracketRight': [']', '}'],
+    'Backslash': ['\\', '|'], 'Semicolon': [';', ':'],
+    'Quote': ["'", '"'], 'Comma': [',', '<'],
+    'Period': ['.', '>'], 'Slash': ['/', '?'],
+    'Backquote': ['`', '~'], 'Space': [' ', ' '],
+  }
+  const pair = symMap[e.code]
+  if (pair) return e.shiftKey ? pair[1] : pair[0]
+  // 普通键：直接取 event.key（仅在 IME 未拦截时有效）
+  if (e.key.length === 1) return e.key
+  return null
+}
+
+function commitInput() {
+  if (!inputBuffer) return
+  terminalStore.consumeInput()
+  terminal?.writeln(inputBuffer)
+  engine.sendInput(inputBuffer)
+  inputBuffer = ''
+}
+
+// keydown 在 IME 之前触发，用 preventDefault 阻止 IME 截获 Shift+组合键
+function onTerminalKeydown(e: KeyboardEvent) {
+  if (!editorStore.isRunning || !terminalStore.waitingForInput) return
+
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    commitInput()
+    return
+  }
+  if (e.key === 'Backspace') {
+    e.preventDefault()
+    if (inputBuffer.length > 0) {
+      inputBuffer = inputBuffer.slice(0, -1)
+      terminal!.write('\b \b')
+    }
+    return
+  }
+
+  const char = keydownToChar(e)
+  if (char !== null) {
+    e.preventDefault()  // 阻止字符进入 xterm textarea → 防止 IME 拦截
+    inputBuffer += char
+    terminal!.write(char)
+  }
 }
 
 function createTerminal() {
@@ -60,8 +129,14 @@ function createTerminal() {
   terminal.open(containerRef.value)
   terminalStore.bindTerminal(terminal)
 
+  // 在 IME 处理前截获 keydown，e.preventDefault() 阻止 IME 拦截 Shift+组合键
+  containerRef.value.addEventListener('keydown', onTerminalKeydown)
+
   terminal.onData((data: string) => {
     if (!editorStore.isRunning) return
+
+    // waitingForInput 时由 keydown 处理，onData 不再接收（被 preventDefault 了）
+    if (terminalStore.waitingForInput) return
 
     if (data === '\r') {
       terminalStore.consumeInput()
@@ -216,6 +291,9 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
+  if (containerRef.value) {
+    containerRef.value.removeEventListener('keydown', onTerminalKeydown)
+  }
   terminal?.dispose()
   document.removeEventListener('mousemove', onDragMove)
   document.removeEventListener('mouseup', onDragEnd)
