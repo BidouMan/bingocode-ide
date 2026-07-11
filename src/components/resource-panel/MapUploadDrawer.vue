@@ -35,13 +35,13 @@ function onAction(action: string) {
   <div class="upload-drawer" @mouseenter="onMouseEnter" @mouseleave="onMouseLeave">
     <transition name="slide-up">
       <div v-show="menuVisible" class="drawer-menu">
-        <button class="drawer-btn" @click="onAction('import')" title="从文件导入">
+        <button class="drawer-btn" @click="onAction('import')" v-tooltip="'从文件导入'">
           <img :src="iconFileUpload" class="drawer-icon" />
         </button>
-        <button class="drawer-btn" @click="onAction('create')" title="创建地图">
+        <button class="drawer-btn" @click="onAction('create')" v-tooltip="'创建地图'">
           <img :src="iconEdit" class="drawer-icon" />
         </button>
-        <button class="drawer-btn" @click="onAction('library')" title="选择库文件">
+        <button class="drawer-btn" @click="onAction('library')" v-tooltip="'选择库文件'">
           <img :src="iconSelectSprite" class="drawer-icon" />
         </button>
       </div>
