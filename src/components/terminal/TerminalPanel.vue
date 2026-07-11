@@ -22,93 +22,20 @@ const editorStore = useEditorStore()
 const themeStore = useThemeStore()
 const engine = useEngine()
 const containerRef = ref<HTMLDivElement>()
-const inputRef = ref<HTMLInputElement>()
 let terminal: Terminal | null = null
 let fitAddon: FitAddon | null = null
 const MAX_LINES = 5000
 const collapsed = ref(true)
 let inputBuffer = ''
 
-function commitInput() {
-  if (!inputBuffer) return
-  terminalStore.consumeInput()
-  terminal?.writeln(inputBuffer)
-  engine.sendInput(inputBuffer)
-  inputBuffer = ''
-}
+// 符号按钮列表（IME 键盘按不了的符号，鼠标点击插入）
+const SYMBOL_BUTTONS = ['+', '-', '*', '/', '(', ')', '!', '@', '#', '$', '%', '^', '&', '=', ':', ';', '"', "'", ',', '.', '?', '<', '>', '[', ']', '{', '}', '|', '\\', '~', '`']
 
-function commitInputFromField() {
-  inputBuffer = inputRef.value?.value || ''
-  commitInput()
-  if (inputRef.value) inputRef.value.value = ''
+function insertSymbol(sym: string) {
+  if (!terminal || !editorStore.isRunning) return
+  inputBuffer += sym
+  terminal.write(sym)
 }
-
-// 物理键盘码 → 字符映射（绕过 IME 对 Shift 的拦截）
-const KEY_MAP: Record<string, string> = {
-  'Space': ' ',
-  'Minus': '-', 'Equal': '=', 'BracketLeft': '[', 'BracketRight': ']',
-  'Backslash': '\\', 'Semicolon': ';', 'Quote': "'", 'Comma': ',',
-  'Period': '.', 'Slash': '/', 'Backquote': '`', 'IntlBackslash': '\\',
-  'NumpadDivide': '/', 'NumpadMultiply': '*', 'NumpadSubtract': '-',
-  'NumpadAdd': '+', 'NumpadDecimal': '.',
-}
-const SHIFT_KEY_MAP: Record<string, string> = {
-  'Minus': '_', 'Equal': '+', 'BracketLeft': '{', 'BracketRight': '}',
-  'Backslash': '|', 'Semicolon': ':', 'Quote': '"', 'Comma': '<',
-  'Period': '>', 'Slash': '?', 'Backquote': '~',
-}
-const DIGIT_SHIFT = ['!', '@', '#', '$', '%', '^', '&', '*', '(', ')']  // Shift+0 到 Shift+9
-
-function keydownToChar(e: KeyboardEvent): string | null {
-  if (e.key === 'Enter' || e.key === 'Backspace') return null
-  if (e.metaKey || e.ctrlKey || e.altKey) return null
-  // 数字小键盘特殊处理
-  if (e.location === KeyboardEvent.DOM_KEY_LOCATION_NUMPAD) {
-    return KEY_MAP[e.code] || null
-  }
-  // 用 e.code（物理按键位置，IME 无法篡改）映射字符
-  const match = e.code.match(/^Digit(\d)$/)
-  if (match) {
-    const digit = parseInt(match[1])
-    return e.shiftKey ? DIGIT_SHIFT[digit] : match[1]
-  }
-  // 非数字键
-  if (e.shiftKey) return SHIFT_KEY_MAP[e.code] || (e.key.length === 1 ? e.key : null)
-  return KEY_MAP[e.code] || (e.key.length === 1 ? e.key : null)
-}
-
-function onInputKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter') {
-    e.preventDefault()
-    commitInputFromField()
-    return
-  }
-  if (e.key === 'Backspace') {
-    e.preventDefault()
-    inputBuffer = inputBuffer.slice(0, -1)
-    if (inputRef.value) inputRef.value.value = inputBuffer
-    return
-  }
-  const char = keydownToChar(e)
-  if (char !== null) {
-    e.preventDefault()
-    inputBuffer += char
-    if (inputRef.value) inputRef.value.value = inputBuffer
-  }
-}
-
-watch(
-  () => terminalStore.waitingForInput,
-  (waiting) => {
-    if (waiting && editorStore.isRunning) {
-      nextTick(() => {
-        inputRef.value?.focus()
-        // 失焦 terminal，防止 onData 抢输入
-        terminal?.blur()
-      })
-    }
-  }
-)
 
 function createTerminal() {
   if (!containerRef.value || terminal) return
@@ -135,9 +62,6 @@ function createTerminal() {
 
   terminal.onData((data: string) => {
     if (!editorStore.isRunning) return
-
-    // 有原生输入框时，不通过 terminal 捕获
-    if (terminalStore.waitingForInput) return
 
     if (data === '\r') {
       terminalStore.consumeInput()
@@ -333,14 +257,14 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-show="!collapsed" ref="containerRef" class="console-body" @mousedown="onBodyClick" />
-    <div v-show="!collapsed && terminalStore.waitingForInput" class="console-input-line">
-      <input
-        ref="inputRef"
-        class="console-input"
-        placeholder="输入..."
-        @keydown="onInputKeydown"
-      />
-      <button class="console-input-btn" @click="commitInputFromField">↵</button>
+    <!-- 符号按钮栏：IME 按不了的符号用鼠标点 -->
+    <div v-show="!collapsed && terminalStore.waitingForInput" class="symbol-bar">
+      <button
+        v-for="sym in SYMBOL_BUTTONS"
+        :key="sym"
+        class="symbol-btn"
+        @mousedown.prevent="insertSymbol(sym)"
+      >{{ sym }}</button>
     </div>
   </div>
 </template>
@@ -447,45 +371,34 @@ onBeforeUnmount(() => {
   background: #1e1e1e !important;
 }
 
-.console-input-line {
+.symbol-bar {
   display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 4px 6px;
   background: #252526;
   border-top: 1px solid rgb(60, 60, 60);
+  max-height: 60px;
+  overflow-y: auto;
 }
-.console-input {
-  flex: 1;
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid rgb(60, 60, 60);
-  border-radius: 3px;
-  background: #1e1e1e;
-  color: #d4d4d4;
-  font-size: 13px;
-  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
-  outline: none;
-  line-height: 28px;
-  vertical-align: middle;
-}
-.console-input:focus {
-  border-color: var(--accent, #5BFB84);
-}
-.console-input-btn {
-  width: 28px;
-  height: 28px;
-  border: 1px solid rgb(60, 60, 60);
+.symbol-btn {
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgb(70, 70, 70);
   border-radius: 3px;
   background: #2d2d2d;
   color: #d4d4d4;
+  font-size: 12px;
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
   cursor: pointer;
-  font-size: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 0;
+  user-select: none;
 }
-.console-input-btn:hover {
-  background: #3d3d3d;
+.symbol-btn:hover {
+  background: #3d4048;
+  border-color: rgb(91, 251, 132);
 }
 </style>
