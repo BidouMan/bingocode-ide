@@ -52,7 +52,7 @@ function cancelRename() {
       >
         <button
           class="layer-vis-btn"
-          :title="layer.visible ? '隐藏' : '显示'"
+          v-tooltip="layer.visible ? '隐藏' : '显示'"
           @click.stop="mapStore.toggleLayerVisibility(mapStore.mapData.layers.length - 1 - index)"
         >
           <img :src="layer.visible ? iconShow : iconHide" class="vis-icon" />
@@ -60,7 +60,7 @@ function cancelRename() {
         <button
           class="layer-lock-btn"
           :class="{ 'layer-locked': layer.locked }"
-          :title="layer.locked ? '解锁' : '锁定'"
+          v-tooltip="layer.locked ? '解锁' : '锁定'"
           @click.stop="mapStore.toggleLayerLock(mapStore.mapData.layers.length - 1 - index)"
         >
           {{ layer.locked ? '🔒' : '🔓' }}
@@ -84,19 +84,19 @@ function cancelRename() {
     </div>
 
     <div class="layer-toolbar">
-      <button class="layer-tool-btn" title="新建图像图层" :disabled="disabled" @click="mapStore.addLayer('图像图层', 'image')">
+      <button class="layer-tool-btn" v-tooltip="'新建图像图层'" :disabled="disabled" @click="mapStore.addLayer('图像图层', 'image')">
         <img :src="iconLibrary" class="layer-tool-icon" />
       </button>
-      <button class="layer-tool-btn" title="新建绘制图层" :disabled="disabled" @click="mapStore.addLayer('绘制图层', 'drawing')">
+      <button class="layer-tool-btn" v-tooltip="'新建绘制图层'" :disabled="disabled" @click="mapStore.addLayer('绘制图层', 'drawing')">
         <img :src="iconAdd" class="layer-tool-icon" />
       </button>
-      <button class="layer-tool-btn" title="删除图层" :disabled="disabled" @click="mapStore.removeLayer(mapStore.activeLayerIndex)">
+      <button class="layer-tool-btn" v-tooltip="'删除图层'" :disabled="disabled" @click="mapStore.removeLayer(mapStore.activeLayerIndex)">
         <img :src="iconDelete" class="layer-tool-icon" />
       </button>
-      <button class="layer-tool-btn" title="上移图层" :disabled="disabled" @click="mapStore.moveLayerUp(mapStore.activeLayerIndex)">
+      <button class="layer-tool-btn" v-tooltip="'上移图层'" :disabled="disabled" @click="mapStore.moveLayerUp(mapStore.activeLayerIndex)">
         <img :src="iconUp" class="layer-tool-icon" />
       </button>
-      <button class="layer-tool-btn" title="下移图层" :disabled="disabled" @click="mapStore.moveLayerDown(mapStore.activeLayerIndex)">
+      <button class="layer-tool-btn" v-tooltip="'下移图层'" :disabled="disabled" @click="mapStore.moveLayerDown(mapStore.activeLayerIndex)">
         <img :src="iconDown" class="layer-tool-icon" />
       </button>
     </div>
