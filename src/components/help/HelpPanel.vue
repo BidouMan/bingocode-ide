@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import iconRightArrow from '../../assets/icons/right_arrow.svg'
 import iconDownArrow from '../../assets/icons/down_arrow.svg'
 
@@ -8,6 +8,7 @@ const emit = defineEmits<{ close: [] }>()
 
 const expandedCards = ref<Record<string, boolean>>({})
 const activeCategory = ref(0)
+const searchQuery = ref('')
 
 function toggleCard(ci: number, fi: number) {
   const key = `${ci}-${fi}`
@@ -160,6 +161,23 @@ function getBadgeColor(type?: string) {
     default: return '#9966FF'
   }
 }
+
+const filteredCategories = computed(() => {
+  if (!searchQuery.value.trim()) return categories
+
+  const query = searchQuery.value.toLowerCase()
+  return categories
+    .map(cat => ({
+      ...cat,
+      funcs: cat.funcs.filter(
+        f =>
+          f.label.toLowerCase().includes(query) ||
+          f.desc.toLowerCase().includes(query) ||
+          f.code.toLowerCase().includes(query)
+      ),
+    }))
+    .filter(cat => cat.funcs.length > 0)
+})
 </script>
 
 <template>
@@ -180,12 +198,32 @@ function getBadgeColor(type?: string) {
             </button>
           </div>
 
+          <!-- 搜索框 -->
+          <div class="help-search">
+            <div class="help-search-box">
+              <svg class="help-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+              </svg>
+              <input
+                v-model="searchQuery"
+                type="text"
+                class="help-search-input"
+                placeholder="搜索 API、函数、属性..."
+              />
+              <button v-if="searchQuery" class="help-search-clear" @click="searchQuery = ''">
+                <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+                  <path d="M1 1L13 13M13 1L1 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
           <!-- 主体：左侧分类 + 右侧内容 -->
           <div class="help-body">
             <!-- 左侧分类栏 -->
             <div class="help-sidebar">
               <button
-                v-for="(cat, ci) in categories"
+                v-for="(cat, ci) in filteredCategories"
                 :key="ci"
                 class="help-sidebar-btn"
                 :class="{ 'help-sidebar-btn-active': activeCategory === ci }"
@@ -202,7 +240,7 @@ function getBadgeColor(type?: string) {
             <!-- 右侧内容 -->
             <div class="help-content">
               <div
-                v-for="(cat, ci) in categories"
+                v-for="(cat, ci) in filteredCategories"
                 :key="ci"
                 :id="`help-cat-${ci}`"
                 class="help-category-section"
@@ -235,6 +273,14 @@ function getBadgeColor(type?: string) {
                     </div>
                   </div>
                 </div>
+              </div>
+
+              <!-- 无搜索结果 -->
+              <div v-if="filteredCategories.length === 0" class="help-empty">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5">
+                  <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+                </svg>
+                <span>没有找到匹配的内容</span>
               </div>
             </div>
           </div>
@@ -284,6 +330,30 @@ function getBadgeColor(type?: string) {
   color: var(--text-secondary); cursor: pointer; transition: all 0.15s;
 }
 .help-close-btn:hover {   background: var(--bg-hover); color: white; }
+
+/* ── 搜索框 ── */
+.help-search {
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+}
+.help-search-box {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-hover);
+  border-radius: 6px; border: 1px solid var(--border-light);
+}
+.help-search-icon { color: var(--text-muted); flex-shrink: 0; }
+.help-search-input {
+  flex: 1; background: transparent; border: none; outline: none;
+  font-size: 13px; color: white;
+}
+.help-search-input::placeholder { color: var(--text-muted); }
+.help-search-clear {
+  display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0;
+  background: transparent; border: none; border-radius: 3px;
+  color: var(--text-muted); cursor: pointer; transition: all 0.15s;
+}
+.help-search-clear:hover { background: rgba(255,255,255,0.1); color: white; }
 
 /* ── 主体布局 ── */
 .help-body {
@@ -393,5 +463,13 @@ function getBadgeColor(type?: string) {
 .help-func-desc {
   font-size: 12.5px; line-height: 1.7;
   color: rgb(180, 180, 180);
+}
+
+/* ── 空状态 ── */
+.help-empty {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 12px; padding: 60px 20px;
+  color: var(--text-muted); font-size: 13px;
 }
 </style>

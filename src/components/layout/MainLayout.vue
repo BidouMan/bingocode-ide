@@ -21,6 +21,7 @@ import MapLibraryPage from '../resource-panel/MapLibraryPage.vue'
 import MapResourceLibPage from '../resource-panel/MapResourceLibPage.vue'
 import SoundLibPage from '../resource-panel/SoundLibPage.vue'
 import HelpPanel from '../help/HelpPanel.vue'
+import PythonHelpPanel from '../help/PythonHelpPanel.vue'
 import PluginManager from '../common/PluginManager.vue'
 import iconLogo from '../../assets/icons/logo.svg'
 import iconFile from '../../assets/icons/icon--file.svg'
@@ -1852,8 +1853,11 @@ function codeDisplayName(name: string) {
       </div>
     </Teleport>
 
-    <!-- 帮助面板 -->
-    <HelpPanel :visible="helpVisible" @close="helpVisible = false" />
+    <!-- 帮助面板（游戏模式） -->
+    <HelpPanel :visible="helpVisible && editorStore.isGameMode" @close="helpVisible = false" />
+
+    <!-- 帮助面板（代码模式） -->
+    <PythonHelpPanel :visible="helpVisible && !editorStore.isGameMode" @close="helpVisible = false" />
 
     <!-- 插件库弹窗 -->
     <PluginManager v-if="pluginManagerVisible" @close="pluginManagerVisible = false" />
