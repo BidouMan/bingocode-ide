@@ -1,8 +1,73 @@
-use std::io::{BufReader, Write};
+use std::io::{BufReader, Read, Write};
 use std::process::{Child, Command, Stdio};
 use tauri::{AppHandle, Emitter};
 
 use crate::EngineState;
+
+/// 读取 stdout（字节级，不等到换行符，解决 input() 提示不显示的问题）
+fn spawn_stdout_reader(
+    stdout: std::process::ChildStdout,
+    app: AppHandle,
+    event: &'static str,
+    end_event: &'static str,
+) {
+    std::thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        let mut buf = [0u8; 4096];
+        let mut partial = String::new();
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let chunk = String::from_utf8_lossy(&buf[..n]);
+                    partial.push_str(&chunk);
+                    // 把完整行（含换行符）发送出去
+                    while let Some(pos) = partial.find('\n') {
+                        let line = partial[..=pos].to_string();
+                        let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
+                        if !trimmed.is_empty() {
+                            let _ = app.emit_to("main", event, line.clone());
+                        }
+                        partial.drain(..=pos);
+                    }
+                    // 剩余的半行数据（如 input() 提示文字）立即发送，不等换行
+                    if !partial.is_empty() {
+                        let _ = app.emit_to("main", event, partial.clone());
+                        partial.clear();
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        // 进程退出，冲刷剩余数据
+        if !partial.is_empty() {
+            let _ = app.emit_to("main", event, partial.clone());
+        }
+        let _ = app.emit_to("main", end_event, ());
+    });
+}
+
+/// 读取 stderr（行级即可，报错信息一般自带换行）
+fn spawn_stderr_reader(stderr: std::process::ChildStderr, app: AppHandle) {
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        let mut reader = BufReader::new(stderr);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
+                    if !trimmed.is_empty() {
+                        let _ = app.emit_to("main", "engine:stderr", line.clone());
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+}
 
 pub struct RunningProcess {
     pub child: Child,
@@ -44,46 +109,8 @@ pub fn run_script(
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
     let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
 
-    let app_stdout = app.clone();
-    std::thread::spawn(move || {
-        use std::io::BufRead;
-        let mut reader = BufReader::new(stdout);
-        let mut line = String::new();
-        loop {
-            line.clear();
-            match reader.read_line(&mut line) {
-                Ok(0) => break,
-                Ok(_) => {
-                    let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
-                    if !trimmed.is_empty() {
-                        let _ = app_stdout.emit_to("main", "engine:stdout", line.clone());
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-        let _ = app_stdout.emit_to("main", "engine:stdout:end", ());
-    });
-
-    let app_stderr = app.clone();
-    std::thread::spawn(move || {
-        use std::io::BufRead;
-        let mut reader = BufReader::new(stderr);
-        let mut line = String::new();
-        loop {
-            line.clear();
-            match reader.read_line(&mut line) {
-                Ok(0) => break,
-                Ok(_) => {
-                    let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
-                    if !trimmed.is_empty() {
-                        let _ = app_stderr.emit_to("main", "engine:stderr", line.clone());
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-    });
+    spawn_stdout_reader(stdout, app.clone(), "engine:stdout", "engine:stdout:end");
+    spawn_stderr_reader(stderr, app.clone());
 
     *process_guard = Some(RunningProcess { child });
     drop(process_guard);
@@ -104,7 +131,6 @@ pub fn run_script(
                     .ok()
                     .and_then(|o| {
                         let s = String::from_utf8_lossy(&o.stdout);
-                        // tasklist returns "INFO: No tasks running" when process is gone
                         if s.contains("No tasks") || s.contains("ERROR") {
                             Some(false)
                         } else {
@@ -200,46 +226,8 @@ pub fn run_script_file(
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
     let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
 
-    let app_stdout = app.clone();
-    std::thread::spawn(move || {
-        use std::io::BufRead;
-        let mut reader = BufReader::new(stdout);
-        let mut line = String::new();
-        loop {
-            line.clear();
-            match reader.read_line(&mut line) {
-                Ok(0) => break,
-                Ok(_) => {
-                    let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
-                    if !trimmed.is_empty() {
-                        let _ = app_stdout.emit_to("main", "engine:stdout", line.clone());
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-        let _ = app_stdout.emit_to("main", "engine:stdout:end", ());
-    });
-
-    let app_stderr = app.clone();
-    std::thread::spawn(move || {
-        use std::io::BufRead;
-        let mut reader = BufReader::new(stderr);
-        let mut line = String::new();
-        loop {
-            line.clear();
-            match reader.read_line(&mut line) {
-                Ok(0) => break,
-                Ok(_) => {
-                    let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
-                    if !trimmed.is_empty() {
-                        let _ = app_stderr.emit_to("main", "engine:stderr", line.clone());
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-    });
+    spawn_stdout_reader(stdout, app.clone(), "engine:stdout", "engine:stdout:end");
+    spawn_stderr_reader(stderr, app.clone());
 
     *process_guard = Some(RunningProcess { child });
     drop(process_guard);
