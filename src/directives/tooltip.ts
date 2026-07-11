@@ -34,7 +34,6 @@ function createTooltipElement(text: string): HTMLDivElement {
     opacity: 0;
     transition: opacity 0.15s ease;
     white-space: nowrap;
-    max-width: 200px;
   `
   return el
 }
