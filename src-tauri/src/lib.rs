@@ -696,21 +696,33 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-/// macOS: 设置 NSWindow 原生背景色，确保窗口创建时就是深色
+/// macOS: WKWebView 透明 + NSWindow 深色，根除白色闪烁
 fn set_macos_bg_color(window: &tauri::WebviewWindow) {
     #[cfg(target_os = "macos")]
     {
+        use objc2::msg_send;
+        use objc2::runtime::AnyObject;
         use objc2_app_kit::{NSColor, NSWindow};
+        use objc2_foundation::NSString;
+
+        // 1. NSWindow 背景色 → 深色
         if let Ok(ns_ptr) = window.ns_window() {
             unsafe {
                 let ns_window = &*(ns_ptr as *mut NSWindow);
-                let bg_color = NSColor::colorWithRed_green_blue_alpha(
-                    26.0 / 255.0,
-                    26.0 / 255.0,
-                    46.0 / 255.0,
-                    1.0,
+                let bg = NSColor::colorWithRed_green_blue_alpha(
+                    26.0 / 255.0, 26.0 / 255.0, 46.0 / 255.0, 1.0,
                 );
-                ns_window.setBackgroundColor(Some(&bg_color));
+                ns_window.setBackgroundColor(Some(&bg));
+            }
+        }
+
+        // 2. WKWebView 透明 → 不画白色背景，让 NSWindow 深色透出来
+        if let Ok(view_ptr) = window.ns_view() {
+            unsafe {
+                let view = &mut *(view_ptr as *mut AnyObject);
+                let yes = objc2_foundation::NSNumber::new_bool(true);
+                let key = NSString::from_str("drawsTransparentBackground");
+                let () = msg_send![view, setValue: &*yes, forKey: &*key];
             }
         }
     }
