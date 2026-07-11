@@ -356,16 +356,16 @@ function onResourceClick(rIdx: number) {
 <template>
   <div class="resource-list-panel">
     <div class="resource-toolbar">
-      <button class="res-tool-btn" title="打开资源库" @click="emit('open-library')">
+      <button class="res-tool-btn" v-tooltip="'打开资源库'" @click="emit('open-library')">
         <img :src="iconLibrary" class="res-tool-icon" />
       </button>
-      <button class="res-tool-btn import-btn" title="上传本地资源" :disabled="disabled" @click="showImportDialog = true">
+      <button class="res-tool-btn import-btn" v-tooltip="'上传本地资源'" :disabled="disabled" @click="showImportDialog = true">
         <img :src="iconUpload" class="res-tool-icon" />
       </button>
-      <button class="res-tool-btn" title="选中删除" @click="onDeleteResource">
+      <button class="res-tool-btn" v-tooltip="'选中删除'" @click="onDeleteResource">
         <img :src="iconDelete" class="res-tool-icon" />
       </button>
-      <button class="res-tool-btn" title="重置" @click="onClearResources">
+      <button class="res-tool-btn" v-tooltip="'重置'" @click="onClearResources">
         <img :src="iconReset" class="res-tool-icon" />
       </button>
     </div>
@@ -412,7 +412,7 @@ function onResourceClick(rIdx: number) {
       <button
         class="col-tool-btn"
         :class="{ 'col-tool-active': mapStore.collisionTool === 'move' }"
-        title="移动锚点"
+        v-tooltip="'移动锚点'"
         @click="mapStore.setCollisionTool('move')"
       >
         <img :src="iconMoveAnchor" class="col-tool-icon" />
@@ -420,7 +420,7 @@ function onResourceClick(rIdx: number) {
       <button
         class="col-tool-btn"
         :class="{ 'col-tool-active': mapStore.collisionTool === 'add' }"
-        title="添加锚点"
+        v-tooltip="'添加锚点'"
         @click="mapStore.setCollisionTool('add')"
       >
         <img :src="iconAddAnchor" class="col-tool-icon" />
@@ -428,14 +428,14 @@ function onResourceClick(rIdx: number) {
       <button
         class="col-tool-btn"
         :class="{ 'col-tool-active': mapStore.collisionTool === 'delete' }"
-        title="删除锚点"
+        v-tooltip="'删除锚点'"
         @click="mapStore.setCollisionTool('delete')"
       >
         <img :src="iconDelAnchor" class="col-tool-icon" />
       </button>
       <button
         class="col-tool-btn"
-        title="重置锚点"
+        v-tooltip="'重置锚点'"
         @click="collisionEditorRef?.resetCollision()"
       >
         <img :src="iconResetAnchor" class="col-tool-icon" />
@@ -443,7 +443,7 @@ function onResourceClick(rIdx: number) {
       <button
         class="col-tool-btn"
         :class="{ 'col-tool-active': mapStore.snapToPixel }"
-        title="吸附锚点"
+        v-tooltip="'吸附锚点'"
         @click="mapStore.toggleSnapToPixel()"
       >
         <img :src="iconSnapAnchor" class="col-tool-icon" />
