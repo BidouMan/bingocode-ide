@@ -23,6 +23,8 @@ _EVENT_LISTENERS = {}
 _SHOW_FPS = False
 _PAUSED = False
 _STOPPED = False
+_SHOW_ALL_COLLISION = False
+_PENDING_RESPONSES = []  # 监听线程→主线程的待发响应
 _PERF_STATS = {"last_time": time.time(), "frame_count": 0}
 _GROUPS = {}
 _MOUSE_STATE = {"down": False, "last_down": False, "x": 0, "y": 0}  # 用字典包装鼠标状态
@@ -157,7 +159,7 @@ class Sprite:
         self._cached_hitbox = None
         self._visual_offset_x = 0
         self._visual_offset_y = 0
-        self._show_hitbox = False
+        self._show_hitbox = _SHOW_ALL_COLLISION
 
         # 🚀 2. 资源解析逻辑升级
         # 尝试寻找解压后的角色文件夹 (例如 assets/sprites/洛克人)
@@ -593,6 +595,7 @@ class Sprite:
             power: 跳跃力度（默认10，越大跳得越高）
         """
         self.vy = -power
+        self.on_ground = False
         self._jump_cut = False
 
     def cut_jump(self):
@@ -1469,7 +1472,7 @@ class Sprite:
 
 
 def _input_sync_listener():
-    global _PRESSED_KEYS, _MOUSE_STATE
+    global _PRESSED_KEYS, _MOUSE_STATE, _PAUSED, _SHOW_FPS, _SHOW_ALL_COLLISION
     while True:
         try:
             # 🚀 确保是阻塞式读取
@@ -1502,6 +1505,28 @@ def _input_sync_listener():
                 mx_s, my_s = pos_str.split(",")
                 _MOUSE_STATE["x"] = float(mx_s)
                 _MOUSE_STATE["y"] = float(my_s)
+
+            # ─── 调试命令 ───
+            elif clean_line == "PAUSE:":
+                _PAUSED = True
+                _PENDING_RESPONSES.append(json.dumps({"type": "PAUSE_STATE", "data": {"paused": True}}))
+            elif clean_line == "RESUME:":
+                _PAUSED = False
+                _PENDING_RESPONSES.append(json.dumps({"type": "PAUSE_STATE", "data": {"paused": False}}))
+            elif clean_line == "SHOW_FPS:1":
+                _SHOW_FPS = True
+                _PENDING_RESPONSES.append(json.dumps({"type": "FPS_UPDATE", "data": {"fps": round(_PERF_STATS.get("last_fps", 0), 1)}}))
+            elif clean_line == "SHOW_FPS:0":
+                _SHOW_FPS = False
+                _PENDING_RESPONSES.append(json.dumps({"type": "FPS_UPDATE", "data": {"fps": 0}}))
+            elif clean_line == "SHOW_COLLISION:1":
+                _SHOW_ALL_COLLISION = True
+                for sprite in _SPRITES.values():
+                    sprite._show_hitbox = True
+            elif clean_line == "SHOW_COLLISION:0":
+                _SHOW_ALL_COLLISION = False
+                for sprite in _SPRITES.values():
+                    sprite._show_hitbox = False
         except:
             time.sleep(0.01)
 
@@ -2241,7 +2266,7 @@ def _render_map():
 
 
 def run():
-    global _PERF_STATS, _MOUSE_STATE, _SPRITES
+    global _PERF_STATS, _MOUSE_STATE, _SPRITES, _PENDING_RESPONSES
     _MOUSE_STATE["down"] = False
     main_module = sys.modules["__main__"]
     if not hasattr(main_module, "loop"):
@@ -2396,10 +2421,15 @@ def run():
         duration = t - _PERF_STATS["last_time"]
         if duration >= 0.5:
             fps = _PERF_STATS["frame_count"] / duration
+            _PERF_STATS["last_fps"] = round(fps, 1)
             if _SHOW_FPS:
                 _send_fps_to_ide(fps)
             _PERF_STATS["frame_count"] = 0
             _PERF_STATS["last_time"] = t
+
+        # 刷出监听线程的待发响应
+        while _PENDING_RESPONSES:
+            print(_PENDING_RESPONSES.pop(0))
 
         # 帧率限制：混合等待策略。time.sleep() 睡大部分时间省电，
         # 末尾用精确自旋补齐 macOS time.sleep() 的精度不足
@@ -2447,7 +2477,7 @@ def start_game(project_dir=None, target_file=None):
         project_dir: 项目目录路径，用于自动发现 .py 文件
         target_file: 指定要运行的文件路径
     """
-    global _STOPPED, _PERF_STATS, _MOUSE_STATE
+    global _STOPPED, _PERF_STATS, _MOUSE_STATE, _PENDING_RESPONSES
 
     _STOPPED = False
     _MOUSE_STATE["down"] = False
@@ -2592,10 +2622,15 @@ def start_game(project_dir=None, target_file=None):
         duration = t - _PERF_STATS["last_time"]
         if duration >= 0.5:
             fps = _PERF_STATS["frame_count"] / duration
+            _PERF_STATS["last_fps"] = round(fps, 1)
             if _SHOW_FPS:
                 _send_fps_to_ide(fps)
             _PERF_STATS["frame_count"] = 0
             _PERF_STATS["last_time"] = t
+
+        # 刷出监听线程的待发响应
+        while _PENDING_RESPONSES:
+            print(_PENDING_RESPONSES.pop(0))
 
         # 帧率限制
         target_frame_time = 1.0 / 60.0

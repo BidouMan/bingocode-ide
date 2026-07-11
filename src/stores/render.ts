@@ -91,6 +91,11 @@ export const useRenderStore = defineStore('render', () => {
   const fps = ref(0)
   const isPaused = ref(false)
 
+  // 调试工具状态
+  const showFps = ref(false)
+  const showCollision = ref(false)
+  const showStats = ref(false)
+
   const shakeIntensity = ref(0)
   const shakeDuration = ref(0)
   const shakeStartTime = ref(0)
@@ -177,6 +182,10 @@ export const useRenderStore = defineStore('render', () => {
     targetCamera.value = { ...camera.value }
     cameraUpdateTime.value = 0
     fps.value = 0
+    isPaused.value = false
+    showFps.value = false
+    showCollision.value = false
+    showStats.value = false
     shakeIntensity.value = 0
     resetTextureLoading()
   }
@@ -298,6 +307,9 @@ export const useRenderStore = defineStore('render', () => {
     camera,
     fps,
     isPaused,
+    showFps,
+    showCollision,
+    showStats,
     textureTotal,
     textureLoaded,
     isLoadingTextures,

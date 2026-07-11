@@ -166,6 +166,16 @@ export interface FpsUpdateCommand extends EngineCommand {
   data: { fps: number }
 }
 
+export interface PauseStateCommand extends EngineCommand {
+  type: 'PAUSE_STATE'
+  data: { paused: boolean }
+}
+
+export interface UICommandCommand extends EngineCommand {
+  type: 'UI_COMMAND'
+  data: { visible: boolean }
+}
+
 export type AnyEngineCommand =
   | CreateCommand
   | UpdateCommand
@@ -180,6 +190,8 @@ export type AnyEngineCommand =
   | DrawTextCommand
   | ScreenShakeCommand
   | FpsUpdateCommand
+  | PauseStateCommand
+  | UICommandCommand
 
 export type InputEventType =
   | 'K_DOWN'

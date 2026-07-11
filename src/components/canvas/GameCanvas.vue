@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { useRenderStore } from '../../stores/render'
 import { useEditorStore } from '../../stores/editor'
 import { useEngine } from '../../composables/useEngine'
-import { signalGameCanvasReady, registerGameCanvasMount, unregisterGameCanvasMount } from '../../utils/gameCanvasReady'
+import { signalGameCanvasReady, resetGameCanvasReady } from '../../utils/gameCanvasReady'
 
 const renderStore = useRenderStore()
 const editorStore = useEditorStore()
@@ -37,6 +37,10 @@ let spritesSyncing = false
 
 const LOGIC_W = 640
 const LOGIC_H = 480
+
+// 游戏画面在容器内的偏移（用于统计面板定位）
+const stageOffsetX = ref(0)
+const stageOffsetY = ref(0)
 
 async function initPixi() {
   if (!containerRef.value) return
@@ -119,6 +123,8 @@ function fitStage() {
   stageContainer.x = (vp.clientWidth - LOGIC_W * scale) / 2
   stageContainer.y = (vp.clientHeight - LOGIC_H * scale) / 2
   stageContainer.scale.set(scale)
+  stageOffsetX.value = stageContainer.x
+  stageOffsetY.value = stageContainer.y
   emit('offset-update', stageContainer.x)
 }
 
@@ -442,6 +448,16 @@ function syncDrawTexts() {
 function syncHitboxes() {
   if (!app || !uiContainer) return
 
+  // 如果调试开关关闭，清除所有碰撞盒显示
+  if (!renderStore.showCollision) {
+    for (const [, obj] of hitboxDisplayObjects) {
+      uiContainer.removeChild(obj)
+      obj.destroy()
+    }
+    hitboxDisplayObjects.clear()
+    return
+  }
+
   const currentIds = new Set(renderStore.hitboxes.keys())
 
   for (const [id, obj] of hitboxDisplayObjects) {
@@ -477,6 +493,11 @@ function syncHitboxes() {
 
 function gameLoop() {
   if (!app) return
+
+  // 更新帧耗时（仅在性能面板开启时计算，避免不必要的开销）
+  if (renderStore.showStats) {
+    updateFrameTime(app.ticker.deltaMS)
+  }
 
   const cam = renderStore.getInterpolatedCamera()
   const shake = renderStore.getShakeOffset()
@@ -632,7 +653,6 @@ watch(
 )
 
 onMounted(async () => {
-  registerGameCanvasMount()
   try {
     await initPixi()
     if (app) {
@@ -651,7 +671,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   removeGameListeners()
   resizeObserver?.disconnect()
-  unregisterGameCanvasMount()
+  resetGameCanvasReady()
 
   if (app) {
     app.ticker.remove(gameLoop)
@@ -667,24 +687,260 @@ onBeforeUnmount(() => {
   drawTextDisplayObjects.clear()
   hitboxDisplayObjects.clear()
 })
+
+// ─── 性能面板 ───
+const statsCollapsed = ref<Record<string, boolean>>({})
+const frameTime = ref(0)  // 显示用的平均帧耗时
+let frameTimeAccum = 0    // 累计帧耗时
+let frameTimeCount = 0    // 累计帧数
+
+function updateFrameTime(dt: number) {
+  frameTimeAccum += dt
+  frameTimeCount++
+  if (frameTimeCount >= 30) {
+    frameTime.value = Math.round(frameTimeAccum / frameTimeCount * 100) / 100
+    frameTimeAccum = 0
+    frameTimeCount = 0
+  }
+}
+
+/** 从图片路径提取精灵名称 */
+function extractSpriteName(imagePath: string): string {
+  if (!imagePath) return '(无图像)'
+  // 匹配 assets/sprites/XXX/ 或 assets/sprites/XXX.
+  const match = imagePath.match(/sprites[\\/]([^\\/]+)(?:[\\/]|\.)/)
+  if (match) return match[1]
+  // 兜底：取文件名（去扩展名）
+  const parts = imagePath.replace(/\\/g, '/').split('/')
+  const file = parts[parts.length - 1] || '(无图像)'
+  return file.replace(/\.[^.]+$/, '') || '(无图像)'
+}
+
+const spriteGroups = computed(() => {
+  const groups = new Map<string, { count: number; ids: string[] }>()
+  for (const [id, sprite] of renderStore.sprites) {
+    const name = extractSpriteName(sprite.imagePath)
+    const existing = groups.get(name)
+    if (existing) {
+      existing.count++
+      existing.ids.push(id)
+    } else {
+      groups.set(name, { count: 1, ids: [id] })
+    }
+  }
+  return Array.from(groups.entries()).sort((a, b) => b[1].count - a[1].count)
+})
+
+const statsInfo = computed(() => {
+  const sprites = renderStore.sprites
+  const tiles = renderStore.tiles
+  return {
+    fps: renderStore.fps,
+    spriteCount: sprites.size,
+    tileCount: tiles.size,
+    hitboxCount: renderStore.hitboxes.size,
+    cameraX: Math.round(renderStore.camera.x),
+    cameraY: Math.round(renderStore.camera.y),
+  }
+})
+
+function toggleGroup(name: string) {
+  statsCollapsed.value[name] = !statsCollapsed.value[name]
+}
+
+function getGroupSprites(name: string) {
+  const result: { id: string; x: number; y: number }[] = []
+  for (const [id, sprite] of renderStore.sprites) {
+    if (extractSpriteName(sprite.imagePath) === name) {
+      result.push({ id, x: sprite.x, y: sprite.y })
+    }
+  }
+  return result
+}
 </script>
 
 <template>
   <div ref="containerRef" class="game-canvas-container" tabindex="-1">
+    <!-- FPS 叠加层 -->
     <div
-      v-if="renderStore.fps > 0"
-      class="absolute top-2 left-2 px-2 py-0.5 bg-black/60 text-green-400 text-xs font-mono rounded z-10"
+      v-if="renderStore.showFps && renderStore.fps > 0"
+      class="fps-overlay"
+      :style="{ top: stageOffsetY + 8 + 'px', left: stageOffsetX + 8 + 'px' }"
     >
       FPS: {{ renderStore.fps }}
+    </div>
+    <!-- 性能面板 -->
+    <div v-if="renderStore.showStats" class="stats-panel" :style="{ top: stageOffsetY + 8 + 'px', right: stageOffsetX + 8 + 'px' }">
+      <div class="stats-header">PERFORMANCE</div>
+      <div class="stats-section">
+        <div class="stats-row">
+          <span class="stats-label">FPS</span>
+          <span class="stats-value" :class="statsInfo.fps >= 55 ? 'text-green' : statsInfo.fps >= 30 ? 'text-yellow' : 'text-red'">
+            {{ statsInfo.fps || 0 }}
+          </span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">帧耗时</span>
+          <span class="stats-value" :class="frameTime <= 20 ? 'text-green' : frameTime <= 33 ? 'text-yellow' : 'text-red'">
+            {{ frameTime }} ms
+          </span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">Camera</span>
+          <span class="stats-value">{{ statsInfo.cameraX }}, {{ statsInfo.cameraY }}</span>
+        </div>
+      </div>
+      <div class="stats-divider"></div>
+      <div class="stats-section">
+        <div class="stats-row">
+          <span class="stats-label">Sprites</span>
+          <span class="stats-value">{{ statsInfo.spriteCount }}</span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">Tiles</span>
+          <span class="stats-value">{{ statsInfo.tileCount }}</span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">Hitboxes</span>
+          <span class="stats-value">{{ statsInfo.hitboxCount }}</span>
+        </div>
+      </div>
+      <!-- 精灵分组列表 -->
+      <template v-if="spriteGroups.length > 0">
+        <div class="stats-divider"></div>
+        <div class="stats-section">
+          <div class="stats-subheader">Sprite List</div>
+          <div v-for="([name, group], idx) in spriteGroups" :key="idx">
+            <div class="stats-row stats-clickable" @click="toggleGroup(name)">
+              <span class="stats-label stats-group-label">
+                <span class="stats-arrow" :class="{ 'stats-arrow-open': !statsCollapsed[name] }">&#9656;</span>
+                {{ name }}
+              </span>
+              <span class="stats-value">x{{ group.count }}</span>
+            </div>
+            <div v-if="!statsCollapsed[name] && group.count <= 20" class="stats-children">
+              <div v-for="sprite in getGroupSprites(name)" :key="sprite.id" class="stats-row stats-child">
+                <span class="stats-label">#{{ sprite.id.slice(0, 8) }}</span>
+                <span class="stats-value">({{ Math.round(sprite.x) }}, {{ Math.round(sprite.y) }})</span>
+              </div>
+            </div>
+            <div v-if="!statsCollapsed[name] && group.count > 20" class="stats-children">
+              <div class="stats-row stats-child">
+                <span class="stats-label">...共 {{ group.count }} 个，已折叠</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
     </div>
   </div>
 </template>
 
 <style scoped>
 .game-canvas-container {
+  position: relative;
   width: 100%;
   height: 100%;
   background: rgb(26, 28, 33);
   outline: none;
+}
+.fps-overlay {
+  position: absolute;
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 12px;
+  color: #50ff78;
+  z-index: 10;
+  user-select: none;
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.6);
+}
+.stats-panel {
+  position: absolute;
+  background: rgba(10, 10, 14, 0.88);
+  border: 1px solid rgba(80, 255, 120, 0.2);
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 11px;
+  color: #b0b8c4;
+  min-width: 180px;
+  max-width: 280px;
+  max-height: 70%;
+  overflow-y: auto;
+  z-index: 20;
+  user-select: none;
+}
+.stats-header {
+  font-size: 10px;
+  font-weight: 700;
+  color: #50ff78;
+  letter-spacing: 1.5px;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(80, 255, 120, 0.15);
+}
+.stats-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.stats-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1px 0;
+  line-height: 1.5;
+}
+.stats-label {
+  color: #7a8290;
+}
+.stats-value {
+  color: #d0d6e0;
+  font-variant-numeric: tabular-nums;
+}
+.stats-value.text-green { color: #50ff78; }
+.stats-value.text-yellow { color: #f0c040; }
+.stats-value.text-red { color: #ff5050; }
+.stats-divider {
+  height: 1px;
+  background: rgba(80, 255, 120, 0.1);
+  margin: 5px 0;
+}
+.stats-subheader {
+  font-size: 10px;
+  font-weight: 600;
+  color: #7a8290;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+.stats-clickable {
+  cursor: pointer;
+}
+.stats-clickable:hover {
+  background: rgba(80, 255, 120, 0.06);
+  border-radius: 2px;
+}
+.stats-group-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+.stats-arrow {
+  font-size: 9px;
+  transition: transform 0.15s;
+  flex-shrink: 0;
+}
+.stats-arrow-open {
+  transform: rotate(90deg);
+}
+.stats-children {
+  padding-left: 16px;
+}
+.stats-child {
+  font-size: 10px;
+  color: #5a6270;
 }
 </style>

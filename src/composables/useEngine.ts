@@ -174,6 +174,16 @@ export function useEngine() {
       case 'SCREEN_SHAKE':
         renderStore.triggerShake(cmd.data.intensity, cmd.data.duration)
         break
+
+      case 'PAUSE_STATE':
+        renderStore.isPaused = cmd.data.paused
+        break
+
+      case 'UI_COMMAND':
+        if (cmd.data.visible !== undefined) {
+          renderStore.showFps = cmd.data.visible
+        }
+        break
     }
   }
 
@@ -408,6 +418,12 @@ export function useEngine() {
     sendInput('M_UP:')
   }
 
+  // ─── 调试工具 ───
+  function sendPause() { sendInput('PAUSE:') }
+  function sendResume() { sendInput('RESUME:') }
+  function sendShowFps(on: boolean) { sendInput(`SHOW_FPS:${on ? 1 : 0}`) }
+  function sendShowCollision(on: boolean) { sendInput(`SHOW_COLLISION:${on ? 1 : 0}`) }
+
   return {
     run,
     stop,
@@ -416,6 +432,10 @@ export function useEngine() {
     sendMouseMove,
     sendMouseDown,
     sendMouseUp,
+    sendPause,
+    sendResume,
+    sendShowFps,
+    sendShowCollision,
     cleanup,
   }
 }

@@ -40,6 +40,9 @@ import iconPlay from '../../assets/icons/icon--play.svg'
 import iconStop from '../../assets/icons/icon--stop-all.svg'
 import iconFullscreen from '../../assets/icons/icon--fullscreen.svg'
 import iconUnfullscreen from '../../assets/icons/icon--unfullscreen.svg'
+import iconFps from '../../assets/icons/fps.svg'
+import iconCollision from '../../assets/icons/hitbox.svg'
+import iconStats from '../../assets/icons/performance.svg'
 import iconPython from '../../assets/icons/python_file_1.svg'
 import iconUndo from '../../assets/icons/undo.svg'
 import iconRedo from '../../assets/icons/redo.svg'
@@ -404,6 +407,19 @@ async function toggleRun() {
   }
 }
 
+// ─── 调试工具 ───
+function toggleShowFps() {
+  renderStore.showFps = !renderStore.showFps
+  engine.sendShowFps(renderStore.showFps)
+}
+function toggleShowCollision() {
+  renderStore.showCollision = !renderStore.showCollision
+  engine.sendShowCollision(renderStore.showCollision)
+}
+function toggleShowStats() {
+  renderStore.showStats = !renderStore.showStats
+}
+
 async function uploadResource(type: 'sprite' | 'map' | 'sound' | 'code') {
   const acceptMap: Record<string, string> = {
     sprite: '.bgs,.png,.jpg,.gif',
@@ -426,14 +442,19 @@ async function uploadResource(type: 'sprite' | 'map' | 'sound' | 'code') {
   }
 }
 
-async function openResource(item: { id: string; name: string; type: string; content?: string }) {
+async function openResource(item: { id: string; name: string; type: string; content?: string; path?: string }) {
   if (item.type === 'code') {
-    // 在游戏模式标签中查找
-    const idx = editorStore.gameTabs.findIndex(t => t.id === item.id)
-    if (idx >= 0) {
-      editorStore.setGameMode(true)
-      editorStore.setActiveTab(idx)
+    // 优先按 id 查找，其次按 path 查找
+    let idx = editorStore.gameTabs.findIndex(t => t.id === item.id)
+    if (idx < 0 && item.path) {
+      idx = editorStore.gameTabs.findIndex(t => t.path === item.path)
     }
+    if (idx < 0) {
+      // 标签已关闭，重新创建
+      idx = editorStore.createTab(item.name, item.path || '', item.content || '')
+    }
+    editorStore.setGameMode(true)
+    editorStore.setActiveTab(idx)
   } else if (item.type === 'map') {
     // 只设置路径，实际加载由 MapEditorView 的 switchToMap 统一处理
     mapStore.setMapPath(item.id)
@@ -594,6 +615,11 @@ function editorRedo() {
 }
 
 function switchPage(page: number) {
+  // 从全屏切回小窗口时，关闭调试面板
+  if (currentPage.value === 1 && page !== 1) {
+    renderStore.showStats = false
+    renderStore.showCollision = false
+  }
   currentPage.value = page
 }
 
@@ -841,15 +867,14 @@ function deleteSoundFromContext(id: string) {
 // 同步游戏模式标签和代码资源管理器
 watch(() => [...editorStore.gameTabs], (tabs) => {
   for (const tab of tabs) {
-    const existing = resourceStore.codes.find(c => c.id === tab.id)
+    const existing = resourceStore.codes.find(c => c.id === tab.id || (tab.path && c.path === tab.path))
     if (!existing) {
       resourceStore.codes.push({ id: tab.id, name: tab.name, type: 'code', path: tab.path, content: tab.content })
     } else {
       existing.name = tab.name
+      if (tab.path) existing.path = tab.path
     }
   }
-  // 移除资源管理器中不存在的标签
-  resourceStore.codes = resourceStore.codes.filter(c => tabs.some(t => t.id === c.id))
 }, { immediate: true, deep: true })
 
 // 代码右键菜单
@@ -1572,10 +1597,7 @@ function spriteDisplayName(name: string) {
             </div>
             <div class="game-preview-wrapper">
               <div class="game-preview-container">
-                <GameCanvas v-if="editorStore.isRunning" class="game-preview-canvas" />
-                <div v-else class="game-preview-placeholder">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5"><polygon points="5,3 19,12 5,21" /></svg>
-                </div>
+                <GameCanvas class="game-preview-canvas" />
                 <!-- Loading覆盖层 -->
                 <div v-if="renderStore.isLoadingTextures" class="loading-overlay">
                   <div class="loading-content">
@@ -1784,6 +1806,19 @@ function spriteDisplayName(name: string) {
               <img :src="iconStop" width="16" height="16" />
             </button>
           </div>
+          <div class="toolbar-divider"></div>
+          <button class="tool-btn" :class="{ 'tool-btn-active': renderStore.showFps }"
+                  @click="toggleShowFps" v-tooltip="'显示帧数'">
+            <img :src="iconFps" width="18" height="18" />
+          </button>
+          <button class="tool-btn" :class="{ 'tool-btn-active': renderStore.showCollision }"
+                  @click="toggleShowCollision" v-tooltip="'显示碰撞'">
+            <img :src="iconCollision" width="18" height="18" />
+          </button>
+          <button class="tool-btn" :class="{ 'tool-btn-active': renderStore.showStats }"
+                  @click="toggleShowStats" v-tooltip="'性能面板'">
+            <img :src="iconStats" width="18" height="18" />
+          </button>
           <div class="tool-spacer"></div>
           <div class="toolbar-right" :style="{ paddingRight: canvasOffsetX + 'px' }">
             <button class="tool-btn" @click="switchPage(0)">
@@ -1792,7 +1827,7 @@ function spriteDisplayName(name: string) {
           </div>
         </div>
         <div class="fullscreen-stage-area">
-          <GameCanvas v-if="currentPage === 1 && editorStore.isRunning" @offset-update="canvasOffsetX = $event" />
+          <GameCanvas v-show="currentPage === 1" @offset-update="canvasOffsetX = $event" />
         </div>
       </div>
 
@@ -2713,6 +2748,12 @@ function spriteDisplayName(name: string) {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+.toolbar-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 4px;
 }
 .fullscreen-stage-area {
   flex: 1;
