@@ -600,37 +600,23 @@ fn run_script_output(
 
 #[tauri::command]
 fn splash_complete(app: tauri::AppHandle) -> Result<(), String> {
-    // 关闭 splash 窗口
     if let Some(splash) = app.get_webview_window("splashscreen") {
-        splash.close().map_err(|e| e.to_string())?;
+        splash.set_background_color(Some(tauri::window::Color(26, 26, 46, 255)))
+            .map_err(|e| e.to_string())?;
+        // 调整窗口大小和装饰 → 从 splash 变成主窗口
+        splash.set_size(tauri::LogicalSize::new(1000.0, 650.0))
+            .map_err(|e| e.to_string())?;
+        splash.set_min_size(Some(tauri::LogicalSize::new(960.0, 600.0)))
+            .map_err(|e| e.to_string())?;
+        splash.set_resizable(true).map_err(|e| e.to_string())?;
+        splash.set_decorations(true).map_err(|e| e.to_string())?;
+        // 跳转到主页面（同一 webview，无白屏）
+        splash.eval("window.location.href = '/'")
+            .map_err(|e| e.to_string())?;
+        splash.set_focus().map_err(|e| e.to_string())?;
     }
-
-    // 动态创建 main 窗口并立即设背景色后立刻显示
-    let main = WebviewWindowBuilder::new(
-        &app,
-        "main",
-        WebviewUrl::App("index.html".into()),
-    )
-    .title("BingoCode IDE")
-    .inner_size(1000.0, 650.0)
-    .min_inner_size(960.0, 600.0)
-    .resizable(true)
-    .decorations(true)
-    .center()
-    .visible(false)
-    .build()
-    .map_err(|e| e.to_string())?;
-
-    // 设背景色 →
-    main.set_background_color(Some(tauri::window::Color(26, 26, 46, 255)))
-        .map_err(|e| e.to_string())?;
-    set_macos_bg_color(&main);
-
-    // → 再显示（此时窗口已是深色）
-    main.show().map_err(|e| e.to_string())?;
-    main.set_focus().map_err(|e| e.to_string())?;
     Ok(())
-} 
+}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -657,7 +643,6 @@ pub fn run() {
             .map_err(|e| e.to_string())?;
             splash.set_background_color(Some(tauri::window::Color(26, 26, 46, 255)))
                 .map_err(|e| e.to_string())?;
-            set_macos_bg_color(&splash);
             splash.show().map_err(|e| e.to_string())?;
 
             Ok(())
@@ -694,36 +679,4 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-/// macOS: WKWebView 透明 + NSWindow 深色，根除白色闪烁
-fn set_macos_bg_color(window: &tauri::WebviewWindow) {
-    #[cfg(target_os = "macos")]
-    {
-        use objc2::msg_send;
-        use objc2::runtime::AnyObject;
-        use objc2_app_kit::{NSColor, NSWindow};
-        use objc2_foundation::NSString;
-
-        // 1. NSWindow 背景色 → 深色
-        if let Ok(ns_ptr) = window.ns_window() {
-            unsafe {
-                let ns_window = &*(ns_ptr as *mut NSWindow);
-                let bg = NSColor::colorWithRed_green_blue_alpha(
-                    26.0 / 255.0, 26.0 / 255.0, 46.0 / 255.0, 1.0,
-                );
-                ns_window.setBackgroundColor(Some(&bg));
-            }
-        }
-
-        // 2. WKWebView 透明 → 不画白色背景，让 NSWindow 深色透出来
-        if let Ok(view_ptr) = window.ns_view() {
-            unsafe {
-                let view = &mut *(view_ptr as *mut AnyObject);
-                let yes = objc2_foundation::NSNumber::new_bool(true);
-                let key = NSString::from_str("drawsTransparentBackground");
-                let () = msg_send![view, setValue: &*yes, forKey: &*key];
-            }
-        }
-    }
 }
