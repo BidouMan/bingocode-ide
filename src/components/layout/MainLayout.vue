@@ -21,6 +21,7 @@ import MapLibraryPage from '../resource-panel/MapLibraryPage.vue'
 import MapResourceLibPage from '../resource-panel/MapResourceLibPage.vue'
 import SoundLibPage from '../resource-panel/SoundLibPage.vue'
 import HelpPanel from '../help/HelpPanel.vue'
+import PluginManager from '../common/PluginManager.vue'
 import iconLogo from '../../assets/icons/logo.svg'
 import iconFile from '../../assets/icons/icon--file.svg'
 import iconCodeEdit from '../../assets/icons/代码编辑.svg'
@@ -73,6 +74,7 @@ const settingsMenuVisible = ref(false)
 const settingsSubmenu = ref<string | null>(null)
 const selectedResource = ref<string | null>(null)
 const helpVisible = ref(false)
+const pluginManagerVisible = ref(false)
 
 // 角色缩略图缓存
 const spriteThumbnails = ref<Record<string, string>>({})
@@ -1441,7 +1443,7 @@ function codeDisplayName(name: string) {
         </button>
         <div v-show="settingsMenuVisible" class="file-menu-dropdown settings-menu">
           <!-- 渲染模式 -->
-          <div class="settings-item-group" @mouseenter="openSettingsSubmenu('renderMode')">
+          <div class="settings-item-group" @mouseenter="openSettingsSubmenu('renderMode')" @mouseleave="settingsSubmenu = null">
             <div class="file-menu-item settings-menu-item">
               <span>渲染模式</span>
               <span class="settings-arrow">›</span>
@@ -1456,7 +1458,7 @@ function codeDisplayName(name: string) {
             </div>
           </div>
           <!-- 主题 -->
-          <div class="settings-item-group" @mouseenter="openSettingsSubmenu('theme')">
+          <div class="settings-item-group" @mouseenter="openSettingsSubmenu('theme')" @mouseleave="settingsSubmenu = null">
             <div class="file-menu-item settings-menu-item">
               <span>主题</span>
               <span class="settings-arrow">›</span>
@@ -1474,17 +1476,11 @@ function codeDisplayName(name: string) {
             </div>
           </div>
           <!-- 插件库 -->
-          <div class="settings-item-group" @mouseenter="openSettingsSubmenu('plugins')">
-            <div class="file-menu-item settings-menu-item">
-              <span>插件库</span>
-              <span class="settings-arrow">›</span>
-            </div>
-            <div v-show="settingsSubmenu === 'plugins'" class="settings-submenu">
-              <button class="file-menu-item settings-item-disabled">暂无插件</button>
-            </div>
-          </div>
+          <button class="file-menu-item" @click="pluginManagerVisible = true; closeSettingsMenu()">
+            插件库
+          </button>
           <!-- 快捷键 -->
-          <div class="settings-item-group" @mouseenter="openSettingsSubmenu('shortcuts')">
+          <div class="settings-item-group" @mouseenter="openSettingsSubmenu('shortcuts')" @mouseleave="settingsSubmenu = null">
             <div class="file-menu-item settings-menu-item">
               <span>快捷键</span>
               <span class="settings-arrow">›</span>
@@ -1494,7 +1490,7 @@ function codeDisplayName(name: string) {
             </div>
           </div>
           <!-- 引擎设置 -->
-          <div class="settings-item-group" @mouseenter="openSettingsSubmenu('engine')">
+          <div class="settings-item-group" @mouseenter="openSettingsSubmenu('engine')" @mouseleave="settingsSubmenu = null">
             <div class="file-menu-item settings-menu-item">
               <span>引擎设置</span>
               <span class="settings-arrow">›</span>
@@ -1858,6 +1854,9 @@ function codeDisplayName(name: string) {
 
     <!-- 帮助面板 -->
     <HelpPanel :visible="helpVisible" @close="helpVisible = false" />
+
+    <!-- 插件库弹窗 -->
+    <PluginManager v-if="pluginManagerVisible" @close="pluginManagerVisible = false" />
   </div>
 </template>
 
