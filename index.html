@@ -1,13 +1,73 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/ui/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>BingoCode IDE</title>
-  </head>
-  <body style="background:#1a1a2e;margin:0">
-    <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+<html lang="zh-CN" style="background:#1a1a2e">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/ui/favicon.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BingoCode IDE</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    #splash {
+      position: fixed; inset: 0; z-index: 99999;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      display: flex; align-items: center; justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      transition: opacity 0.5s ease;
+    }
+    #splash.hide { opacity: 0; pointer-events: none; }
+    .splash-logo {
+      font-size: 36px; font-weight: 700; letter-spacing: 4px;
+      color: #fff; animation: breathe 3s ease-in-out infinite;
+    }
+    .splash-dots {
+      display: flex; justify-content: center; gap: 8px; margin-top: 32px;
+    }
+    .splash-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: #5BFB84; animation: bounce 1.4s ease-in-out infinite;
+    }
+    .splash-dot:nth-child(1) { animation-delay: -0.32s; }
+    .splash-dot:nth-child(2) { animation-delay: -0.16s; }
+    @keyframes breathe {
+      0%,100% { opacity: 0.8; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.02); }
+    }
+    @keyframes bounce {
+      0%,80%,100% { transform: scale(0.6); opacity: 0.5; }
+      40% { transform: scale(1); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <div id="splash">
+    <div style="text-align:center">
+      <div class="splash-logo">BINGOCODE IDE</div>
+      <div class="splash-dots">
+        <div class="splash-dot"></div>
+        <div class="splash-dot"></div>
+        <div class="splash-dot"></div>
+      </div>
+    </div>
+  </div>
+  <div id="app"></div>
+  <script>
+    // Vue挂载后隐藏splash
+    window.addEventListener('DOMContentLoaded', () => {
+      const observer = new MutationObserver(() => {
+        const app = document.getElementById('app')
+        if (app && app.children.length > 0) {
+          document.getElementById('splash')?.classList.add('hide')
+          observer.disconnect()
+        }
+      })
+      observer.observe(document.getElementById('app'), { childList: true, subtree: true })
+      // 兜底：3秒后自动隐藏
+      setTimeout(() => {
+        document.getElementById('splash')?.classList.add('hide')
+        observer.disconnect()
+      }, 3000)
+    })
+  </script>
+  <script type="module" src="/src/main.ts"></script>
+</body>
 </html>

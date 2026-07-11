@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::Manager;
 
 mod engine;
 
@@ -598,25 +598,6 @@ fn run_script_output(
     Ok(stdout)
 }
 
-#[tauri::command]
-fn splash_complete(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(splash) = app.get_webview_window("splashscreen") {
-        splash.set_background_color(Some(tauri::window::Color(26, 26, 46, 255)))
-            .map_err(|e| e.to_string())?;
-        // 调整窗口大小和装饰 → 从 splash 变成主窗口
-        splash.set_size(tauri::LogicalSize::new(1000.0, 650.0))
-            .map_err(|e| e.to_string())?;
-        splash.set_min_size(Some(tauri::LogicalSize::new(960.0, 600.0)))
-            .map_err(|e| e.to_string())?;
-        splash.set_resizable(true).map_err(|e| e.to_string())?;
-        splash.set_decorations(true).map_err(|e| e.to_string())?;
-        // 跳转到主页面（同一 webview，无白屏）
-        splash.eval("window.location.href = '/'")
-            .map_err(|e| e.to_string())?;
-        splash.set_focus().map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -625,27 +606,6 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .manage(EngineState {
             process: Mutex::new(None),
-        })
-        .setup(|app| {
-            // ── 创建 splash screen 窗口 ──
-            let splash = WebviewWindowBuilder::new(
-                app,
-                "splashscreen",
-                WebviewUrl::App("splash.html".into()),
-            )
-            .title("BingoCode IDE")
-            .inner_size(480.0, 320.0)
-            .resizable(false)
-            .decorations(false)
-            .center()
-            .visible(false)
-            .build()
-            .map_err(|e| e.to_string())?;
-            splash.set_background_color(Some(tauri::window::Color(26, 26, 46, 255)))
-                .map_err(|e| e.to_string())?;
-            splash.show().map_err(|e| e.to_string())?;
-
-            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             read_file,
@@ -675,7 +635,6 @@ pub fn run() {
             engine::send_stdin,
             engine::run_script_file,
             run_script_output,
-            splash_complete,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

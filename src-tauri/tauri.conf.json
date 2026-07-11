@@ -10,7 +10,20 @@
     "beforeBuildCommand": "pnpm build"
   },
   "app": {
-    "windows": [],
+    "windows": [
+      {
+        "title": "BingoCode IDE",
+        "width": 1000,
+        "height": 650,
+        "minWidth": 960,
+        "minHeight": 600,
+        "resizable": true,
+        "decorations": true,
+        "titleBarStyle": "Transparent",
+        "hiddenTitle": true,
+        "center": true
+      }
+    ],
     "security": {
       "csp": null,
       "assetProtocol": {
