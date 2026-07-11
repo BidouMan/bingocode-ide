@@ -6,6 +6,13 @@ interface TooltipElement extends HTMLElement {
     showTimeout: ReturnType<typeof setTimeout> | 0
     hideTimeout: ReturnType<typeof setTimeout> | 0
   }
+  _tooltipHandlers?: {
+    onMouseEnter: () => void
+    onMouseLeave: () => void
+    onFocus: () => void
+    onBlur: () => void
+  }
+  _tooltipCurrentText?: string
 }
 
 function createTooltipElement(text: string): HTMLDivElement {
@@ -106,21 +113,37 @@ function hideTooltip(el: TooltipElement): void {
 
 export const vTooltip: Directive = {
   mounted(el: TooltipElement, binding: DirectiveBinding) {
-    el.addEventListener('mouseenter', () => showTooltip(el, binding.value))
-    el.addEventListener('mouseleave', () => hideTooltip(el))
-    el.addEventListener('focus', () => showTooltip(el, binding.value))
-    el.addEventListener('blur', () => hideTooltip(el))
+    el._tooltipCurrentText = binding.value
+
+    const onMouseEnter = () => showTooltip(el, el._tooltipCurrentText!)
+    const onMouseLeave = () => hideTooltip(el)
+    const onFocus = () => showTooltip(el, el._tooltipCurrentText!)
+    const onBlur = () => hideTooltip(el)
+
+    el.addEventListener('mouseenter', onMouseEnter)
+    el.addEventListener('mouseleave', onMouseLeave)
+    el.addEventListener('focus', onFocus)
+    el.addEventListener('blur', onBlur)
+
+    el._tooltipHandlers = { onMouseEnter, onMouseLeave, onFocus, onBlur }
   },
-  
+
   updated(el: TooltipElement, binding: DirectiveBinding) {
-    // Update tooltip text if binding value changed
+    el._tooltipCurrentText = binding.value
     if (el._tooltip && binding.value !== binding.oldValue) {
       el._tooltip.element.textContent = binding.value || ''
     }
   },
-  
+
   unmounted(el: TooltipElement) {
-    // Clean up
+    if (el._tooltipHandlers) {
+      el.removeEventListener('mouseenter', el._tooltipHandlers.onMouseEnter)
+      el.removeEventListener('mouseleave', el._tooltipHandlers.onMouseLeave)
+      el.removeEventListener('focus', el._tooltipHandlers.onFocus)
+      el.removeEventListener('blur', el._tooltipHandlers.onBlur)
+      delete el._tooltipHandlers
+    }
+    delete el._tooltipCurrentText
     if (el._tooltip) {
       clearTimeout(el._tooltip.showTimeout)
       clearTimeout(el._tooltip.hideTimeout)
