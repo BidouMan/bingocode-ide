@@ -1363,6 +1363,10 @@ function cancelTabRename() {
 function codeDisplayName(name: string) {
   return name.endsWith('.py') ? name.slice(0, -3) : name
 }
+
+function spriteDisplayName(name: string) {
+  return name.replace(/\.(png|jpg|jpeg|gif|webp|bmp)$/i, '')
+}
 </script>
 
 <template>
@@ -1377,7 +1381,7 @@ function codeDisplayName(name: string) {
       <!-- ═══ 游戏模式菜单 ═══ -->
       <template v-if="editorStore.isGameMode">
         <div class="menu-file-wrapper" @mouseleave="closeFileMenu">
-          <button class="menu-btn menu-btn-file" v-tooltip="'项目'" @click="toggleFileMenu">
+          <button class="menu-btn menu-btn-file" @click="toggleFileMenu">
             <img :src="iconFile" class="menu-icon" />
             <span>项目</span>
           </button>
@@ -1621,7 +1625,7 @@ function codeDisplayName(name: string) {
                       />
                     </template>
                     <template v-else>
-                      <span class="resource-grid-name">{{ item.name }}</span>
+                      <span class="resource-grid-name">{{ spriteDisplayName(item.name) }}</span>
                     </template>
                   </div>
                   <div v-if="resourceStore.sprites.length === 0" class="resource-empty"></div>
@@ -1963,9 +1967,6 @@ function codeDisplayName(name: string) {
 }
 .menu-btn-file {
   overflow: hidden;
-}
-.menu-btn-file:hover {
-  margin-bottom: 1px;
 }
 .file-menu-dropdown {
   position: absolute;
