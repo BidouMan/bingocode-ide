@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, nextTick, watch, onMounted } from 'vue'
+import iconAiAssistant from '../../assets/icons/ai_助手.svg'
 
 defineProps<{ visible: boolean }>()
 const emit = defineEmits<{ close: [] }>()
@@ -391,17 +392,12 @@ function renderMarkdown(text: string): string {
 <template>
   <Teleport to="body">
     <Transition name="ai-slide">
-      <div v-if="visible" class="ai-overlay" @click.self="emit('close')">
+      <div v-if="visible" class="ai-overlay">
         <div class="ai-panel">
           <!-- 标题栏 -->
           <div class="ai-header">
             <div class="ai-title-row">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgb(91, 251, 132)" stroke-width="2">
-                <path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z"/>
-                <path d="M9 22h6"/>
-                <path d="M10 2v2"/>
-                <path d="M14 2v2"/>
-              </svg>
+              <img :src="iconAiAssistant" class="ai-header-icon" />
               <span class="ai-title">AI 编程助手</span>
             </div>
             <div class="ai-header-actions">
@@ -458,12 +454,7 @@ function renderMarkdown(text: string): string {
             <!-- 空状态 -->
             <div v-if="messages.length === 0 && !isLoading" class="ai-empty">
               <div class="ai-empty-icon">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="rgb(91, 251, 132)" stroke-width="1.5">
-                  <path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z"/>
-                  <path d="M9 22h6"/>
-                  <path d="M10 2v2"/>
-                  <path d="M14 2v2"/>
-                </svg>
+                <img :src="iconAiAssistant" width="64" height="64" />
               </div>
               <div class="ai-empty-title">Bingo 引擎 AI 助手</div>
               <div class="ai-empty-desc">我可以帮你编写游戏代码、解答 API 用法、检查代码问题</div>
@@ -572,11 +563,12 @@ function renderMarkdown(text: string): string {
 .ai-overlay {
   position: fixed; inset: 0; z-index: 9000;
   display: flex; justify-content: flex-end;
-  background: rgba(0, 0, 0, 0.3);
+  pointer-events: none;
 }
 
 .ai-panel {
   width: 420px; max-width: 92vw; height: 100%;
+  pointer-events: auto;
   display: flex; flex-direction: column;
   background: var(--bg-root);
   border-left: 1px solid var(--border);
@@ -590,6 +582,7 @@ function renderMarkdown(text: string): string {
   border-bottom: 1px solid var(--border);
 }
 .ai-title-row { display: flex; align-items: center; gap: 8px; }
+.ai-header-icon { width: 20px; height: 20px; }
 .ai-title { font-size: 14px; font-weight: 600; color: white; }
 .ai-header-actions { display: flex; align-items: center; gap: 4px; }
 .ai-settings-btn, .ai-clear-btn, .ai-close-btn {
@@ -676,7 +669,7 @@ function renderMarkdown(text: string): string {
   align-items: center; justify-content: center;
   gap: 12px; padding: 20px;
 }
-.ai-empty-icon { opacity: 0.6; margin-bottom: 4px; }
+.ai-empty-icon { margin-bottom: 4px; }
 .ai-empty-title {
   font-size: 16px; font-weight: 600; color: white;
 }
@@ -776,7 +769,7 @@ function renderMarkdown(text: string): string {
   transition: border-color 0.2s;
 }
 .ai-input-box:focus-within {
-  border-color: rgba(91, 251, 132, 0.4);
+  border-color: var(--border-light);
 }
 .ai-input {
   flex: 1; min-height: 20px; max-height: 120px;

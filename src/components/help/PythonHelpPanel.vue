@@ -250,7 +250,7 @@ const filteredCategories = computed(() => {
 <template>
   <Teleport to="body">
     <Transition name="help-slide">
-      <div v-if="visible" class="help-overlay" @click.self="emit('close')">
+      <div v-if="visible" class="help-overlay">
         <div class="help-panel">
           <!-- 标题栏 -->
           <div class="help-header">
@@ -371,11 +371,12 @@ const filteredCategories = computed(() => {
 .help-overlay {
   position: fixed; inset: 0; z-index: 9000;
   display: flex; justify-content: flex-end;
-  background: rgba(0, 0, 0, 0.3);
+  pointer-events: none;
 }
 
 .help-panel {
   width: 480px; max-width: 92vw; height: 100%;
+  pointer-events: auto;
   display: flex; flex-direction: column;
   background: var(--bg-root);
   border-left: 1px solid var(--border);
