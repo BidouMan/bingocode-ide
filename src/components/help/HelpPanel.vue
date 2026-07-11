@@ -46,8 +46,8 @@ const categories = [
     funcs: [
       { label: 'goto 传送到某个位置', code: 'hero.goto(100, 200)', desc: '让角色瞬间传送到画面的某个位置。x 是左右方向（0~640），y 是上下方向（0~480）。', badgeType: 'object' },
       { label: 'move 朝前走', code: 'hero.move(5)', desc: '让角色朝着它面朝的方向走几步。比如 move(5) 就往前走 5 步。走的时候会自动避开墙壁。', badgeType: 'object' },
-      { label: 'jump 跳起来', code: 'hero.jump(12)', desc: '让角色跳起来！数字越大跳得越高，默认是 10。要站在地面上才能跳。', badgeType: 'object' },
-      { label: 'cut_jump 提前落地', code: 'hero.cut_jump()', desc: '松手的时候调用这个，角色会提前往下掉。按住跳键跳得高，松手就落下来，这样你就能控制跳多高。', badgeType: 'object' },
+      { label: 'jump 跳起来', code: 'if hero.on_ground:\n    hero.jump(12)', desc: '让角色跳起来！数字越大跳得越高，默认是 10。jump 只是施加向上的力，需要自己用 on_ground 判断是否在地面。', badgeType: 'object' },
+      { label: 'cut_jump 提前落地', code: 'if key_pressed("space") and hero.on_ground:\n    hero.jump(10)\nif key_up("space"):\n    hero.cut_jump()', desc: '松手的时候调用，角色会提前下落。按住跳键跳得高，松手就落下来，这样你就能控制跳多高。', badgeType: 'object' },
       { label: 'drop_through 穿过跳板', code: 'hero.drop_through()', desc: '让角色穿过脚下的跳板掉下去。站在跳板上时按向下键就能穿过去。', badgeType: 'object' },
       { label: 'add_x 向右走', code: 'hero.add_x(5)', desc: '让角色向右走几步。写负数就向左走，比如 add_x(-5) 向左走 5 步。', badgeType: 'object' },
       { label: 'add_y 向下走', code: 'hero.add_y(5)', desc: '让角色向下走几步。写负数就向上走。', badgeType: 'object' },
@@ -98,7 +98,7 @@ const categories = [
     name: '控制',
     color: '#FFAB19',
     funcs: [
-      { label: 'run 游戏主循环', code: 'def run():\n    if key_down("right"):\n        hero.move(3)', desc: '这是游戏的核心！把你写的游戏代码放在 run() 里面，引擎会不停地重复执行这段代码，游戏就是这样"跑"起来的。', badgeType: 'function' },
+      { label: 'while True 主循环', code: 'while True:\n    if key_down("right"):\n        hero.move(3)', desc: '这是游戏的核心！用 while True 不断重复执行游戏逻辑，游戏就是这样"跑"起来的。', badgeType: 'function' },
       { label: 'pause 暂停游戏', code: 'pause()', desc: '把游戏暂停。所有角色都停下来不动了，但是程序还在跑，可以随时 resume。', badgeType: 'function' },
       { label: 'resume 继续游戏', code: 'resume()', desc: '让暂停的游戏重新动起来。', badgeType: 'function' },
       { label: 'is_paused 暂停了吗', code: 'if is_paused():\n    resume()', desc: '检查游戏是不是暂停了。暂停了返回 True，正在玩返回 False。', badgeType: 'function' },
@@ -453,7 +453,11 @@ const filteredCategories = computed(() => {
   margin-bottom: 6px; padding: 6px 10px;
   background: rgb(28, 28, 32);
   border-radius: 6px; border: 1px solid var(--border-light);
+  overflow-x: auto;
 }
+.help-func-code::-webkit-scrollbar { height: 4px; }
+.help-func-code::-webkit-scrollbar-track { background: transparent; }
+.help-func-code::-webkit-scrollbar-thumb { background: rgb(60, 63, 70); border-radius: 2px; }
 .help-func-code code {
   font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
   font-size: 12px; color: rgb(156, 227, 170);

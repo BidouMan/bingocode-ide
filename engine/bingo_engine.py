@@ -142,9 +142,6 @@ class Sprite:
         self.vy = 0
         self._prev_bottom_y = 0
         self._jump_cut = False
-        self._coyote_counter = 0
-        self._jump_buffer = 0
-        self._jump_buffered = False
         self._drop_through = False
         self._drop_through_timer = 0
         self._groups = []
@@ -595,14 +592,8 @@ class Sprite:
         Args:
             power: 跳跃力度（默认10，越大跳得越高）
         """
-        if self.on_ground or self._coyote_counter > 0:
-            self.vy = -power
-            self.on_ground = False
-            self._coyote_counter = 0
-            self._jump_cut = False
-        elif not self._jump_buffered:
-            self._jump_buffer = 8
-            self._jump_buffered = True
+        self.vy = -power
+        self._jump_cut = False
 
     def cut_jump(self):
         """截断跳跃（松开跳跃键时调用），使角色提前下落"""
@@ -2025,15 +2016,11 @@ def _handle_physics_collision():
             if sprite._drop_through_timer <= 0:
                 sprite._drop_through = False
 
-        last_on_ground = sprite.on_ground
         sprite.on_ground = False
 
         hitbox = sprite._get_hitbox_rect()
         if hitbox:
             sprite._prev_bottom_y = hitbox[3]
-
-        if sprite._jump_buffer > 0:
-            sprite._jump_buffer -= 1
 
         if _CURRENT_MAP.get("gravity", False):
             if sprite.vy < 0:
@@ -2053,16 +2040,6 @@ def _handle_physics_collision():
         if sprite.on_ground:
             sprite.vy = 0
             sprite._jump_cut = False
-            if sprite._jump_buffer > 0:
-                sprite.vy = -10
-                sprite.on_ground = False
-                sprite._jump_buffer = 0
-                sprite._coyote_counter = 0
-
-        if not sprite.on_ground and last_on_ground:
-            sprite._coyote_counter = 8
-        elif not sprite.on_ground:
-            sprite._coyote_counter = max(0, sprite._coyote_counter - 1)
 
         sprite._update_transform()
 

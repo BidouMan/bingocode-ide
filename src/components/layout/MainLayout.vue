@@ -22,6 +22,7 @@ import MapResourceLibPage from '../resource-panel/MapResourceLibPage.vue'
 import SoundLibPage from '../resource-panel/SoundLibPage.vue'
 import HelpPanel from '../help/HelpPanel.vue'
 import PythonHelpPanel from '../help/PythonHelpPanel.vue'
+import AiChatPanel from '../help/AiChatPanel.vue'
 import PluginManager from '../common/PluginManager.vue'
 import iconLogo from '../../assets/icons/logo.svg'
 import iconFile from '../../assets/icons/icon--file.svg'
@@ -75,6 +76,7 @@ const settingsMenuVisible = ref(false)
 const settingsSubmenu = ref<string | null>(null)
 const selectedResource = ref<string | null>(null)
 const helpVisible = ref(false)
+const aiChatVisible = ref(false)
 const pluginManagerVisible = ref(false)
 
 // 角色缩略图缓存
@@ -220,6 +222,18 @@ function toggleSettingsMenu() {
 function closeSettingsMenu() {
   settingsMenuVisible.value = false
   settingsSubmenu.value = null
+}
+
+function onHelpClick(e: MouseEvent) {
+  if (e.metaKey || e.ctrlKey) {
+    // Cmd/Ctrl + 点击 → 打开 AI 助手
+    aiChatVisible.value = true
+    helpVisible.value = false
+  } else {
+    // 普通点击 → 打开帮助文档
+    helpVisible.value = !helpVisible.value
+    aiChatVisible.value = false
+  }
 }
 
 function openSettingsSubmenu(name: string) {
@@ -1516,7 +1530,7 @@ function codeDisplayName(name: string) {
       </div>
 
       <!-- 帮助 (仅图标) -->
-      <button class="menu-btn menu-btn-help" v-tooltip="'帮助'" @click="helpVisible = !helpVisible">
+      <button class="menu-btn menu-btn-help" v-tooltip="'帮助 (⌘+点击打开AI助手)'" @click="onHelpClick">
         <img :src="iconHelp" width="24" height="24" />
       </button>
     </div>
@@ -1858,6 +1872,9 @@ function codeDisplayName(name: string) {
 
     <!-- 帮助面板（代码模式） -->
     <PythonHelpPanel :visible="helpVisible && !editorStore.isGameMode" @close="helpVisible = false" />
+
+    <!-- AI 助手面板 -->
+    <AiChatPanel :visible="aiChatVisible" @close="aiChatVisible = false" />
 
     <!-- 插件库弹窗 -->
     <PluginManager v-if="pluginManagerVisible" @close="pluginManagerVisible = false" />
