@@ -22,11 +22,52 @@ const editorStore = useEditorStore()
 const themeStore = useThemeStore()
 const engine = useEngine()
 const containerRef = ref<HTMLDivElement>()
+const inputRef = ref<HTMLInputElement>()
 let terminal: Terminal | null = null
 let fitAddon: FitAddon | null = null
 const MAX_LINES = 5000
 const collapsed = ref(true)
 let inputBuffer = ''
+
+function commitInput() {
+  if (!inputBuffer) return
+  terminalStore.consumeInput()
+  terminal?.writeln(inputBuffer)
+  engine.sendInput(inputBuffer)
+  inputBuffer = ''
+}
+
+function commitInputFromField() {
+  inputBuffer = inputRef.value?.value || ''
+  commitInput()
+  if (inputRef.value) inputRef.value.value = ''
+}
+
+function onInputKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter') {
+    commitInputFromField()
+  }
+}
+
+function onInputCompositionend() {
+  // IME 输入完成时更新 inputBuffer
+  if (inputRef.value) {
+    inputBuffer = inputRef.value.value
+  }
+}
+
+watch(
+  () => terminalStore.waitingForInput,
+  (waiting) => {
+    if (waiting && editorStore.isRunning) {
+      nextTick(() => {
+        inputRef.value?.focus()
+        // 失焦 terminal，防止 onData 抢输入
+        terminal?.blur()
+      })
+    }
+  }
+)
 
 function createTerminal() {
   if (!containerRef.value || terminal) return
@@ -53,6 +94,9 @@ function createTerminal() {
 
   terminal.onData((data: string) => {
     if (!editorStore.isRunning) return
+
+    // 有原生输入框时，不通过 terminal 捕获
+    if (terminalStore.waitingForInput) return
 
     if (data === '\r') {
       terminalStore.consumeInput()
@@ -248,6 +292,16 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-show="!collapsed" ref="containerRef" class="console-body" @mousedown="onBodyClick" />
+    <div v-show="!collapsed && terminalStore.waitingForInput" class="console-input-line">
+      <input
+        ref="inputRef"
+        class="console-input"
+        placeholder="输入..."
+        @keydown="onInputKeydown"
+        @compositionend="onInputCompositionend"
+      />
+      <button class="console-input-btn" @click="commitInputFromField">↵</button>
+    </div>
   </div>
 </template>
 
@@ -351,5 +405,45 @@ onBeforeUnmount(() => {
 }
 .console-body :deep(.xterm-viewport) {
   background: #1e1e1e !important;
+}
+
+.console-input-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: #252526;
+  border-top: 1px solid rgb(60, 60, 60);
+}
+.console-input {
+  flex: 1;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgb(60, 60, 60);
+  border-radius: 3px;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  font-size: 13px;
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  outline: none;
+}
+.console-input:focus {
+  border-color: var(--accent, #5BFB84);
+}
+.console-input-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgb(60, 60, 60);
+  border-radius: 3px;
+  background: #2d2d2d;
+  color: #d4d4d4;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.console-input-btn:hover {
+  background: #3d3d3d;
 }
 </style>
