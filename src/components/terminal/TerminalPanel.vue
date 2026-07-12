@@ -150,55 +150,39 @@ function createTerminal() {
   terminal.open(containerRef.value)
   terminalStore.bindTerminal(terminal)
 
-  // 注册 shell 运行器：代码模式运行时通过 shell 执行
+  // 注册 shell 运行器：每次运行只是发命令
   let runEndTimer: ReturnType<typeof setTimeout> | null = null
-  let outputStarted = false
+
+  // 终端创建后就启动 shell 并保持运行，后续运行只是发命令
+  terminalStore.terminalMode = 'shell'
+  shell.startShell(
+    (data) => {
+      terminal?.write(data)
+      scrollToBottom()
+      // 运行状态下：收到第一个输出启动结束检测，后续输出重置超时
+      if (!editorStore.isRunning) return
+      if (runEndTimer) {
+        clearTimeout(runEndTimer)
+      }
+      runEndTimer = setTimeout(() => {
+        editorStore.setRunning(false)
+        runEndTimer = null
+      }, 3000)
+    },
+    () => {
+      editorStore.setRunning(false)
+      runEndTimer = null
+    }
+  )
+  fitTerminal()
+  // 同步 shell 尺寸
+  setTimeout(() => {
+    const dims = (terminal as any).dimensions
+    if (dims) shell.resize(dims.cols, dims.rows)
+  }, 100)
 
   terminalStore.registerShellRunner(async (cmd: string) => {
     if (runEndTimer) { clearTimeout(runEndTimer); runEndTimer = null }
-    outputStarted = false
-
-    // 确保 shell 已启动
-    if (!isShellMode.value) {
-      terminalStore.terminalMode = 'shell'
-      await nextTick()
-      await shell.startShell(
-        (data) => {
-          terminal?.write(data)
-          scrollToBottom()
-          // 收到第一个输出后才启动结束检测
-          if (!editorStore.isRunning) return
-          if (!outputStarted) {
-            outputStarted = true
-            runEndTimer = setTimeout(() => {
-              editorStore.setRunning(false)
-              runEndTimer = null
-              outputStarted = false
-            }, 3000)
-          } else if (runEndTimer) {
-            // 后续输出重置超时
-            clearTimeout(runEndTimer)
-            runEndTimer = setTimeout(() => {
-              editorStore.setRunning(false)
-              runEndTimer = null
-              outputStarted = false
-            }, 3000)
-          }
-        },
-        () => {
-          runEndTimer = null
-          outputStarted = false
-          editorStore.setRunning(false)
-          terminalStore.terminalMode = 'python'
-        }
-      )
-      if (terminal && fitAddon) {
-        fitAddon.fit()
-        const dims = (terminal as any).dimensions
-        if (dims) await shell.resize(dims.cols, dims.rows)
-      }
-    }
-    // 发送运行命令
     shell.sendInput(cmd + '\n')
   })
 
