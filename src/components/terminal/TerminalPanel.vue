@@ -512,6 +512,10 @@ onBeforeUnmount(() => {
   flex: 1;
   min-height: 0;
   background: #1e1e1e;
+  overflow: hidden;
+}
+.console-body :deep(.xterm) {
+  height: 100%;
 }
 .console-body :deep(.xterm-viewport) {
   overflow-y: auto !important;
