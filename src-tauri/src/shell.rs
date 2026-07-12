@@ -29,7 +29,7 @@ pub fn start_shell(
         .openpty(size)
         .map_err(|e| format!("Failed to open PTY: {}", e))?;
 
-    // 选择用户默认 shell
+    // 选择用户默认 shell，加 --norc --noprofile 跳过用户美化配置
     #[cfg(target_os = "macos")]
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     #[cfg(target_os = "windows")]
@@ -38,12 +38,31 @@ pub fn start_shell(
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
 
     let mut cmd = CommandBuilder::new(&shell);
+    // 跳过用户 .zshrc / .bashrc 等美化配置，保持统一的干净终端
+    #[cfg(not(target_os = "windows"))]
+    {
+        let shell_name = std::path::Path::new(&shell)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+        if shell_name == "zsh" {
+            cmd.arg("--norc");
+            cmd.arg("--noprofile");
+        } else if shell_name == "bash" {
+            cmd.arg("--norc");
+            cmd.arg("--noprofile");
+        }
+    }
     cmd.cwd(&working_dir);
 
-    // 设置终端类型
-    cmd.env("TERM", "xterm-256color");
-    #[cfg(target_os = "macos")]
-    cmd.env("COLORTERM", "truecolor");
+    // 设置终端类型为最基础的 xterm，避免触发美化插件
+    cmd.env("TERM", "dumb");
+    cmd.env("NO_COLOR", "1");
+    cmd.env("FORCE_COLOR", "0");
+    // 清除可能导致美化的环境变量
+    cmd.env_remove("PROMPT_COMMAND");
+    cmd.env_remove("PS1");
+    cmd.env_remove("PS2");
 
     let child = pair
         .slave
