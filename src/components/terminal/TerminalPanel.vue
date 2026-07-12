@@ -230,8 +230,14 @@ function createTerminal() {
   // 捕获阶段拦截 keydown，在 xterm.js 处理之前截获，e.preventDefault() 才能阻止 xterm 重复处理
   containerRef.value.addEventListener('keydown', onTerminalKeydown, true)
 
-  // 所有输入由 keydown 统一处理，onData 仅兜底（正常情况不会触发）
+  // 所有输入由 keydown 统一处理（Python 模式），shell 模式走 onData 直发 PTY
   terminal.onData((data: string) => {
+    // shell 模式：直接发送到 PTY，不做任何处理
+    if (isShellMode.value) {
+      shell.sendInput(data)
+      return
+    }
+
     if (!editorStore.isRunning) return
 
     if (data === '\r') {
