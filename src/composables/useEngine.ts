@@ -327,16 +327,11 @@ export function useEngine() {
         await invoke('cleanup_temp_script', { projectDir }).catch(() => {})
       }
 
-      // 构建最终脚本内容：sys.path + 自动 import
-      let codeToRun = tab.content
-      const gameKeywords = ['run()', 'Sprite(', 'load_map(', 'key_down(', 'key_pressed(', 'Timer(', 'mouse', 'wait(']
-      const hasImport = codeToRun.includes('from bingo_engine import') || codeToRun.includes('import bingo_engine')
-      const needsEngine = !hasImport && gameKeywords.some(kw => codeToRun.includes(kw))
-
-      // 先写入原始内容获取临时文件路径
-      const scriptPath = await invoke<string>('save_temp_script', {
+      // 先写入临时文件获取路径（resolve_engine_env 需要）
+      const tab = editorStore.currentTab
+      const tempScriptPath = await invoke<string>('save_temp_script', {
         projectDir,
-        content: codeToRun,
+        content: tab?.content || '',
       })
 
       // 获取引擎环境（python路径、engine目录、工作目录）
@@ -344,30 +339,71 @@ export function useEngine() {
         python_path: string
         engine_dir: string
         working_dir: string
-      }>('resolve_engine_env', { scriptPath, projectRoot: projectDir || undefined })
+      }>('resolve_engine_env', { scriptPath: tempScriptPath, projectRoot: projectDir || undefined })
 
       // 根据模式决定如何运行
       if (editorStore.isGameMode) {
-        // ═══ 游戏模式：使用游戏引擎运行 ═══
-        // 如果需要引擎，注入 sys.path 和 import 并重新写入
-        if (needsEngine) {
-          const escapedPath = env.engine_dir.replace(/\\/g, '\\\\')
-          codeToRun = `import sys\nif "${escapedPath}" not in sys.path:\n    sys.path.insert(0, "${escapedPath}")\nfrom bingo_engine import *\n` + codeToRun
-        }
-        // 始终保存 temp 脚本，供 start_game 的 discover_and_merge 发现
-        const savedPath = await invoke<string>('save_temp_script', {
-          projectDir,
-          content: codeToRun,
-        })
+        // ═══ 游戏模式：保存所有 tab 到 code/ 目录，引擎自动发现并运行 ═══
+        const gameKeywords = ['run()', 'Sprite(', 'load_map(', 'key_down(', 'key_pressed(', 'Timer(', 'mouse', 'wait(']
+        const codeDir = projectDir ? `${projectDir}/code` : ''
 
+        // 确保 code/ 目录存在
+        if (codeDir) {
+          await invoke('create_dir', { path: codeDir }).catch(() => {})
+        }
+
+        let allNeedsEngine = false
+        const usedFileNames = new Set<string>()
+
+        // 保存每个 tab 为独立 .py 文件
+        for (const t of editorStore.currentTabs) {
+          if (!t.content.trim()) continue
+          // 检查是否需要引擎
+          const hasImport = t.content.includes('from bingo_engine import') || t.content.includes('import bingo_engine')
+          if (!hasImport && gameKeywords.some(kw => t.content.includes(kw))) {
+            allNeedsEngine = true
+          }
+          // 确定文件名：优先用已保存的 path，否则用 tab name
+          let fileName = t.name
+          if (t.path) {
+            const parts = t.path.replace(/\\/g, '/').split('/')
+            fileName = parts[parts.length - 1]
+          }
+          if (!fileName.endsWith('.py')) fileName += '.py'
+          // 文件名去重：同名加后缀避免覆盖
+          let finalName = fileName
+          let suffix = 1
+          while (usedFileNames.has(finalName)) {
+            const dotIdx = fileName.lastIndexOf('.')
+            finalName = `${fileName.slice(0, dotIdx)}_${suffix}${fileName.slice(dotIdx)}`
+            suffix++
+          }
+          usedFileNames.add(finalName)
+          const filePath = codeDir ? `${codeDir}/${finalName}` : finalName
+
+          // 需要引擎时注入 sys.path 和 import
+          let content = t.content
+          if (allNeedsEngine) {
+            const escapedPath = env.engine_dir.replace(/\\/g, '\\\\')
+            content = `import sys\nif "${escapedPath}" not in sys.path:\n    sys.path.insert(0, "${escapedPath}")\nfrom bingo_engine import *\n` + content
+          }
+
+          await invoke('write_file', { path: filePath, content })
+        }
+
+        // 不传 scriptPath，让 discover_and_merge 扫描 code/ 目录运行所有文件
         await invoke('run_script', {
           workingDir: env.working_dir,
           pythonPath: env.python_path,
           engineDir: env.engine_dir,
-          scriptPath: savedPath,
         })
       } else {
         // ═══ 代码模式：直接运行 Python 脚本 ═══
+        if (!tab) {
+          terminalStore.appendLine('\x1b[31m❌ 没有打开的文件\x1b[0m')
+          editorStore.setRunning(false)
+          return
+        }
         // 覆盖 input() 使提示文字带换行符，解决 Rust read_line 等不到 \n 的问题
         const patchedCode = `import sys as _sys
 def _input(prompt=""):
@@ -375,7 +411,7 @@ def _input(prompt=""):
     _sys.stdout.flush()
     return _sys.stdin.readline().rstrip("\\n")
 input = _input
-` + codeToRun
+` + tab.content
 
         const scriptPath = await invoke<string>('save_temp_script', {
           projectDir,
