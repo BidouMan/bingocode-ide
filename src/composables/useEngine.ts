@@ -278,7 +278,7 @@ export function useEngine() {
       }
     }
 
-    // 如果文件未保存，弹窗让用户保存
+    // 如果文件未保存，弹窗让用户保存后即止（不运行）
     if (!tab.path) {
       const filePath = await save({
         title: '保存 Python 文件',
@@ -286,7 +286,6 @@ export function useEngine() {
         defaultPath: tab.name,
       })
       if (!filePath) {
-        // 用户取消保存，不运行
         terminalStore.appendLine('\x1b[33m已取消运行\x1b[0m')
         return
       }
@@ -300,6 +299,9 @@ export function useEngine() {
         resource.path = filePath
         resource.name = tab.name
       }
+      terminalStore.appendLine('\x1b[33m文件已保存，再次点击运行即可执行\x1b[0m')
+      editorStore.setRunning(false)
+      return
     }
 
     renderStore.clearAll()
@@ -405,7 +407,7 @@ export function useEngine() {
           return
         }
         // 保存脚本到临时文件
-        const scriptPath = await invoke<string>('save_temp_script', {
+        await invoke<string>('save_temp_script', {
           projectDir,
           content: tab.content,
         })
