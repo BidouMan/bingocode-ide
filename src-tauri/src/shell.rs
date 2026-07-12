@@ -46,8 +46,8 @@ pub fn start_shell(
             .and_then(|n| n.to_str())
             .unwrap_or("");
         if shell_name == "zsh" {
-            cmd.arg("--norc");
-            cmd.arg("--noprofile");
+            // macOS /bin/zsh 用 -f 跳过所有启动文件
+            cmd.arg("-f");
         } else if shell_name == "bash" {
             cmd.arg("--norc");
             cmd.arg("--noprofile");
