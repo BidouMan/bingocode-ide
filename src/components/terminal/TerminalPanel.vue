@@ -162,7 +162,7 @@ function createTerminal() {
     if (!isShellMode.value) {
       terminalStore.terminalMode = 'shell'
       await nextTick()
-      shell.startShell(
+      await shell.startShell(
         (data) => {
           terminal?.write(data)
           scrollToBottom()
