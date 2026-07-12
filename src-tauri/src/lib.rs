@@ -1,12 +1,24 @@
 use serde::{Deserialize, Serialize};
+use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use tauri::Manager;
 
 mod engine;
+mod shell;
 
 pub struct EngineState {
     pub process: Mutex<Option<engine::RunningProcess>>,
+}
+
+pub struct RunningShell {
+    pub child: Box<dyn portable_pty::Child + Send>,
+    pub writer: Option<Box<dyn Write + Send>>,
+    pub pair: Option<portable_pty::PtyPair>,
+}
+
+pub struct ShellState {
+    pub pty: Mutex<Option<RunningShell>>,
 }
 
 #[tauri::command]
@@ -826,6 +838,9 @@ pub fn run() {
         .manage(EngineState {
             process: Mutex::new(None),
         })
+        .manage(ShellState {
+            pty: Mutex::new(None),
+        })
         .invoke_handler(tauri::generate_handler![
             read_file,
             write_file,
@@ -861,6 +876,10 @@ pub fn run() {
             pip_get_versions,
             pip_check_outdated,
             pip_upgrade_package,
+            shell::start_shell,
+            shell::send_shell_input,
+            shell::resize_shell,
+            shell::stop_shell,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

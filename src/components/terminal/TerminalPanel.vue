@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import { SearchAddon } from '@xterm/addon-search'
+import { Unicode11Addon } from '@xterm/addon-unicode11'
+import { ClipboardAddon } from '@xterm/addon-clipboard'
 import '@xterm/xterm/css/xterm.css'
 import { useTerminalStore } from '../../stores/terminal'
 import { useEditorStore } from '../../stores/editor'
 import { useThemeStore } from '../../stores/theme'
 import { useEngine } from '../../composables/useEngine'
+import { useShell } from '../../composables/useShell'
 
 const props = defineProps<{
   visible: boolean
@@ -21,12 +25,22 @@ const terminalStore = useTerminalStore()
 const editorStore = useEditorStore()
 const themeStore = useThemeStore()
 const engine = useEngine()
+const shell = useShell()
 const containerRef = ref<HTMLDivElement>()
 let terminal: Terminal | null = null
 let fitAddon: FitAddon | null = null
+let searchAddon: SearchAddon | null = null as any
 const MAX_LINES = 5000
 const collapsed = ref(true)
 let inputBuffer = ''
+// 命令历史
+const commandHistory: string[] = []
+let historyIndex = -1
+// 搜索栏
+const showSearch = ref(false)
+const searchText = ref('')
+// shell 模式
+const isShellMode = computed(() => terminalStore.terminalMode === 'shell')
 
 // 符号按钮列表（IME 键盘按不了的符号，鼠标点击插入）
 const SYMBOL_BUTTONS = ['+', '-', '*', '/', '(', ')', '!', '@', '#', '$', '%', '^', '&', '=', ':', ';', '"', "'", ',', '.', '?', '<', '>', '[', ']', '{', '}', '|', '\\', '~', '`']
@@ -72,15 +86,94 @@ function keydownToChar(e: KeyboardEvent): string | null {
   return null
 }
 
-// keydown 统一处理所有按键输入（代码模式 + game 模式），用物理键码绕过 IME
+// keydown 统一处理所有按键输入（代码模式 + game 模式 + shell 模式）
 function onTerminalKeydown(e: KeyboardEvent) {
+  // Ctrl+F 搜索
+  if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+    e.preventDefault()
+    e.stopPropagation()
+    showSearch.value = !showSearch.value
+    if (!showSearch.value) {
+      searchAddon?.clearDecorations()
+    }
+    return
+  }
+
+  // Esc 关闭搜索
+  if (e.key === 'Escape' && showSearch.value) {
+    e.preventDefault()
+    e.stopPropagation()
+    showSearch.value = false
+    searchAddon?.clearDecorations()
+    return
+  }
+
+  // shell 模式：所有按键直接发送到 PTY，不做任何拦截
+  if (isShellMode.value) {
+    return // 让 xterm.js 原生处理，通过 onData 发送到 shell
+  }
+
+  // 以下为 Python 控制台模式
   if (!editorStore.isRunning) return
+
+  // Ctrl+C 中断
+  if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
+    e.preventDefault()
+    e.stopPropagation()
+    engine.stop()
+    terminal?.write('^C\r\n')
+    inputBuffer = ''
+    return
+  }
+
+  // 上/下箭头 命令历史
+  if (e.key === 'ArrowUp' && commandHistory.length > 0) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (historyIndex < commandHistory.length - 1) {
+      historyIndex++
+    }
+    const cmd = commandHistory[commandHistory.length - 1 - historyIndex]
+    // 清除当前输入
+    while (inputBuffer.length > 0) {
+      inputBuffer = inputBuffer.slice(0, -1)
+      terminal!.write('\b \b')
+    }
+    inputBuffer = cmd
+    terminal!.write(cmd)
+    return
+  }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    e.stopPropagation()
+    if (historyIndex > 0) {
+      historyIndex--
+      const cmd = commandHistory[commandHistory.length - 1 - historyIndex]
+      while (inputBuffer.length > 0) {
+        inputBuffer = inputBuffer.slice(0, -1)
+        terminal!.write('\b \b')
+      }
+      inputBuffer = cmd
+      terminal!.write(cmd)
+    } else {
+      historyIndex = -1
+      while (inputBuffer.length > 0) {
+        inputBuffer = inputBuffer.slice(0, -1)
+        terminal!.write('\b \b')
+      }
+    }
+    return
+  }
 
   if (e.key === 'Enter') {
     e.preventDefault()
     e.stopPropagation()
     terminalStore.consumeInput()
     terminal?.write('\r\n')
+    if (inputBuffer.trim()) {
+      commandHistory.push(inputBuffer)
+      historyIndex = -1
+    }
     engine.sendInput(inputBuffer)
     inputBuffer = ''
     return
@@ -123,6 +216,13 @@ function createTerminal() {
   fitAddon = new FitAddon()
   terminal.loadAddon(fitAddon)
   terminal.loadAddon(new WebLinksAddon())
+  // 搜索 addon
+  searchAddon = new SearchAddon()
+  terminal.loadAddon(searchAddon)
+  // Unicode 11 支持
+  try { terminal.loadAddon(new Unicode11Addon()) } catch {}
+  // 剪贴板 addon
+  try { terminal.loadAddon(new ClipboardAddon()) } catch {}
 
   terminal.open(containerRef.value)
   terminalStore.bindTerminal(terminal)
@@ -149,6 +249,12 @@ function createTerminal() {
       terminal!.write(data)
     }
   })
+
+  // shell 模式下监听 PTY 输出
+  shell.startShell(
+    (data) => { terminal?.write(data) },
+    () => { terminalStore.terminalMode = 'python' }
+  )
 }
 
 function fitTerminal() {
@@ -158,16 +264,57 @@ function fitTerminal() {
   fitAddon.fit()
 }
 
+// 搜索功能
+function doSearch() {
+  if (!searchAddon || !searchText.value) {
+    searchAddon?.clearDecorations()
+    return
+  }
+  searchAddon.findNext(searchText.value)
+}
+
+function doSearchPrev() {
+  if (!searchAddon || !searchText.value) return
+  searchAddon.findPrevious(searchText.value)
+}
+
+// 切换终端模式
+async function toggleTerminalMode() {
+  if (isShellMode.value) {
+    // 切回 Python 控制台
+    await shell.stopShell()
+    terminalStore.terminalMode = 'python'
+    terminal?.clear()
+    terminal?.write('\x1b[33m[已切换到 Python 控制台]\x1b[0m\r\n')
+  } else {
+    // 切到系统终端
+    terminalStore.terminalMode = 'shell'
+    terminal?.clear()
+    terminal?.write('\x1b[33m[已切换到系统终端]\x1b[0m\r\n')
+    // 通知 shell 发送 resize
+    if (terminal && fitAddon) {
+      fitAddon.fit()
+      const dims = (terminal as any).dimensions
+      if (dims) await shell.resize(dims.cols, dims.rows)
+    }
+  }
+}
+
+// 窗口 resize 时同步 shell 尺寸
+async function onResize() {
+  fitTerminal()
+  if (isShellMode.value && terminal) {
+    const dims = (terminal as any).dimensions
+    if (dims) await shell.resize(dims.cols, dims.rows)
+  }
+}
+
 function clearInputBuffer() {
   inputBuffer = ''
 }
 
 function onBodyClick() {
   setTimeout(() => terminal?.focus(), 0)
-}
-
-function close() {
-  emit('update:visible', false)
 }
 
 function toggleCollapse() {
@@ -280,8 +427,8 @@ function onDragEnd() {
 }
 
 onMounted(() => {
-  window.addEventListener('resize', () => fitTerminal())
-  resizeObserver = new ResizeObserver(() => fitTerminal())
+  window.addEventListener('resize', onResize)
+  resizeObserver = new ResizeObserver(onResize)
   if (containerRef.value) resizeObserver.observe(containerRef.value)
 })
 
@@ -315,6 +462,20 @@ onBeforeUnmount(() => {
         <span class="console-title">控制台</span>
       </div>
       <div class="console-header-right">
+        <!-- 终端模式切换 -->
+        <button class="console-action" @click="toggleTerminalMode" v-tooltip="isShellMode ? '切换到 Python 控制台' : '切换到系统终端'">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="4,17 10,11 4,5" />
+            <line x1="12" y1="19" x2="20" y2="19" />
+          </svg>
+        </button>
+        <!-- 搜索按钮 -->
+        <button class="console-action" @click="showSearch = !showSearch; if (!showSearch) searchAddon?.clearDecorations()" v-tooltip="'搜索 (Ctrl+F)'">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+        </button>
         <button class="console-action" @click="terminalStore.clear()" v-tooltip="'清空'">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="3,6 5,6 21,6" />
@@ -328,6 +489,29 @@ onBeforeUnmount(() => {
           </svg>
         </button>
       </div>
+    </div>
+
+    <!-- 搜索栏 -->
+    <div v-show="!collapsed && showSearch" class="search-bar">
+      <input
+        v-model="searchText"
+        class="search-input"
+        placeholder="搜索..."
+        @input="doSearch"
+        @keydown.enter="doSearch"
+        @keydown.up.prevent="doSearchPrev"
+        @keydown.down.prevent="doSearch"
+        @keydown.escape="showSearch = false; searchAddon?.clearDecorations()"
+      />
+      <button class="search-btn" @click="doSearchPrev" v-tooltip="'上一个'">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18,15 12,9 6,15" /></svg>
+      </button>
+      <button class="search-btn" @click="doSearch" v-tooltip="'下一个'">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6,9 12,15 18,9" /></svg>
+      </button>
+      <button class="search-btn" @click="showSearch = false; searchAddon?.clearDecorations()" v-tooltip="'关闭'">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+      </button>
     </div>
 
     <div v-show="!collapsed" ref="containerRef" class="console-body" @mousedown="onBodyClick" />
@@ -474,6 +658,48 @@ onBeforeUnmount(() => {
   user-select: none;
 }
 .symbol-btn:hover {
+  background: #3d4048;
+  border-color: rgb(91, 251, 132);
+}
+
+/* 搜索栏 */
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: #252526;
+  border-bottom: 1px solid rgb(60, 60, 60);
+}
+.search-input {
+  flex: 1;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid rgb(70, 70, 70);
+  border-radius: 3px;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  font-size: 12px;
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  outline: none;
+}
+.search-input:focus {
+  border-color: rgb(91, 251, 132);
+}
+.search-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid rgb(70, 70, 70);
+  border-radius: 3px;
+  background: #2d2d2d;
+  color: #d4d4d4;
+  cursor: pointer;
+  padding: 0;
+}
+.search-btn:hover {
   background: #3d4048;
   border-color: rgb(91, 251, 132);
 }

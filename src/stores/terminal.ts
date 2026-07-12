@@ -11,6 +11,8 @@ export const useTerminalStore = defineStore('terminal', () => {
   let terminalInstance: any = null
   const earlyBuffer: string[] = []
   const waitingForInput = ref(false)
+  // 终端模式：'python' = Python 控制台，'shell' = 系统终端
+  const terminalMode = ref<'python' | 'shell'>('python')
 
   function bindTerminal(terminal: any) {
     terminalInstance = terminal
@@ -135,6 +137,7 @@ export const useTerminalStore = defineStore('terminal', () => {
   return {
     lines,
     waitingForInput,
+    terminalMode,
     bindTerminal,
     appendLine,
     appendBatch,
