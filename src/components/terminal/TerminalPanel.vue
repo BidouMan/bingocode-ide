@@ -255,12 +255,6 @@ function createTerminal() {
       terminal!.write(data)
     }
   })
-
-  // shell 模式下监听 PTY 输出
-  shell.startShell(
-    (data) => { terminal?.write(data) },
-    () => { terminalStore.terminalMode = 'python' }
-  )
 }
 
 function fitTerminal() {
@@ -284,25 +278,29 @@ function doSearchPrev() {
   searchAddon.findPrevious(searchText.value)
 }
 
-// 切换终端模式
-async function toggleTerminalMode() {
-  if (isShellMode.value) {
-    // 切回 Python 控制台
-    await shell.stopShell()
-    terminalStore.terminalMode = 'python'
-    terminal?.clear()
-    terminal?.write('\x1b[33m[已切换到 Python 控制台]\x1b[0m\r\n')
-  } else {
-    // 切到系统终端
-    terminalStore.terminalMode = 'shell'
-    terminal?.clear()
-    terminal?.write('\x1b[33m[已切换到系统终端]\x1b[0m\r\n')
-    // 通知 shell 发送 resize
-    if (terminal && fitAddon) {
-      fitAddon.fit()
-      const dims = (terminal as any).dimensions
-      if (dims) await shell.resize(dims.cols, dims.rows)
-    }
+// 切换到 Python 控制台
+async function switchToPython() {
+  if (!isShellMode.value) return
+  await shell.stopShell()
+  terminalStore.terminalMode = 'python'
+  terminal?.clear()
+}
+
+// 切换到系统终端
+async function switchToShell() {
+  if (isShellMode.value) return
+  terminalStore.terminalMode = 'shell'
+  terminal?.clear()
+  await nextTick()
+  // 启动 shell 并同步尺寸
+  shell.startShell(
+    (data) => { terminal?.write(data) },
+    () => { terminalStore.terminalMode = 'python' }
+  )
+  if (terminal && fitAddon) {
+    fitAddon.fit()
+    const dims = (terminal as any).dimensions
+    if (dims) await shell.resize(dims.cols, dims.rows)
   }
 }
 
@@ -461,20 +459,10 @@ onBeforeUnmount(() => {
     />
     <div class="console-header">
       <div class="console-header-left">
-        <svg class="console-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="4,17 10,11 4,5" />
-          <line x1="12" y1="19" x2="20" y2="19" />
-        </svg>
-        <span class="console-title">控制台</span>
+        <button class="mode-tab" :class="{ 'mode-tab-active': !isShellMode }" @click="switchToPython">控制台</button>
+        <button class="mode-tab" :class="{ 'mode-tab-active': isShellMode }" @click="switchToShell">终端</button>
       </div>
       <div class="console-header-right">
-        <!-- 终端模式切换 -->
-        <button class="console-action" @click="toggleTerminalMode" v-tooltip="isShellMode ? '切换到 Python 控制台' : '切换到系统终端'">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="4,17 10,11 4,5" />
-            <line x1="12" y1="19" x2="20" y2="19" />
-          </svg>
-        </button>
         <!-- 搜索按钮 -->
         <button class="console-action" @click="showSearch = !showSearch; if (!showSearch) searchAddon?.clearDecorations()" v-tooltip="'搜索 (Ctrl+F)'">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -584,19 +572,28 @@ onBeforeUnmount(() => {
 .console-header-left {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 0;
 }
 
-.console-icon {
-  color: var(--text-muted);
-}
-
-.console-title {
+.mode-tab {
+  padding: 2px 10px;
   font-size: 11px;
   font-weight: 600;
-  color: rgb(180, 180, 180);
+  color: rgb(140, 140, 140);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+.mode-tab:hover {
+  color: rgb(180, 180, 180);
+}
+.mode-tab-active {
+  color: rgb(200, 200, 200);
+  border-bottom-color: var(--accent, rgb(91, 251, 132));
 }
 
 .console-header-right {
