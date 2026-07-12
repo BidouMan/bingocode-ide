@@ -931,14 +931,12 @@ function startCodeRename(id: string) {
   })
 }
 
-async function migrateCodeFile(oldName: string, newName: string) {
-  if (!projectStore.root) return
-  const oldFile = `${projectStore.root}/code/${oldName}`
-  const newFile = `${projectStore.root}/code/${newName}`
+async function migrateCodeFile(oldPath: string, newPath: string) {
+  if (!oldPath || !newPath || oldPath === newPath) return
   try {
-    const exists = await invoke<boolean>('path_exists', { path: oldFile })
+    const exists = await invoke<boolean>('path_exists', { path: oldPath })
     if (!exists) return
-    await invoke('rename_path', { oldPath: oldFile, newPath: newFile })
+    await invoke('rename_path', { oldPath, newPath })
   } catch (e) {
     console.error('[MainLayout] 迁移代码文件失败:', e)
   }
@@ -951,23 +949,18 @@ function confirmCodeRename() {
 
   const nameWithPy = val.endsWith('.py') ? val : val + '.py'
   const item = resourceStore.codes.find(c => c.id === codeRenameId.value)
-  const oldName = item?.name
-  if (!item || !oldName || oldName === nameWithPy) {
-    codeRenameId.value = null
-    codeRenameValue.value = ''
-    return
-  }
+  const tab = editorStore.gameTabs.find(t => t.id === codeRenameId.value)
+  if (!item || !tab) { codeRenameId.value = null; codeRenameValue.value = ''; return }
 
-  // 先执行文件迁移，再改名字
-  migrateCodeFile(oldName, nameWithPy).then(() => {
-    // 更新 tab 名称
-    const tab = editorStore.gameTabs.find(t => t.id === codeRenameId.value)
-    if (tab) tab.name = nameWithPy
-    // 更新 resource 名称和路径
+  const oldPath = tab.path || item.path || ''
+  const newPath = projectStore.root ? `${projectStore.root}/code/${nameWithPy}` : nameWithPy
+  if (!oldPath || oldPath === newPath) { codeRenameId.value = null; codeRenameValue.value = ''; return }
+
+  migrateCodeFile(oldPath, newPath).then(() => {
+    tab.name = nameWithPy
+    tab.path = newPath
     item.name = nameWithPy
-    if (projectStore.root) {
-      item.path = `${projectStore.root}/code/${nameWithPy}`
-    }
+    item.path = newPath
     codeRenameId.value = null
     codeRenameValue.value = ''
   })
@@ -1371,17 +1364,21 @@ function confirmTabRename() {
 
   const nameWithPy = val.endsWith('.py') ? val : val + '.py'
   const tab = editorStore.currentTabs.find(t => t.id === tabRenameId.value)
-  const item = resourceStore.codes.find(c => c.id === tabRenameId.value)
-  const oldName = item?.name
-  if (!tab || !oldName || oldName === nameWithPy) {
-    tabRenameId.value = null
-    tabRenameValue.value = ''
-    return
-  }
+  if (!tab) { tabRenameId.value = null; tabRenameValue.value = ''; return }
 
-  // 先执行文件迁移，再改名字（只改 tab，watch 自动同步到 resource）
-  migrateCodeFile(oldName, nameWithPy).then(() => {
+  const oldPath = tab.path || ''
+  const newPath = projectStore.root ? `${projectStore.root}/code/${nameWithPy}` : nameWithPy
+  if (!oldPath || oldPath === newPath) { tabRenameId.value = null; tabRenameValue.value = ''; return }
+
+  migrateCodeFile(oldPath, newPath).then(() => {
     editorStore.renameTab(tab.id, nameWithPy)
+    tab.path = newPath
+    // 同步更新 resource
+    const item = resourceStore.codes.find(c => c.id === tab.id)
+    if (item) {
+      item.name = nameWithPy
+      item.path = newPath
+    }
     tabRenameId.value = null
     tabRenameValue.value = ''
   })
