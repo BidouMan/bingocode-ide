@@ -65,13 +65,20 @@ export const useTerminalStore = defineStore('terminal', () => {
     const cleaned = text.replace('__BINGO_WAITING_INPUT__', '')
 
     const parts = cleaned.split('\n')
+    // 找到最后一个非空片段，用 writeRaw（不追加换行），让光标停在同一行
+    let lastNonEmptyIdx = -1
+    for (let i = parts.length - 1; i >= 0; i--) {
+      if (parts[i].length > 0) { lastNonEmptyIdx = i; break }
+    }
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i]
       const stripped = part.trim()
       if (stripped.startsWith('{"type":') && stripped.endsWith('}')) {
         continue
       }
-      if (i < parts.length - 1) {
+      if (i === lastNonEmptyIdx) {
+        writeRaw(part)
+      } else if (i < parts.length - 1) {
         appendLine(part)
       } else if (part) {
         writeRaw(part)

@@ -235,7 +235,7 @@ export function useEngine() {
           terminalStore.flushNow()
           terminalStore.resetInputState()
           editorStore.setRunning(false)
-          terminalStore.appendLine('\x1b[33m[运行完毕]\x1b[0m')
+          terminalStore.appendLine('\r\n\x1b[33m[运行完毕]\x1b[0m')
         } else {
           setTimeout(tryFinish, 50)
         }

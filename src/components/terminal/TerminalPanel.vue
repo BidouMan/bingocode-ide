@@ -32,7 +32,7 @@ let inputBuffer = ''
 const SYMBOL_BUTTONS = ['+', '-', '*', '/', '(', ')', '!', '@', '#', '$', '%', '^', '&', '=', ':', ';', '"', "'", ',', '.', '?', '<', '>', '[', ']', '{', '}', '|', '\\', '~', '`']
 
 // Shift+数字的符号映射（US 键盘布局）
-const DIGIT_SHIFT_MAP = ['!', '@', '#', '$', '%', '^', '&', '*', '(', ')']
+const DIGIT_SHIFT_MAP = [')', '!', '@', '#', '$', '%', '^', '&', '*', '(']
 
 function insertSymbol(sym: string) {
   if (!terminal || !editorStore.isRunning) return
@@ -72,25 +72,22 @@ function keydownToChar(e: KeyboardEvent): string | null {
   return null
 }
 
-function commitInput() {
-  if (!inputBuffer) return
-  terminalStore.consumeInput()
-  terminal?.writeln(inputBuffer)
-  engine.sendInput(inputBuffer)
-  inputBuffer = ''
-}
-
-// keydown 在 IME 之前触发，用 preventDefault 阻止 IME 截获 Shift+组合键
+// keydown 统一处理所有按键输入（代码模式 + game 模式），用物理键码绕过 IME
 function onTerminalKeydown(e: KeyboardEvent) {
-  if (!editorStore.isRunning || !terminalStore.waitingForInput) return
+  if (!editorStore.isRunning) return
 
   if (e.key === 'Enter') {
     e.preventDefault()
-    commitInput()
+    e.stopPropagation()
+    terminalStore.consumeInput()
+    terminal?.write('\r\n')
+    engine.sendInput(inputBuffer)
+    inputBuffer = ''
     return
   }
   if (e.key === 'Backspace') {
     e.preventDefault()
+    e.stopPropagation()
     if (inputBuffer.length > 0) {
       inputBuffer = inputBuffer.slice(0, -1)
       terminal!.write('\b \b')
@@ -100,7 +97,8 @@ function onTerminalKeydown(e: KeyboardEvent) {
 
   const char = keydownToChar(e)
   if (char !== null) {
-    e.preventDefault()  // 阻止字符进入 xterm textarea → 防止 IME 拦截
+    e.preventDefault()
+    e.stopPropagation()
     inputBuffer += char
     terminal!.write(char)
   }
@@ -129,14 +127,12 @@ function createTerminal() {
   terminal.open(containerRef.value)
   terminalStore.bindTerminal(terminal)
 
-  // 在 IME 处理前截获 keydown，e.preventDefault() 阻止 IME 拦截 Shift+组合键
-  containerRef.value.addEventListener('keydown', onTerminalKeydown)
+  // 捕获阶段拦截 keydown，在 xterm.js 处理之前截获，e.preventDefault() 才能阻止 xterm 重复处理
+  containerRef.value.addEventListener('keydown', onTerminalKeydown, true)
 
+  // 所有输入由 keydown 统一处理，onData 仅兜底（正常情况不会触发）
   terminal.onData((data: string) => {
     if (!editorStore.isRunning) return
-
-    // waitingForInput 时由 keydown 处理，onData 不再接收（被 preventDefault 了）
-    if (terminalStore.waitingForInput) return
 
     if (data === '\r') {
       terminalStore.consumeInput()
@@ -292,7 +288,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   if (containerRef.value) {
-    containerRef.value.removeEventListener('keydown', onTerminalKeydown)
+    containerRef.value.removeEventListener('keydown', onTerminalKeydown, true)
   }
   terminal?.dispose()
   document.removeEventListener('mousemove', onDragMove)
