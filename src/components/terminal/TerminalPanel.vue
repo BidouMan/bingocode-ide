@@ -41,12 +41,9 @@ const isShellMode = computed(() => terminalStore.terminalMode === 'shell')
 // 滚动到底部
 function scrollToBottom() {
   if (!terminal) return
-  // 等 xterm.js 渲染完成后再滚动
-  requestAnimationFrame(() => {
-    terminal?.scrollToBottom()
-    // 二次确保
-    setTimeout(() => terminal?.scrollToBottom(), 50)
-  })
+  terminal.scrollToBottom()
+  setTimeout(() => terminal?.scrollToBottom(), 50)
+  setTimeout(() => terminal?.scrollToBottom(), 150)
 }
 
 // Shift+数字的符号映射（US 键盘布局）
@@ -156,8 +153,11 @@ function createTerminal() {
   // 注册 shell 运行器：每次运行只是发命令
   let runEndTimer: ReturnType<typeof setTimeout> | null = null
 
-  // 终端创建后就启动 shell 并保持运行，后续运行只是发命令
+  // 先 fit 再启动 shell，确保终端尺寸正确
   terminalStore.terminalMode = 'shell'
+  fitTerminal()
+  // 延迟再 fit 一次，确保容器布局完成后尺寸正确
+  setTimeout(fitTerminal, 100)
   shell.startShell(
     (data) => {
       terminal?.write(data)
@@ -177,12 +177,11 @@ function createTerminal() {
       runEndTimer = null
     }
   )
-  fitTerminal()
   // 同步 shell 尺寸
   setTimeout(() => {
     const dims = (terminal as any).dimensions
     if (dims) shell.resize(dims.cols, dims.rows)
-  }, 100)
+  }, 200)
 
   terminalStore.registerShellRunner(async (cmd: string) => {
     if (runEndTimer) { clearTimeout(runEndTimer); runEndTimer = null }
@@ -206,9 +205,7 @@ function createTerminal() {
 
 function fitTerminal() {
   if (!fitAddon || !terminal) return
-  const vp = (terminal as any).viewport
-  if (!vp || !vp.scrollBarWidth) return
-  fitAddon.fit()
+  try { fitAddon.fit() } catch {}
 }
 
 // 搜索功能
