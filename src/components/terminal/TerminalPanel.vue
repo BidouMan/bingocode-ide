@@ -37,6 +37,38 @@ const showSearch = ref(false)
 const searchText = ref('')
 // shell 模式
 const isShellMode = computed(() => terminalStore.terminalMode === 'shell')
+
+// Shift+数字的符号映射（US 键盘布局）
+const DIGIT_SHIFT_MAP = [')', '!', '@', '#', '$', '%', '^', '&', '*', '(']
+
+// 用物理键码绕过 IME，确保 Shift+组合键正确输入
+function keydownToChar(e: KeyboardEvent): string | null {
+  if (e.key === 'Enter' || e.key === 'Backspace') return null
+  if (e.metaKey || e.ctrlKey || e.altKey) return null
+  const digitMatch = e.code.match(/^Digit(\d)$/)
+  if (digitMatch) {
+    const digit = parseInt(digitMatch[1])
+    return e.shiftKey ? DIGIT_SHIFT_MAP[digit] : digitMatch[1]
+  }
+  if (e.code === 'NumpadMultiply') return '*'
+  if (e.code === 'NumpadAdd') return '+'
+  if (e.code === 'NumpadSubtract') return '-'
+  if (e.code === 'NumpadDivide') return '/'
+  if (e.code === 'NumpadDecimal') return '.'
+  const symMap: Record<string, [string, string]> = {
+    'Minus': ['-', '_'], 'Equal': ['=', '+'],
+    'BracketLeft': ['[', '{'], 'BracketRight': [']', '}'],
+    'Backslash': ['\\', '|'], 'Semicolon': [';', ':'],
+    'Quote': ["'", '"'], 'Comma': [',', '<'],
+    'Period': ['.', '>'], 'Slash': ['/', '?'],
+    'Backquote': ['`', '~'], 'Space': [' ', ' '],
+  }
+  const pair = symMap[e.code]
+  if (pair) return e.shiftKey ? pair[1] : pair[0]
+  if (e.key.length === 1) return e.key
+  return null
+}
+
 function onTerminalKeydown(e: KeyboardEvent) {
   // Ctrl+F 搜索
   if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
@@ -64,6 +96,18 @@ function onTerminalKeydown(e: KeyboardEvent) {
     e.stopPropagation()
     engine.stop()
     return
+  }
+
+  // Shift+组合键：用物理键码绕过 IME，直接发送到 shell
+  if (e.shiftKey && isShellMode.value) {
+    const char = keydownToChar(e)
+    if (char !== null) {
+      e.preventDefault()
+      e.stopPropagation()
+      shell.sendInput(char)
+      terminal?.write(char)
+      return
+    }
   }
 
   // 其他按键：让 xterm.js 原生处理，通过 onData 发送到 shell
@@ -107,7 +151,11 @@ function createTerminal() {
       terminalStore.terminalMode = 'shell'
       await nextTick()
       shell.startShell(
-        (data) => { terminal?.write(data) },
+        (data) => {
+          terminal?.write(data)
+          // PTY 输出后自动滚动到底部
+          requestAnimationFrame(() => terminal?.scrollToBottom())
+        },
         () => { editorStore.setRunning(false); terminalStore.terminalMode = 'python' }
       )
       if (terminal && fitAddon) {
