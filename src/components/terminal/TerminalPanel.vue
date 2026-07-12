@@ -152,9 +152,11 @@ function createTerminal() {
 
   // 注册 shell 运行器：代码模式运行时通过 shell 执行
   let runEndTimer: ReturnType<typeof setTimeout> | null = null
+  let outputStarted = false
 
   terminalStore.registerShellRunner(async (cmd: string) => {
     if (runEndTimer) { clearTimeout(runEndTimer); runEndTimer = null }
+    outputStarted = false
 
     // 确保 shell 已启动
     if (!isShellMode.value) {
@@ -164,17 +166,28 @@ function createTerminal() {
         (data) => {
           terminal?.write(data)
           scrollToBottom()
-          // 收到命令输出后重置结束检测
-          if (editorStore.isRunning && runEndTimer) {
+          // 收到第一个输出后才启动结束检测
+          if (!editorStore.isRunning) return
+          if (!outputStarted) {
+            outputStarted = true
+            runEndTimer = setTimeout(() => {
+              editorStore.setRunning(false)
+              runEndTimer = null
+              outputStarted = false
+            }, 3000)
+          } else if (runEndTimer) {
+            // 后续输出重置超时
             clearTimeout(runEndTimer)
             runEndTimer = setTimeout(() => {
               editorStore.setRunning(false)
               runEndTimer = null
+              outputStarted = false
             }, 3000)
           }
         },
         () => {
           runEndTimer = null
+          outputStarted = false
           editorStore.setRunning(false)
           terminalStore.terminalMode = 'python'
         }
@@ -184,17 +197,9 @@ function createTerminal() {
         const dims = (terminal as any).dimensions
         if (dims) await shell.resize(dims.cols, dims.rows)
       }
-      await new Promise(r => setTimeout(r, 300))
     }
+    // 发送运行命令
     shell.sendInput(cmd + '\n')
-    // 等 shell 回显命令后开始检测
-    setTimeout(() => {
-      if (!editorStore.isRunning) return
-      runEndTimer = setTimeout(() => {
-        editorStore.setRunning(false)
-        runEndTimer = null
-      }, 3000)
-    }, 500)
   })
 
   // 捕获阶段拦截 keydown，在 xterm.js 处理之前截获，e.preventDefault() 才能阻止 xterm 重复处理
