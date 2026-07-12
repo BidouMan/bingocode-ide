@@ -865,7 +865,20 @@ function deleteSoundFromContext(id: string) {
 }
 
 // 同步游戏模式标签和代码资源管理器
-watch(() => [...editorStore.gameTabs], (tabs) => {
+watch(() => [...editorStore.gameTabs], (tabs, oldTabs) => {
+  const tabIds = new Set(tabs.map(t => t.id))
+
+  // 删除已不存在的 tab 对应的资源项
+  if (oldTabs) {
+    for (const oldTab of oldTabs) {
+      if (!tabIds.has(oldTab.id)) {
+        const idx = resourceStore.codes.findIndex(c => c.id === oldTab.id)
+        if (idx >= 0) resourceStore.codes.splice(idx, 1)
+      }
+    }
+  }
+
+  // 新增或更新
   for (const tab of tabs) {
     const existing = resourceStore.codes.find(c => c.id === tab.id || (tab.path && c.path === tab.path))
     if (!existing) {
@@ -873,6 +886,7 @@ watch(() => [...editorStore.gameTabs], (tabs) => {
     } else {
       existing.name = tab.name
       if (tab.path) existing.path = tab.path
+      existing.content = tab.content
     }
   }
 }, { immediate: true, deep: true })
@@ -946,12 +960,11 @@ function confirmCodeRename() {
 
   // 先执行文件迁移，再改名字
   migrateCodeFile(oldName, nameWithPy).then(() => {
-    // 同步更新标签页名称
+    // 更新 tab 名称
     const tab = editorStore.gameTabs.find(t => t.id === codeRenameId.value)
     if (tab) tab.name = nameWithPy
-    // 同步更新资源管理器
+    // 更新 resource 名称和路径
     item.name = nameWithPy
-    // 更新 item.path
     if (projectStore.root) {
       item.path = `${projectStore.root}/code/${nameWithPy}`
     }
@@ -1360,20 +1373,15 @@ function confirmTabRename() {
   const tab = editorStore.currentTabs.find(t => t.id === tabRenameId.value)
   const item = resourceStore.codes.find(c => c.id === tabRenameId.value)
   const oldName = item?.name
-  if (!tab || !item || !oldName || oldName === nameWithPy) {
+  if (!tab || !oldName || oldName === nameWithPy) {
     tabRenameId.value = null
     tabRenameValue.value = ''
     return
   }
 
-  // 先执行文件迁移，再改名字
+  // 先执行文件迁移，再改名字（只改 tab，watch 自动同步到 resource）
   migrateCodeFile(oldName, nameWithPy).then(() => {
-    tab.name = nameWithPy
-    item.name = nameWithPy
-    // 更新 item.path
-    if (projectStore.root) {
-      item.path = `${projectStore.root}/code/${nameWithPy}`
-    }
+    editorStore.renameTab(tab.id, nameWithPy)
     tabRenameId.value = null
     tabRenameValue.value = ''
   })

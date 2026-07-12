@@ -158,9 +158,9 @@ export const useEditorStore = defineStore('editor', () => {
     const tabs = currentTabs.value
     const idx = tabs.findIndex(t => t.id === id)
     if (idx >= 0) {
-      // 自动补 .py 后缀
+      // 自动补 .py 后缀，保留原 path 不覆盖
       const name = newName.endsWith('.py') ? newName : newName + '.py'
-      tabs[idx] = { ...tabs[idx], name, path: name }
+      tabs[idx] = { ...tabs[idx], name }
     }
   }
 
