@@ -512,15 +512,20 @@ onBeforeUnmount(() => {
 .console-body {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
   background: #1e1e1e;
+  position: relative;
 }
 .console-body :deep(.xterm) {
   padding-left: 8px;
   background: #1e1e1e;
+  overflow: hidden;
 }
 .console-body :deep(.xterm-viewport) {
   background: #1e1e1e !important;
+  overflow-y: scroll !important;
+}
+.console-body :deep(.xterm-screen) {
+  z-index: 1;
 }
 
 
