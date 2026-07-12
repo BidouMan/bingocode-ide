@@ -331,8 +331,8 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-show="!collapsed" ref="containerRef" class="console-body" @mousedown="onBodyClick" />
-    <!-- 符号按钮栏：IME 按不了的符号用鼠标点 -->
-    <div v-show="!collapsed && terminalStore.waitingForInput" class="symbol-bar">
+    <!-- 符号按钮栏：仅代码模式 IME 按不了的符号用鼠标点，游戏模式不需要 -->
+    <div v-show="!collapsed && terminalStore.waitingForInput && !editorStore.isGameMode" class="symbol-bar">
       <button
         v-for="sym in SYMBOL_BUTTONS"
         :key="sym"
