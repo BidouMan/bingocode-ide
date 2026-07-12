@@ -151,8 +151,14 @@ function createTerminal() {
   terminalStore.bindTerminal(terminal)
 
   // 注册 shell 运行器：代码模式运行时通过 shell 执行
+  let runEndTimer: ReturnType<typeof setTimeout> | null = null
+  let runOutputTimer: ReturnType<typeof setTimeout> | null = null
+
   terminalStore.registerShellRunner(async (cmd: string) => {
-    editorStore.setRunning(true)
+    // 清除之前的检测定时器
+    if (runEndTimer) { clearTimeout(runEndTimer); runEndTimer = null }
+    if (runOutputTimer) { clearTimeout(runOutputTimer); runOutputTimer = null }
+
     // 确保 shell 已启动
     if (!isShellMode.value) {
       terminalStore.terminalMode = 'shell'
@@ -161,6 +167,13 @@ function createTerminal() {
         (data) => {
           terminal?.write(data)
           scrollToBottom()
+          // 有输出就重置结束检测
+          if (editorStore.isRunning) {
+            if (runOutputTimer) clearTimeout(runOutputTimer)
+            runOutputTimer = setTimeout(() => {
+              if (editorStore.isRunning) editorStore.setRunning(false)
+            }, 800)
+          }
         },
         () => { editorStore.setRunning(false); terminalStore.terminalMode = 'python' }
       )
@@ -169,9 +182,10 @@ function createTerminal() {
         const dims = (terminal as any).dimensions
         if (dims) await shell.resize(dims.cols, dims.rows)
       }
-      await new Promise(r => setTimeout(r, 200))
+      await new Promise(r => setTimeout(r, 300))
     }
-    // 发送运行命令到 shell
+    // shell 就绪后标记运行
+    editorStore.setRunning(true)
     shell.sendInput(cmd + '\n')
   })
 
@@ -182,7 +196,6 @@ function createTerminal() {
   terminal.onData((data: string) => {
     if (isShellMode.value) {
       shell.sendInput(data)
-      // 用户输入后也滚动到底部
       scrollToBottom()
       return
     }
