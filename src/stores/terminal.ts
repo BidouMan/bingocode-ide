@@ -87,9 +87,6 @@ export const useTerminalStore = defineStore('terminal', () => {
 
     if (waiting) {
       waitingForInput.value = true
-      if (terminalInstance) {
-        terminalInstance.write('\r\n> ')
-      }
     }
   }
 

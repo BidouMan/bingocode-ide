@@ -351,6 +351,7 @@ onBeforeUnmount(() => {
   background: #1e1e1e;
   flex-shrink: 0;
   position: relative;
+  overflow: hidden;
 }
 .console-panel.collapsed {
   height: 26px;
@@ -435,6 +436,7 @@ onBeforeUnmount(() => {
 .console-body {
   flex: 1;
   min-height: 0;
+  overflow: hidden;
   background: #1e1e1e;
 }
 .console-body :deep(.xterm) {

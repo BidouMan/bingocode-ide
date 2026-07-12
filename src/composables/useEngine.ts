@@ -353,16 +353,18 @@ export function useEngine() {
         if (needsEngine) {
           const escapedPath = env.engine_dir.replace(/\\/g, '\\\\')
           codeToRun = `import sys\nif "${escapedPath}" not in sys.path:\n    sys.path.insert(0, "${escapedPath}")\nfrom bingo_engine import *\n` + codeToRun
-          await invoke<string>('save_temp_script', {
-            projectDir,
-            content: codeToRun,
-          })
         }
+        // 始终保存 temp 脚本，供 start_game 的 discover_and_merge 发现
+        const savedPath = await invoke<string>('save_temp_script', {
+          projectDir,
+          content: codeToRun,
+        })
 
         await invoke('run_script', {
           workingDir: env.working_dir,
           pythonPath: env.python_path,
           engineDir: env.engine_dir,
+          scriptPath: savedPath,
         })
       } else {
         // ═══ 代码模式：直接运行 Python 脚本 ═══

@@ -15,6 +15,7 @@ pub fn run_script(
     working_dir: String,
     python_path: String,
     engine_dir: String,
+    script_path: Option<String>,
 ) -> Result<(), String> {
     let mut process_guard = state.process.lock().map_err(|e| e.to_string())?;
 
@@ -22,9 +23,10 @@ pub fn run_script(
         stop_script_process(&mut process_guard)?;
     }
 
+    let target_arg = script_path.as_deref().unwrap_or("");
     let start_cmd = format!(
-        "import sys; sys.path.insert(0, '{}'); from bingo_engine import start_game; start_game('{}')",
-        engine_dir, working_dir
+        "import sys; sys.path.insert(0, '{}'); from bingo_engine import start_game; start_game('{}', '{}')",
+        engine_dir, working_dir, target_arg
     );
 
     let mut child = Command::new(&python_path)
