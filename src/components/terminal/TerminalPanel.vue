@@ -38,12 +38,15 @@ const searchText = ref('')
 // shell 模式
 const isShellMode = computed(() => terminalStore.terminalMode === 'shell')
 
-// 滚动到底部（供多处调用）
+// 滚动到底部
 function scrollToBottom() {
-  if (terminal) {
-    terminal.scrollToBottom()
-    setTimeout(() => terminal?.scrollToBottom(), 10)
-  }
+  if (!terminal) return
+  // 等 xterm.js 渲染完成后再滚动
+  requestAnimationFrame(() => {
+    terminal?.scrollToBottom()
+    // 二次确保
+    setTimeout(() => terminal?.scrollToBottom(), 50)
+  })
 }
 
 // Shift+数字的符号映射（US 键盘布局）
@@ -183,6 +186,8 @@ function createTerminal() {
 
   terminalStore.registerShellRunner(async (cmd: string) => {
     if (runEndTimer) { clearTimeout(runEndTimer); runEndTimer = null }
+    // 清屏后再发命令，不显示文件路径
+    terminal?.clear()
     shell.sendInput(cmd + '\n')
   })
 
