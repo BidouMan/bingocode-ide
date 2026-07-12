@@ -32,61 +32,11 @@ let fitAddon: FitAddon | null = null
 let searchAddon: SearchAddon | null = null as any
 const MAX_LINES = 5000
 const collapsed = ref(true)
-let inputBuffer = ''
-// 命令历史
-const commandHistory: string[] = []
-let historyIndex = -1
 // 搜索栏
 const showSearch = ref(false)
 const searchText = ref('')
 // shell 模式
 const isShellMode = computed(() => terminalStore.terminalMode === 'shell')
-
-// 符号按钮列表（IME 键盘按不了的符号，鼠标点击插入）
-const SYMBOL_BUTTONS = ['+', '-', '*', '/', '(', ')', '!', '@', '#', '$', '%', '^', '&', '=', ':', ';', '"', "'", ',', '.', '?', '<', '>', '[', ']', '{', '}', '|', '\\', '~', '`']
-
-// Shift+数字的符号映射（US 键盘布局）
-const DIGIT_SHIFT_MAP = [')', '!', '@', '#', '$', '%', '^', '&', '*', '(']
-
-function insertSymbol(sym: string) {
-  if (!terminal || !editorStore.isRunning) return
-  inputBuffer += sym
-  terminal.write(sym)
-}
-
-// 用物理按键码 + shiftKey 确定字符（IME 无法篡改，在 IME 处理前截获）
-function keydownToChar(e: KeyboardEvent): string | null {
-  if (e.key === 'Enter' || e.key === 'Backspace') return null
-  if (e.metaKey || e.ctrlKey || e.altKey) return null
-  // 数字键：用 shiftKey 物理状态判断 Shift+数字
-  const digitMatch = e.code.match(/^Digit(\d)$/)
-  if (digitMatch) {
-    const digit = parseInt(digitMatch[1])
-    return e.shiftKey ? DIGIT_SHIFT_MAP[digit] : digitMatch[1]
-  }
-  // 小键盘
-  if (e.code === 'NumpadMultiply') return '*'
-  if (e.code === 'NumpadAdd') return '+'
-  if (e.code === 'NumpadSubtract') return '-'
-  if (e.code === 'NumpadDivide') return '/'
-  if (e.code === 'NumpadDecimal') return '.'
-  // 符号键
-  const symMap: Record<string, [string, string]> = {
-    'Minus': ['-', '_'], 'Equal': ['=', '+'],
-    'BracketLeft': ['[', '{'], 'BracketRight': [']', '}'],
-    'Backslash': ['\\', '|'], 'Semicolon': [';', ':'],
-    'Quote': ["'", '"'], 'Comma': [',', '<'],
-    'Period': ['.', '>'], 'Slash': ['/', '?'],
-    'Backquote': ['`', '~'], 'Space': [' ', ' '],
-  }
-  const pair = symMap[e.code]
-  if (pair) return e.shiftKey ? pair[1] : pair[0]
-  // 普通键：直接取 event.key（仅在 IME 未拦截时有效）
-  if (e.key.length === 1) return e.key
-  return null
-}
-
-// keydown 统一处理所有按键输入（代码模式 + game 模式 + shell 模式）
 function onTerminalKeydown(e: KeyboardEvent) {
   // Ctrl+F 搜索
   if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
@@ -108,93 +58,15 @@ function onTerminalKeydown(e: KeyboardEvent) {
     return
   }
 
-  // shell 模式：所有按键直接发送到 PTY，不做任何拦截
-  if (isShellMode.value) {
-    return // 让 xterm.js 原生处理，通过 onData 发送到 shell
-  }
-
-  // 以下为 Python 控制台模式
-  if (!editorStore.isRunning) return
-
-  // Ctrl+C 中断
-  if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
+  // 游戏模式运行时：Ctrl+C 停止引擎
+  if ((e.metaKey || e.ctrlKey) && e.key === 'c' && editorStore.isRunning && !isShellMode.value) {
     e.preventDefault()
     e.stopPropagation()
     engine.stop()
-    terminal?.write('^C\r\n')
-    inputBuffer = ''
     return
   }
 
-  // 上/下箭头 命令历史
-  if (e.key === 'ArrowUp' && commandHistory.length > 0) {
-    e.preventDefault()
-    e.stopPropagation()
-    if (historyIndex < commandHistory.length - 1) {
-      historyIndex++
-    }
-    const cmd = commandHistory[commandHistory.length - 1 - historyIndex]
-    // 清除当前输入
-    while (inputBuffer.length > 0) {
-      inputBuffer = inputBuffer.slice(0, -1)
-      terminal!.write('\b \b')
-    }
-    inputBuffer = cmd
-    terminal!.write(cmd)
-    return
-  }
-  if (e.key === 'ArrowDown') {
-    e.preventDefault()
-    e.stopPropagation()
-    if (historyIndex > 0) {
-      historyIndex--
-      const cmd = commandHistory[commandHistory.length - 1 - historyIndex]
-      while (inputBuffer.length > 0) {
-        inputBuffer = inputBuffer.slice(0, -1)
-        terminal!.write('\b \b')
-      }
-      inputBuffer = cmd
-      terminal!.write(cmd)
-    } else {
-      historyIndex = -1
-      while (inputBuffer.length > 0) {
-        inputBuffer = inputBuffer.slice(0, -1)
-        terminal!.write('\b \b')
-      }
-    }
-    return
-  }
-
-  if (e.key === 'Enter') {
-    e.preventDefault()
-    e.stopPropagation()
-    terminalStore.consumeInput()
-    terminal?.write('\r\n')
-    if (inputBuffer.trim()) {
-      commandHistory.push(inputBuffer)
-      historyIndex = -1
-    }
-    engine.sendInput(inputBuffer)
-    inputBuffer = ''
-    return
-  }
-  if (e.key === 'Backspace') {
-    e.preventDefault()
-    e.stopPropagation()
-    if (inputBuffer.length > 0) {
-      inputBuffer = inputBuffer.slice(0, -1)
-      terminal!.write('\b \b')
-    }
-    return
-  }
-
-  const char = keydownToChar(e)
-  if (char !== null) {
-    e.preventDefault()
-    e.stopPropagation()
-    inputBuffer += char
-    terminal!.write(char)
-  }
+  // 其他按键：让 xterm.js 原生处理，通过 onData 发送到 shell
 }
 
 function createTerminal() {
@@ -227,32 +99,36 @@ function createTerminal() {
   terminal.open(containerRef.value)
   terminalStore.bindTerminal(terminal)
 
+  // 注册 shell 运行器：代码模式运行时通过 shell 执行
+  terminalStore.registerShellRunner(async (cmd: string) => {
+    editorStore.setRunning(true)
+    // 确保 shell 已启动
+    if (!isShellMode.value) {
+      terminalStore.terminalMode = 'shell'
+      await nextTick()
+      shell.startShell(
+        (data) => { terminal?.write(data) },
+        () => { editorStore.setRunning(false); terminalStore.terminalMode = 'python' }
+      )
+      if (terminal && fitAddon) {
+        fitAddon.fit()
+        const dims = (terminal as any).dimensions
+        if (dims) await shell.resize(dims.cols, dims.rows)
+      }
+      await new Promise(r => setTimeout(r, 200))
+    }
+    // 发送运行命令到 shell
+    shell.sendInput(cmd + '\n')
+  })
+
   // 捕获阶段拦截 keydown，在 xterm.js 处理之前截获，e.preventDefault() 才能阻止 xterm 重复处理
   containerRef.value.addEventListener('keydown', onTerminalKeydown, true)
 
-  // 所有输入由 keydown 统一处理（Python 模式），shell 模式走 onData 直发 PTY
+  // 所有输入直接发送到 PTY shell
   terminal.onData((data: string) => {
-    // shell 模式：直接发送到 PTY，不做任何处理
     if (isShellMode.value) {
       shell.sendInput(data)
       return
-    }
-
-    if (!editorStore.isRunning) return
-
-    if (data === '\r') {
-      terminalStore.consumeInput()
-      terminal!.write('\r\n')
-      engine.sendInput(inputBuffer)
-      inputBuffer = ''
-    } else if (data === '\x7f') {
-      if (inputBuffer.length > 0) {
-        inputBuffer = inputBuffer.slice(0, -1)
-        terminal!.write('\b \b')
-      }
-    } else if (data >= ' ') {
-      inputBuffer += data
-      terminal!.write(data)
     }
   })
 }
@@ -278,32 +154,6 @@ function doSearchPrev() {
   searchAddon.findPrevious(searchText.value)
 }
 
-// 切换到 Python 控制台
-async function switchToPython() {
-  if (!isShellMode.value) return
-  await shell.stopShell()
-  terminalStore.terminalMode = 'python'
-  terminal?.clear()
-}
-
-// 切换到系统终端
-async function switchToShell() {
-  if (isShellMode.value) return
-  terminalStore.terminalMode = 'shell'
-  terminal?.clear()
-  await nextTick()
-  // 启动 shell 并同步尺寸
-  shell.startShell(
-    (data) => { terminal?.write(data) },
-    () => { terminalStore.terminalMode = 'python' }
-  )
-  if (terminal && fitAddon) {
-    fitAddon.fit()
-    const dims = (terminal as any).dimensions
-    if (dims) await shell.resize(dims.cols, dims.rows)
-  }
-}
-
 // 窗口 resize 时同步 shell 尺寸
 async function onResize() {
   fitTerminal()
@@ -311,10 +161,6 @@ async function onResize() {
     const dims = (terminal as any).dimensions
     if (dims) await shell.resize(dims.cols, dims.rows)
   }
-}
-
-function clearInputBuffer() {
-  inputBuffer = ''
 }
 
 function onBodyClick() {
@@ -354,15 +200,6 @@ watch(
   (waiting) => {
     if (waiting && editorStore.isRunning) {
       nextTick(() => terminal?.focus())
-    }
-  }
-)
-
-watch(
-  () => editorStore.isRunning,
-  (running) => {
-    if (!running) {
-      clearInputBuffer()
     }
   }
 )
@@ -459,11 +296,13 @@ onBeforeUnmount(() => {
     />
     <div class="console-header">
       <div class="console-header-left">
-        <button class="mode-tab" :class="{ 'mode-tab-active': !isShellMode }" @click="switchToPython">控制台</button>
-        <button class="mode-tab" :class="{ 'mode-tab-active': isShellMode }" @click="switchToShell">终端</button>
+        <svg class="console-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="4,17 10,11 4,5" />
+          <line x1="12" y1="19" x2="20" y2="19" />
+        </svg>
+        <span class="console-title">控制台</span>
       </div>
       <div class="console-header-right">
-        <!-- 搜索按钮 -->
         <button class="console-action" @click="showSearch = !showSearch; if (!showSearch) searchAddon?.clearDecorations()" v-tooltip="'搜索 (Ctrl+F)'">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="11" cy="11" r="8" />
@@ -509,15 +348,6 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-show="!collapsed" ref="containerRef" class="console-body" @mousedown="onBodyClick" />
-    <!-- 符号按钮栏：仅代码模式 IME 按不了的符号用鼠标点，游戏模式不需要 -->
-    <div v-show="!collapsed && terminalStore.waitingForInput && !editorStore.isGameMode" class="symbol-bar">
-      <button
-        v-for="sym in SYMBOL_BUTTONS"
-        :key="sym"
-        class="symbol-btn"
-        @mousedown.prevent="insertSymbol(sym)"
-      >{{ sym }}</button>
-    </div>
   </div>
 </template>
 
@@ -572,28 +402,19 @@ onBeforeUnmount(() => {
 .console-header-left {
   display: flex;
   align-items: center;
-  gap: 0;
+  gap: 6px;
 }
 
-.mode-tab {
-  padding: 2px 10px;
+.console-icon {
+  color: var(--text-muted);
+}
+
+.console-title {
   font-size: 11px;
   font-weight: 600;
-  color: rgb(140, 140, 140);
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  cursor: pointer;
-  transition: all 0.15s;
+  color: rgb(180, 180, 180);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-}
-.mode-tab:hover {
-  color: rgb(180, 180, 180);
-}
-.mode-tab-active {
-  color: rgb(200, 200, 200);
-  border-bottom-color: var(--accent, rgb(91, 251, 132));
 }
 
 .console-header-right {
@@ -634,36 +455,6 @@ onBeforeUnmount(() => {
   background: #1e1e1e !important;
 }
 
-.symbol-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  padding: 4px 6px;
-  background: #252526;
-  border-top: 1px solid rgb(60, 60, 60);
-  max-height: 60px;
-  overflow-y: auto;
-}
-.symbol-btn {
-  width: 26px;
-  height: 26px;
-  border: 1px solid rgb(70, 70, 70);
-  border-radius: 3px;
-  background: #2d2d2d;
-  color: #d4d4d4;
-  font-size: 12px;
-  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  user-select: none;
-}
-.symbol-btn:hover {
-  background: #3d4048;
-  border-color: rgb(91, 251, 132);
-}
 
 /* 搜索栏 */
 .search-bar {

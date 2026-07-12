@@ -13,6 +13,16 @@ export const useTerminalStore = defineStore('terminal', () => {
   const waitingForInput = ref(false)
   // 终端模式：'python' = Python 控制台，'shell' = 系统终端
   const terminalMode = ref<'python' | 'shell'>('python')
+  // shell 运行命令回调（由 TerminalPanel 注册）
+  let shellRunCallback: ((cmd: string) => void) | null = null
+
+  function registerShellRunner(callback: (cmd: string) => void) {
+    shellRunCallback = callback
+  }
+
+  function runInShell(cmd: string) {
+    shellRunCallback?.(cmd)
+  }
 
   function bindTerminal(terminal: any) {
     terminalInstance = terminal
@@ -138,6 +148,8 @@ export const useTerminalStore = defineStore('terminal', () => {
     lines,
     waitingForInput,
     terminalMode,
+    registerShellRunner,
+    runInShell,
     bindTerminal,
     appendLine,
     appendBatch,

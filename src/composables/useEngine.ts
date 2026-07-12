@@ -398,31 +398,22 @@ export function useEngine() {
           engineDir: env.engine_dir,
         })
       } else {
-        // ═══ 代码模式：直接运行 Python 脚本 ═══
+        // ═══ 代码模式：在终端 shell 中直接运行 ═══
         if (!tab) {
           terminalStore.appendLine('\x1b[31m❌ 没有打开的文件\x1b[0m')
           editorStore.setRunning(false)
           return
         }
-        // 覆盖 input() 使提示文字带换行符，解决 Rust read_line 等不到 \n 的问题
-        const patchedCode = `import sys as _sys
-def _input(prompt=""):
-    _sys.stdout.write(prompt + "\\n")
-    _sys.stdout.flush()
-    return _sys.stdin.readline().rstrip("\\n")
-input = _input
-` + tab.content
-
+        // 保存脚本到临时文件
         const scriptPath = await invoke<string>('save_temp_script', {
           projectDir,
-          content: patchedCode,
+          content: tab.content,
         })
 
-        await invoke('run_script_file', {
-          workingDir: env.working_dir,
-          pythonPath: env.python_path,
-          scriptPath,
-        })
+        // 通过 shell 执行，输出直接在终端显示
+        const pythonPath = env.python_path
+        // 通知前端通过 shell 发送运行命令
+        terminalStore.runInShell(`${pythonPath} -u "${scriptPath}"`)
       }
     } catch (err) {
       terminalStore.appendLine(`\x1b[31m❌ 启动失败: ${err}\x1b[0m`)
