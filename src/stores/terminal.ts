@@ -15,13 +15,26 @@ export const useTerminalStore = defineStore('terminal', () => {
   const terminalMode = ref<'python' | 'shell'>('python')
   // shell 运行命令回调（由 TerminalPanel 注册）
   let shellRunCallback: ((cmd: string) => void) | null = null
+  // 运行代码时屏蔽回显：设置后持续屏蔽直到遇到命令结束符
+  let suppressEcho = false
 
   function registerShellRunner(callback: (cmd: string) => void) {
     shellRunCallback = callback
   }
 
-  function runInShell(cmd: string) {
+  function runInShell(cmd: string, _suppress?: string) {
+    suppressEcho = true
     shellRunCallback?.(cmd)
+  }
+
+  function isSuppressed(data: string): boolean {
+    if (!suppressEcho) return false
+    // 遇到命令结束符（\r\r\n）后关闭屏蔽
+    if (data.includes('\r\r\n') || data.includes('\n')) {
+      suppressEcho = false
+      return true
+    }
+    return true
   }
 
   function bindTerminal(terminal: any) {
@@ -150,6 +163,7 @@ export const useTerminalStore = defineStore('terminal', () => {
     terminalMode,
     registerShellRunner,
     runInShell,
+    isSuppressed,
     bindTerminal,
     appendLine,
     appendBatch,

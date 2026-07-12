@@ -415,7 +415,7 @@ export function useEngine() {
         // 通过 shell 执行，输出直接在终端显示
         const pythonPath = env.python_path
         // 用相对路径，避免显示吓人的完整路径
-        terminalStore.runInShell(`"${pythonPath}" -u .temp_run.py`)
+        terminalStore.runInShell(`"${pythonPath}" -u .temp_run.py`, pythonPath)
       }
     } catch (err) {
       terminalStore.appendLine(`\x1b[31m❌ 启动失败: ${err}\x1b[0m`)

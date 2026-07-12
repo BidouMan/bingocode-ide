@@ -38,13 +38,23 @@ const searchText = ref('')
 // shell 模式
 const isShellMode = computed(() => terminalStore.terminalMode === 'shell')
 
-// 滚动到底部
+// 滚动到底部（仅清空按钮用）
 function scrollToBottom() {
   if (!terminal) return
   terminal.scrollToBottom()
-  setTimeout(() => terminal?.scrollToBottom(), 50)
-  setTimeout(() => terminal?.scrollToBottom(), 150)
 }
+
+// ═══ DEBUG ═══
+let _dbgId = 0
+function dbg(msg: string) {
+  if (!terminal) return
+  const t = terminal
+  const buf = t.buffer.active
+  const vp = t.element?.querySelector('.xterm-viewport')
+  const coreBuf = (t as any)._core?.buffer
+  console.log(`[TERM ${_dbgId++}] ${msg} | rows=${t.rows} cols=${t.cols} baseY=${buf.baseY} cursorY=${buf.cursorY} ydisp=${coreBuf?.ydisp ?? '?'} vpScrollTop=${vp?.scrollTop?.toFixed(0)} vpScrollH=${vp?.scrollHeight} vpClientH=${vp?.clientHeight} fitCalled=${fitCount}`)
+}
+let fitCount = 0
 
 // Shift+数字的符号映射（US 键盘布局）
 const DIGIT_SHIFT_MAP = [')', '!', '@', '#', '$', '%', '^', '&', '*', '(']
@@ -120,6 +130,18 @@ function onTerminalKeydown(e: KeyboardEvent) {
   // 其他按键：让 xterm.js 原生处理，通过 onData 发送到 shell
 }
 
+// 自适应终端尺寸（行列）+ 重置视口到底部，让后续自动滚动正常工作
+function fitTerminal() {
+  if (!fitAddon || !terminal) return
+  fitCount++
+  try {
+    fitAddon.fit()
+  } catch (e) {
+    console.error('[TERM] fit() FAILED', e)
+  }
+  dbg(`after fit #${fitCount}`)
+}
+
 function createTerminal() {
   if (!containerRef.value || terminal) return
 
@@ -139,30 +161,32 @@ function createTerminal() {
   fitAddon = new FitAddon()
   terminal.loadAddon(fitAddon)
   terminal.loadAddon(new WebLinksAddon())
-  // 搜索 addon
   searchAddon = new SearchAddon()
   terminal.loadAddon(searchAddon)
-  // Unicode 11 支持
   try { terminal.loadAddon(new Unicode11Addon()) } catch {}
-  // 剪贴板 addon
   try { terminal.loadAddon(new ClipboardAddon()) } catch {}
 
   terminal.open(containerRef.value)
   terminalStore.bindTerminal(terminal)
 
-  // 注册 shell 运行器：每次运行只是发命令
   let runEndTimer: ReturnType<typeof setTimeout> | null = null
 
-  // 先 fit 再启动 shell，确保终端尺寸正确
   terminalStore.terminalMode = 'shell'
   fitTerminal()
-  // 延迟再 fit 一次，确保容器布局完成后尺寸正确
   setTimeout(fitTerminal, 100)
+
   shell.startShell(
     (data) => {
+      if (terminalStore.isSuppressed(data)) return
+      dbg(`stdout BEFORE write len=${data.length} data=${JSON.stringify(data.slice(0, 50))}`)
       terminal?.write(data)
-      scrollToBottom()
-      // 运行状态下：收到第一个输出启动结束检测，后续输出重置超时
+      dbg(`stdout AFTER write`)
+      terminal?.scrollToBottom()
+      dbg(`stdout AFTER scrollToBottom`)
+      requestAnimationFrame(() => {
+        dbg(`stdout rAF callback`)
+        terminal?.scrollToBottom()
+      })
       if (!editorStore.isRunning) return
       if (runEndTimer) {
         clearTimeout(runEndTimer)
@@ -177,7 +201,6 @@ function createTerminal() {
       runEndTimer = null
     }
   )
-  // 同步 shell 尺寸
   setTimeout(() => {
     const dims = (terminal as any).dimensions
     if (dims) shell.resize(dims.cols, dims.rows)
@@ -185,28 +208,26 @@ function createTerminal() {
 
   terminalStore.registerShellRunner(async (cmd: string) => {
     if (runEndTimer) { clearTimeout(runEndTimer); runEndTimer = null }
-    // 清屏后再发命令，不显示文件路径
     terminal?.clear()
     shell.sendInput(cmd + '\n')
   })
 
-  // 捕获阶段拦截 keydown，在 xterm.js 处理之前截获，e.preventDefault() 才能阻止 xterm 重复处理
   containerRef.value.addEventListener('keydown', onTerminalKeydown, true)
 
-  // 所有输入直接发送到 PTY shell
   terminal.onData((data: string) => {
     if (isShellMode.value) {
+      dbg(`onData BEFORE sendInput data=${JSON.stringify(data.slice(0, 30))}`)
       shell.sendInput(data)
-      scrollToBottom()
+      terminal?.scrollToBottom()
+      dbg(`onData AFTER scrollToBottom`)
+      requestAnimationFrame(() => {
+        terminal?.scrollToBottom()
+      })
       return
     }
   })
 }
 
-function fitTerminal() {
-  if (!fitAddon || !terminal) return
-  try { fitAddon.fit() } catch {}
-}
 
 // 搜索功能
 function doSearch() {
@@ -222,8 +243,9 @@ function doSearchPrev() {
   searchAddon.findPrevious(searchText.value)
 }
 
-// 窗口 resize 时同步 shell 尺寸
+// 窗口 resize → 自适应 + 重置视口到底部
 async function onResize() {
+  dbg('onResize triggered')
   fitTerminal()
   if (isShellMode.value && terminal) {
     const dims = (terminal as any).dimensions
@@ -284,7 +306,12 @@ watch(
 let resizeObserver: ResizeObserver | null = null
 
 // ═══ 拖动调整大小 ═══
-const panelHeight = ref(200)
+const FONT_SIZE = 13
+const LINE_HEIGHT = 1.4
+const CELL_HEIGHT = FONT_SIZE * LINE_HEIGHT  // 18.2px
+const HEADER_HEIGHT = 26
+const DEFAULT_ROWS = 7
+const panelHeight = ref(HEADER_HEIGHT + Math.ceil(DEFAULT_ROWS * CELL_HEIGHT))
 const isDragging = ref(false)
 const showHighlight = ref(false)
 let highlightTimer: ReturnType<typeof setTimeout> | null = null
@@ -333,6 +360,11 @@ function onDragEnd() {
   document.removeEventListener('mouseup', onDragEnd)
   document.body.style.cursor = ''
   document.body.style.userSelect = ''
+  fitTerminal()
+  if (isShellMode.value && terminal) {
+    const dims = (terminal as any).dimensions
+    if (dims) shell.resize(dims.cols, dims.rows).catch(() => {})
+  }
 }
 
 onMounted(() => {
@@ -516,9 +548,25 @@ onBeforeUnmount(() => {
 }
 .console-body :deep(.xterm) {
   height: 100%;
+  padding-left: 8px;
 }
 .console-body :deep(.xterm-viewport) {
   overflow-y: auto !important;
+  background-color: #1e1e1e !important;
+}
+/* 细滚动条 — 与 IDE 整体风格一致 */
+.console-body :deep(.xterm-viewport)::-webkit-scrollbar {
+  width: 6px;
+}
+.console-body :deep(.xterm-viewport)::-webkit-scrollbar-track {
+  background: transparent;
+}
+.console-body :deep(.xterm-viewport)::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+}
+.console-body :deep(.xterm-viewport)::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
 }
 
 
