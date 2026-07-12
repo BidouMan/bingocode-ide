@@ -38,6 +38,14 @@ const searchText = ref('')
 // shell 模式
 const isShellMode = computed(() => terminalStore.terminalMode === 'shell')
 
+// 滚动到底部（供多处调用）
+function scrollToBottom() {
+  if (terminal) {
+    terminal.scrollToBottom()
+    setTimeout(() => terminal?.scrollToBottom(), 10)
+  }
+}
+
 // Shift+数字的符号映射（US 键盘布局）
 const DIGIT_SHIFT_MAP = [')', '!', '@', '#', '$', '%', '^', '&', '*', '(']
 
@@ -152,8 +160,7 @@ function createTerminal() {
       shell.startShell(
         (data) => {
           terminal?.write(data)
-          // PTY 输出后自动滚动到底部
-          requestAnimationFrame(() => terminal?.scrollToBottom())
+          scrollToBottom()
         },
         () => { editorStore.setRunning(false); terminalStore.terminalMode = 'python' }
       )
@@ -175,6 +182,8 @@ function createTerminal() {
   terminal.onData((data: string) => {
     if (isShellMode.value) {
       shell.sendInput(data)
+      // 用户输入后也滚动到底部
+      scrollToBottom()
       return
     }
   })
@@ -356,7 +365,7 @@ onBeforeUnmount(() => {
             <line x1="21" y1="21" x2="16.65" y2="16.65" />
           </svg>
         </button>
-        <button class="console-action" @click="terminalStore.clear()" v-tooltip="'清空'">
+        <button class="console-action" @click="terminalStore.clear(); nextTick(scrollToBottom)" v-tooltip="'清空'">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="3,6 5,6 21,6" />
             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
