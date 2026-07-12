@@ -427,7 +427,6 @@ onBeforeUnmount(() => {
   background: #1e1e1e;
   flex-shrink: 0;
   position: relative;
-  overflow: hidden;
 }
 .console-panel.collapsed {
   height: 26px;
