@@ -98,14 +98,13 @@ function onTerminalKeydown(e: KeyboardEvent) {
     return
   }
 
-  // Shift+组合键：用物理键码绕过 IME，直接发送到 shell
+  // Shift+组合键：用物理键码绕过 IME，直接发送到 shell（shell 会回显，不需要手动写入）
   if (e.shiftKey && isShellMode.value) {
     const char = keydownToChar(e)
     if (char !== null) {
       e.preventDefault()
       e.stopPropagation()
       shell.sendInput(char)
-      terminal?.write(char)
       return
     }
   }
