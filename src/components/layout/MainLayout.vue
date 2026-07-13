@@ -942,7 +942,7 @@ async function migrateCodeFile(oldPath: string, newPath: string) {
   }
 }
 
-function confirmCodeRename() {
+async function confirmCodeRename() {
   if (!codeRenameId.value) return
   const val = codeRenameValue.value.trim()
   if (!val) { codeRenameId.value = null; codeRenameValue.value = ''; return }
@@ -953,17 +953,40 @@ function confirmCodeRename() {
   if (!item || !tab) { codeRenameId.value = null; codeRenameValue.value = ''; return }
 
   const oldPath = tab.path || item.path || ''
-  const newPath = projectStore.root ? `${projectStore.root}/code/${nameWithPy}` : nameWithPy
-  if (!oldPath || oldPath === newPath) { codeRenameId.value = null; codeRenameValue.value = ''; return }
+  const projectRoot = projectStore.root || ''
+  const isInsideProject = projectRoot && oldPath.startsWith(projectRoot)
+  const newPath = projectRoot ? `${projectRoot}/code/${nameWithPy}` : nameWithPy
 
-  migrateCodeFile(oldPath, newPath).then(() => {
+  // 如果新旧路径相同，只更新显示名
+  if (oldPath === newPath) {
     tab.name = nameWithPy
-    tab.path = newPath
     item.name = nameWithPy
-    item.path = newPath
     codeRenameId.value = null
     codeRenameValue.value = ''
-  })
+    return
+  }
+
+  try {
+    if (isInsideProject) {
+      // 文件在项目目录内：执行文件重命名
+      await migrateCodeFile(oldPath, newPath)
+    } else if (projectRoot) {
+      // 文件在项目外或无路径：写入项目目录（不动原文件）
+      await invoke('create_dir', { path: `${projectRoot}/code` })
+      await invoke('write_file', { path: newPath, content: tab.content || '' })
+    }
+
+    tab.name = nameWithPy
+    tab.path = projectRoot ? newPath : ''
+    tab.modified = false
+    item.name = nameWithPy
+    item.path = projectRoot ? newPath : ''
+  } catch (e) {
+    console.error('[MainLayout] 代码重命名失败:', e)
+  } finally {
+    codeRenameId.value = null
+    codeRenameValue.value = ''
+  }
 }
 
 function cancelCodeRename() {
@@ -1357,31 +1380,77 @@ function startTabRename(id: string) {
   }))
 }
 
-function confirmTabRename() {
+async function confirmTabRename() {
   if (!tabRenameId.value) return
   const val = tabRenameValue.value.trim()
   if (!val) { tabRenameId.value = null; tabRenameValue.value = ''; return }
 
   const nameWithPy = val.endsWith('.py') ? val : val + '.py'
-  const tab = editorStore.currentTabs.find(t => t.id === tabRenameId.value)
+  const tabId = tabRenameId.value
+  const tab = editorStore.currentTabs.find(t => t.id === tabId)
   if (!tab) { tabRenameId.value = null; tabRenameValue.value = ''; return }
 
   const oldPath = tab.path || ''
-  const newPath = projectStore.root ? `${projectStore.root}/code/${nameWithPy}` : nameWithPy
-  if (!oldPath || oldPath === newPath) { tabRenameId.value = null; tabRenameValue.value = ''; return }
 
-  migrateCodeFile(oldPath, newPath).then(() => {
-    editorStore.renameTab(tab.id, nameWithPy)
-    tab.path = newPath
-    // 同步更新 resource
-    const item = resourceStore.codes.find(c => c.id === tab.id)
+  // ── 代码模式 (IDE)：文件在用户本地磁盘，重命名只改文件名，不动位置 ──
+  if (!editorStore.isGameMode) {
+    if (oldPath) {
+      // 有文件路径：在同一目录下重命名文件
+      const lastSlash = oldPath.lastIndexOf('/')
+      const dir = lastSlash >= 0 ? oldPath.substring(0, lastSlash) : ''
+      const newPath = dir ? `${dir}/${nameWithPy}` : nameWithPy
+      if (oldPath !== newPath) {
+        await migrateCodeFile(oldPath, newPath)
+      }
+      editorStore.renameTab(tabId, nameWithPy, newPath)
+      const item = resourceStore.codes.find(c => c.id === tabId)
+      if (item) { item.name = nameWithPy; item.path = newPath }
+    } else {
+      // 无路径（新文件）：只更新显示名
+      editorStore.renameTab(tabId, nameWithPy)
+      const item = resourceStore.codes.find(c => c.id === tabId)
+      if (item) item.name = nameWithPy
+    }
+    tabRenameId.value = null
+    tabRenameValue.value = ''
+    return
+  }
+
+  // ── 游戏模式：文件在项目目录内 ──
+  const projectRoot = projectStore.root || ''
+  const newPath = projectRoot ? `${projectRoot}/code/${nameWithPy}` : nameWithPy
+
+  if (oldPath === newPath) {
+    editorStore.renameTab(tabId, nameWithPy)
+    const item = resourceStore.codes.find(c => c.id === tabId)
+    if (item) item.name = nameWithPy
+    tabRenameId.value = null
+    tabRenameValue.value = ''
+    return
+  }
+
+  try {
+    if (oldPath) {
+      await migrateCodeFile(oldPath, newPath)
+    } else if (projectRoot) {
+      await invoke('create_dir', { path: `${projectRoot}/code` })
+      await invoke('write_file', { path: newPath, content: tab.content || '' })
+    }
+
+    editorStore.renameTab(tabId, nameWithPy, newPath)
+    const item = resourceStore.codes.find(c => c.id === tabId)
     if (item) {
       item.name = nameWithPy
       item.path = newPath
     }
+    const updatedTab = editorStore.currentTabs.find(t => t.id === tabId)
+    if (updatedTab) updatedTab.modified = false
+  } catch (e) {
+    console.error('[MainLayout] 标签重命名失败:', e)
+  } finally {
     tabRenameId.value = null
     tabRenameValue.value = ''
-  })
+  }
 }
 
 function cancelTabRename() {

@@ -154,13 +154,15 @@ export const useEditorStore = defineStore('editor', () => {
     }
   }
 
-  function renameTab(id: string, newName: string) {
+  function renameTab(id: string, newName: string, newPath?: string) {
     const tabs = currentTabs.value
     const idx = tabs.findIndex(t => t.id === id)
     if (idx >= 0) {
-      // 自动补 .py 后缀，保留原 path 不覆盖
+      // 自动补 .py 后缀
       const name = newName.endsWith('.py') ? newName : newName + '.py'
-      tabs[idx] = { ...tabs[idx], name }
+      const patch: Partial<Tab> = { name }
+      if (newPath !== undefined) patch.path = newPath
+      tabs[idx] = { ...tabs[idx], ...patch }
     }
   }
 
