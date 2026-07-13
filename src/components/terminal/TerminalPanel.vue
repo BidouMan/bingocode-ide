@@ -44,18 +44,6 @@ function scrollToBottom() {
   terminal.scrollToBottom()
 }
 
-// ═══ DEBUG ═══
-let _dbgId = 0
-function dbg(msg: string) {
-  if (!terminal) return
-  const t = terminal
-  const buf = t.buffer.active
-  const vp = t.element?.querySelector('.xterm-viewport')
-  const coreBuf = (t as any)._core?.buffer
-  console.log(`[TERM ${_dbgId++}] ${msg} | rows=${t.rows} cols=${t.cols} baseY=${buf.baseY} cursorY=${buf.cursorY} ydisp=${coreBuf?.ydisp ?? '?'} vpScrollTop=${vp?.scrollTop?.toFixed(0)} vpScrollH=${vp?.scrollHeight} vpClientH=${vp?.clientHeight} fitCalled=${fitCount}`)
-}
-let fitCount = 0
-
 // Shift+数字的符号映射（US 键盘布局）
 const DIGIT_SHIFT_MAP = [')', '!', '@', '#', '$', '%', '^', '&', '*', '(']
 
@@ -133,13 +121,11 @@ function onTerminalKeydown(e: KeyboardEvent) {
 // 自适应终端尺寸（行列）+ 重置视口到底部，让后续自动滚动正常工作
 function fitTerminal() {
   if (!fitAddon || !terminal) return
-  fitCount++
   try {
     fitAddon.fit()
   } catch (e) {
     console.error('[TERM] fit() FAILED', e)
   }
-  dbg(`after fit #${fitCount}`)
 }
 
 function createTerminal() {
@@ -175,18 +161,20 @@ function createTerminal() {
   fitTerminal()
   setTimeout(fitTerminal, 100)
 
+  // 输出缓冲：高频输出时合并到一个 animation frame 内写入，避免闪烁和卡顿
+  let scrollRaf: number | null = null
+  function throttledScroll() {
+    if (scrollRaf !== null) return
+    scrollRaf = requestAnimationFrame(() => {
+      terminal?.scrollToBottom()
+      scrollRaf = null
+    })
+  }
+
   shell.startShell(
     (data) => {
-      if (terminalStore.isSuppressed(data)) return
-      dbg(`stdout BEFORE write len=${data.length} data=${JSON.stringify(data.slice(0, 50))}`)
       terminal?.write(data)
-      dbg(`stdout AFTER write`)
-      terminal?.scrollToBottom()
-      dbg(`stdout AFTER scrollToBottom`)
-      requestAnimationFrame(() => {
-        dbg(`stdout rAF callback`)
-        terminal?.scrollToBottom()
-      })
+      throttledScroll()
       if (!editorStore.isRunning) return
       if (runEndTimer) {
         clearTimeout(runEndTimer)
@@ -208,7 +196,7 @@ function createTerminal() {
 
   terminalStore.registerShellRunner(async (cmd: string) => {
     if (runEndTimer) { clearTimeout(runEndTimer); runEndTimer = null }
-    terminal?.clear()
+    terminal?.reset()
     shell.sendInput(cmd + '\n')
   })
 
@@ -216,13 +204,8 @@ function createTerminal() {
 
   terminal.onData((data: string) => {
     if (isShellMode.value) {
-      dbg(`onData BEFORE sendInput data=${JSON.stringify(data.slice(0, 30))}`)
       shell.sendInput(data)
       terminal?.scrollToBottom()
-      dbg(`onData AFTER scrollToBottom`)
-      requestAnimationFrame(() => {
-        terminal?.scrollToBottom()
-      })
       return
     }
   })
@@ -245,7 +228,6 @@ function doSearchPrev() {
 
 // 窗口 resize → 自适应 + 重置视口到底部
 async function onResize() {
-  dbg('onResize triggered')
   fitTerminal()
   if (isShellMode.value && terminal) {
     const dims = (terminal as any).dimensions

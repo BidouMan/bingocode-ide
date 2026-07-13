@@ -4,10 +4,7 @@ import { ref } from 'vue'
 export const useTerminalStore = defineStore('terminal', () => {
   const lines = ref<string[]>([])
   const MAX_LINES = 5000
-  const FLUSH_INTERVAL_MS = 30
 
-  let pendingText = ''
-  let flushTimer: ReturnType<typeof setTimeout> | null = null
   let terminalInstance: any = null
   const earlyBuffer: string[] = []
   const waitingForInput = ref(false)
@@ -15,26 +12,13 @@ export const useTerminalStore = defineStore('terminal', () => {
   const terminalMode = ref<'python' | 'shell'>('python')
   // shell 运行命令回调（由 TerminalPanel 注册）
   let shellRunCallback: ((cmd: string) => void) | null = null
-  // 运行代码时屏蔽回显：设置后持续屏蔽直到遇到命令结束符
-  let suppressEcho = false
 
   function registerShellRunner(callback: (cmd: string) => void) {
     shellRunCallback = callback
   }
 
-  function runInShell(cmd: string, _suppress?: string) {
-    suppressEcho = true
+  function runInShell(cmd: string) {
     shellRunCallback?.(cmd)
-  }
-
-  function isSuppressed(data: string): boolean {
-    if (!suppressEcho) return false
-    // 遇到命令结束符（\r\r\n）后关闭屏蔽
-    if (data.includes('\r\r\n') || data.includes('\n')) {
-      suppressEcho = false
-      return true
-    }
-    return true
   }
 
   function bindTerminal(terminal: any) {
@@ -67,18 +51,25 @@ export const useTerminalStore = defineStore('terminal', () => {
     }
   }
 
+  const MAX_PENDING = 10240 // 缓冲上限 10KB
+
+  // 高频输出节流：收集到缓冲区，每帧只写一次到 xterm
+  let pendingText = ''
+  let flushTimer: number | null = null
+
   function appendBatch(text: string) {
     pendingText += text
+    if (pendingText.length > MAX_PENDING) {
+      pendingText = pendingText.slice(-MAX_PENDING)
+    }
     if (!flushTimer) {
-      flushTimer = setTimeout(flush, FLUSH_INTERVAL_MS)
+      flushTimer = requestAnimationFrame(flush)
     }
   }
 
   function flush() {
     if (!pendingText) {
-      if (flushTimer) {
-        flushTimer = null
-      }
+      flushTimer = null
       return
     }
 
@@ -89,8 +80,11 @@ export const useTerminalStore = defineStore('terminal', () => {
     const waiting = text.includes('__BINGO_WAITING_INPUT__')
     const cleaned = text.replace('__BINGO_WAITING_INPUT__', '')
 
-    const parts = cleaned.split('\n')
-    // 找到最后一个非空片段，用 writeRaw（不追加换行），让光标停在同一行
+    // 超过 8KB 只保留最新部分，避免 xterm 渲染阻塞 UI
+    const maxLen = 8192
+    const trimmed = cleaned.length > maxLen ? cleaned.slice(-maxLen) : cleaned
+
+    const parts = trimmed.split('\n')
     let lastNonEmptyIdx = -1
     for (let i = parts.length - 1; i >= 0; i--) {
       if (parts[i].length > 0) { lastNonEmptyIdx = i; break }
@@ -163,9 +157,9 @@ export const useTerminalStore = defineStore('terminal', () => {
     terminalMode,
     registerShellRunner,
     runInShell,
-    isSuppressed,
     bindTerminal,
     appendLine,
+    writeRaw,
     appendBatch,
     handleStdout,
     handleStderr,

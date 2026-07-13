@@ -235,7 +235,7 @@ export function useEngine() {
           terminalStore.flushNow()
           terminalStore.resetInputState()
           editorStore.setRunning(false)
-          terminalStore.appendLine('\r\n\x1b[33m[运行完毕]\x1b[0m')
+          terminalStore.writeRaw('\n\x1b[38;5;46m[运行完毕]\x1b[0m\n')
         } else {
           setTimeout(tryFinish, 50)
         }
@@ -400,22 +400,27 @@ export function useEngine() {
           engineDir: env.engine_dir,
         })
       } else {
-        // ═══ 代码模式：在终端 shell 中直接运行 ═══
+        // ═══ 代码模式：直接运行 Python，不走 PTY，无 echo 和 traceback ═══
         if (!tab) {
           terminalStore.appendLine('\x1b[31m❌ 没有打开的文件\x1b[0m')
           editorStore.setRunning(false)
           return
         }
-        // 保存脚本到临时文件
-        await invoke<string>('save_temp_script', {
-          projectDir,
-          content: tab.content,
-        })
 
-        // 通过 shell 执行，输出直接在终端显示
+        let runPath: string
+        if (tab.path) {
+          runPath = tab.path
+        } else {
+          await invoke<string>('save_temp_script', {
+            projectDir,
+            content: tab.content,
+          })
+          runPath = `${projectDir}/.temp_run.py`
+        }
+
         const pythonPath = env.python_path
-        // 用相对路径，避免显示吓人的完整路径
-        terminalStore.runInShell(`"${pythonPath}" -u .temp_run.py`, pythonPath)
+        terminalStore.clear()
+        terminalStore.runInShell(`"${pythonPath}" -u "${runPath}" 2>/dev/null`)
       }
     } catch (err) {
       terminalStore.appendLine(`\x1b[31m❌ 启动失败: ${err}\x1b[0m`)
@@ -424,13 +429,14 @@ export function useEngine() {
   }
 
   async function stop() {
-    try {
-      await invoke('stop_script')
-    } catch {}
+    if (editorStore.isGameMode) {
+      try { await invoke('stop_script') } catch {}
+    } else {
+      try { await invoke('send_shell_input', { data: '\x03' }) } catch {}
+    }
     editorStore.setRunning(false)
     renderStore.resetTextureLoading()
     terminalStore.resetInputState()
-    terminalStore.appendLine('\x1b[33m[已停止运行]\x1b[0m')
   }
 
   async function sendInput(data: string) {

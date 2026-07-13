@@ -59,10 +59,10 @@ pub fn start_shell(
     cmd.env("TERM", "dumb");
     cmd.env("NO_COLOR", "1");
     cmd.env("FORCE_COLOR", "0");
-    // 清除可能导致美化的环境变量
+    // 清空提示符，保持终端输出纯净
+    cmd.env("PS1", "");
+    cmd.env("PS2", "");
     cmd.env_remove("PROMPT_COMMAND");
-    cmd.env_remove("PS1");
-    cmd.env_remove("PS2");
 
     let child = pair
         .slave
@@ -103,6 +103,14 @@ pub fn start_shell(
         writer: Some(writer),
         pair: Some(pair),
     });
+
+    // shell 启动后立即禁用 ^C 的可视显示
+    if let Some(ref mut shell) = *shell_guard {
+        if let Some(ref mut w) = shell.writer {
+            let _ = w.write_all(b"stty -echoctl\n");
+            let _ = w.flush();
+        }
+    }
 
     Ok(())
 }

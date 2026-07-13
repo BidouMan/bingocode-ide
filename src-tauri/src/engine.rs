@@ -51,14 +51,26 @@ pub fn run_script(
         use std::io::BufRead;
         let mut reader = BufReader::new(stdout);
         let mut line = String::new();
+        let mut batch = String::new();
+        let mut last_flush = std::time::Instant::now();
         loop {
             line.clear();
             match reader.read_line(&mut line) {
-                Ok(0) => break,
+                Ok(0) => {
+                    if !batch.is_empty() {
+                        let _ = app_stdout.emit_to("main", "engine:stdout", batch.clone());
+                        batch.clear();
+                    }
+                    break;
+                }
                 Ok(_) => {
-                    let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
-                    if !trimmed.is_empty() {
-                        let _ = app_stdout.emit_to("main", "engine:stdout", line.clone());
+                    batch.push_str(&line);
+                    if last_flush.elapsed() >= std::time::Duration::from_millis(16) {
+                        if !batch.is_empty() {
+                            let _ = app_stdout.emit_to("main", "engine:stdout", batch.clone());
+                            batch.clear();
+                        }
+                        last_flush = std::time::Instant::now();
                     }
                 }
                 Err(_) => break,
@@ -206,14 +218,26 @@ pub fn run_script_file(
         use std::io::BufRead;
         let mut reader = BufReader::new(stdout);
         let mut line = String::new();
+        let mut batch = String::new();
+        let mut last_flush = std::time::Instant::now();
         loop {
             line.clear();
             match reader.read_line(&mut line) {
-                Ok(0) => break,
+                Ok(0) => {
+                    if !batch.is_empty() {
+                        let _ = app_stdout.emit_to("main", "engine:stdout", batch.clone());
+                        batch.clear();
+                    }
+                    break;
+                }
                 Ok(_) => {
-                    let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
-                    if !trimmed.is_empty() {
-                        let _ = app_stdout.emit_to("main", "engine:stdout", line.clone());
+                    batch.push_str(&line);
+                    if last_flush.elapsed() >= std::time::Duration::from_millis(16) {
+                        if !batch.is_empty() {
+                            let _ = app_stdout.emit_to("main", "engine:stdout", batch.clone());
+                            batch.clear();
+                        }
+                        last_flush = std::time::Instant::now();
                     }
                 }
                 Err(_) => break,
