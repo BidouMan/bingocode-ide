@@ -192,17 +192,29 @@ export function useEngine() {
 
     const unlisten1 = await listen<string>('engine:stdout', (event) => {
       const data = event.payload
-      const stripped = data.trim()
+      // Rust 引擎的 stdout 读取器会在 16ms 内将多行合并成一个 batch 发送，
+      // 需要按换行符拆分后逐行解析 JSON 指令
+      const lines = data.split('\n')
+      const nonJsonParts: string[] = []
 
-      if (stripped.startsWith('{') && stripped.endsWith('}')) {
-        const cmd = parseInstruction(stripped)
-        if (cmd) {
-          dispatchInstruction(cmd)
-          return
+      for (const line of lines) {
+        const stripped = line.trim()
+        if (!stripped) continue
+
+        if (stripped.startsWith('{') && stripped.endsWith('}')) {
+          const cmd = parseInstruction(stripped)
+          if (cmd) {
+            dispatchInstruction(cmd)
+            continue
+          }
         }
+
+        nonJsonParts.push(line)
       }
 
-      terminalStore.handleStdout(data)
+      if (nonJsonParts.length > 0) {
+        terminalStore.handleStdout(nonJsonParts.join('\n'))
+      }
     })
 
     const unlisten2 = await listen<string>('engine:stderr', (event) => {

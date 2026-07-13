@@ -175,7 +175,9 @@ function createTerminal() {
     (data) => {
       terminal?.write(data)
       throttledScroll()
-      if (!editorStore.isRunning) return
+      // 仅代码模式：shell 3秒无输出 → 脚本结束
+      // 游戏模式：引擎进程独立运行，shell 静默不代表游戏结束
+      if (!editorStore.isRunning || editorStore.isGameMode) return
       if (runEndTimer) {
         clearTimeout(runEndTimer)
       }
@@ -241,6 +243,7 @@ function onBodyClick() {
 
 function toggleCollapse() {
   collapsed.value = !collapsed.value
+  emit('update:visible', !collapsed.value)
   if (!collapsed.value) {
     nextTick(() => {
       createTerminal()

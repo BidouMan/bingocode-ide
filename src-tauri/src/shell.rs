@@ -104,14 +104,6 @@ pub fn start_shell(
         pair: Some(pair),
     });
 
-    // shell 启动后立即禁用 ^C 的可视显示
-    if let Some(ref mut shell) = *shell_guard {
-        if let Some(ref mut w) = shell.writer {
-            let _ = w.write_all(b"stty -echoctl\n");
-            let _ = w.flush();
-        }
-    }
-
     Ok(())
 }
 

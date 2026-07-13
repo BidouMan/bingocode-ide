@@ -536,15 +536,21 @@ function invalidateUsesEngineCache() {
 
 function usesEngine(): boolean {
   if (usesEngineCache.valid) return usesEngineCache.value
-  const code = editorStore.currentTab?.content || ''
-  if (code.includes('bingo_engine')) {
-    usesEngineCache.value = true
-  } else {
-    const gameKeywords = ['run()', 'Sprite(', 'load_map(', 'key_down(', 'key_pressed(', 'Timer(', 'mouse', 'wait(']
-    usesEngineCache.value = gameKeywords.some(kw => code.includes(kw))
+  const gameKeywords = ['run()', 'Sprite(', 'load_map(', 'key_down(', 'key_pressed(', 'Timer(', 'mouse', 'wait(']
+  // 游戏模式下检查所有 tabs，不只是当前 tab
+  // 用户可能切换了 tab，但游戏引擎仍在运行
+  const tabs = editorStore.isGameMode ? editorStore.currentTabs : [editorStore.currentTab]
+  for (const tab of tabs) {
+    const code = tab?.content || ''
+    if (code.includes('bingo_engine') || gameKeywords.some(kw => code.includes(kw))) {
+      usesEngineCache.value = true
+      usesEngineCache.valid = true
+      return true
+    }
   }
+  usesEngineCache.value = false
   usesEngineCache.valid = true
-  return usesEngineCache.value
+  return false
 }
 
 let pendingMouseMove: MouseEvent | null = null
@@ -646,9 +652,9 @@ watch(
   }
 )
 
-// 监听标签切换，使 usesEngine 缓存失效
+// 监听标签切换、模式切换、tabs 变化，使 usesEngine 缓存失效
 watch(
-  () => editorStore.currentTab?.content,
+  () => [editorStore.currentTab?.content, editorStore.currentTab?.id, editorStore.isGameMode, editorStore.currentTabs.length],
   () => invalidateUsesEngineCache()
 )
 
