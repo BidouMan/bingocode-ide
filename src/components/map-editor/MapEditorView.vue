@@ -338,7 +338,7 @@ defineExpose({ switchToMap })
           <span class="info-spacer" />
           <span class="info-label">ID:{{ mapStore.currentMapPath ? mapStore.currentMapPath.split('/').pop()?.split('.')[0] ?? '--' : '--' }}</span>
           <span class="info-label">场景大小:{{ mapStore.mapData.width * mapStore.mapData.tileSize }}×{{ mapStore.mapData.height * mapStore.mapData.tileSize }}</span>
-          <span class="info-label">坐标:{{ mapStore.cursorX ?? '--' }},{{ mapStore.cursorY ?? '--' }}</span>
+          <span class="info-label">坐标:{{ mapStore.cursorX !== null ? mapStore.cursorX * mapStore.mapData.tileSize : '--' }},{{ mapStore.cursorY !== null ? mapStore.cursorY * mapStore.mapData.tileSize : '--' }}</span>
           <span class="info-label">资源尺寸:{{ mapStore.selectedResource?.tileWidth ?? '--' }}×{{ mapStore.selectedResource?.tileHeight ?? '--' }}</span>
           <span class="info-spacer" />
         </div>
