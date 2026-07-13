@@ -188,7 +188,7 @@ class Sprite:
             self.config = None
 
         if not os.path.exists(self.image):
-            print(f"❌ 角色 '{filename}' 不存在，请先在资源管理器中添加")
+            print(f"[警告] 角色 '{filename}' 不存在，请先在资源管理器中添加")
             self._is_deleted = True
             stop()
             return
@@ -1260,7 +1260,7 @@ class Sprite:
                 with open(config_path, "r", encoding="utf-8") as f:
                     return json.load(f)
             except Exception as e:
-                print(f"❌ 警告：读取角色配置 {config_path} 失败: {e}")
+                print(f"[警告] 读取角色配置 {config_path} 失败: {e}")
         return None
 
     def _resolve_path(self, filename, category):
@@ -1783,10 +1783,10 @@ def load_map(map_name):
         if not os.path.exists(map_dir):
             _try_extract_bgm(map_name)
 
-        print(f"✅ [BingoEngine] 加载地图: {map_name}")
+        print(f"加载地图: {map_name}")
 
         if not os.path.exists(json_file):
-            print(f"❌ [BingoEngine] 地图文件不存在: {json_file}")
+            print(f"[错误] 地图文件不存在: {json_file}")
             return False
 
         with open(json_file, "r", encoding="utf-8") as f:
@@ -1957,7 +1957,7 @@ def load_map(map_name):
         return True
 
     except Exception as e:
-        print(f"❌ [BingoEngine] 加载地图时出错: {e}")
+        print(f"[错误] 加载地图时出错: {e}")
         import traceback
 
         traceback.print_exc()
@@ -2018,10 +2018,10 @@ def _try_extract_bgm(map_name):
         os.makedirs(target_dir, exist_ok=True)
         with zipfile.ZipFile(bgm_path, 'r') as zf:
             zf.extractall(target_dir)
-        print(f"✅ [BingoEngine] 自动解压 .bgm: {map_name} → {target_dir}")
+        print(f"自动解压 .bgm: {map_name} -> {target_dir}")
         return True
     except Exception as e:
-        print(f"❌ [BingoEngine] 解压 .bgm 失败: {e}")
+        print(f"[错误] 解压 .bgm 失败: {e}")
         return False
 
 
@@ -2504,7 +2504,7 @@ def start_game(project_dir=None, target_file=None):
         from script_runner import discover_and_merge
         script_content = discover_and_merge(project_dir, target_file)
         if not script_content:
-            print("❌ 没有找到 Python 文件")
+            print("[错误] 没有找到 Python 文件")
             return
 
         # 执行脚本，注册 generator
@@ -2572,7 +2572,7 @@ def start_game(project_dir=None, target_file=None):
                         _generators.clear()
                         return
                     except Exception as e:
-                        print(f"❌ Generator 错误: {e}")
+                        print(f"[错误] Generator 错误: {e}")
                         _generators.remove(gen)
 
                 # 精灵运动和碰撞
