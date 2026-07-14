@@ -44,6 +44,12 @@ jobs:
       - name: Setup Python engine
         run: pnpm engine:setup
 
+      - name: Fix venv symlinks
+        run: |
+          cp -L engine/venv engine/venv_fixed
+          rm -rf engine/venv
+          mv engine/venv_fixed engine/venv
+
       - name: Build Tauri app
         run: pnpm tauri build
 

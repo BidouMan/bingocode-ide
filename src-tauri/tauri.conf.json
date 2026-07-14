@@ -47,7 +47,8 @@
     "resources": [
       "../engine/*.py",
       "../engine/models/**",
-      "../engine/assets/**"
+      "../engine/assets/**",
+      "../engine/venv/**"
     ]
   },
   "plugins": {
