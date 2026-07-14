@@ -428,6 +428,58 @@ fn find_system_python() -> Result<String, String> {
     Err("Python not found".to_string())
 }
 
+/// 确保引擎环境已设置（创建 venv 并安装依赖）
+#[tauri::command]
+fn ensure_engine_setup(engine_dir: String) -> Result<String, String> {
+    let venv_dir = std::path::PathBuf::from(&engine_dir).join("venv");
+    let venv_python = if cfg!(target_os = "windows") {
+        venv_dir.join("Scripts/python.exe")
+    } else {
+        venv_dir.join("bin/python3")
+    };
+
+    // 如果 venv 已存在，直接返回
+    if venv_python.exists() {
+        return Ok(venv_python.to_string_lossy().to_string());
+    }
+
+    // 查找系统 Python
+    let system_python = find_system_python()?;
+
+    // 创建 venv
+    let output = Command::new(&system_python)
+        .args(["-m", "venv", venv_dir.to_str().unwrap_or("")])
+        .output()
+        .map_err(|e| format!("创建 venv 失败: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("创建 venv 失败: {}", stderr));
+    }
+
+    // 安装依赖
+    let pip = if cfg!(target_os = "windows") {
+        venv_dir.join("Scripts/pip.exe")
+    } else {
+        venv_dir.join("bin/pip")
+    };
+    let requirements = std::path::PathBuf::from(&engine_dir).join("requirements.txt");
+
+    if requirements.exists() {
+        let output = Command::new(&pip)
+            .args(["install", "-r", requirements.to_str().unwrap_or("")])
+            .output()
+            .map_err(|e| format!("安装依赖失败: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("安装依赖失败: {}", stderr));
+        }
+    }
+
+    Ok(venv_python.to_string_lossy().to_string())
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EngineEnv {
     pub python_path: String,
@@ -911,6 +963,7 @@ pub fn run() {
             save_temp_script,
             cleanup_temp_script,
             resolve_engine_env,
+            ensure_engine_setup,
             init_default_project,
             copy_file_to_project,
             extract_bgs_to_project,

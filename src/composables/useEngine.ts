@@ -355,6 +355,12 @@ export function useEngine() {
         working_dir: string
       }>('resolve_engine_env', { scriptPath: tempScriptPath, projectRoot: projectDir || undefined })
 
+      // 确保引擎环境已设置（首次运行时创建 venv）
+      const venvPython = await invoke<string>('ensure_engine_setup', { engineDir: env.engine_dir })
+      if (venvPython) {
+        env.python_path = venvPython
+      }
+
       // 根据模式决定如何运行
       if (editorStore.isGameMode) {
         // ═══ 游戏模式：保存所有 tab 到 code/ 目录，引擎自动发现并运行 ═══
