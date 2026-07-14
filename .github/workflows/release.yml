@@ -30,11 +30,19 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install frontend deps
         run: pnpm install
+
+      - name: Setup Python engine
+        run: pnpm engine:setup
 
       - name: Build Tauri app
         run: pnpm tauri build
