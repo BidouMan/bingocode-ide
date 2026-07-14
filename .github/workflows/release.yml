@@ -30,26 +30,82 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install frontend deps
         run: pnpm install
 
-      - name: Setup Python engine
-        run: pnpm engine:setup
-
-      - name: Fix venv symlinks (macOS)
-        if: runner.os == 'macOS'
+      - name: Setup portable Python engine
+        shell: bash
         run: |
-          cp -rL engine/venv engine/venv_fixed
-          rm -rf engine/venv
-          mv engine/venv_fixed engine/venv
+          set -euo pipefail
+          ENGINE_DIR="${{ github.workspace }}/engine"
+          OUTPUT_DIR="$ENGINE_DIR/portable-python"
+
+          # 根据 runner OS 选择架构
+          case "${{ runner.os }}" in
+            macOS)
+              case "$(uname -m)" in
+                arm64) PLATFORM="aarch64-apple-darwin" ;;
+                x86_64) PLATFORM="x86_64-apple-darwin" ;;
+                *) echo "Unknown arch: $(uname -m)"; exit 1 ;;
+              esac
+              ;;
+            Windows)
+              PLATFORM="x86_64-pc-windows-msvc"
+              ;;
+            *)
+              echo "Unsupported OS: ${{ runner.os }}"
+              exit 1
+              ;;
+          esac
+
+          PYTHON_VERSION="3.12.13"
+          RELEASE_TAG="20260623"
+          FILENAME="cpython-${PYTHON_VERSION}+${RELEASE_TAG}-${PLATFORM}-install_only_stripped.tar.gz"
+          DOWNLOAD_URL="https://github.com/astral-sh/python-build-standalone/releases/download/${RELEASE_TAG}/${FILENAME}"
+
+          echo "🔍 Platform: $PLATFORM"
+          echo "📥 Downloading $FILENAME ..."
+
+          mkdir -p "$OUTPUT_DIR"
+          curl -L --retry 3 --retry-delay 5 -o "/tmp/${FILENAME}" "$DOWNLOAD_URL"
+          tar -xzf "/tmp/${FILENAME}" -C "$OUTPUT_DIR" --strip-components=1
+          rm "/tmp/${FILENAME}"
+
+          # 找到 Python
+          if [ -f "$OUTPUT_DIR/bin/python3" ]; then
+            PYTHON_BIN="$OUTPUT_DIR/bin/python3"
+          elif [ -f "$OUTPUT_DIR/bin/python" ]; then
+            PYTHON_BIN="$OUTPUT_DIR/bin/python"
+          elif [ -f "$OUTPUT_DIR/python.exe" ]; then
+            PYTHON_BIN="$OUTPUT_DIR/python.exe"
+          else
+            echo "❌ Python binary not found"; exit 1
+          fi
+
+          echo "🐍 $($PYTHON_BIN --version 2>&1)"
+
+          # 升级 pip 并安装依赖
+          "$PYTHON_BIN" -m pip install --upgrade pip --quiet
+          "$PYTHON_BIN" -m pip install -r "$ENGINE_DIR/requirements.txt" --no-compile --quiet
+          echo "✅ Dependencies installed"
+
+          # 清理无用文件
+          find "$OUTPUT_DIR" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+          find "$OUTPUT_DIR" -name "*.pyc" -delete 2>/dev/null || true
+          rm -rf "$OUTPUT_DIR/var/cache" "$OUTPUT_DIR/.cache" 2>/dev/null || true
+          rm -rf "$OUTPUT_DIR/lib/python3.12/test" 2>/dev/null || true
+          rm -rf "$OUTPUT_DIR/lib/python3.12/idlelib" 2>/dev/null || true
+          rm -rf "$OUTPUT_DIR/lib/python3.12/tkinter" 2>/dev/null || true
+          rm -rf "$OUTPUT_DIR/lib/python3.12/turtledemo" 2>/dev/null || true
+          rm -rf "$OUTPUT_DIR/lib/python3.12/unittest" 2>/dev/null || true
+          rm -rf "$OUTPUT_DIR/lib/python3.12/ensurepip" 2>/dev/null || true
+          rm -rf "$OUTPUT_DIR/include" 2>/dev/null || true
+
+          echo "✅ Portable Python ready"
+          du -sh "$OUTPUT_DIR"
 
       - name: Build Tauri app
         run: pnpm tauri build

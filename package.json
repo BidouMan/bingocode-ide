@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "engine:setup": "cd engine && bash setup.sh",
+    "engine:portable": "bash scripts/setup-portable-python.sh",
     "docs:build": "tsx docs/build.ts",
     "docs:preview": "open docs/dist/index.html"
   },

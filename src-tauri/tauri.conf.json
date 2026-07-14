@@ -46,9 +46,10 @@
     "externalBin": [],
     "resources": [
       "../engine/*.py",
-      "../engine/models/**",
-      "../engine/assets/**",
-      "../engine/venv/**"
+      "../engine/models/*",
+      "../engine/assets/**/*",
+      "../engine/portable-python/**/*",
+      "../engine/requirements.txt"
     ]
   },
   "plugins": {

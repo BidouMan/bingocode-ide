@@ -32,12 +32,16 @@ src-tauri/target/
 src-tauri/WixTools/
 src-tauri/Frameworks/
 
-# Python engine venv
+# Python engine venv + portable python (build.rs creates marker)
 engine/venv/
+engine/portable-python/
 engine/__pycache__/
 engine/**/*.pyc
 engine/tests/
 engine/test_projects/
+
+# PyInstaller build outputs
+engine/dist/
 
 # Legacy old project (will be removed after refactor)
 legacy/

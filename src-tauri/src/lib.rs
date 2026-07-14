@@ -333,26 +333,26 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
         }
     };
 
-    let venv_python = if cfg!(target_os = "windows") {
-        engine_dir.join("venv/Scripts/python.exe")
+    let portable_python = if cfg!(target_os = "windows") {
+        engine_dir.join("portable-python/python.exe")
     } else {
-        engine_dir.join("venv/bin/python3")
+        engine_dir.join("portable-python/bin/python3")
     };
 
-    let python_path = if venv_python.exists() {
-        venv_python.to_string_lossy().to_string()
+    let python_path = if portable_python.exists() {
+        portable_python.to_string_lossy().to_string()
     } else {
-        // 在 engine_dir 的同级或上级查找 venv
+        // 回退：在 engine_dir 的同级或上级查找 portable-python
         let mut candidate = engine_dir.as_path();
         let mut found_python = None;
         for _ in 0..3 {
-            let venv_test = if cfg!(target_os = "windows") {
-                candidate.join("engine/venv/Scripts/python.exe")
+            let portable_test = if cfg!(target_os = "windows") {
+                candidate.join("engine/portable-python/python.exe")
             } else {
-                candidate.join("engine/venv/bin/python3")
+                candidate.join("engine/portable-python/bin/python3")
             };
-            if venv_test.exists() {
-                found_python = Some(venv_test);
+            if portable_test.exists() {
+                found_python = Some(portable_test);
                 break;
             }
             if let Some(p) = candidate.parent() {
@@ -364,15 +364,25 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
         if let Some(p) = found_python {
             p.to_string_lossy().to_string()
         } else if let Ok(cwd) = std::env::current_dir() {
-            let cwd_venv = if cfg!(target_os = "windows") {
-                cwd.join("engine/venv/Scripts/python.exe")
+            let cwd_portable = if cfg!(target_os = "windows") {
+                cwd.join("engine/portable-python/python.exe")
             } else {
-                cwd.join("engine/venv/bin/python3")
+                cwd.join("engine/portable-python/bin/python3")
             };
-            if cwd_venv.exists() {
-                cwd_venv.to_string_lossy().to_string()
+            if cwd_portable.exists() {
+                cwd_portable.to_string_lossy().to_string()
             } else {
-                find_system_python()?
+                // 最后回退：旧版 venv 方式（兼容开发环境）
+                let venv_python = if cfg!(target_os = "windows") {
+                    engine_dir.join("venv/Scripts/python.exe")
+                } else {
+                    engine_dir.join("venv/bin/python3")
+                };
+                if venv_python.exists() {
+                    venv_python.to_string_lossy().to_string()
+                } else {
+                    find_system_python()?
+                }
             }
         } else {
             find_system_python()?
@@ -428,22 +438,34 @@ fn find_system_python() -> Result<String, String> {
     Err("Python not found".to_string())
 }
 
-/// 确保引擎环境已设置（创建 venv 并安装依赖）
+/// 确保引擎环境已设置（优先使用便携 Python，回退到 venv）
 #[tauri::command]
 fn ensure_engine_setup(engine_dir: String) -> Result<String, String> {
-    let venv_dir = std::path::PathBuf::from(&engine_dir).join("venv");
+    let engine_path = std::path::Path::new(&engine_dir);
+
+    // 优先使用便携 Python（打包版本自带）
+    let portable_python = if cfg!(target_os = "windows") {
+        engine_path.join("portable-python/python.exe")
+    } else {
+        engine_path.join("portable-python/bin/python3")
+    };
+    if portable_python.exists() {
+        return Ok(portable_python.to_string_lossy().to_string());
+    }
+
+    // 回退：使用 venv（本地开发环境）
+    let venv_dir = engine_path.join("venv");
     let venv_python = if cfg!(target_os = "windows") {
         venv_dir.join("Scripts/python.exe")
     } else {
         venv_dir.join("bin/python3")
     };
 
-    // 如果 venv 已存在，直接返回
     if venv_python.exists() {
         return Ok(venv_python.to_string_lossy().to_string());
     }
 
-    // 查找系统 Python
+    // 查找系统 Python 来创建 venv
     let system_python = find_system_python()?;
 
     // 创建 venv
@@ -463,7 +485,7 @@ fn ensure_engine_setup(engine_dir: String) -> Result<String, String> {
     } else {
         venv_dir.join("bin/pip")
     };
-    let requirements = std::path::PathBuf::from(&engine_dir).join("requirements.txt");
+    let requirements = engine_path.join("requirements.txt");
 
     if requirements.exists() {
         let output = Command::new(&pip)
