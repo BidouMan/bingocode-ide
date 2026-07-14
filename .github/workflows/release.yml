@@ -10,6 +10,7 @@ permissions:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         os: [macos-latest, windows-latest]
 
@@ -40,14 +41,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ENGINE_DIR="${{ github.workspace }}/engine"
+
+          # Windows: 转换反斜杠为正斜杠（tar 不支持反斜杠路径）
+          RAW_WS="${{ github.workspace }}"
+          case "${{ runner.os }}" in
+            Windows) WS="${RAW_WS//\\//}" ;;
+            *)       WS="$RAW_WS" ;;
+          esac
+
+          ENGINE_DIR="$WS/engine"
           OUTPUT_DIR="$ENGINE_DIR/portable-python"
 
           # 根据 runner OS 选择架构
           case "${{ runner.os }}" in
             macOS)
               case "$(uname -m)" in
-                arm64) PLATFORM="aarch64-apple-darwin" ;;
+                arm64)  PLATFORM="aarch64-apple-darwin" ;;
                 x86_64) PLATFORM="x86_64-apple-darwin" ;;
                 *) echo "Unknown arch: $(uname -m)"; exit 1 ;;
               esac
