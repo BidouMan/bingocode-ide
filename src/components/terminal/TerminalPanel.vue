@@ -175,7 +175,7 @@ function createTerminal() {
     (data) => {
       terminal?.write(data)
       throttledScroll()
-      // 仅代码模式：shell 3秒无输出 → 脚本结束
+      // 仅代码模式：shell 1秒无输出 → 脚本结束
       // 游戏模式：引擎进程独立运行，shell 静默不代表游戏结束
       if (!editorStore.isRunning || editorStore.isGameMode) return
       if (runEndTimer) {
@@ -184,7 +184,7 @@ function createTerminal() {
       runEndTimer = setTimeout(() => {
         editorStore.setRunning(false)
         runEndTimer = null
-      }, 3000)
+      }, 1000)
     },
     () => {
       editorStore.setRunning(false)

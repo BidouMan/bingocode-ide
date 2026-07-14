@@ -284,7 +284,7 @@ fn save_temp_script(project_dir: String, content: String) -> Result<String, Stri
     let mut file = std::fs::File::create(&temp_path).map_err(|e| format!("创建临时文件失败: {}", e))?;
     file.write_all(content.as_bytes()).map_err(|e| format!("写入临时文件失败: {}", e))?;
     file.sync_all().map_err(|e| format!("同步临时文件失败: {}", e))?;
-    Ok(temp_path.to_string_lossy().to_string())
+    Ok(temp_path.to_str().ok_or("路径包含无效字符")?.to_string())
 }
 
 #[tauri::command]

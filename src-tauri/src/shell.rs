@@ -59,6 +59,9 @@ pub fn start_shell(
     cmd.env("TERM", "dumb");
     cmd.env("NO_COLOR", "1");
     cmd.env("FORCE_COLOR", "0");
+    // 设置 UTF-8 编码，避免中文路径乱码
+    cmd.env("LANG", "en_US.UTF-8");
+    cmd.env("LC_ALL", "en_US.UTF-8");
     // 清空提示符，保持终端输出纯净
     cmd.env("PS1", "");
     cmd.env("PS2", "");

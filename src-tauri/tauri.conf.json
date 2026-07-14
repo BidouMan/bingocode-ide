@@ -44,7 +44,11 @@
       "icons/icon.ico"
     ],
     "externalBin": [],
-    "resources": []
+    "resources": [
+      "../engine/*.py",
+      "../engine/models/**",
+      "../engine/assets/**"
+    ]
   },
   "plugins": {
     "shell": {

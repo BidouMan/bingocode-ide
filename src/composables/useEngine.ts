@@ -421,6 +421,8 @@ export function useEngine() {
 
         let runPath: string
         if (tab.path) {
+          // 将编辑器最新内容写入磁盘
+          await invoke('write_file', { path: tab.path, content: tab.content })
           runPath = tab.path
         } else {
           await invoke<string>('save_temp_script', {
