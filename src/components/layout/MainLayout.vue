@@ -23,6 +23,7 @@ import SoundLibPage from '../resource-panel/SoundLibPage.vue'
 import HelpPanel from '../help/HelpPanel.vue'
 import PythonHelpPanel from '../help/PythonHelpPanel.vue'
 import AiChatPanel from '../help/AiChatPanel.vue'
+import { openHelpDocs } from '../help/HelpDocsOpener'
 import PluginManager from '../common/PluginManager.vue'
 import iconLogo from '../../assets/icons/logo.svg'
 import iconFile from '../../assets/icons/icon--file.svg'
@@ -236,6 +237,15 @@ function onHelpClick(e: MouseEvent) {
     // 普通点击 → 打开帮助文档
     helpVisible.value = !helpVisible.value
     aiChatVisible.value = false
+  }
+}
+
+async function onOpenHelpDocs() {
+  closeSettingsMenu()
+  try {
+    await openHelpDocs()
+  } catch (error) {
+    console.error('打开帮助文档失败:', error)
   }
 }
 
@@ -1618,6 +1628,12 @@ function spriteDisplayName(name: string) {
               <button class="file-menu-item settings-item-disabled">引擎参数</button>
             </div>
           </div>
+          <!-- 分隔线 -->
+          <div class="settings-divider"></div>
+          <!-- 帮助文档 -->
+          <button class="file-menu-item" @click="onOpenHelpDocs">
+            帮助文档
+          </button>
         </div>
       </div>
 
@@ -2146,6 +2162,11 @@ function spriteDisplayName(name: string) {
 }
 .settings-item-disabled:hover {
   background: transparent;
+}
+.settings-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
 }
 
 /* 模式切换开关 */

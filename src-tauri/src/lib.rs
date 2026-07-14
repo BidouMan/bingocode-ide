@@ -92,6 +92,62 @@ fn path_exists(path: String) -> bool {
 }
 
 #[tauri::command]
+fn get_project_root() -> Result<String, String> {
+    let cwd = std::env::current_dir()
+        .map_err(|e| format!("Failed to get current dir: {}", e))?;
+    // src-tauri 目录下需要向上一级到项目根目录
+    let project_root = cwd.parent()
+        .unwrap_or(&cwd)
+        .to_string_lossy()
+        .to_string();
+    Ok(project_root)
+}
+
+#[tauri::command]
+fn open_file_in_browser(path: String) -> Result<String, String> {
+    // 检查文件是否存在
+    let path_obj = std::path::Path::new(&path);
+    if !path_obj.exists() {
+        return Err(format!("文件不存在: {}", path));
+    }
+
+    let absolute_path = std::fs::canonicalize(path_obj)
+        .map_err(|e| format!("获取绝对路径失败: {}", e))?
+        .to_string_lossy()
+        .to_string();
+
+    // 使用系统默认应用打开文件
+    #[cfg(target_os = "macos")]
+    {
+        let result = std::process::Command::new("open")
+            .arg(&absolute_path)
+            .output()
+            .map_err(|e| format!("启动 open 命令失败: {}", e))?;
+
+        if !result.status.success() {
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            return Err(format!("open 命令执行失败: {}", stderr));
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &absolute_path])
+            .spawn()
+            .map_err(|e| format!("Failed to open file: {}", e))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&absolute_path)
+            .spawn()
+            .map_err(|e| format!("Failed to open file: {}", e))?;
+    }
+
+    Ok(absolute_path)
+}
+
+#[tauri::command]
 fn init_default_project() -> Result<String, String> {
     // 跨平台默认项目目录
     // Mac: ~/BingoCodeIDE/Projects/default
@@ -850,6 +906,8 @@ pub fn run() {
             create_dir,
             delete_path,
             path_exists,
+            get_project_root,
+            open_file_in_browser,
             save_temp_script,
             cleanup_temp_script,
             resolve_engine_env,

@@ -1,14 +1,16 @@
 {
   "name": "bingo-ide",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "engine:setup": "cd engine && bash setup.sh"
+    "engine:setup": "cd engine && bash setup.sh",
+    "docs:build": "tsx docs/build.ts",
+    "docs:preview": "open docs/dist/index.html"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
@@ -37,7 +39,10 @@
     "@vitejs/plugin-vue": "^6.0.7",
     "@vue/tsconfig": "^0.9.1",
     "esbuild": "^0.28.1",
+    "highlight.js": "^11.11.1",
+    "marked": "^18.0.6",
     "tailwindcss": "^4.3.1",
+    "tsx": "^4.23.0",
     "typescript": "~6.0.2",
     "vite": "^8.1.0",
     "vue-tsc": "^3.3.5"
