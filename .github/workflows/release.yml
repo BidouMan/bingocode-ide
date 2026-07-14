@@ -44,9 +44,10 @@ jobs:
       - name: Setup Python engine
         run: pnpm engine:setup
 
-      - name: Fix venv symlinks
+      - name: Fix venv symlinks (macOS)
+        if: runner.os == 'macOS'
         run: |
-          cp -L engine/venv engine/venv_fixed
+          cp -rL engine/venv engine/venv_fixed
           rm -rf engine/venv
           mv engine/venv_fixed engine/venv
 
