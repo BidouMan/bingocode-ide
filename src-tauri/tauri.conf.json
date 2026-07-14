@@ -45,9 +45,7 @@
     ],
     "externalBin": [],
     "resources": [
-      "../engine/*.py",
-      "../engine/models/**",
-      "../engine/assets/**"
+      "../engine/**"
     ]
   },
   "plugins": {
