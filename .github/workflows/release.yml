@@ -3,6 +3,17 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: '构建平台'
+        required: true
+        default: 'windows'
+        type: choice
+        options:
+          - windows
+          - macos
+          - both
 
 permissions:
   contents: write
@@ -12,8 +23,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 本次只构建 Windows，测试通过后改回 [macos-latest, windows-latest]
-        os: [windows-latest]
+        os: >-
+          ${{ 
+            github.event_name == 'workflow_dispatch' && (
+              github.event.inputs.platform == 'windows' && fromJSON('["windows-latest"]') ||
+              github.event.inputs.platform == 'macos' && fromJSON('["macos-latest"]') ||
+              fromJSON('["macos-latest", "windows-latest"]')
+            ) || fromJSON('["windows-latest"]')
+          }}
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
