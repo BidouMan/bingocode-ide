@@ -1000,6 +1000,7 @@ pub fn run() {
             engine::run_script,
             engine::stop_script,
             engine::send_stdin,
+            engine::send_stdin_data,
             engine::run_script_file,
             run_script_output,
             pip_list_installed,

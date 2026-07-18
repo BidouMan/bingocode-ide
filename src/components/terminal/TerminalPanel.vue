@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -30,6 +31,7 @@ const containerRef = ref<HTMLDivElement>()
 let terminal: Terminal | null = null
 let fitAddon: FitAddon | null = null
 let searchAddon: SearchAddon | null = null as any
+const inputBuffer = ref('')
 const MAX_LINES = 5000
 const collapsed = ref(true)
 // 搜索栏
@@ -104,13 +106,19 @@ function onTerminalKeydown(e: KeyboardEvent) {
     return
   }
 
-  // Shift+组合键：用物理键码绕过 IME，直接发送到 shell（shell 会回显，不需要手动写入）
+  // Shift+组合键：用物理键码绕过 IME，直接发送
   if (e.shiftKey && isShellMode.value) {
     const char = keydownToChar(e)
     if (char !== null) {
       e.preventDefault()
       e.stopPropagation()
-      shell.sendInput(char)
+      if (terminalStore.terminalMode === 'python' && char !== null) {
+        // 行缓冲模式：加入缓冲并回显
+        inputBuffer.value += char
+        terminal?.write(char)
+      } else if (char !== null) {
+        shell.sendInput(char)
+      }
       return
     }
   }
@@ -175,9 +183,10 @@ function createTerminal() {
     (data) => {
       terminal?.write(data)
       throttledScroll()
-      // 仅代码模式：shell 1秒无输出 → 脚本结束
-      // 游戏模式：引擎进程独立运行，shell 静默不代表游戏结束
-      if (!editorStore.isRunning || editorStore.isGameMode) return
+      // 代码模式下 isRunning 由 useEngine 事件管理，shell 回调不参与
+      if (!editorStore.isGameMode) return
+      if (!editorStore.isRunning) return
+      if (terminalStore.terminalMode === 'python') return
       if (runEndTimer) {
         clearTimeout(runEndTimer)
       }
@@ -187,6 +196,8 @@ function createTerminal() {
       }, 1000)
     },
     () => {
+      // 代码模式下 isRunning 由 useEngine 事件管理，shell 退出不干扰
+      if (!editorStore.isGameMode) return
       editorStore.setRunning(false)
       runEndTimer = null
     }
@@ -205,6 +216,29 @@ function createTerminal() {
   containerRef.value.addEventListener('keydown', onTerminalKeydown, true)
 
   terminal.onData((data: string) => {
+    if (terminalStore.terminalMode === 'python') {
+      // Python 子进程模式：行缓冲输入，退格可编辑，回车一并发送
+      if (data === '\r' || data === '\n') {
+        // 回车：将缓冲的整行发给 Python，换行显示
+        terminal?.write('\r\n')
+        const line = inputBuffer.value
+        inputBuffer.value = ''
+        invoke('send_stdin_data', { data: line + '\n' }).catch(() => {})
+        terminal?.scrollToBottom()
+      } else if (data === '\x7f' || data === '\b') {
+        // 退格：删除缓冲末尾字符，终端上回退一格清掉
+        if (inputBuffer.value.length > 0) {
+          inputBuffer.value = inputBuffer.value.slice(0, -1)
+          terminal?.write('\b \b')
+        }
+      } else if (data !== '\r' && data !== '\n' && data !== '\x7f' && data !== '\b') {
+        // 普通字符（含中文等多字节 UTF-8 字符）：加入缓冲，回显到终端
+        inputBuffer.value += data
+        terminal?.write(data)
+        terminal?.scrollToBottom()
+      }
+      return
+    }
     if (isShellMode.value) {
       shell.sendInput(data)
       terminal?.scrollToBottom()
@@ -284,6 +318,15 @@ watch(
   () => {
     if (terminal) {
       terminal.options.theme = themeStore.colors.terminalTheme as any
+    }
+  }
+)
+
+watch(
+  () => terminalStore.terminalMode,
+  (mode) => {
+    if (mode !== 'python') {
+      inputBuffer.value = ''
     }
   }
 )

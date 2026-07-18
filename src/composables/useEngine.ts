@@ -190,10 +190,23 @@ export function useEngine() {
   async function setupListeners() {
     cleanup()
 
-    const unlisten1 = await listen<string>('engine:stdout', (event) => {
-      const data = event.payload
-      // Rust 引擎的 stdout 读取器会在 16ms 内将多行合并成一个 batch 发送，
-      // 需要按换行符拆分后逐行解析 JSON 指令
+    const isCodeMode = !editorStore.isGameMode
+    const myRunId = runGeneration
+
+    const unlisten1 = await listen<{ run_id: number; data: string }>('engine:stdout', (event) => {
+      // ★ 按 run_id 精确过滤：旧进程事件被完全忽略
+      if (event.payload.run_id !== myRunId) {
+        return
+      }
+      const data = event.payload.data
+
+      // 代码模式：直接写入终端
+      if (isCodeMode) {
+        terminalStore.handleCodeStdout(data)
+        return
+      }
+
+      // 游戏模式：需要解析 JSON 指令
       const lines = data.split('\n')
       const nonJsonParts: string[] = []
 
@@ -217,37 +230,66 @@ export function useEngine() {
       }
     })
 
-    const unlisten2 = await listen<string>('engine:stderr', (event) => {
-      const msg = event.payload
+    const unlisten2 = await listen<{ run_id: number; data: string }>('engine:stderr', (event) => {
+      if (event.payload.run_id !== myRunId) return
+      const msg = event.payload.data
       // 学生友好的错误提示
-      if (msg.includes('No such file') && msg.includes('.temp_run.py')) {
-        terminalStore.handleStderr('❌ 程序文件出错了，请再试一次运行\n')
+      if (msg.includes('KeyboardInterrupt')) {
+        // 用户主动中断，静默处理
+      } else if (msg.includes('No such file') && msg.includes('.temp_run.py')) {
+        terminalStore.handleStderr('程序文件出错了，请再试一次\n')
       } else if (msg.includes('ModuleNotFoundError')) {
         const match = msg.match(/No module named '(\w+)'/)
         const moduleName = match ? match[1] : '未知模块'
-        terminalStore.handleStderr(`❌ 找不到模块 "${moduleName}"，请检查代码中的 import 语句\n`)
+        terminalStore.handleStderr(`找不到模块 "${moduleName}"，请检查 import 语句\n`)
       } else if (msg.includes('SyntaxError')) {
-        terminalStore.handleStderr('❌ 代码语法有误，请检查拼写和括号是否正确\n')
+        const lineMatch = msg.match(/line (\d+)/)
+        const lineInfo = lineMatch ? `（第 ${lineMatch[1]} 行）` : ''
+        terminalStore.handleStderr(`代码语法有误${lineInfo}，请检查拼写和括号\n`)
       } else if (msg.includes('NameError')) {
         const match = msg.match(/name '(\w+)'/)
         const name = match ? match[1] : '未知'
-        terminalStore.handleStderr(`❌ 变量或函数 "${name}" 未定义，请检查拼写\n`)
+        terminalStore.handleStderr(`变量或函数 "${name}" 未定义，请检查拼写\n`)
+      } else if (msg.includes('IndentationError') || msg.includes('TabError')) {
+        terminalStore.handleStderr('缩进有误，请检查空格是否对齐\n')
+      } else if (msg.includes('TypeError')) {
+        const match = msg.match(/unsupported operand type\(s\)/)
+        if (match) {
+          terminalStore.handleStderr('数据类型不匹配，请检查运算是否正确\n')
+        } else {
+          terminalStore.handleStderr('数据类型有误，请检查变量类型\n')
+        }
+      } else if (msg.includes('ZeroDivisionError')) {
+        terminalStore.handleStderr('不能除以 0\n')
+      } else if (msg.includes('IndexError')) {
+        terminalStore.handleStderr('列表下标超出范围\n')
+      } else if (msg.includes('KeyError')) {
+        const match = msg.match(/KeyError:\s*'?(\w+)'?/)
+        const key = match ? match[1] : ''
+        terminalStore.handleStderr(key ? `找不到键 "${key}"\n` : '字典中找不到指定的键\n')
+      } else if (msg.includes('ValueError')) {
+        terminalStore.handleStderr('数值有误，请检查输入是否正确\n')
+      } else if (msg.includes('FileNotFoundError')) {
+        terminalStore.handleStderr('找不到文件，请检查文件路径\n')
       } else {
         terminalStore.handleStderr(msg)
       }
     })
 
     let stdoutEnded = false
-    const myGeneration = runGeneration
 
-    const unlisten3 = await listen('engine:finished', () => {
+    const unlisten3 = await listen<{ run_id: number }>('engine:finished', (event) => {
+      if (event.payload.run_id !== myRunId) {
+        return
+      }
       const tryFinish = () => {
-        if (runGeneration !== myGeneration) return // 新的 run 已启动，放弃
         if (stdoutEnded) {
           terminalStore.flushNow()
           terminalStore.resetInputState()
           editorStore.setRunning(false)
-          terminalStore.writeRaw('\n\x1b[38;5;46m[运行完毕]\x1b[0m\n')
+          if (terminalStore.terminalMode === 'python') {
+            terminalStore.terminalMode = 'shell'
+          }
         } else {
           setTimeout(tryFinish, 50)
         }
@@ -255,7 +297,10 @@ export function useEngine() {
       tryFinish()
     })
 
-    const unlisten4 = await listen('engine:stdout:end', () => {
+    const unlisten4 = await listen<{ run_id: number }>('engine:stdout:end', (event) => {
+      if (event.payload.run_id !== myRunId) {
+        return
+      }
       stdoutEnded = true
     })
 
@@ -275,7 +320,6 @@ export function useEngine() {
   async function run() {
     // 等待项目初始化完成（onMounted 可能尚未完成）
     if (!projectStore.root) {
-      terminalStore.appendLine('\x1b[33m⏳ 正在初始化项目...\x1b[0m')
       await projectStore.initProject()
     }
 
@@ -285,7 +329,7 @@ export function useEngine() {
       await new Promise(r => setTimeout(r, 50))
       tab = editorStore.currentTab
       if (!tab) {
-        terminalStore.appendLine('\x1b[31m❌ 没有打开的文件\x1b[0m')
+        terminalStore.appendLine('\x1b[31m没有打开的文件\x1b[0m')
         return
       }
     }
@@ -298,7 +342,6 @@ export function useEngine() {
         defaultPath: tab.name,
       })
       if (!filePath) {
-        terminalStore.appendLine('\x1b[33m已取消运行\x1b[0m')
         return
       }
       // 保存文件
@@ -311,7 +354,7 @@ export function useEngine() {
         resource.path = filePath
         resource.name = tab.name
       }
-      terminalStore.appendLine('\x1b[33m文件已保存，再次点击运行即可执行\x1b[0m')
+      terminalStore.appendLine('\x1b[33m文件已保存，点击运行\x1b[0m')
       editorStore.setRunning(false)
       return
     }
@@ -410,11 +453,12 @@ export function useEngine() {
           workingDir: env.working_dir,
           pythonPath: env.python_path,
           engineDir: env.engine_dir,
+          runId: runGeneration,
         })
       } else {
-        // ═══ 代码模式：直接运行 Python，不走 PTY，无 echo 和 traceback ═══
+        // ═══ 代码模式：通过子进程运行 Python，不走 PTY，完全无回显 ═══
         if (!tab) {
-          terminalStore.appendLine('\x1b[31m❌ 没有打开的文件\x1b[0m')
+          terminalStore.appendLine('\x1b[31m没有打开的文件\x1b[0m')
           editorStore.setRunning(false)
           return
         }
@@ -432,12 +476,18 @@ export function useEngine() {
           runPath = `${projectDir}/.temp_run.py`
         }
 
-        const pythonPath = env.python_path
         terminalStore.clear()
-        terminalStore.runInShell(`"${pythonPath}" -u "${runPath}" 2>/dev/null`)
+        terminalStore.terminalMode = 'python'
+        // 使用子进程运行（和游戏模式同一套管道通信机制）
+        await invoke('run_script_file', {
+          workingDir: env.working_dir,
+          pythonPath: env.python_path,
+          scriptPath: runPath,
+          runId: runGeneration,
+        })
       }
     } catch (err) {
-      terminalStore.appendLine(`\x1b[31m❌ 启动失败: ${err}\x1b[0m`)
+      terminalStore.appendLine(`\x1b[31m启动失败: ${err}\x1b[0m`)
       editorStore.setRunning(false)
     }
   }
@@ -446,11 +496,15 @@ export function useEngine() {
     if (editorStore.isGameMode) {
       try { await invoke('stop_script') } catch {}
     } else {
-      try { await invoke('send_shell_input', { data: '\x03' }) } catch {}
+      try { await invoke('stop_script') } catch {}
     }
+    terminalStore.flushNow()
     editorStore.setRunning(false)
     renderStore.resetTextureLoading()
     terminalStore.resetInputState()
+    if (terminalStore.terminalMode === 'python') {
+      terminalStore.terminalMode = 'shell'
+    }
   }
 
   async function sendInput(data: string) {

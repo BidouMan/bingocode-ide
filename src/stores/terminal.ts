@@ -13,6 +13,66 @@ export const useTerminalStore = defineStore('terminal', () => {
   // shell 运行命令回调（由 TerminalPanel 注册）
   let shellRunCallback: ((cmd: string) => void) | null = null
 
+  // 输出限流：高频写入时合并到 animation frame，防止 xterm 渲染阻塞主线程
+  let writeRaf: number | null = null
+  let pendingWrite = ''
+  // 每帧写入上限：超过此行数则丢弃旧行
+  const MAX_WRITE_LINES = 50
+
+  function scheduleWrite() {
+    if (writeRaf !== null) return
+    writeRaf = requestAnimationFrame(doWrite)
+  }
+
+  function doWrite() {
+    writeRaf = null
+    if (!pendingWrite) return
+    if (!terminalInstance) {
+      // 终端还没创建，保留数据，等 bindTerminal 后再写入
+      return
+    }
+
+    const text = pendingWrite
+    pendingWrite = ''
+
+    // 过滤游戏引擎 JSON 指令
+    const filtered = filterEngineJson(text)
+    if (!filtered) return
+
+    // 行数限流：高频输出时只保留最新行，避免 xterm 卡死
+    const lineCount = (filtered.match(/\n/g) || []).length
+    if (lineCount > MAX_WRITE_LINES) {
+      const allLines = filtered.split('\n')
+      const kept = allLines.slice(-MAX_WRITE_LINES)
+      terminalInstance.write(kept.join('\n'))
+    } else {
+      terminalInstance.write(filtered)
+    }
+    terminalInstance.scrollToBottom()
+  }
+
+  // 过滤游戏引擎 JSON 指令行
+  function filterEngineJson(text: string): string {
+    // 快速检查：如果不包含 JSON 特征，直接返回
+    if (!text.includes('{"type":')) return text
+    const lines = text.split('\n')
+    const filtered = lines.filter(line => {
+      const trimmed = line.trim()
+      return !(trimmed.startsWith('{"type":') && trimmed.endsWith('}'))
+    })
+    return filtered.join('\n')
+  }
+
+  // 立即写入终端（不走 RAF 缓冲），用于需要即时显示的内容
+  function writeImmediate(text: string) {
+    if (!terminalInstance) return
+    const filtered = filterEngineJson(text)
+    if (filtered) {
+      terminalInstance.write(filtered)
+      terminalInstance.scrollToBottom()
+    }
+  }
+
   function registerShellRunner(callback: (cmd: string) => void) {
     shellRunCallback = callback
   }
@@ -27,6 +87,10 @@ export const useTerminalStore = defineStore('terminal', () => {
       terminalInstance.writeln(line)
     }
     earlyBuffer.length = 0
+    // 刷新积压的输出数据（首次运行时终端可能还没创建）
+    if (pendingWrite) {
+      doWrite()
+    }
     if (lines.value.length > 0) {
       terminalInstance.scrollToBottom()
     }
@@ -51,70 +115,31 @@ export const useTerminalStore = defineStore('terminal', () => {
     }
   }
 
-  const MAX_PENDING = 10240 // 缓冲上限 10KB
-
-  // 高频输出节流：收集到缓冲区，每帧只写一次到 xterm
-  let pendingText = ''
-  let flushTimer: number | null = null
-
-  function appendBatch(text: string) {
-    pendingText += text
-    if (pendingText.length > MAX_PENDING) {
-      pendingText = pendingText.slice(-MAX_PENDING)
-    }
-    if (!flushTimer) {
-      flushTimer = requestAnimationFrame(flush)
-    }
-  }
-
-  function flush() {
-    if (!pendingText) {
-      flushTimer = null
-      return
-    }
-
-    const text = pendingText
-    pendingText = ''
-    flushTimer = null
-
-    const waiting = text.includes('__BINGO_WAITING_INPUT__')
-    const cleaned = text.replace('__BINGO_WAITING_INPUT__', '')
-
-    // 超过 8KB 只保留最新部分，避免 xterm 渲染阻塞 UI
-    const maxLen = 8192
-    const trimmed = cleaned.length > maxLen ? cleaned.slice(-maxLen) : cleaned
-
-    const parts = trimmed.split('\n')
-    let lastNonEmptyIdx = -1
-    for (let i = parts.length - 1; i >= 0; i--) {
-      if (parts[i].length > 0) { lastNonEmptyIdx = i; break }
-    }
-    for (let i = 0; i < parts.length; i++) {
-      const part = parts[i]
-      const stripped = part.trim()
-      if (stripped.startsWith('{"type":') && stripped.endsWith('}')) {
-        continue
-      }
-      if (i === lastNonEmptyIdx) {
-        writeRaw(part)
-      } else if (i < parts.length - 1) {
-        appendLine(part)
-      } else if (part) {
-        writeRaw(part)
-      }
-    }
-
-    if (waiting) {
-      waitingForInput.value = true
-    }
-  }
-
+  // 游戏模式的高频 stdout（JSON 指令 + 普通输出混合）
+  // 使用 RAF 缓冲避免高频写入卡死
   function handleStdout(data: string) {
-    appendBatch(data)
+    pendingWrite += data
+    // 缓冲上限 64KB
+    if (pendingWrite.length > 65536) {
+      pendingWrite = pendingWrite.slice(-65536)
+    }
+    scheduleWrite()
+  }
+
+  // 代码模式：也使用 RAF 缓冲，但保证实时性
+  // input() prompt 的延迟仅 16ms，用户无感知
+  // 高频输出时限流丢弃旧行，防止 xterm 卡死
+  function handleCodeStdout(data: string) {
+    pendingWrite += data
+    if (pendingWrite.length > 65536) {
+      pendingWrite = pendingWrite.slice(-65536)
+    }
+    scheduleWrite()
   }
 
   function handleStderr(data: string) {
-    appendBatch(`\x1b[31m❌ ${data}\x1b[0m`)
+    // 错误信息用红色显示
+    writeImmediate(`\x1b[31m${data}\x1b[0m`)
   }
 
   function consumeInput() {
@@ -126,28 +151,36 @@ export const useTerminalStore = defineStore('terminal', () => {
   }
 
   function flushNow() {
-    if (flushTimer) {
-      clearTimeout(flushTimer)
-      flushTimer = null
+    if (writeRaf !== null) {
+      cancelAnimationFrame(writeRaf)
+      writeRaf = null
     }
-    if (pendingText) {
-      flush()
+    if (pendingWrite) {
+      doWrite()
     }
   }
 
   function clear() {
     earlyBuffer.length = 0
+    pendingWrite = ''
+    if (writeRaf !== null) {
+      cancelAnimationFrame(writeRaf)
+      writeRaf = null
+    }
     if (terminalInstance) {
-      terminalInstance.clear()
+      // reset() 完全重置终端（清空 scrollback + viewport），
+      // clear() 只清空 viewport 不清 scrollback，会导致残留内容
+      terminalInstance.reset()
     }
     lines.value = []
   }
 
   function destroy() {
-    if (flushTimer) {
-      clearTimeout(flushTimer)
-      flushTimer = null
+    if (writeRaf !== null) {
+      cancelAnimationFrame(writeRaf)
+      writeRaf = null
     }
+    pendingWrite = ''
     terminalInstance = null
   }
 
@@ -160,8 +193,9 @@ export const useTerminalStore = defineStore('terminal', () => {
     bindTerminal,
     appendLine,
     writeRaw,
-    appendBatch,
+    writeImmediate,
     handleStdout,
+    handleCodeStdout,
     handleStderr,
     flushNow,
     consumeInput,

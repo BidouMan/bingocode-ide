@@ -15,6 +15,9 @@ _Hard constraints from user that every session must respect._
 - Target audience is elementary school students — API must be extremely simple
 - **Never reinvent the wheel** — always check official docs or peer implementations before coding custom solutions [ses_0fca6436bffeFjyYRHjEP7Aa14]
 - **Research before implementing** — do not guess at APIs; when a fix fails, research the correct documentation before retrying [ses_0f76eaddaffe8JtDDqJfrCUqkd]
+- **控制台输出必须干净简单** — 控制台只显示程序实际输出（print/input prompt），绝不显示 Python 命令行、文件路径、启动参数等技术信息。目标用户是小学生，不能有乱七八糟的东西。[ses_09c5077a4ffeTQJrYwAtE7TXje]
+- **调试必须追踪代码根因** — 不要猜测，必须通过代码追踪确认根因后再修复。修复后在 dev 模式验证，不依赖打包测试。[ses_09c5077a4ffeTQJrYwAtE7TXje]
+- **代码模式运行 Python 必须用 `run_script_file`** — 不要通过 shell PTY 运行 Python 代码。`run_script_file`（engine.rs）以子进程方式运行 Python，使用 piped stdin/stdout/stderr，完全避免 PTY 回映问题。[ses_09c5077a4ffeTQJrYwAtE7TXje]
 
 ## Architecture decisions
 _Major design choices with rationale._
@@ -28,6 +31,19 @@ _Major design choices with rationale._
 - **Code mode fully isolated**: Code mode (`isGameMode=false`) has its own menu (新建/打开/保存/运行) and only operates on code tabs. Never modifies game-mode state or vice versa.
 - **Two execution modes in game mode**: (1) Default Python — run .py files directly, output to terminal panel. (2) Game engine mode — run via bingo_engine.py with PixiJS rendering. Default Python comes first as the simpler path. [ses_0f3269dafffe7c1hmFD6MKVa6w]
 - **Python bundled with app**: Must include a bundled Python binary (python-build-standalone recommended) so end users never need to install Python separately. `resolve_engine_env` fallback: bundled python → venv python → system python. [ses_0f3269dafffe7c1hmFD6MKVa6w]
+
+## Discovered durable knowledge (terminal/console)
+
+- **终端双通道架构**: 游戏模式用 `engine.rs` 子进程（独立 stdin/stdout 管道），代码模式用 `shell.rs` PTY。两个完全独立的 I/O 通道。`TerminalPanel.vue:207-213` 的 `onData` 只路由到 shell，从不路由到 engine — 游戏模式 `input()` 根本不工作。`terminalMode` 始终为 `'shell'`（L160 硬编码）。[ses_09c5077a4ffeTQJrYwAtE7TXje]
+- **PTY 回显机制**: `portable_pty` 的 PTY 行规约默认启用字符回显。`TERM=dumb` 和 `PS1=""` 只影响 shell 提示符，不抑制 PTY 内置字符回显。抑制回显需要 `stty -echo`。[ses_09c5077a4ffeTQJrYwAtE7TXje]
+- **PTY 抑制回显修复模式**: 代码模式运行 Python 脚本时，在 shell runner 中发送 `stty -echo` 抑制命令回显，脚本结束后（runEndTimer 或 shell 退出）恢复 `stty echo`。用 `shellEchoDisabled` 布尔变量跟踪状态防止重复恢复。[ses_09c5077a4ffeTQJrYwAtE7TXje]
+- **`2>/dev/null` 抑制所有 stderr**: `useEngine.ts:437` 的 `2>/dev/null` 隐藏 Python 所有错误和 traceback，代码模式下完全看不到错误。[ses_09c5077a4ffeTQJrYwAtE7TXje]
+- **PTY 抑制回映方案已证实不可行**（2次打包测试均失败）: PTY 行规约回映是内核级机制，输入字符在 shell 处理前就被 PTY 回映。`stty -echo` 作为 shell 命令有无法消除的延迟，期间发送的字符仍会被回映。且恢复回映的 `stty echo` 命令会与用户输入混淆。不能使用 PTY + stty 方案抑制命令回映。[ses_09c5077a4ffeTQJrYwAtE7TXje]
+- **`run_script_file`（v0.3.0 添加）**：`engine.rs:188-305` 包含 `run_script_file` 函数，以子进程方式运行任意 Python 脚本，使用 piped stdin/stdout/stderr。这是代码模式运行 Python 的正确路径，不走 PTY，无回映问题。已在 `lib.rs:1003` 注册为 Tauri 命令。[ses_09c5077a4ffeTQJrYwAtE7TXje]
+- **`input()` 提示无换行使 `read_line()` 阻塞**：`input('提示：')` 输出提示后无换行。Rust `BufReader::read_line()` 等待换行符，导致提示被缓存到用户输入后的 `print()` 输出换行才显示。`run_script_file` 的 stdout 读取必须用 `Read::read()` 替代 `read_line()`。[ses_09c5077a4ffeTQJrYwAtE7TXje]
+- **`send_stdin` 的自动 `\n` 不适合代码模式**：`engine.rs` 的 `send_stdin` 追加 `\n`（游戏模式 `K_DOWN:up\n`）。代码模式逐字符输入需要 `send_stdin_data`（不追加 `\n`），前端 `onData` 将 `\r`（Enter 键）转为 `\n`。[ses_09c5077a4ffeTQJrYwAtE7TXje]
+- **`editorStore.isRunning` 不适合做输入路由条件**：shell 的 `runEndTimer`、引擎事件、用户操作都可能导致此变量提前变为 `false`。应使用独立的 `terminalMode` 标志（`'shell'`/`'python'`）控制 xterm.js `onData` 的输入路由方向。[ses_09c5077a4ffeTQJrYwAtE7TXje]
+- **代码模式子进程必须禁用 shell 的 `runEndTimer`**：当 `terminalMode === 'python'` 时，shell stdout 回调必须跳过 `runEndTimer`（1 秒无输出判定脚本结束），否则会提前误判脚本结束 → `editorStore.setRunning(false)` → `[运行完毕]` 提前显示 → 用户输入跑到 shell。[ses_09c5077a4ffeTQJrYwAtE7TXje]
 
 ## compose-preferences
 
