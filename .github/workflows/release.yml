@@ -12,7 +12,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        # 本次只构建 Windows，测试通过后改回 [macos-latest, windows-latest]
+        os: [windows-latest]
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60

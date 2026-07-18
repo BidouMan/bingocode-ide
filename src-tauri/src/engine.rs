@@ -43,16 +43,22 @@ pub fn run_script(
         engine_dir, working_dir, target_arg
     );
 
-    let mut child = Command::new(&python_path)
-        .arg("-u")
+    let mut cmd = Command::new(&python_path);
+    cmd.arg("-u")
         .arg("-c")
         .arg(&start_cmd)
         .current_dir(&working_dir)
         .env("PYTHONPATH", &engine_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .stdin(Stdio::piped())
-        .spawn()
+        .stdin(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = cmd.spawn()
         .map_err(|e| format!("Failed to spawn Python process: {}", e))?;
 
     let pid = child.id();
@@ -127,10 +133,13 @@ pub fn run_script(
         }
         #[cfg(windows)]
         {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
             let pid_str = pid.to_string();
             loop {
                 let alive = std::process::Command::new("tasklist")
                     .args(["/FI", &format!("PID eq {}", pid_str), "/NH"])
+                    .creation_flags(CREATE_NO_WINDOW)
                     .output()
                     .ok()
                     .and_then(|o| {
@@ -173,8 +182,11 @@ fn stop_script_process(process: &mut Option<RunningProcess>) -> Result<(), Strin
 
         #[cfg(windows)]
         {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
             let _ = Command::new("taskkill")
                 .args(["/F", "/T", "/PID", &pid.to_string()])
+                .creation_flags(CREATE_NO_WINDOW)
                 .output();
         }
 
@@ -234,14 +246,20 @@ pub fn run_script_file(
         stop_script_process(&mut process_guard)?;
     }
 
-    let mut child = Command::new(&python_path)
-        .arg("-u")
+    let mut cmd = Command::new(&python_path);
+    cmd.arg("-u")
         .arg(&script_path)
         .current_dir(&working_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .stdin(Stdio::piped())
-        .spawn()
+        .stdin(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = cmd.spawn()
         .map_err(|e| format!("Failed to spawn Python process: {}", e))?;
 
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
@@ -305,10 +323,13 @@ pub fn run_script_file(
         }
         #[cfg(windows)]
         {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
             let pid_str = pid.to_string();
             loop {
                 let alive = std::process::Command::new("tasklist")
                     .args(["/FI", &format!("PID eq {}", pid_str), "/NH"])
+                    .creation_flags(CREATE_NO_WINDOW)
                     .output()
                     .ok()
                     .and_then(|o| {
