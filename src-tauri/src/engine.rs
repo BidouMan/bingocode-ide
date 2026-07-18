@@ -137,18 +137,17 @@ pub fn run_script(
             const CREATE_NO_WINDOW: u32 = 0x08000000;
             let pid_str = pid.to_string();
             loop {
+                // 检查进程是否存活：执行 tasklist 后检查输出中是否包含 PID
+                // 不依赖 "No tasks" 等文字，兼容所有语言的 Windows
                 let alive = std::process::Command::new("tasklist")
-                    .args(["/FI", &format!("PID eq {}", pid_str), "/NH"])
+                    .args(["/FI", &format!("PID eq {}", pid_str)])
                     .creation_flags(CREATE_NO_WINDOW)
                     .output()
                     .ok()
-                    .and_then(|o| {
+                    .map(|o| {
                         let s = String::from_utf8_lossy(&o.stdout);
-                        if s.contains("No tasks") || s.contains("ERROR") {
-                            Some(false)
-                        } else {
-                            Some(true)
-                        }
+                        // 输出中包含 PID → 进程还活着；不包含 → 已退出
+                        s.contains(&*pid_str)
                     })
                     .unwrap_or(false);
                 if !alive {
@@ -327,18 +326,17 @@ pub fn run_script_file(
             const CREATE_NO_WINDOW: u32 = 0x08000000;
             let pid_str = pid.to_string();
             loop {
+                // 检查进程是否存活：执行 tasklist 后检查输出中是否包含 PID
+                // 不依赖 "No tasks" 等文字，兼容所有语言的 Windows
                 let alive = std::process::Command::new("tasklist")
-                    .args(["/FI", &format!("PID eq {}", pid_str), "/NH"])
+                    .args(["/FI", &format!("PID eq {}", pid_str)])
                     .creation_flags(CREATE_NO_WINDOW)
                     .output()
                     .ok()
-                    .and_then(|o| {
+                    .map(|o| {
                         let s = String::from_utf8_lossy(&o.stdout);
-                        if s.contains("No tasks") || s.contains("ERROR") {
-                            Some(false)
-                        } else {
-                            Some(true)
-                        }
+                        // 输出中包含 PID → 进程还活着；不包含 → 已退出
+                        s.contains(&*pid_str)
                     })
                     .unwrap_or(false);
                 if !alive {

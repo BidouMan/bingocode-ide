@@ -7,6 +7,19 @@ use tauri::Manager;
 mod engine;
 mod shell;
 
+/// 创建 Command 时自动添加 CREATE_NO_WINDOW 标志（Windows）
+/// 防止任何子进程弹出系统终端窗口
+fn hidden_command(program: &str) -> Command {
+    let mut cmd = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 pub struct EngineState {
     pub process: Mutex<Option<engine::RunningProcess>>,
 }
@@ -444,7 +457,7 @@ fn find_system_python() -> Result<String, String> {
     };
 
     for name in names {
-        if let Ok(output) = Command::new(name)
+        if let Ok(output) = hidden_command(name)
             .arg("--version")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -452,9 +465,9 @@ fn find_system_python() -> Result<String, String> {
         {
             if output.status.success() {
                 let path_output = if cfg!(target_os = "windows") {
-                    Command::new("where").arg(name).output()
+                    hidden_command("where").arg(name).output()
                 } else {
-                    Command::new("which").arg(name).output()
+                    hidden_command("which").arg(name).output()
                 };
 
                 if let Ok(out) = path_output {
@@ -502,7 +515,7 @@ fn ensure_engine_setup(engine_dir: String) -> Result<String, String> {
     let system_python = find_system_python()?;
 
     // 创建 venv
-    let output = Command::new(&system_python)
+    let output = hidden_command(&system_python)
         .args(["-m", "venv", venv_dir.to_str().unwrap_or("")])
         .output()
         .map_err(|e| format!("创建 venv 失败: {}", e))?;
@@ -521,7 +534,7 @@ fn ensure_engine_setup(engine_dir: String) -> Result<String, String> {
     let requirements = engine_path.join("requirements.txt");
 
     if requirements.exists() {
-        let output = Command::new(&pip)
+        let output = hidden_command(&pip)
             .args(["install", "-r", requirements.to_str().unwrap_or("")])
             .output()
             .map_err(|e| format!("安装依赖失败: {}", e))?;
@@ -774,7 +787,7 @@ fn run_script_output(
     python_path: String,
     script_path: String,
 ) -> Result<String, String> {
-    let output = Command::new(&python_path)
+    let output = hidden_command(&python_path)
         .arg("-u")
         .arg(&script_path)
         .current_dir(&working_dir)
@@ -803,14 +816,14 @@ pub struct PipPackage {
 #[tauri::command]
 fn pip_list_installed(app: tauri::AppHandle) -> Result<Vec<PipPackage>, String> {
     let python_path = find_venv_python(&app)?;
-    let output = Command::new(&python_path)
+    let output = hidden_command(&python_path)
         .args(["-m", "pip", "list", "--format=json", "--not-required"])
         .output()
         .map_err(|e| format!("执行 pip list 失败: {}", e))?;
 
     if !output.status.success() {
         // --not-required 可能在旧版 pip 不支持，回退到不带该参数
-        let output2 = Command::new(&python_path)
+        let output2 = hidden_command(&python_path)
             .args(["-m", "pip", "list", "--format=json"])
             .output()
             .map_err(|e| format!("执行 pip list 失败: {}", e))?;
@@ -826,7 +839,7 @@ fn pip_list_installed(app: tauri::AppHandle) -> Result<Vec<PipPackage>, String> 
 #[tauri::command]
 fn pip_list_all(app: tauri::AppHandle) -> Result<Vec<PipPackage>, String> {
     let python_path = find_venv_python(&app)?;
-    let output = Command::new(&python_path)
+    let output = hidden_command(&python_path)
         .args(["-m", "pip", "list", "--format=json"])
         .output()
         .map_err(|e| format!("执行 pip list 失败: {}", e))?;
@@ -866,7 +879,7 @@ fn pip_install_package(
         None => package,
     };
 
-    let output = Command::new(&python_path)
+    let output = hidden_command(&python_path)
         .args([
             "-m", "pip", "install",
             &spec,
@@ -893,7 +906,7 @@ fn pip_uninstall_package(
     package: String,
 ) -> Result<String, String> {
     let python_path = find_venv_python(&app)?;
-    let output = Command::new(&python_path)
+    let output = hidden_command(&python_path)
         .args(["-m", "pip", "uninstall", &package, "-y"])
         .output()
         .map_err(|e| format!("执行 pip uninstall 失败: {}", e))?;
@@ -914,7 +927,7 @@ fn pip_get_versions(
 ) -> Result<Vec<String>, String> {
     // 使用 PyPI JSON API 查询可用版本
     let url = format!("https://pypi.org/pypi/{}/json", package);
-    let output = Command::new("curl")
+    let output = hidden_command("curl")
         .args(["-s", "--max-time", "10", &url])
         .output()
         .map_err(|e| format!("查询版本失败: {}", e))?;
@@ -959,7 +972,7 @@ pub struct OutdatedPackage {
 #[tauri::command]
 fn pip_check_outdated(app: tauri::AppHandle) -> Result<Vec<OutdatedPackage>, String> {
     let python_path = find_venv_python(&app)?;
-    let output = Command::new(&python_path)
+    let output = hidden_command(&python_path)
         .args(["-m", "pip", "list", "--outdated", "--format=json"])
         .output()
         .map_err(|e| format!("检查更新失败: {}", e))?;
@@ -994,7 +1007,7 @@ fn pip_upgrade_package(
     mirror: String,
 ) -> Result<String, String> {
     let python_path = find_venv_python(&app)?;
-    let output = Command::new(&python_path)
+    let output = hidden_command(&python_path)
         .args([
             "-m", "pip", "install", "--upgrade", &package,
             "-i", &mirror,
