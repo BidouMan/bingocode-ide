@@ -383,18 +383,31 @@ async function handleDropInto(sourcePath: string, targetDir: string) {
         <span
           v-if="hasWorkspace && fileExplorerStore.recentFolders.length > 0"
           class="fe-recent-arrow"
-          :class="{ 'fe-recent-arrow-open': showRecent }"
-        >▾</span>
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline v-if="showRecent" points="6,9 12,15 18,9" />
+            <polyline v-else points="6,15 12,9 18,15" />
+          </svg>
+        </span>
       </div>
       <div class="fe-actions" v-if="hasWorkspace">
-        <button class="fe-action-btn" v-tooltip="'添加本地文件'" @click.stop="addLocalFile(fileExplorerStore.workspaceFolder)">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 5.5C2 4.67 2.67 4 3.5 4h2.59l1.7 1.5h4.71c.83 0 1.5.67 1.5 1.5V11c0 .83-.67 1.5-1.5 1.5h-9C2.67 12.5 2 11.83 2 11V5.5z" stroke="currentColor" stroke-width="1.1" fill="none"/><path d="M5 9h6M8 7v4" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
-        </button>
         <button class="fe-action-btn" v-tooltip="'新建文件'" @click.stop="startCreate('file', fileExplorerStore.workspaceFolder)">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         </button>
         <button class="fe-action-btn" v-tooltip="'新建文件夹'" @click.stop="startCreate('folder', fileExplorerStore.workspaceFolder)">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4.5C2 3.67 2.67 3 3.5 3h3l1.5 1.5h4.5c.83 0 1.5.67 1.5 1.5V12c0 .83-.67 1.5-1.5 1.5h-9C2.67 13.5 2 12.83 2 12V4.5z" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M8 7.5v3M6.5 9h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+        </button>
+        <button class="fe-action-btn" v-tooltip="'添加文件'" @click.stop="addLocalFile(fileExplorerStore.workspaceFolder)">
+          <svg width="14" height="14" viewBox="0 0 300 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <g transform="translate(150,150)">
+              <g transform="translate(-150,-150)">
+                <g transform="scale(0.292969)">
+                  <path d="M731.429,341.333L804.571,341.333C844.696,341.333 877.714,374.351 877.714,414.476L877.714,828.952C877.714,869.077 844.696,902.095 804.571,902.095L219.429,902.095C179.304,902.095 146.286,869.077 146.286,828.952L146.286,414.476C146.286,374.351 179.304,341.333 219.429,341.333L292.571,341.333L292.571,414.476L219.429,414.476L219.429,828.952L804.571,828.952L804.571,414.476L731.429,414.476L731.429,341.333Z" fill="currentColor"/>
+                  <path d="M518.461,93.672L690.834,266.045L639.147,317.781L554.545,233.204L554.545,581.51L481.402,581.51L481.402,234.228L397.775,317.806L346.063,266.094L518.437,93.696L518.461,93.672Z" fill="currentColor"/>
+                </g>
+              </g>
+            </g>
+          </svg>
         </button>
         <button class="fe-action-btn" v-tooltip="'刷新'" @click.stop="fileExplorerStore.refresh()">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M13 8a5 5 0 1 1-1.46-3.54M13 3v3h-3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
@@ -546,12 +559,11 @@ async function handleDropInto(sourcePath: string, targetDir: string) {
   font-weight: 500;
 }
 .fe-recent-arrow {
-  font-size: 10px;
+  display: flex;
+  align-items: center;
   color: var(--text-muted);
-  transition: transform 0.15s;
   flex-shrink: 0;
 }
-.fe-recent-arrow-open { transform: rotate(180deg); }
 .fe-actions {
   display: flex;
   align-items: center;

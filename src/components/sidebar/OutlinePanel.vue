@@ -287,7 +287,7 @@ function isRenaming(item: OutlineItem): boolean {
 .outline-rename-input {
   flex: 1;
   min-width: 40px;
-  height: 18px;
+  height: 22px;
   background: var(--bg-base);
   border: 1px solid var(--accent);
   border-radius: 2px;

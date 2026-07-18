@@ -91,6 +91,8 @@ const aiChatVisible = ref(false)
 const pluginManagerVisible = ref(false)
 const ideExplorerVisible = ref(true)
 const ideActivePanel = ref<'files' | 'search' | 'outline' | 'snippets' | 'learn'>('files')
+const sidePanelWidth = ref(240)
+const isResizingSidePanel = ref(false)
 
 // 角色缩略图缓存
 const spriteThumbnails = ref<Record<string, string>>({})
@@ -237,6 +239,33 @@ function toggleSettingsMenu() {
 function closeSettingsMenu() {
   settingsMenuVisible.value = false
   settingsSubmenu.value = null
+}
+
+// 侧边栏拖拽调整宽度
+function startResizeSidePanel(e: MouseEvent) {
+  e.preventDefault()
+  isResizingSidePanel.value = true
+  const startX = e.clientX
+  const startWidth = sidePanelWidth.value
+  const minW = 180
+  const maxW = 480
+
+  function onMove(ev: MouseEvent) {
+    const delta = ev.clientX - startX
+    const newWidth = Math.min(maxW, Math.max(minW, startWidth + delta))
+    sidePanelWidth.value = newWidth
+  }
+  function onUp() {
+    isResizingSidePanel.value = false
+    document.removeEventListener('mousemove', onMove)
+    document.removeEventListener('mouseup', onUp)
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+  }
+  document.addEventListener('mousemove', onMove)
+  document.addEventListener('mouseup', onUp)
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
 }
 
 function onHelpClick(e: MouseEvent) {
@@ -1873,12 +1902,18 @@ function spriteDisplayName(name: string) {
           </div>
 
           <!-- Side Panel (根据 activePanel 切换内容) -->
-          <aside class="ide-side-panel" v-show="ideExplorerVisible">
+          <aside class="ide-side-panel" v-show="ideExplorerVisible" :style="{ width: sidePanelWidth + 'px' }">
             <FileExplorer v-if="ideActivePanel === 'files'" />
             <SearchPanel v-else-if="ideActivePanel === 'search'" />
             <OutlinePanel v-else-if="ideActivePanel === 'outline'" />
             <SnippetPanel v-else-if="ideActivePanel === 'snippets'" />
             <LearnPanel v-else-if="ideActivePanel === 'learn'" />
+            <!-- 拖拽手柄 -->
+            <div
+              class="ide-side-resize-handle"
+              :class="{ 'ide-side-resize-active': isResizingSidePanel }"
+              @mousedown="startResizeSidePanel"
+            ></div>
           </aside>
 
           <!-- 右侧编辑器区域 -->
@@ -2335,11 +2370,36 @@ function spriteDisplayName(name: string) {
 
 /* Side Panel (内容面板) */
 .ide-side-panel {
-  width: 240px;
   flex-shrink: 0;
   border-right: 1px solid var(--border);
   background: var(--bg-root);
   overflow: hidden;
+  position: relative;
+}
+
+/* 侧边栏拖拽手柄 */
+.ide-side-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 7px;
+  cursor: col-resize;
+  z-index: 10;
+}
+.ide-side-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background 0.1s ease;
+}
+.ide-side-resize-handle:hover::after,
+.ide-side-resize-active::after {
+  background: var(--accent);
 }
 
 /* IDE 编辑器区域 */
