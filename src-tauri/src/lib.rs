@@ -9,7 +9,8 @@ mod shell;
 
 /// 创建 Command 时自动添加 CREATE_NO_WINDOW 标志（Windows）
 /// 防止任何子进程弹出系统终端窗口
-fn hidden_command(program: &str) -> Command {
+#[allow(unused_mut)]
+fn hidden_command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
     let mut cmd = Command::new(program);
     #[cfg(windows)]
     {
