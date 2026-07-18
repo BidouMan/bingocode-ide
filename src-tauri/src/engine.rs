@@ -1,12 +1,13 @@
 use std::io::Write;
-use std::process::{Child, Command, Stdio};
+use std::process::{ChildStdin, Command, Stdio};
 use tauri::{AppHandle, Emitter};
 use serde::Serialize;
 
 use crate::EngineState;
 
 pub struct RunningProcess {
-    pub child: Child,
+    pub stdin: Option<ChildStdin>,
+    pub pid: u32,
 }
 
 /// 带会话 ID 的事件载荷，用于前端精确过滤新旧进程事件
@@ -63,10 +64,11 @@ pub fn run_script(
         .map_err(|e| format!("Failed to spawn Python process: {}", e))?;
 
     let pid = child.id();
-
+    let stdin = child.stdin.take();
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
     let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
 
+    // stdout 读取线程
     let app_stdout = app.clone();
     let rid = run_id;
     std::thread::spawn(move || {
@@ -88,6 +90,7 @@ pub fn run_script(
         let _ = app_stdout.emit_to("main", "engine:stdout:end", SessionEnd { run_id: rid });
     });
 
+    // stderr 读取线程
     let app_stderr = app.clone();
     let rid = run_id;
     std::thread::spawn(move || {
@@ -108,41 +111,15 @@ pub fn run_script(
         }
     });
 
-    *process_guard = Some(RunningProcess { child });
+    // 保存 stdin 和 pid 供 send_stdin/stop_script 使用
+    *process_guard = Some(RunningProcess { stdin, pid });
     drop(process_guard);
 
+    // 进程等待线程：直接用 child.wait()，不再轮询 tasklist
     let app_finish = app.clone();
     let rid = run_id;
     std::thread::spawn(move || {
-        #[cfg(unix)]
-        unsafe {
-            libc::waitpid(pid as i32, std::ptr::null_mut(), 0);
-        }
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            let pid_str = pid.to_string();
-            loop {
-                // 检查进程是否存活：执行 tasklist 后检查输出中是否包含 PID
-                // 不依赖 "No tasks" 等文字，兼容所有语言的 Windows
-                let alive = std::process::Command::new("tasklist")
-                    .args(["/FI", &format!("PID eq {}", pid_str)])
-                    .creation_flags(CREATE_NO_WINDOW)
-                    .output()
-                    .ok()
-                    .map(|o| {
-                        let s = String::from_utf8_lossy(&o.stdout);
-                        // 输出中包含 PID → 进程还活着；不包含 → 已退出
-                        s.contains(&*pid_str)
-                    })
-                    .unwrap_or(false);
-                if !alive {
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(200));
-            }
-        }
+        let _ = child.wait();  // 阻塞直到进程退出，跨平台通用
         let _ = app_finish.emit_to("main", "engine:finished", SessionEnd { run_id: rid });
     });
 
@@ -158,8 +135,8 @@ pub fn stop_script(
 }
 
 fn stop_script_process(process: &mut Option<RunningProcess>) -> Result<(), String> {
-    if let Some(mut proc) = process.take() {
-        let pid = proc.child.id();
+    if let Some(proc) = process.take() {
+        let pid = proc.pid;
 
         #[cfg(unix)]
         unsafe {
@@ -175,8 +152,6 @@ fn stop_script_process(process: &mut Option<RunningProcess>) -> Result<(), Strin
                 .creation_flags(CREATE_NO_WINDOW)
                 .output();
         }
-
-        let _ = proc.child.wait();
     }
     Ok(())
 }
@@ -189,7 +164,7 @@ pub fn send_stdin(
     let mut process_guard = state.process.lock().map_err(|e| e.to_string())?;
 
     if let Some(proc) = process_guard.as_mut() {
-        if let Some(ref mut stdin) = proc.child.stdin {
+        if let Some(ref mut stdin) = proc.stdin {
             let _ = stdin.write_all(format!("{}\n", data).as_bytes());
             let _ = stdin.flush();
         }
@@ -207,7 +182,7 @@ pub fn send_stdin_data(
     let mut process_guard = state.process.lock().map_err(|e| e.to_string())?;
 
     if let Some(proc) = process_guard.as_mut() {
-        if let Some(ref mut stdin) = proc.child.stdin {
+        if let Some(ref mut stdin) = proc.stdin {
             let _ = stdin.write_all(data.as_bytes());
             let _ = stdin.flush();
         }
@@ -249,19 +224,18 @@ pub fn run_script_file(
     let mut child = cmd.spawn()
         .map_err(|e| format!("Failed to spawn Python process: {}", e))?;
 
+    let pid = child.id();
+    let stdin = child.stdin.take();
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
     let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
-    let pid = child.id();
 
+    // stdout 读取线程
     let app_stdout = app.clone();
     let rid = run_id;
     std::thread::spawn(move || {
         use std::io::Read;
         let mut reader = stdout;
         let mut buf = [0u8; 4096];
-        // 代码模式：每次 read 返回数据后立即发送，不做节流
-        // input() 的 prompt 不带 \n，必须立即发送否则会被卡在 batch 中
-        // 高频输出的限流由前端 RAF 缓冲处理
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
@@ -277,6 +251,7 @@ pub fn run_script_file(
         let _ = app_stdout.emit_to("main", "engine:stdout:end", SessionEnd { run_id: rid });
     });
 
+    // stderr 读取线程
     let app_stderr = app.clone();
     let rid = run_id;
     std::thread::spawn(move || {
@@ -297,41 +272,15 @@ pub fn run_script_file(
         }
     });
 
-    *process_guard = Some(RunningProcess { child });
+    // 保存 stdin 和 pid 供 send_stdin/stop_script 使用
+    *process_guard = Some(RunningProcess { stdin, pid });
     drop(process_guard);
 
+    // 进程等待线程：直接用 child.wait()，不再轮询 tasklist
     let app_finish = app.clone();
     let rid = run_id;
     std::thread::spawn(move || {
-        #[cfg(unix)]
-        unsafe {
-            libc::waitpid(pid as i32, std::ptr::null_mut(), 0);
-        }
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            let pid_str = pid.to_string();
-            loop {
-                // 检查进程是否存活：执行 tasklist 后检查输出中是否包含 PID
-                // 不依赖 "No tasks" 等文字，兼容所有语言的 Windows
-                let alive = std::process::Command::new("tasklist")
-                    .args(["/FI", &format!("PID eq {}", pid_str)])
-                    .creation_flags(CREATE_NO_WINDOW)
-                    .output()
-                    .ok()
-                    .map(|o| {
-                        let s = String::from_utf8_lossy(&o.stdout);
-                        // 输出中包含 PID → 进程还活着；不包含 → 已退出
-                        s.contains(&*pid_str)
-                    })
-                    .unwrap_or(false);
-                if !alive {
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(200));
-            }
-        }
+        let _ = child.wait();  // 阻塞直到进程退出，跨平台通用
         let _ = app_finish.emit_to("main", "engine:finished", SessionEnd { run_id: rid });
     });
 
