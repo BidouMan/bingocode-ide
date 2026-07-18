@@ -1,4 +1,4 @@
-use std::io::{BufReader, Write};
+use std::io::Write;
 use std::process::{Child, Command, Stdio};
 use tauri::{AppHandle, Emitter};
 use serde::Serialize;
@@ -49,6 +49,7 @@ pub fn run_script(
         .arg(&start_cmd)
         .current_dir(&working_dir)
         .env("PYTHONPATH", &engine_dir)
+        .env("PYTHONIOENCODING", "utf-8")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::piped());
@@ -69,29 +70,16 @@ pub fn run_script(
     let app_stdout = app.clone();
     let rid = run_id;
     std::thread::spawn(move || {
-        use std::io::BufRead;
-        let mut reader = BufReader::new(stdout);
-        let mut line = String::new();
-        let mut batch = String::new();
-        let mut last_flush = std::time::Instant::now();
+        use std::io::Read;
+        let mut reader = stdout;
+        let mut buf = [0u8; 4096];
         loop {
-            line.clear();
-            match reader.read_line(&mut line) {
-                Ok(0) => {
-                    if !batch.is_empty() {
-                        let _ = app_stdout.emit_to("main", "engine:stdout", SessionEvent { run_id: rid, data: batch.clone() });
-                        batch.clear();
-                    }
-                    break;
-                }
-                Ok(_) => {
-                    batch.push_str(&line);
-                    if last_flush.elapsed() >= std::time::Duration::from_millis(16) {
-                        if !batch.is_empty() {
-                            let _ = app_stdout.emit_to("main", "engine:stdout", SessionEvent { run_id: rid, data: batch.clone() });
-                            batch.clear();
-                        }
-                        last_flush = std::time::Instant::now();
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let data = String::from_utf8_lossy(&buf[..n]).to_string();
+                    if !data.is_empty() {
+                        let _ = app_stdout.emit_to("main", "engine:stdout", SessionEvent { run_id: rid, data });
                     }
                 }
                 Err(_) => break,
@@ -103,17 +91,16 @@ pub fn run_script(
     let app_stderr = app.clone();
     let rid = run_id;
     std::thread::spawn(move || {
-        use std::io::BufRead;
-        let mut reader = BufReader::new(stderr);
-        let mut line = String::new();
+        use std::io::Read;
+        let mut reader = stderr;
+        let mut buf = [0u8; 4096];
         loop {
-            line.clear();
-            match reader.read_line(&mut line) {
+            match reader.read(&mut buf) {
                 Ok(0) => break,
-                Ok(_) => {
-                    let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
-                    if !trimmed.is_empty() {
-                        let _ = app_stderr.emit_to("main", "engine:stderr", SessionEvent { run_id: rid, data: line.clone() });
+                Ok(n) => {
+                    let data = String::from_utf8_lossy(&buf[..n]).to_string();
+                    if !data.is_empty() {
+                        let _ = app_stderr.emit_to("main", "engine:stderr", SessionEvent { run_id: rid, data });
                     }
                 }
                 Err(_) => break,
@@ -249,6 +236,7 @@ pub fn run_script_file(
     cmd.arg("-u")
         .arg(&script_path)
         .current_dir(&working_dir)
+        .env("PYTHONIOENCODING", "utf-8")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::piped());
@@ -292,17 +280,16 @@ pub fn run_script_file(
     let app_stderr = app.clone();
     let rid = run_id;
     std::thread::spawn(move || {
-        use std::io::BufRead;
-        let mut reader = BufReader::new(stderr);
-        let mut line = String::new();
+        use std::io::Read;
+        let mut reader = stderr;
+        let mut buf = [0u8; 4096];
         loop {
-            line.clear();
-            match reader.read_line(&mut line) {
+            match reader.read(&mut buf) {
                 Ok(0) => break,
-                Ok(_) => {
-                    let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
-                    if !trimmed.is_empty() {
-                        let _ = app_stderr.emit_to("main", "engine:stderr", SessionEvent { run_id: rid, data: line.clone() });
+                Ok(n) => {
+                    let data = String::from_utf8_lossy(&buf[..n]).to_string();
+                    if !data.is_empty() {
+                        let _ = app_stderr.emit_to("main", "engine:stderr", SessionEvent { run_id: rid, data });
                     }
                 }
                 Err(_) => break,

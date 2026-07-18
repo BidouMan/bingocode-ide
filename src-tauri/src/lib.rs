@@ -451,8 +451,10 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
 }
 
 fn find_system_python() -> Result<String, String> {
+    // Windows: 先尝试 py launcher，再尝试 python/python3
+    // macOS/Linux: 先尝试 python3，再尝试 python
     let names = if cfg!(target_os = "windows") {
-        vec!["python", "python3"]
+        vec!["py", "python", "python3"]
     } else {
         vec!["python3", "python"]
     };
@@ -475,6 +477,22 @@ fn find_system_python() -> Result<String, String> {
                     if out.status.success() {
                         let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
                         if !path.is_empty() {
+                            // py launcher 返回的是 launcher 路径，需要获取实际 Python 路径
+                            if name == "py" {
+                                if let Ok(ver_output) = hidden_command("py")
+                                    .args(["-3", "-c", "import sys; print(sys.executable)"])
+                                    .stdout(Stdio::piped())
+                                    .stderr(Stdio::piped())
+                                    .output()
+                                {
+                                    if ver_output.status.success() {
+                                        let real_path = String::from_utf8_lossy(&ver_output.stdout).trim().to_string();
+                                        if !real_path.is_empty() {
+                                            return Ok(real_path);
+                                        }
+                                    }
+                                }
+                            }
                             return Ok(path);
                         }
                     }
@@ -482,6 +500,24 @@ fn find_system_python() -> Result<String, String> {
             }
         }
     }
+
+    // Windows: 尝试常见安装路径
+    if cfg!(target_os = "windows") {
+        if let Ok(app_data) = std::env::var("LOCALAPPDATA") {
+            let candidates = [
+                format!("{}\\Programs\\Python\\Python312\\python.exe", app_data),
+                format!("{}\\Programs\\Python\\Python311\\python.exe", app_data),
+                format!("{}\\Programs\\Python\\Python310\\python.exe", app_data),
+                format!("{}\\Programs\\Python\\Python3\\python.exe", app_data),
+            ];
+            for path in &candidates {
+                if std::path::Path::new(path).exists() {
+                    return Ok(path.clone());
+                }
+            }
+        }
+    }
+
     Err("Python not found".to_string())
 }
 
