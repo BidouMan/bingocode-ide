@@ -351,85 +351,105 @@ fn cleanup_temp_script(project_dir: String) -> Result<(), String> {
 #[tauri::command]
 fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: Option<String>) -> Result<EngineEnv, String> {
     let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
-
     let win = cfg!(target_os = "windows");
-    let py_rel = if win { "portable-python/python.exe" } else { "portable-python/bin/python3" };
-    let venv_py_rel = if win { "venv/Scripts/python.exe" } else { "venv/bin/python3" };
+    let cwd = std::env::current_dir().unwrap_or_default();
 
-    // 构建所有候选路径：portable Python + venv Python
-    let mut py_candidates: Vec<std::path::PathBuf> = Vec::new();
-
-    // --- portable Python 候选 ---
-    // 1. resource_dir 直接包含（Tauri 打包：资源平铺）
-    py_candidates.push(resource_dir.join(&py_rel));
-    // 2. resource_dir/engine/（Tauri 打包：资源带 engine 前缀）
-    py_candidates.push(resource_dir.join("engine").join(&py_rel));
-    // 3. 从 resource_dir 往上最多 5 级查找 engine/portable-python/
-    {
-        let mut cur = resource_dir.as_path();
-        for _ in 0..5 {
-            if let Some(p) = cur.parent() {
-                cur = p;
-                py_candidates.push(cur.join("engine").join(&py_rel));
-            }
-        }
-    }
-    // 4. 当前工作目录
-    if let Ok(cwd) = std::env::current_dir() {
-        py_candidates.push(cwd.join("engine").join(&py_rel));
-    }
-
-    // --- venv Python 候选（开发环境）---
-    py_candidates.push(resource_dir.join("engine").join(&venv_py_rel));
-    py_candidates.push(resource_dir.join(&venv_py_rel));
-    if let Ok(cwd) = std::env::current_dir() {
-        py_candidates.push(cwd.join("engine").join(&venv_py_rel));
-    }
-
-    // 找到第一个存在的 Python
-    let python_path = py_candidates.iter()
-        .find(|p| p.exists())
-        .map(|p| p.to_string_lossy().to_string());
-
-    // engine_dir：包含 bingo_engine.py、models/、assets/ 的目录
-    let engine_dir = {
-        // 从 python_path 往上查找包含 bingo_engine.py 的目录
-        if let Some(ref py) = python_path {
-            let py_path = std::path::Path::new(py);
-            // 检查 python_path 自身所在目录的父级
-            let candidates_for_engine: Vec<&std::path::Path> = vec![
-                py_path.parent().and_then(|p| p.parent()).unwrap_or(&resource_dir), // portable-python/../ 或 venv/..
-                py_path.parent().unwrap_or(&resource_dir),
-                &resource_dir,
-            ];
-            let mut found = None;
-            for c in candidates_for_engine {
-                if c.join("bingo_engine.py").exists() || c.join("models").exists() || c.join("assets").exists() {
-                    found = Some(c.to_path_buf());
-                    break;
-                }
-            }
-            found.unwrap_or_else(|| resource_dir.clone())
-        } else if resource_dir.join("bingo_engine.py").exists() {
-            resource_dir.clone()
-        } else if let Ok(cwd) = std::env::current_dir() {
-            cwd.join("engine")
+    // 辅助函数：检查路径是否存在并返回可执行 Python 路径
+    fn find_py(base: &std::path::Path, rel: &str) -> Option<String> {
+        let p = base.join(rel);
+        if p.exists() {
+            Some(p.to_string_lossy().to_string())
         } else {
-            resource_dir.clone()
+            None
         }
+    }
+
+    // 辅助函数：从某个目录往上找 engine 目录（含 bingo_engine.py）
+    fn find_engine_dir(from: &std::path::Path) -> std::path::PathBuf {
+        let mut cur = from;
+        for _ in 0..6 {
+            if cur.join("bingo_engine.py").exists() || cur.join("models").exists() {
+                return cur.to_path_buf();
+            }
+            match cur.parent() {
+                Some(p) => cur = p,
+                None => break,
+            }
+        }
+        from.to_path_buf()
+    }
+
+    let py_name = if win { "portable-python/python.exe" } else { "portable-python/bin/python3" };
+    let venv_name = if win { "venv/Scripts/python.exe" } else { "venv/bin/python3" };
+
+    // ═══ 查找 Python ═══
+    // 按优先级逐个尝试，找到即停
+    let python_path = [
+        // 1. resource_dir 直接包含（打包：资源平铺到根）
+        find_py(&resource_dir, &py_name),
+        // 2. resource_dir/engine/（打包：资源带 engine 前缀）
+        find_py(&resource_dir, &format!("engine/{}", py_name)),
+        // 3. resource_dir 同级 engine/
+        find_py(&resource_dir, &format!("../engine/{}", py_name)),
+        // 4. 往上最多 4 级查找
+        (|| {
+            let mut cur = resource_dir.as_path();
+            for _ in 0..4 {
+                cur = cur.parent()?;
+                let p = cur.join("engine").join(&py_name);
+                if p.exists() { return Some(p.to_string_lossy().to_string()); }
+            }
+            None
+        })(),
+        // 5. cwd/engine/
+        find_py(&cwd, &format!("engine/{}", py_name)),
+        // 6. venv 回退（开发环境）
+        find_py(&resource_dir, &format!("engine/{}", venv_name)),
+        find_py(&resource_dir, &venv_name),
+        find_py(&cwd, &format!("engine/{}", venv_name)),
+    ].into_iter().flatten().next();
+
+    // ═══ 查找 engine_dir ═══
+    let engine_dir = if let Some(ref py) = python_path {
+        let py_path = std::path::Path::new(py);
+        // 从 python 所在目录往上找 engine 目录
+        let parent = py_path.parent().unwrap_or(&resource_dir);
+        // portable-python/ 的上级可能是 engine/；venv/ 的上级也可能是 engine/
+        let up = parent.parent().unwrap_or(parent);
+        if up.join("bingo_engine.py").exists() || up.join("models").exists() {
+            up.to_path_buf()
+        } else if parent.join("bingo_engine.py").exists() || parent.join("models").exists() {
+            parent.to_path_buf()
+        } else {
+            find_engine_dir(parent)
+        }
+    } else if resource_dir.join("bingo_engine.py").exists() {
+        resource_dir.clone()
+    } else {
+        find_engine_dir(&cwd)
     };
 
     let python_path = python_path.unwrap_or_default();
 
     if python_path.is_empty() {
-        return Err("Python not found. 请确保 portable-python 已正确打包。".to_string());
+        let checked = vec![
+            resource_dir.join(&py_name),
+            resource_dir.join(format!("engine/{}", py_name)),
+            cwd.join(format!("engine/{}", py_name)),
+        ];
+        let paths: Vec<String> = checked.iter().map(|p| format!("  {}", p.display())).collect();
+        return Err(format!(
+            "Python not found.\nresource_dir: {}\n已检查:\n{}",
+            resource_dir.display(),
+            paths.join("\n")
+        ));
     }
 
     let working_dir = project_root.clone().unwrap_or_else(|| {
         std::path::Path::new(&script_path)
             .parent()
             .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|| std::env::current_dir().unwrap().to_string_lossy().to_string())
+            .unwrap_or_else(|| cwd.to_string_lossy().to_string())
     });
 
     Ok(EngineEnv {

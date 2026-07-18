@@ -25,10 +25,18 @@ export function useShell() {
 
     unlisteners.push(() => { unlisten1() }, () => { unlisten2() })
 
-    const workingDir = projectStore.root || await invoke<string>('resolve_engine_env', {
-      scriptPath: '',
-      projectRoot: undefined,
-    }).then((env: any) => env.working_dir)
+    let workingDir = projectStore.root || ''
+    if (!workingDir) {
+      try {
+        const env = await invoke<{ working_dir: string }>('resolve_engine_env', {
+          scriptPath: '',
+          projectRoot: undefined,
+        })
+        workingDir = env.working_dir
+      } catch {
+        workingDir = ''
+      }
+    }
 
     await invoke('start_shell', { workingDir })
   }
