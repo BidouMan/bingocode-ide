@@ -126,15 +126,21 @@ export const useTerminalStore = defineStore('terminal', () => {
     scheduleWrite()
   }
 
-  // 代码模式：也使用 RAF 缓冲，但保证实时性
-  // input() prompt 的延迟仅 16ms，用户无感知
-  // 高频输出时限流丢弃旧行，防止 xterm 卡死
+  // 代码模式：直接写入，不做 RAF 缓冲，保证实时性
+  // input() 的 prompt 不带 \n，延迟会导致用户看到卡顿
   function handleCodeStdout(data: string) {
-    pendingWrite += data
-    if (pendingWrite.length > 65536) {
-      pendingWrite = pendingWrite.slice(-65536)
+    if (!terminalInstance) {
+      pendingWrite += data
+      if (pendingWrite.length > 65536) {
+        pendingWrite = pendingWrite.slice(-65536)
+      }
+      return
     }
-    scheduleWrite()
+    const filtered = filterEngineJson(data)
+    if (filtered) {
+      terminalInstance.write(filtered)
+      terminalInstance.scrollToBottom()
+    }
   }
 
   function handleStderr(data: string) {

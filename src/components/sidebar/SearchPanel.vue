@@ -160,9 +160,11 @@ function onKeydown(e: KeyboardEvent) {
   color: var(--text-secondary);
   font-weight: 500;
   padding: 10px 12px 6px;
+  background: rgba(0, 0, 0, 0.15);
 }
 .search-inputs {
   padding: 0 8px 6px;
+  background: rgba(0, 0, 0, 0.15);
 }
 .search-row {
   display: flex;

@@ -775,7 +775,7 @@ function renderMarkdown(text: string): string {
   flex: 1; min-height: 20px; max-height: 120px;
   background: transparent; border: none; outline: none;
   font-size: 13px; color: white;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif;
   resize: none; line-height: 1.5;
   padding: 0; margin: 0;
 }

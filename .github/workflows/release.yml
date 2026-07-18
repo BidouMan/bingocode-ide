@@ -24,12 +24,12 @@ jobs:
       fail-fast: false
       matrix:
         os: >-
-          ${{ 
+          ${{
             github.event_name == 'workflow_dispatch' && (
               github.event.inputs.platform == 'windows' && fromJSON('["windows-latest"]') ||
               github.event.inputs.platform == 'macos' && fromJSON('["macos-latest"]') ||
               fromJSON('["macos-latest", "windows-latest"]')
-            ) || fromJSON('["windows-latest"]')
+            ) || fromJSON('["macos-latest", "windows-latest"]')
           }}
 
     runs-on: ${{ matrix.os }}

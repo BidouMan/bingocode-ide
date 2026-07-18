@@ -27,15 +27,26 @@ const showRecent = ref(false)
 
 const folderName = computed(() => {
   if (!fileExplorerStore.workspaceFolder) return '未打开文件夹'
-  const parts = fileExplorerStore.workspaceFolder.split('/')
+  // 兼容 Windows 反斜杠和 Unix 正斜杠
+  const normalized = fileExplorerStore.workspaceFolder.replace(/\\/g, '/')
+  const parts = normalized.split('/')
   return parts[parts.length - 1] || fileExplorerStore.workspaceFolder
+})
+
+// 获取父级路径（显示为灰色小字）
+const folderParentPath = computed(() => {
+  if (!fileExplorerStore.workspaceFolder) return ''
+  const normalized = fileExplorerStore.workspaceFolder.replace(/\\/g, '/')
+  const parts = normalized.split('/')
+  parts.pop()
+  return parts.join('/') || ''
 })
 
 const hasWorkspace = computed(() => !!fileExplorerStore.workspaceFolder)
 
 // 内联 SVG 图标（黑白灰风格文件夹 + 绿色py徽章）
 const folderIconSvg = `<svg width="22" height="18" viewBox="0 0 16 16" fill="none"><path d="M1.5 4C1.5 3.17 2.17 2.5 3 2.5h3l1.5 1.5h5c.83 0 1.5.67 1.5 1.5V12c0 .83-.67 1.5-1.5 1.5h-9C2.67 13.5 1.5 12.83 1.5 12V4z" fill="rgba(160,160,170,0.2)"/><path d="M1.5 4C1.5 3.17 2.17 2.5 3 2.5h3l1.5 1.5h5c.83 0 1.5.67 1.5 1.5V12c0 .83-.67 1.5-1.5 1.5h-9C2.67 13.5 1.5 12.83 1.5 12V4z" stroke="rgba(160,160,170,0.5)" stroke-width="0.8"/></svg>`
-const pyIconSvg = `<span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:17px;border-radius:3px;background:rgba(91,251,132,0.2);color:rgba(91,251,132,0.9);font-size:8px;font-family:monospace;font-weight:700;letter-spacing:0.3px;">py</span>`
+const pyIconSvg = `<span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:18px;border-radius:3px;background:rgba(91,251,132,0.2);color:rgba(91,251,132,0.9);font-size:9px;font-family:monospace;font-weight:700;letter-spacing:0.3px;">py</span>`
 const emptyFolderIconSvg = `<svg width="48" height="48" viewBox="0 0 16 16" fill="none"><path d="M1.5 4C1.5 3.17 2.17 2.5 3 2.5h3l1.5 1.5h5c.83 0 1.5.67 1.5 1.5V12c0 .83-.67 1.5-1.5 1.5h-9C2.67 13.5 1.5 12.83 1.5 12V4z" fill="#3a3d44" stroke="rgba(160,160,170,0.3)" stroke-width="0.8"/></svg>`
 
 onMounted(() => {
@@ -379,7 +390,10 @@ async function handleDropInto(sourcePath: string, targetDir: string) {
     <div class="fe-header">
       <div class="fe-title-wrapper" @click="hasWorkspace && (showRecent = !showRecent)">
         <span class="fe-folder-icon" v-html="folderIconSvg"></span>
-        <span class="fe-title" :title="fileExplorerStore.workspaceFolder">{{ folderName }}</span>
+        <div class="fe-title-group">
+          <span class="fe-title" :title="fileExplorerStore.workspaceFolder">{{ folderName }}</span>
+          <span v-if="showRecent && folderParentPath" class="fe-title-path" :title="fileExplorerStore.workspaceFolder">{{ folderParentPath }}</span>
+        </div>
         <span
           v-if="hasWorkspace && fileExplorerStore.recentFolders.length > 0"
           class="fe-recent-arrow"
@@ -429,8 +443,10 @@ async function handleDropInto(sourcePath: string, targetDir: string) {
         @click="switchToRecent(folder)"
       >
         <span class="fe-recent-icon" v-html="folderIconSvg"></span>
-        <span class="fe-recent-name">{{ folder.split('/').pop() || folder }}</span>
-        <span class="fe-recent-path" :title="folder">{{ folder }}</span>
+        <div class="fe-recent-info">
+          <span class="fe-recent-name">{{ (folder.replace(/\\/g, '/').split('/').pop()) || folder }}</span>
+          <span class="fe-recent-path" :title="folder">{{ folder.replace(/\\/g, '/').split('/').slice(0, -1).join('/') }}</span>
+        </div>
         <button class="fe-recent-del" @click="removeRecent(folder, $event)" v-tooltip="'移除记录'">×</button>
       </div>
     </div>
@@ -531,8 +547,8 @@ async function handleDropInto(sourcePath: string, targetDir: string) {
   height: 32px;
   padding: 0 6px 0 10px;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
   gap: 4px;
+  background: rgba(0, 0, 0, 0.15);
 }
 .fe-title-wrapper {
   display: flex;
@@ -550,6 +566,12 @@ async function handleDropInto(sourcePath: string, targetDir: string) {
   align-items: center;
   flex-shrink: 0;
 }
+.fe-title-group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
 .fe-title {
   font-size: 12px;
   color: var(--text-secondary);
@@ -557,6 +579,15 @@ async function handleDropInto(sourcePath: string, targetDir: string) {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 500;
+  line-height: 1.2;
+}
+.fe-title-path {
+  font-size: 10px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.2;
 }
 .fe-recent-arrow {
   display: flex;
@@ -624,22 +655,27 @@ async function handleDropInto(sourcePath: string, targetDir: string) {
 }
 .fe-recent-item:hover { background: var(--bg-hover); }
 .fe-recent-icon { display: flex; flex-shrink: 0; }
+.fe-recent-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
 .fe-recent-name {
   font-size: 12px;
   color: var(--text);
-  flex-shrink: 0;
-  max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.2;
 }
 .fe-recent-path {
   font-size: 10px;
   color: var(--text-muted);
-  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.2;
 }
 .fe-recent-del {
   width: 18px;

@@ -109,11 +109,13 @@ import { ref } from 'vue'
   color: var(--text-secondary);
   font-weight: 500;
   padding: 10px 12px 2px;
+  background: rgba(0, 0, 0, 0.15);
 }
 .learn-hint {
   font-size: 10px;
   color: var(--text-muted);
   padding: 0 12px 8px;
+  background: rgba(0, 0, 0, 0.15);
 }
 .learn-list {
   flex: 1;

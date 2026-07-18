@@ -519,7 +519,7 @@ const filteredCategories = computed(() => {
   font-size: 10px; padding: 1px 6px;
   border-radius: 4px; margin-left: auto;
   white-space: nowrap; font-weight: 500;
-  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif;
 }
 
 /* ── 展开内容 ── */

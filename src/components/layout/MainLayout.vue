@@ -2087,7 +2087,7 @@ function spriteDisplayName(name: string) {
   overflow: hidden;
   background: var(--bg-root);
   color: white;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', Roboto, sans-serif;
 }
 
 /* ═══ 顶部菜单栏 ═══ */

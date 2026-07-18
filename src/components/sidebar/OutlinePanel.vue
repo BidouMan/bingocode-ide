@@ -204,6 +204,7 @@ function isRenaming(item: OutlineItem): boolean {
   color: var(--text-secondary);
   font-weight: 500;
   padding: 10px 12px 4px;
+  background: rgba(0, 0, 0, 0.15);
 }
 
 /* 筛选按钮 */
@@ -212,6 +213,7 @@ function isRenaming(item: OutlineItem): boolean {
   gap: 4px;
   padding: 4px 10px 8px;
   flex-wrap: wrap;
+  background: rgba(0, 0, 0, 0.15);
 }
 .filter-btn {
   padding: 2px 8px;

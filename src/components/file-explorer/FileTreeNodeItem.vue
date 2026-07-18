@@ -216,12 +216,12 @@ export default { name: 'FileTreeNodeItem' }
   width: 22px;
   height: 18px;
 }
-/* 徽章类图标（py/json/txt/img）：统一尺寸 */
+/* 徽章类图标（py/json/txt/img）：统一尺寸，低分辨率友好 */
 .fe-icon-badge {
-  width: 24px;
-  height: 17px;
+  width: 26px;
+  height: 18px;
   border-radius: 3px;
-  font-size: 8px;
+  font-size: 9px;
   font-family: monospace;
   font-weight: 700;
   letter-spacing: 0.3px;

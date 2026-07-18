@@ -352,64 +352,65 @@ fn cleanup_temp_script(project_dir: String) -> Result<(), String> {
 fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: Option<String>) -> Result<EngineEnv, String> {
     let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
 
-    // 查找 portable Python 的所有候选路径
-    // Tauri 打包时资源平铺到 resource_dir，开发时在项目根/engine/
     let win = cfg!(target_os = "windows");
     let py_rel = if win { "portable-python/python.exe" } else { "portable-python/bin/python3" };
+    let venv_py_rel = if win { "venv/Scripts/python.exe" } else { "venv/bin/python3" };
 
-    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    // 构建所有候选路径：portable Python + venv Python
+    let mut py_candidates: Vec<std::path::PathBuf> = Vec::new();
 
+    // --- portable Python 候选 ---
     // 1. resource_dir 直接包含（Tauri 打包：资源平铺）
-    candidates.push(resource_dir.join(&py_rel));
+    py_candidates.push(resource_dir.join(&py_rel));
     // 2. resource_dir/engine/（Tauri 打包：资源带 engine 前缀）
-    candidates.push(resource_dir.join("engine").join(&py_rel));
+    py_candidates.push(resource_dir.join("engine").join(&py_rel));
     // 3. 从 resource_dir 往上最多 5 级查找 engine/portable-python/
     {
         let mut cur = resource_dir.as_path();
         for _ in 0..5 {
             if let Some(p) = cur.parent() {
                 cur = p;
-                candidates.push(cur.join("engine").join(&py_rel));
+                py_candidates.push(cur.join("engine").join(&py_rel));
             }
         }
     }
     // 4. 当前工作目录
     if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(cwd.join("engine").join(&py_rel));
+        py_candidates.push(cwd.join("engine").join(&py_rel));
     }
 
-    // 找到第一个存在的 portable Python
-    let python_path = candidates.iter()
+    // --- venv Python 候选（开发环境）---
+    py_candidates.push(resource_dir.join("engine").join(&venv_py_rel));
+    py_candidates.push(resource_dir.join(&venv_py_rel));
+    if let Ok(cwd) = std::env::current_dir() {
+        py_candidates.push(cwd.join("engine").join(&venv_py_rel));
+    }
+
+    // 找到第一个存在的 Python
+    let python_path = py_candidates.iter()
         .find(|p| p.exists())
         .map(|p| p.to_string_lossy().to_string());
 
-    // engine_dir：包含 Python 模块和资源的目录
-    // Tauri 打包时 resources 平铺到 resource_dir，所以 engine_dir = resource_dir
-    // 开发时 engine_dir = 项目根/engine
-    let engine_dir = if python_path.is_some() {
-        // 从 python_path 推断 engine_dir
-        let py = std::path::PathBuf::from(python_path.as_ref().unwrap());
-        // 往上找到 engine 目录，或直接用 resource_dir
-        let parent = py.parent().unwrap_or(&resource_dir); // portable-python/
-        let grandparent = parent.parent().unwrap_or(&resource_dir); // engine/ or resource_dir/
-        // 如果 grandparent 是 "engine"，用 grandparent；否则用 parent 的父级
-        if grandparent.file_name().map(|n| n == "engine").unwrap_or(false) {
-            grandparent.to_path_buf()
-        } else if parent.file_name().map(|n| n == "portable-python").unwrap_or(false) {
-            // portable-python 的上级应该是 engine（打包时）或 resource_dir（平铺时）
-            let up = grandparent;
-            if up.join("models").exists() || up.join("assets").exists() || up.join("bingo_engine.py").exists() {
-                up.to_path_buf()
-            } else {
-                // 平铺模式：resource_dir 本身就是 engine_dir
-                resource_dir.clone()
+    // engine_dir：包含 bingo_engine.py、models/、assets/ 的目录
+    let engine_dir = {
+        // 从 python_path 往上查找包含 bingo_engine.py 的目录
+        if let Some(ref py) = python_path {
+            let py_path = std::path::Path::new(py);
+            // 检查 python_path 自身所在目录的父级
+            let candidates_for_engine: Vec<&std::path::Path> = vec![
+                py_path.parent().and_then(|p| p.parent()).unwrap_or(&resource_dir), // portable-python/../ 或 venv/..
+                py_path.parent().unwrap_or(&resource_dir),
+                &resource_dir,
+            ];
+            let mut found = None;
+            for c in candidates_for_engine {
+                if c.join("bingo_engine.py").exists() || c.join("models").exists() || c.join("assets").exists() {
+                    found = Some(c.to_path_buf());
+                    break;
+                }
             }
-        } else {
-            resource_dir.clone()
-        }
-    } else {
-        // 没找到 portable Python，用 resource_dir 或开发环境
-        if resource_dir.join("bingo_engine.py").exists() {
+            found.unwrap_or_else(|| resource_dir.clone())
+        } else if resource_dir.join("bingo_engine.py").exists() {
             resource_dir.clone()
         } else if let Ok(cwd) = std::env::current_dir() {
             cwd.join("engine")
@@ -418,20 +419,7 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
         }
     };
 
-    let python_path = python_path.unwrap_or_else(|| {
-        // 最后回退：venv 或系统 Python
-        let venv_py = if win {
-            engine_dir.join("venv/Scripts/python.exe")
-        } else {
-            engine_dir.join("venv/bin/python3")
-        };
-        if venv_py.exists() {
-            venv_py.to_string_lossy().to_string()
-        } else {
-            // 系统 Python（兜底，打包版本不应该走到这里）
-            find_system_python().unwrap_or_default()
-        }
-    });
+    let python_path = python_path.unwrap_or_default();
 
     if python_path.is_empty() {
         return Err("Python not found. 请确保 portable-python 已正确打包。".to_string());
