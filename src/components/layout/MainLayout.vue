@@ -1376,8 +1376,10 @@ except Exception as e:
       // 通知 Monaco 编辑器刷新内容
       window.dispatchEvent(new CustomEvent('editor-refresh-content'))
     }
-  } catch {
-    // 静默失败
+  } catch (e) {
+    terminalStore.clear()
+    terminalStore.appendLine(`\x1b[31m❌ 格式化失败: ${e}\x1b[0m`)
+    consoleVisible.value = true
   }
 }
 
