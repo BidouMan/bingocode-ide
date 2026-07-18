@@ -600,10 +600,75 @@ function handleRefreshContent() {
   }
 }
 
+// 跳转到指定行（搜索/大纲面板调用）
+function handleGotoLine(e: Event) {
+  const { line } = (e as CustomEvent).detail
+  if (editor && line) {
+    editor.revealLineInCenter(line)
+    editor.setPosition({ lineNumber: line, column: 1 })
+    editor.focus()
+  }
+}
+window.addEventListener('editor:goto-line', handleGotoLine)
+
+// 在光标位置插入文本（代码片段面板调用）
+function handleInsertText(e: Event) {
+  const { text } = (e as CustomEvent).detail
+  if (editor && text) {
+    const position = editor.getPosition()
+    if (position) {
+      editor.executeEdits('snippet', [{
+        range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column),
+        text: text + '\n',
+      }])
+    }
+    editor.focus()
+  }
+}
+window.addEventListener('editor:insert-text', handleInsertText)
+
+// 重命名符号（大纲面板调用）：全文件替换同名标识符
+function handleRenameSymbol(e: Event) {
+  const { oldName, newName, type } = (e as CustomEvent).detail
+  if (!editor || !oldName || !newName || oldName === newName) return
+
+  const model = editor.getModel()
+  if (!model) return
+
+  // 构造匹配正则：确保替换的是完整标识符（不是子串）
+  // \b 在 monaco 中对 _ 开头的标识符可能不准，用 (^|[^a-zA-Z_]) 前瞻
+  const escapedOld = oldName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  // 根据类型，只在匹配关键字后面的位置替换
+  const patterns: Record<string, RegExp> = {
+    function: new RegExp(`(\\bdef\\s+)${escapedOld}\\b`, 'g'),
+    class: new RegExp(`(\\bclass\\s+)${escapedOld}\\b`, 'g'),
+    variable: new RegExp(`(?<=^|[^a-zA-Z_])${escapedOld}\\b`, 'gm'),
+    import: new RegExp(`(?<=^import\\s+|^from\\s+\\S+\\s+import\\s+)${escapedOld}\\b`, 'gm'),
+  }
+
+  // 简单方案：全文件 \b 替换完整标识符
+  const fullPattern = new RegExp(`\\b${escapedOld}\\b`, 'g')
+  const content = model.getValue()
+  const newContent = content.replace(fullPattern, newName)
+
+  if (newContent !== content) {
+    editor.pushUndoStop()
+    editor.executeEdits('rename-symbol', [{
+      range: model.getFullModelRange(),
+      text: newContent,
+    }])
+    editor.pushUndoStop()
+  }
+}
+window.addEventListener('editor:rename-symbol', handleRenameSymbol)
+
 onBeforeUnmount(() => {
   window.removeEventListener('editor-undo', handleUndo)
   window.removeEventListener('editor-redo', handleRedo)
   window.removeEventListener('editor-refresh-content', handleRefreshContent)
+  window.removeEventListener('editor:goto-line', handleGotoLine)
+  window.removeEventListener('editor:insert-text', handleInsertText)
+  window.removeEventListener('editor:rename-symbol', handleRenameSymbol)
   window.removeEventListener('click', closeCtxMenu)
   window.removeEventListener('contextmenu', closeCtxMenu)
   if (ctxMenuHandler) {

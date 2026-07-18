@@ -35,6 +35,47 @@ function loadSavedMode(): boolean {
   }
 }
 
+// 保存/恢复代码模式标签页
+const CODE_TABS_KEY = 'bingo-ide-code-tabs'
+
+function loadSavedCodeTabs(): Tab[] {
+  try {
+    const saved = localStorage.getItem(CODE_TABS_KEY)
+    if (!saved) return []
+    const data = JSON.parse(saved)
+    const tabs = data?.tabs
+    if (!Array.isArray(tabs) || tabs.length === 0) return []
+    return tabs.map((t: any) => ({
+      id: t.id || `tab-${++tabIdCounter}`,
+      name: t.name || '未命名.py',
+      path: t.path || '',
+      content: '', // 内容延迟加载
+      modified: false,
+    }))
+  } catch {
+    return []
+  }
+}
+
+function loadSavedCodeActiveIndex(): number {
+  try {
+    const saved = localStorage.getItem(CODE_TABS_KEY)
+    if (!saved) return -1
+    const data = JSON.parse(saved)
+    const idx = data?.activeIndex ?? -1
+    return typeof idx === 'number' ? idx : -1
+  } catch {
+    return -1
+  }
+}
+
+function saveCodeTabs(tabs: Tab[], activeIndex: number) {
+  try {
+    const data = tabs.map(t => ({ id: t.id, name: t.name, path: t.path }))
+    localStorage.setItem(CODE_TABS_KEY, JSON.stringify({ tabs: data, activeIndex }))
+  } catch {}
+}
+
 // 保存模式到 localStorage
 function saveMode(isGame: boolean) {
   try {
@@ -76,8 +117,8 @@ export const useEditorStore = defineStore('editor', () => {
   const gameActiveTabIndex = ref(0)
 
   // ─── 代码模式标签 (IDE) ───
-  const codeTabs = ref<Tab[]>([createDefaultTab()])
-  const codeActiveTabIndex = ref(0)
+  const codeTabs = ref<Tab[]>(loadSavedCodeTabs())
+  const codeActiveTabIndex = ref(loadSavedCodeActiveIndex())
 
   // ─── 计算属性 ───
   const currentTabs = computed(() => isGameMode.value ? gameTabs.value : codeTabs.value)
@@ -123,6 +164,7 @@ export const useEditorStore = defineStore('editor', () => {
     const existing = tabs.findIndex((t) => t.path === path && path !== '')
     if (existing >= 0) {
       activeTabIndex.value = existing
+      saveCodeTabsState()
       return existing
     }
 
@@ -135,6 +177,7 @@ export const useEditorStore = defineStore('editor', () => {
     }
     tabs.push(tab)
     activeTabIndex.value = tabs.length - 1
+    saveCodeTabsState()
     return activeTabIndex.value
   }
 
@@ -145,13 +188,13 @@ export const useEditorStore = defineStore('editor', () => {
     tabs.splice(index, 1)
 
     if (tabs.length === 0) {
-      tabs.push(createDefaultTab())
-      activeTabIndex.value = 0
+      activeTabIndex.value = -1
     } else if (activeTabIndex.value >= tabs.length) {
       activeTabIndex.value = tabs.length - 1
     } else if (activeTabIndex.value > index) {
       activeTabIndex.value--
     }
+    saveCodeTabsState()
   }
 
   function renameTab(id: string, newName: string, newPath?: string) {
@@ -164,6 +207,7 @@ export const useEditorStore = defineStore('editor', () => {
       if (newPath !== undefined) patch.path = newPath
       tabs[idx] = { ...tabs[idx], ...patch }
     }
+    saveCodeTabsState()
   }
 
   function setActiveTab(index: number) {
@@ -171,6 +215,35 @@ export const useEditorStore = defineStore('editor', () => {
     if (index >= 0 && index < tabs.length) {
       activeTabIndex.value = index
     }
+    saveCodeTabsState()
+  }
+
+  // 保存代码模式标签状态到 localStorage
+  function saveCodeTabsState() {
+    saveCodeTabs(codeTabs.value, codeActiveTabIndex.value)
+  }
+
+  // 恢复代码标签页内容（从文件重新加载）
+  async function restoreCodeTabContents() {
+    for (const tab of codeTabs.value) {
+      if (tab.path && !tab.content) {
+        try {
+          const { invoke } = await import('@tauri-apps/api/core')
+          tab.content = await invoke<string>('read_file', { path: tab.path })
+        } catch {
+          // 文件可能已被删除，移除这个标签
+          const idx = codeTabs.value.indexOf(tab)
+          if (idx >= 0) codeTabs.value.splice(idx, 1)
+        }
+      }
+    }
+    // 修正 activeIndex
+    if (codeTabs.value.length === 0) {
+      codeActiveTabIndex.value = -1
+    } else if (codeActiveTabIndex.value >= codeTabs.value.length) {
+      codeActiveTabIndex.value = codeTabs.value.length - 1
+    }
+    saveCodeTabsState()
   }
 
   function saveCurrentTab() {
@@ -237,6 +310,7 @@ export const useEditorStore = defineStore('editor', () => {
     renameTab,
     setActiveTab,
     saveCurrentTab,
+    restoreCodeTabContents,
     setRunning,
     toggleRun,
     zoomIn,

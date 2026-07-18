@@ -25,6 +25,12 @@ import PythonHelpPanel from '../help/PythonHelpPanel.vue'
 import AiChatPanel from '../help/AiChatPanel.vue'
 import { openHelpDocs } from '../help/HelpDocsOpener'
 import PluginManager from '../common/PluginManager.vue'
+import FileExplorer from '../file-explorer/FileExplorer.vue'
+import SnippetPanel from '../sidebar/SnippetPanel.vue'
+import LearnPanel from '../sidebar/LearnPanel.vue'
+import SearchPanel from '../sidebar/SearchPanel.vue'
+import OutlinePanel from '../sidebar/OutlinePanel.vue'
+import { useFileExplorerStore } from '../../stores/fileExplorer'
 import iconLogo from '../../assets/icons/logo.svg'
 import iconFile from '../../assets/icons/icon--file.svg'
 import iconCodeEdit from '../../assets/icons/代码编辑.svg'
@@ -61,6 +67,7 @@ const mapStore = useMapStore()
 const renderStore = useRenderStore()
 const terminalStore = useTerminalStore()
 const themeStore = useThemeStore()
+const fileExplorerStore = useFileExplorerStore()
 const engine = useEngine()
 const fileDialog = useFileDialog()
 
@@ -82,6 +89,8 @@ const selectedResource = ref<string | null>(null)
 const helpVisible = ref(false)
 const aiChatVisible = ref(false)
 const pluginManagerVisible = ref(false)
+const ideExplorerVisible = ref(true)
+const ideActivePanel = ref<'files' | 'search' | 'outline' | 'snippets' | 'learn'>('files')
 
 // 角色缩略图缓存
 const spriteThumbnails = ref<Record<string, string>>({})
@@ -148,6 +157,8 @@ onMounted(loadAllMapThumbnails)
 onMounted(async () => {
   themeStore.initTheme()
   await projectStore.initProject()
+  // 恢复代码模式标签页内容
+  editorStore.restoreCodeTabContents()
 })
 
 // 代码编辑器右键菜单事件
@@ -1006,69 +1017,38 @@ function cancelCodeRename() {
 
 // ═══ IDE 模式文件操作 ═══
 
-// 生成不重名的文件名
-function generateUniqueFileName(baseName: string): string {
-  const tabs = editorStore.codeTabs
-  let name = baseName
-  let counter = 1
-  while (tabs.some(t => t.name === name)) {
-    counter++
-    name = `${baseName.replace(/\.py$/, '')}-${counter}.py`
-  }
-  return name
-}
-
-// 新建 .py 文件（IDE 模式）
-async function ideNewFile() {
-  const name = generateUniqueFileName('未命名.py')
-  const projectRoot = projectStore.root
-  
-  if (projectRoot) {
-    // 有项目目录，直接创建文件
-    const filePath = `${projectRoot}/code/${name}`
-    await invoke('create_dir', { path: `${projectRoot}/code` })
-    await invoke('write_file', { path: filePath, content: '' })
-    editorStore.createTab(name, filePath, '')
-    resourceStore.addItem({ name, type: 'code', path: filePath, content: '' })
-  } else {
-    // 无项目目录，创建内存标签
-    editorStore.createTab(name, '', '')
-  }
-}
-
-// 打开 .py 文件（IDE 模式）
-async function ideOpenFile() {
+// 打开文件夹（IDE 模式）
+async function ideOpenFolder() {
   const path = await open({
-    title: '打开 Python 文件',
-    filters: [{ name: 'Python 文件', extensions: ['py'] }],
-    multiple: true,
+    title: '打开文件夹',
+    directory: true,
   })
-  
-  if (!path) return
-  
-  // 处理单选或多选
-  const paths = Array.isArray(path) ? path : [path]
-  
-  for (const filePath of paths) {
-    try {
-      const content = await invoke<string>('read_file', { path: filePath })
-      const fileName = filePath.split('/').pop() || '未命名.py'
-      
-      // 检查是否已打开
-      const existing = editorStore.currentTabs.find(t => t.path === filePath)
-      if (existing) {
-        // 已打开，切换到该标签
-        const idx = editorStore.currentTabs.indexOf(existing)
-        editorStore.setActiveTab(idx)
-        continue
-      }
-      
-      // 创建新标签
-      editorStore.createTab(fileName, filePath, content)
-      resourceStore.addItem({ name: fileName, type: 'code', path: filePath, content })
-    } catch (e) {
-      console.error('[IDE] 打开文件失败:', e)
-    }
+  if (path && typeof path === 'string') {
+    await fileExplorerStore.openFolder(path)
+  }
+}
+
+// 在文件树中新建文件（IDE 标签栏 + 按钮调用）
+async function ideNewFileInTree() {
+  if (!fileExplorerStore.workspaceFolder) {
+    await ideOpenFolder()
+    return
+  }
+  const name = '新文件.py'
+  let counter = 1
+  let finalName = name
+  const basePath = fileExplorerStore.workspaceFolder
+  while (await invoke<boolean>('path_exists', { path: `${basePath}/${finalName}` })) {
+    counter++
+    finalName = `新文件-${counter}.py`
+  }
+  try {
+    await fileExplorerStore.createFile(basePath, finalName)
+    const newPath = `${basePath}/${finalName}`
+    const content = await invoke<string>('read_file', { path: newPath })
+    editorStore.createTab(finalName, newPath, content)
+  } catch (e) {
+    console.error('[IDE] 新建文件失败:', e)
   }
 }
 
@@ -1076,7 +1056,7 @@ async function ideOpenFile() {
 async function ideSaveFile() {
   const tab = editorStore.currentTab
   if (!tab) return
-  
+
   if (tab.path) {
     // 有文件路径，直接保存
     try {
@@ -1525,16 +1505,10 @@ function spriteDisplayName(name: string) {
 
       <!-- ═══ 代码模式菜单 ═══ -->
       <template v-else>
-        <!-- 新建 -->
-        <button class="menu-btn" @click="ideNewFile" v-tooltip="'新建'">
-          <img :src="iconNewMap" class="menu-icon" />
-          <span>新建</span>
-        </button>
-
-        <!-- 打开 -->
-        <button class="menu-btn" @click="ideOpenFile" v-tooltip="'打开'">
+        <!-- 打开文件夹 (最左边) -->
+        <button class="menu-btn" @click="ideOpenFolder" v-tooltip="'打开文件夹'">
           <img :src="iconCodeOpen" class="menu-icon" />
-          <span>打开</span>
+          <span>项目</span>
         </button>
 
         <!-- 保存 -->
@@ -1852,35 +1826,91 @@ function spriteDisplayName(name: string) {
           </div>
         </div>
 
-        <!-- ═══ Page 3: 代码模式 IDE (全宽) ═══ -->
-        <div v-if="!editorStore.isGameMode" class="editor-page-full">
-          <div class="ide-tab-bar">
-            <div class="tab-bar-tabs">
-              <div v-for="(tab, index) in editorStore.currentTabs" :key="tab.id" class="tab-item" :class="{ 'tab-item-active': editorStore.activeTabIndex === index }" @click="editorStore.setActiveTab(index)">
-                <template v-if="tabRenameId === tab.id">
-                  <input class="tab-rename-input" v-model="tabRenameValue" @blur="confirmTabRename" @keydown.enter.prevent="confirmTabRename" @keydown.escape="cancelTabRename" @click.stop />
-                </template>
-                <template v-else>
-                  <span @dblclick.stop="startTabRename(tab.id)">{{ codeDisplayName(tab.name) }}</span>
-                </template>
-                <button class="tab-close" @click.stop="editorStore.closeTab(index)">×</button>
+        <!-- ═══ Page 3: 代码模式 IDE (Activity Bar + Side Panel + 编辑器) ═══ -->
+        <div v-if="!editorStore.isGameMode" class="ide-layout-wrapper">
+          <!-- Activity Bar (图标列) -->
+          <div class="ide-activity-bar">
+            <button
+              class="activity-btn"
+              :class="{ 'activity-btn-active': ideExplorerVisible && ideActivePanel === 'files' }"
+              @click="ideActivePanel === 'files' ? (ideExplorerVisible = !ideExplorerVisible) : (ideActivePanel = 'files', ideExplorerVisible = true)"
+              v-tooltip="'文件浏览器'"
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+            </button>
+            <button
+              class="activity-btn"
+              :class="{ 'activity-btn-active': ideExplorerVisible && ideActivePanel === 'search' }"
+              @click="ideActivePanel === 'search' ? (ideExplorerVisible = !ideExplorerVisible) : (ideActivePanel = 'search', ideExplorerVisible = true)"
+              v-tooltip="'搜索'"
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="10" cy="10" r="6" stroke="currentColor" stroke-width="1.5"/><path d="M15 15l4.5 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </button>
+            <button
+              class="activity-btn"
+              :class="{ 'activity-btn-active': ideExplorerVisible && ideActivePanel === 'outline' }"
+              @click="ideActivePanel === 'outline' ? (ideExplorerVisible = !ideExplorerVisible) : (ideActivePanel = 'outline', ideExplorerVisible = true)"
+              v-tooltip="'代码大纲'"
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h10M4 18h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </button>
+            <button
+              class="activity-btn"
+              :class="{ 'activity-btn-active': ideExplorerVisible && ideActivePanel === 'snippets' }"
+              @click="ideActivePanel === 'snippets' ? (ideExplorerVisible = !ideExplorerVisible) : (ideActivePanel = 'snippets', ideExplorerVisible = true)"
+              v-tooltip="'代码片段'"
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M9.4 16.6L4.8 12l4.6-4.6M14.6 7.4l4.6 4.6-4.6 4.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <button
+              class="activity-btn"
+              :class="{ 'activity-btn-active': ideExplorerVisible && ideActivePanel === 'learn' }"
+              @click="ideActivePanel === 'learn' ? (ideExplorerVisible = !ideExplorerVisible) : (ideActivePanel = 'learn', ideExplorerVisible = true)"
+              v-tooltip="'Python 速查'"
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/><path d="M12 8v5M12 16h.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+
+          <!-- Side Panel (根据 activePanel 切换内容) -->
+          <aside class="ide-side-panel" v-show="ideExplorerVisible">
+            <FileExplorer v-if="ideActivePanel === 'files'" />
+            <SearchPanel v-else-if="ideActivePanel === 'search'" />
+            <OutlinePanel v-else-if="ideActivePanel === 'outline'" />
+            <SnippetPanel v-else-if="ideActivePanel === 'snippets'" />
+            <LearnPanel v-else-if="ideActivePanel === 'learn'" />
+          </aside>
+
+          <!-- 右侧编辑器区域 -->
+          <div class="editor-page-full">
+            <div class="ide-tab-bar">
+              <div class="tab-bar-tabs">
+                <div v-for="(tab, index) in editorStore.currentTabs" :key="tab.id" class="tab-item" :class="{ 'tab-item-active': editorStore.activeTabIndex === index }" @click="editorStore.setActiveTab(index)">
+                  <template v-if="tabRenameId === tab.id">
+                    <input class="tab-rename-input" v-model="tabRenameValue" @blur="confirmTabRename" @keydown.enter.prevent="confirmTabRename" @keydown.escape="cancelTabRename" @click.stop />
+                  </template>
+                  <template v-else>
+                    <span @dblclick.stop="startTabRename(tab.id)">{{ codeDisplayName(tab.name) }}</span>
+                  </template>
+                  <button class="tab-close" @click.stop="editorStore.closeTab(index)">×</button>
+                </div>
+                <button class="tab-add" @click="ideNewFileInTree" v-tooltip="'新建文件'">+</button>
               </div>
-              <button class="tab-add" @click="editorStore.createTab('未命名.py', '')" v-tooltip="'新建文件'">+</button>
             </div>
-          </div>
-          <div class="ide-editor-area">
-            <CodeEditor />
-            <!-- 浮动工具栏 -->
-            <div class="ide-float-bar">
-              <button class="ide-float-btn" v-tooltip="'缩小'" @click="editorStore.zoomOut()"><img :src="iconReduceOne" width="16" height="16" /></button>
-              <button class="ide-float-btn ide-float-zoom" v-tooltip="'重置缩放'" @click="editorStore.resetZoom()">{{ editorStore.editorFontZoom }}%</button>
-              <button class="ide-float-btn" v-tooltip="'放大'" @click="editorStore.zoomIn()"><img :src="iconAddOne" width="16" height="16" /></button>
-              <div class="ide-float-divider"></div>
-              <button class="ide-float-btn" v-tooltip="'撤销'" @click="editorUndo"><img :src="iconUndo" width="14" height="14" /></button>
-              <button class="ide-float-btn" v-tooltip="'重做'" @click="editorRedo"><img :src="iconRedo" width="14" height="14" /></button>
+            <div class="ide-editor-area">
+              <CodeEditor />
+              <!-- 浮动工具栏 -->
+              <div class="ide-float-bar">
+                <button class="ide-float-btn" v-tooltip="'缩小'" @click="editorStore.zoomOut()"><img :src="iconReduceOne" width="16" height="16" /></button>
+                <button class="ide-float-btn ide-float-zoom" v-tooltip="'重置缩放'" @click="editorStore.resetZoom()">{{ editorStore.editorFontZoom }}%</button>
+                <button class="ide-float-btn" v-tooltip="'放大'" @click="editorStore.zoomIn()"><img :src="iconAddOne" width="16" height="16" /></button>
+                <div class="ide-float-divider"></div>
+                <button class="ide-float-btn" v-tooltip="'撤销'" @click="editorUndo"><img :src="iconUndo" width="14" height="14" /></button>
+                <button class="ide-float-btn" v-tooltip="'重做'" @click="editorRedo"><img :src="iconRedo" width="14" height="14" /></button>
+              </div>
             </div>
+            <TerminalPanel v-model:visible="consoleVisible" />
           </div>
-          <TerminalPanel v-model:visible="consoleVisible" />
         </div>
 
       </div>
@@ -2250,6 +2280,66 @@ function spriteDisplayName(name: string) {
   height: 30px;
   background: var(--bg-root);
   flex-shrink: 0;
+}
+
+/* IDE 布局：Activity Bar + Side Panel + 编辑器 */
+.ide-layout-wrapper {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* Activity Bar (图标列) */
+.ide-activity-bar {
+  width: 44px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0;
+  background: rgb(30, 30, 30);
+  border-right: 1px solid var(--border);
+  gap: 2px;
+}
+.activity-btn {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  position: relative;
+  transition: color 0.12s, background 0.12s;
+}
+.activity-btn:hover {
+  color: var(--text);
+  background: rgba(255,255,255,0.06);
+}
+.activity-btn-active {
+  color: var(--text);
+}
+.activity-btn-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: var(--accent);
+  border-radius: 0 2px 2px 0;
+}
+
+/* Side Panel (内容面板) */
+.ide-side-panel {
+  width: 240px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-root);
+  overflow: hidden;
 }
 
 /* IDE 编辑器区域 */

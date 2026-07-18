@@ -87,6 +87,39 @@ fn rename_path(old_path: String, new_path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn copy_file(src: String, dst_dir: String) -> Result<String, String> {
+    let src_path = std::path::Path::new(&src);
+    let file_name = src_path.file_name()
+        .ok_or_else(|| "无法获取文件名".to_string())?;
+    let dst_path = std::path::Path::new(&dst_dir).join(file_name);
+    // 如果目标已存在，加后缀避免覆盖
+    let final_path = if dst_path.exists() {
+        let stem = src_path.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("file");
+        let ext = src_path.extension()
+            .and_then(|s| s.to_str())
+            .map(|e| format!(".{}", e))
+            .unwrap_or_default();
+        let mut i = 1;
+        loop {
+            let candidate = std::path::Path::new(&dst_dir).join(format!("{}_{}{}", stem, i, ext));
+            if !candidate.exists() {
+                break candidate;
+            }
+            i += 1;
+        }
+    } else {
+        dst_path
+    };
+    std::fs::copy(&src, &final_path)
+        .map_err(|e| format!("复制文件失败: {}", e))?;
+    final_path.to_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| "路径转换失败".to_string())
+}
+
+#[tauri::command]
 fn path_exists(path: String) -> bool {
     std::path::Path::new(&path).exists()
 }
@@ -697,6 +730,24 @@ fn pick_image_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+async fn pick_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    use std::sync::mpsc;
+
+    let (tx, rx) = mpsc::channel();
+    app.dialog()
+        .file()
+        .pick_files(move |paths| {
+            let _ = tx.send(paths);
+        });
+
+    let paths = rx.recv()
+        .map_err(|_| "选择文件取消".to_string())?;
+
+    Ok(paths.map(|ps| ps.iter().map(|p| p.to_string()).collect()).unwrap_or_default())
+}
+
+#[tauri::command]
 fn read_image_as_data_url(path: String) -> Result<String, String> {
     use base64::Engine;
 
@@ -993,8 +1044,10 @@ pub fn run() {
             get_engine_assets_dir,
             get_sprite_thumbnail,
             pick_image_file,
+            pick_files,
             read_image_as_data_url,
             rename_path,
+            copy_file,
             pack_bingo,
             unpack_bingo,
             engine::run_script,

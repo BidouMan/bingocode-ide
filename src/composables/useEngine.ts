@@ -463,26 +463,35 @@ export function useEngine() {
           return
         }
 
-        let runPath: string
+        // 始终写入临时文件运行，避免 macOS 权限问题（Downloads 等受保护目录无法直接写入）
+        // 用文件所在目录作为 working_dir，确保相对路径 import 正确
+        const tempScriptPath = await invoke<string>('save_temp_script', {
+          projectDir,
+          content: tab.content,
+        })
+
+        // 如果源文件有路径，用其目录作为 working_dir（让相对 import 正确）
+        let runWorkingDir = env.working_dir
         if (tab.path) {
-          // 将编辑器最新内容写入磁盘
-          await invoke('write_file', { path: tab.path, content: tab.content })
-          runPath = tab.path
-        } else {
-          await invoke<string>('save_temp_script', {
-            projectDir,
-            content: tab.content,
-          })
-          runPath = `${projectDir}/.temp_run.py`
+          const pathParts = tab.path.split('/')
+          pathParts.pop()
+          const fileDir = pathParts.join('/')
+          if (fileDir) {
+            // 确保目录可访问
+            try {
+              const accessible = await invoke<boolean>('path_exists', { path: fileDir })
+              if (accessible) runWorkingDir = fileDir
+            } catch {}
+          }
         }
 
         terminalStore.clear()
         terminalStore.terminalMode = 'python'
         // 使用子进程运行（和游戏模式同一套管道通信机制）
         await invoke('run_script_file', {
-          workingDir: env.working_dir,
+          workingDir: runWorkingDir,
           pythonPath: env.python_path,
-          scriptPath: runPath,
+          scriptPath: tempScriptPath,
           runId: runGeneration,
         })
       }
