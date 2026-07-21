@@ -21,6 +21,14 @@ const BUILTIN_RESOURCES: { name: string; path: string; category: MapResourceItem
   { name: 'coin', path: '/maps/tilesets/coin.png', category: 'tilesets' },
 ]
 
+// 路径拼接：兼容 Windows（反斜杠）和 Unix（正斜杠）
+function joinPath(base: string, ...parts: string[]): string {
+  const sep = base.includes('\\') && !base.includes('/') ? '\\' : '/'
+  const cleanBase = base.replace(/[\\/]+$/, '')
+  const cleanParts = parts.map(p => p.replace(/^[\\/]+/, '').replace(/[\\/]+$/, ''))
+  return [cleanBase, ...cleanParts].join(sep)
+}
+
 export const useMapResourceLibStore = defineStore('mapResourceLib', () => {
   const items = ref<MapResourceItem[]>([])
   const loaded = ref(false)
@@ -41,11 +49,12 @@ export const useMapResourceLibStore = defineStore('mapResourceLib', () => {
     // 通过 Rust 命令逐个加载缩略图
     for (const item of items.value) {
       try {
-        const fullPath = `${engineDir}${item.path}`
+        // item.path 以 / 开头，需要去掉前导分隔符再拼接，避免 Windows 混合分隔符报错
+        const fullPath = joinPath(engineDir, item.path)
         const dataUrl = await invoke<string>('read_image_as_data_url', { path: fullPath })
         item.thumbnail = dataUrl
       } catch (e) {
-        console.warn(`[MapResourceLib] ${item.name}: 加载缩略图失败`, e)
+        console.warn(`[MapResourceLib] ${item.name}: 加载缩略图失败 (path=${joinPath(engineDir, item.path)})`, e)
       }
     }
   }

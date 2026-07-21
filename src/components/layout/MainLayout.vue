@@ -1324,72 +1324,10 @@ else:
   }
 }
 
-// 格式化代码 - 使用 black
-async function ideFormatCode() {
-  const tab = editorStore.currentTab
-  if (!tab) return
-
-  const code = tab.content
-  if (!code.trim()) return
-
-  const projectRoot = projectStore.root || ''
-
-  try {
-    const env = await invoke<{
-      python_path: string
-      engine_dir: string
-      working_dir: string
-    }>('resolve_engine_env', { scriptPath: '', projectRoot: projectRoot || undefined })
-
-    // 使用 base64 编码传递代码
-    const encoder = new TextEncoder()
-    const data = encoder.encode(code)
-    let binary = ''
-    for (let i = 0; i < data.length; i++) {
-      binary += String.fromCharCode(data[i])
-    }
-    const base64Code = btoa(binary)
-
-    // 使用 black 格式化
-    const formatScript = `
-import base64
-import black
-
-code = base64.b64decode("${base64Code}").decode('utf-8')
-try:
-    formatted = black.format_str(code, mode=black.Mode(
-        target_versions={black.TargetVersion.PY310},
-        line_length=88,
-    ))
-    print(formatted, end='')
-except black.NothingChanged:
-    print(code, end='')
-except Exception as e:
-    print(f"ERROR: {e}", end='')
-`
-
-    const formatPath = await invoke<string>('save_temp_script', {
-      projectDir: projectRoot,
-      content: formatScript,
-    })
-
-    const result = await invoke<string>('run_script_output', {
-      workingDir: env.working_dir,
-      pythonPath: env.python_path,
-      scriptPath: formatPath,
-    })
-
-    if (!result.startsWith('ERROR:') && result !== code) {
-      tab.content = result
-      tab.modified = true
-      // 通知 Monaco 编辑器刷新内容
-      window.dispatchEvent(new CustomEvent('editor-refresh-content'))
-    }
-  } catch (e) {
-    terminalStore.clear()
-    terminalStore.appendLine(`\x1b[31m❌ 格式化失败: ${e}\x1b[0m`)
-    consoleVisible.value = true
-  }
+// 格式化代码 - 使用 Monaco DocumentFormattingEditProvider（VSCode 风格）
+function ideFormatCode() {
+  // 通过 Monaco 内置命令触发格式化，由 CodeEditor 中注册的 provider 处理
+  window.dispatchEvent(new CustomEvent('editor-run-format'))
 }
 
 // ═══ 代码检查与格式化结束 ═══

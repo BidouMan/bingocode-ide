@@ -16,6 +16,14 @@ export interface SpriteLibItem {
 
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']
 
+// 路径拼接：兼容 Windows（反斜杠）和 Unix（正斜杠）
+function joinPath(base: string, ...parts: string[]): string {
+  const sep = base.includes('\\') && !base.includes('/') ? '\\' : '/'
+  const cleanBase = base.replace(/[\\/]+$/, '')
+  const cleanParts = parts.map(p => p.replace(/^[\\/]+/, '').replace(/[\\/]+$/, ''))
+  return [cleanBase, ...cleanParts].join(sep)
+}
+
 export const useSpriteLibStore = defineStore('spriteLib', () => {
   const items = ref<SpriteLibItem[]>([])
   const loading = ref(false)
@@ -28,7 +36,7 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
       const engineDir = await invoke<string>('get_engine_assets_dir')
 
       // 加载 .bgs 包文件
-      const packagesDir = `${engineDir}/sprites/packages`
+      const packagesDir = joinPath(engineDir, 'sprites', 'packages')
       try {
         const files = await invoke<string[]>('list_dir', { path: packagesDir })
         const bgsNames = files
@@ -38,7 +46,7 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
         for (const name of bgsNames) {
           items.value.push({
             name,
-            filePath: `${packagesDir}/${name}.bgs`,
+            filePath: joinPath(packagesDir, `${name}.bgs`),
             type: 'bgs',
             thumbUrl: '',
             loaded: false,
@@ -49,7 +57,7 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
       }
 
       // 加载 images/ 目录下的常规图片文件
-      const imagesDir = `${engineDir}/sprites/images`
+      const imagesDir = joinPath(engineDir, 'sprites', 'images')
       try {
         const files = await invoke<string[]>('list_dir', { path: imagesDir })
         const imageFiles = files.filter(f => {
@@ -61,7 +69,7 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
           const name = filename.replace(/\.[^.]+$/, '')
           items.value.push({
             name,
-            filePath: `${imagesDir}/${filename}`,
+            filePath: joinPath(imagesDir, filename),
             type: 'image',
             thumbUrl: '',
             loaded: false,
@@ -81,7 +89,7 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
           item.thumbUrl = dataUrl
           item.loaded = true
         } catch (e) {
-          console.error(`[SpriteLib] ${item.name}: 加载缩略图失败`, e)
+          console.error(`[SpriteLib] ${item.name}: 加载缩略图失败 (path=${item.filePath})`, e)
         }
       }
     } catch (e) {

@@ -151,7 +151,7 @@ async function initMonaco() {
     language: 'python',
     theme: themeStore.colors.monacoTheme,
     fontSize: editorStore.editorFontSize,
-    lineHeight: Math.round(editorStore.editorFontSize * 1.5),
+    // 不强制 lineHeight，让 Monaco 根据字体自动计算，避免中英文行高不一致导致光标错位
     fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
     fontLigatures: false,
     mouseWheelZoom: false,
@@ -207,6 +207,75 @@ async function initMonaco() {
   console.log(`[Perf] CodeEditor.editor.create: ${(performance.now() - t1).toFixed(1)}ms`)
   console.log(`[Perf] CodeEditor.initMonaco total: ${(performance.now() - t0).toFixed(1)}ms, initial content=${editorStore.currentTab?.content?.length ?? 0} chars`)
 
+  // 注册代码格式化（纯 JS，零延迟）
+  function formatPythonCode(code: string): string {
+    const lines = code.replace(/\r\n/g, '\n').split('\n')
+    const result: string[] = []
+    let prevBlank = false
+
+    for (const line of lines) {
+      // 1. 保留缩进，去除行尾空格
+      const indentMatch = line.match(/^(\s*)/)
+      const indent = indentMatch ? indentMatch[1] : ''
+      const content = line.slice(indent.length).trimEnd()
+
+      // 2. 合并连续空行为单个
+      if (content === '') {
+        if (prevBlank) continue
+        prevBlank = true
+        result.push('')
+        continue
+      }
+      prevBlank = false
+
+      // 3. 运算符格式化（仅处理代码部分，跳过 # 注释和字符串）
+      const commentIdx = content.indexOf('#')
+      const codePart = commentIdx >= 0 ? content.slice(0, commentIdx) : content
+      const commentPart = commentIdx >= 0 ? content.slice(commentIdx) : ''
+
+      let formatted = codePart
+        // 赋值 = （不匹配 == += 等）
+        .replace(/(\w)(\s*)=(?!=)(\s*)(\w)/g, '$1 = $4')
+        // 比较运算符
+        .replace(/(\w)(\s*)==(\s*)(\w)/g, '$1 == $4')
+        .replace(/(\w)(\s*)!=(\s*)(\w)/g, '$1 != $4')
+        .replace(/(\w)(\s*)<=(\s*)(\w)/g, '$1 <= $4')
+        .replace(/(\w)(\s*)>=(\s*)(\w)/g, '$1 >= $4')
+        // 复合赋值
+        .replace(/(\w)(\s*)\+=(\s*)(\w)/g, '$1 += $4')
+        .replace(/(\w)(\s*)-=(\s*)(\w)/g, '$1 -= $4')
+        .replace(/(\w)(\s*)\*=(\s*)(\w)/g, '$1 *= $4')
+        .replace(/(\w)(\s*)\/=(\s*)(\w)/g, '$1 /= $4')
+        .replace(/(\w)(\s*)%=(\s*)(\w)/g, '$1 %= $4')
+        // 算术运算符
+        .replace(/(\w)(\s*)\+(?!=)(\s*)(\w)/g, '$1 + $4')
+        .replace(/(\w)(\s*)-(?!=)(\s*)(\w)/g, '$1 - $4')
+        .replace(/(\w)(\s*)\*(?!=)(\s*)(\w)/g, '$1 * $4')
+        .replace(/(\w)(\s*)\/(?!=)(\s*)(\w)/g, '$1 / $4')
+        .replace(/(\w)(\s*)%(?!=)(\s*)(\w)/g, '$1 % $4')
+
+      result.push(indent + formatted + commentPart)
+    }
+
+    // 保持原始文件末尾换行
+    const trailing = code.endsWith('\n') ? '\n' : ''
+    // 去掉尾部多余空行
+    while (result.length > 1 && result[result.length - 1] === '' && result[result.length - 2] === '') {
+      result.pop()
+    }
+    return result.join('\n') + trailing
+  }
+
+  m.languages.registerDocumentFormattingEditProvider('python', {
+    provideDocumentFormattingEdits(model) {
+      const code = model.getValue()
+      const formatted = formatPythonCode(code)
+      if (formatted === code) return []
+      const fullRange = model.getFullModelRange()
+      return [{ range: fullRange, text: formatted }]
+    },
+  })
+
   // 注册智能补全（游戏模式 = 引擎 API + Python 标准库，代码模式 = Python 标准库）
   m.languages.registerCompletionItemProvider('python', {
     triggerCharacters: ['.', ' '],
@@ -259,12 +328,14 @@ async function initMonaco() {
     },
   })
 
-  nextTick(() => {
+  // 延迟布局：等待 Monaco 内部渲染完成，确保光标位置正确
+  // Monaco 创建后需要时间完成 tokenize + 布局计算，用 setTimeout 确保就绪
+  setTimeout(() => {
     if (editor) {
       editor.layout()
       editor.focus()
     }
-  })
+  }, 100)
 
   // 在 window 捕获阶段监听右键，确保不被 Monaco 拦截
   ctxMenuHandler = (e: Event) => {
@@ -279,8 +350,8 @@ async function initMonaco() {
   window.addEventListener('contextmenu', ctxMenuHandler, true)
 
   // IME 中文输入法处理
-  // 抖动根因：组合期间 textarea 宽度变化 (1→59px) 触发容器重排
-  // 方案：永久固定 textarea 尺寸 + contain:strict 隔离布局影响，opacity:0 隐藏
+  // 抖动根因：组合期间 textarea 宽度变化触发容器重排
+  // 方案：固定宽度 + opacity:0 隐藏，高度由 Monaco 自动管理
   const editorDomNode = editor.getDomNode()
   if (editorDomNode) {
     if (!document.getElementById('ime-stable-style')) {
@@ -291,11 +362,7 @@ async function initMonaco() {
           width: 1px !important;
           min-width: 1px !important;
           max-width: 1px !important;
-          height: 24px !important;
-          min-height: 24px !important;
-          max-height: 24px !important;
           overflow: hidden !important;
-          contain: strict !important;
           opacity: 0 !important;
         }
       `
@@ -416,9 +483,9 @@ watch(
   () => editorStore.editorFontSize,
   (newSize) => {
     if (editor) {
-      // 行间距跟随字体大小：fontSize * 1.5
-      const lineHeight = Math.round(newSize * 1.5)
-      editor.updateOptions({ fontSize: newSize, lineHeight })
+      // 只更新 fontSize，让 Monaco 自动计算 lineHeight
+      editor.updateOptions({ fontSize: newSize })
+      editor.layout()
     }
   }
 )
@@ -429,6 +496,7 @@ onMounted(() => {
   window.addEventListener('editor-undo', handleUndo)
   window.addEventListener('editor-redo', handleRedo)
   window.addEventListener('editor-refresh-content', handleRefreshContent)
+  window.addEventListener('editor-run-format', handleFormat)
   window.addEventListener('click', closeCtxMenu)
   window.addEventListener('contextmenu', closeCtxMenu)
 })
@@ -439,6 +507,12 @@ function handleUndo() {
 
 function handleRedo() {
   if (editor) editor.trigger('keyboard', 'redo')
+}
+
+function handleFormat() {
+  if (editor) {
+    editor.getAction('editor.action.formatDocument')?.run()
+  }
 }
 
 function handleRefreshContent() {
