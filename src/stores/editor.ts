@@ -225,18 +225,25 @@ export const useEditorStore = defineStore('editor', () => {
 
   // 恢复代码标签页内容（从文件重新加载）
   async function restoreCodeTabContents() {
-    for (const tab of codeTabs.value) {
+    const t0 = performance.now()
+    const { invoke } = await import('@tauri-apps/api/core')
+    const t1 = performance.now()
+    console.log(`[Perf] restoreCodeTabContents: invoke imported in ${(t1 - t0).toFixed(1)}ms, tabs=${codeTabs.value.length}`)
+    // 并行读取所有需要恢复的标签页内容
+    await Promise.all(codeTabs.value.map(async (tab) => {
       if (tab.path && !tab.content) {
+        const tFile = performance.now()
         try {
-          const { invoke } = await import('@tauri-apps/api/core')
           tab.content = await invoke<string>('read_file', { path: tab.path })
+          console.log(`[Perf]   read_file "${tab.name}" (${tab.path}): ${(performance.now() - tFile).toFixed(1)}ms, ${tab.content.length} chars`)
         } catch {
           // 文件可能已被删除，移除这个标签
           const idx = codeTabs.value.indexOf(tab)
           if (idx >= 0) codeTabs.value.splice(idx, 1)
+          console.warn(`[Perf]   read_file "${tab.name}" FAILED: ${tab.path}`)
         }
       }
-    }
+    }))
     // 修正 activeIndex
     if (codeTabs.value.length === 0) {
       codeActiveTabIndex.value = -1
@@ -244,6 +251,7 @@ export const useEditorStore = defineStore('editor', () => {
       codeActiveTabIndex.value = codeTabs.value.length - 1
     }
     saveCodeTabsState()
+    console.log(`[Perf] restoreCodeTabContents total: ${(performance.now() - t0).toFixed(1)}ms`)
   }
 
   function saveCurrentTab() {

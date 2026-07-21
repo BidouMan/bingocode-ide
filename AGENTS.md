@@ -82,6 +82,7 @@ engine/
 - **Reference original PySide6 UI files before implementing any UI** — never design from scratch
 - **Comments and some variable names are in Chinese** — do not change
 - **Respond to user in Chinese**
+- **Cross-platform safety (Mac + Windows)**: This project is a dual-platform (macOS + Windows) desktop app. When fixing Windows-specific bugs, NEVER break macOS functionality. Always check if a change uses platform-specific code paths before modifying. If the fix requires platform branching, use `#[cfg(target_os = "windows")]` / `#[cfg(target_os = "macos")]` in Rust, or `process.platform` checks in TypeScript. When in doubt, preserve the existing Mac behavior and only add Windows-specific handling.
 
 ## Key quirks
 

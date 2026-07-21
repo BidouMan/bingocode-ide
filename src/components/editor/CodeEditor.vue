@@ -132,191 +132,20 @@ function updateLineNumberWidth() {
   editor.updateOptions({ lineNumbersMinChars: chars })
 }
 
-async function initMonaco() {
-  // 配置 Monaco web worker（ES 模块模式必须手动指定）
-  window.MonacoEnvironment = {
-    getWorker(_: any, label: string) {
-      return new Worker(new URL('monaco-editor/esm/vs/editor/editor.worker.js', import.meta.url), { type: 'module' })
-    },
-  }
+import { waitForMonaco } from '../../utils/monaco-init'
 
-  // 直接从本地 npm 包加载 Monaco（ES 模块），不走 CDN 也不走 @monaco-editor/loader 的脚本注入
-  const m = await import('monaco-editor/esm/vs/editor/editor.main.js')
+async function initMonaco() {
+  // 等待 Monaco 就绪（已预加载时几乎瞬时）
+  const t0 = performance.now()
+  console.log('[Perf] CodeEditor.initMonaco start')
+  const m = await waitForMonaco()
   monaco = m
+  console.log(`[Perf] CodeEditor.waitForMonaco: ${(performance.now() - t0).toFixed(1)}ms`)
 
   if (!containerRef.value) return
 
-  // Tokyo Night 风格主题
-  m.editor.defineTheme('bingo-dark', {
-    base: 'vs-dark',
-    inherit: true,
-    rules: [
-      { token: 'comment', foreground: '565f89', fontStyle: 'italic' },
-      { token: 'keyword', foreground: 'bb9af7' },
-      { token: 'string', foreground: '9ece6a' },
-      { token: 'number', foreground: 'ff9e64' },
-      { token: 'type', foreground: '2ac3de' },
-      { token: 'function', foreground: '7aa2f7' },
-      { token: 'variable', foreground: 'c0caf5' },
-      { token: 'operator', foreground: '89ddff' },
-      { token: 'delimiter', foreground: 'e2b78d' },
-      { token: 'identifier', foreground: 'c0caf5' },
-    ],
-    colors: {
-      'editor.background': '#1a1b26',
-      'editor.foreground': '#c0caf5',
-      'editor.lineHighlightBackground': '#1e2030',
-      'editor.selectionBackground': '#33467c',
-      'editor.inactiveSelectionBackground': '#283457',
-      'editorCursor.foreground': '#c0caf5',
-      'editorWhitespace.foreground': '#3b4261',
-      'editorIndentGuide.background': '#292e42',
-      'editorIndentGuide.activeBackground': '#3b4261',
-      'editorLineNumber.foreground': '#3d4260',
-      'editorLineNumber.activeForeground': '#737aa2',
-      'editorGutter.background': '#1a1b26',
-      'editorGutter.border': 'transparent',
-      'editor.selectionHighlightBackground': '#33467c55',
-      'editorBracketMatch.background': '#33467c55',
-      'editorBracketMatch.border': '#565f89',
-      'scrollbar.shadow': '#00000000',
-      'scrollbarSlider.background': '#3b426133',
-      'scrollbarSlider.hoverBackground': '#3b426155',
-      'scrollbarSlider.activeBackground': '#3b426188',
-      'minimap.background': '#1a1b26',
-    },
-  })
-
-  // Light theme
-  m.editor.defineTheme('bingo-light', {
-    base: 'vs',
-    inherit: true,
-    rules: [
-      { token: 'comment', foreground: 'a0a1a7', fontStyle: 'italic' },
-      { token: 'keyword', foreground: 'a626a4' },
-      { token: 'string', foreground: '50a14f' },
-      { token: 'number', foreground: '986801' },
-      { token: 'type', foreground: 'c18401' },
-      { token: 'function', foreground: '4078f2' },
-      { token: 'variable', foreground: '383a42' },
-      { token: 'operator', foreground: '383a42' },
-      { token: 'delimiter', foreground: '383a42' },
-      { token: 'identifier', foreground: '383a42' },
-    ],
-    colors: {
-      'editor.background': '#ffffff',
-      'editor.foreground': '#383a42',
-      'editor.lineHighlightBackground': '#f5f5f5',
-      'editor.selectionBackground': '#bfceff',
-      'editor.inactiveSelectionBackground': '#e5ebf6',
-      'editorCursor.foreground': '#526fff',
-      'editorWhitespace.foreground': '#d1d9e0',
-      'editorIndentGuide.background': '#e8eaed',
-      'editorIndentGuide.activeBackground': '#c4c7c9',
-      'editorLineNumber.foreground': '#a0a1a7',
-      'editorLineNumber.activeForeground': '#383a42',
-      'editorGutter.background': '#ffffff',
-      'editorGutter.border': 'transparent',
-      'editor.selectionHighlightBackground': '#bfceff55',
-      'editorBracketMatch.background': '#bfceff55',
-      'editorBracketMatch.border': '#a0a1a7',
-      'scrollbar.shadow': '#00000000',
-      'scrollbarSlider.background': '#383a4233',
-      'scrollbarSlider.hoverBackground': '#383a4255',
-      'scrollbarSlider.activeBackground': '#383a4288',
-      'minimap.background': '#ffffff',
-    },
-  })
-
-  // Warm theme (Gruvbox-style warm dark)
-  m.editor.defineTheme('bingo-warm', {
-    base: 'vs-dark',
-    inherit: true,
-    rules: [
-      { token: 'comment', foreground: '928374', fontStyle: 'italic' },
-      { token: 'keyword', foreground: 'fb4934' },
-      { token: 'string', foreground: 'b8bb26' },
-      { token: 'number', foreground: 'd3869b' },
-      { token: 'type', foreground: '8ec07c' },
-      { token: 'function', foreground: 'fabd2f' },
-      { token: 'variable', foreground: 'ebdbb2' },
-      { token: 'operator', foreground: 'fb4934' },
-      { token: 'delimiter', foreground: 'ebdbb2' },
-      { token: 'identifier', foreground: 'ebdbb2' },
-    ],
-    colors: {
-      'editor.background': '#282828',
-      'editor.foreground': '#ebdbb2',
-      'editor.lineHighlightBackground': '#3c3836',
-      'editor.selectionBackground': '#504945',
-      'editor.inactiveSelectionBackground': '#3c3836',
-      'editorCursor.foreground': '#ebdbb2',
-      'editorWhitespace.foreground': '#665c54',
-      'editorIndentGuide.background': '#3c3836',
-      'editorIndentGuide.activeBackground': '#665c54',
-      'editorLineNumber.foreground': '#665c54',
-      'editorLineNumber.activeForeground': '#fabd2f',
-      'editorGutter.background': '#282828',
-      'editorGutter.border': 'transparent',
-      'editor.selectionHighlightBackground': '#50494555',
-      'editorBracketMatch.background': '#50494555',
-      'editorBracketMatch.border': '#928374',
-      'scrollbar.shadow': '#00000000',
-      'scrollbarSlider.background': '#665c5433',
-      'scrollbarSlider.hoverBackground': '#665c5455',
-      'scrollbarSlider.activeBackground': '#665c5488',
-      'minimap.background': '#282828',
-    },
-  })
-
-  // Python Monarch tokenizer
-  m.languages.setMonarchTokensProvider('python', {
-    keywords: ['def','class','return','if','elif','else','for','while','import','from','as','try','except','finally','with','yield','lambda','pass','break','continue','raise','and','or','not','in','is','global','nonlocal','del','assert'],
-    builtin: ['print','len','range','int','str','float','list','dict','tuple','set','type','input','open','True','False','None','self','cls'],
-    engine: ['Sprite','Timer','run','key_down','key_pressed','wait','broadcast','receive','pause','resume','is_paused','stop','show_fps','mouse_down','mouse_pressed','mouse','load_map','follow','play_sound','show_collision','random_int','random_float','draw_text','stop_sound','shake','start_game','register_generator','unregister_generator','GameStop','stop_game'],
-    tokenizer: {
-      root: [
-        [/"""/, 'string', '@multiString'],
-        [/'''/, 'string', '@multiString'],
-        [/''/, 'string'],
-        [/""/, 'string'],
-        [/"(?!")/, 'string', '@dblString'],
-        [/'(?!')/, 'string', '@sglString'],
-        [/#.*$/, 'comment'],
-        [/\b\d+\.?\d*\b/, 'number'],
-        [/[a-zA-Z_]\w*/, {
-          cases: {
-            '@keywords': 'keyword',
-            '@engine': 'type',
-            '@builtin': 'type',
-            '@default': 'identifier',
-          },
-        }],
-        [/[ \t]+/, 'white'],
-        [/[(){}[\]]/, 'delimiter'],
-        [/./, 'source'],
-      ],
-      dblString: [
-        [/[^"\\]+/, 'string'],
-        [/\\./, 'string.escape'],
-        [/"/, 'string', '@pop'],
-      ],
-      sglString: [
-        [/[^'\\]+/, 'string'],
-        [/\\./, 'string.escape'],
-        [/'/, 'string', '@pop'],
-      ],
-      multiString: [
-        [/[^"']+/, 'string'],
-        [/"""/, 'string', '@pop'],
-        [/'''/, 'string', '@pop'],
-        [/""/, 'string'],
-        [/''/, 'string'],
-        [/["']/, 'string'],
-      ],
-    },
-  })
-
+  // 创建编辑器（主题/语法/补全已在 monaco-init 中注册，此处直接创建）
+  const t1 = performance.now()
   editor = m.editor.create(containerRef.value, {
     value: editorStore.currentTab?.content || '',
     language: 'python',
@@ -375,6 +204,8 @@ async function initMonaco() {
     parameterHints: { enabled: false },
     contextmenu: false,
   })
+  console.log(`[Perf] CodeEditor.editor.create: ${(performance.now() - t1).toFixed(1)}ms`)
+  console.log(`[Perf] CodeEditor.initMonaco total: ${(performance.now() - t0).toFixed(1)}ms, initial content=${editorStore.currentTab?.content?.length ?? 0} chars`)
 
   // 注册智能补全（游戏模式 = 引擎 API + Python 标准库，代码模式 = Python 标准库）
   m.languages.registerCompletionItemProvider('python', {
@@ -520,7 +351,14 @@ function switchTab() {
 
   const newTab = editorStore.currentTab
 
-  if (!newTab) return
+  if (!newTab) {
+    // 所有标签关闭时清空编辑器
+    ignoreChange = true
+    const model = editor.getModel()
+    if (model) model.setValue('')
+    ignoreChange = false
+    return
+  }
 
   let saved = tabStates.get(newTab.id)
   if (!saved) {
@@ -546,6 +384,22 @@ watch(
   () => editorStore.currentTab,
   () => {
     nextTick(switchTab)
+  }
+)
+
+// 监听当前 tab 的 content 变化（启动时 restoreCodeTabContents 异步填充内容后触发刷新）
+watch(
+  () => editorStore.currentTab?.content,
+  (newContent, oldContent) => {
+    // 仅在内容真正变化且不是用户编辑触发的场景下刷新
+    if (editor && monaco && newContent !== undefined && newContent !== oldContent) {
+      const model = editor.getModel()
+      if (model && model.getValue() !== newContent) {
+        ignoreChange = true
+        model.setValue(newContent || '')
+        ignoreChange = false
+      }
+    }
   }
 )
 

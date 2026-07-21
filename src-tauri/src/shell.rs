@@ -33,7 +33,7 @@ pub fn start_shell(
     #[cfg(target_os = "macos")]
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     #[cfg(target_os = "windows")]
-    let shell = "cmd.exe".to_string();
+    let shell = "powershell.exe".to_string();
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
 
@@ -52,6 +52,16 @@ pub fn start_shell(
             cmd.arg("--norc");
             cmd.arg("--noprofile");
         }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // PowerShell: -NoLogo 不显示横幅，-NoProfile 不加载配置
+        // -NoExit 保持打开，-Command 自定义简洁提示符
+        cmd.arg("-NoLogo");
+        cmd.arg("-NoProfile");
+        cmd.arg("-NoExit");
+        cmd.arg("-Command");
+        cmd.arg("function prompt { '> ' }");
     }
     cmd.cwd(&working_dir);
 

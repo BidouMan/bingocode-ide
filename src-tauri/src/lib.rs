@@ -391,7 +391,7 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
         find_py(&resource_dir, &format!("engine/{}", py_name)),
         // 3. resource_dir 同级 engine/
         find_py(&resource_dir, &format!("../engine/{}", py_name)),
-        // 4. 往上最多 4 级查找
+        // 4. 从 resource_dir 往上最多 4 级查找 portable-python
         (|| {
             let mut cur = resource_dir.as_path();
             for _ in 0..4 {
@@ -403,10 +403,42 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
         })(),
         // 5. cwd/engine/
         find_py(&cwd, &format!("engine/{}", py_name)),
-        // 6. venv 回退（开发环境）
+        // 6. 从 cwd 往上最多 4 级查找 portable-python（dev 模式 cwd 可能是 src-tauri/）
+        (|| {
+            let mut cur = cwd.as_path();
+            for _ in 0..4 {
+                let p = cur.join("engine").join(&py_name);
+                if p.exists() { return Some(p.to_string_lossy().to_string()); }
+                cur = cur.parent()?;
+            }
+            None
+        })(),
+        // 7. venv 回退（开发环境）
         find_py(&resource_dir, &format!("engine/{}", venv_name)),
         find_py(&resource_dir, &venv_name),
         find_py(&cwd, &format!("engine/{}", venv_name)),
+        // 8. 从 cwd 往上最多 4 级查找 venv（dev 模式 cwd 可能是 src-tauri/）
+        (|| {
+            let mut cur = cwd.as_path();
+            for _ in 0..4 {
+                let p = cur.join("engine").join(&venv_name);
+                if p.exists() { return Some(p.to_string_lossy().to_string()); }
+                let p2 = cur.join(&venv_name);
+                if p2.exists() { return Some(p2.to_string_lossy().to_string()); }
+                cur = cur.parent()?;
+            }
+            None
+        })(),
+        // 9. 从 resource_dir 往上查找 venv
+        (|| {
+            let mut cur = resource_dir.as_path();
+            for _ in 0..6 {
+                cur = cur.parent()?;
+                let p = cur.join("engine").join(&venv_name);
+                if p.exists() { return Some(p.to_string_lossy().to_string()); }
+            }
+            None
+        })(),
     ].into_iter().flatten().next();
 
     // ═══ 查找 engine_dir ═══
@@ -435,12 +467,17 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
         let checked = vec![
             resource_dir.join(&py_name),
             resource_dir.join(format!("engine/{}", py_name)),
+            resource_dir.join(format!("../engine/{}", py_name)),
             cwd.join(format!("engine/{}", py_name)),
+            resource_dir.join(format!("engine/{}", venv_name)),
+            resource_dir.join(&venv_name),
+            cwd.join(format!("engine/{}", venv_name)),
         ];
         let paths: Vec<String> = checked.iter().map(|p| format!("  {}", p.display())).collect();
         return Err(format!(
-            "Python not found.\nresource_dir: {}\n已检查:\n{}",
+            "Python not found.\nresource_dir: {}\ncwd: {}\n已检查:\n{}",
             resource_dir.display(),
+            cwd.display(),
             paths.join("\n")
         ));
     }
@@ -837,6 +874,8 @@ fn run_script_output(
         .arg("-u")
         .arg(&script_path)
         .current_dir(&working_dir)
+        .env("PYTHONIOENCODING", "utf-8")
+        .env("PYTHONUNBUFFERED", "1")
         .output()
         .map_err(|e| format!("Failed to run script: {}", e))?;
 

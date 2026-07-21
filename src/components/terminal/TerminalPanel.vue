@@ -181,6 +181,8 @@ function createTerminal() {
 
   shell.startShell(
     (data) => {
+      // 代码模式运行程序时，不显示 shell 输出（程序输出走事件通道）
+      if (!editorStore.isGameMode && terminalStore.terminalMode === 'python') return
       terminal?.write(data)
       throttledScroll()
       // 代码模式下 isRunning 由 useEngine 事件管理，shell 回调不参与

@@ -157,10 +157,19 @@ onMounted(loadAllMapThumbnails)
 
 // 新项目不预创建地图，用户通过按钮创建
 onMounted(async () => {
+  const t0 = performance.now()
+  console.log('[Perf] MainLayout onMounted start')
   themeStore.initTheme()
+  const t1 = performance.now()
+  console.log(`[Perf] initTheme: ${(t1 - t0).toFixed(1)}ms`)
   await projectStore.initProject()
+  const t2 = performance.now()
+  console.log(`[Perf] initProject: ${(t2 - t1).toFixed(1)}ms`)
   // 恢复代码模式标签页内容
-  editorStore.restoreCodeTabContents()
+  await editorStore.restoreCodeTabContents()
+  const t3 = performance.now()
+  console.log(`[Perf] restoreCodeTabContents: ${(t3 - t2).toFixed(1)}ms`)
+  console.log(`[Perf] MainLayout onMounted total: ${(t3 - t0).toFixed(1)}ms`)
 })
 
 // 代码编辑器右键菜单事件
