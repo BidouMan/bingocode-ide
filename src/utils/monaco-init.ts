@@ -77,8 +77,15 @@ async function init(): Promise<typeof Monaco> {
 
   // 通过 AMD loader 加载预打包的 Monaco（绕过 Vite 编译）
   const tLoad = performance.now()
-  const m = await loadMonacoViaAmd()
-  console.log(`[Perf]   monaco-init: AMD load took ${(performance.now() - tLoad).toFixed(1)}ms`)
+  let m: typeof Monaco
+  try {
+    m = await loadMonacoViaAmd()
+  } catch (amdError) {
+    console.warn('[Monaco] AMD load failed, trying ESM fallback:', amdError)
+    // AMD 失败时回退到 ESM import（确保窗口能显示）
+    m = await import('monaco-editor/esm/vs/editor/editor.main.js') as any
+  }
+  console.log(`[Perf]   monaco-init: load took ${(performance.now() - tLoad).toFixed(1)}ms`)
   monacoInstance = m
 
   // ═══ 定义主题 ═══

@@ -8,11 +8,14 @@ import { waitForMonaco } from './utils/monaco-init'
 const bootReady = ref(false)
 
 onMounted(async () => {
-  // 等待 Monaco 加载完成。CodeEditor 一挂载就能直接创建编辑器，无 1.5 秒等待
-  await waitForMonaco()
-  // 主布局已挂载完成，可以显示窗口
+  try {
+    // 等待 Monaco 加载完成。CodeEditor 一挂载就能直接创建编辑器，无 1.5 秒等待
+    await waitForMonaco()
+  } catch (e) {
+    console.error('[Boot] Monaco load failed:', e)
+  }
+  // 无论如何都显示窗口（不被 Monaco 加载阻塞）
   bootReady.value = true
-  // 显示窗口，隐藏启动白屏
   const win = getCurrentWebviewWindow()
   await win.show()
   win.setFocus()
