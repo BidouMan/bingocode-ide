@@ -133,9 +133,19 @@ fn copy_file(src: String, dst_dir: String) -> Result<String, String> {
         .ok_or_else(|| "路径转换失败".to_string())
 }
 
+// Windows: 去掉 \\?\ 前缀再检查，否则 Path::exists() 可能失败
+fn path_exists(p: &std::path::Path) -> bool {
+    if cfg!(windows) {
+        let s = p.to_string_lossy().to_string();
+        std::path::PathBuf::from(s.trim_start_matches("\\\\?\\")).exists()
+    } else {
+        p.exists()
+    }
+}
+
 #[tauri::command]
-fn path_exists(path: String) -> bool {
-    std::path::Path::new(&path).exists()
+fn path_exists_cmd(path: String) -> bool {
+    path_exists(std::path::Path::new(&path))
 }
 
 #[tauri::command]
@@ -286,7 +296,7 @@ fn get_engine_assets_dir(app: tauri::AppHandle) -> Result<String, String> {
     let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
 
     // 查找引擎 assets 目录的策略（与 resolve_engine_env 相同）
-    let engine_dir = if resource_dir.join("engine").exists() {
+    let engine_dir = if path_exists(&resource_dir.join("engine")) {
         resource_dir.join("engine")
     } else {
         let mut candidate = resource_dir.as_path();
@@ -295,7 +305,7 @@ fn get_engine_assets_dir(app: tauri::AppHandle) -> Result<String, String> {
             if let Some(p) = candidate.parent() {
                 candidate = p;
                 let test = candidate.join("engine");
-                if test.exists() {
+                if path_exists(&test) {
                     found = Some(test);
                     break;
                 }
@@ -357,7 +367,7 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
     // 辅助函数：检查路径是否存在并返回可执行 Python 路径
     fn find_py(base: &std::path::Path, rel: &str) -> Option<String> {
         let p = base.join(rel);
-        if p.exists() {
+        if path_exists(&p) {
             Some(p.to_string_lossy().to_string())
         } else {
             None
@@ -368,7 +378,7 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
     fn find_engine_dir(from: &std::path::Path) -> std::path::PathBuf {
         let mut cur = from;
         for _ in 0..6 {
-            if cur.join("bingo_engine.py").exists() || cur.join("models").exists() {
+            if path_exists(&cur.join("bingo_engine.py")) || path_exists(&cur.join("models")) {
                 return cur.to_path_buf();
             }
             match cur.parent() {
@@ -397,7 +407,7 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
             for _ in 0..4 {
                 cur = cur.parent()?;
                 let p = cur.join("engine").join(&py_name);
-                if p.exists() { return Some(p.to_string_lossy().to_string()); }
+                if path_exists(&p) { return Some(p.to_string_lossy().to_string()); }
             }
             None
         })(),
@@ -408,7 +418,7 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
             let mut cur = cwd.as_path();
             for _ in 0..4 {
                 let p = cur.join("engine").join(&py_name);
-                if p.exists() { return Some(p.to_string_lossy().to_string()); }
+                if path_exists(&p) { return Some(p.to_string_lossy().to_string()); }
                 cur = cur.parent()?;
             }
             None
@@ -422,9 +432,9 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
             let mut cur = cwd.as_path();
             for _ in 0..4 {
                 let p = cur.join("engine").join(&venv_name);
-                if p.exists() { return Some(p.to_string_lossy().to_string()); }
+                if path_exists(&p) { return Some(p.to_string_lossy().to_string()); }
                 let p2 = cur.join(&venv_name);
-                if p2.exists() { return Some(p2.to_string_lossy().to_string()); }
+                if path_exists(&p2) { return Some(p2.to_string_lossy().to_string()); }
                 cur = cur.parent()?;
             }
             None
@@ -435,7 +445,7 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
             for _ in 0..6 {
                 cur = cur.parent()?;
                 let p = cur.join("engine").join(&venv_name);
-                if p.exists() { return Some(p.to_string_lossy().to_string()); }
+                if path_exists(&p) { return Some(p.to_string_lossy().to_string()); }
             }
             None
         })(),
@@ -448,14 +458,14 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
         let parent = py_path.parent().unwrap_or(&resource_dir);
         // portable-python/ 的上级可能是 engine/；venv/ 的上级也可能是 engine/
         let up = parent.parent().unwrap_or(parent);
-        if up.join("bingo_engine.py").exists() || up.join("models").exists() {
+        if path_exists(&up.join("bingo_engine.py")) || path_exists(&up.join("models")) {
             up.to_path_buf()
-        } else if parent.join("bingo_engine.py").exists() || parent.join("models").exists() {
+        } else if path_exists(&parent.join("bingo_engine.py")) || path_exists(&parent.join("models")) {
             parent.to_path_buf()
         } else {
             find_engine_dir(parent)
         }
-    } else if resource_dir.join("bingo_engine.py").exists() {
+    } else if path_exists(&resource_dir.join("bingo_engine.py")) {
         resource_dir.clone()
     } else {
         find_engine_dir(&cwd)
@@ -1128,7 +1138,7 @@ pub fn run() {
             list_dir,
             create_dir,
             delete_path,
-            path_exists,
+            path_exists_cmd,
             get_project_root,
             open_file_in_browser,
             save_temp_script,
