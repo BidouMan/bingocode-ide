@@ -184,11 +184,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # 构建后验证：直接检查 NSIS 安装包大小。
-          # 便携 Python 解压后约 50-100 MB，加上 Python 依赖（Pillow/numpy）后更大。
-          # 如果 NSIS 安装包小于 30 MB，几乎可以确定 Python 没被打进去。
-          # 这是 v0.4.8/v0.4.9 出现 "Python not found" 的根因——
-          # CI 静默产出了不包含 Python 的安装包。
+          # 构建后验证：直接用 7z 列出 NSIS 安装包内容，确认 python.exe 真的在里面。
+          # 这是 v0.4.8/v0.4.9/v0.5.0/v0.5.1 "Python not found" 的终极防线——
+          # 不再依赖安装包大小（不可靠），而是直接检查内容。
           echo "=== Bundle 目录树 ==="
           find src-tauri/target/release/bundle -type f 2>/dev/null | head -20
 
@@ -198,7 +196,7 @@ jobs:
           fi
 
           if [ -z "$INSTALLER" ]; then
-            echo "⚠️  未找到 NSIS 安装包，跳过大小验证（可能是 macOS 构建）"
+            echo "⚠️  未找到 NSIS 安装包，跳过验证（可能是 macOS 构建）"
             exit 0
           fi
 
@@ -207,15 +205,46 @@ jobs:
           echo "📦 安装包: $INSTALLER"
           echo "📦 大小: ${SIZE_MB} MB"
 
-          # 阈值 30 MB：Python 二进制本身约 30MB，加上 stdlib 和依赖远超此值
-          if [ "$SIZE_MB" -lt 30 ]; then
-            echo "❌ FATAL: 安装包体积过小 (${SIZE_MB} MB < 30 MB)"
-            echo "    几乎可以确定便携 Python 没被打进安装包。"
-            echo "    请检查 tauri.conf.json 的 resources glob 是否真的匹配到了"
-            echo "    engine/portable-python/ 下的 python 二进制。"
+          # 用 7z 直接检查安装包内容（Windows runner 预装 7z）
+          echo "=== 用 7z 检查安装包内容 ==="
+          if ! command -v 7z &>/dev/null; then
+            echo "⚠️  7z 不可用，跳过内容验证"
+            # 回退到大小验证（阈值 60MB：便携 Python + stdlib + Pillow/numpy 至少 50MB）
+            if [ "$SIZE_MB" -lt 60 ]; then
+              echo "❌ FATAL: 安装包体积过小 (${SIZE_MB} MB < 60 MB)"
+              echo "    几乎可以确定便携 Python 没被打进安装包。"
+              exit 1
+            fi
+            exit 0
+          fi
+
+          # 列出安装包中所有 python 相关文件
+          PYTHON_FILES=$(7z l "$INSTALLER" 2>/dev/null | grep -iE "python|python3" || true)
+          if [ -z "$PYTHON_FILES" ]; then
+            echo "❌ FATAL: 安装包中没有 Python 相关文件！"
+            echo "    7z 列出的文件中找不到 'python' 关键字。"
+            echo "    === 安装包内容（前 50 行）==="
+            7z l "$INSTALLER" 2>/dev/null | head -50
             exit 1
           fi
-          echo "✅ 安装包体积正常 (${SIZE_MB} MB ≥ 30 MB)，便携 Python 应已打包"
+
+          echo "✅ 安装包中找到 Python 文件："
+          echo "$PYTHON_FILES" | head -10
+
+          # 额外检查 python.exe 或 bin/python3 是否存在
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            if ! echo "$PYTHON_FILES" | grep -qi "python.exe"; then
+              echo "❌ FATAL: 安装包中没有 python.exe"
+              exit 1
+            fi
+          else
+            if ! echo "$PYTHON_FILES" | grep -qi "bin/python3"; then
+              echo "❌ FATAL: 安装包中没有 bin/python3"
+              exit 1
+            fi
+          fi
+
+          echo "✅ Python 二进制确认在安装包中"
 
       - name: Upload bundle
         uses: actions/upload-artifact@v5

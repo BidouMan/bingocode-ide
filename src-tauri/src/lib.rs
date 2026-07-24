@@ -295,35 +295,55 @@ fn extract_bgm_to_project(bgm_path: String, project_root: String, map_name: Stri
 fn get_engine_assets_dir(app: tauri::AppHandle) -> Result<String, String> {
     let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
 
-    // 查找引擎 assets 目录的策略（与 resolve_engine_env 相同）
-    let engine_dir = if path_exists(&resource_dir.join("engine")) {
-        resource_dir.join("engine")
-    } else {
-        let mut candidate = resource_dir.as_path();
-        let mut found = None;
-        for _ in 0..5 {
-            if let Some(p) = candidate.parent() {
-                candidate = p;
-                let test = candidate.join("engine");
-                if path_exists(&test) {
-                    found = Some(test);
-                    break;
-                }
-            } else {
-                break;
+    // 打包后资源布局（tauri.conf.json 列表格式）：
+    //   "../engine/assets/**/*" 中的 ../ 会被 Tauri 替换为 _up_/，
+    //   实际路径: $RESOURCE/_up_/engine/assets/
+    //
+    // dev 模式下 resource_dir 可能指向 src-tauri/，需要往上找项目根的 engine/
+    let candidates = [
+        resource_dir.join("engine"),
+        resource_dir.join("_up_").join("engine"),
+        resource_dir.join("..").join("engine"),
+    ];
+
+    for c in &candidates {
+        if path_exists(&c.join("assets")) || path_exists(&c.join("bingo_engine.py")) {
+            let assets_dir = c.join("assets");
+            return Ok(assets_dir.to_string_lossy().to_string());
+        }
+    }
+
+    // 从 resource_dir 往上找
+    let mut cur = resource_dir.as_path();
+    for _ in 0..5 {
+        if let Some(p) = cur.parent() {
+            cur = p;
+            let test = cur.join("engine");
+            if path_exists(&test.join("assets")) || path_exists(&test.join("bingo_engine.py")) {
+                return Ok(test.join("assets").to_string_lossy().to_string());
+            }
+        } else {
+            break;
+        }
+    }
+
+    // dev 模式：从 cwd 找
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut cur = cwd.as_path();
+        for _ in 0..4 {
+            let test = cur.join("engine");
+            if path_exists(&test.join("assets")) || path_exists(&test.join("bingo_engine.py")) {
+                return Ok(test.join("assets").to_string_lossy().to_string());
+            }
+            match cur.parent() {
+                Some(p) => cur = p,
+                None => break,
             }
         }
-        if let Some(f) = found {
-            f
-        } else if let Ok(cwd) = std::env::current_dir() {
-            cwd.join("engine")
-        } else {
-            resource_dir.join("engine")
-        }
-    };
+    }
 
-    let assets_dir = engine_dir.join("assets");
-    Ok(assets_dir.to_string_lossy().to_string())
+    // 最终回退
+    Ok(resource_dir.join("engine").join("assets").to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -393,13 +413,24 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
     let venv_name = if win { "venv/Scripts/python.exe" } else { "venv/bin/python3" };
 
     // ═══ 查找 Python ═══
-    // 按优先级逐个尝试，找到即停
+    // 打包后资源布局（tauri.conf.json 列表格式）：
+    //   "../engine/portable-python/**/*" 中的 ../ 会被 Tauri 替换为 _up_/，
+    //   实际路径: $RESOURCE/_up_/engine/portable-python/python.exe
+    //
+    // 这是 v0.4.8 ~ v0.5.1 "Python not found" 的根因：
+    //   代码只查找 $RESOURCE/engine/portable-python/python.exe，
+    //   但实际文件在 $RESOURCE/_up_/engine/portable-python/python.exe。
+    //   macOS 上 resource_dir 是 Contents/Resources/，往上跳一级恰好能找到，
+    //   所以 mac 版能成功；Windows 上 resource_dir 是安装根目录，往上跳找不到。
+    //   v0.5.2 在查找路径中添加了 _up_ 前缀，两个平台都能正确找到。
     let python_path = [
-        // 1. resource_dir 直接包含（打包：资源平铺到根）
+        // 1. 新布局：portable-python 直接放在 resource_dir 下（未来改用对象映射时）
         find_py(&resource_dir, &py_name),
-        // 2. resource_dir/engine/（打包：资源带 engine 前缀）
+        // 1b. engine 前缀
         find_py(&resource_dir, &format!("engine/{}", py_name)),
-        // 3. resource_dir 同级 engine/
+        // 2. 当前布局：_up_/engine/portable-python/（列表格式 ../ → _up_）
+        find_py(&resource_dir, &format!("_up_/engine/{}", py_name)),
+        // 3. resource_dir 同级 engine/（dev 模式）
         find_py(&resource_dir, &format!("../engine/{}", py_name)),
         // 4. 从 resource_dir 往上最多 4 级查找 portable-python
         (|| {
@@ -411,7 +442,7 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
             }
             None
         })(),
-        // 5. cwd/engine/
+        // 5. cwd/engine/（dev 模式）
         find_py(&cwd, &format!("engine/{}", py_name)),
         // 6. 从 cwd 往上最多 4 级查找 portable-python（dev 模式 cwd 可能是 src-tauri/）
         (|| {
@@ -477,6 +508,7 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
         let checked = vec![
             resource_dir.join(&py_name),
             resource_dir.join(format!("engine/{}", py_name)),
+            resource_dir.join(format!("_up_/engine/{}", py_name)),
             resource_dir.join(format!("../engine/{}", py_name)),
             cwd.join(format!("engine/{}", py_name)),
             resource_dir.join(format!("engine/{}", venv_name)),
