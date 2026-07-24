@@ -215,7 +215,7 @@ export const useFileExplorerStore = defineStore('fileExplorer', () => {
     // 同位置不移动
     if (sourcePath === newPath) return null
     // 目标已存在
-    const exists = await invoke<boolean>('path_exists', { path: newPath })
+    const exists = await invoke<boolean>('path_exists_cmd', { path: newPath })
     if (exists) return null
     await invoke('rename_path', { oldPath: sourcePath, newPath })
     // 刷新源父目录（保持展开状态）
@@ -274,7 +274,9 @@ export const useFileExplorerStore = defineStore('fileExplorer', () => {
     try {
       const last = localStorage.getItem(LAST_FOLDER_KEY)
       if (!last) return
-      const exists = await invoke<boolean>('path_exists', { path: last })
+      // 注意：Tauri 注册的命令名是 path_exists_cmd，不是 path_exists
+      // （lib.rs 中 fn path_exists 是内部辅助函数，#[tauri::command] 标注的是 path_exists_cmd）
+      const exists = await invoke<boolean>('path_exists_cmd', { path: last })
       if (exists) {
         await openFolder(last)
       } else {
