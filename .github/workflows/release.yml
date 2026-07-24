@@ -183,10 +183,8 @@ jobs:
       - name: Verify bundle contains Python
         shell: bash
         run: |
-          set -euo pipefail
           # 构建后验证：直接用 7z 列出 NSIS 安装包内容，确认 python.exe 真的在里面。
-          # 这是 v0.4.8/v0.4.9/v0.5.0/v0.5.1 "Python not found" 的终极防线——
-          # 不再依赖安装包大小（不可靠），而是直接检查内容。
+          # 不用 set -euo pipefail —— 7z 管道容易触发 SIGPIPE (exit 141)
           echo "=== Bundle 目录树 ==="
           find src-tauri/target/release/bundle -type f 2>/dev/null | head -20
 
@@ -205,45 +203,37 @@ jobs:
           echo "📦 安装包: $INSTALLER"
           echo "📦 大小: ${SIZE_MB} MB"
 
-          # 用 7z 直接检查安装包内容（Windows runner 预装 7z）
-          echo "=== 用 7z 检查安装包内容 ==="
-          if ! command -v 7z &>/dev/null; then
-            echo "⚠️  7z 不可用，跳过内容验证"
-            # 回退到大小验证（阈值 60MB：便携 Python + stdlib + Pillow/numpy 至少 50MB）
-            if [ "$SIZE_MB" -lt 60 ]; then
-              echo "❌ FATAL: 安装包体积过小 (${SIZE_MB} MB < 60 MB)"
-              echo "    几乎可以确定便携 Python 没被打进安装包。"
-              exit 1
-            fi
-            exit 0
+          # 用 7z 列出安装包内容到临时文件（避免管道 SIGPIPE）
+          LIST_FILE=$(mktemp)
+          7z l "$INSTALLER" > "$LIST_FILE" 2>&1 || true
+
+          echo "=== 7z 列出文件总数 ==="
+          wc -l "$LIST_FILE"
+
+          # 检查 python.exe（Windows）或 bin/python3（macOS）是否在安装包中
+          # NSIS 安装包中路径可能是 _up_\engine\portable-python\python.exe 这种格式
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            PY_PATTERN="python\.exe"
+          else
+            PY_PATTERN="bin/python3"
           fi
 
-          # 列出安装包中所有 python 相关文件
-          PYTHON_FILES=$(7z l "$INSTALLER" 2>/dev/null | grep -iE "python|python3" || true)
-          if [ -z "$PYTHON_FILES" ]; then
-            echo "❌ FATAL: 安装包中没有 Python 相关文件！"
-            echo "    7z 列出的文件中找不到 'python' 关键字。"
-            echo "    === 安装包内容（前 50 行）==="
-            7z l "$INSTALLER" 2>/dev/null | head -50
+          echo "=== 搜索 Python 二进制 ($PY_PATTERN) ==="
+          PY_MATCHES=$(grep -iE "$PY_PATTERN" "$LIST_FILE" || true)
+
+          if [ -z "$PY_MATCHES" ]; then
+            echo "❌ FATAL: 安装包中没有 Python 二进制 (匹配: $PY_PATTERN)"
+            echo "    === 7z 输出中包含 'python' 的行（前 20 行）==="
+            grep -i "python" "$LIST_FILE" | head -20 || echo "    (无)"
+            echo "    === 7z 输出前 30 行 ==="
+            head -30 "$LIST_FILE"
+            rm -f "$LIST_FILE"
             exit 1
           fi
 
-          echo "✅ 安装包中找到 Python 文件："
-          echo "$PYTHON_FILES" | head -10
-
-          # 额外检查 python.exe 或 bin/python3 是否存在
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            if ! echo "$PYTHON_FILES" | grep -qi "python.exe"; then
-              echo "❌ FATAL: 安装包中没有 python.exe"
-              exit 1
-            fi
-          else
-            if ! echo "$PYTHON_FILES" | grep -qi "bin/python3"; then
-              echo "❌ FATAL: 安装包中没有 bin/python3"
-              exit 1
-            fi
-          fi
-
+          echo "✅ 安装包中找到 Python 二进制："
+          echo "$PY_MATCHES" | head -5
+          rm -f "$LIST_FILE"
           echo "✅ Python 二进制确认在安装包中"
 
       - name: Upload bundle
