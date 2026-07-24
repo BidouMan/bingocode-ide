@@ -136,31 +136,46 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # 关键验证：在 build 之前确认 python 二进制真的存在，
+          # 关键验证：在 build 之前确认 python 二进制真的可执行，
           # 否则 build.rs 会 panic 中止构建。
           # 历史上曾发生过 portable-python 目录只有 .gitkeep 就被打包，
           # 导致用户安装后运行报 "Python not found"。
+          #
+          # 注意：不能用文件大小判断——
+          #   - macOS 上 bin/python3 是 symlink（指向 python3.12），symlink 本身只有几 bytes
+          #   - Windows 上 python.exe 是 launcher stub（约 90KB），真正解释器在 python3.dll
+          # 最可靠的方式是直接执行 --version 验证可运行性。
           if [ "${{ runner.os }}" = "Windows" ]; then
             PY_BIN="$GITHUB_WORKSPACE/engine/portable-python/python.exe"
           else
             PY_BIN="$GITHUB_WORKSPACE/engine/portable-python/bin/python3"
           fi
 
-          if [ ! -f "$PY_BIN" ]; then
+          if [ ! -e "$PY_BIN" ]; then
             echo "❌ FATAL: Python binary not found at: $PY_BIN"
             echo "    Directory contents:"
             ls -la "$GITHUB_WORKSPACE/engine/portable-python/" 2>/dev/null || echo "    (directory missing)"
+            ls -la "$GITHUB_WORKSPACE/engine/portable-python/bin/" 2>/dev/null || true
             exit 1
           fi
 
-          SIZE=$(stat -c%s "$PY_BIN" 2>/dev/null || stat -f%z "$PY_BIN")
-          if [ "$SIZE" -lt 100000 ]; then
-            echo "❌ FATAL: Python binary suspiciously small (${SIZE} bytes): $PY_BIN"
+          # 执行验证：能跑通就算数（比文件大小可靠）
+          echo "🐍 Verifying Python at: $PY_BIN"
+          VERSION_OUTPUT=$("$PY_BIN" --version 2>&1) || {
+            echo "❌ FATAL: Python binary not executable: $PY_BIN"
+            echo "    --version output: $VERSION_OUTPUT"
             exit 1
-          fi
+          }
+          echo "✅ Python executable: $VERSION_OUTPUT"
 
-          echo "✅ Verified Python binary: $PY_BIN ($SIZE bytes)"
-          "$PY_BIN" --version
+          # 额外验证：确认能 import 关键依赖（Pillow/numpy）
+          # 这些是 engine/requirements.txt 里要装的，setup 步骤应该已装好
+          DEP_CHECK=$("$PY_BIN" -c "import PIL, numpy; print('deps OK')" 2>&1) || {
+            echo "⚠️  WARNING: Python dependencies missing: $DEP_CHECK"
+            echo "    Setup step should have installed Pillow + numpy."
+            echo "    Continuing anyway (will fail at runtime if deps are truly missing)."
+          }
+          echo "✅ $DEP_CHECK"
 
       - name: Build Tauri app
         run: pnpm tauri build

@@ -51,24 +51,12 @@ fn main() {
         } else {
             println!("cargo:warning={}", msg);
         }
-    } else {
-        // 进一步检查：如果便携 Python 大小异常小（< 1MB），可能解压不完整
-        if let Ok(meta) = std::fs::metadata(&py_bin) {
-            let size_mb = meta.len() as f64 / 1024.0 / 1024.0;
-            if size_mb < 0.01 {
-                let msg = format!(
-                    "便携 Python 二进制异常小 ({:.2} KB)，可能解压不完整: {}",
-                    size_mb * 1024.0,
-                    py_bin.display()
-                );
-                if is_release {
-                    panic!("{}", msg);
-                } else {
-                    println!("cargo:warning={}", msg);
-                }
-            }
-        }
     }
+    // 注意：不检查文件大小——
+    //   macOS 上 bin/python3 是 symlink，symlink 本身只有几 bytes
+    //   Windows 上 python.exe 是 launcher stub（约 90KB），真正解释器在 python3.dll
+    // CI 的 "Verify portable Python before build" 步骤会执行 python --version
+    // 来验证可运行性，比文件大小可靠得多。
 
     tauri_build::build()
 }
