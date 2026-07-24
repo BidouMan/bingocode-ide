@@ -146,6 +146,14 @@ async function loadAllMapThumbnails() {
 async function loadProjectResources(root: string) {
   if (!root) return
 
+  // ── 同步文件树（VSCode 逻辑：打开项目后文件树显示工作目录）──
+  // fileExplorerStore 和 projectStore 是两套独立状态，
+  // 打开 .bingo 项目时 projectStore.root 已更新但 fileExplorerStore 不会自动同步。
+  // 这里显式调用 openFolder 让左侧文件树显示工作目录。
+  if (fileExplorerStore.workspaceFolder !== root) {
+    await fileExplorerStore.openFolder(root)
+  }
+
   // ── 预加载代码文件 ──
   try {
     const files = await invoke<string[]>('list_dir', { path: `${root}/code` })
