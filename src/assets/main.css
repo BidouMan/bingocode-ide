@@ -1,12 +1,17 @@
 @import "tailwindcss";
 
 /* 内置 JetBrains Mono 字体 */
+/* font-display: block —— 字体加载期间不显示 fallback 文字，
+   避免 Monaco 创建后字体切换导致光标位置错乱 */
+/* font-weight: 100 1000 —— 让所有字重都用同一个 ttf，
+   避免 Monaco 渲染粗体/斜体时使用合成字（faux bold/italic），
+   合成字字宽与 Regular 不一致会导致光标与文字错位 */
 @font-face {
   font-family: 'JetBrains Mono';
   src: url('./fonts/JetBrainsMono-Regular.ttf') format('truetype');
-  font-weight: 400;
+  font-weight: 100 1000;
   font-style: normal;
-  font-display: swap;
+  font-display: block;
 }
 
 @theme {

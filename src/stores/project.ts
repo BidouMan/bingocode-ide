@@ -11,6 +11,38 @@ export interface ProjectState {
   resourceDirty: boolean
 }
 
+// 持久化上次打开的 .bingo 项目路径，启动时自动恢复
+const LAST_PROJECT_KEY = 'bingo-ide-last-project'
+
+interface LastProjectInfo {
+  bingoPath: string
+  name: string
+}
+
+function loadLastProject(): LastProjectInfo | null {
+  try {
+    const saved = localStorage.getItem(LAST_PROJECT_KEY)
+    if (!saved) return null
+    const data = JSON.parse(saved)
+    if (typeof data?.bingoPath === 'string' && data.bingoPath) {
+      return { bingoPath: data.bingoPath, name: data.name || '未命名项目' }
+    }
+  } catch {}
+  return null
+}
+
+function saveLastProject(bingoPath: string, name: string) {
+  try {
+    localStorage.setItem(LAST_PROJECT_KEY, JSON.stringify({ bingoPath, name }))
+  } catch {}
+}
+
+function clearLastProject() {
+  try {
+    localStorage.removeItem(LAST_PROJECT_KEY)
+  } catch {}
+}
+
 export const useProjectStore = defineStore('project', () => {
   const root = ref('')
   const name = ref('')
@@ -19,6 +51,9 @@ export const useProjectStore = defineStore('project', () => {
   const codeDirty = ref(false)
   const resourceDirty = ref(false)
   const initialized = ref(false)
+  // 启动恢复时使用：标记本次 initProject 是从上次项目恢复的，
+  // MainLayout.onMounted 据此决定是否需要预加载项目资源
+  const restoredFromLast = ref(false)
 
   const projectName = computed(() => name.value || '未命名项目')
   const isDirty = computed(() => codeDirty.value || resourceDirty.value)
@@ -32,6 +67,20 @@ export const useProjectStore = defineStore('project', () => {
 
   async function initProject() {
     if (initialized.value) return root.value
+    // 优先尝试恢复上次打开的 .bingo 项目
+    const last = loadLastProject()
+    if (last) {
+      console.log(`[Project] 尝试恢复上次项目: ${last.bingoPath}`)
+      const ok = await openProject(last.bingoPath)
+      if (ok) {
+        initialized.value = true
+        restoredFromLast.value = true
+        return root.value
+      }
+      // 恢复失败（文件被删/损坏），回退到默认项目
+      console.warn('[Project] 恢复上次项目失败，回退到默认项目')
+      clearLastProject()
+    }
     try {
       const projectRoot = await invoke<string>('init_default_project')
       root.value = projectRoot
@@ -51,6 +100,8 @@ export const useProjectStore = defineStore('project', () => {
     bingoPath.value = null
     codeDirty.value = false
     resourceDirty.value = false
+    // 新建项目没有 .bingo 路径，清除上次项目记录
+    clearLastProject()
     return projectRoot
   }
 
@@ -85,6 +136,8 @@ export const useProjectStore = defineStore('project', () => {
       })
       codeDirty.value = false
       resourceDirty.value = false
+      // 更新上次项目记录
+      saveLastProject(bingoPath.value, name.value)
       return true
     } catch (e) {
       console.error('[Project] 保存失败:', e)
@@ -105,6 +158,8 @@ export const useProjectStore = defineStore('project', () => {
       name.value = fileName
       codeDirty.value = false
       resourceDirty.value = false
+      // 更新上次项目记录
+      saveLastProject(outputPath, fileName)
       return true
     } catch (e) {
       console.error('[Project] 另存为失败:', e)
@@ -124,6 +179,8 @@ export const useProjectStore = defineStore('project', () => {
       name.value = fileName
       codeDirty.value = false
       resourceDirty.value = false
+      // 更新上次项目记录
+      saveLastProject(bingoFilePath, fileName)
       return true
     } catch (e) {
       console.error('[Project] 打开项目失败:', e)
@@ -156,6 +213,7 @@ export const useProjectStore = defineStore('project', () => {
     codeDirty,
     resourceDirty,
     initialized,
+    restoredFromLast,
     projectName,
     isDirty,
     setProject,

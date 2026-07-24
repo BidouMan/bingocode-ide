@@ -132,8 +132,75 @@ jobs:
           echo "✅ Portable Python ready"
           du -sh "$OUTPUT_DIR"
 
+      - name: Verify portable Python before build
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 关键验证：在 build 之前确认 python 二进制真的存在，
+          # 否则 build.rs 会 panic 中止构建。
+          # 历史上曾发生过 portable-python 目录只有 .gitkeep 就被打包，
+          # 导致用户安装后运行报 "Python not found"。
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            PY_BIN="$GITHUB_WORKSPACE/engine/portable-python/python.exe"
+          else
+            PY_BIN="$GITHUB_WORKSPACE/engine/portable-python/bin/python3"
+          fi
+
+          if [ ! -f "$PY_BIN" ]; then
+            echo "❌ FATAL: Python binary not found at: $PY_BIN"
+            echo "    Directory contents:"
+            ls -la "$GITHUB_WORKSPACE/engine/portable-python/" 2>/dev/null || echo "    (directory missing)"
+            exit 1
+          fi
+
+          SIZE=$(stat -c%s "$PY_BIN" 2>/dev/null || stat -f%z "$PY_BIN")
+          if [ "$SIZE" -lt 100000 ]; then
+            echo "❌ FATAL: Python binary suspiciously small (${SIZE} bytes): $PY_BIN"
+            exit 1
+          fi
+
+          echo "✅ Verified Python binary: $PY_BIN ($SIZE bytes)"
+          "$PY_BIN" --version
+
       - name: Build Tauri app
         run: pnpm tauri build
+
+      - name: Verify bundle contains Python
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 构建后验证：直接检查 NSIS 安装包大小。
+          # 便携 Python 解压后约 50-100 MB，加上 Python 依赖（Pillow/numpy）后更大。
+          # 如果 NSIS 安装包小于 30 MB，几乎可以确定 Python 没被打进去。
+          # 这是 v0.4.8/v0.4.9 出现 "Python not found" 的根因——
+          # CI 静默产出了不包含 Python 的安装包。
+          echo "=== Bundle 目录树 ==="
+          find src-tauri/target/release/bundle -type f 2>/dev/null | head -20
+
+          INSTALLER=$(find src-tauri/target/release/bundle -name "*.exe" -path "*nsis*" 2>/dev/null | head -1)
+          if [ -z "$INSTALLER" ]; then
+            INSTALLER=$(find src-tauri/target/release/bundle -name "*-setup.exe" 2>/dev/null | head -1)
+          fi
+
+          if [ -z "$INSTALLER" ]; then
+            echo "⚠️  未找到 NSIS 安装包，跳过大小验证（可能是 macOS 构建）"
+            exit 0
+          fi
+
+          SIZE=$(stat -c%s "$INSTALLER" 2>/dev/null || stat -f%z "$INSTALLER")
+          SIZE_MB=$((SIZE / 1024 / 1024))
+          echo "📦 安装包: $INSTALLER"
+          echo "📦 大小: ${SIZE_MB} MB"
+
+          # 阈值 30 MB：Python 二进制本身约 30MB，加上 stdlib 和依赖远超此值
+          if [ "$SIZE_MB" -lt 30 ]; then
+            echo "❌ FATAL: 安装包体积过小 (${SIZE_MB} MB < 30 MB)"
+            echo "    几乎可以确定便携 Python 没被打进安装包。"
+            echo "    请检查 tauri.conf.json 的 resources glob 是否真的匹配到了"
+            echo "    engine/portable-python/ 下的 python 二进制。"
+            exit 1
+          fi
+          echo "✅ 安装包体积正常 (${SIZE_MB} MB ≥ 30 MB)，便携 Python 应已打包"
 
       - name: Upload bundle
         uses: actions/upload-artifact@v5

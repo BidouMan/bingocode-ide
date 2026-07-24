@@ -75,6 +75,20 @@ function loadMonacoViaAmd(): Promise<typeof Monaco> {
 async function init(): Promise<typeof Monaco> {
   const tInit = performance.now()
 
+  // 等待 JetBrains Mono 字体加载完成，避免 Monaco 创建后字体切换导致光标错位
+  // （font-display: block 已经让浏览器在加载期间不显示 fallback，但 Monaco
+  //  内部会测量字宽来定位光标，字体未加载完成时测量结果会错误）
+  if (typeof document !== 'undefined' && (document as any).fonts) {
+    const tFont = performance.now()
+    try {
+      await (document as any).fonts.load('16px "JetBrains Mono"')
+      await (document as any).fonts.load('bold 16px "JetBrains Mono"')
+      console.log(`[Perf]   monaco-init: JetBrains Mono loaded in ${(performance.now() - tFont).toFixed(1)}ms`)
+    } catch (e) {
+      console.warn('[Monaco] 字体加载失败，继续初始化:', e)
+    }
+  }
+
   // 通过 AMD loader 加载预打包的 Monaco（绕过 Vite 编译）
   const tLoad = performance.now()
   let m: typeof Monaco

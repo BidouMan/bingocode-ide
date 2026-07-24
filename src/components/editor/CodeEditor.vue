@@ -152,7 +152,9 @@ async function initMonaco() {
     theme: themeStore.colors.monacoTheme,
     fontSize: editorStore.editorFontSize,
     // 不强制 lineHeight，让 Monaco 根据字体自动计算，避免中英文行高不一致导致光标错位
-    fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
+    // fontFamily 简化为只保留项目内置的 JetBrains Mono + monospace fallback，
+    // 去掉 Fira Code/Consolas 等中间 fallback（用户机器不一定有，fallback 时字宽不一会导致光标错位）
+    fontFamily: "'JetBrains Mono', monospace",
     fontLigatures: false,
     mouseWheelZoom: false,
     minimap: { enabled: false },

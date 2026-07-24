@@ -136,6 +136,80 @@ async function loadAllMapThumbnails() {
   await Promise.all(promises)
 }
 
+/**
+ * 从工作目录预加载项目资源（代码/地图/精灵/声音）。
+ * 供两处复用：
+ *   1. 文件菜单"打开项目"成功后
+ *   2. 启动时从 lastProject 恢复后
+ * 调用前需保证 projectStore.root 已指向有效工作目录、旧数据已清空。
+ */
+async function loadProjectResources(root: string) {
+  if (!root) return
+
+  // ── 预加载代码文件 ──
+  try {
+    const files = await invoke<string[]>('list_dir', { path: `${root}/code` })
+    for (const file of files) {
+      if (file.endsWith('.py')) {
+        const content = await invoke<string>('read_file', { path: `${root}/code/${file}` })
+        editorStore.createTab(file, `${root}/code/${file}`, content)
+        resourceStore.addItem({ name: file, type: 'code', path: `${root}/code/${file}`, content })
+      }
+    }
+  } catch { /* code 目录可能不存在 */ }
+
+  // ── 预加载地图资源 ──
+  try {
+    const mapEntries = await invoke<string[]>('list_dir', { path: `${root}/assets/maps` })
+    for (const entry of mapEntries) {
+      const mapName = entry.replace(/\/$/, '')
+      const jsonPath = `${root}/assets/maps/${mapName}/map.json`
+      const exists = await invoke<boolean>('path_exists', { path: jsonPath })
+      if (!exists) continue
+      const json = await invoke<string>('read_file', { path: jsonPath })
+      const saveData = JSON.parse(json)
+      const { deserializeMap } = await import('../../utils/mapSerializer')
+      const mapData = deserializeMap(saveData)
+      const mapId = resourceStore.addItem({ name: mapName, type: 'map', path: `${root}/assets/maps/${mapName}` })
+      resourceStore.setCachedMapData(mapId, mapData)
+    }
+  } catch { /* assets/maps 可能不存在 */ }
+
+  // ── 预加载精灵资源 ──
+  try {
+    const spriteEntries = await invoke<string[]>('list_dir', { path: `${root}/assets/sprites` })
+    for (const entry of spriteEntries) {
+      const dirName = entry.replace(/\/$/, '')
+      if (!dirName) continue
+      const dirPath = `${root}/assets/sprites/${dirName}`
+      resourceStore.addItem({ name: dirName, type: 'sprite', path: dirPath })
+    }
+  } catch { /* assets/sprites 可能不存在 */ }
+
+  // ── 预加载声音资源 ──
+  try {
+    const soundFiles = await invoke<string[]>('list_dir', { path: `${root}/assets/sounds` })
+    for (const file of soundFiles) {
+      if (file.endsWith('.wav') || file.endsWith('.mp3') || file.endsWith('.ogg')) {
+        const name = file.replace(/\.\w+$/, '')
+        resourceStore.addItem({ name, type: 'sound', path: `${root}/assets/sounds/${file}` })
+      }
+    }
+  } catch { /* assets/sounds 可能不存在 */ }
+
+  // 刷新缩略图（并行加载，不阻塞后续流程）
+  Promise.all([loadAllSpriteThumbnails(), loadAllMapThumbnails()])
+
+  // 切换到第一个代码标签（如有）
+  if (editorStore.currentTabs.length > 0) {
+    editorStore.setActiveTab(0)
+  }
+  editorStore.setActiveEditorMode('code')
+  editorStore.setResourceTab('sprite')
+  // 确保回到主页面
+  currentPage.value = 0
+}
+
 // 地图列表变化时不自动加载缩略图（改为切换标签时刷新）
 watch(() => editorStore.resourceTab, (tab) => {
   if (tab === 'map') {
@@ -165,7 +239,28 @@ onMounted(async () => {
   await projectStore.initProject()
   const t2 = performance.now()
   console.log(`[Perf] initProject: ${(t2 - t1).toFixed(1)}ms`)
-  // 恢复代码模式标签页内容
+
+  // 如果启动时从上次项目恢复，需要预加载项目资源
+  // （和文件菜单"打开项目"走同一段逻辑）
+  if (projectStore.restoredFromLast && projectStore.root) {
+    console.log('[Perf] 检测到上次项目恢复，开始预加载资源')
+    // 清空 editor store 初始化时从 localStorage 恢复的旧 tab
+    // （这些 tab 的 path 指向上次项目的 code 文件，loadProjectResources 会重新创建）
+    resourceStore.clearAllResources()
+    renderStore.clearAll()
+    editorStore.gameTabs.splice(0, editorStore.gameTabs.length)
+    editorStore.codeTabs.splice(0, editorStore.codeTabs.length)
+    editorStore.gameActiveTabIndex = 0
+    editorStore.codeActiveTabIndex = 0
+    await nextTick()
+    await loadProjectResources(projectStore.root)
+    const t3 = performance.now()
+    console.log(`[Perf] loadProjectResources: ${(t3 - t2).toFixed(1)}ms`)
+    console.log(`[Perf] MainLayout onMounted total: ${(t3 - t0).toFixed(1)}ms`)
+    return
+  }
+
+  // 默认项目：恢复代码模式标签页内容
   await editorStore.restoreCodeTabContents()
   const t3 = performance.now()
   console.log(`[Perf] restoreCodeTabContents: ${(t3 - t2).toFixed(1)}ms`)
@@ -355,68 +450,8 @@ async function fileMenuAction(action: string) {
       editorStore.codeActiveTabIndex = 0
       await nextTick()
 
-      // ── 预加载代码文件（createTab 根据当前模式加入对应列表）──
-      try {
-        const files = await invoke<string[]>('list_dir', { path: `${root}/code` })
-        for (const file of files) {
-          if (file.endsWith('.py')) {
-            const content = await invoke<string>('read_file', { path: `${root}/code/${file}` })
-            editorStore.createTab(file, `${root}/code/${file}`, content)
-            resourceStore.addItem({ name: file, type: 'code', path: `${root}/code/${file}`, content })
-          }
-        }
-      } catch { /* code 目录可能不存在 */ }
-
-      // ── 预加载地图资源 ──
-      try {
-        const mapEntries = await invoke<string[]>('list_dir', { path: `${root}/assets/maps` })
-        for (const entry of mapEntries) {
-          const mapName = entry.replace(/\/$/, '')
-          const jsonPath = `${root}/assets/maps/${mapName}/map.json`
-          const exists = await invoke<boolean>('path_exists', { path: jsonPath })
-          if (!exists) continue
-          const json = await invoke<string>('read_file', { path: jsonPath })
-          const saveData = JSON.parse(json)
-          const { deserializeMap } = await import('../../utils/mapSerializer')
-          const mapData = deserializeMap(saveData)
-          const mapId = resourceStore.addItem({ name: mapName, type: 'map', path: `${root}/assets/maps/${mapName}` })
-          resourceStore.setCachedMapData(mapId, mapData)
-        }
-      } catch { /* assets/maps 可能不存在 */ }
-
-      // ── 预加载精灵资源 ──
-      try {
-        const spriteEntries = await invoke<string[]>('list_dir', { path: `${root}/assets/sprites` })
-        for (const entry of spriteEntries) {
-          const dirName = entry.replace(/\/$/, '')
-          if (!dirName) continue
-          const dirPath = `${root}/assets/sprites/${dirName}`
-          resourceStore.addItem({ name: dirName, type: 'sprite', path: dirPath })
-        }
-      } catch { /* assets/sprites 可能不存在 */ }
-
-      // ── 预加载声音资源 ──
-      try {
-        const soundFiles = await invoke<string[]>('list_dir', { path: `${root}/assets/sounds` })
-        for (const file of soundFiles) {
-          if (file.endsWith('.wav') || file.endsWith('.mp3') || file.endsWith('.ogg')) {
-            const name = file.replace(/\.\w+$/, '')
-            resourceStore.addItem({ name, type: 'sound', path: `${root}/assets/sounds/${file}` })
-          }
-        }
-      } catch { /* assets/sounds 可能不存在 */ }
-
-      // 刷新缩略图（并行加载，不阻塞后续流程）
-      Promise.all([loadAllSpriteThumbnails(), loadAllMapThumbnails()])
-
-      // 切换到第一个代码标签（如有）
-      if (editorStore.currentTabs.length > 0) {
-        editorStore.setActiveTab(0)
-      }
-      editorStore.setActiveEditorMode('code')
-      editorStore.setResourceTab('sprite')
-      // 确保回到主页面
-      currentPage.value = 0
+      // 预加载项目资源（代码/地图/精灵/声音）
+      await loadProjectResources(root)
       break
     }
 
