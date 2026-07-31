@@ -107,7 +107,7 @@ async function init(): Promise<typeof Monaco> {
     base: 'vs-dark',
     inherit: true,
     rules: [
-      { token: 'comment', foreground: '565f89', fontStyle: 'italic' },
+      { token: 'comment', foreground: '565f89' },
       { token: 'keyword', foreground: 'bb9af7' },
       { token: 'string', foreground: '9ece6a' },
       { token: 'number', foreground: 'ff9e64' },
@@ -147,7 +147,7 @@ async function init(): Promise<typeof Monaco> {
     base: 'vs',
     inherit: true,
     rules: [
-      { token: 'comment', foreground: 'a0a1a7', fontStyle: 'italic' },
+      { token: 'comment', foreground: 'a0a1a7' },
       { token: 'keyword', foreground: 'a626a4' },
       { token: 'string', foreground: '50a14f' },
       { token: 'number', foreground: '986801' },
@@ -187,7 +187,7 @@ async function init(): Promise<typeof Monaco> {
     base: 'vs-dark',
     inherit: true,
     rules: [
-      { token: 'comment', foreground: '928374', fontStyle: 'italic' },
+      { token: 'comment', foreground: '928374' },
       { token: 'keyword', foreground: 'fb4934' },
       { token: 'string', foreground: 'b8bb26' },
       { token: 'number', foreground: 'd3869b' },
@@ -227,7 +227,7 @@ async function init(): Promise<typeof Monaco> {
     base: 'vs-dark',
     inherit: true,
     rules: [
-      { token: 'comment', foreground: '616e88', fontStyle: 'italic' },
+      { token: 'comment', foreground: '616e88' },
       { token: 'keyword', foreground: '81a1c1' },
       { token: 'string', foreground: 'a3be8c' },
       { token: 'number', foreground: 'b48ead' },
@@ -267,7 +267,7 @@ async function init(): Promise<typeof Monaco> {
     base: 'vs-dark',
     inherit: true,
     rules: [
-      { token: 'comment', foreground: '5c6370', fontStyle: 'italic' },
+      { token: 'comment', foreground: '5c6370' },
       { token: 'keyword', foreground: 'c678dd' },
       { token: 'string', foreground: '98c379' },
       { token: 'number', foreground: 'd19a66' },
