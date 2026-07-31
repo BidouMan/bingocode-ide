@@ -12,8 +12,6 @@ const BUILTIN_PACKAGES = new Set([
   'pip', 'setuptools', 'wheel',
   // 代码格式化 (black)
   'black', 'click', 'mypy_extensions', 'pathspec',
-  // 代码检查 (pyflakes)
-  'pyflakes',
   // 其他内置依赖
   'packaging', 'platformdirs', 'pytokens', 'tomli', 'typing_extensions',
 ])

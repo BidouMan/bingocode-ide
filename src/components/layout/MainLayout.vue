@@ -54,7 +54,6 @@ import iconPython from '../../assets/icons/python_file_1.svg'
 import iconUndo from '../../assets/icons/undo.svg'
 import iconRedo from '../../assets/icons/redo.svg'
 import iconSoundIcon from '../../assets/icons/sound_icon.svg'
-import iconCodeCheck from '../../assets/icons/code_check.svg'
 import iconCodeFormat from '../../assets/icons/code_fomat.svg'
 import iconAddOne from '../../assets/icons/add-one.svg'
 import iconReduceOne from '../../assets/icons/reduce-one.svg'
@@ -269,7 +268,6 @@ onMounted(async () => {
 
 // 代码编辑器右键菜单事件
 window.addEventListener('editor-run', () => { toggleRun() })
-window.addEventListener('editor-check', () => { ideCheckCode() })
 window.addEventListener('editor-format', () => { ideFormatCode() })
 
 // 自动选中第一个资源
@@ -1177,187 +1175,7 @@ async function ideSaveFileAs() {
 
 // ═══ IDE 模式文件操作结束 ═══
 
-// ═══ 代码检查与格式化 ═══
-
-// 检查代码语法 - 使用 pyflakes
-async function ideCheckCode() {
-  const tab = editorStore.currentTab
-  if (!tab) return
-
-  consoleVisible.value = true
-  await nextTick()
-
-  terminalStore.clear()
-  terminalStore.appendLine('\x1b[36m🔍 正在检查代码...\x1b[0m')
-
-  const code = tab.content
-  if (!code.trim()) {
-    terminalStore.appendLine('\x1b[33m⚠️ 代码为空\x1b[0m')
-    return
-  }
-
-  const projectRoot = projectStore.root || ''
-
-  try {
-    const env = await invoke<{
-      python_path: string
-      engine_dir: string
-      working_dir: string
-    }>('resolve_engine_env', { scriptPath: '', projectRoot: projectRoot || undefined })
-
-    // 直接在检查脚本中内联用户代码，避免文件覆盖问题
-    // 使用 base64 编码传递代码，避免转义问题
-    const encoder = new TextEncoder()
-    const data = encoder.encode(code)
-    let binary = ''
-    for (let i = 0; i < data.length; i++) {
-      binary += String.fromCharCode(data[i])
-    }
-    const base64Code = btoa(binary)
-
-    const checkScript = `
-import pyflakes.api
-import pyflakes.reporter
-import io
-import base64
-
-code = base64.b64decode("${base64Code}").decode('utf-8')
-result = io.StringIO()
-reporter = pyflakes.reporter.Reporter(result, result)
-pyflakes.api.check(code, '<check>', reporter=reporter)
-output = result.getvalue()
-
-if output.strip():
-    print(output.strip())
-else:
-    print("OK")
-`
-
-    const checkPath = await invoke<string>('save_temp_script', {
-      projectDir: projectRoot,
-      content: checkScript,
-    })
-
-    const result = await invoke<string>('run_script_output', {
-      workingDir: env.working_dir,
-      pythonPath: env.python_path,
-      scriptPath: checkPath,
-    })
-
-    if (result.trim() === 'OK' || !result.trim()) {
-      terminalStore.appendLine('代码检查通过，没有发现问题')
-    } else {
-      // 翻译 pyflakes 英文错误消息为简单中文
-      function translatePyflakesError(msg: string): string {
-        // undefined name 'xxx'
-        const undefinedMatch = msg.match(/undefined name '(.+?)'/)
-        if (undefinedMatch) {
-          return `"${undefinedMatch[1]}" 没有定义过，可能拼写错误`
-        }
-        // imported but unused
-        if (msg.includes('imported but unused')) {
-          const importMatch = msg.match(/'(.+?)'/)
-          return `导入了 "${importMatch?.[1] || ''}" 但没有使用`
-        }
-        // 'xxx' from unused import
-        if (msg.includes('from unused import')) {
-          const importMatch = msg.match(/'(.+?)'/)
-          return `"${importMatch?.[1] || ''}" 导入了但没有使用`
-        }
-        // local variable 'xxx' is assigned to but never used
-        const localVarMatch = msg.match(/local variable '(.+?)' is assigned to but never used/)
-        if (localVarMatch) {
-          return `变量 "${localVarMatch[1]}" 定义了但没有使用`
-        }
-        // 'xxx' may be undefined, or defined from star imports
-        const mayBeUndefined = msg.match(/'(.+?)' may be undefined/)
-        if (mayBeUndefined) {
-          return `"${mayBeUndefined[1]}" 可能没有定义`
-        }
-        // 'xxx' is never defined
-        const neverDefined = msg.match(/'(.+?)' is never defined/)
-        if (neverDefined) {
-          return `"${neverDefined[1]}" 还没有定义就被使用了`
-        }
-        // missing parentheses in call to 'xxx'
-        const parenMatch = msg.match(/missing parentheses in call to '(.+?)'/)
-        if (parenMatch) {
-          return `调用 "${parenMatch[1]}" 时缺少括号，需要加上 ()`
-        }
-        // duplicate argument
-        const dupMatch = msg.match(/duplicate argument '(.+?)'/)
-        if (dupMatch) {
-          return `参数 "${dupMatch[1]}" 重复定义`
-        }
-        // positionally exceeds argument count
-        if (msg.includes('positionally exceeds argument count')) {
-          return '函数调用时参数数量太多了'
-        }
-        // 'xxx' has no attribute 'yyy'
-        const attrMatch = msg.match(/has no attribute '(.+?)'/)
-        if (attrMatch) {
-          return `没有 "${attrMatch[1]}" 这个属性或方法`
-        }
-        // invalid syntax
-        if (msg.includes('invalid syntax')) {
-          return '语法错误，代码写法不正确'
-        }
-        // unexpected indent
-        if (msg.includes('unexpected indent')) {
-          return '缩进错误，这里不应该有空格'
-        }
-        // unindent does not match
-        if (msg.includes('unindent does not match')) {
-          return '缩进不一致，空格数量要对齐'
-        }
-        // EOL while scanning string literal
-        if (msg.includes('EOL while scanning string literal')) {
-          return '字符串没有写完，引号没有成对'
-        }
-        // unexpected EOF
-        if (msg.includes('unexpected EOF')) {
-          return '代码不完整，可能缺少括号或冒号'
-        }
-        // return outside function
-        if (msg.includes('return outside function')) {
-          return 'return 只能在函数内部使用'
-        }
-        // yield outside function
-        if (msg.includes('yield outside function')) {
-          return 'yield 只能在函数内部使用'
-        }
-        // 'xxx' is void
-        const isVoid = msg.match(/'(.+?)' is void/)
-        if (isVoid) {
-          return `"${isVoid[1]}" 没有返回值`
-        }
-        // fallback: 返回原始消息
-        return msg
-      }
-
-      // 解析 pyflakes 输出
-      const outputLines = result.trim().split('\n')
-      const errors: Array<{ line: string; message: string }> = []
-
-      for (const line of outputLines) {
-        const match = line.match(/.+?:(\d+):\s*(.+)/)
-        if (match) {
-          errors.push({
-            line: match[1],
-            message: translatePyflakesError(match[2])
-          })
-        }
-      }
-
-      terminalStore.appendLine(`共发现 ${errors.length} 个错误:`)
-      for (const err of errors) {
-        terminalStore.appendLine(`第${err.line}行: ${err.message}`)
-      }
-    }
-  } catch (e) {
-    terminalStore.appendLine(`\x1b[31m❌ 检查失败: ${e}\x1b[0m`)
-  }
-}
+// ═══ 代码格式化 ═══
 
 // 格式化代码 - 使用 Monaco DocumentFormattingEditProvider（VSCode 风格）
 function ideFormatCode() {
@@ -1365,7 +1183,7 @@ function ideFormatCode() {
   window.dispatchEvent(new CustomEvent('editor-run-format'))
 }
 
-// ═══ 代码检查与格式化结束 ═══
+// ═══ 代码格式化结束 ═══
 
 // 代码文件显示名：隐藏 .py 后缀
 // 代码标签重命名
@@ -1535,12 +1353,6 @@ function spriteDisplayName(name: string) {
           <img v-if="!editorStore.isRunning" :src="iconCodeRun" class="menu-icon" />
           <img v-else :src="iconCodeStop" class="menu-icon" />
           <span>{{ editorStore.isRunning ? '停止' : '运行' }}</span>
-        </button>
-
-        <!-- 检查 -->
-        <button class="menu-btn" @click="ideCheckCode" v-tooltip="'检查代码'">
-          <img :src="iconCodeCheck" class="menu-icon" />
-          <span>检查</span>
         </button>
 
         <!-- 格式化 -->

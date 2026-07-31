@@ -111,10 +111,6 @@ function doFormat() {
   window.dispatchEvent(new CustomEvent('editor-format'))
 }
 
-function doCheck() {
-  closeCtxMenu()
-  window.dispatchEvent(new CustomEvent('editor-check'))
-}
 const containerRef = ref<HTMLDivElement>()
 let editor: any = null
 let monaco: any = null
@@ -656,9 +652,7 @@ onBeforeUnmount(() => {
       <div class="editor-ctx-item" @click="doFormat">
         <span>格式化代码</span><span class="editor-ctx-shortcut">Shift+Alt+F</span>
       </div>
-      <div class="editor-ctx-item" @click="doCheck">
-        <span>检查语法</span><span class="editor-ctx-shortcut"></span>
-      </div>
+
     </div>
   </Teleport>
 </template>
