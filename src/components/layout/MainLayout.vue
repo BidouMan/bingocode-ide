@@ -2089,6 +2089,7 @@ function spriteDisplayName(name: string) {
 /* 全宽编辑器页面 (角色/地图/IDE) */
 .editor-page-full {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -2745,6 +2746,7 @@ function spriteDisplayName(name: string) {
 }
 .code-editor-pane {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
