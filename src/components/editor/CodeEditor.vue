@@ -706,3 +706,16 @@ onBeforeUnmount(() => {
   margin: 4px 8px;
 }
 </style>
+
+<style>
+/* Monaco 补全弹窗自适应字体大小 */
+.monaco-editor .suggest-widget {
+  min-width: 360px;
+  max-width: 80vw;
+}
+.monaco-editor .suggest-widget .monaco-list .monaco-list-row .column-label {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+</style>
