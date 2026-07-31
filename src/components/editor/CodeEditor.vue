@@ -276,7 +276,7 @@ async function initMonaco() {
 
   // 注册智能补全（游戏模式 = 引擎 API + Python 标准库，代码模式 = Python 标准库）
   m.languages.registerCompletionItemProvider('python', {
-    triggerCharacters: ['.', ' '],
+    triggerCharacters: ['.'],
     provideCompletionItems(model, position) {
       const textUntilPosition = model.getValueInRange({
         startLineNumber: position.lineNumber,
