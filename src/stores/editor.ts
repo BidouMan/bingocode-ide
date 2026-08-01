@@ -199,27 +199,27 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   function closeOtherTabs(index: number) {
-    const tabs = currentTabs.value
-    if (index < 0 || index >= tabs.length) return
-    const kept = tabs[index]
-    tabs.splice(0, tabs.length, kept)
+    const tabs = isGameMode.value ? gameTabs : codeTabs
+    if (index < 0 || index >= tabs.value.length) return
+    const kept = tabs.value[index]
+    tabs.value = [kept]
     activeTabIndex.value = 0
     saveCodeTabsState()
   }
 
   function closeTabsToRight(index: number) {
-    const tabs = currentTabs.value
-    if (index < 0 || index >= tabs.length - 1) return
-    tabs.splice(index + 1)
-    if (activeTabIndex.value >= tabs.length) {
-      activeTabIndex.value = tabs.length - 1
+    const tabs = isGameMode.value ? gameTabs : codeTabs
+    if (index < 0 || index >= tabs.value.length - 1) return
+    tabs.value = tabs.value.slice(0, index + 1)
+    if (activeTabIndex.value >= tabs.value.length) {
+      activeTabIndex.value = tabs.value.length - 1
     }
     saveCodeTabsState()
   }
 
   function closeAllTabs() {
-    const tabs = currentTabs.value
-    tabs.splice(0, tabs.length)
+    const tabs = isGameMode.value ? gameTabs : codeTabs
+    tabs.value = []
     activeTabIndex.value = -1
     saveCodeTabsState()
   }

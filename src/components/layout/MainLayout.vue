@@ -1971,12 +1971,12 @@ function spriteDisplayName(name: string) {
 
     <!-- 标签页右键菜单 -->
     <Teleport to="body">
-      <div v-if="tabContextMenu.show" class="tab-ctx-menu" :style="{ left: tabContextMenu.x + 'px', top: tabContextMenu.y + 'px' }" @click.stop>
-        <div class="tab-ctx-item" @click="tabCtxClose">关闭</div>
-        <div class="tab-ctx-item" @click="tabCtxCloseOthers">关闭其他</div>
-        <div class="tab-ctx-item" @click="tabCtxCloseToRight">关闭右侧</div>
+      <div v-if="tabContextMenu.show" class="tab-ctx-menu" :style="{ left: tabContextMenu.x + 'px', top: tabContextMenu.y + 'px' }">
+        <div class="tab-ctx-item" @click.stop="tabCtxClose">关闭</div>
+        <div class="tab-ctx-item" @click.stop="tabCtxCloseOthers">关闭其他</div>
+        <div class="tab-ctx-item" @click.stop="tabCtxCloseToRight">关闭右侧</div>
         <div class="tab-ctx-divider" />
-        <div class="tab-ctx-item" @click="tabCtxCloseAll">关闭所有</div>
+        <div class="tab-ctx-item" @click.stop="tabCtxCloseAll">关闭所有</div>
       </div>
     </Teleport>
   </div>
