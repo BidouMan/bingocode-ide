@@ -75,9 +75,8 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
             loaded: false,
           })
         }
-      } catch (e) {
+      } catch (_e) {
         // images 目录可能为空或不存在，静默处理
-        console.warn('[SpriteLib] 加载图片列表:', e)
       }
 
       // 批量加载缩略图

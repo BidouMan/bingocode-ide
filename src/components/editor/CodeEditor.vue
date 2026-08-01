@@ -133,15 +133,12 @@ import { waitForMonaco } from '../../utils/monaco-init'
 async function initMonaco() {
   // 等待 Monaco 就绪（已预加载时几乎瞬时）
   const t0 = performance.now()
-  console.log('[Perf] CodeEditor.initMonaco start')
   const m = await waitForMonaco()
   monaco = m
-  console.log(`[Perf] CodeEditor.waitForMonaco: ${(performance.now() - t0).toFixed(1)}ms`)
 
   if (!containerRef.value) return
 
   // 创建编辑器（主题/语法/补全已在 monaco-init 中注册，此处直接创建）
-  const t1 = performance.now()
   editor = m.editor.create(containerRef.value, {
     value: editorStore.currentTab?.content || '',
     language: 'python',
@@ -202,8 +199,7 @@ async function initMonaco() {
     parameterHints: { enabled: false },
     contextmenu: false,
   })
-  console.log(`[Perf] CodeEditor.editor.create: ${(performance.now() - t1).toFixed(1)}ms`)
-  console.log(`[Perf] CodeEditor.initMonaco total: ${(performance.now() - t0).toFixed(1)}ms, initial content=${editorStore.currentTab?.content?.length ?? 0} chars`)
+  console.log(`[Perf] Editor init: ${(performance.now() - t0).toFixed(0)}ms`)
 
   // 注册代码格式化（纯 JS，零延迟）
   function formatPythonCode(code: string): string {

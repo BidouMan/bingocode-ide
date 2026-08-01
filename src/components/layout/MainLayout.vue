@@ -268,18 +268,12 @@ onMounted(loadAllMapThumbnails)
 // 新项目不预创建地图，用户通过按钮创建
 onMounted(async () => {
   const t0 = performance.now()
-  console.log('[Perf] MainLayout onMounted start')
   themeStore.initTheme()
-  const t1 = performance.now()
-  console.log(`[Perf] initTheme: ${(t1 - t0).toFixed(1)}ms`)
   await projectStore.initProject()
-  const t2 = performance.now()
-  console.log(`[Perf] initProject: ${(t2 - t1).toFixed(1)}ms`)
 
   // 如果启动时从上次项目恢复，需要预加载项目资源
   // （和文件菜单"打开项目"走同一段逻辑）
   if (projectStore.restoredFromLast && projectStore.root) {
-    console.log('[Perf] 检测到上次项目恢复，开始预加载资源')
     // 清空 editor store 初始化时从 localStorage 恢复的旧 tab
     // （这些 tab 的 path 指向上次项目的 code 文件，loadProjectResources 会重新创建）
     resourceStore.clearAllResources()
@@ -290,17 +284,13 @@ onMounted(async () => {
     editorStore.codeActiveTabIndex = 0
     await nextTick()
     await loadProjectResources(projectStore.root)
-    const t3 = performance.now()
-    console.log(`[Perf] loadProjectResources: ${(t3 - t2).toFixed(1)}ms`)
-    console.log(`[Perf] MainLayout onMounted total: ${(t3 - t0).toFixed(1)}ms`)
+    console.log(`[Perf] Startup: ${(performance.now() - t0).toFixed(0)}ms`)
     return
   }
 
   // 默认项目：恢复代码模式标签页内容
   await editorStore.restoreCodeTabContents()
-  const t3 = performance.now()
-  console.log(`[Perf] restoreCodeTabContents: ${(t3 - t2).toFixed(1)}ms`)
-  console.log(`[Perf] MainLayout onMounted total: ${(t3 - t0).toFixed(1)}ms`)
+  console.log(`[Perf] Startup: ${(performance.now() - t0).toFixed(0)}ms`)
 })
 
 // 代码编辑器右键菜单事件

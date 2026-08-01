@@ -2,12 +2,8 @@
  * Monaco Editor 单例初始化模块
  * 应用启动时立即加载，编辑器创建时直接使用，零等待
  *
- * 加载策略：使用 Monaco 官方提供的 AMD loader 加载预打包的 min/vs 版本，
- * 而不是 ESM import。原因：
- * - ESM 版本（monaco-editor/esm/vs/editor/editor.main.js）有数千个子模块，
- *   Vite dev 模式需要即时编译每一个，耗时 5-6 秒
- * - min/vs 是预打包+minified 的单文件版本（loader.js + editor.main.js + worker），
- *   浏览器直接执行，无需 Vite 编译，加载时间 < 1 秒
+ * 加载策略：使用 ESM import 加载 Monaco，Vite 会自动处理模块编译和缓存。
+ * 配置 web worker 以避免降级到主线程导致 UI 卡顿。
  */
 import type * as Monaco from 'monaco-editor'
 
@@ -36,70 +32,42 @@ export function waitForMonaco(): Promise<typeof Monaco> {
 export function preloadMonaco() {
   if (!initPromise) {
     const t = performance.now()
-    console.log('[Perf] preloadMonaco starting')
     initPromise = init().then((m) => {
-      console.log(`[Perf] preloadMonaco ready: ${(performance.now() - t).toFixed(1)}ms`)
+      console.log(`[Perf] Monaco preload: ${(performance.now() - t).toFixed(0)}ms`)
       return m
     })
   }
 }
 
-// 通过 AMD loader 异步加载 Monaco（绕过 Vite，直接走静态资源）
-function loadMonacoViaAmd(): Promise<typeof Monaco> {
-  return new Promise((resolve, reject) => {
-    // 配置 AMD loader 路径，指向 publicDir 下的预打包 monaco
-    // publicDir=engine/assets，所以 /monaco/vs 对应 engine/assets/monaco/vs
-    const amdLoaderScript = document.createElement('script')
-    amdLoaderScript.src = '/monaco/vs/loader.js'
-    amdLoaderScript.onload = () => {
-      const amdRequire = (window as any).require
-      if (!amdRequire) {
-        reject(new Error('AMD loader not found after script load'))
-        return
-      }
-      amdRequire.config({ paths: { vs: '/monaco/vs' } })
-      amdRequire(['vs/editor/editor.main'], () => {
-        const m = (window as any).monaco
-        if (!m) {
-          reject(new Error('monaco global not found after AMD load'))
-          return
-        }
-        resolve(m as typeof Monaco)
-      })
-    }
-    amdLoaderScript.onerror = () => reject(new Error('Failed to load AMD loader.js'))
-    document.head.appendChild(amdLoaderScript)
-  })
-}
-
 async function init(): Promise<typeof Monaco> {
-  const tInit = performance.now()
-
   // 等待 JetBrains Mono 字体加载完成，避免 Monaco 创建后字体切换导致光标错位
   // （font-display: block 已经让浏览器在加载期间不显示 fallback，但 Monaco
   //  内部会测量字宽来定位光标，字体未加载完成时测量结果会错误）
   if (typeof document !== 'undefined' && (document as any).fonts) {
-    const tFont = performance.now()
     try {
       await (document as any).fonts.load('16px "JetBrains Mono"')
       await (document as any).fonts.load('bold 16px "JetBrains Mono"')
-      console.log(`[Perf]   monaco-init: JetBrains Mono loaded in ${(performance.now() - tFont).toFixed(1)}ms`)
-    } catch (e) {
-      console.warn('[Monaco] 字体加载失败，继续初始化:', e)
+    } catch (_e) {
+      // 字体加载失败，继续初始化
     }
   }
 
-  // 通过 AMD loader 加载预打包的 Monaco（绕过 Vite 编译）
-  const tLoad = performance.now()
-  let m: typeof Monaco
-  try {
-    m = await loadMonacoViaAmd()
-  } catch (amdError) {
-    console.warn('[Monaco] AMD load failed, trying ESM fallback:', amdError)
-    // AMD 失败时回退到 ESM import（确保窗口能显示）
-    m = await import('monaco-editor/esm/vs/editor/editor.main.js') as any
+  // 配置 web worker，避免 Monaco 降级到主线程运行（导致 UI 卡顿）
+  if (typeof self !== 'undefined') {
+    try {
+      const EditorWorker = (await import('monaco-editor/esm/vs/editor/editor.worker?worker')).default
+      ;(self as any).MonacoEnvironment = {
+        getWorker(): Worker {
+          return new EditorWorker()
+        },
+      }
+    } catch (_e) {
+      // worker 加载失败，Monaco 会降级到主线程
+    }
   }
-  console.log(`[Perf]   monaco-init: load took ${(performance.now() - tLoad).toFixed(1)}ms`)
+
+  // 通过 ESM import 加载 Monaco
+  const m = await import('monaco-editor/esm/vs/editor/editor.main.js') as any
   monacoInstance = m
 
   // ═══ 定义主题 ═══
