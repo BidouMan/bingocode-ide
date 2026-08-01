@@ -485,6 +485,8 @@ async function checkUpdate() {
     }
   } catch (e) {
     console.error('检查更新失败:', e)
+    const { message } = await import('@tauri-apps/plugin-dialog')
+    await message('检查更新失败，请检查网络连接后重试', { title: '检查更新', kind: 'warning' })
   }
 }
 
