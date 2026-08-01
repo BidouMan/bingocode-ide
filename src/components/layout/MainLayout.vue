@@ -1679,6 +1679,7 @@ function spriteDisplayName(name: string) {
                     <input class="tab-rename-input" v-model="tabRenameValue" @blur="confirmTabRename" @keydown.enter.prevent="confirmTabRename" @keydown.escape="cancelTabRename" @click.stop />
                   </template>
                   <template v-else>
+                    <span v-if="tab.modified" class="tab-modified-dot"></span>
                     <span @dblclick.stop="startTabRename(tab.id)">{{ codeDisplayName(tab.name) }}</span>
                   </template>
                   <button class="tab-close" @click.stop="editorStore.closeTab(index)">×</button>
@@ -1776,6 +1777,7 @@ function spriteDisplayName(name: string) {
                     <input class="tab-rename-input" v-model="tabRenameValue" @blur="confirmTabRename" @keydown.enter.prevent="confirmTabRename" @keydown.escape="cancelTabRename" @click.stop />
                   </template>
                   <template v-else>
+                    <span v-if="tab.modified" class="tab-modified-dot"></span>
                     <span @dblclick.stop="startTabRename(tab.id)">{{ codeDisplayName(tab.name) }}</span>
                   </template>
                   <button class="tab-close" @click.stop="editorStore.closeTab(index)">×</button>
@@ -2663,6 +2665,15 @@ function spriteDisplayName(name: string) {
 }
 .tab-item:hover { color: var(--text); background: var(--bg-base); }
 .tab-item-active { color: var(--text); background: var(--bg-base); border-bottom: 2px solid var(--accent); }
+.tab-modified-dot {
+  width: 8px;
+  height: 8px;
+  min-width: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-right: 6px;
+  flex-shrink: 0;
+}
 .tab-close {
   margin-left: 6px;
   background: transparent;
