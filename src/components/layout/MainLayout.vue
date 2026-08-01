@@ -105,6 +105,42 @@ const spriteRenameId = ref<string | null>(null)
 // 代码资源管理
 const codeContextMenu = ref<{ show: boolean; x: number; y: number; item: { id: string; name: string } | null }>({ show: false, x: 0, y: 0, item: null })
 const codeRenameId = ref<string | null>(null)
+
+// 标签页右键菜单
+const tabContextMenu = ref<{ show: boolean; x: number; y: number; index: number }>({ show: false, x: 0, y: 0, index: -1 })
+
+function onTabContextMenu(e: MouseEvent, index: number) {
+  e.preventDefault()
+  e.stopPropagation()
+  tabContextMenu.value = { show: true, x: e.clientX, y: e.clientY, index }
+}
+
+function closeTabCtxMenu() {
+  tabContextMenu.value.show = false
+}
+
+function tabCtxClose() {
+  const idx = tabContextMenu.value.index
+  closeTabCtxMenu()
+  editorStore.closeTab(idx)
+}
+
+function tabCtxCloseOthers() {
+  const idx = tabContextMenu.value.index
+  closeTabCtxMenu()
+  editorStore.closeOtherTabs(idx)
+}
+
+function tabCtxCloseToRight() {
+  const idx = tabContextMenu.value.index
+  closeTabCtxMenu()
+  editorStore.closeTabsToRight(idx)
+}
+
+function tabCtxCloseAll() {
+  closeTabCtxMenu()
+  editorStore.closeAllTabs()
+}
 const codeRenameValue = ref('')
 const spriteRenameValue = ref('')
 
@@ -271,6 +307,8 @@ onMounted(async () => {
 window.addEventListener('editor-run', () => { toggleRun() })
 window.addEventListener('editor-format', () => { ideFormatCode() })
 window.addEventListener('editor-save', () => { ideSaveFile() })
+window.addEventListener('click', () => { closeTabCtxMenu() })
+window.addEventListener('contextmenu', () => { closeTabCtxMenu() })
 
 // 退出保护：有未保存代码时弹窗提示（Tauri 原生窗口关闭）
 const appWindow = getCurrentWebviewWindow()
@@ -1679,7 +1717,7 @@ function spriteDisplayName(name: string) {
           <div class="game-editor-area">
             <div class="tab-bar">
               <div class="tab-bar-tabs">
-                <div v-for="(tab, index) in editorStore.currentTabs" :key="tab.id" class="tab-item" :class="{ 'tab-item-active': editorStore.activeTabIndex === index }" @click="editorStore.setActiveTab(index)">
+                <div v-for="(tab, index) in editorStore.currentTabs" :key="tab.id" class="tab-item" :class="{ 'tab-item-active': editorStore.activeTabIndex === index }" @click="editorStore.setActiveTab(index)" @contextmenu="onTabContextMenu($event, index)">
                   <template v-if="tabRenameId === tab.id">
                     <input class="tab-rename-input" v-model="tabRenameValue" @blur="confirmTabRename" @keydown.enter.prevent="confirmTabRename" @keydown.escape="cancelTabRename" @click.stop />
                   </template>
@@ -1777,7 +1815,7 @@ function spriteDisplayName(name: string) {
           <div class="editor-page-full">
             <div class="ide-tab-bar">
               <div class="tab-bar-tabs">
-                <div v-for="(tab, index) in editorStore.currentTabs" :key="tab.id" class="tab-item" :class="{ 'tab-item-active': editorStore.activeTabIndex === index }" @click="editorStore.setActiveTab(index)">
+                <div v-for="(tab, index) in editorStore.currentTabs" :key="tab.id" class="tab-item" :class="{ 'tab-item-active': editorStore.activeTabIndex === index }" @click="editorStore.setActiveTab(index)" @contextmenu="onTabContextMenu($event, index)">
                   <template v-if="tabRenameId === tab.id">
                     <input class="tab-rename-input" v-model="tabRenameValue" @blur="confirmTabRename" @keydown.enter.prevent="confirmTabRename" @keydown.escape="cancelTabRename" @click.stop />
                   </template>
@@ -1930,6 +1968,17 @@ function spriteDisplayName(name: string) {
 
     <!-- 插件库弹窗 -->
     <PluginManager v-if="pluginManagerVisible" @close="pluginManagerVisible = false" />
+
+    <!-- 标签页右键菜单 -->
+    <Teleport to="body">
+      <div v-if="tabContextMenu.show" class="tab-ctx-menu" :style="{ left: tabContextMenu.x + 'px', top: tabContextMenu.y + 'px' }" @click.stop>
+        <div class="tab-ctx-item" @click="tabCtxClose">关闭</div>
+        <div class="tab-ctx-item" @click="tabCtxCloseOthers">关闭其他</div>
+        <div class="tab-ctx-item" @click="tabCtxCloseToRight">关闭右侧</div>
+        <div class="tab-ctx-divider" />
+        <div class="tab-ctx-item" @click="tabCtxCloseAll">关闭所有</div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -2977,4 +3026,31 @@ function spriteDisplayName(name: string) {
 }
 .sprite-ctx-item:hover { background: var(--bg-hover); color: var(--text); }
 .sprite-ctx-del:hover { background: var(--danger); color: var(--text); }
+
+/* ═══ 标签页右键菜单 ═══ */
+.tab-ctx-menu {
+  position: fixed;
+  background: var(--bg-root);
+  border: 1px solid rgb(60, 60, 60);
+  border-radius: 6px;
+  padding: 4px 0;
+  z-index: 9999;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  min-width: 120px;
+}
+.tab-ctx-item {
+  padding: 6px 14px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.tab-ctx-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.tab-ctx-divider {
+  height: 1px;
+  background: rgb(60, 60, 60);
+  margin: 4px 0;
+}
 </style>

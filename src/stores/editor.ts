@@ -198,6 +198,32 @@ export const useEditorStore = defineStore('editor', () => {
     saveCodeTabsState()
   }
 
+  function closeOtherTabs(index: number) {
+    const tabs = currentTabs.value
+    if (index < 0 || index >= tabs.length) return
+    const kept = tabs[index]
+    tabs.splice(0, tabs.length, kept)
+    activeTabIndex.value = 0
+    saveCodeTabsState()
+  }
+
+  function closeTabsToRight(index: number) {
+    const tabs = currentTabs.value
+    if (index < 0 || index >= tabs.length - 1) return
+    tabs.splice(index + 1)
+    if (activeTabIndex.value >= tabs.length) {
+      activeTabIndex.value = tabs.length - 1
+    }
+    saveCodeTabsState()
+  }
+
+  function closeAllTabs() {
+    const tabs = currentTabs.value
+    tabs.splice(0, tabs.length)
+    activeTabIndex.value = -1
+    saveCodeTabsState()
+  }
+
   function renameTab(id: string, newName: string, newPath?: string) {
     const tabs = currentTabs.value
     const idx = tabs.findIndex(t => t.id === id)
@@ -340,6 +366,9 @@ export const useEditorStore = defineStore('editor', () => {
     setRenderMode,
     createTab,
     closeTab,
+    closeOtherTabs,
+    closeTabsToRight,
+    closeAllTabs,
     renameTab,
     setActiveTab,
     saveCurrentTab,
