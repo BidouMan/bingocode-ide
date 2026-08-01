@@ -91,6 +91,7 @@ const helpVisible = ref(false)
 const aiChatVisible = ref(false)
 const pluginManagerVisible = ref(false)
 const ideExplorerVisible = ref(true)
+const hasUpdate = ref(false)
 const ideActivePanel = ref<'files' | 'search' | 'outline' | 'snippets' | 'learn'>('files')
 const sidePanelWidth = ref(240)
 const isResizingSidePanel = ref(false)
@@ -265,6 +266,19 @@ watch(() => editorStore.activeEditorMode, (mode) => {
 })
 
 onMounted(loadAllMapThumbnails)
+
+// 启动时静默检查更新，只显示圆点提示，不弹窗
+onMounted(async () => {
+  try {
+    const { check } = await import('@tauri-apps/plugin-updater')
+    const update = await check()
+    if (update) {
+      hasUpdate.value = true
+    }
+  } catch (_e) {
+    // 静默失败
+  }
+})
 
 // 新项目不预创建地图，用户通过按钮创建
 onMounted(async () => {
@@ -460,9 +474,11 @@ async function checkUpdate() {
     const { check } = await import('@tauri-apps/plugin-updater')
     const update = await check()
     if (update) {
+      hasUpdate.value = true
       // 发现更新，触发 UpdateDialog 显示
       window.dispatchEvent(new CustomEvent('app-update-available', { detail: update }))
     } else {
+      hasUpdate.value = false
       // 没有更新
       const { message } = await import('@tauri-apps/plugin-dialog')
       await message('当前已是最新版本', { title: '检查更新', kind: 'info' })
@@ -1541,8 +1557,9 @@ function spriteDisplayName(name: string) {
             帮助文档
           </button>
           <!-- 检查更新 -->
-          <button class="file-menu-item" @click="checkUpdate">
+          <button class="file-menu-item settings-update-btn" @click="checkUpdate">
             检查更新
+            <span v-if="hasUpdate" class="update-dot"></span>
           </button>
         </div>
       </div>
@@ -2155,6 +2172,20 @@ function spriteDisplayName(name: string) {
   height: 1px;
   background: var(--border);
   margin: 4px 0;
+}
+
+/* 检查更新按钮圆点提示 */
+.settings-update-btn {
+  position: relative;
+}
+.update-dot {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  width: 6px;
+  height: 6px;
+  background: #f7768e;
+  border-radius: 50%;
 }
 
 /* 模式切换开关 */

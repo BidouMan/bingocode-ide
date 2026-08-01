@@ -28,15 +28,9 @@ function handleUpdateAvailable(event: Event) {
   }
 }
 
-onMounted(async () => {
-  // 监听手动检查更新事件
+onMounted(() => {
+  // 只监听手动检查更新事件，不自动检查
   window.addEventListener('app-update-available', handleUpdateAvailable)
-
-  // 启动时自动检查更新
-  const update = await checkForUpdates()
-  if (update) {
-    showDialog.value = true
-  }
 })
 
 onBeforeUnmount(() => {
