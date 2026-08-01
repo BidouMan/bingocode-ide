@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick } from 'vue'
-import { open } from '@tauri-apps/plugin-dialog'
+import { open, ask } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { useFileExplorerStore, type FileTreeNode } from '../../stores/fileExplorer'
 import { useEditorStore } from '../../stores/editor'
@@ -54,6 +54,13 @@ onMounted(() => {
 })
 
 async function openFolderPicker() {
+  // 切换前：有未保存代码时提示保存
+  if (editorStore.hasUnsavedTabs) {
+    const shouldSave = await ask('有未保存的代码，是否保存？', { title: '未保存的代码', kind: 'warning' })
+    if (shouldSave) {
+      await editorStore.saveAllModifiedTabs()
+    }
+  }
   const path = await open({
     title: '打开文件夹',
     directory: true,
@@ -212,6 +219,13 @@ async function deleteNode(node: FileTreeNode) {
 }
 
 async function switchToRecent(folder: string) {
+  // 切换前：有未保存代码时提示保存
+  if (editorStore.hasUnsavedTabs) {
+    const shouldSave = await ask('有未保存的代码，是否保存？', { title: '未保存的代码', kind: 'warning' })
+    if (shouldSave) {
+      await editorStore.saveAllModifiedTabs()
+    }
+  }
   showRecent.value = false
   await fileExplorerStore.openFolder(folder)
 }

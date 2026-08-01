@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 
 export type EditorMode = 'code' | 'sprite' | 'map'
 export type ResourceTab = 'sprite' | 'map' | 'sound' | 'code'
@@ -260,6 +261,30 @@ export const useEditorStore = defineStore('editor', () => {
     }
   }
 
+  const hasUnsavedTabs = computed(() => {
+    const allTabs = [...gameTabs.value, ...codeTabs.value]
+    const unsaved = allTabs.some(t => t.modified)
+    console.log('[Editor] hasUnsavedTabs check:', allTabs.map(t => ({ name: t.name, modified: t.modified, path: t.path })), '=>', unsaved)
+    return unsaved
+  })
+
+  async function saveAllModifiedTabs(): Promise<number> {
+    const allTabs = [...gameTabs.value, ...codeTabs.value]
+    let saved = 0
+    for (const tab of allTabs) {
+      if (tab.modified && tab.path) {
+        try {
+          await invoke('write_file', { path: tab.path, content: tab.content })
+          tab.modified = false
+          saved++
+        } catch (e) {
+          console.error(`[Editor] 保存 ${tab.name} 失败:`, e)
+        }
+      }
+    }
+    return saved
+  }
+
   function setRunning(running: boolean) {
     isRunning.value = running
   }
@@ -318,6 +343,8 @@ export const useEditorStore = defineStore('editor', () => {
     renameTab,
     setActiveTab,
     saveCurrentTab,
+    hasUnsavedTabs,
+    saveAllModifiedTabs,
     restoreCodeTabContents,
     setRunning,
     toggleRun,

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { open, save } from '@tauri-apps/plugin-dialog'
+import { open, save, ask } from '@tauri-apps/plugin-dialog'
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { useEditorStore } from '../../stores/editor'
 import { useResourceStore } from '../../stores/resource'
 import { useProjectStore } from '../../stores/project'
@@ -269,6 +270,39 @@ onMounted(async () => {
 // 代码编辑器右键菜单事件
 window.addEventListener('editor-run', () => { toggleRun() })
 window.addEventListener('editor-format', () => { ideFormatCode() })
+window.addEventListener('editor-save', () => { ideSaveFile() })
+
+// 退出保护：有未保存代码时弹窗提示（Tauri 原生窗口关闭）
+const appWindow = getCurrentWebviewWindow()
+let pendingClose = false
+
+async function writeDebugLog(msg: string) {
+  try {
+    const logPath = '/tmp/bingo_close_debug.log'
+    const existing = await invoke<string>('read_file', { path: logPath }).catch(() => '')
+    await invoke('write_file', { path: logPath, content: existing + msg + '\n' })
+  } catch {}
+}
+
+appWindow.onCloseRequested(async (e) => {
+  const allTabs = [...editorStore.gameTabs, ...editorStore.codeTabs]
+  const tabInfo = allTabs.map(t => `${t.name}:modified=${t.modified},path=${t.path}`)
+  await writeDebugLog(`[Close] onCloseRequested fired, hasUnsavedTabs=${editorStore.hasUnsavedTabs}, tabs=[${tabInfo.join('; ')}]`)
+  if (pendingClose) {
+    await writeDebugLog('[Close] pendingClose=true, skipping')
+    return
+  }
+  if (editorStore.hasUnsavedTabs) {
+    e.preventDefault()
+    const shouldSave = await ask('有未保存的代码，是否保存？', { title: '未保存的代码', kind: 'warning' })
+    await writeDebugLog(`[Close] user chose save=${shouldSave}`)
+    if (shouldSave) {
+      await editorStore.saveAllModifiedTabs()
+    }
+  }
+  pendingClose = true
+  await appWindow.close()
+})
 
 // 自动选中第一个资源
 function autoSelectFirst() {
@@ -397,6 +431,20 @@ function openSettingsSubmenu(name: string) {
 
 async function fileMenuAction(action: string) {
   closeFileMenu()
+
+  // 切换项目前：有未保存代码时提示保存
+  const allTabs = [...editorStore.gameTabs, ...editorStore.codeTabs]
+  const tabInfo = allTabs.map(t => `${t.name}:modified=${t.modified}`)
+  await writeDebugLog(`[Save] fileMenuAction: ${action}, hasUnsavedTabs=${editorStore.hasUnsavedTabs}, tabs=[${tabInfo.join('; ')}]`)
+  if ((action === 'new' || action === 'open') && editorStore.hasUnsavedTabs) {
+    const shouldSave = await ask('有未保存的代码，是否保存？', { title: '未保存的代码', kind: 'warning' })
+    await writeDebugLog(`[Save] user chose save=${shouldSave}`)
+    if (shouldSave) {
+      await editorStore.saveAllModifiedTabs()
+    }
+  } else {
+    await writeDebugLog(`[Save] skipping prompt: action=${action}, hasUnsavedTabs=${editorStore.hasUnsavedTabs}`)
+  }
 
   // 任何项目操作都先停止运行
   if (editorStore.isRunning) {
@@ -1090,6 +1138,13 @@ function cancelCodeRename() {
 
 // 打开文件夹（IDE 模式）
 async function ideOpenFolder() {
+  // 切换前：有未保存代码时提示保存
+  if (editorStore.hasUnsavedTabs) {
+    const shouldSave = await ask('有未保存的代码，是否保存？', { title: '未保存的代码', kind: 'warning' })
+    if (shouldSave) {
+      await editorStore.saveAllModifiedTabs()
+    }
+  }
   const path = await open({
     title: '打开文件夹',
     directory: true,

@@ -395,10 +395,7 @@ async function initMonaco() {
 
   // Ctrl+S 保存
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-    const tab = editorStore.currentTab
-    if (tab) {
-      tab.modified = false
-    }
+    window.dispatchEvent(new CustomEvent('editor-save'))
   })
 
   // 恢复初始标签的状态

@@ -359,6 +359,9 @@ export function useEngine() {
       return
     }
 
+    // 运行前自动保存所有修改过的文件
+    await editorStore.saveAllModifiedTabs()
+
     renderStore.clearAll()
     renderStore.resetTextureLoading()
     terminalStore.clear()
@@ -461,6 +464,12 @@ export function useEngine() {
           terminalStore.appendLine('\x1b[31m没有打开的文件\x1b[0m')
           editorStore.setRunning(false)
           return
+        }
+
+        // 运行前一键保存全部修改过的代码
+        const savedCount = await editorStore.saveAllModifiedTabs()
+        if (savedCount > 0) {
+          terminalStore.appendLine(`\x1b[32m已自动保存 ${savedCount} 个文件\x1b[0m`)
         }
 
         // 始终写入临时文件运行，避免 macOS 权限问题（Downloads 等受保护目录无法直接写入）

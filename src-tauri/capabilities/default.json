@@ -6,6 +6,8 @@
   "permissions": [
     "core:window:default",
     "core:window:allow-show",
+    "core:window:allow-close",
+    "core:window:allow-destroy",
     "core:window:allow-set-focus",
     "core:event:default",
     "dialog:default",
