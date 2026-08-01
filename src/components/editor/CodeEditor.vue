@@ -398,6 +398,17 @@ async function initMonaco() {
     window.dispatchEvent(new CustomEvent('editor-save'))
   })
 
+  // IME 组合输入：输入中文拼音时临时禁用语法高亮，避免中间状态（如 ni'hao）被错误解析
+  const editorDom = containerRef.value
+  if (editorDom) {
+    editorDom.addEventListener('compositionstart', () => {
+      editorDom.classList.add('ime-composing')
+    })
+    editorDom.addEventListener('compositionend', () => {
+      editorDom.classList.remove('ime-composing')
+    })
+  }
+
   // 恢复初始标签的状态
   const tab = editorStore.currentTab
   if (tab) {
@@ -714,5 +725,9 @@ onBeforeUnmount(() => {
   overflow: visible;
   text-overflow: clip;
   white-space: nowrap;
+}
+/* IME 组合输入期间：覆盖所有 token 颜色，避免拼音中间状态被错误高亮 */
+.ime-composing .monaco-editor .view-line span {
+  color: var(--vscode-editor-foreground, #c0caf5) !important;
 }
 </style>
