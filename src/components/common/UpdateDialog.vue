@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useUpdater } from '../../composables/useUpdater'
 
 const emit = defineEmits<{
@@ -16,12 +16,31 @@ const {
 
 const showDialog = ref(false)
 
+// 处理手动检查更新事件
+function handleUpdateAvailable(event: Event) {
+  const customEvent = event as CustomEvent
+  if (customEvent.detail) {
+    updateInfo.value = {
+      version: customEvent.detail.version || '未知',
+      notes: customEvent.detail.body || '无更新说明',
+    }
+    showDialog.value = true
+  }
+}
+
 onMounted(async () => {
+  // 监听手动检查更新事件
+  window.addEventListener('app-update-available', handleUpdateAvailable)
+
   // 启动时自动检查更新
   const update = await checkForUpdates()
   if (update) {
     showDialog.value = true
   }
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('app-update-available', handleUpdateAvailable)
 })
 
 function closeDialog() {

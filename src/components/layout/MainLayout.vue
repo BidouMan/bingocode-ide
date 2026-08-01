@@ -454,6 +454,24 @@ async function onOpenHelpDocs() {
   }
 }
 
+async function checkUpdate() {
+  closeSettingsMenu()
+  try {
+    const { check } = await import('@tauri-apps/plugin-updater')
+    const update = await check()
+    if (update) {
+      // 发现更新，触发 UpdateDialog 显示
+      window.dispatchEvent(new CustomEvent('app-update-available', { detail: update }))
+    } else {
+      // 没有更新
+      const { message } = await import('@tauri-apps/plugin-dialog')
+      await message('当前已是最新版本', { title: '检查更新', kind: 'info' })
+    }
+  } catch (e) {
+    console.error('检查更新失败:', e)
+  }
+}
+
 function openSettingsSubmenu(name: string) {
   settingsSubmenu.value = name
 }
@@ -1521,6 +1539,10 @@ function spriteDisplayName(name: string) {
           <!-- 帮助文档 -->
           <button class="file-menu-item" @click="onOpenHelpDocs">
             帮助文档
+          </button>
+          <!-- 检查更新 -->
+          <button class="file-menu-item" @click="checkUpdate">
+            检查更新
           </button>
         </div>
       </div>
