@@ -61,6 +61,11 @@ async function openFolderPicker() {
       await editorStore.saveAllModifiedTabs()
     }
   }
+  // 清空旧标签页
+  editorStore.gameTabs.splice(0, editorStore.gameTabs.length)
+  editorStore.codeTabs.splice(0, editorStore.codeTabs.length)
+  editorStore.gameActiveTabIndex = 0
+  editorStore.codeActiveTabIndex = 0
   const path = await open({
     title: '打开文件夹',
     directory: true,
@@ -226,6 +231,11 @@ async function switchToRecent(folder: string) {
       await editorStore.saveAllModifiedTabs()
     }
   }
+  // 清空旧标签页
+  editorStore.gameTabs.splice(0, editorStore.gameTabs.length)
+  editorStore.codeTabs.splice(0, editorStore.codeTabs.length)
+  editorStore.gameActiveTabIndex = 0
+  editorStore.codeActiveTabIndex = 0
   showRecent.value = false
   await fileExplorerStore.openFolder(folder)
 }
