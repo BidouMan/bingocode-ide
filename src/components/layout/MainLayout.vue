@@ -26,6 +26,7 @@ import PythonHelpPanel from '../help/PythonHelpPanel.vue'
 import AiChatPanel from '../help/AiChatPanel.vue'
 import { openHelpDocs } from '../help/HelpDocsOpener'
 import PluginManager from '../common/PluginManager.vue'
+import UpdateDialog from '../common/UpdateDialog.vue'
 import FileExplorer from '../file-explorer/FileExplorer.vue'
 import SnippetPanel from '../sidebar/SnippetPanel.vue'
 import LearnPanel from '../sidebar/LearnPanel.vue'
@@ -1958,6 +1959,9 @@ function spriteDisplayName(name: string) {
 
     <!-- 插件库弹窗 -->
     <PluginManager v-if="pluginManagerVisible" @close="pluginManagerVisible = false" />
+
+    <!-- 更新提示 -->
+    <UpdateDialog />
 
     <!-- 标签页右键菜单 -->
     <Teleport to="body">
