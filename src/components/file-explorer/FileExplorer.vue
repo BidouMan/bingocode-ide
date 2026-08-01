@@ -464,7 +464,7 @@ async function handleDropInto(sourcePath: string, targetDir: string) {
         v-for="folder in fileExplorerStore.recentFolders"
         :key="folder"
         class="fe-recent-item"
-        @click="switchToRecent(folder)"
+        @click.stop="switchToRecent(folder)"
       >
         <span class="fe-recent-icon" v-html="folderIconSvg"></span>
         <div class="fe-recent-info">
