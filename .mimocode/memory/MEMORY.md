@@ -7,43 +7,40 @@ _BingoCodeIDE_ — Tauri v2 + Vue 3 + PixiJS desktop IDE for game development wi
 ## Rules
 _Hard constraints from user that every session must respect._
 
-- Reference original PySide6 UI files before implementing any UI — never design from scratch (see AGENTS.md for file list)
+- Reference original PySide6 UI files before implementing any UI — never design from scratch (see AGENTS.md)
 - Comments and some variable names are in Chinese — do not change
 - Respond to user in Chinese
-- Game stage size is hardcoded to 640x480 throughout the codebase
+- Game stage size is hardcoded to 640x480
 - Engine uses unbuffered stdout — do not change
 - Target audience is elementary school students — API must be extremely simple
-- **Never reinvent the wheel** — always check official docs or peer implementations before coding custom solutions [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **Research before implementing** — do not guess at APIs; when a fix fails, research the correct documentation before retrying [ses_0f76eaddaffe8JtDDqJfrCUqkd]
-- **控制台输出必须干净简单** — 控制台只显示程序实际输出（print/input prompt），绝不显示 Python 命令行、文件路径、启动参数等技术信息。目标用户是小学生，不能有乱七八糟的东西。[ses_09c5077a4ffeTQJrYwAtE7TXje]
-- **调试必须追踪代码根因** — 不要猜测，必须通过代码追踪确认根因后再修复。修复后在 dev 模式验证，不依赖打包测试。[ses_09c5077a4ffeTQJrYwAtE7TXje]
-- **代码模式运行 Python 必须用 `run_script_file`** — 不要通过 shell PTY 运行 Python 代码。`run_script_file`（engine.rs）以子进程方式运行 Python，使用 piped stdin/stdout/stderr，完全避免 PTY 回映问题。[ses_09c5077a4ffeTQJrYwAtE7TXje]
+- **Never reinvent the wheel** — always check official docs or peer implementations [ses_0fca6436bffe]
+- **Research before implementing** — do not guess at APIs; research documentation when fixes fail [ses_0f76eaddaffe]
+- **控制台输出必须干净简单** — 只显示程序实际输出，绝不显示技术信息。目标用户是小学生。[ses_09c5077a4ffe]
+- **调试必须追踪代码根因** — 不要猜测，必须通过代码追踪确认根因后再修复。dev 模式验证。[ses_09c5077a4ffe]
+- **代码模式运行 Python 必须用 `run_script_file`** — 不要通过 shell PTY。piped stdin/stdout/stderr，避免回映。[ses_09c5077a4ffe]
 
 ## Architecture decisions
 _Major design choices with rationale._
 
-- **Refactored from PySide6 to Tauri v2**: Original PySide6 app (~22K lines Python) → Tauri v2 + Vue 3 + PixiJS for modern desktop experience. Python engine retained as subprocess.
-- **Subprocess engine pattern**: User scripts run in Python subprocess (not IDE process). Engine sends JSON commands (CREATE/UPDATE/DESTROY) to frontend via stdout. Input events sent via stdin.
-- **Two separate tab systems**: `gameTabs` (game mode) and `codeTabs` (IDE mode). Switching mode preserves both.
-- **GameCanvas only mounts when running**: Prevents PixiJS from capturing mouse events when not needed.
-- **Event listeners scoped to canvas**: Keyboard/mouse events only on GameCanvas element, not window, to avoid blocking Monaco editor.
-- **Game mode has three sub-pages**: Game mode contains three switchable views controlled by `activeEditorMode`: (1) `'code'` — default with sidebar+code editor+preview, (2) `'sprite'` — independent full-width sprite editor, (3) `'map'` — independent full-width map editor. Top menu buttons (代码/角色/地图) switch between these sub-pages WITHIN game mode. `setResourceTab()` is ONLY for sidebar tab switching (角色/场景/声音/代码), NOT for page switching.
-- **Code mode fully isolated**: Code mode (`isGameMode=false`) has its own menu (新建/打开/保存/运行) and only operates on code tabs. Never modifies game-mode state or vice versa.
-- **Two execution modes in game mode**: (1) Default Python — run .py files directly, output to terminal panel. (2) Game engine mode — run via bingo_engine.py with PixiJS rendering. Default Python comes first as the simpler path. [ses_0f3269dafffe7c1hmFD6MKVa6w]
-- **Python bundled with app**: Must include a bundled Python binary (python-build-standalone recommended) so end users never need to install Python separately. `resolve_engine_env` fallback: bundled python → venv python → system python. [ses_0f3269dafffe7c1hmFD6MKVa6w]
+- **PySide6 → Tauri v2 refactor**: Python engine retained as subprocess. JSON commands over stdout/stdin.
+- **Two tab systems**: `gameTabs` (game mode) and `codeTabs` (IDE mode). Switching mode preserves both.
+- **GameCanvas mounts only when running**: Prevents PixiJS mouse capture. Events scoped to canvas element, not window.
+- **Game mode three sub-pages**: `activeEditorMode` controls `'code'`/`'sprite'`/`'map'` views. `setResourceTab()` is ONLY for sidebar switching (角色/场景/声音/代码).
+- **Code mode fully isolated**: Own menu, never modifies game-mode state.
+- **Two execution modes**: Default Python (terminal output) + Game engine mode (PixiJS rendering). [ses_0f3269daffe]
+- **Bundled Python**: python-build-standalone. `resolve_engine_env` fallback: bundled → venv → system. [ses_0f3269daffe]
+- **移除代码检查按钮**: pyflakes 静态分析与运行时 Python 异常提示高度重叠，对目标用户（小学生）无实际价值，完全移除。[ses_04894c7f7ffe]
 
 ## Discovered durable knowledge (terminal/console)
 
-- **终端双通道架构**: 游戏模式用 `engine.rs` 子进程（独立 stdin/stdout 管道），代码模式用 `shell.rs` PTY。两个完全独立的 I/O 通道。`TerminalPanel.vue:207-213` 的 `onData` 只路由到 shell，从不路由到 engine — 游戏模式 `input()` 根本不工作。`terminalMode` 始终为 `'shell'`（L160 硬编码）。[ses_09c5077a4ffeTQJrYwAtE7TXje]
-- **PTY 回显机制**: `portable_pty` 的 PTY 行规约默认启用字符回显。`TERM=dumb` 和 `PS1=""` 只影响 shell 提示符，不抑制 PTY 内置字符回显。抑制回显需要 `stty -echo`。[ses_09c5077a4ffeTQJrYwAtE7TXje]
-- **PTY 抑制回显修复模式**: 代码模式运行 Python 脚本时，在 shell runner 中发送 `stty -echo` 抑制命令回显，脚本结束后（runEndTimer 或 shell 退出）恢复 `stty echo`。用 `shellEchoDisabled` 布尔变量跟踪状态防止重复恢复。[ses_09c5077a4ffeTQJrYwAtE7TXje]
-- **`2>/dev/null` 抑制所有 stderr**: `useEngine.ts:437` 的 `2>/dev/null` 隐藏 Python 所有错误和 traceback，代码模式下完全看不到错误。[ses_09c5077a4ffeTQJrYwAtE7TXje]
-- **PTY 抑制回映方案已证实不可行**（2次打包测试均失败）: PTY 行规约回映是内核级机制，输入字符在 shell 处理前就被 PTY 回映。`stty -echo` 作为 shell 命令有无法消除的延迟，期间发送的字符仍会被回映。且恢复回映的 `stty echo` 命令会与用户输入混淆。不能使用 PTY + stty 方案抑制命令回映。[ses_09c5077a4ffeTQJrYwAtE7TXje]
-- **`run_script_file`（v0.3.0 添加）**：`engine.rs:188-305` 包含 `run_script_file` 函数，以子进程方式运行任意 Python 脚本，使用 piped stdin/stdout/stderr。这是代码模式运行 Python 的正确路径，不走 PTY，无回映问题。已在 `lib.rs:1003` 注册为 Tauri 命令。[ses_09c5077a4ffeTQJrYwAtE7TXje]
-- **`input()` 提示无换行使 `read_line()` 阻塞**：`input('提示：')` 输出提示后无换行。Rust `BufReader::read_line()` 等待换行符，导致提示被缓存到用户输入后的 `print()` 输出换行才显示。`run_script_file` 的 stdout 读取必须用 `Read::read()` 替代 `read_line()`。[ses_09c5077a4ffeTQJrYwAtE7TXje]
-- **`send_stdin` 的自动 `\n` 不适合代码模式**：`engine.rs` 的 `send_stdin` 追加 `\n`（游戏模式 `K_DOWN:up\n`）。代码模式逐字符输入需要 `send_stdin_data`（不追加 `\n`），前端 `onData` 将 `\r`（Enter 键）转为 `\n`。[ses_09c5077a4ffeTQJrYwAtE7TXje]
-- **`editorStore.isRunning` 不适合做输入路由条件**：shell 的 `runEndTimer`、引擎事件、用户操作都可能导致此变量提前变为 `false`。应使用独立的 `terminalMode` 标志（`'shell'`/`'python'`）控制 xterm.js `onData` 的输入路由方向。[ses_09c5077a4ffeTQJrYwAtE7TXje]
-- **代码模式子进程必须禁用 shell 的 `runEndTimer`**：当 `terminalMode === 'python'` 时，shell stdout 回调必须跳过 `runEndTimer`（1 秒无输出判定脚本结束），否则会提前误判脚本结束 → `editorStore.setRunning(false)` → `[运行完毕]` 提前显示 → 用户输入跑到 shell。[ses_09c5077a4ffeTQJrYwAtE7TXje]
+- **终端双通道**: 游戏模式 `engine.rs` 子进程（piped），代码模式 `shell.rs` PTY。完全独立 I/O。[ses_09c5077a4ffe]
+- **PTY 回映不可抑制**（2次打包确认）: 内核级机制，`stty -echo` 有延迟且与输入混淆。[ses_09c5077a4ffe]
+- **`input()` 提示无换行使 `read_line()` 阻塞**: 必须用 `Read::read()` 替代。[ses_09c5077a4ffe, ses_08c1fa6b0ffe]
+- **`send_stdin` 追加 `\n` 不适合代码模式**: 需 `send_stdin_data`，前端 `\r` → `\n`。[ses_09c5077a4ffe]
+- **输入路由用 `terminalMode`**: `isRunning` 可被提前置 false。用独立 `terminalMode`（`'shell'`/`'python'`）。[ses_09c5077a4ffe]
+- **代码模式跳过 shell `runEndTimer`**: 否则 1 秒后误判脚本结束。[ses_09c5077a4ffe]
+- **Python `-u` 不解缓冲文本 I/O**: 管道模式必须 `PYTHONUNBUFFERED=1`。[ses_08c1fa6b0ffe]
+- **前端 RAF 缓冲延迟**: `handleCodeStdout` 已改为直接写入 xterm.js。[ses_08c1fa6b0ffe]
 
 ## compose-preferences
 
@@ -52,58 +49,37 @@ _Major design choices with rationale._
 ## Discovered durable knowledge
 _Cross-task facts that survive across sessions._
 
-- **pnpm PATH gotcha (2026-06-26)**: `npm install -g pnpm` installs to `/opt/homebrew/Cellar/node/26.0.0/bin/pnpm` but does NOT add it to PATH. Use full path or `npx` as workaround. `npm bin -g` removed in npm v11 — use `npm prefix -g` instead. [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **Engine API design for kids**: (1) No import needed. (2) Auto-concat args. (3) One-line configs. (4) Blocking patterns harmful in game loops. Inherited from original PySide6 BingoIDE. [MyIDE MEMORY]
-- **`__all__` requirement**: Any new function/class in `bingo_engine.py` MUST be added to `__all__` or won't be importable via `*`. [MyIDE MEMORY]
-- **PySide6 shutdown crash**: During `Py_FinalizeEx`, PySide6's `destroyQCoreApplication()` destroys widget tree. Any Python `eventFilter` triggers SIGSEGV. Mitigation: `removeEventFilter` in cleanup, `window.hide()` + `deleteLater()` + `processEvents()`. [MyIDE MEMORY — relevant for engine subprocess]
-- **Console throttled buffer**: Signal → `_pending_text` string buffer → 30ms QTimer flushes batch to UI via `_raw_append`. Matches VSCode/PyCharm pattern. Output capped at 5000 lines. [AGENTS.md]
-- **Tauri dev mode skips resource bundling**: `tauri.conf.json` `externalBin` and `resources` arrays can be emptied for dev — `find_system_python()` in `lib.rs` resolves Python at runtime. The Python binary reference (`engine/python-aarch64-apple-darwin`) only needed for production bundle. [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **Engine cleanup thread uses waitpid**: `engine.rs` cleanup thread captures PID before dropping MutexGuard, uses `libc::waitpid` directly. Original raw-pointer `*const EngineState` + `.lock()` pattern doesn't compile in Rust. [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **macOS IMK warning is harmless**: `error messaging the mach port for IMKCFRunLoopWakeUpReliable` is Input Method Kit noise, not a real error. [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **Tauri v2 capabilities mandatory for window ops**: `src-tauri/capabilities/default.json` must declare permissions for `core:window:allow-close`, `core:window:allow-minimize`, `core:window:allow-toggle-maximize`, `core:window:allow-start-dragging`. Without it, all JS window API calls silently fail. This is the #1 trap when custom title bars don't work. [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **Tauri v2 `emit_to("main", ...)` required over `emit()` from background threads**: When emitting events from spawned `std::thread` in engine.rs, `app.emit()` does NOT reliably deliver to frontend listeners. Must use `app.emit_to("main", event, payload)` to explicitly target the main window. Also requires `"core:event:default"` in `capabilities/default.json`. [ses_0f3269dafffe7c1hmFD6MKVa6w]
-- **Tauri v2 official title bar pattern**: Use `data-tauri-drag-region` on drag zone + `document.getElementById` + `addEventListener` in `onMounted`. Follow https://v2.tauri.app/learn/window-customization/ exactly. Vue `@click` bindings work but the official pattern uses raw JS event listeners. [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **macOS rounded corners requires native decorations**: CSS `border-radius` cannot create window-level rounded corners. Must use `decorations: true` + `titleBarStyle: "Transparent"` + `hiddenTitle: true`. On Windows, `titleBarStyle`/`hiddenTitle` are ignored (standard titlebar). [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **Original icon files in `src/assets/icons/`**: Use `icon--play.svg`, `icon--stop-all.svg`, `icon--fullscreen.svg`, `icon--unfullscreen.svg` for toolbar buttons instead of inline SVGs. [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **Qt QLayout stretches widgets to fill frame**: When translating Qt layouts to CSS flexbox, remember that `QLayout` stretches child widgets to fill available space. The QSS `padding` creates internal spacing within the stretched widget. To match in CSS: use `align-self: stretch` on the flex child + `padding: Npx` on all sides + inner alignment. Do NOT assume widgets keep their natural size. [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **macOS dock icon safe zone**: `iconutil -c icns` generates correct format. If icon appears too large on dock, content extends too close to canvas edges. macOS applies a rounded-rect mask — content must fit within an invisible circle (more restrictive than 80% square). Need to reduce content further for proper dock sizing. [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **Console panel always-render pattern**: For collapsible bottom panels, keep the panel always rendered and use internal `collapsed` state to hide content. Header bar (26px) stays visible as an interactive element. `v-if` or `v-show` on the wrapper hides the entire panel which is NOT the desired behavior — user wants the panel always present at bottom with collapse toggle. [ses_0fca6436bffeFjyYRHjEP7Aa14, ses_0f376fc72ffez7id3W15c9zIFx]
-- **Resource panel default state**: Default resource tab is `'sprite'` (角色). Console starts collapsed. Background `rgb(30,30,30)` for sunken look vs sidebar `rgb(34,37,43)`. [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **Sprite data model format**: JSON config with `{name, frames[], segments[{name, start, end, fps, loop}]}`. Frames are PNG files in same directory. Segments define animation ranges over frames. [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **Sprite editor original architecture**: Three-panel layout — costume list (100px left), canvas (center), preview panel (264px right). Preview contains 256x256 preview box, FPS slider (1-60), 6 action buttons, animation state list with inline editing. [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **PNG must be RGBA for Tauri icons**: `generate_context!()` panics with "icon is not RGBA" if PNGs in `src-tauri/icons/` are not RGBA mode. Use `Image.convert('RGBA')` before saving. [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **macOS .app icon requires release build**: `tauri dev` doesn't apply icon mask. Must use `tauri build` for proper rounded corners on dock. [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **CSS transform calc(-50% + X) unreliable in Vue :style**: `calc(-50% + ${panX}px)` in reactive style bindings doesn't resolve correctly. Use nested flex container for centering + separate transform wrapper with `transform-origin: 0 0`. [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **SVG checkerboard over CSS gradients**: CSS linear gradients cause sub-pixel white diagonal lines during zoom. Use SVG data URI pattern for clean rendering. [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **box-shadow inset for selection highlights**: `box-shadow: inset 0 0 0 2px color` avoids layout shifts vs `border: 2px solid color`. Prevents jitter on selection. [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **Sprite editor three-frame-index pattern**: `selectedFrameIndex` (animation), `canvasDisplayIndex` (canvas), `costumeHighlightIndex` (list) must be separate. Animation playback should NOT drive canvas or list highlight. [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **Vue v-if + ref timing requires double nextTick**: When element is conditionally rendered with `v-if` and you need its ref, a single `nextTick` may not be enough. Use `nextTick(() => nextTick(() => { ... }))` or `document.querySelector` as robust fallback. [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **Vue watch with array spread for mutation detection**: `watch(() => [...array])` creates new reference each time, ensuring watcher fires on in-place mutations. Plain `watch(() => array)` with `deep: true` may miss mutations. [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **Renaming requires reactive object replacement in Pinia**: `obj.name = newName` on a Pinia ref may not trigger watchers. Use `tabs[idx] = { ...tabs[idx], name: newName }` to create new object reference. [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **Blur event on dynamic v-if input loses value**: When input removed from DOM by v-if after blur fires, event target value may be stale. Use `v-model` bound to separate ref variable, not event.target.value. [ses_0fca6436bffeFjyYRHjEP7Aa14]
-- **`.editor-page-full` must use `flex: 1` not `height: 100%`**: In flex column parents, `height: 100%` is unreliable and causes children to not get proper height. Use `flex: 1; min-height: 0;` on `.editor-page-full` and ensure `.edit-stage-frame` has `display: flex; flex-direction: column;`. [ses_0f376fc72ffez7id3W15c9zIFx]
-- **TerminalPanel always-render pattern (updated)**: For collapsible bottom panels, the panel should ALWAYS be rendered with internal `collapsed` state. Header bar (26px) stays visible. Do NOT use `v-show` or `v-if` on the wrapper — user wants the panel always present at bottom with collapse toggle. [ses_0f376fc72ffez7id3W15c9zIFx]
-- **Code mode menu bar design pattern**: Use `v-if="editorStore.isGameMode"` on template to conditionally render game-mode menu items; `v-else` for code-mode items. Settings button shared. Run/stop icon toggles via `editorStore.isRunning`. [ses_0f376fc72ffez7id3W15c9zIFx]
-- **Tauri v2 `withGlobalTauri` placement**: NOT valid in `build` section — causes JSON schema validation error. Tauri HMR works via Vite WebSocket, not through `withGlobalTauri`. [ses_0f376fc72ffez7id3W15c9zIFx]
-- See MEMORY-MonacoIME.md (9 entries) — Monaco editor IME and configuration history (loader, caret animation, IME jitter, line numbers, color detection)
-- See MEMORY-TerminalEditor.md (14 entries) — terminal, xterm.js, Monaco editor, and code-mode patterns
-- **Map editor architecture (original PySide6)**: Three-panel layout: left (resource list + collision editor), center (toolbar with draw/erase/select/move tools + canvas + info bar), right (map properties + layer list). Uses event filter pattern on QGraphicsView, auto-save on every change, per-layer resource isolation, dual coordinate systems (grid vs pixel), object pool for tile sprites. [ses_0f2715ca4ffebfM0NnVYJ9P2n6]
-- **Map binary format v5**: `.info` (metadata JSON with version field), `.tiles` (tile data), `.collision` (collision shapes), `.resources` (resource paths). Per-layer resources merged on save via `layer_resources_map`. [ses_0f2715ca4ffebfM0NnVYJ9P2n6]
-- **`.bgm` format**: Zip file containing map data files + thumbnail.png. Used for map library storage and export. Map library loads from `assets/map_lib/`, extracts to `assets/maps/`. [ses_0f2715ca4ffebfM0NnVYJ9P2n6]
-- **Map resource library categories**: images (loose images), tiles (tile images), tilesets (tileset sheets). Stored under `assets/map_res_lib/{category}/`. On click, imports resource to current map via `map_editor.add_resource_from_path()`. [ses_0f2715ca4ffebfM0NnVYJ9P2n6]
-- **PixiJS 8 `require()` fails in Vite**: Plan code used `require('pixi.js')` in multiple functions — must store PIXI reference from the initial dynamic `import('pixi.js')` call and reuse it everywhere. Vite is ESM-only. [ses_0f2715ca4ffebfM0NnVYJ9P2n6]
-- **PixiJS 8 Application init**: Constructor is gone; must use `new PIXI.Application()` then `await app.init({...})`. [ses_0f2715ca4ffebfM0NnVYJ9P2n6]
-- **`$store.map` is Vuex syntax**: Vue 3 Composition API with Pinia must use `useMapStore()` directly, not `$store.map?.mapData`. [ses_0f2715ca4ffebfM0NnVYJ9P2n6]
-- **Library page CSS pattern**: `SpriteLibPage.vue` and `MapLibraryPage.vue` share identical toolbar/grid CSS class names (`.lib-toolbar`, `.lib-search`, `.lib-grid`) — could be extracted to shared stylesheet. [ses_0f2715ca4ffebfM0NnVYJ9P2n6]
-- **Pre-existing TS errors**: `MainLayout.vue` (unused vars, null type mismatches), `UploadDrawer.vue` (missing SVG module declarations), `SpriteEditorView.vue` (missing SVG imports), `TerminalPanel.vue` (CSS import), `useEngine.ts` (unrecognized REMOVE type), `terminal.ts` (duplicate functions), `theme.ts` (unused watch). Not blocking builds. [ses_0f2715ca4ffebfM0NnVYJ9P2n6]
-- **Map editor image drag has THREE mechanisms**: (1) HTML5 `dataTransfer` drag (`application/x-bingo-image`), (2) scratch-drag via mousedown/mousemove/mouseup with fixed-position HTML `<img>` + `scratch-drop` CustomEvent on canvas, (3) select-tool click-and-drag via `hitTestImage()` + `isDraggingImage` state for repositioning placed images. All in MapCanvas.vue. [ses_0df6b173cffe2iIZ1i2Wee8su7]
-- **Godot/Scratch select tool interaction pattern**: Select tool = default active tool. Click selects object, then drag moves it. 8 resize handles on bounding box edges/corners. Dedicated rotation handle (circle above top-center connected by line) — not right-click. Select tool is single-purpose for image layers. Move tool is ONLY for tile layers. [ses_0df6b173cffe2iIZ1i2Wee8su7]
-- **Tauri webview CSS `background: url()` unreliable for local files**: CSS `background: url(localPath)` doesn't reliably load local file paths in Tauri webview. Use `<img src>` element instead. Changed drag preview in ResourceListPanel.vue from div+CSS to `<img>`. [ses_0df6b173cffe2iIZ1i2Wee8su7]
-- **Scratch 8-handle anchor resize pattern**: Each handle's opposite corner/edge is the fixed anchor. Clockwise from top-left: a(0)↔e(4), b(1)↔f(5), c(2)↔g(6), d(3)↔h(7). Width/height = distance from anchor to mouse. Position adjusts to keep anchor fixed. Edge handles constrain to one axis. Implemented as data-driven `handleEdges[8][4]` table (`[left,top,right,bottom]`) — no switch cases. [ses_0df6b173cffe2iIZ1i2Wee8su7]
-- **PixiJS sprite scale vs data model width/height**: PIXI.Sprite display size = `texture.naturalWidth * scaleX`. Data model `width`/`height` must represent natural (unscaled) dimensions and stay constant. Visual resize must update `scaleX`/`scaleY`, never `width`/`height`. [ses_0df6b173cffe2iIZ1i2Wee8su7]
-- **Sprite caching for smooth drag**: Store `selectedImageSprite` reference set during `renderImageLayer` (when `imgData === selectedImageData`). For sprites rendered before selection, `cacheSelectedImageSprite()` iterates the layer container's children to find the sprite by index. Drag/resize/rotation then updates the cached sprite directly per frame; full `renderAllLayers()` only on pointer up. Boolean `isImageDragging` guard suppresses the `JSON.stringify(layer.images)` watcher mid-drag. [ses_0df6b173cffe2iIZ1i2Wee8su7]
-- **PixiJS/DOM event ordering**: When using PixiJS `eventMode = 'static'` handles + DOM listeners on same canvas, PixiJS processes events AFTER DOM listeners. Use `nextTick()` deferral to let PixiJS set flags first. [ses_0df6b173cffe2iIZ1i2Wee8su7]
-- **Avoid `JSON.stringify` in watcher getters**: Vue watcher getters run on EVERY dependency check. `JSON.stringify(layer.tiles)` in a getter is O(n) on every change notification. Use revision counters (`tileRevision`, `imageRevision`) incremented at mutation site, return the number from the getter. [ses_0df6b173cffe2iIZ1i2Wee8su7]
-- **Keep PixiJS alive with `v-show`**: Switching map editor with `v-if` destroys+recreates PixiJS (WebGL context init is expensive, ~1s). Use `v-show` instead to keep the component mounted and PixiJS rendering. Avoids re-init latency on every mode switch. [ses_0df6b173cffe2iIZ1i2Wee8su7]
-- **Map .bgm thumbnail from tileContainer only**: Use `PIXI.RenderTexture` sized to exact map pixel dimensions (`mapWidth * tileSize × mapHeight * tileSize`), render only `tileContainer` into it. Produces clean thumbnails without dark canvas borders/UI overlays. [ses_0df6b173cffe2iIZ1i2Wee8su7]
-- **Auto-save throttle to 2000ms**: Generating .bgm zip + thumbnail on every save is CPU-heavy. 2000ms debounce is sufficient; 500ms causes perceived lag on older machines. [ses_0df6b173cffe2iIZ1i2Wee8su7]
+- **pnpm PATH gotcha**: `npm install -g pnpm` does NOT add to PATH. Use full path or `npx`. `npm bin -g` removed in npm v11 — use `npm prefix -g`. [ses_0fca6436bffe]
+- **Engine API design for kids**: No import needed, auto-concat args, one-line configs, no blocking in game loops. [MyIDE MEMORY]
+- **`__all__` requirement**: New functions/classes in `bingo_engine.py` MUST be added to `__all__`. [MyIDE MEMORY]
+- **Tauri dev mode**: `externalBin`/`resources` can be emptied for dev — `find_system_python()` resolves at runtime. [ses_0fca6436bffe]
+- **Tauri v2 capabilities mandatory for window ops**: `capabilities/default.json` must declare `core:window:allow-{close,minimize,toggle-maximize,start-dragging}`. #1 trap for custom title bars. [ses_0fca6436bffe]
+- **Tauri `beforeunload` 对原生关闭按钮无效**: 必须用 `getCurrentWebviewWindow().onCloseRequested()` 拦截窗口关闭。[ses_04894c7f7ffe]
+- **Tauri `window.confirm()` 返回 Promise**: 在 Tauri v2 webview 中 `window.confirm()` 返回 Promise 对象而非 boolean，`if(obj)` 永远 true。必须用 `@tauri-apps/plugin-dialog` 的 `ask()`。[ses_04894c7f7ffe]
+- **Tauri `onCloseRequested` + `close()` 需防重复触发**: `close()` 会再次触发 `onCloseRequested`，需用 flag 防止无限循环。[ses_04894c7f7ffe]
+- **Tauri capabilities 需声明 `close` 和 `destroy`**: `appWindow.close()` 需要 `core:window:allow-close`，`appWindow.destroy()` 需要 `core:window:allow-destroy`。[ses_04894c7f7ffe]
+- **Tauri v2 `emit_to("main", ...)` over `emit()`**: From background threads, `app.emit()` unreliable. Use `app.emit_to("main", event, payload)` + `"core:event:default"` capability. [ses_0f3269daffe]
+- **macOS rounded corners**: CSS `border-radius` can't do window-level. Use `decorations: true` + `titleBarStyle: "Transparent"` + `hiddenTitle: true`. Windows ignores these. [ses_0fca6436bffe]
+- **Qt QLayout stretches widgets**: When translating Qt to CSS flexbox, use `align-self: stretch` + `padding` on children. Don't assume natural size. [ses_0fca6436bffe]
+- **Console panel always-render**: Collapsible panels: keep rendered, use internal `collapsed` state. Header bar (26px) stays visible. No `v-show`/`v-if` on wrapper. [ses_0fca6436bffe, ses_0f376fc72ffe]
+- **Sprite data model**: `{name, frames[], segments[{name, start, end, fps, loop}]}`. Frames are PNGs in same dir. [ses_0fca6436bffe]
+- **Sprite editor architecture**: Three-panel — costume list (100px), canvas, preview (264px). [ses_0fca6436bffe]
+- **PNG must be RGBA for Tauri icons**: `generate_context!()` panics otherwise. Use `Image.convert('RGBA')`. [ses_0fca6436bffe]
+- **Vue v-if + ref timing**: May need double `nextTick` or `document.querySelector` fallback. [ses_0fca6436bffe]
+- **Vue watch array spread**: `watch(() => [...array])` ensures firing on in-place mutations. [ses_0fca6436bffe]
+- **Pinia reactive replacement**: `obj.name = newName` may not trigger watchers. Use `{ ...obj, name: newName }`. [ses_0fca6436bffe]
+- **`.editor-page-full`**: Use `flex: 1; min-width: 0; min-height: 0;` in flex parents. Missing `min-width: 0` causes overflow when sibling (side panel) grows. [ses_0f376fc72ffe, ses_04894c7f7ffe]
+- See MEMORY-PixiJSMapEditor.md — PixiJS 8 patterns, map editor, drag/resize, auto-save
+- **`xattr -cr` may fail under SIP**: Use `sudo xattr -cr` or "Open Anyway" in System Settings. [ses_08c1fa6b0ffe]
+- **Windows `hidden_command()`**: `lib.rs` wraps `CREATE_NO_WINDOW` (0x08000000). All `Command::new()` must use it. [ses_08c1fa6b0ffe]
+- **pyflakes 已从检查按钮移除**: 检查按钮（ideCheckCode）与运行时错误提示高度重叠，对小学生用户鸡肋，已完全移除。pyflakes 也从 PluginManager 内置包列表移除。[ses_04894c7f7ffe]
+- **GitHub Actions matrix**: Edit `os` array in `.github/workflows/release.yml`. `workflow_dispatch` for manual. [ses_08c1fa6b0ffe]
+- **Windows Python encoding**: `PYTHONIOENCODING=utf-8` required — Windows uses GBK/CP936. [ses_08c1fa6b0ffe]
+- **Windows `py` launcher path trap**: `where py` returns launcher, not Python. Use `py -3 -c "import sys; print(sys.executable)"`. [ses_08c1fa6b0ffe]
+- **`tasklist` locale-dependent**: Check for PID digits, not English text. [ses_08c1fa6b0ffe]
+- **Tauri 资源打包**: `resources` extracts flat to `resource_dir/portable-python/`. `resolve_engine_env` searches accordingly. [ses_08c1fa6b0ffe]
+- **`Child::wait()` over polling**: Cross-platform blocking wait, no tasklist needed. [ses_08c1fa6b0ffe]
+- **resolve_engine_env must include venv Python**: Dev needs venv for black. [ses_08c1fa6b0ffe]
+- **Monaco comment italic 光标重叠**: 斜体字视觉宽度偏移但光标按正体计算。移除 `fontStyle: 'italic'` 修复。[ses_04894c7f7ffe]
+- **Monaco suggest widget 宽度不随字体缩放**: 需非 scoped CSS 设 `min-width: 360px` + `overflow: visible` on `.column-label`。[ses_04894c7f7ffe]
+- **Monaco triggerCharacters 空格陷阱**: 空格触发导致每次按空格弹补全。移除后不影响 `.` 触发和 quickSuggestions 自动弹出。不要设 `quickSuggestions: false`。[ses_04894c7f7ffe]
