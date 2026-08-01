@@ -10,11 +10,11 @@ const {
   updateInfo,
   downloadProgress,
   isDownloading,
-  checkForUpdates,
   downloadAndInstall,
 } = useUpdater()
 
 const showDialog = ref(false)
+const dialogMode = ref<'update' | 'none' | 'error'>('update')
 const skippedVersion = localStorage.getItem('skippedVersion')
 
 // 更新日志接口 - 未来可从服务器获取
@@ -40,16 +40,31 @@ function handleUpdateAvailable(event: Event) {
       version: newVersion || '未知',
       notes: customEvent.detail.body || '',
     }
+    dialogMode.value = 'update'
     showDialog.value = true
   }
 }
 
+function handleUpdateNone() {
+  dialogMode.value = 'none'
+  showDialog.value = true
+}
+
+function handleUpdateError() {
+  dialogMode.value = 'error'
+  showDialog.value = true
+}
+
 onMounted(() => {
   window.addEventListener('app-update-available', handleUpdateAvailable)
+  window.addEventListener('app-update-none', handleUpdateNone)
+  window.addEventListener('app-update-error', handleUpdateError)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('app-update-available', handleUpdateAvailable)
+  window.removeEventListener('app-update-none', handleUpdateNone)
+  window.removeEventListener('app-update-error', handleUpdateError)
 })
 
 function closeDialog() {
@@ -77,40 +92,77 @@ async function handleUpdate() {
   <Teleport to="body">
     <div v-if="showDialog" class="update-overlay" @click.self="closeDialog">
       <div class="update-dialog">
-        <div class="update-header">
-          <span class="update-title">发现新版本</span>
-          <button class="update-close" @click="closeDialog">×</button>
-        </div>
-        <div class="update-body">
-          <div class="update-version">Version {{ updateInfo?.version }}</div>
-          <div class="update-notes">
-            <template v-if="getUpdateNotes(updateInfo?.version || '').length > 0">
-              <div v-for="(note, index) in getUpdateNotes(updateInfo?.version || '')" :key="index" class="update-note-item">
-                {{ note }}
-              </div>
-            </template>
-            <template v-else>
-              <div class="update-note-item">{{ updateInfo?.notes || '包含 bug 修复和性能优化' }}</div>
-            </template>
+        <!-- 有更新 -->
+        <template v-if="dialogMode === 'update'">
+          <div class="update-header">
+            <span class="update-title">发现新版本</span>
+            <button class="update-close" @click="closeDialog">×</button>
           </div>
-        </div>
-        <div v-if="isDownloading" class="update-progress-wrapper">
-          <div class="update-progress">
-            <div class="update-progress-bar" :style="{ width: `${downloadProgress}%` }" />
-            <span class="update-progress-text">{{ downloadProgress }}%</span>
+          <div class="update-body">
+            <div class="update-version">Version {{ updateInfo?.version }}</div>
+            <div class="update-notes">
+              <template v-if="getUpdateNotes(updateInfo?.version || '').length > 0">
+                <div v-for="(note, index) in getUpdateNotes(updateInfo?.version || '')" :key="index" class="update-note-item">
+                  {{ note }}
+                </div>
+              </template>
+              <template v-else>
+                <div class="update-note-item">{{ updateInfo?.notes || '包含 bug 修复和性能优化' }}</div>
+              </template>
+            </div>
           </div>
-        </div>
-        <div class="update-footer">
-          <button class="update-btn update-btn-skip" @click="skipVersion">跳过此版本</button>
-          <div class="update-footer-right">
-            <button class="update-btn update-btn-later" @click="closeDialog">稍后再说</button>
-            <button
-              class="update-btn update-btn-install"
-              :disabled="isDownloading"
-              @click="handleUpdate"
-            >
-              {{ isDownloading ? '下载中...' : '立即更新' }}
-            </button>
+          <div v-if="isDownloading" class="update-progress-wrapper">
+            <div class="update-progress">
+              <div class="update-progress-bar" :style="{ width: `${downloadProgress}%` }" />
+              <span class="update-progress-text">{{ downloadProgress }}%</span>
+            </div>
+          </div>
+          <div class="update-footer">
+            <button class="update-btn update-btn-skip" @click="skipVersion">跳过此版本</button>
+            <div class="update-footer-right">
+              <button class="update-btn update-btn-later" @click="closeDialog">稍后再说</button>
+              <button
+                class="update-btn update-btn-install"
+                :disabled="isDownloading"
+                @click="handleUpdate"
+              >
+                {{ isDownloading ? '下载中...' : '立即更新' }}
+              </button>
+            </div>
+          </div>
+        </template>
+
+        <!-- 无更新 -->
+        <template v-else-if="dialogMode === 'none'">
+          <div class="update-header">
+            <span class="update-title">检查更新</span>
+            <button class="update-close" @click="closeDialog">×</button>
+          </div>
+          <div class="update-body">
+            <div class="update-message">当前已是最新版本</div>
+          </div>
+          <div class="update-footer">
+            <div class="update-footer-right">
+              <button class="update-btn update-btn-later" @click="closeDialog">确定</button>
+            </div>
+          </div>
+        </template>
+
+        <!-- 检查失败 -->
+        <template v-else-if="dialogMode === 'error'">
+          <div class="update-header">
+            <span class="update-title">检查更新</span>
+            <button class="update-close" @click="closeDialog">×</button>
+          </div>
+          <div class="update-body">
+            <div class="update-message update-message-error">检查更新失败，请检查网络连接后重试</div>
+          </div>
+          <div class="update-footer">
+            <div class="update-footer-right">
+              <button class="update-btn update-btn-later" @click="closeDialog">确定</button>
+            </div>
+          </div>
+        </template>
           </div>
         </div>
       </div>
@@ -193,6 +245,17 @@ async function handleUpdate() {
   content: '•';
   color: #565f89;
   margin-right: 6px;
+}
+
+.update-message {
+  font-size: 13px;
+  color: #a9b1d6;
+  text-align: center;
+  padding: 10px 0;
+}
+
+.update-message-error {
+  color: #f7768e;
 }
 
 .update-progress-wrapper {

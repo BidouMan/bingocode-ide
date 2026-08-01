@@ -479,14 +479,12 @@ async function checkUpdate() {
       window.dispatchEvent(new CustomEvent('app-update-available', { detail: update }))
     } else {
       hasUpdate.value = false
-      // 没有更新
-      const { message } = await import('@tauri-apps/plugin-dialog')
-      await message('当前已是最新版本', { title: '检查更新', kind: 'info' })
+      // 没有更新，触发 UpdateDialog 显示提示
+      window.dispatchEvent(new CustomEvent('app-update-none'))
     }
   } catch (e) {
     console.error('检查更新失败:', e)
-    const { message } = await import('@tauri-apps/plugin-dialog')
-    await message('检查更新失败，请检查网络连接后重试', { title: '检查更新', kind: 'warning' })
+    window.dispatchEvent(new CustomEvent('app-update-error'))
   }
 }
 
