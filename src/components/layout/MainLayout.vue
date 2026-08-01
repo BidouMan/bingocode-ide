@@ -2177,14 +2177,14 @@ function spriteDisplayName(name: string) {
 /* 检查更新按钮圆点提示 */
 .settings-update-btn {
   position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 .update-dot {
-  position: absolute;
-  top: 6px;
-  right: 8px;
   width: 6px;
   height: 6px;
-  background: #f7768e;
+  background: #5BFB84;
   border-radius: 50%;
 }
 

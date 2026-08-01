@@ -15,21 +15,36 @@ const {
 } = useUpdater()
 
 const showDialog = ref(false)
+const skippedVersion = localStorage.getItem('skippedVersion')
+
+// 更新日志接口 - 未来可从服务器获取
+function getUpdateNotes(version: string): string[] {
+  // TODO: 从服务器获取更新日志
+  // 目前使用静态数据
+  const notes: Record<string, string[]> = {
+    // '0.6.0': ['新增应用自动更新功能', '优化控制台日志输出', '清理无用内置资源'],
+  }
+  return notes[version] || ['包含 bug 修复和性能优化']
+}
 
 // 处理手动检查更新事件
 function handleUpdateAvailable(event: Event) {
   const customEvent = event as CustomEvent
   if (customEvent.detail) {
+    const newVersion = customEvent.detail.version
+    // 检查是否跳过了这个版本
+    if (skippedVersion === newVersion) {
+      return
+    }
     updateInfo.value = {
-      version: customEvent.detail.version || '未知',
-      notes: customEvent.detail.body || '无更新说明',
+      version: newVersion || '未知',
+      notes: customEvent.detail.body || '',
     }
     showDialog.value = true
   }
 }
 
 onMounted(() => {
-  // 只监听手动检查更新事件，不自动检查
   window.addEventListener('app-update-available', handleUpdateAvailable)
 })
 
@@ -40,6 +55,13 @@ onBeforeUnmount(() => {
 function closeDialog() {
   showDialog.value = false
   emit('close')
+}
+
+function skipVersion() {
+  if (updateInfo.value?.version) {
+    localStorage.setItem('skippedVersion', updateInfo.value.version)
+  }
+  closeDialog()
 }
 
 async function handleUpdate() {
@@ -60,21 +82,36 @@ async function handleUpdate() {
           <button class="update-close" @click="closeDialog">×</button>
         </div>
         <div class="update-body">
-          <div class="update-version">v{{ updateInfo?.version }}</div>
-          <div class="update-notes">{{ updateInfo?.notes || '包含 bug 修复和性能优化' }}</div>
+          <div class="update-version">Version {{ updateInfo?.version }}</div>
+          <div class="update-notes">
+            <template v-if="getUpdateNotes(updateInfo?.version || '').length > 0">
+              <div v-for="(note, index) in getUpdateNotes(updateInfo?.version || '')" :key="index" class="update-note-item">
+                {{ note }}
+              </div>
+            </template>
+            <template v-else>
+              <div class="update-note-item">{{ updateInfo?.notes || '包含 bug 修复和性能优化' }}</div>
+            </template>
+          </div>
+        </div>
+        <div v-if="isDownloading" class="update-progress-wrapper">
+          <div class="update-progress">
+            <div class="update-progress-bar" :style="{ width: `${downloadProgress}%` }" />
+            <span class="update-progress-text">{{ downloadProgress }}%</span>
+          </div>
         </div>
         <div class="update-footer">
-          <button class="update-btn update-btn-later" @click="closeDialog">稍后再说</button>
-          <button
-            class="update-btn update-btn-install"
-            :disabled="isDownloading"
-            @click="handleUpdate"
-          >
-            {{ isDownloading ? `下载中 ${downloadProgress}%` : '立即更新' }}
-          </button>
-        </div>
-        <div v-if="isDownloading" class="update-progress">
-          <div class="update-progress-bar" :style="{ width: `${downloadProgress}%` }" />
+          <button class="update-btn update-btn-skip" @click="skipVersion">跳过此版本</button>
+          <div class="update-footer-right">
+            <button class="update-btn update-btn-later" @click="closeDialog">稍后再说</button>
+            <button
+              class="update-btn update-btn-install"
+              :disabled="isDownloading"
+              @click="handleUpdate"
+            >
+              {{ isDownloading ? '下载中...' : '立即更新' }}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -99,7 +136,7 @@ async function handleUpdate() {
   background: #1a1b26;
   border: 1px solid #3b4261;
   border-radius: 8px;
-  width: 360px;
+  width: 340px;
   overflow: hidden;
 }
 
@@ -107,12 +144,12 @@ async function handleUpdate() {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 16px;
+  padding: 10px 14px;
   border-bottom: 1px solid #3b4261;
 }
 
 .update-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: #c0caf5;
 }
@@ -121,7 +158,7 @@ async function handleUpdate() {
   background: none;
   border: none;
   color: #565f89;
-  font-size: 20px;
+  font-size: 18px;
   cursor: pointer;
   padding: 0;
   line-height: 1;
@@ -132,36 +169,93 @@ async function handleUpdate() {
 }
 
 .update-body {
-  padding: 20px 16px;
+  padding: 16px 14px;
 }
 
 .update-version {
-  font-size: 24px;
-  font-weight: 600;
-  color: #7aa2f7;
-  margin-bottom: 8px;
+  font-size: 16px;
+  font-weight: 500;
+  color: #5BFB84;
+  margin-bottom: 10px;
 }
 
 .update-notes {
-  font-size: 13px;
+  font-size: 12px;
   color: #a9b1d6;
-  line-height: 1.5;
+  line-height: 1.6;
+}
+
+.update-note-item {
+  padding: 2px 0;
+}
+
+.update-note-item::before {
+  content: '•';
+  color: #565f89;
+  margin-right: 6px;
+}
+
+.update-progress-wrapper {
+  padding: 0 14px 8px;
+}
+
+.update-progress {
+  height: 18px;
+  background: #24283b;
+  border-radius: 3px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.update-progress-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: rgba(91, 251, 132, 0.2);
+  transition: width 0.3s;
+}
+
+.update-progress-text {
+  position: relative;
+  font-size: 11px;
+  color: #5BFB84;
+  font-weight: 500;
 }
 
 .update-footer {
   display: flex;
-  gap: 8px;
-  padding: 12px 16px;
-  justify-content: flex-end;
+  gap: 6px;
+  padding: 10px 14px;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.update-footer-right {
+  display: flex;
+  gap: 6px;
 }
 
 .update-btn {
-  padding: 6px 16px;
+  padding: 5px 12px;
   border-radius: 4px;
-  font-size: 13px;
+  font-size: 12px;
   cursor: pointer;
   border: none;
   transition: all 0.2s;
+}
+
+.update-btn-skip {
+  background: transparent;
+  color: #565f89;
+  padding-left: 0;
+}
+
+.update-btn-skip:hover {
+  color: #a9b1d6;
 }
 
 .update-btn-later {
@@ -174,27 +268,16 @@ async function handleUpdate() {
 }
 
 .update-btn-install {
-  background: #7aa2f7;
+  background: #5BFB84;
   color: #1a1b26;
 }
 
 .update-btn-install:hover {
-  background: #89b4fa;
+  background: #4BE074;
 }
 
 .update-btn-install:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-}
-
-.update-progress {
-  height: 3px;
-  background: #24283b;
-}
-
-.update-progress-bar {
-  height: 100%;
-  background: #7aa2f7;
-  transition: width 0.3s;
 }
 </style>
