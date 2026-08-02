@@ -181,9 +181,15 @@ jobs:
           UPDATER_DIR="src-tauri/target/release/bundle/updater"
           mkdir -p "$UPDATER_DIR"
 
-          # 写入临时密钥文件
-          KEY_FILE="/tmp/updater-key.pem"
-          echo "$UPDATER_PRIVATE_KEY" > "$KEY_FILE"
+          # 写入临时密钥文件（使用 RUNNER_TEMP 确保跨平台兼容）
+          KEY_FILE="$RUNNER_TEMP/updater-key.pem"
+          if [ -z "$UPDATER_PRIVATE_KEY" ]; then
+            echo "❌ UPDATER_PRIVATE_KEY secret 未配置或为空，跳过签名"
+            KEY_FILE=""
+          else
+            echo "$UPDATER_PRIVATE_KEY" > "$KEY_FILE"
+            echo "✅ 签名密钥已写入: $KEY_FILE"
+          fi
 
           # macOS: 生成 .app.tar.gz
           if [ "${{ runner.os }}" = "macOS" ]; then
@@ -195,11 +201,15 @@ jobs:
               echo "✅ macOS 更新包: $TARBALL"
 
               # 生成签名
-              openssl pkeyutl -sign -inkey "$KEY_FILE" -in "$TARBALL" -out /tmp/mac.sig
-              SIGNATURE=$(base64 < /tmp/mac.sig | tr -d '\n')
-              echo "$SIGNATURE" > "$UPDATER_DIR/signature.txt"
+              if [ -n "$KEY_FILE" ]; then
+                openssl pkeyutl -sign -inkey "$KEY_FILE" -in "$TARBALL" -out "$RUNNER_TEMP/mac.sig"
+                SIGNATURE=$(base64 < "$RUNNER_TEMP/mac.sig" | tr -d '\n')
+                echo "$SIGNATURE" > "$UPDATER_DIR/signature.txt"
+                echo "✅ macOS 签名已生成"
+              else
+                echo "⚠️ 跳过 macOS 签名（无密钥）"
+              fi
               echo "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$TARBALL")" > "$UPDATER_DIR/url.txt"
-              echo "✅ macOS 签名已生成"
             fi
           fi
 
@@ -212,11 +222,15 @@ jobs:
               echo "✅ Windows 更新包: $ZIP_FILE"
 
               # 生成签名
-              openssl pkeyutl -sign -inkey "$KEY_FILE" -in "$ZIP_FILE" -out /tmp/win.sig
-              SIGNATURE=$(base64 < /tmp/win.sig | tr -d '\n')
-              echo "$SIGNATURE" > "$UPDATER_DIR/signature.txt"
+              if [ -n "$KEY_FILE" ]; then
+                openssl pkeyutl -sign -inkey "$KEY_FILE" -in "$ZIP_FILE" -out "$RUNNER_TEMP/win.sig"
+                SIGNATURE=$(base64 < "$RUNNER_TEMP/win.sig" | tr -d '\n')
+                echo "$SIGNATURE" > "$UPDATER_DIR/signature.txt"
+                echo "✅ Windows 签名已生成"
+              else
+                echo "⚠️ 跳过 Windows 签名（无密钥）"
+              fi
               echo "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$ZIP_FILE")" > "$UPDATER_DIR/url.txt"
-              echo "✅ Windows 签名已生成"
             fi
           fi
 
