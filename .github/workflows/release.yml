@@ -167,13 +167,33 @@ jobs:
           # 从 GitHub Secrets 读取私钥
           UPDATER_KEY_FILE="${{ github.workspace }}/src-tauri/updater-key.pem"
 
+          echo "=== 调试信息 ==="
+          echo "Secret length: ${#UPDATER_PRIVATE_KEY}"
+          echo "Key file path: $UPDATER_KEY_FILE"
+
           if [ -n "${{ secrets.UPDATER_PRIVATE_KEY }}" ]; then
-            # 使用 printf 确保换行符正确处理
-            printf '%s' "${{ secrets.UPDATER_PRIVATE_KEY }}" > "$UPDATER_KEY_FILE"
-            echo "✅ 使用 GitHub Secrets 中的签名密钥"
-            # 验证文件内容
-            head -c 50 "$UPDATER_KEY_FILE"
-            echo "..."
+            # 写入私钥
+            echo "${{ secrets.UPDATER_PRIVATE_KEY }}" > "$UPDATER_KEY_FILE"
+            echo "✅ 私钥已写入"
+
+            # 验证文件
+            echo "=== 文件检查 ==="
+            ls -la "$UPDATER_KEY_FILE"
+            echo "=== 文件内容前100字符 ==="
+            head -c 100 "$UPDATER_KEY_FILE"
+            echo ""
+            echo "=== 文件内容后100字符 ==="
+            tail -c 100 "$UPDATER_KEY_FILE"
+            echo ""
+
+            # 尝试验证密钥
+            if openssl pkey -in "$UPDATER_KEY_FILE" -noout 2>&1; then
+              echo "✅ 密钥格式正确"
+            else
+              echo "❌ 密钥格式错误"
+              echo "=== 完整文件内容 ==="
+              cat "$UPDATER_KEY_FILE"
+            fi
           else
             echo "❌ 错误: 未找到 UPDATER_PRIVATE_KEY secret"
             exit 1
