@@ -319,10 +319,17 @@ jobs:
               SIG=$(cat "$dir/$sig_file")
             fi
             if [ -n "$URL" ] && [ -n "$SIG" ]; then
-              PLATFORMS_JSON=$(echo "$PLATFORMS_JSON" | jq \
-                --arg url "$URL" \
-                --arg sig "$SIG" \
-                ". + {\"$target1\": {signature: \$sig, url: \$url}}" +$([ -n "$target2" ] && echo " | . + {\"$target2\": {signature: \$sig, url: \$url}}" || echo ""))
+              echo "✅ $target1: url=$URL"
+              # 逐个 target 添加，避免引号和分词问题
+              for target in $target1 $target2; do
+                PLATFORMS_JSON=$(echo "$PLATFORMS_JSON" | jq \
+                  --arg url "$URL" \
+                  --arg sig "$SIG" \
+                  --arg t "$target" \
+                  '. + {($t): {signature: $sig, url: $url}}')
+              done
+            else
+              echo "⚠️ $target1: 缺少签名或URL，跳过"
             fi
           done
 
