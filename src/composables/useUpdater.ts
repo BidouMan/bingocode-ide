@@ -26,9 +26,14 @@ export function useUpdater() {
       updateAvailable.value = false
       updateInfo.value = null
       return null
-    } catch (e) {
-      console.error('[Updater] 检查更新失败:', e)
-      return null
+    } catch (e: unknown) {
+      const errorMsg = e instanceof Error ? e.message : String(e)
+      console.error('[Updater] 检查更新失败:', errorMsg)
+      updateInfo.value = {
+        version: '',
+        notes: errorMsg,
+      }
+      throw e
     } finally {
       isChecking.value = false
     }

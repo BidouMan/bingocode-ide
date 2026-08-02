@@ -15,6 +15,7 @@ const {
 
 const showDialog = ref(false)
 const dialogMode = ref<'update' | 'none' | 'error'>('update')
+const errorMessage = ref('')
 const skippedVersion = localStorage.getItem('skippedVersion')
 
 // 更新日志接口 - 未来可从服务器获取
@@ -50,7 +51,9 @@ function handleUpdateNone() {
   showDialog.value = true
 }
 
-function handleUpdateError() {
+function handleUpdateError(event: Event) {
+  const customEvent = event as CustomEvent
+  errorMessage.value = customEvent.detail?.message || '请检查网络连接后重试'
   dialogMode.value = 'error'
   showDialog.value = true
 }
@@ -153,7 +156,7 @@ async function handleUpdate() {
             <button class="update-close" @click="closeDialog">×</button>
           </div>
           <div class="update-body">
-            <div class="update-message update-message-error">检查更新失败，请检查网络连接后重试</div>
+            <div class="update-message update-message-error">检查更新失败：{{ errorMessage }}</div>
           </div>
           <div class="update-footer update-footer-center">
             <button class="update-btn update-btn-later" @click="closeDialog">确定</button>

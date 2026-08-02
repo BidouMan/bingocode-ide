@@ -294,40 +294,56 @@ jobs:
             echo "⚠️ 未找到公钥文件"
           fi
 
-          # macOS
-          MACOS_URL=""
-          MACOS_SIG=""
-          if [ -f "updater/updater-macOS/url.txt" ] && [ -f "updater/updater-macOS/signature.txt" ]; then
-            MACOS_URL=$(cat "updater/updater-macOS/url.txt")
-            MACOS_SIG=$(cat "updater/updater-macOS/signature.txt")
-          fi
+          # 收集各平台数据（URL 和签名都必须非空才写入）
+          PLATFORMS_ARGS=()
+          for entry in "updater/updater-macOS:url.txt:signature.txt:darwin-aarch64:darwin-x86_64" "updater/updater-Windows:url.txt:signature.txt:windows-x86_64"; do
+            IFS=':' read -r dir url_file sig_file target1 target2 <<< "$entry"
+            URL=""
+            SIG=""
+            if [ -f "$dir/$url_file" ] && [ -f "$dir/$sig_file" ]; then
+              URL=$(cat "$dir/$url_file")
+              SIG=$(cat "$dir/$sig_file")
+            fi
+            if [ -n "$URL" ] && [ -n "$SIG" ]; then
+              echo "✅ $target1: url=$URL"
+              PLATFORMS_ARGS+=("--arg" "${target1}_url" "$URL" "--arg" "${target1}_sig" "$SIG")
+              if [ -n "$target2" ]; then
+                PLATFORMS_ARGS+=("--arg" "${target2}_url" "$URL" "--arg" "${target2}_sig" "$SIG")
+              fi
+            else
+              echo "⚠️ $target1: 缺少签名或URL，跳过"
+              PLATFORMS_ARGS+=("--argjson" "${target1}_skip" "null" "--argjson" "${target2}_skip" "null")
+            fi
+          done
 
-          # Windows
-          WINDOWS_URL=""
-          WINDOWS_SIG=""
-          if [ -f "updater/updater-Windows/url.txt" ] && [ -f "updater/updater-Windows/signature.txt" ]; then
-            WINDOWS_URL=$(cat "updater/updater-Windows/url.txt")
-            WINDOWS_SIG=$(cat "updater/updater-Windows/signature.txt")
-          fi
+          # 生成 latest.json（用 jq，只包含有有效签名和URL的平台）
+          PLATFORMS_JSON="{}"
+          for entry in "updater/updater-macOS:url.txt:signature.txt:darwin-aarch64:darwin-x86_64" "updater/updater-Windows:url.txt:signature.txt:windows-x86_64"; do
+            IFS=':' read -r dir url_file sig_file target1 target2 <<< "$entry"
+            URL=""
+            SIG=""
+            if [ -f "$dir/$url_file" ] && [ -f "$dir/$sig_file" ]; then
+              URL=$(cat "$dir/$url_file")
+              SIG=$(cat "$dir/$sig_file")
+            fi
+            if [ -n "$URL" ] && [ -n "$SIG" ]; then
+              PLATFORMS_JSON=$(echo "$PLATFORMS_JSON" | jq \
+                --arg url "$URL" \
+                --arg sig "$SIG" \
+                ". + {\"$target1\": {signature: \$sig, url: \$url}}" +$([ -n "$target2" ] && echo " | . + {\"$target2\": {signature: \$sig, url: \$url}}" || echo ""))
+            fi
+          done
 
-          # 生成 latest.json（用 jq 确保 JSON 格式正确，安全转义特殊字符）
           jq -n \
             --arg version "v${VERSION}" \
             --arg notes "Version ${VERSION}" \
             --arg pubkey "${PUBKEY}" \
-            --arg mac_url "${MACOS_URL}" \
-            --arg mac_sig "${MACOS_SIG}" \
-            --arg win_url "${WINDOWS_URL}" \
-            --arg win_sig "${WINDOWS_SIG}" \
+            --argjson platforms "$PLATFORMS_JSON" \
             '{
               version: $version,
               notes: $notes,
               pubkey: $pubkey,
-              platforms: {
-                "darwin-aarch64": { signature: $mac_sig, url: $mac_url },
-                "darwin-x86_64": { signature: $mac_sig, url: $mac_url },
-                "windows-x86_64": { signature: $win_sig, url: $win_url }
-              }
+              platforms: $platforms
             }' > latest.json
 
           echo "✅ latest.json 已生成"

@@ -482,9 +482,10 @@ async function checkUpdate() {
       // 没有更新，触发 UpdateDialog 显示提示
       window.dispatchEvent(new CustomEvent('app-update-none'))
     }
-  } catch (e) {
-    console.error('检查更新失败:', e)
-    window.dispatchEvent(new CustomEvent('app-update-error'))
+  } catch (e: unknown) {
+    const errorMsg = e instanceof Error ? e.message : String(e)
+    console.error('检查更新失败:', errorMsg)
+    window.dispatchEvent(new CustomEvent('app-update-error', { detail: { message: errorMsg } }))
   }
 }
 
