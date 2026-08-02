@@ -213,9 +213,10 @@ jobs:
               tar -czf "$TARBALL" -C "$BUNDLE_DIR/macos" "$(basename "$APP_DIR")"
               echo "✅ macOS 更新包: $TARBALL"
 
-              # 生成签名
+              # 生成签名（Ed25519 不需要 -sha256 参数）
               if [ -f "${{ github.workspace }}/src-tauri/updater-key.pem" ]; then
-                SIGNATURE=$(openssl dgst -sha256 -sign "${{ github.workspace }}/src-tauri/updater-key.pem" "$TARBALL" | base64 | tr -d '\n')
+                openssl pkeyutl -sign -inkey "${{ github.workspace }}/src-tauri/updater-key.pem" -in "$TARBALL" -out /tmp/mac.sig
+                SIGNATURE=$(base64 < /tmp/mac.sig | tr -d '\n')
                 echo "SIGNATURE_MACOS=$SIGNATURE" >> $GITHUB_ENV
                 echo "URL_MACOS=https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$TARBALL")" >> $GITHUB_ENV
                 echo "✅ macOS 签名已生成"
@@ -231,9 +232,10 @@ jobs:
               7z a "$ZIP_FILE" "$INSTALLER"
               echo "✅ Windows 更新包: $ZIP_FILE"
 
-              # 生成签名
+              # 生成签名（Ed25519 不需要 -sha256 参数）
               if [ -f "${{ github.workspace }}/src-tauri/updater-key.pem" ]; then
-                SIGNATURE=$(openssl dgst -sha256 -sign "${{ github.workspace }}/src-tauri/updater-key.pem" "$ZIP_FILE" | base64 | tr -d '\n')
+                openssl pkeyutl -sign -inkey "${{ github.workspace }}/src-tauri/updater-key.pem" -in "$ZIP_FILE" -out /tmp/win.sig
+                SIGNATURE=$(base64 < /tmp/win.sig | tr -d '\n')
                 echo "SIGNATURE_WINDOWS=$SIGNATURE" >> $GITHUB_ENV
                 echo "URL_WINDOWS=https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$ZIP_FILE")" >> $GITHUB_ENV
                 echo "✅ Windows 签名已生成"
