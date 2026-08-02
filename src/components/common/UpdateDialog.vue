@@ -141,10 +141,8 @@ async function handleUpdate() {
           <div class="update-body">
             <div class="update-message">当前已是最新版本</div>
           </div>
-          <div class="update-footer">
-            <div class="update-footer-right">
-              <button class="update-btn update-btn-later" @click="closeDialog">确定</button>
-            </div>
+          <div class="update-footer update-footer-center">
+            <button class="update-btn update-btn-later" @click="closeDialog">确定</button>
           </div>
         </template>
 
@@ -157,10 +155,8 @@ async function handleUpdate() {
           <div class="update-body">
             <div class="update-message update-message-error">检查更新失败，请检查网络连接后重试</div>
           </div>
-          <div class="update-footer">
-            <div class="update-footer-right">
-              <button class="update-btn update-btn-later" @click="closeDialog">确定</button>
-            </div>
+          <div class="update-footer update-footer-center">
+            <button class="update-btn update-btn-later" @click="closeDialog">确定</button>
           </div>
         </template>
       </div>
@@ -293,6 +289,10 @@ async function handleUpdate() {
   padding: 10px 14px;
   justify-content: space-between;
   align-items: center;
+}
+
+.update-footer-center {
+  justify-content: center;
 }
 
 .update-footer-right {
