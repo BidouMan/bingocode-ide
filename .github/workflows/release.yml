@@ -181,6 +181,21 @@ jobs:
           UPDATER_DIR="src-tauri/target/release/bundle/updater"
           mkdir -p "$UPDATER_DIR"
 
+          # 确定正确的 OpenSSL 路径（macOS 系统自带 LibreSSL 不支持 Ed25519）
+          OPENSSL="openssl"
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            if ! [ -x "/opt/homebrew/opt/openssl@3/bin/openssl" ]; then
+              echo "🍺 安装 openssl@3..."
+              brew install openssl@3 >/dev/null 2>&1
+            fi
+            if [ -x "/opt/homebrew/opt/openssl@3/bin/openssl" ]; then
+              OPENSSL="/opt/homebrew/opt/openssl@3/bin/openssl"
+            else
+              echo "⚠️ openssl@3 安装失败，将使用系统 openssl（可能不支持 Ed25519）"
+            fi
+          fi
+          echo "🔐 使用 OpenSSL: $($OPENSSL version 2>&1 || echo 'unknown')"
+
           # 写入临时密钥文件（使用 RUNNER_TEMP 确保跨平台兼容）
           KEY_FILE="$RUNNER_TEMP/updater-key.pem"
           if [ -z "$UPDATER_PRIVATE_KEY" ]; then
@@ -191,16 +206,14 @@ jobs:
             echo "✅ 签名密钥已写入: $KEY_FILE"
 
             # 导出公钥到 updater 目录（供 latest.json 使用）
-            if [ "${{ runner.os }}" = "macOS" ]; then
-              /opt/homebrew/opt/openssl@3/bin/openssl pkey -in "$KEY_FILE" -pubout -out "$UPDATER_DIR/pubkey.txt" 2>/dev/null || openssl pkey -in "$KEY_FILE" -pubout -out "$UPDATER_DIR/pubkey.txt" 2>/dev/null || true
-            else
-              openssl pkey -in "$KEY_FILE" -pubout -out "$UPDATER_DIR/pubkey.txt" 2>/dev/null || true
-            fi
+            $OPENSSL pkey -in "$KEY_FILE" -pubout -out "$UPDATER_DIR/pubkey.txt"
+            echo "✅ 公钥已导出"
           fi
 
           # macOS: 生成 .app.tar.gz
           if [ "${{ runner.os }}" = "macOS" ]; then
             APP_DIR=$(find "$BUNDLE_DIR/macos" -name "*.app" -type d | head -1)
+            echo "📁 macOS APP_DIR: ${APP_DIR:-未找到}"
             if [ -n "$APP_DIR" ]; then
               APP_NAME=$(basename "$APP_DIR" .app)
               TARBALL="$UPDATER_DIR/${APP_NAME}_${VERSION}_aarch64.app.tar.gz"
@@ -209,7 +222,7 @@ jobs:
 
               # 生成签名
               if [ -n "$KEY_FILE" ]; then
-                openssl pkeyutl -sign -inkey "$KEY_FILE" -in "$TARBALL" -out "$RUNNER_TEMP/mac.sig"
+                $OPENSSL pkeyutl -sign -inkey "$KEY_FILE" -in "$TARBALL" -out "$RUNNER_TEMP/mac.sig"
                 SIGNATURE=$(base64 < "$RUNNER_TEMP/mac.sig" | tr -d '\n')
                 echo "$SIGNATURE" > "$UPDATER_DIR/signature.txt"
                 echo "✅ macOS 签名已生成"
@@ -223,6 +236,7 @@ jobs:
           # Windows: 生成 .nsis.zip
           if [ "${{ runner.os }}" = "Windows" ]; then
             INSTALLER=$(find "$BUNDLE_DIR/nsis" -name "*-setup.exe" | head -1)
+            echo "📁 Windows INSTALLER: ${INSTALLER:-未找到}"
             if [ -n "$INSTALLER" ]; then
               ZIP_FILE="$UPDATER_DIR/BingoCode_${VERSION}_x64-setup.nsis.zip"
               7z a "$ZIP_FILE" "$INSTALLER"
@@ -230,7 +244,7 @@ jobs:
 
               # 生成签名
               if [ -n "$KEY_FILE" ]; then
-                openssl pkeyutl -sign -inkey "$KEY_FILE" -in "$ZIP_FILE" -out "$RUNNER_TEMP/win.sig"
+                $OPENSSL pkeyutl -sign -inkey "$KEY_FILE" -in "$ZIP_FILE" -out "$RUNNER_TEMP/win.sig"
                 SIGNATURE=$(base64 < "$RUNNER_TEMP/win.sig" | tr -d '\n')
                 echo "$SIGNATURE" > "$UPDATER_DIR/signature.txt"
                 echo "✅ Windows 签名已生成"
@@ -294,29 +308,7 @@ jobs:
             echo "⚠️ 未找到公钥文件"
           fi
 
-          # 收集各平台数据（URL 和签名都必须非空才写入）
-          PLATFORMS_ARGS=()
-          for entry in "updater/updater-macOS:url.txt:signature.txt:darwin-aarch64:darwin-x86_64" "updater/updater-Windows:url.txt:signature.txt:windows-x86_64"; do
-            IFS=':' read -r dir url_file sig_file target1 target2 <<< "$entry"
-            URL=""
-            SIG=""
-            if [ -f "$dir/$url_file" ] && [ -f "$dir/$sig_file" ]; then
-              URL=$(cat "$dir/$url_file")
-              SIG=$(cat "$dir/$sig_file")
-            fi
-            if [ -n "$URL" ] && [ -n "$SIG" ]; then
-              echo "✅ $target1: url=$URL"
-              PLATFORMS_ARGS+=("--arg" "${target1}_url" "$URL" "--arg" "${target1}_sig" "$SIG")
-              if [ -n "$target2" ]; then
-                PLATFORMS_ARGS+=("--arg" "${target2}_url" "$URL" "--arg" "${target2}_sig" "$SIG")
-              fi
-            else
-              echo "⚠️ $target1: 缺少签名或URL，跳过"
-              PLATFORMS_ARGS+=("--argjson" "${target1}_skip" "null" "--argjson" "${target2}_skip" "null")
-            fi
-          done
-
-          # 生成 latest.json（用 jq，只包含有有效签名和URL的平台）
+          # 收集各平台数据（URL 和签名都必须非空才写入 latest.json）
           PLATFORMS_JSON="{}"
           for entry in "updater/updater-macOS:url.txt:signature.txt:darwin-aarch64:darwin-x86_64" "updater/updater-Windows:url.txt:signature.txt:windows-x86_64"; do
             IFS=':' read -r dir url_file sig_file target1 target2 <<< "$entry"
