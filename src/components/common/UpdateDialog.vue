@@ -163,8 +163,6 @@ async function handleUpdate() {
             </div>
           </div>
         </template>
-          </div>
-        </div>
       </div>
     </div>
   </Teleport>
