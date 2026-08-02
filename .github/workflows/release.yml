@@ -189,6 +189,13 @@ jobs:
           else
             echo "$UPDATER_PRIVATE_KEY" > "$KEY_FILE"
             echo "✅ 签名密钥已写入: $KEY_FILE"
+
+            # 导出公钥到 updater 目录（供 latest.json 使用）
+            if [ "${{ runner.os }}" = "macOS" ]; then
+              /opt/homebrew/opt/openssl@3/bin/openssl pkey -in "$KEY_FILE" -pubout -out "$UPDATER_DIR/pubkey.txt" 2>/dev/null || openssl pkey -in "$KEY_FILE" -pubout -out "$UPDATER_DIR/pubkey.txt" 2>/dev/null || true
+            else
+              openssl pkey -in "$KEY_FILE" -pubout -out "$UPDATER_DIR/pubkey.txt" 2>/dev/null || true
+            fi
           fi
 
           # macOS: 生成 .app.tar.gz
@@ -274,14 +281,17 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           echo "📝 生成 latest.json，版本: $VERSION"
 
-          # 读取公钥
-          if [ -f "updater/updater-macOS/pubkey.txt" ]; then
-            PUBKEY=$(cat "updater/updater-macOS/pubkey.txt")
-          elif [ -f "updater/updater-Windows/pubkey.txt" ]; then
-            PUBKEY=$(cat "updater/updater-Windows/pubkey.txt")
-          else
-            echo "⚠️ 未找到公钥"
-            PUBKEY=""
+          # 读取公钥（base64 编码的 PEM，与 tauri.conf.json 格式一致）
+          PUBKEY=""
+          for f in "updater/updater-macOS/pubkey.txt" "updater/updater-Windows/pubkey.txt"; do
+            if [ -f "$f" ]; then
+              PUBKEY=$(base64 -w 0 < "$f")
+              echo "✅ 从 $f 读取公钥"
+              break
+            fi
+          done
+          if [ -z "$PUBKEY" ]; then
+            echo "⚠️ 未找到公钥文件"
           fi
 
           # macOS
@@ -300,28 +310,25 @@ jobs:
             WINDOWS_SIG=$(cat "updater/updater-Windows/signature.txt")
           fi
 
-          # 生成 latest.json
-          cat > latest.json << EOF
-          {
-            "version": "v${VERSION}",
-            "notes": "Version ${VERSION}",
-            "pubkey": "${PUBKEY}",
-            "platforms": {
-              "darwin-aarch64": {
-                "signature": "${MACOS_SIG}",
-                "url": "${MACOS_URL}"
-              },
-              "darwin-x86_64": {
-                "signature": "${MACOS_SIG}",
-                "url": "${MACOS_URL}"
-              },
-              "windows-x86_64": {
-                "signature": "${WINDOWS_SIG}",
-                "url": "${WINDOWS_URL}"
+          # 生成 latest.json（用 jq 确保 JSON 格式正确，安全转义特殊字符）
+          jq -n \
+            --arg version "v${VERSION}" \
+            --arg notes "Version ${VERSION}" \
+            --arg pubkey "${PUBKEY}" \
+            --arg mac_url "${MACOS_URL}" \
+            --arg mac_sig "${MACOS_SIG}" \
+            --arg win_url "${WINDOWS_URL}" \
+            --arg win_sig "${WINDOWS_SIG}" \
+            '{
+              version: $version,
+              notes: $notes,
+              pubkey: $pubkey,
+              platforms: {
+                "darwin-aarch64": { signature: $mac_sig, url: $mac_url },
+                "darwin-x86_64": { signature: $mac_sig, url: $mac_url },
+                "windows-x86_64": { signature: $win_sig, url: $win_url }
               }
-            }
-          }
-          EOF
+            }' > latest.json
 
           echo "✅ latest.json 已生成"
           cat latest.json
