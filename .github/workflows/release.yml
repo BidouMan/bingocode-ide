@@ -168,8 +168,12 @@ jobs:
           UPDATER_KEY_FILE="${{ github.workspace }}/src-tauri/updater-key.pem"
 
           if [ -n "${{ secrets.UPDATER_PRIVATE_KEY }}" ]; then
-            echo "${{ secrets.UPDATER_PRIVATE_KEY }}" > "$UPDATER_KEY_FILE"
+            # 使用 printf 确保换行符正确处理
+            printf '%s' "${{ secrets.UPDATER_PRIVATE_KEY }}" > "$UPDATER_KEY_FILE"
             echo "✅ 使用 GitHub Secrets 中的签名密钥"
+            # 验证文件内容
+            head -c 50 "$UPDATER_KEY_FILE"
+            echo "..."
           else
             echo "❌ 错误: 未找到 UPDATER_PRIVATE_KEY secret"
             exit 1
