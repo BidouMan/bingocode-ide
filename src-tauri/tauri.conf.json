@@ -60,7 +60,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHJlcXVpcmVk",
       "endpoints": [
-        "https://cdn.jsdelivr.net/gh/BidouMan/bingocode-ide@latest/latest.json"
+        "https://github.com/BidouMan/bingocode-ide/releases/latest/download/latest.json"
       ]
     }
   }

@@ -136,8 +136,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # 关键验证：在 build 之前确认 python 二进制真的可执行，
-          # 否则 build.rs 会 panic 中止构建。
           if [ "${{ runner.os }}" = "Windows" ]; then
             PY_BIN="$GITHUB_WORKSPACE/engine/portable-python/python.exe"
           else
@@ -172,10 +170,6 @@ jobs:
 
           if [ ! -f "$UPDATER_KEY_FILE" ]; then
             echo "🔑 生成新的更新签名密钥..."
-            # 使用 Tauri 官方方法生成密钥对
-            cargo install tauri-cli
-            mkdir -p src-tauri
-            # 生成 ed25519 密钥对
             openssl genpkey -algorithm Ed25519 -out "$UPDATER_KEY_FILE" 2>/dev/null
             openssl pkey -in "$UPDATER_KEY_FILE" -pubout -out "$UPDATER_PUB_FILE" 2>/dev/null
             echo "✅ 密钥已生成"
@@ -185,7 +179,7 @@ jobs:
 
           # 提取公钥内容（base64 编码）
           PUBKEY=$(base64 < "$UPDATER_PUB_FILE" | tr -d '\n')
-          echo "PUBLIC_KEY=$PUBKEY" >> $GITHUB_ENV
+          echo "$PUBKEY" > /tmp/pubkey.txt
           echo "📝 公钥已提取"
 
       - name: Build Tauri app
@@ -205,7 +199,6 @@ jobs:
 
           # macOS: 生成 .app.tar.gz
           if [ "${{ runner.os }}" = "macOS" ]; then
-            # 找到 .app 目录
             APP_DIR=$(find "$BUNDLE_DIR/macos" -name "*.app" -type d | head -1)
             if [ -n "$APP_DIR" ]; then
               APP_NAME=$(basename "$APP_DIR" .app)
@@ -213,12 +206,12 @@ jobs:
               tar -czf "$TARBALL" -C "$BUNDLE_DIR/macos" "$(basename "$APP_DIR")"
               echo "✅ macOS 更新包: $TARBALL"
 
-              # 生成签名（Ed25519 不需要 -sha256 参数）
+              # 生成签名
               if [ -f "${{ github.workspace }}/src-tauri/updater-key.pem" ]; then
                 openssl pkeyutl -sign -inkey "${{ github.workspace }}/src-tauri/updater-key.pem" -in "$TARBALL" -out /tmp/mac.sig
                 SIGNATURE=$(base64 < /tmp/mac.sig | tr -d '\n')
-                echo "SIGNATURE_MACOS=$SIGNATURE" >> $GITHUB_ENV
-                echo "URL_MACOS=https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$TARBALL")" >> $GITHUB_ENV
+                echo "$SIGNATURE" > "$UPDATER_DIR/signature.txt"
+                echo "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$TARBALL")" > "$UPDATER_DIR/url.txt"
                 echo "✅ macOS 签名已生成"
               fi
             fi
@@ -232,12 +225,12 @@ jobs:
               7z a "$ZIP_FILE" "$INSTALLER"
               echo "✅ Windows 更新包: $ZIP_FILE"
 
-              # 生成签名（Ed25519 不需要 -sha256 参数）
+              # 生成签名
               if [ -f "${{ github.workspace }}/src-tauri/updater-key.pem" ]; then
                 openssl pkeyutl -sign -inkey "${{ github.workspace }}/src-tauri/updater-key.pem" -in "$ZIP_FILE" -out /tmp/win.sig
                 SIGNATURE=$(base64 < /tmp/win.sig | tr -d '\n')
-                echo "SIGNATURE_WINDOWS=$SIGNATURE" >> $GITHUB_ENV
-                echo "URL_WINDOWS=https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$ZIP_FILE")" >> $GITHUB_ENV
+                echo "$SIGNATURE" > "$UPDATER_DIR/signature.txt"
+                echo "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$ZIP_FILE")" > "$UPDATER_DIR/url.txt"
                 echo "✅ Windows 签名已生成"
               fi
             fi
@@ -283,25 +276,30 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           echo "📝 生成 latest.json，版本: $VERSION"
 
-          # 查找更新包和签名
-          MACOS_URL=""
-          MACOS_SIG=""
-          WINDOWS_URL=""
-          WINDOWS_SIG=""
+          # 读取公钥
+          if [ -f "updater/updater-macOS/pubkey.txt" ]; then
+            PUBKEY=$(cat "updater/updater-macOS/pubkey.txt")
+          elif [ -f "updater/updater-Windows/pubkey.txt" ]; then
+            PUBKEY=$(cat "updater/updater-Windows/pubkey.txt")
+          else
+            echo "⚠️ 未找到公钥"
+            PUBKEY=""
+          fi
 
           # macOS
-          MACOS_TARBALL=$(find updater -name "*darwin*aarch64*.tar.gz" -o -name "*macos*aarch64*.tar.gz" | head -1)
-          if [ -n "$MACOS_TARBALL" ]; then
-            MACOS_URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$MACOS_TARBALL")"
-            # 从环境变量获取签名
-            MACOS_SIG="${SIGNATURE_MACOS:-}"
+          MACOS_URL=""
+          MACOS_SIG=""
+          if [ -f "updater/updater-macOS/url.txt" ] && [ -f "updater/updater-macOS/signature.txt" ]; then
+            MACOS_URL=$(cat "updater/updater-macOS/url.txt")
+            MACOS_SIG=$(cat "updater/updater-macOS/signature.txt")
           fi
 
           # Windows
-          WINDOWS_ZIP=$(find updater -name "*windows*x64*.zip" -o -name "*win*x64*.zip" | head -1)
-          if [ -n "$WINDOWS_ZIP" ]; then
-            WINDOWS_URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$WINDOWS_ZIP")"
-            WINDOWS_SIG="${SIGNATURE_WINDOWS:-}"
+          WINDOWS_URL=""
+          WINDOWS_SIG=""
+          if [ -f "updater/updater-Windows/url.txt" ] && [ -f "updater/updater-Windows/signature.txt" ]; then
+            WINDOWS_URL=$(cat "updater/updater-Windows/url.txt")
+            WINDOWS_SIG=$(cat "updater/updater-Windows/signature.txt")
           fi
 
           # 生成 latest.json
@@ -309,7 +307,7 @@ jobs:
           {
             "version": "v${VERSION}",
             "notes": "Version ${VERSION}",
-            "pubkey": "${PUBLIC_KEY:-}",
+            "pubkey": "${PUBKEY}",
             "platforms": {
               "darwin-aarch64": {
                 "signature": "${MACOS_SIG}",
