@@ -138,13 +138,6 @@ jobs:
           set -euo pipefail
           # 关键验证：在 build 之前确认 python 二进制真的可执行，
           # 否则 build.rs 会 panic 中止构建。
-          # 历史上曾发生过 portable-python 目录只有 .gitkeep 就被打包，
-          # 导致用户安装后运行报 "Python not found"。
-          #
-          # 注意：不能用文件大小判断——
-          #   - macOS 上 bin/python3 是 symlink（指向 python3.12），symlink 本身只有几 bytes
-          #   - Windows 上 python.exe 是 launcher stub（约 90KB），真正解释器在 python3.dll
-          # 最可靠的方式是直接执行 --version 验证可运行性。
           if [ "${{ runner.os }}" = "Windows" ]; then
             PY_BIN="$GITHUB_WORKSPACE/engine/portable-python/python.exe"
           else
@@ -153,88 +146,107 @@ jobs:
 
           if [ ! -e "$PY_BIN" ]; then
             echo "❌ FATAL: Python binary not found at: $PY_BIN"
-            echo "    Directory contents:"
-            ls -la "$GITHUB_WORKSPACE/engine/portable-python/" 2>/dev/null || echo "    (directory missing)"
-            ls -la "$GITHUB_WORKSPACE/engine/portable-python/bin/" 2>/dev/null || true
             exit 1
           fi
 
-          # 执行验证：能跑通就算数（比文件大小可靠）
           echo "🐍 Verifying Python at: $PY_BIN"
           VERSION_OUTPUT=$("$PY_BIN" --version 2>&1) || {
             echo "❌ FATAL: Python binary not executable: $PY_BIN"
-            echo "    --version output: $VERSION_OUTPUT"
             exit 1
           }
           echo "✅ Python executable: $VERSION_OUTPUT"
 
-          # 额外验证：确认能 import 关键依赖（Pillow/numpy）
-          # 这些是 engine/requirements.txt 里要装的，setup 步骤应该已装好
           DEP_CHECK=$("$PY_BIN" -c "import PIL, numpy; print('deps OK')" 2>&1) || {
             echo "⚠️  WARNING: Python dependencies missing: $DEP_CHECK"
-            echo "    Setup step should have installed Pillow + numpy."
-            echo "    Continuing anyway (will fail at runtime if deps are truly missing)."
           }
           echo "✅ $DEP_CHECK"
+
+      - name: Generate update signatures
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # 生成签名密钥（如果不存在）
+          UPDATER_KEY_FILE="${{ github.workspace }}/src-tauri/updater-key.pem"
+          UPDATER_PUB_FILE="${{ github.workspace }}/src-tauri/updater-key.pub"
+
+          if [ ! -f "$UPDATER_KEY_FILE" ]; then
+            echo "🔑 生成新的更新签名密钥..."
+            # 使用 Tauri 官方方法生成密钥对
+            cargo install tauri-cli
+            mkdir -p src-tauri
+            # 生成 ed25519 密钥对
+            openssl genpkey -algorithm Ed25519 -out "$UPDATER_KEY_FILE" 2>/dev/null
+            openssl pkey -in "$UPDATER_KEY_FILE" -pubout -out "$UPDATER_PUB_FILE" 2>/dev/null
+            echo "✅ 密钥已生成"
+          else
+            echo "✅ 使用现有密钥"
+          fi
+
+          # 提取公钥内容（base64 编码）
+          PUBKEY=$(base64 < "$UPDATER_PUB_FILE" | tr -d '\n')
+          echo "PUBLIC_KEY=$PUBKEY" >> $GITHUB_ENV
+          echo "📝 公钥已提取"
 
       - name: Build Tauri app
         run: pnpm tauri build
 
-      - name: Verify bundle contains Python
+      - name: Generate updater artifacts
         shell: bash
         run: |
-          # 构建后验证：直接用 7z 列出 NSIS 安装包内容，确认 python.exe 真的在里面。
-          # 不用 set -euo pipefail —— 7z 管道容易触发 SIGPIPE (exit 141)
-          echo "=== Bundle 目录树 ==="
-          find src-tauri/target/release/bundle -type f 2>/dev/null | head -20
+          set -euo pipefail
 
-          INSTALLER=$(find src-tauri/target/release/bundle -name "*.exe" -path "*nsis*" 2>/dev/null | head -1)
-          if [ -z "$INSTALLER" ]; then
-            INSTALLER=$(find src-tauri/target/release/bundle -name "*-setup.exe" 2>/dev/null | head -1)
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "📦 生成更新包，版本: $VERSION"
+
+          BUNDLE_DIR="src-tauri/target/release/bundle"
+          UPDATER_DIR="src-tauri/target/release/bundle/updater"
+          mkdir -p "$UPDATER_DIR"
+
+          # macOS: 生成 .app.tar.gz
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            # 找到 .app 目录
+            APP_DIR=$(find "$BUNDLE_DIR/macos" -name "*.app" -type d | head -1)
+            if [ -n "$APP_DIR" ]; then
+              APP_NAME=$(basename "$APP_DIR" .app)
+              TARBALL="$UPDATER_DIR/${APP_NAME}_${VERSION}_aarch64.app.tar.gz"
+              tar -czf "$TARBALL" -C "$BUNDLE_DIR/macos" "$(basename "$APP_DIR")"
+              echo "✅ macOS 更新包: $TARBALL"
+
+              # 生成签名
+              if [ -f "${{ github.workspace }}/src-tauri/updater-key.pem" ]; then
+                SIGNATURE=$(openssl dgst -sha256 -sign "${{ github.workspace }}/src-tauri/updater-key.pem" "$TARBALL" | base64 | tr -d '\n')
+                echo "SIGNATURE_MACOS=$SIGNATURE" >> $GITHUB_ENV
+                echo "URL_MACOS=https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$TARBALL")" >> $GITHUB_ENV
+                echo "✅ macOS 签名已生成"
+              fi
+            fi
           fi
 
-          if [ -z "$INSTALLER" ]; then
-            echo "⚠️  未找到 NSIS 安装包，跳过验证（可能是 macOS 构建）"
-            exit 0
-          fi
-
-          SIZE=$(stat -c%s "$INSTALLER" 2>/dev/null || stat -f%z "$INSTALLER")
-          SIZE_MB=$((SIZE / 1024 / 1024))
-          echo "📦 安装包: $INSTALLER"
-          echo "📦 大小: ${SIZE_MB} MB"
-
-          # 用 7z 列出安装包内容到临时文件（避免管道 SIGPIPE）
-          LIST_FILE=$(mktemp)
-          7z l "$INSTALLER" > "$LIST_FILE" 2>&1 || true
-
-          echo "=== 7z 列出文件总数 ==="
-          wc -l "$LIST_FILE"
-
-          # 检查 python.exe（Windows）或 bin/python3（macOS）是否在安装包中
-          # NSIS 安装包中路径可能是 _up_\engine\portable-python\python.exe 这种格式
+          # Windows: 生成 .nsis.zip
           if [ "${{ runner.os }}" = "Windows" ]; then
-            PY_PATTERN="python\.exe"
-          else
-            PY_PATTERN="bin/python3"
+            INSTALLER=$(find "$BUNDLE_DIR/nsis" -name "*-setup.exe" | head -1)
+            if [ -n "$INSTALLER" ]; then
+              ZIP_FILE="$UPDATER_DIR/BingoCode_${VERSION}_x64-setup.nsis.zip"
+              7z a "$ZIP_FILE" "$INSTALLER"
+              echo "✅ Windows 更新包: $ZIP_FILE"
+
+              # 生成签名
+              if [ -f "${{ github.workspace }}/src-tauri/updater-key.pem" ]; then
+                SIGNATURE=$(openssl dgst -sha256 -sign "${{ github.workspace }}/src-tauri/updater-key.pem" "$ZIP_FILE" | base64 | tr -d '\n')
+                echo "SIGNATURE_WINDOWS=$SIGNATURE" >> $GITHUB_ENV
+                echo "URL_WINDOWS=https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$ZIP_FILE")" >> $GITHUB_ENV
+                echo "✅ Windows 签名已生成"
+              fi
+            fi
           fi
 
-          echo "=== 搜索 Python 二进制 ($PY_PATTERN) ==="
-          PY_MATCHES=$(grep -iE "$PY_PATTERN" "$LIST_FILE" || true)
-
-          if [ -z "$PY_MATCHES" ]; then
-            echo "❌ FATAL: 安装包中没有 Python 二进制 (匹配: $PY_PATTERN)"
-            echo "    === 7z 输出中包含 'python' 的行（前 20 行）==="
-            grep -i "python" "$LIST_FILE" | head -20 || echo "    (无)"
-            echo "    === 7z 输出前 30 行 ==="
-            head -30 "$LIST_FILE"
-            rm -f "$LIST_FILE"
-            exit 1
-          fi
-
-          echo "✅ 安装包中找到 Python 二进制："
-          echo "$PY_MATCHES" | head -5
-          rm -f "$LIST_FILE"
-          echo "✅ Python 二进制确认在安装包中"
+      - name: Upload updater artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: updater-${{ runner.os }}
+          path: src-tauri/target/release/bundle/updater/
+          retention-days: 7
 
       - name: Upload bundle
         uses: actions/upload-artifact@v5
@@ -256,12 +268,75 @@ jobs:
         with:
           path: bundles
 
+      - name: Download updater artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: updater
+
+      - name: Generate latest.json
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "📝 生成 latest.json，版本: $VERSION"
+
+          # 查找更新包和签名
+          MACOS_URL=""
+          MACOS_SIG=""
+          WINDOWS_URL=""
+          WINDOWS_SIG=""
+
+          # macOS
+          MACOS_TARBALL=$(find updater -name "*darwin*aarch64*.tar.gz" -o -name "*macos*aarch64*.tar.gz" | head -1)
+          if [ -n "$MACOS_TARBALL" ]; then
+            MACOS_URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$MACOS_TARBALL")"
+            # 从环境变量获取签名
+            MACOS_SIG="${SIGNATURE_MACOS:-}"
+          fi
+
+          # Windows
+          WINDOWS_ZIP=$(find updater -name "*windows*x64*.zip" -o -name "*win*x64*.zip" | head -1)
+          if [ -n "$WINDOWS_ZIP" ]; then
+            WINDOWS_URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$WINDOWS_ZIP")"
+            WINDOWS_SIG="${SIGNATURE_WINDOWS:-}"
+          fi
+
+          # 生成 latest.json
+          cat > latest.json << EOF
+          {
+            "version": "v${VERSION}",
+            "notes": "Version ${VERSION}",
+            "pubkey": "${PUBLIC_KEY:-}",
+            "platforms": {
+              "darwin-aarch64": {
+                "signature": "${MACOS_SIG}",
+                "url": "${MACOS_URL}"
+              },
+              "darwin-x86_64": {
+                "signature": "${MACOS_SIG}",
+                "url": "${MACOS_URL}"
+              },
+              "windows-x86_64": {
+                "signature": "${WINDOWS_SIG}",
+                "url": "${WINDOWS_URL}"
+              }
+            }
+          }
+          EOF
+
+          echo "✅ latest.json 已生成"
+          cat latest.json
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             bundles/**/*.dmg
-            bundles/**/*.msi
             bundles/**/*.exe
+            bundles/**/*.zip
+            updater/**/*.tar.gz
+            updater/**/*.zip
+            latest.json
           generate_release_notes: true
           make_latest: true
