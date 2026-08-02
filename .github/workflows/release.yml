@@ -161,29 +161,16 @@ jobs:
 
       - name: Setup update signing key
         shell: bash
-        env:
-          UPDATER_PRIVATE_KEY: ${{ secrets.UPDATER_PRIVATE_KEY }}
         run: |
-          set -euo pipefail
-
-          # 从环境变量读取私钥
-          UPDATER_KEY_FILE="${{ github.workspace }}/src-tauri/updater-key.pem"
-
-          if [ -n "$UPDATER_PRIVATE_KEY" ]; then
-            # 写入私钥
-            echo "$UPDATER_PRIVATE_KEY" > "$UPDATER_KEY_FILE"
-            echo "✅ 私钥已写入"
-            echo "文件大小: $(wc -c < "$UPDATER_KEY_FILE") bytes"
-          else
-            echo "❌ 错误: UPDATER_PRIVATE_KEY 环境变量为空"
-            exit 1
-          fi
+          echo "✅ 私钥将通过环境变量传递到签名步骤"
 
       - name: Build Tauri app
         run: pnpm tauri build
 
       - name: Generate updater artifacts
         shell: bash
+        env:
+          UPDATER_PRIVATE_KEY: ${{ secrets.UPDATER_PRIVATE_KEY }}
         run: |
           set -euo pipefail
 
@@ -193,6 +180,10 @@ jobs:
           BUNDLE_DIR="src-tauri/target/release/bundle"
           UPDATER_DIR="src-tauri/target/release/bundle/updater"
           mkdir -p "$UPDATER_DIR"
+
+          # 写入临时密钥文件
+          KEY_FILE="/tmp/updater-key.pem"
+          echo "$UPDATER_PRIVATE_KEY" > "$KEY_FILE"
 
           # macOS: 生成 .app.tar.gz
           if [ "${{ runner.os }}" = "macOS" ]; then
@@ -204,13 +195,11 @@ jobs:
               echo "✅ macOS 更新包: $TARBALL"
 
               # 生成签名
-              if [ -f "${{ github.workspace }}/src-tauri/updater-key.pem" ]; then
-                openssl pkeyutl -sign -inkey "${{ github.workspace }}/src-tauri/updater-key.pem" -in "$TARBALL" -out /tmp/mac.sig
-                SIGNATURE=$(base64 < /tmp/mac.sig | tr -d '\n')
-                echo "$SIGNATURE" > "$UPDATER_DIR/signature.txt"
-                echo "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$TARBALL")" > "$UPDATER_DIR/url.txt"
-                echo "✅ macOS 签名已生成"
-              fi
+              openssl pkeyutl -sign -inkey "$KEY_FILE" -in "$TARBALL" -out /tmp/mac.sig
+              SIGNATURE=$(base64 < /tmp/mac.sig | tr -d '\n')
+              echo "$SIGNATURE" > "$UPDATER_DIR/signature.txt"
+              echo "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$TARBALL")" > "$UPDATER_DIR/url.txt"
+              echo "✅ macOS 签名已生成"
             fi
           fi
 
@@ -223,13 +212,11 @@ jobs:
               echo "✅ Windows 更新包: $ZIP_FILE"
 
               # 生成签名
-              if [ -f "${{ github.workspace }}/src-tauri/updater-key.pem" ]; then
-                openssl pkeyutl -sign -inkey "${{ github.workspace }}/src-tauri/updater-key.pem" -in "$ZIP_FILE" -out /tmp/win.sig
-                SIGNATURE=$(base64 < /tmp/win.sig | tr -d '\n')
-                echo "$SIGNATURE" > "$UPDATER_DIR/signature.txt"
-                echo "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$ZIP_FILE")" > "$UPDATER_DIR/url.txt"
-                echo "✅ Windows 签名已生成"
-              fi
+              openssl pkeyutl -sign -inkey "$KEY_FILE" -in "$ZIP_FILE" -out /tmp/win.sig
+              SIGNATURE=$(base64 < /tmp/win.sig | tr -d '\n')
+              echo "$SIGNATURE" > "$UPDATER_DIR/signature.txt"
+              echo "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$ZIP_FILE")" > "$UPDATER_DIR/url.txt"
+              echo "✅ Windows 签名已生成"
             fi
           fi
 
