@@ -159,28 +159,21 @@ jobs:
           }
           echo "✅ $DEP_CHECK"
 
-      - name: Generate update signatures
+      - name: Setup update signing key
         shell: bash
         run: |
           set -euo pipefail
 
-          # 生成签名密钥（如果不存在）
+          # 从 GitHub Secrets 读取私钥
           UPDATER_KEY_FILE="${{ github.workspace }}/src-tauri/updater-key.pem"
-          UPDATER_PUB_FILE="${{ github.workspace }}/src-tauri/updater-key.pub"
 
-          if [ ! -f "$UPDATER_KEY_FILE" ]; then
-            echo "🔑 生成新的更新签名密钥..."
-            openssl genpkey -algorithm Ed25519 -out "$UPDATER_KEY_FILE" 2>/dev/null
-            openssl pkey -in "$UPDATER_KEY_FILE" -pubout -out "$UPDATER_PUB_FILE" 2>/dev/null
-            echo "✅ 密钥已生成"
+          if [ -n "${{ secrets.UPDATER_PRIVATE_KEY }}" ]; then
+            echo "${{ secrets.UPDATER_PRIVATE_KEY }}" > "$UPDATER_KEY_FILE"
+            echo "✅ 使用 GitHub Secrets 中的签名密钥"
           else
-            echo "✅ 使用现有密钥"
+            echo "❌ 错误: 未找到 UPDATER_PRIVATE_KEY secret"
+            exit 1
           fi
-
-          # 提取公钥内容（base64 编码）
-          PUBKEY=$(base64 < "$UPDATER_PUB_FILE" | tr -d '\n')
-          echo "$PUBKEY" > /tmp/pubkey.txt
-          echo "📝 公钥已提取"
 
       - name: Build Tauri app
         run: pnpm tauri build

@@ -58,7 +58,7 @@
       "open": true
     },
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHJlcXVpcmVk",
+      "pubkey": "LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUNvd0JRWURLMlZ3QXlFQWd1dW9PV2cwR2JuYnVTRWpKU3RGU3plQlpzbTUwVjY2RU10ZEVJbzQvMFE9Ci0tLS0tRU5EIFBVQkxJQyBLRVktLS0tLQo=",
       "endpoints": [
         "https://github.com/BidouMan/bingocode-ide/releases/latest/download/latest.json"
       ]
