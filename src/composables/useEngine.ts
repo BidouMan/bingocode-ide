@@ -282,7 +282,10 @@ export function useEngine() {
       if (event.payload.run_id !== myRunId) {
         return
       }
+      // 如果已经手动停止（isRunning=false），不再重复处理
+      if (!editorStore.isRunning) return
       const tryFinish = () => {
+        if (!editorStore.isRunning) return
         if (stdoutEnded) {
           terminalStore.flushNow()
           terminalStore.resetInputState()
@@ -510,19 +513,21 @@ export function useEngine() {
     }
   }
 
+  let _stopping = false
   async function stop() {
-    if (editorStore.isGameMode) {
-      try { await invoke('stop_script') } catch {}
-    } else {
-      try { await invoke('stop_script') } catch {}
-    }
-    terminalStore.flushNow()
+    // 幂等保护：防止并发/重复调用
+    if (_stopping || !editorStore.isRunning) return
+    _stopping = true
+    // 立即更新 UI，不等待 Rust 返回（防止 mutex 阻塞导致 UI 卡死）
     editorStore.setRunning(false)
+    terminalStore.flushNow()
     renderStore.resetTextureLoading()
     terminalStore.resetInputState()
     if (terminalStore.terminalMode === 'python') {
       terminalStore.terminalMode = 'shell'
     }
+    // 发送停止命令到后端（不 await，后台执行）
+    invoke('stop_script').catch(() => {}).finally(() => { _stopping = false })
   }
 
   async function sendInput(data: string) {

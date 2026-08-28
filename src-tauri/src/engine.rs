@@ -147,11 +147,15 @@ fn stop_script_process(process: &mut Option<RunningProcess>) -> Result<(), Strin
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
+            use std::process::Stdio;
             const CREATE_NO_WINDOW: u32 = 0x08000000;
+            // 不等待 taskkill 完成，防止阻塞 mutex 导致 UI 卡死
             let _ = Command::new("taskkill")
                 .args(["/F", "/T", "/PID", &pid.to_string()])
                 .creation_flags(CREATE_NO_WINDOW)
-                .output();
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn();
         }
     }
     Ok(())

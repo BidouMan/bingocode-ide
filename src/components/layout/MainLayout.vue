@@ -510,9 +510,9 @@ async function fileMenuAction(action: string) {
     await writeDebugLog(`[Save] skipping prompt: action=${action}, hasUnsavedTabs=${editorStore.hasUnsavedTabs}`)
   }
 
-  // 任何项目操作都先停止运行
+  // 任何项目操作都先停止运行（不等待后端返回）
   if (editorStore.isRunning) {
-    await engine.stop()
+    engine.stop()
     renderStore.clearAll()
   }
 
@@ -599,15 +599,23 @@ async function fileMenuAction(action: string) {
   }
 }
 
+let _toggling = false
 async function toggleRun() {
-  if (editorStore.isRunning) {
-    // 正在运行 → 停止
-    await engine.stop()
-  } else {
-    // 未运行 → 开始运行
-    consoleVisible.value = true
-    await nextTick()
-    await engine.run()
+  // 防抖：防止学生疯狂点击导致并发调用
+  if (_toggling) return
+  _toggling = true
+  try {
+    if (editorStore.isRunning) {
+      // 正在运行 → 停止（engine.stop() 内部立即更新 UI，不等待 Rust）
+      engine.stop()
+    } else {
+      // 未运行 → 开始运行
+      consoleVisible.value = true
+      await nextTick()
+      await engine.run()
+    }
+  } finally {
+    _toggling = false
   }
 }
 
