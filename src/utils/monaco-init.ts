@@ -299,11 +299,13 @@ async function init(): Promise<typeof Monaco> {
         [/./, 'source'],
       ],
       dblString: [
+        [/$/, 'string', '@pop'],
         [/[^"\\]+/, 'string'],
         [/\\./, 'string.escape'],
         [/"/, 'string', '@pop'],
       ],
       sglString: [
+        [/$/, 'string', '@pop'],
         [/[^'\\]+/, 'string'],
         [/\\./, 'string.escape'],
         [/'/, 'string', '@pop'],

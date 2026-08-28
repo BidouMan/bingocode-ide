@@ -367,26 +367,60 @@ async function initMonaco() {
   }
   window.addEventListener('contextmenu', ctxMenuHandler, true)
 
-  // IME 中文输入法处理
-  // 抖动根因：组合期间 textarea 宽度变化触发容器重排
-  // 方案：固定宽度 + opacity:0 隐藏，高度由 Monaco 自动管理
-  const editorDomNode = editor.getDomNode()
-  if (editorDomNode) {
-    if (!document.getElementById('ime-stable-style')) {
-      const style = document.createElement('style')
-      style.id = 'ime-stable-style'
-      style.textContent = `
-        .monaco-editor textarea.inputarea {
-          width: 1px !important;
-          min-width: 1px !important;
-          max-width: 1px !important;
-          overflow: hidden !important;
-          opacity: 0 !important;
-        }
-      `
-      document.head.appendChild(style)
-    }
+  // IME 输入时固定 textarea 宽度，防止拼音输入导致布局抖动
+  if (!document.getElementById('ime-stable-style')) {
+    const style = document.createElement('style')
+    style.id = 'ime-stable-style'
+    style.textContent = `
+      .monaco-editor textarea.inputarea {
+        width: 1px !important;
+        min-width: 1px !important;
+        max-width: 1px !important;
+        overflow: hidden !important;
+        opacity: 0 !important;
+      }
+    `
+    document.head.appendChild(style)
   }
+
+  // IME 组合期间拦截分词器，防止拼音中间状态（如 ni'hao）触发字符串模式污染整篇代码
+  // 精确方案：只拦截触发重新分词的 handleChanges()，让内部状态更新正常进行。
+  // 组合结束后恢复并强制重新分词所有可见行。
+  let _origHandleChanges: (() => void) | null = null
+  let _bgTokenizer: any = null
+  editor.onDidCompositionStart(() => {
+    const model = editor.getModel()
+    if (!model) return
+    const tokPart = (model as any)._tokenizationTextModelPart
+    if (!tokPart?.tokens) return
+    const tokBackend = tokPart.tokens.get()
+    if (!tokBackend?._defaultBackgroundTokenizer) return
+    _bgTokenizer = tokBackend._defaultBackgroundTokenizer
+    if (!_bgTokenizer || _origHandleChanges) return
+    _origHandleChanges = _bgTokenizer.handleChanges.bind(_bgTokenizer)
+    // 拦截：阻止后台分词器在组合期间触发重新分词
+    _bgTokenizer.handleChanges = function () { /* 暂停，组合结束后统一处理 */ }
+  })
+  editor.onDidCompositionEnd(() => {
+    if (_bgTokenizer && _origHandleChanges) {
+      // 恢复后台分词器
+      _bgTokenizer.handleChanges = _origHandleChanges
+      _origHandleChanges = null
+      _bgTokenizer = null
+    }
+    // 强制重新分词所有可见行，恢复正确语法高亮
+    const model = editor.getModel()
+    if (model) {
+      const ranges = editor.getVisibleRanges()
+      if (ranges.length > 0) {
+        for (const range of ranges) {
+          for (let i = range.startLineNumber; i <= range.endLineNumber; i++) {
+            model.tokenization.forceTokenization(i)
+          }
+        }
+      }
+    }
+  })
 
   // 自定义滚轮缩放：Cmd/Ctrl + 滚轮，每次加减 10%
   wheelHandler = (e: WheelEvent) => {
@@ -417,17 +451,6 @@ async function initMonaco() {
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
     window.dispatchEvent(new CustomEvent('editor-save'))
   })
-
-  // IME 组合输入：输入中文拼音时临时禁用语法高亮，避免中间状态（如 ni'hao）被错误解析
-  const editorDom = containerRef.value
-  if (editorDom) {
-    editorDom.addEventListener('compositionstart', () => {
-      editorDom.classList.add('ime-composing')
-    })
-    editorDom.addEventListener('compositionend', () => {
-      editorDom.classList.remove('ime-composing')
-    })
-  }
 
   // 恢复初始标签的状态
   const tab = editorStore.currentTab
@@ -633,6 +656,7 @@ onBeforeUnmount(() => {
     window.removeEventListener('wheel', wheelHandler, { capture: true } as any)
     wheelHandler = null
   }
+  document.getElementById('ime-stable-style')?.remove()
   if (editor) {
     const editorDom = editor.getDomNode()
     if (editorDom) {
@@ -745,9 +769,5 @@ onBeforeUnmount(() => {
   overflow: visible;
   text-overflow: clip;
   white-space: nowrap;
-}
-/* IME 组合输入期间：覆盖所有 token 颜色，避免拼音中间状态被错误高亮 */
-.ime-composing .monaco-editor .view-line span {
-  color: var(--vscode-editor-foreground, #c0caf5) !important;
 }
 </style>
