@@ -34,8 +34,32 @@ function closeCtxMenu() {
 // ─── 菜单动作 ───
 function doUndo() { closeCtxMenu(); editor?.trigger('contextMenu', 'undo') }
 function doRedo() { closeCtxMenu(); editor?.trigger('contextMenu', 'redo') }
-function doCut() { closeCtxMenu(); document.execCommand('cut') }
-function doCopy() { closeCtxMenu(); document.execCommand('copy') }
+function doCut() {
+  closeCtxMenu()
+  if (!editor || !monaco) return
+  const selection = editor.getSelection()
+  if (!selection || selection.isEmpty()) return
+  const model = editor.getModel()
+  if (!model) return
+  const text = model.getValueInRange(selection)
+  navigator.clipboard.writeText(text).then(() => {
+    editor.executeEdits('contextMenu', [{
+      range: selection,
+      text: '',
+      forceMoveMarkers: true,
+    }])
+  })
+}
+function doCopy() {
+  closeCtxMenu()
+  if (!editor) return
+  const selection = editor.getSelection()
+  if (!selection || selection.isEmpty()) return
+  const model = editor.getModel()
+  if (!model) return
+  const text = model.getValueInRange(selection)
+  navigator.clipboard.writeText(text)
+}
 function doPaste() {
   closeCtxMenu()
   navigator.clipboard.readText().then(text => {
