@@ -674,7 +674,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="containerRef" class="code-editor-container" />
+  <div class="code-editor-container">
+    <div ref="containerRef" class="code-editor-inner" />
+    <div v-if="!editorStore.currentTab" class="editor-empty-state">
+      <span class="editor-empty-text">打开文件开始编辑</span>
+    </div>
+  </div>
   <Teleport to="body">
     <div
       v-if="ctxMenu.show"
@@ -716,9 +721,14 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .code-editor-container {
+  position: relative;
   flex: 1;
   min-height: 0;
   background: #1a1b26;
+}
+.code-editor-inner {
+  width: 100%;
+  height: 100%;
 }
 .code-editor-container :deep(.margin) {
   border-right: none;
@@ -726,6 +736,21 @@ onBeforeUnmount(() => {
 }
 .code-editor-container :deep(.monaco-editor .margin) {
   padding-right: 4px;
+}
+.editor-empty-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1a1b26;
+  z-index: 10;
+  pointer-events: none;
+}
+.editor-empty-text {
+  color: #3b4261;
+  font-size: 16px;
+  user-select: none;
 }
 
 .editor-ctx-menu {
