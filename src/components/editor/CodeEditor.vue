@@ -221,6 +221,8 @@ async function initMonaco() {
       showConstants: true,
     },
     parameterHints: { enabled: false },
+    suggestFontSize: Math.min(editorStore.editorFontSize, 24),
+    wordBasedSuggestions: 'off',
     contextmenu: false,
   })
   console.log(`[Perf] Editor init: ${(performance.now() - t0).toFixed(0)}ms`)
@@ -320,12 +322,12 @@ async function initMonaco() {
         if (editorStore.isGameMode) {
           // 游戏模式：优先匹配已知变量名，否则默认显示 Sprite 方法
           const methods = dotCompletions[varName] || spriteDotDefault
-          return { suggestions: methods.map(item => ({ ...item, range })) }
+          return { suggestions: methods.map(item => ({ ...item, range })), incomplete: true }
         } else {
           // 代码模式：匹配 Python 类型方法
           const methods = pythonDotCompletions[varName]
           if (methods) {
-            return { suggestions: methods.map(item => ({ ...item, range })) }
+            return { suggestions: methods.map(item => ({ ...item, range })), incomplete: true }
           }
         }
       }
@@ -339,9 +341,9 @@ async function initMonaco() {
           seen.add(item.label)
           return true
         })
-        return { suggestions: merged.map(item => ({ ...item, range })) }
+        return { suggestions: merged.map(item => ({ ...item, range })), incomplete: true }
       } else {
-        return { suggestions: pythonCompletions.map(item => ({ ...item, range })) }
+        return { suggestions: pythonCompletions.map(item => ({ ...item, range })), incomplete: true }
       }
     },
   })
@@ -534,6 +536,9 @@ watch(
     if (editor) {
       // 只更新 fontSize，让 Monaco 自动计算 lineHeight
       editor.updateOptions({ fontSize: newSize })
+      // 补全弹窗字体跟随缩放，但上限为基础字号 16px 的 1.5 倍（24px），防止高缩放下文字溢出
+      const SUGGEST_FONT_CAP = 24
+      editor.updateOptions({ suggestFontSize: Math.min(newSize, SUGGEST_FONT_CAP) })
       editor.layout()
     }
   }
@@ -760,14 +765,20 @@ onBeforeUnmount(() => {
 </style>
 
 <style>
-/* Monaco 补全弹窗自适应字体大小 */
+/* Monaco 补全弹窗自适应字体大小和缩放 */
 .monaco-editor .suggest-widget {
-  min-width: 360px;
-  max-width: 80vw;
+  min-width: 20em;
+  max-width: 50em;
 }
 .monaco-editor .suggest-widget .monaco-list .monaco-list-row .column-label {
-  overflow: visible;
-  text-overflow: clip;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: ltr;
+}
+.monaco-editor .suggest-widget .monaco-list .monaco-list-row .details {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 </style>

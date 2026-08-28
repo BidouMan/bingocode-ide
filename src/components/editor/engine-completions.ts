@@ -258,6 +258,32 @@ const pythonKeywords: EngineCompletionItem[] = [
   { label: 'nonlocal', kind: CompletionItemKind.Keyword, insertText: 'nonlocal', documentation: '声明外层变量', detail: 'nonlocal variable_name' },
 ]
 
+/** Python 常用标准库模块 */
+const pythonModules: EngineCompletionItem[] = [
+  { label: 'random', kind: CompletionItemKind.Module, insertText: 'random', documentation: '随机数生成', detail: 'import random' },
+  { label: 'math', kind: CompletionItemKind.Module, insertText: 'math', documentation: '数学函数', detail: 'import math' },
+  { label: 'os', kind: CompletionItemKind.Module, insertText: 'os', documentation: '操作系统接口', detail: 'import os' },
+  { label: 'sys', kind: CompletionItemKind.Module, insertText: 'sys', documentation: '系统相关参数', detail: 'import sys' },
+  { label: 'time', kind: CompletionItemKind.Module, insertText: 'time', documentation: '时间访问和转换', detail: 'import time' },
+  { label: 'datetime', kind: CompletionItemKind.Module, insertText: 'datetime', documentation: '日期和时间处理', detail: 'import datetime' },
+  { label: 'json', kind: CompletionItemKind.Module, insertText: 'json', documentation: 'JSON 编码和解码', detail: 'import json' },
+  { label: 're', kind: CompletionItemKind.Module, insertText: 're', documentation: '正则表达式', detail: 'import re' },
+  { label: 'collections', kind: CompletionItemKind.Module, insertText: 'collections', documentation: '容器数据类型', detail: 'import collections' },
+  { label: 'itertools', kind: CompletionItemKind.Module, insertText: 'itertools', documentation: '迭代器工具', detail: 'import itertools' },
+  { label: 'functools', kind: CompletionItemKind.Module, insertText: 'functools', documentation: '高阶函数工具', detail: 'import functools' },
+  { label: 'string', kind: CompletionItemKind.Module, insertText: 'string', documentation: '字符串常量和模板', detail: 'import string' },
+  { label: 'copy', kind: CompletionItemKind.Module, insertText: 'copy', documentation: '浅拷贝和深拷贝', detail: 'import copy' },
+  { label: 'pickle', kind: CompletionItemKind.Module, insertText: 'pickle', documentation: '对象序列化', detail: 'import pickle' },
+  { label: 'hashlib', kind: CompletionItemKind.Module, insertText: 'hashlib', documentation: '安全哈希和消息摘要', detail: 'import hashlib' },
+  { label: 'urllib', kind: CompletionItemKind.Module, insertText: 'urllib', documentation: 'URL 处理', detail: 'import urllib' },
+  { label: 'pathlib', kind: CompletionItemKind.Module, insertText: 'pathlib', documentation: '面向对象的路径操作', detail: 'import pathlib' },
+  { label: 'typing', kind: CompletionItemKind.Module, insertText: 'typing', documentation: '类型提示支持', detail: 'import typing' },
+  { label: 'tkinter', kind: CompletionItemKind.Module, insertText: 'tkinter', documentation: 'GUI 图形界面', detail: 'import tkinter' },
+  { label: 'turtle', kind: CompletionItemKind.Module, insertText: 'turtle', documentation: '海龟绘图', detail: 'import turtle' },
+  { label: 'pygame', kind: CompletionItemKind.Module, insertText: 'pygame', documentation: '游戏开发库', detail: 'import pygame' },
+  { label: 'PIL', kind: CompletionItemKind.Module, insertText: 'PIL', documentation: '图像处理（Pillow）', detail: 'import PIL' },
+]
+
 /** Python list 方法 */
 const listMethods: EngineCompletionItem[] = [
   { label: 'append', kind: CompletionItemKind.Method, insertText: 'append', documentation: '在末尾添加元素', detail: 'list.append(object)' },
@@ -310,6 +336,7 @@ const strMethods: EngineCompletionItem[] = [
 export const pythonCompletions: EngineCompletionItem[] = [
   ...pythonKeywords,
   ...pythonBuiltins,
+  ...pythonModules,
 ]
 
 /** 代码模式点号触发 — 常见类型的实例方法 */
