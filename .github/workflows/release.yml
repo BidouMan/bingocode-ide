@@ -313,9 +313,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -- . 2>/dev/null || true
-          git clean -fd 2>/dev/null || true
-          git pull origin master --rebase
+          git fetch origin master
+          git checkout master
+          git reset --hard origin/master
           git add latest.json
           git diff --cached --quiet || git commit -m "chore: update latest.json for CDN cache"
-          git push origin master
+          git push origin HEAD:master
