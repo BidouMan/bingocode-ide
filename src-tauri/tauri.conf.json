@@ -59,7 +59,7 @@
       "open": true
     },
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU5ODI5NjE2OTkxN0I1OEIKUldTTHRSZVpGcGFDNmYyRG1veGplaEc1SnRwQVFDeVRyUEdLcFk3cW1WNHpWM1Npbk0wL21BNzYK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENBQ0U2Njk2NjNENEVCQwpSV1M4VGoxbWFlYXNEUE8wTm1aanJMQ1FLcFZXNDhjMXI4c3BLMFUwQm5WcG4yVlhBK3ZqOXhPZgo=",
       "endpoints": [
         "https://cdn.jsdelivr.net/gh/BidouMan/bingocode-ide@latest/latest.json",
         "https://ghfast.top/https://github.com/BidouMan/bingocode-ide/releases/latest/download/latest.json",
