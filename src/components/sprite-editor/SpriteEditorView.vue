@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useResourceStore } from '../../stores/resource'
 import { useEditorStore } from '../../stores/editor'
 import type { SpriteData, SpriteFrame, SpriteAnimation } from '../../composables/useSpriteData'
-import { readBgsFromUrl } from '../../composables/useSpriteData'
+import { readBgsFromUrl, revokeSpriteUrls, saveSpriteConfig } from '../../composables/useSpriteData'
 
 import iconPrev from '../../assets/icons/btn_preview_prev.svg'
 import iconPlay from '../../assets/icons/btn_preview_play.svg'
@@ -23,6 +23,7 @@ const imageRenderingStyle = computed(() => {
 })
 
 const currentSprite = ref<SpriteData | null>(null)
+const currentSpritePath = ref('')
 const selectedFrameIndex = ref(0)
 const selectedAnim = ref<SpriteAnimation | null>(null)
 const isPlaying = ref(false)
@@ -59,9 +60,28 @@ watch(
   { immediate: true }
 )
 
+// 自动保存：每次修改后写回 config.json
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleSave() {
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = setTimeout(async () => {
+    if (!currentSprite.value || !currentSpritePath.value) return
+    try {
+      await saveSpriteConfig(currentSpritePath.value, currentSprite.value)
+    } catch (e) {
+      console.error('自动保存角色失败:', e)
+    }
+  }, 300)
+}
+
 async function loadSprite(item: { id: string; name: string; path: string }) {
+  // 防重复加载：同一个角色不重新加载
+  if (currentSpritePath.value === item.path && currentSprite.value) return
   try {
+    // 释放旧的 ObjectURL 防止内存泄漏
+    revokeSpriteUrls(currentSprite.value)
     currentSprite.value = await readBgsFromUrl(item.path)
+    currentSpritePath.value = item.path
     selectedFrameIndex.value = 0
     canvasDisplayIndex.value = 0
     costumeHighlightIndex.value = 0
@@ -218,9 +238,14 @@ function getPreviewBgStyle() {
   return bgs[previewBgIndex.value]
 }
 
-watch(fpsValue, () => {
+watch(fpsValue, (val) => {
   if (isPlaying.value && selectedAnim.value) {
     restartTimer()
+  }
+  // 保存 FPS 到当前动画
+  if (selectedAnim.value) {
+    selectedAnim.value.fps = val
+    scheduleSave()
   }
 })
 
@@ -233,12 +258,14 @@ function addAnimation() {
   while (existing.includes(name)) { name = `动画${counter}`; counter++ }
   const newAnim: SpriteAnimation = { name, start: 1, end: total, fps: 10, loop: true }
   currentSprite.value.animations.push(newAnim)
+  scheduleSave()
 }
 
 function deleteAnimation(name: string) {
   if (!currentSprite.value) return
   if (selectedAnim.value?.name === name) { stopAnimation(); selectedAnim.value = null }
   currentSprite.value.animations = currentSprite.value.animations.filter(a => a.name !== name)
+  scheduleSave()
 }
 
 function renameAnimation(oldName: string, newName: string) {
@@ -251,10 +278,12 @@ function renameAnimation(oldName: string, newName: string) {
   if (anim) anim.name = newName.trim()
   if (selectedAnim.value?.name === oldName) selectedAnim.value.name = newName.trim()
   if (shouldResume && selectedAnim.value) startAnimation(selectedAnim.value)
+  scheduleSave()
 }
 
 function toggleLoop(anim: SpriteAnimation) {
   anim.loop = anim.loop === false ? true : false
+  scheduleSave()
 }
 
 function onCostumeContextMenu(e: MouseEvent, index: number) {
@@ -275,6 +304,7 @@ function deleteCostume(index: number) {
     selectedFrameIndex.value = Math.max(0, currentSprite.value.frames.length - 1)
   }
   costumeContextMenu.value.show = false
+  scheduleSave()
 }
 
 function onAnimContextMenu(e: MouseEvent, name: string) {
@@ -302,10 +332,14 @@ function closeContextMenus() {
 }
 
 // 注册全局 mouseup 监听
-document.addEventListener('mouseup', onGlobalMouseUp)
+onMounted(() => {
+  document.addEventListener('mouseup', onGlobalMouseUp)
+})
 
 onBeforeUnmount(() => {
   stopAnimation()
+  revokeSpriteUrls(currentSprite.value)
+  if (saveTimer) clearTimeout(saveTimer)
   document.removeEventListener('mouseup', onGlobalMouseUp)
 })
 </script>
@@ -393,8 +427,8 @@ onBeforeUnmount(() => {
       <!-- 动画列表 -->
       <div class="anim-list">
         <div
-          v-for="anim in (currentSprite?.animations || [])"
-          :key="anim.name"
+          v-for="(anim, animIdx) in (currentSprite?.animations || [])"
+          :key="animIdx"
           class="anim-item"
           :class="{ 'anim-item-active': selectedAnim?.name === anim.name }"
           @click="selectAnimation(anim)"
@@ -422,7 +456,7 @@ onBeforeUnmount(() => {
                 :value="anim.start"
                 min="1"
                 :max="currentSprite?.frames.length || 999"
-                @change="anim.start = Math.max(1, Math.min(Number(($event.target as HTMLInputElement).value), anim.end))"
+                @change="anim.start = Math.max(1, Math.min(Number(($event.target as HTMLInputElement).value), anim.end)); scheduleSave()"
                 @click.stop
               />
               <span class="anim-dash">-</span>
@@ -432,7 +466,7 @@ onBeforeUnmount(() => {
                 :value="anim.end"
                 min="1"
                 :max="currentSprite?.frames.length || 999"
-                @change="anim.end = Math.max(anim.start, Math.min(Number(($event.target as HTMLInputElement).value), currentSprite?.frames.length || 999))"
+                @change="anim.end = Math.max(anim.start, Math.min(Number(($event.target as HTMLInputElement).value), currentSprite?.frames.length || 999)); scheduleSave()"
                 @click.stop
               />
               <button class="anim-loop-btn" @click.stop="toggleLoop(anim)">

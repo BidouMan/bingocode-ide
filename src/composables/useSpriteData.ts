@@ -1,4 +1,5 @@
 import JSZip from 'jszip'
+import { invoke } from '@tauri-apps/api/core'
 
 export interface SpriteFrame {
   name: string
@@ -61,4 +62,35 @@ export async function readBgsFromUrl(url: string): Promise<SpriteData> {
 
 export function createFrameUrl(blob: Blob): string {
   return URL.createObjectURL(blob)
+}
+
+/** 释放 SpriteData 中所有 ObjectURL，防止内存泄漏 */
+export function revokeSpriteUrls(sprite: SpriteData | null) {
+  if (!sprite) return
+  for (const frame of sprite.frames) {
+    if (frame.url) URL.revokeObjectURL(frame.url)
+  }
+}
+
+/**
+ * 将动画/帧修改写回 config.json（自动保存）
+ * 保持与旧版 PySide6 sprite_model.py save() 相同的格式：
+ * 使用 "segments" 数组，保留 name/count 等原有字段
+ */
+export async function saveSpriteConfig(spritePath: string, sprite: SpriteData): Promise<void> {
+  const config: Record<string, any> = { name: sprite.name }
+  config.frames = sprite.frames.map(f => f.name)
+  config.segments = sprite.animations.map(a => {
+    const seg: Record<string, any> = {
+      name: a.name,
+      start: a.start,
+      end: a.end,
+    }
+    if (a.fps != null) seg.fps = a.fps
+    if (a.loop != null) seg.loop = a.loop
+    return seg
+  })
+
+  const json = JSON.stringify(config, null, 4)
+  await invoke('write_file', { path: `${spritePath}/config.json`, content: json })
 }
