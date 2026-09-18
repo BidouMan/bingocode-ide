@@ -1543,11 +1543,14 @@ threading.Thread(target=_input_sync_listener, daemon=True).start()
 def _custom_input(prompt=""):
     """替代内置 input()，从 _USER_INPUT_QUEUE 读取，不跟 stdin 监听线程抢数据。"""
     import sys
-    # 提示文字不加换行，光标停在同一行（与代码模式一致）
-    sys.stdout.write(prompt + "__BINGO_WAITING_INPUT__\n")
-    sys.stdout.flush()
     try:
+        # 提示文字不加换行，光标停在同一行（与代码模式一致）
+        sys.stdout.write(prompt + "__BINGO_WAITING_INPUT__\n")
+        sys.stdout.flush()
         return _USER_INPUT_QUEUE.get(timeout=300)
+    except EOFError:
+        # Windows 上 taskkill /F 强制终止进程时，stdin 管道关闭会触发 EOFError
+        return ""
     except queue.Empty:
         return ""
 
