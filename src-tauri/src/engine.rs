@@ -212,9 +212,31 @@ pub fn run_script_file(
         stop_script_process(&mut process_guard)?;
     }
 
+    // 包装脚本：覆盖 builtins.input 以优雅处理 EOFError（Windows 停止进程时 stdin 关闭）
+    let script_content = std::fs::read_to_string(&script_path)
+        .map_err(|e| format!("Failed to read script: {}", e))?;
+    let wrapped_script = format!(
+        "import builtins as _bi, sys as _sys\n\
+         _orig_print = print\n\
+         def _safe_input(prompt=''):\n\
+         \x20   _sys.stdout.write(str(prompt))\n\
+         \x20   _sys.stdout.flush()\n\
+         \x20   try:\n\
+         \x20       \x20   return _sys.stdin.readline().rstrip('\\n')\n\
+         \x20   except (EOFError, OSError):\n\
+         \x20       \x20   return ''\n\
+         _bi.input = _safe_input\n\
+         del _bi, _sys, _orig_print, _safe_input\n\
+         {}\n",
+        script_content
+    );
+    let wrapped_path = format!("{}.wrapped.py", script_path);
+    std::fs::write(&wrapped_path, &wrapped_script)
+        .map_err(|e| format!("Failed to write wrapped script: {}", e))?;
+
     let mut cmd = Command::new(&python_path);
     cmd.arg("-u")
-        .arg(&script_path)
+        .arg(&wrapped_path)
         .current_dir(&working_dir)
         .env("PYTHONUNBUFFERED", "1")
         .env("PYTHONIOENCODING", "utf-8")
