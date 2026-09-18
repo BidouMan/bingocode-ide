@@ -159,108 +159,21 @@ jobs:
           }
           echo "✅ $DEP_CHECK"
 
-      - name: Setup update signing key
-        shell: bash
-        run: |
-          echo "✅ 私钥将通过环境变量传递到签名步骤"
-
       - name: Build Tauri app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.UPDATER_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: pnpm tauri build
 
-      - name: Generate updater artifacts
+      - name: List updater artifacts
         shell: bash
-        env:
-          UPDATER_PRIVATE_KEY: ${{ secrets.UPDATER_PRIVATE_KEY }}
         run: |
-          set -euo pipefail
-
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "📦 生成更新包，版本: $VERSION"
-
+          echo "📦 查找 Tauri 自动生成的更新包和签名文件..."
           BUNDLE_DIR="src-tauri/target/release/bundle"
-          UPDATER_DIR="src-tauri/target/release/bundle/updater"
-          mkdir -p "$UPDATER_DIR"
-
-          # 确定正确的 OpenSSL 路径（macOS 系统自带 LibreSSL 不支持 Ed25519）
-          OPENSSL="openssl"
-          if [ "${{ runner.os }}" = "macOS" ]; then
-            if ! [ -x "/opt/homebrew/opt/openssl@3/bin/openssl" ]; then
-              echo "🍺 安装 openssl@3..."
-              brew install openssl@3 >/dev/null 2>&1
-            fi
-            if [ -x "/opt/homebrew/opt/openssl@3/bin/openssl" ]; then
-              OPENSSL="/opt/homebrew/opt/openssl@3/bin/openssl"
-            else
-              echo "⚠️ openssl@3 安装失败，将使用系统 openssl（可能不支持 Ed25519）"
-            fi
-          fi
-          echo "🔐 使用 OpenSSL: $($OPENSSL version 2>&1 || echo 'unknown')"
-
-          # 写入临时密钥文件（使用 RUNNER_TEMP 确保跨平台兼容）
-          KEY_FILE="$RUNNER_TEMP/updater-key.pem"
-          if [ -z "$UPDATER_PRIVATE_KEY" ]; then
-            echo "❌ UPDATER_PRIVATE_KEY secret 未配置或为空，跳过签名"
-            KEY_FILE=""
-          else
-            echo "$UPDATER_PRIVATE_KEY" > "$KEY_FILE"
-            echo "✅ 签名密钥已写入: $KEY_FILE"
-
-            # 导出公钥到 updater 目录（供 latest.json 使用）
-            $OPENSSL pkey -in "$KEY_FILE" -pubout -out "$UPDATER_DIR/pubkey.txt"
-            echo "✅ 公钥已导出"
-          fi
-
-          # macOS: 生成 .app.tar.gz
-          if [ "${{ runner.os }}" = "macOS" ]; then
-            APP_DIR=$(find "$BUNDLE_DIR/macos" -name "*.app" -type d | head -1)
-            echo "📁 macOS APP_DIR: ${APP_DIR:-未找到}"
-            if [ -n "$APP_DIR" ]; then
-              APP_NAME=$(basename "$APP_DIR" .app)
-              TARBALL="$UPDATER_DIR/${APP_NAME}_${VERSION}_aarch64.app.tar.gz"
-              tar -czf "$TARBALL" -C "$BUNDLE_DIR/macos" "$(basename "$APP_DIR")"
-              echo "✅ macOS 更新包: $TARBALL"
-
-              # 生成签名
-              if [ -n "$KEY_FILE" ]; then
-                $OPENSSL pkeyutl -sign -inkey "$KEY_FILE" -in "$TARBALL" -out "$RUNNER_TEMP/mac.sig"
-                SIGNATURE=$(base64 < "$RUNNER_TEMP/mac.sig" | tr -d '\n')
-                echo "$SIGNATURE" > "$UPDATER_DIR/signature.txt"
-                echo "✅ macOS 签名已生成"
-              else
-                echo "⚠️ 跳过 macOS 签名（无密钥）"
-              fi
-              echo "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$TARBALL")" > "$UPDATER_DIR/url.txt"
-            fi
-          fi
-
-          # Windows: 生成 .nsis.zip
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            INSTALLER=$(find "$BUNDLE_DIR/nsis" -name "*-setup.exe" | head -1)
-            echo "📁 Windows INSTALLER: ${INSTALLER:-未找到}"
-            if [ -n "$INSTALLER" ]; then
-              ZIP_FILE="$UPDATER_DIR/BingoCode_${VERSION}_x64-setup.nsis.zip"
-              7z a "$ZIP_FILE" "$INSTALLER"
-              echo "✅ Windows 更新包: $ZIP_FILE"
-
-              # 生成签名
-              if [ -n "$KEY_FILE" ]; then
-                $OPENSSL pkeyutl -sign -inkey "$KEY_FILE" -in "$ZIP_FILE" -out "$RUNNER_TEMP/win.sig"
-                SIGNATURE=$(base64 < "$RUNNER_TEMP/win.sig" | tr -d '\n')
-                echo "$SIGNATURE" > "$UPDATER_DIR/signature.txt"
-                echo "✅ Windows 签名已生成"
-              else
-                echo "⚠️ 跳过 Windows 签名（无密钥）"
-              fi
-              echo "https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$ZIP_FILE")" > "$UPDATER_DIR/url.txt"
-            fi
-          fi
-
-      - name: Upload updater artifacts
-        uses: actions/upload-artifact@v5
-        with:
-          name: updater-${{ runner.os }}
-          path: src-tauri/target/release/bundle/updater/
-          retention-days: 7
+          echo "--- macOS ---"
+          find "$BUNDLE_DIR/macos" -type f \( -name "*.tar.gz" -o -name "*.tar.gz.sig" \) 2>/dev/null || echo "无 macOS 更新包"
+          echo "--- Windows NSIS ---"
+          find "$BUNDLE_DIR/nsis" -type f \( -name "*.nsis.zip" -o -name "*.nsis.zip.sig" \) 2>/dev/null || echo "无 Windows 更新包"
 
       - name: Upload bundle
         uses: actions/upload-artifact@v5
@@ -282,11 +195,6 @@ jobs:
         with:
           path: bundles
 
-      - name: Download updater artifacts
-        uses: actions/download-artifact@v5
-        with:
-          path: updater
-
       - name: Generate latest.json
         shell: bash
         run: |
@@ -295,44 +203,82 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           echo "📝 生成 latest.json，版本: $VERSION"
 
-          # 读取公钥（base64 编码的 PEM，与 tauri.conf.json 格式一致）
-          PUBKEY=""
-          for f in "updater/updater-macOS/pubkey.txt" "updater/updater-Windows/pubkey.txt"; do
-            if [ -f "$f" ]; then
-              PUBKEY=$(base64 -w 0 < "$f")
-              echo "✅ 从 $f 读取公钥"
-              break
+          # 公钥直接从 tauri.conf.json 读取（minisign 格式）
+          PUBKEY=$(jq -r '.plugins.updater.pubkey' src-tauri/tauri.conf.json)
+          echo "✅ 从 tauri.conf.json 读取公钥"
+
+          # 收集各平台签名和 URL
+          # macOS: Tauri 生成 .app.tar.gz + .app.tar.gz.sig
+          # Windows: Tauri 生成 *.nsis.zip + *.nsis.zip.sig
+          PLATFORMS_JSON="{}"
+
+          # --- macOS ---
+          MAC_TARGZ=""
+          MAC_SIG=""
+          for f in $(find bundles -name "*.app.tar.gz" -not -name "*.sig" 2>/dev/null); do
+            MAC_TARGZ="$f"
+            SIG_FILE="${f}.sig"
+            if [ -f "$SIG_FILE" ]; then
+              MAC_SIG=$(cat "$SIG_FILE" | tr -d '\n')
+              echo "✅ macOS 签名已读取: $(basename "$f")"
+            else
+              echo "⚠️ macOS 签名文件不存在: $SIG_FILE"
             fi
+            break
           done
-          if [ -z "$PUBKEY" ]; then
-            echo "⚠️ 未找到公钥文件"
+          if [ -n "$MAC_TARGZ" ] && [ -n "$MAC_SIG" ]; then
+            MAC_URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$MAC_TARGZ")"
+            # 从 DMG 文件名推断架构（macos-latest 是 ARM64）
+            ARCH="aarch64"
+            DMG_FILE=$(find bundles -name "*_aarch64.dmg" -o -name "*_x64.dmg" 2>/dev/null | head -1)
+            if [ -n "$DMG_FILE" ]; then
+              case "$(basename "$DMG_FILE")" in
+                *_x64*) ARCH="x86_64" ;;
+                *)      ARCH="aarch64" ;;
+              esac
+              echo "✅ 从 DMG 文件名推断架构: $ARCH"
+            else
+              echo "ℹ️ 未找到 DMG，默认架构: $ARCH (macos-latest 为 ARM64)"
+            fi
+            TARGET="darwin-${ARCH}"
+            PLATFORMS_JSON=$(echo "$PLATFORMS_JSON" | jq \
+              --arg url "$MAC_URL" \
+              --arg sig "$MAC_SIG" \
+              --arg t "$TARGET" \
+              '. + {($t): {signature: $sig, url: $url}}')
+            echo "✅ macOS ($TARGET): url=$MAC_URL"
+          else
+            echo "⚠️ macOS: 未找到更新包或签名"
           fi
 
-          # 收集各平台数据（URL 和签名都必须非空才写入 latest.json）
-          PLATFORMS_JSON="{}"
-          for entry in "updater/updater-macOS:url.txt:signature.txt:darwin-aarch64:darwin-x86_64" "updater/updater-Windows:url.txt:signature.txt:windows-x86_64"; do
-            IFS=':' read -r dir url_file sig_file target1 target2 <<< "$entry"
-            URL=""
-            SIG=""
-            if [ -f "$dir/$url_file" ] && [ -f "$dir/$sig_file" ]; then
-              URL=$(cat "$dir/$url_file")
-              SIG=$(cat "$dir/$sig_file")
-            fi
-            if [ -n "$URL" ] && [ -n "$SIG" ]; then
-              echo "✅ $target1: url=$URL"
-              # 逐个 target 添加，避免引号和分词问题
-              for target in $target1 $target2; do
-                PLATFORMS_JSON=$(echo "$PLATFORMS_JSON" | jq \
-                  --arg url "$URL" \
-                  --arg sig "$SIG" \
-                  --arg t "$target" \
-                  '. + {($t): {signature: $sig, url: $url}}')
-              done
+          # --- Windows ---
+          WIN_NSIS_ZIP=""
+          WIN_SIG=""
+          for f in $(find bundles -name "*.nsis.zip" -not -name "*.sig" 2>/dev/null); do
+            WIN_NSIS_ZIP="$f"
+            SIG_FILE="${f}.sig"
+            if [ -f "$SIG_FILE" ]; then
+              WIN_SIG=$(cat "$SIG_FILE" | tr -d '\n')
+              echo "✅ Windows 签名已读取: $(basename "$f")"
             else
-              echo "⚠️ $target1: 缺少签名或URL，跳过"
+              echo "⚠️ Windows 签名文件不存在: $SIG_FILE"
             fi
+            break
           done
+          if [ -n "$WIN_NSIS_ZIP" ] && [ -n "$WIN_SIG" ]; then
+            WIN_URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$WIN_NSIS_ZIP")"
+            TARGET="windows-x86_64"
+            PLATFORMS_JSON=$(echo "$PLATFORMS_JSON" | jq \
+              --arg url "$WIN_URL" \
+              --arg sig "$WIN_SIG" \
+              --arg t "$TARGET" \
+              '. + {($t): {signature: $sig, url: $url}}')
+            echo "✅ Windows ($TARGET): url=$WIN_URL"
+          else
+            echo "⚠️ Windows: 未找到更新包或签名"
+          fi
 
+          # 生成 latest.json
           jq -n \
             --arg version "v${VERSION}" \
             --arg notes "Version ${VERSION}" \
@@ -354,9 +300,10 @@ jobs:
           files: |
             bundles/**/*.dmg
             bundles/**/*.exe
-            bundles/**/*.zip
-            updater/**/*.tar.gz
-            updater/**/*.zip
+            bundles/**/*.app.tar.gz
+            bundles/**/*.app.tar.gz.sig
+            bundles/**/*.nsis.zip
+            bundles/**/*.nsis.zip.sig
             latest.json
           generate_release_notes: true
           make_latest: true
@@ -369,7 +316,6 @@ jobs:
           git checkout -- . 2>/dev/null || true
           git clean -fd 2>/dev/null || true
           git pull origin master --rebase
-          cp latest.json ./latest.json
           git add latest.json
           git diff --cached --quiet || git commit -m "chore: update latest.json for CDN cache"
           git push origin master

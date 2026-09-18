@@ -1,11 +1,6 @@
 {
-  "version": "v0.5.4",
-  "notes": "Version 0.5.4",
-  "pubkey": "LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUNvd0JRWURLMlZ3QXlFQVkwOVpRTDdyZ0ZoRVFNSUFQOXlLTWl2UlNDZ1pMUnVtRDYwcGNJNWdFczQ9Ci0tLS0tRU5EIFBVQkxJQyBLRVktLS0tLQo=",
-  "platforms": {
-    "windows-x86_64": {
-      "signature": "PF5cX8fb1pJgsoW+GgldXnGCvk8OVWFULi858WJa+UHQG4vnY1BiZN3l/L3ACAhbQglWsOpY6pfzKa+Sgj7WAA==",
-      "url": "https://github.com/BidouMan/bingocode-ide/releases/download/v0.5.4/BingoCode_0.5.4_x64-setup.nsis.zip"
-    }
-  }
+  "version": "v0.5.5",
+  "notes": "Version 0.5.5",
+  "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU5ODI5NjE2OTkxN0I1OEIKUldTTHRSZVpGcGFDNmYyRG1veGplaEc1SnRwQVFDeVRyUEdLcFk3cW1WNHpWM1Npbk0wL21BNzYK",
+  "platforms": {}
 }
