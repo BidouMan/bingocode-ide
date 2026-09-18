@@ -838,8 +838,8 @@ function switchPage(page: number) {
 // 双击角色跳转到角色编辑页面
 function openSpriteEditor(item: { id: string; name: string; path: string }) {
   resourceStore.selectedSpriteId = item.id
+  editorStore.setGameMode(true)
   editorStore.setActiveEditorMode('sprite')
-  editorStore.setGameMode(false)
 }
 
 // 加载角色缩略图（通过 Rust 命令从解压目录读取）
