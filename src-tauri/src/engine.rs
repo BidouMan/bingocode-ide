@@ -217,16 +217,18 @@ pub fn run_script_file(
         .map_err(|e| format!("Failed to read script: {}", e))?;
     let wrapped_script = format!(
         "import builtins as _bi, sys as _sys\n\
-         _orig_print = print\n\
+         _input_ref = _sys.stdin\n\
+         _write_ref = _sys.stdout.write\n\
+         _flush_ref = _sys.stdout.flush\n\
          def _safe_input(prompt=''):\n\
-         \x20   _sys.stdout.write(str(prompt))\n\
-         \x20   _sys.stdout.flush()\n\
+         \x20   _write_ref(str(prompt))\n\
+         \x20   _flush_ref()\n\
          \x20   try:\n\
-         \x20       \x20   return _sys.stdin.readline().rstrip('\\n')\n\
+         \x20       \x20   return _input_ref.readline().rstrip('\\n')\n\
          \x20   except (EOFError, OSError):\n\
          \x20       \x20   return ''\n\
          _bi.input = _safe_input\n\
-         del _bi, _sys, _orig_print, _safe_input\n\
+         del _bi, _sys, _input_ref, _write_ref, _flush_ref, _safe_input\n\
          {}\n",
         script_content
     );
