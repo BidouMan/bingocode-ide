@@ -228,7 +228,6 @@ pub fn run_script_file(
          \x20   except (EOFError, OSError):\n\
          \x20       \x20   return ''\n\
          _bi.input = _safe_input\n\
-         del _bi, _sys, _input_ref, _write_ref, _flush_ref, _safe_input\n\
          {}\n",
         script_content
     );
