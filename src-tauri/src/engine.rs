@@ -216,17 +216,26 @@ pub fn run_script_file(
     let script_content = std::fs::read_to_string(&script_path)
         .map_err(|e| format!("Failed to read script: {}", e))?;
     let wrapped_script = format!(
-        "import builtins as _bi, sys as _sys\n\
+        "import builtins as _bi, sys as _sys, os as _os\n\
          _input_ref = _sys.stdin\n\
          _write_ref = _sys.stdout.write\n\
          _flush_ref = _sys.stdout.flush\n\
+         _stdin_closed = False\n\
          def _safe_input(prompt=''):\n\
+         \x20   global _stdin_closed\n\
+         \x20   if _stdin_closed:\n\
+         \x20       \x20   raise SystemExit\n\
          \x20   _write_ref(str(prompt))\n\
          \x20   _flush_ref()\n\
          \x20   try:\n\
-         \x20       \x20   return _input_ref.readline().rstrip('\\n')\n\
+         \x20       \x20   line = _input_ref.readline()\n\
+         \x20       \x20   if not line:\n\
+         \x20       \x20       \x20   _stdin_closed = True\n\
+         \x20       \x20       \x20   raise SystemExit\n\
+         \x20       \x20   return line.rstrip('\\n')\n\
          \x20   except (EOFError, OSError):\n\
-         \x20       \x20   return ''\n\
+         \x20       \x20   _stdin_closed = True\n\
+         \x20       \x20   raise SystemExit\n\
          _bi.input = _safe_input\n\
          {}\n",
         script_content
