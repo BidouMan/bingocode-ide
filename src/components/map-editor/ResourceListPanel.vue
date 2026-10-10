@@ -241,6 +241,23 @@ function onClearResources() {
   refreshAllThumbnails()
 }
 
+// 上传本地资源：图像图层直接打开本地文件选择窗口（整图导入无需任何选项）；
+// 绘制图层保留弹窗（需要选择导入图像模式还是图块集合及尺寸）
+async function onUploadClick() {
+  if (mapStore.activeLayer?.type === 'image') {
+    try {
+      const path = await invoke<string | null>('pick_image_file')
+      if (path) {
+        await onResourceImported({ path, mode: 'image', size: '64x64' })
+      }
+    } catch (e) {
+      console.error('选择文件失败:', e)
+    }
+    return
+  }
+  showImportDialog.value = true
+}
+
 async function onResourceImported(options: { path: string; mode: 'image' | 'tileset'; size: string }) {
   const isImageLayer = mapStore.activeLayer?.type === 'image'
   // 复制资源文件到项目地图目录
@@ -359,7 +376,7 @@ function onResourceClick(rIdx: number) {
       <button class="res-tool-btn" v-tooltip="'打开资源库'" @click="emit('open-library')">
         <img :src="iconLibrary" class="res-tool-icon" />
       </button>
-      <button class="res-tool-btn import-btn" v-tooltip="'上传本地资源'" :disabled="disabled" @click="showImportDialog = true">
+      <button class="res-tool-btn import-btn" v-tooltip="'上传本地资源'" :disabled="disabled" @click="onUploadClick">
         <img :src="iconUpload" class="res-tool-icon" />
       </button>
       <button class="res-tool-btn" v-tooltip="'选中删除'" @click="onDeleteResource">

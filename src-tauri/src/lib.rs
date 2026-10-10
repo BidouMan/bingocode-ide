@@ -856,9 +856,10 @@ fn get_sprite_thumbnail(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn pick_image_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
+async fn pick_image_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
 
+    // 必须是 async 命令：blocking_pick_file 在主线程（同步命令）调用会在 macOS 上死锁
     let path = app.dialog()
         .file()
         .add_filter("图片", &["png", "jpg", "jpeg", "bmp", "gif"])
