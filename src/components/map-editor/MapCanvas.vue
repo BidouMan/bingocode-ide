@@ -1402,11 +1402,35 @@ function scheduleRender() {
       renderQueued = false
       while (pendingRender) {
         pendingRender = false
+        // app 未就绪时轮询等待（initPixi 是异步的）
+        while (!app) {
+          await new Promise(r => requestAnimationFrame(r))
+        }
         await renderAllLayers()
       }
     })
   }
 }
+
+// 保护性 watcher：如果 tileRevision 变化时 app 还没初始化，等就绪后补渲染
+let pendingMapRender = false
+watch(
+  () => mapStore.tileRevision,
+  () => {
+    if (!app && !pendingMapRender) {
+      pendingMapRender = true
+      const checkReady = () => {
+        if (app) {
+          pendingMapRender = false
+          renderAllLayers()
+        } else {
+          requestAnimationFrame(checkReady)
+        }
+      }
+      requestAnimationFrame(checkReady)
+    }
+  }
+)
 
 onMounted(() => {
   nextTick(initPixi)

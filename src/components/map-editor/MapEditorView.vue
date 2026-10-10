@@ -95,12 +95,64 @@ async function loadMapFromProject(itemId: string): Promise<boolean> {
     if (!exists) return false
     const json = await invoke<string>('read_file', { path: filePath })
     const saveData = JSON.parse(json)
+
+    // Rust zip 0.6 解压 .bgm 时 map.json 可能丢失数据（tilesets/layers 被清空）
+    // 检测并从原始 .bgm zip 重新读取
+    if (!saveData.tilesets || saveData.tilesets.length === 0) {
+      const fixed = await tryReadMapFromBgm(mapName)
+      if (fixed) {
+        // 用正确的数据覆盖损坏的 map.json
+        await invoke('write_file', { path: filePath, content: JSON.stringify(fixed, null, 2) })
+        Object.assign(saveData, fixed)
+      }
+    }
+
     const mapData = deserializeMap(saveData)
+
+    // 将相对路径解析为绝对路径（.bgm 解压后的 map.json 使用相对路径）
+    const dir = mapDirPath(mapName)
+    resolveRelativePaths(mapData, dir)
+
     mapStore.loadMap(mapData)
     return true
   } catch (e) {
     console.error(`[MapEditor] loadMapFromProject: 失败 path=${filePath}`, e)
     return false
+  }
+}
+
+// 尝试从原始 .bgm zip 文件读取 map.json（修复 Rust zip 解压 bug）
+async function tryReadMapFromBgm(mapName: string): Promise<any | null> {
+  try {
+    const engineDir = await invoke<string>('get_engine_assets_dir')
+    const bgmPath = `${engineDir}/maps/packages/${mapName}.bgm`
+    const bgmExists = await invoke<boolean>('path_exists', { path: bgmPath })
+    if (!bgmExists) return null
+    const data = await invoke<number[]>('read_binary', { path: bgmPath })
+    const zip = await JSZip.loadAsync(new Uint8Array(data))
+    const entry = zip.file('map.json')
+    if (!entry) return null
+    return JSON.parse(await entry.async('text'))
+  } catch {
+    return null
+  }
+}
+
+// 将相对路径解析为绝对路径
+function resolveRelativePaths(mapData: any, dir: string) {
+  for (const ts of mapData.tileSets) {
+    if (ts.imagePath && !ts.imagePath.startsWith('/') && !ts.imagePath.startsWith('assets/') && !ts.imagePath.startsWith('/maps/')) {
+      ts.imagePath = `${dir}/${ts.imagePath}`
+    }
+  }
+  for (const layer of mapData.layers) {
+    if (layer.images) {
+      for (const img of layer.images) {
+        if (img.imagePath && !img.imagePath.startsWith('/') && !img.imagePath.startsWith('assets/') && !img.imagePath.startsWith('/maps/')) {
+          img.imagePath = `${dir}/${img.imagePath}`
+        }
+      }
+    }
   }
 }
 
@@ -208,12 +260,18 @@ async function onImportMap() {
       if (mapJsonEntry) {
         const saveData = JSON.parse(await mapJsonEntry.async('text'))
         const mapData = deserializeMap(saveData)
-        mapStore.loadMap(mapData)
+
         // 导入到项目目录，使用文件名作为资源名
         const name = file.name.replace(/\.bgm$/i, '')
         // 获取原始地图名，用于更新瓦片集图片路径
         const originalName = saveData.name || mapData.name
         const id = resourceStore.addItem({ name, type: 'map', path: '' })
+
+        // 将相对路径解析为绝对路径（.bgm 内的 map.json 使用相对路径）
+        const dir = mapDirPath(name)
+        resolveRelativePaths(mapData, dir)
+
+        mapStore.loadMap(mapData)
         skipNextPathWatch = true
         mapStore.setMapPath(id)
         mapData.name = name

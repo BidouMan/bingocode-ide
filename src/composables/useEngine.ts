@@ -143,6 +143,10 @@ export function useEngine() {
         renderStore.setFps(cmd.data.fps)
         break
 
+      case 'SHOW_COLLISION':
+        renderStore.showCollision = cmd.data.visible
+        break
+
       case 'PLAY_SOUND':
         try {
           const url = convertFileSrc(cmd.data.sound)

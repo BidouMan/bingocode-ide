@@ -176,6 +176,11 @@ export interface UICommandCommand extends EngineCommand {
   data: { visible: boolean }
 }
 
+export interface ShowCollisionCommand extends EngineCommand {
+  type: 'SHOW_COLLISION'
+  data: { visible: boolean }
+}
+
 export type AnyEngineCommand =
   | CreateCommand
   | UpdateCommand
@@ -192,6 +197,7 @@ export type AnyEngineCommand =
   | FpsUpdateCommand
   | PauseStateCommand
   | UICommandCommand
+  | ShowCollisionCommand
 
 export type InputEventType =
   | 'K_DOWN'

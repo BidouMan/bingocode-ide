@@ -257,6 +257,13 @@ watch(() => editorStore.resourceTab, (tab) => {
   }
 })
 
+// 新增地图资源时立即加载缩略图（不需要等切换标签）
+watch(() => resourceStore.maps.length, () => {
+  if (editorStore.resourceTab === 'map') {
+    loadAllMapThumbnails()
+  }
+})
+
 // 监听编辑器模式切换（从地图编辑器返回时刷新）
 watch(() => editorStore.activeEditorMode, (mode) => {
   if (mode !== 'map' && editorStore.resourceTab === 'map') {
@@ -610,6 +617,10 @@ async function toggleRun() {
       engine.stop()
     } else {
       // 未运行 → 开始运行
+      // 如果当前在角色/地图编辑器，自动切回代码模式（GameCanvas 只在代码模式下挂载）
+      if (editorStore.activeEditorMode === 'sprite' || editorStore.activeEditorMode === 'map') {
+        editorStore.setActiveEditorMode('code')
+      }
       consoleVisible.value = true
       await nextTick()
       await engine.run()
@@ -861,13 +872,9 @@ async function loadMapThumbnail(item: { id: string; path: string }) {
   if (mapThumbnails.value[item.id]) return
   if (!item.path) return
   try {
-    const { convertFileSrc } = await import('@tauri-apps/api/core')
-    // 解压后的地图目录中有 thumbnail.png
-    const thumbUrl = convertFileSrc(`${item.path}/thumbnail.png`)
-    const resp = await fetch(thumbUrl)
-    if (resp.ok) {
-      mapThumbnails.value[item.id] = thumbUrl
-    }
+    // 用 Tauri invoke 直接读取图片（与角色缩略图同理，避免 convertFileSrc 权限问题）
+    const thumbUrl = await invoke<string>('read_image_as_data_url', { path: `${item.path}/thumbnail.png` })
+    mapThumbnails.value[item.id] = thumbUrl
   } catch {
     // thumbnail load failed
   }

@@ -54,10 +54,48 @@ export async function readBgsFile(file: File): Promise<SpriteData> {
 }
 
 export async function readBgsFromUrl(url: string): Promise<SpriteData> {
+  // 本地文件系统路径：通过 Tauri invoke 读取
+  if (url.startsWith('/') || /^[A-Z]:\\/i.test(url)) {
+    return readLocalSpriteDir(url)
+  }
+  // HTTP URL（engine/assets 通过 Vite publicDir 提供）：用 fetch 读取 .bgs zip
   const resp = await fetch(url)
   const blob = await resp.blob()
   const file = new File([blob], 'sprite.bgs')
   return readBgsFile(file)
+}
+
+/** 从本地解压目录读取角色（config.json + 帧图片） */
+async function readLocalSpriteDir(dirPath: string): Promise<SpriteData> {
+  const configText = await invoke<string>('read_file', { path: `${dirPath}/config.json` })
+  const config = JSON.parse(configText)
+
+  const frames: SpriteFrame[] = []
+  const frameNames: string[] = config.frames || []
+
+  for (const frameName of frameNames) {
+    try {
+      const dataUrl = await invoke<string>('read_image_as_data_url', { path: `${dirPath}/${frameName}` })
+      const resp = await fetch(dataUrl)
+      const blob = await resp.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      frames.push({ name: frameName, blob, url: objectUrl })
+    } catch (e) {
+      console.warn(`读取帧 ${frameName} 失败:`, e)
+    }
+  }
+
+  const animations: SpriteAnimation[] = (config.segments || config.animations || []).map(
+    (seg: any) => ({
+      name: seg.name,
+      start: seg.start || 1,
+      end: seg.end || seg.start || 1,
+      fps: seg.fps || 10,
+      loop: seg.loop !== false,
+    })
+  )
+
+  return { name: config.name || '未知角色', frames, animations }
 }
 
 export function createFrameUrl(blob: Blob): string {

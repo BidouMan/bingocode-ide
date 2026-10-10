@@ -1393,7 +1393,7 @@ class Sprite:
         current_key = (
             round(self._x, 1), round(self._y, 1), round(display_angle, 1),
             round(base_scale, 4), round(final_scale_x, 4), round(final_scale_y, 4),
-            self._visible, self._layer,
+            self._visible, self._layer, self._show_hitbox,
             os.path.abspath(self.image) if hasattr(self, "image") and self.image else None,
         )
         if getattr(self, "_last_update_key", None) == current_key:
@@ -1525,10 +1525,12 @@ def _input_sync_listener():
                 _SHOW_ALL_COLLISION = True
                 for sprite in _SPRITES.values():
                     sprite._show_hitbox = True
+                    sprite._last_update_key = None
             elif clean_line == "SHOW_COLLISION:0":
                 _SHOW_ALL_COLLISION = False
                 for sprite in _SPRITES.values():
                     sprite._show_hitbox = False
+                    sprite._last_update_key = None
             else:
                 # 不是控制命令 → 投喂给用户代码的 input()
                 _USER_INPUT_QUEUE.put(clean_line)
@@ -1705,6 +1707,10 @@ def play_sound(sound_name, loop=False):
 def show_collision(sprite):
     if isinstance(sprite, Sprite):
         sprite._show_hitbox = True
+        # 重置脏缓存，强制下一帧发送包含 hitbox 的 UPDATE
+        sprite._last_update_key = None
+        # 通知前端开启碰撞盒渲染开关
+        print(json.dumps({"type": "SHOW_COLLISION", "data": {"visible": True}}))
 
 
 # ---------- 内部函数 ----------

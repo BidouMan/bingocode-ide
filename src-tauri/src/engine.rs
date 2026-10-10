@@ -73,16 +73,17 @@ pub fn run_script(
     let app_stdout = app.clone();
     let rid = run_id;
     std::thread::spawn(move || {
-        use std::io::Read;
-        let mut reader = stdout;
-        let mut buf = [0u8; 4096];
+        use std::io::{BufRead, BufReader};
+        let reader = stdout;
+        let mut buf_reader = BufReader::new(reader);
+        let mut line = String::new();
         loop {
-            match reader.read(&mut buf) {
+            line.clear();
+            match buf_reader.read_line(&mut line) {
                 Ok(0) => break,
-                Ok(n) => {
-                    let data = String::from_utf8_lossy(&buf[..n]).to_string();
-                    if !data.is_empty() {
-                        let _ = app_stdout.emit_to("main", "engine:stdout", SessionEvent { run_id: rid, data });
+                Ok(_) => {
+                    if !line.is_empty() {
+                        let _ = app_stdout.emit_to("main", "engine:stdout", SessionEvent { run_id: rid, data: line.clone() });
                     }
                 }
                 Err(_) => break,
@@ -95,16 +96,17 @@ pub fn run_script(
     let app_stderr = app.clone();
     let rid = run_id;
     std::thread::spawn(move || {
-        use std::io::Read;
-        let mut reader = stderr;
-        let mut buf = [0u8; 4096];
+        use std::io::{BufRead, BufReader};
+        let reader = stderr;
+        let mut buf_reader = BufReader::new(reader);
+        let mut line = String::new();
         loop {
-            match reader.read(&mut buf) {
+            line.clear();
+            match buf_reader.read_line(&mut line) {
                 Ok(0) => break,
-                Ok(n) => {
-                    let data = String::from_utf8_lossy(&buf[..n]).to_string();
-                    if !data.is_empty() {
-                        let _ = app_stderr.emit_to("main", "engine:stderr", SessionEvent { run_id: rid, data });
+                Ok(_) => {
+                    if !line.is_empty() {
+                        let _ = app_stderr.emit_to("main", "engine:stderr", SessionEvent { run_id: rid, data: line.clone() });
                     }
                 }
                 Err(_) => break,
@@ -271,16 +273,17 @@ pub fn run_script_file(
     let app_stdout = app.clone();
     let rid = run_id;
     std::thread::spawn(move || {
-        use std::io::Read;
-        let mut reader = stdout;
-        let mut buf = [0u8; 4096];
+        use std::io::{BufRead, BufReader};
+        let reader = stdout;
+        let mut buf_reader = BufReader::new(reader);
+        let mut line = String::new();
         loop {
-            match reader.read(&mut buf) {
+            line.clear();
+            match buf_reader.read_line(&mut line) {
                 Ok(0) => break,
-                Ok(n) => {
-                    let data = String::from_utf8_lossy(&buf[..n]).to_string();
-                    if !data.is_empty() {
-                        let _ = app_stdout.emit_to("main", "engine:stdout", SessionEvent { run_id: rid, data });
+                Ok(_) => {
+                    if !line.is_empty() {
+                        let _ = app_stdout.emit_to("main", "engine:stdout", SessionEvent { run_id: rid, data: line.clone() });
                     }
                 }
                 Err(_) => break,
@@ -293,16 +296,17 @@ pub fn run_script_file(
     let app_stderr = app.clone();
     let rid = run_id;
     std::thread::spawn(move || {
-        use std::io::Read;
-        let mut reader = stderr;
-        let mut buf = [0u8; 4096];
+        use std::io::{BufRead, BufReader};
+        let reader = stderr;
+        let mut buf_reader = BufReader::new(reader);
+        let mut line = String::new();
         loop {
-            match reader.read(&mut buf) {
+            line.clear();
+            match buf_reader.read_line(&mut line) {
                 Ok(0) => break,
-                Ok(n) => {
-                    let data = String::from_utf8_lossy(&buf[..n]).to_string();
-                    if !data.is_empty() {
-                        let _ = app_stderr.emit_to("main", "engine:stderr", SessionEvent { run_id: rid, data });
+                Ok(_) => {
+                    if !line.is_empty() {
+                        let _ = app_stderr.emit_to("main", "engine:stderr", SessionEvent { run_id: rid, data: line.clone() });
                     }
                 }
                 Err(_) => break,

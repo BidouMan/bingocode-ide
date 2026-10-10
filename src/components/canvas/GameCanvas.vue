@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { convertFileSrc } from '@tauri-apps/api/core'
+import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { useRenderStore } from '../../stores/render'
 import { useEditorStore } from '../../stores/editor'
 import { useEngine } from '../../composables/useEngine'
@@ -147,14 +147,20 @@ async function getTexture(imagePath: string): Promise<any> {
 
   try {
     const isLocal = imagePath.startsWith('/') || imagePath.match(/^[A-Z]:\\/i)
-    const url = isLocal ? convertFileSrc(imagePath) : imagePath
+    let url: string
+    if (isLocal) {
+      // 本地文件用 Tauri invoke 读取 data URL（避免 convertFileSrc 对中文路径编码问题）
+      url = await invoke<string>('read_image_as_data_url', { path: imagePath })
+    } else {
+      url = imagePath
+    }
     // 手动加载图片，绕过 PixiJS Assets 全局缓存，
     // 确保每次清缓存后能用新的 scaleMode 重建纹理
     const img = await new Promise<HTMLImageElement>((resolve, reject) => {
       const el = new Image()
       el.crossOrigin = 'anonymous'
       el.onload = () => resolve(el)
-      el.onerror = reject
+      el.onerror = () => reject(new Error(`Image load failed: ${url.substring(0, 80)}...`))
       el.src = url
     })
     // 手动创建 BaseTexture，绕过 PixiJS Texture.from 的内部 URL 缓存，
@@ -169,6 +175,8 @@ async function getTexture(imagePath: string): Promise<any> {
     renderStore.incrementTextureLoaded()
     return texture
   } catch (e) {
+    console.warn(`[GameCanvas] 加载纹理失败: ${imagePath}`, e)
+    if (!app) return null
     const g = new PIXI.Graphics()
     g.rect(0, 0, 32, 32)
     g.fill({ color: 0xff00ff })
@@ -302,16 +310,22 @@ async function syncTiles() {
     let displayObj = tileDisplayObjects.get(tileData.id)
 
     if (!displayObj) {
-      if (tileData.type === 'image' && tileData.imagePath) {
-        const texture = await getTexture(tileData.imagePath)
-        displayObj = new PIXI.Sprite(texture)
-        displayObj.anchor = { x: 0, y: 0 }
-      } else if (tileData.type === 'tile' && tileData.tileSetIndex !== undefined && tileData.tileId !== undefined) {
-        const texture = await getTileFrame(tileData.tileSetIndex, tileData.tileId)
-        if (texture) {
-          displayObj = new PIXI.Sprite(texture)
-          displayObj.anchor = { x: 0, y: 0 }
+      try {
+        if (tileData.type === 'image' && tileData.imagePath) {
+          const texture = await getTexture(tileData.imagePath)
+          if (texture) {
+            displayObj = new PIXI.Sprite(texture)
+            displayObj.anchor = { x: 0, y: 0 }
+          }
+        } else if (tileData.type === 'tile' && tileData.tileSetIndex !== undefined && tileData.tileId !== undefined) {
+          const texture = await getTileFrame(tileData.tileSetIndex, tileData.tileId)
+          if (texture) {
+            displayObj = new PIXI.Sprite(texture)
+            displayObj.anchor = { x: 0, y: 0 }
+          }
         }
+      } catch (e) {
+        console.warn('[GameCanvas] tile create error:', e)
       }
 
       if (displayObj) {

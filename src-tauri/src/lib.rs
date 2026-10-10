@@ -134,7 +134,7 @@ fn copy_file(src: String, dst_dir: String) -> Result<String, String> {
 }
 
 // Windows: 去掉 \\?\ 前缀再检查，否则 Path::exists() 可能失败
-fn path_exists(p: &std::path::Path) -> bool {
+fn path_exists_impl(p: &std::path::Path) -> bool {
     if cfg!(windows) {
         let s = p.to_string_lossy().to_string();
         std::path::PathBuf::from(s.trim_start_matches("\\\\?\\")).exists()
@@ -144,8 +144,8 @@ fn path_exists(p: &std::path::Path) -> bool {
 }
 
 #[tauri::command]
-fn path_exists_cmd(path: String) -> bool {
-    path_exists(std::path::Path::new(&path))
+fn path_exists(path: String) -> bool {
+    path_exists_impl(std::path::Path::new(&path))
 }
 
 #[tauri::command]
@@ -307,7 +307,7 @@ fn get_engine_assets_dir(app: tauri::AppHandle) -> Result<String, String> {
     ];
 
     for c in &candidates {
-        if path_exists(&c.join("assets")) || path_exists(&c.join("bingo_engine.py")) {
+        if path_exists_impl(&c.join("assets")) || path_exists_impl(&c.join("bingo_engine.py")) {
             let assets_dir = c.join("assets");
             return Ok(assets_dir.to_string_lossy().to_string());
         }
@@ -319,7 +319,7 @@ fn get_engine_assets_dir(app: tauri::AppHandle) -> Result<String, String> {
         if let Some(p) = cur.parent() {
             cur = p;
             let test = cur.join("engine");
-            if path_exists(&test.join("assets")) || path_exists(&test.join("bingo_engine.py")) {
+            if path_exists_impl(&test.join("assets")) || path_exists_impl(&test.join("bingo_engine.py")) {
                 return Ok(test.join("assets").to_string_lossy().to_string());
             }
         } else {
@@ -332,7 +332,7 @@ fn get_engine_assets_dir(app: tauri::AppHandle) -> Result<String, String> {
         let mut cur = cwd.as_path();
         for _ in 0..4 {
             let test = cur.join("engine");
-            if path_exists(&test.join("assets")) || path_exists(&test.join("bingo_engine.py")) {
+            if path_exists_impl(&test.join("assets")) || path_exists_impl(&test.join("bingo_engine.py")) {
                 return Ok(test.join("assets").to_string_lossy().to_string());
             }
             match cur.parent() {
@@ -387,7 +387,7 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
     // 辅助函数：检查路径是否存在并返回可执行 Python 路径
     fn find_py(base: &std::path::Path, rel: &str) -> Option<String> {
         let p = base.join(rel);
-        if path_exists(&p) {
+        if path_exists_impl(&p) {
             Some(p.to_string_lossy().to_string())
         } else {
             None
@@ -398,7 +398,7 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
     fn find_engine_dir(from: &std::path::Path) -> std::path::PathBuf {
         let mut cur = from;
         for _ in 0..6 {
-            if path_exists(&cur.join("bingo_engine.py")) || path_exists(&cur.join("models")) {
+            if path_exists_impl(&cur.join("bingo_engine.py")) || path_exists_impl(&cur.join("models")) {
                 return cur.to_path_buf();
             }
             match cur.parent() {
@@ -438,7 +438,7 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
             for _ in 0..4 {
                 cur = cur.parent()?;
                 let p = cur.join("engine").join(&py_name);
-                if path_exists(&p) { return Some(p.to_string_lossy().to_string()); }
+                if path_exists_impl(&p) { return Some(p.to_string_lossy().to_string()); }
             }
             None
         })(),
@@ -449,7 +449,7 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
             let mut cur = cwd.as_path();
             for _ in 0..4 {
                 let p = cur.join("engine").join(&py_name);
-                if path_exists(&p) { return Some(p.to_string_lossy().to_string()); }
+                if path_exists_impl(&p) { return Some(p.to_string_lossy().to_string()); }
                 cur = cur.parent()?;
             }
             None
@@ -463,9 +463,9 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
             let mut cur = cwd.as_path();
             for _ in 0..4 {
                 let p = cur.join("engine").join(&venv_name);
-                if path_exists(&p) { return Some(p.to_string_lossy().to_string()); }
+                if path_exists_impl(&p) { return Some(p.to_string_lossy().to_string()); }
                 let p2 = cur.join(&venv_name);
-                if path_exists(&p2) { return Some(p2.to_string_lossy().to_string()); }
+                if path_exists_impl(&p2) { return Some(p2.to_string_lossy().to_string()); }
                 cur = cur.parent()?;
             }
             None
@@ -476,7 +476,7 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
             for _ in 0..6 {
                 cur = cur.parent()?;
                 let p = cur.join("engine").join(&venv_name);
-                if path_exists(&p) { return Some(p.to_string_lossy().to_string()); }
+                if path_exists_impl(&p) { return Some(p.to_string_lossy().to_string()); }
             }
             None
         })(),
@@ -489,14 +489,14 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
         let parent = py_path.parent().unwrap_or(&resource_dir);
         // portable-python/ 的上级可能是 engine/；venv/ 的上级也可能是 engine/
         let up = parent.parent().unwrap_or(parent);
-        if path_exists(&up.join("bingo_engine.py")) || path_exists(&up.join("models")) {
+        if path_exists_impl(&up.join("bingo_engine.py")) || path_exists_impl(&up.join("models")) {
             up.to_path_buf()
-        } else if path_exists(&parent.join("bingo_engine.py")) || path_exists(&parent.join("models")) {
+        } else if path_exists_impl(&parent.join("bingo_engine.py")) || path_exists_impl(&parent.join("models")) {
             parent.to_path_buf()
         } else {
             find_engine_dir(parent)
         }
-    } else if path_exists(&resource_dir.join("bingo_engine.py")) {
+    } else if path_exists_impl(&resource_dir.join("bingo_engine.py")) {
         resource_dir.clone()
     } else {
         find_engine_dir(&cwd)
@@ -1171,7 +1171,7 @@ pub fn run() {
             list_dir,
             create_dir,
             delete_path,
-            path_exists_cmd,
+            path_exists,
             get_project_root,
             open_file_in_browser,
             save_temp_script,
