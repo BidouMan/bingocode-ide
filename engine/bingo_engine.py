@@ -348,16 +348,18 @@ class Sprite:
                             return
 
                         elif axis == "y":
-                            if sprite_rect[3] <= img_top + tile_size:
-                                rect = self._get_hitbox_rect()
-                                if rect:
-                                    self._y = img_top - (rect[3] - self._y) - 0.05
-                                    self.on_ground = True
-                                    self.vy = 0
-                            elif sprite_rect[1] >= img_bottom - tile_size:
-                                rect = self._get_hitbox_rect()
-                                if rect:
-                                    self._y = img_bottom + (self._y - rect[1]) + 0.05
+                            rect = self._get_hitbox_rect()
+                            if not rect:
+                                return
+                            # 按穿透深度选择最近的边缘推出（支持任意深度穿透）
+                            overlap_up = img_bottom - rect[1]
+                            overlap_down = rect[3] - img_top
+                            if overlap_up < overlap_down:
+                                self._y = img_bottom + (self._y - rect[1]) + 0.05
+                            else:
+                                self._y = img_top - (rect[3] - self._y) - 0.05
+                                self.on_ground = True
+                                self.vy = 0
                             return
 
             tiles = layer.get("tiles", {})
@@ -423,10 +425,11 @@ class Sprite:
 
                                     if collision_shape and "points" in collision_shape:
                                         points = collision_shape["points"]
+                                        # 编辑器保存的是归一化坐标(0~1)，需乘以 tile_size 转为像素
                                         world_points = [
                                             (
-                                                tile_x * tile_size + p[0],
-                                                tile_y * tile_size + p[1],
+                                                tile_x * tile_size + p[0] * tile_size,
+                                                tile_y * tile_size + p[1] * tile_size,
                                             )
                                             for p in points
                                         ]
@@ -475,25 +478,18 @@ class Sprite:
                                             return
 
                                         elif axis == "y":
-                                            if sprite_rect[3] <= tile_top + tile_size:
-                                                rect = self._get_hitbox_rect()
-                                                if rect:
-                                                    self._y = (
-                                                        tile_top
-                                                        - (rect[3] - self._y)
-                                                        - 0.05
-                                                    )
-                                                    self.on_ground = True
-                                                    self.vy = 0
-                                            elif sprite_rect[1] >= tile_bottom - tile_size:
-                                                rect = self._get_hitbox_rect()
-                                                if rect:
-                                                    self._y = (
-                                                        tile_bottom
-                                                        + (self._y - rect[1])
-                                                        + 0.05
-                                                    )
-                                                    self.vy = 0
+                                            rect = self._get_hitbox_rect()
+                                            if not rect:
+                                                return
+                                            # 按穿透深度选择最近的边缘推出（支持任意深度穿透）
+                                            overlap_up = tile_bottom - rect[1]
+                                            overlap_down = rect[3] - tile_top
+                                            if overlap_up < overlap_down:
+                                                self._y = tile_bottom + (self._y - rect[1]) + 0.05
+                                            else:
+                                                self._y = tile_top - (rect[3] - self._y) - 0.05
+                                                self.on_ground = True
+                                                self.vy = 0
                                             return
 
         # 地图边界碰撞检测
@@ -1171,11 +1167,12 @@ class Sprite:
                                 if collision_shape and "points" in collision_shape:
                                     # 使用自定义碰撞形状
                                     points = collision_shape["points"]
+                                    # 编辑器保存的是归一化坐标(0~1)，需乘以 tile_size 转为像素
                                     # 转换为世界坐标
                                     world_points = [
                                         (
-                                            tile_x * tile_size + p[0],
-                                            check_tile_y * tile_size + p[1],
+                                            tile_x * tile_size + p[0] * tile_size,
+                                            check_tile_y * tile_size + p[1] * tile_size,
                                         )
                                         for p in points
                                     ]
@@ -1335,11 +1332,13 @@ class Sprite:
         if hasattr(self, "_cached_rect_frame") and self._cached_rect_frame == _PERF_STATS["frame_count"]:
             if (abs(self._cached_rect_x - self._x) < 0.01 and 
                 abs(self._cached_rect_y - self._y) < 0.01 and
-                self._cached_rect_scale == self._scale):
+                self._cached_rect_scale == self._scale and
+                getattr(self, "_cached_rect_flip", 1) == getattr(self, "_current_scale_x", 1)):
                 return self._cached_rect
 
-        # 计算缩放系数
+        # 计算缩放系数（含水平镜像）
         s = self._scale / 100.0
+        flip_x = getattr(self, "_current_scale_x", 1)  # 1=正常, -1=水平镜像
 
         # 图片的视觉中心
         img_w, img_h = self._orig_w, self._orig_h
@@ -1347,9 +1346,14 @@ class Sprite:
 
         # 【核心对齐公式】
         # 以图片中心为基准，计算非透明内容相对于中心点的偏移，再应用缩放
-        content_left = center_x + (bbox[0] - img_w / 2) * s
+        # 镜像时 X 方向翻转：bbox 的 left/right 互换
+        if flip_x < 0:
+            content_left = center_x - (bbox[2] - img_w / 2) * s
+            content_right = center_x - (bbox[0] - img_w / 2) * s
+        else:
+            content_left = center_x + (bbox[0] - img_w / 2) * s
+            content_right = center_x + (bbox[2] - img_w / 2) * s
         content_top = center_y + (bbox[1] - img_h / 2) * s
-        content_right = center_x + (bbox[2] - img_w / 2) * s
         content_bottom = center_y + (bbox[3] - img_h / 2) * s
 
         rect = [content_left, content_top, content_right, content_bottom]
@@ -1360,6 +1364,7 @@ class Sprite:
         self._cached_rect_x = self._x
         self._cached_rect_y = self._y
         self._cached_rect_scale = self._scale
+        self._cached_rect_flip = flip_x
 
         return rect
 
