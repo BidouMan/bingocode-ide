@@ -505,7 +505,7 @@ watch(
   }
 )
 
-// 监听当前 tab 的 content 变化（启动时 restoreCodeTabContents 异步填充内容后触发刷新）
+// 监听当前 tab 的 content 变化（切换标签或异步填充内容后触发刷新）
 watch(
   () => editorStore.currentTab?.content,
   (newContent, oldContent) => {

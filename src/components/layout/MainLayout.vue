@@ -176,13 +176,14 @@ async function loadAllMapThumbnails() {
 
 /**
  * 从工作目录预加载项目资源（代码/地图/精灵/声音）。
- * 供两处复用：
- *   1. 文件菜单"打开项目"成功后
- *   2. 启动时从 lastProject 恢复后
+ * 供文件菜单"打开项目"成功后调用。
  * 调用前需保证 projectStore.root 已指向有效工作目录、旧数据已清空。
  */
 async function loadProjectResources(root: string) {
   if (!root) return
+  // 先切到代码模式再建标签，确保 createTab 把代码文件放进 codeTabs（与本函数结尾的最终状态一致）
+  editorStore.setActiveEditorMode('code')
+  editorStore.setResourceTab('sprite')
 
   // ── 预加载代码文件 ──
   try {
@@ -242,8 +243,6 @@ async function loadProjectResources(root: string) {
   if (editorStore.currentTabs.length > 0) {
     editorStore.setActiveTab(0)
   }
-  editorStore.setActiveEditorMode('code')
-  editorStore.setResourceTab('sprite')
   // 确保回到主页面
   currentPage.value = 0
 }
@@ -293,25 +292,26 @@ onMounted(async () => {
   themeStore.initTheme()
   await projectStore.initProject()
 
-  // 如果启动时从上次项目恢复，需要预加载项目资源
-  // （和文件菜单"打开项目"走同一段逻辑）
-  if (projectStore.restoredFromLast && projectStore.root) {
-    // 清空 editor store 初始化时从 localStorage 恢复的旧 tab
-    // （这些 tab 的 path 指向上次项目的 code 文件，loadProjectResources 会重新创建）
-    resourceStore.clearAllResources()
-    renderStore.clearAll()
-    editorStore.gameTabs.splice(0, editorStore.gameTabs.length)
-    editorStore.codeTabs.splice(0, editorStore.codeTabs.length)
-    editorStore.gameActiveTabIndex = 0
-    editorStore.codeActiveTabIndex = 0
-    await nextTick()
-    await loadProjectResources(projectStore.root)
-    console.log(`[Perf] Startup: ${(performance.now() - t0).toFixed(0)}ms`)
-    return
-  }
+  // 启动永远是全新默认项目：清空编辑器残留状态。
+  // default 目录每次启动都会被 init_default_project 清空，
+  // localStorage 里恢复的旧标签都是指向已删文件的幽灵，全部丢弃。
+  resourceStore.clearAllResources()
+  renderStore.clearAll()
+  editorStore.gameTabs.splice(0, editorStore.gameTabs.length)
+  editorStore.codeTabs.splice(0, editorStore.codeTabs.length)
+  editorStore.gameActiveTabIndex = 0
+  editorStore.codeActiveTabIndex = 0
 
-  // 默认项目：恢复代码模式标签页内容
-  await editorStore.restoreCodeTabContents()
+  // 创建默认空代码文件（与"新建项目"一致，只保留一个 未命名-1.py）
+  if (projectStore.root) {
+    const projectRoot = projectStore.root
+    const name = '未命名-1.py'
+    editorStore.setActiveEditorMode('code')
+    await invoke('create_dir', { path: `${projectRoot}/code` })
+    await invoke('write_file', { path: `${projectRoot}/code/${name}`, content: '' })
+    editorStore.createTab(name, `${projectRoot}/code/${name}`, '')
+    resourceStore.addItem({ name, type: 'code', path: `${projectRoot}/code/${name}`, content: '' })
+  }
   console.log(`[Perf] Startup: ${(performance.now() - t0).toFixed(0)}ms`)
 })
 
@@ -326,26 +326,13 @@ window.addEventListener('contextmenu', () => { closeTabCtxMenu() })
 const appWindow = getCurrentWebviewWindow()
 let pendingClose = false
 
-async function writeDebugLog(msg: string) {
-  try {
-    const logPath = '/tmp/bingo_close_debug.log'
-    const existing = await invoke<string>('read_file', { path: logPath }).catch(() => '')
-    await invoke('write_file', { path: logPath, content: existing + msg + '\n' })
-  } catch {}
-}
-
 appWindow.onCloseRequested(async (e) => {
-  const allTabs = [...editorStore.gameTabs, ...editorStore.codeTabs]
-  const tabInfo = allTabs.map(t => `${t.name}:modified=${t.modified},path=${t.path}`)
-  await writeDebugLog(`[Close] onCloseRequested fired, hasUnsavedTabs=${editorStore.hasUnsavedTabs}, tabs=[${tabInfo.join('; ')}]`)
   if (pendingClose) {
-    await writeDebugLog('[Close] pendingClose=true, skipping')
     return
   }
   if (editorStore.hasUnsavedTabs) {
     e.preventDefault()
     const shouldSave = await ask('有未保存的代码，是否保存？', { title: '未保存的代码', kind: 'warning' })
-    await writeDebugLog(`[Close] user chose save=${shouldSave}`)
     if (shouldSave) {
       await editorStore.saveAllModifiedTabs()
     }
@@ -504,17 +491,11 @@ async function fileMenuAction(action: string) {
   closeFileMenu()
 
   // 切换项目前：有未保存代码时提示保存
-  const allTabs = [...editorStore.gameTabs, ...editorStore.codeTabs]
-  const tabInfo = allTabs.map(t => `${t.name}:modified=${t.modified}`)
-  await writeDebugLog(`[Save] fileMenuAction: ${action}, hasUnsavedTabs=${editorStore.hasUnsavedTabs}, tabs=[${tabInfo.join('; ')}]`)
   if ((action === 'new' || action === 'open') && editorStore.hasUnsavedTabs) {
     const shouldSave = await ask('有未保存的代码，是否保存？', { title: '未保存的代码', kind: 'warning' })
-    await writeDebugLog(`[Save] user chose save=${shouldSave}`)
     if (shouldSave) {
       await editorStore.saveAllModifiedTabs()
     }
-  } else {
-    await writeDebugLog(`[Save] skipping prompt: action=${action}, hasUnsavedTabs=${editorStore.hasUnsavedTabs}`)
   }
 
   // 任何项目操作都先停止运行（不等待后端返回）
@@ -535,14 +516,13 @@ async function fileMenuAction(action: string) {
       editorStore.gameActiveTabIndex = 0
       editorStore.codeActiveTabIndex = 0
       await nextTick()
-      // 创建新项目默认代码文件（createTab 会根据当前 isGameMode 加入对应列表）
+      // 创建新项目默认代码文件（先切代码模式，确保 createTab 加入 codeTabs）
       const name = '未命名-1.py'
-      const code = 'print("Hello Bingo!")\n'
       await invoke('create_dir', { path: `${projectRoot}/code` })
-      await invoke('write_file', { path: `${projectRoot}/code/${name}`, content: code })
-      editorStore.createTab(name, `${projectRoot}/code/${name}`, code)
-      resourceStore.addItem({ name, type: 'code', path: `${projectRoot}/code/${name}`, content: code })
+      await invoke('write_file', { path: `${projectRoot}/code/${name}`, content: '' })
       editorStore.setActiveEditorMode('code')
+      editorStore.createTab(name, `${projectRoot}/code/${name}`, '')
+      resourceStore.addItem({ name, type: 'code', path: `${projectRoot}/code/${name}`, content: '' })
       editorStore.setResourceTab('sprite')
       currentPage.value = 0
       break
@@ -554,7 +534,9 @@ async function fileMenuAction(action: string) {
         filters: [{ name: 'Bingo 项目', extensions: ['bingo'] }],
       })
       if (!path) break
-      await projectStore.openProject(path)
+      const openOk = await projectStore.openProject(path)
+      // 打开失败时中止，避免误清空当前工作区
+      if (!openOk) break
       const root = projectStore.root
       if (!root) break
 

@@ -250,30 +250,6 @@ export const useEditorStore = defineStore('editor', () => {
     saveCodeTabs(codeTabs.value, codeActiveTabIndex.value)
   }
 
-  // 恢复代码标签页内容（从文件重新加载）
-  async function restoreCodeTabContents() {
-    const { invoke } = await import('@tauri-apps/api/core')
-    // 并行读取所有需要恢复的标签页内容
-    await Promise.all(codeTabs.value.map(async (tab) => {
-      if (tab.path && !tab.content) {
-        try {
-          tab.content = await invoke<string>('read_file', { path: tab.path })
-        } catch {
-          // 文件可能已被删除，移除这个标签
-          const idx = codeTabs.value.indexOf(tab)
-          if (idx >= 0) codeTabs.value.splice(idx, 1)
-        }
-      }
-    }))
-    // 修正 activeIndex
-    if (codeTabs.value.length === 0) {
-      codeActiveTabIndex.value = -1
-    } else if (codeActiveTabIndex.value >= codeTabs.value.length) {
-      codeActiveTabIndex.value = codeTabs.value.length - 1
-    }
-    saveCodeTabsState()
-  }
-
   function saveCurrentTab() {
     if (currentTab.value) {
       currentTab.value.modified = false
@@ -367,7 +343,6 @@ export const useEditorStore = defineStore('editor', () => {
     saveCurrentTab,
     hasUnsavedTabs,
     saveAllModifiedTabs,
-    restoreCodeTabContents,
     setRunning,
     toggleRun,
     zoomIn,
