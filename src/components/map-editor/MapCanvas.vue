@@ -750,7 +750,15 @@ function onPointerMove(e: PointerEvent) {
     if (worldPos) {
       const dx = worldPos.x - imageDragStartWorld.x
       const dy = worldPos.y - imageDragStartWorld.y
-      selectedImageData.position = [imageDragStartPos[0] + dx, imageDragStartPos[1] + dy]
+      let nx = imageDragStartPos[0] + dx
+      let ny = imageDragStartPos[1] + dy
+      // 吸附网格：图像左上角对齐到最近的网格点
+      if (mapStore.snapToGrid) {
+        const ts = mapStore.mapData.tileSize
+        nx = Math.round(nx / ts) * ts
+        ny = Math.round(ny / ts) * ts
+      }
+      selectedImageData.position = [nx, ny]
       updateTransformBox()
       updateSelectedImageSprite()
     }
@@ -884,19 +892,15 @@ function setupInteraction() {
 }
 
 function onScratchDrop(e: CustomEvent) {
-  const { resourceIndex, clientX, clientY } = e.detail
+  const { resourceIndex } = e.detail
   const layer = mapStore.activeLayer
 
   if (!layer || layer.type !== 'image') return
   const resource = layer.resources[resourceIndex]
   if (!resource) return
 
-  // 将屏幕坐标转换为世界坐标
-  const rect = (e.target as HTMLElement).getBoundingClientRect()
-  const worldX = (clientX - rect.left - app.stage.x) / currentScale
-  const worldY = (clientY - rect.top - app.stage.y) / currentScale
-
-  placeImage(layer, resource, worldX, worldY)
+  // 拖入的图片左上角自动对齐到坐标原点
+  placeImage(layer, resource, 0, 0)
 }
 
 function onDragOver(e: DragEvent) {

@@ -103,6 +103,7 @@ export const useMapStore = defineStore('map', () => {
 
   const activeLayerIndex = ref(0)
   const showGrid = ref(true)
+  const snapToGrid = ref(true)
   const currentTool = ref<MapTool>('select')
   const selectedResourceIndex = ref(-1)
   const selectedTileIndex = ref(-1)
@@ -309,6 +310,10 @@ export const useMapStore = defineStore('map', () => {
     showGrid.value = !showGrid.value
   }
 
+  function toggleSnapToGrid() {
+    snapToGrid.value = !snapToGrid.value
+  }
+
   function selectTile(resourceIndex: number, tileIndex: number) {
     selectedResourceIndex.value = resourceIndex
     selectedTileIndex.value = tileIndex
@@ -456,6 +461,7 @@ export const useMapStore = defineStore('map', () => {
     mapData,
     activeLayerIndex,
     showGrid,
+    snapToGrid,
     currentTool,
     selectedResourceIndex,
     selectedTileIndex,
@@ -483,6 +489,7 @@ export const useMapStore = defineStore('map', () => {
     renameLayer,
     setActiveLayer,
     toggleGrid,
+    toggleSnapToGrid,
     selectTile,
     addResource,
     removeResource,

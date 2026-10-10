@@ -12,6 +12,7 @@ import iconNewMap from '../../assets/icons/新建地图.svg'
 import iconImportMap from '../../assets/icons/导入地图.svg'
 import iconExportMap from '../../assets/icons/导出地图.svg'
 import iconGrid from '../../assets/icons/显示网格.svg'
+import iconSnapGrid from '../../assets/icons/吸附锚点.svg'
 import iconDelete from '../../assets/icons/选中删除.svg'
 
 const props = defineProps<{
@@ -123,6 +124,14 @@ const imageTools: { id: MapTool; icon: string; label: string }[] = [
       @click="mapStore.toggleGrid()"
     >
       <img :src="iconGrid" class="toolbar-icon" />
+    </button>
+    <button
+      class="toolbar-btn"
+      :class="{ 'toolbar-btn-active': mapStore.snapToGrid }"
+      v-tooltip="'吸附网格'"
+      @click="mapStore.toggleSnapToGrid()"
+    >
+      <img :src="iconSnapGrid" class="toolbar-icon" />
     </button>
 
     <div class="toolbar-spacer" />
