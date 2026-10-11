@@ -10,6 +10,8 @@ export const useTerminalStore = defineStore('terminal', () => {
   const waitingForInput = ref(false)
   // 终端模式：'python' = Python 控制台，'shell' = 系统终端
   const terminalMode = ref<'python' | 'shell'>('python')
+  // 游戏模式控制台面板可见性：有输出时自动弹出，手动停止时收回
+  const consoleVisible = ref(false)
   // shell 运行命令回调（由 TerminalPanel 注册）
   let shellRunCallback: ((cmd: string) => void) | null = null
 
@@ -194,6 +196,7 @@ export const useTerminalStore = defineStore('terminal', () => {
     lines,
     waitingForInput,
     terminalMode,
+    consoleVisible,
     registerShellRunner,
     runInShell,
     bindTerminal,

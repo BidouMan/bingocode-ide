@@ -231,12 +231,18 @@ export function useEngine() {
 
       if (nonJsonParts.length > 0) {
         terminalStore.handleStdout(nonJsonParts.join('\n'))
+        // 引擎有打印信息时自动弹出控制台（仅游戏模式；JSON 指令不算打印信息）
+        terminalStore.consoleVisible = true
       }
     })
 
     const unlisten2 = await listen<{ run_id: number; data: string }>('engine:stderr', (event) => {
       if (event.payload.run_id !== myRunId) return
       const msg = event.payload.data
+      // 出错必须让用户看到：自动弹出控制台（仅游戏模式）
+      if (editorStore.isGameMode) {
+        terminalStore.consoleVisible = true
+      }
       // 学生友好的错误提示
       if (msg.includes('KeyboardInterrupt')) {
         // 用户主动中断，静默处理
@@ -524,6 +530,10 @@ export function useEngine() {
     _stopping = true
     // 立即更新 UI，不等待 Rust 返回（防止 mutex 阻塞导致 UI 卡死）
     editorStore.setRunning(false)
+    // 手动停止时收回控制台面板（仅游戏模式；程序自然结束不收回，方便查看最后的输出）
+    if (editorStore.isGameMode) {
+      terminalStore.consoleVisible = false
+    }
     terminalStore.flushNow()
     renderStore.resetTextureLoading()
     terminalStore.resetInputState()

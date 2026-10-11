@@ -80,7 +80,11 @@ const loadingProgress = computed(() => {
 
 // change_page: 0=编辑器, 1=全屏, 2=地图库, 3=角色库, 4=素材库, 5=声音库
 const currentPage = ref(0)
-const consoleVisible = ref(false)
+// 控制台面板可见性：状态在 terminal store 中（引擎有输出自动弹出、手动停止收回）
+const consoleVisible = computed({
+  get: () => terminalStore.consoleVisible,
+  set: (v) => { terminalStore.consoleVisible = v },
+})
 const canvasOffsetX = ref(0)
 const consoleExpanded = ref(true)
 const fileMenuVisible = ref(false)
@@ -626,7 +630,7 @@ async function toggleRun() {
     if (editorStore.activeEditorMode === 'sprite' || editorStore.activeEditorMode === 'map') {
       editorStore.setActiveEditorMode('code')
     }
-    consoleVisible.value = true
+    // 控制台不在此处强制弹出：引擎有打印信息时自动弹出（见 useEngine）
     await nextTick()
     await engine.run()
   } finally {
