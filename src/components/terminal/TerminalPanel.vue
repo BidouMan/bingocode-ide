@@ -163,8 +163,6 @@ function createTerminal() {
   terminal.open(containerRef.value)
   terminalStore.bindTerminal(terminal)
 
-  let runEndTimer: ReturnType<typeof setTimeout> | null = null
-
   terminalStore.terminalMode = 'shell'
   fitTerminal()
   setTimeout(fitTerminal, 100)
@@ -185,23 +183,13 @@ function createTerminal() {
       if (!editorStore.isGameMode && terminalStore.terminalMode === 'python') return
       terminal?.write(data)
       throttledScroll()
-      // 代码模式下 isRunning 由 useEngine 事件管理，shell 回调不参与
-      if (!editorStore.isGameMode) return
-      if (!editorStore.isRunning) return
-      if (terminalStore.terminalMode === 'python') return
-      if (runEndTimer) {
-        clearTimeout(runEndTimer)
-      }
-      runEndTimer = setTimeout(() => {
-        editorStore.setRunning(false)
-        runEndTimer = null
-      }, 1000)
+      // isRunning 完全由 useEngine 的 engine:finished/stop 事件管理，
+      // shell 输出（如 zsh 启动提示符）不得误判为程序结束
     },
     () => {
       // 代码模式下 isRunning 由 useEngine 事件管理，shell 退出不干扰
       if (!editorStore.isGameMode) return
       editorStore.setRunning(false)
-      runEndTimer = null
     }
   )
   setTimeout(() => {
@@ -210,7 +198,6 @@ function createTerminal() {
   }, 200)
 
   terminalStore.registerShellRunner(async (cmd: string) => {
-    if (runEndTimer) { clearTimeout(runEndTimer); runEndTimer = null }
     terminal?.reset()
     shell.sendInput(cmd + '\n')
   })

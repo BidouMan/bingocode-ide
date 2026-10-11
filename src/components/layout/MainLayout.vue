@@ -613,23 +613,22 @@ async function fileMenuAction(action: string) {
 
 let _toggling = false
 async function toggleRun() {
-  // 防抖：防止学生疯狂点击导致并发调用
+  // 防抖：疯狂点击时忽略后续点击，直到本次启动流程完成（不阻塞 UI）
   if (_toggling) return
   _toggling = true
   try {
+    // 无论当前状态，点击运行 = 重新开始：
+    // 若正在运行，先停止（立即更新 UI；旧进程由 Rust 端 run_script 内部再次兜底清理）
     if (editorStore.isRunning) {
-      // 正在运行 → 停止（engine.stop() 内部立即更新 UI，不等待 Rust）
       engine.stop()
-    } else {
-      // 未运行 → 开始运行
-      // 如果当前在角色/地图编辑器，自动切回代码模式（GameCanvas 只在代码模式下挂载）
-      if (editorStore.activeEditorMode === 'sprite' || editorStore.activeEditorMode === 'map') {
-        editorStore.setActiveEditorMode('code')
-      }
-      consoleVisible.value = true
-      await nextTick()
-      await engine.run()
     }
+    // 如果当前在角色/地图编辑器，自动切回代码模式（GameCanvas 只在代码模式下挂载）
+    if (editorStore.activeEditorMode === 'sprite' || editorStore.activeEditorMode === 'map') {
+      editorStore.setActiveEditorMode('code')
+    }
+    consoleVisible.value = true
+    await nextTick()
+    await engine.run()
   } finally {
     _toggling = false
   }

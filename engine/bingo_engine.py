@@ -2032,7 +2032,6 @@ def _try_extract_bgm(map_name):
         os.makedirs(target_dir, exist_ok=True)
         with zipfile.ZipFile(bgm_path, 'r') as zf:
             zf.extractall(target_dir)
-        print(f"自动解压 .bgm: {map_name} -> {target_dir}")
         return True
     except Exception as e:
         print(f"[错误] 解压 .bgm 失败: {e}")
