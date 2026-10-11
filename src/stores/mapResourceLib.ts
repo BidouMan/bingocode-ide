@@ -46,8 +46,9 @@ export const useMapResourceLibStore = defineStore('mapResourceLib', () => {
             path: `/maps/${category}/${file}`,
             category,
             // 缩略图直接用文件 URL 交给 <img>：WebView 按需异步解码并自带缓存，
-            // 不做 base64 全量读取，图片再多也不卡主线程
-            thumbnail: convertFileSrc(fullPath),
+            // 不做 base64 全量读取，图片再多也不卡主线程。
+            // URL 追加时间戳破坏缓存：用户替换同名图片后重扫能立即看到新图
+            thumbnail: `${convertFileSrc(fullPath)}?t=${Date.now()}`,
           })
         }
       } catch (e) {

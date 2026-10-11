@@ -1,17 +1,22 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
 import { useMapLibStore } from '../../stores/mapLib'
+import { useMapResourceLibStore } from '../../stores/mapResourceLib'
 
 const emit = defineEmits<{
   'close': []
   'imported': [bgmUrl: string, name: string]
+  'imported-image': [engineRelPath: string, name: string]
 }>()
 
 const mapLibStore = useMapLibStore()
+const mapResLibStore = useMapResourceLibStore()
 const searchQuery = ref('')
+const activeTab = ref<'maps' | 'images'>('maps')
 
 onMounted(() => {
   mapLibStore.loadBuiltinLibrary()
+  mapResLibStore.loadBuiltinResources()
 })
 
 const filteredMaps = computed(() => {
@@ -19,19 +24,43 @@ const filteredMaps = computed(() => {
   const q = searchQuery.value.toLowerCase()
   return mapLibStore.items.filter(m => m.name.toLowerCase().includes(q))
 })
+
+const filteredImages = computed(() => {
+  let list = mapResLibStore.items.filter(r => r.category === 'images')
+  if (searchQuery.value) {
+    const q = searchQuery.value.toLowerCase()
+    list = list.filter(r => r.name.toLowerCase().includes(q))
+  }
+  return list
+})
+
+const tabs = [
+  { id: 'maps' as const, label: '地图' },
+  { id: 'images' as const, label: '图像' },
+]
 </script>
 
 <template>
   <div class="map-lib-page">
     <div class="lib-toolbar">
-      <input v-model="searchQuery" class="lib-search" placeholder="搜索地图..." />
+      <input v-model="searchQuery" class="lib-search" :placeholder="activeTab === 'maps' ? '搜索地图...' : '搜索图像...'" />
+      <div style="width:10px" />
+      <button
+        v-for="tab in tabs"
+        :key="tab.id"
+        class="lib-tab-btn"
+        :class="{ 'lib-tab-active': activeTab === tab.id }"
+        @click="activeTab = tab.id"
+      >
+        {{ tab.label }}
+      </button>
       <div class="lib-spacer" />
-      <span class="lib-hint">请选择地图</span>
+      <span class="lib-hint">{{ activeTab === 'maps' ? '请选择地图' : '选择图像作为地图' }}</span>
       <div class="lib-spacer" />
       <div style="width:120px" />
       <button class="lib-return-btn" @click="emit('close')">返回</button>
     </div>
-    <div class="lib-grid">
+    <div v-if="activeTab === 'maps'" class="lib-grid">
       <div
         v-for="map in filteredMaps"
         :key="map.bgmUrl"
@@ -45,6 +74,20 @@ const filteredMaps = computed(() => {
         <div class="lib-card-name">{{ map.name }}</div>
       </div>
       <div v-if="filteredMaps.length === 0" class="lib-empty">暂无地图</div>
+    </div>
+    <div v-else class="lib-grid">
+      <div
+        v-for="img in filteredImages"
+        :key="img.path"
+        class="lib-card"
+        @click="emit('imported-image', img.path, img.name)"
+      >
+        <div class="lib-card-thumb">
+          <img :src="img.thumbnail" />
+        </div>
+        <div class="lib-card-name">{{ img.name }}</div>
+      </div>
+      <div v-if="filteredImages.length === 0" class="lib-empty">暂无图像</div>
     </div>
   </div>
 </template>
@@ -85,6 +128,30 @@ const filteredMaps = computed(() => {
 }
 
 .lib-spacer { flex: 1; }
+
+.lib-tab-btn {
+  min-width: 80px;
+  height: 28px;
+  padding: 4px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: #9ca0a4;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.lib-tab-btn:hover {
+  background: var(--bg-hover);
+  color: white;
+}
+
+.lib-tab-active {
+  background: rgb(46, 49, 58);
+  border: 1px solid var(--border-light);
+  color: white;
+}
 
 .lib-hint {
   font-size: 12px;

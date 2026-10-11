@@ -24,6 +24,7 @@ const emit = defineEmits<{
   uploaded: [type: string, name: string, content?: string]
   openLibrary: [type: string]
   createMap: []
+  importMapImage: [name: string, data: number[]]
 }>()
 
 const resourceStore = useResourceStore()
@@ -34,7 +35,7 @@ const menuOpen = ref(false)
 
 const acceptMap: Record<string, string> = {
   sprite: '.bgs,.png,.jpg,.gif,.jpeg',
-  map: '.bgm,.json,.info',
+  map: '.bgm,.json,.info,.png,.jpg,.jpeg,.gif,.bmp,.webp',
   sound: '.wav,.mp3,.ogg,.flac',
   code: '.py',
 }
@@ -130,6 +131,14 @@ async function handleAction(key: string) {
           const objectUrl = URL.createObjectURL(result.file)
           resourceStore.addItem({ name: result.name, type: 'sprite', path: objectUrl })
           emit('uploaded', 'sprite', result.name)
+        }
+      } else if (props.type === 'map' && isImageFile(result.name)) {
+        // 图片文件：读取字节交给主布局创建图像模式地图（图片直接作为地图使用）
+        try {
+          const arrayBuffer = await result.file.arrayBuffer()
+          emit('importMapImage', result.name, Array.from(new Uint8Array(arrayBuffer)))
+        } catch (e) {
+          console.error('[UploadDrawer] 读取图片文件失败:', e)
         }
       } else if (props.type === 'code') {
         resourceStore.addItem({ name: result.name, type: 'code', path: result.name, content: result.content || undefined })

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { open, save, ask } from '@tauri-apps/plugin-dialog'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { useEditorStore } from '../../stores/editor'
@@ -733,12 +733,11 @@ async function onCreateMap() {
     layers: [
       {
         id: 0,
-        name: '图像图层',
-        type: 'imagelayer',
+        name: '绘制图层',
+        type: 'tilelayer',
         visible: true,
         locked: false,
         data: '',
-        images: [],
       },
     ],
     tilesets: [],
@@ -789,6 +788,154 @@ async function onMapLibImported(bgmUrl: string, name: string) {
   resourceStore.addItem({ name, type: 'map', path: projectPath })
   editorStore.setResourceTab('map')
   currentPage.value = 0
+}
+
+// ====== 图片作为地图导入（上传图片 / 内置资源库选图共用） ======
+
+// 用前端 Image 对象测量图片真实尺寸（图像渲染偏移依赖 width/height）
+function measureImageSize(absPath: string): Promise<{ w: number; h: number }> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => resolve({ w: img.naturalWidth || 640, h: img.naturalHeight || 480 })
+    img.onerror = () => resolve({ w: 640, h: 480 })
+    img.src = convertFileSrc(absPath)
+  })
+}
+
+// 为图片创建图像模式地图：复制图片 → 生成 map.json（单个图像图层，图片自动放置于原点）
+async function createImageMapProject(fileName: string, opts: { bytes?: number[]; srcPath?: string }) {
+  const projectRoot = projectStore.root
+  if (!projectRoot) return
+
+  const baseName = fileName.replace(/\.[^.]+$/, '') || '图片地图'
+  // 重名处理：与普通地图共用命名空间
+  let mapName = baseName
+  let n = 2
+  while (resourceStore.maps.some(m => m.name === mapName)) {
+    mapName = `${baseName}_${n++}`
+  }
+
+  const mapDir = `${projectRoot}/assets/maps/${mapName}`
+  await invoke('create_dir', { path: `${mapDir}/images` })
+
+  const imageRelPath = `assets/maps/${mapName}/images/${fileName}`
+  if (opts.bytes) {
+    await invoke('write_binary', { path: `${projectRoot}/${imageRelPath}`, data: opts.bytes })
+  } else if (opts.srcPath) {
+    await invoke('copy_file_to_project', { src: opts.srcPath, projectRoot, relativePath: imageRelPath })
+  }
+
+  const { w, h } = await measureImageSize(`${projectRoot}/${imageRelPath}`)
+
+  const mapData = {
+    name: mapName,
+    width: 40,
+    height: 30,
+    tileSize: 16,
+    gravity: false,
+    collisionType: '图像',
+    collisionEnabled: false,
+    layers: [
+      {
+        id: 0,
+        name: '图像图层',
+        type: 'imagelayer',
+        visible: true,
+        locked: false,
+        images: [
+          {
+            imagePath: imageRelPath,
+            position: [0, 0],
+            rotation: 0,
+            scale: 1,
+            scaleX: 1,
+            scaleY: 1,
+            opacity: 1,
+            width: w,
+            height: h,
+            collisionType: '图像',
+            collisionEnabled: false,
+          },
+        ],
+        resources: [
+          {
+            name: baseName,
+            path: imageRelPath,
+            resourceType: 'image',
+            tileWidth: 64,
+            tileHeight: 64,
+            collisionType: '图像',
+            collisionEnabled: false,
+          },
+        ],
+      },
+    ],
+    tilesets: [],
+  }
+  await invoke('write_file', {
+    path: `${mapDir}/map.json`,
+    content: JSON.stringify(mapData, null, 2),
+  })
+
+  // 生成缩略图（模拟画布快照：底色 + 图片绘制在原点），
+  // 必须在 addItem 之前写好，资源列表首次读取即可命中
+  const thumbDataUrl = await writeMapThumbnail(mapDir, `${projectRoot}/${imageRelPath}`, 40 * 16, 30 * 16)
+
+  const newItemId = resourceStore.addItem({ name: mapName, type: 'map', path: mapDir })
+  editorStore.setResourceTab('map')
+  currentPage.value = 0
+  // 等 watch（切 tab 清空 / maps.length 变化重载）执行完，再直接把已生成的
+  // dataURL 写进缩略图缓存——不依赖二次文件读取，确保第一时间显示
+  await nextTick()
+  if (thumbDataUrl) {
+    mapThumbnails.value[newItemId] = thumbDataUrl
+  }
+  // 兜底：缓存已有会直接短路返回
+  await loadMapThumbnail({ id: newItemId, path: mapDir })
+}
+
+// 用 2D canvas 生成地图缩略图快照（与编辑器画布快照语义一致：底色 + 图层内容），
+// 返回 dataURL 供调用方直接写入缩略图缓存
+async function writeMapThumbnail(mapDir: string, imageAbsPath: string, width: number, height: number): Promise<string | null> {
+  try {
+    // 必须经 Rust 读成 dataURL 再画 canvas：asset:// 协议图片会污染 canvas，
+    // 导致 toDataURL() 抛 SecurityError，缩略图静默失败
+    const srcDataUrl = await invoke<string>('read_image_as_data_url', { path: imageAbsPath })
+    const img = new Image()
+    img.src = srcDataUrl
+    await new Promise<void>((resolve) => {
+      img.onload = () => resolve()
+      img.onerror = () => resolve()
+    })
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+    ctx.fillStyle = '#1e1e1e'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    if (img.naturalWidth) ctx.drawImage(img, 0, 0)
+    const dataUrl = canvas.toDataURL('image/png')
+    const raw = Uint8Array.from(atob(dataUrl.split(',')[1]), c => c.charCodeAt(0))
+    await invoke('write_binary', { path: `${mapDir}/thumbnail.png`, data: Array.from(raw) })
+    return dataUrl
+  } catch (e) {
+    console.warn('[MainLayout] 生成地图缩略图失败:', e)
+    return null
+  }
+}
+
+// 上传图片作为地图（UploadDrawer，data 为图片字节数组）
+async function onImportMapImage(name: string, data: number[]) {
+  await createImageMapProject(name, { bytes: data })
+}
+
+// 从内置资源库选择图片作为地图（路径为引擎 assets 相对路径，如 /maps/images/x.png）
+async function onMapLibImportedImage(engineRelPath: string) {
+  const engineAssetsDir = await invoke<string>('get_engine_assets_dir')
+  const absPath = `${engineAssetsDir}${engineRelPath}`
+  const fileName = engineRelPath.split('/').pop() || 'image.png'
+  await createImageMapProject(fileName, { srcPath: absPath })
 }
 
 async function onResLibImported(path: string) {
@@ -1763,7 +1910,7 @@ function spriteDisplayName(name: string) {
                   </div>
                 </div>
               </div>
-              <UploadDrawer v-if="editorStore.resourceTab !== 'code'" :type="editorStore.resourceTab" @uploaded="onResourceUploaded" @open-library="onOpenLibrary" @create-map="onCreateMap" />
+              <UploadDrawer v-if="editorStore.resourceTab !== 'code'" :type="editorStore.resourceTab" @uploaded="onResourceUploaded" @open-library="onOpenLibrary" @create-map="onCreateMap" @import-map-image="onImportMapImage" />
             </div>
           </div>
 
@@ -1938,7 +2085,7 @@ function spriteDisplayName(name: string) {
 
       <!-- ─── page 2: 地图库 ─── -->
       <div v-show="currentPage === 2" class="lib-page">
-        <MapLibraryPage @close="switchPage(0)" @imported="onMapLibImported" />
+        <MapLibraryPage @close="switchPage(0)" @imported="onMapLibImported" @imported-image="onMapLibImportedImage" />
       </div>
 
       <!-- ─── page 3: 角色库 (独立全屏页面) ─── -->
