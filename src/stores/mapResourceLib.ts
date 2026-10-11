@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 
 export interface MapResourceItem {
   name: string
@@ -9,17 +9,8 @@ export interface MapResourceItem {
   thumbnail: string
 }
 
-const BUILTIN_RESOURCES: { name: string; path: string; category: MapResourceItem['category'] }[] = [
-  { name: 'bg', path: '/maps/images/bg.png', category: 'images' },
-  { name: 'Fence 01', path: '/maps/images/Fence 01.png', category: 'images' },
-  { name: 'Grass 03', path: '/maps/images/Grass 03.png', category: 'images' },
-  { name: 'Tree 03', path: '/maps/images/Tree 03.png', category: 'images' },
-  { name: 'brick', path: '/maps/tiles/brick.png', category: 'tiles' },
-  { name: 'grass', path: '/maps/tiles/grass.png', category: 'tiles' },
-  { name: 'tileset', path: '/maps/tilesets/tileset.png', category: 'tilesets' },
-  { name: 'fruit', path: '/maps/tilesets/fruit.png', category: 'tilesets' },
-  { name: 'coin', path: '/maps/tilesets/coin.png', category: 'tilesets' },
-]
+// 支持的图片扩展名（自动扫描时过滤）
+const IMAGE_EXTS = /\.(png|jpe?g|gif|webp|bmp|svg)$/i
 
 // 路径拼接：兼容 Windows（反斜杠）和 Unix（正斜杠）
 function joinPath(base: string, ...parts: string[]): string {
@@ -31,33 +22,48 @@ function joinPath(base: string, ...parts: string[]): string {
 
 export const useMapResourceLibStore = defineStore('mapResourceLib', () => {
   const items = ref<MapResourceItem[]>([])
-  const loaded = ref(false)
 
   async function loadBuiltinResources() {
-    if (loaded.value) return
-
-    // 获取引擎资源目录
+    // 每次打开面板都重新扫描：read_dir 为微秒级操作，缩略图走 WebView 缓存的文件 URL，
+    // 重扫零负担；这样才能让用户新放入的图片无需重启即被看到
     const engineDir = await invoke<string>('get_engine_assets_dir')
 
-    // 先设置空缩略图
-    items.value = BUILTIN_RESOURCES.map(r => ({
-      ...r,
-      thumbnail: '',
-    }))
-    loaded.value = true
+    // 自动扫描 maps/images、maps/tiles、maps/tilesets 三个目录
+    // list_dir 对子目录返回 "name/" 后缀，需要过滤掉
+    const categories: MapResourceItem['category'][] = ['images', 'tiles', 'tilesets']
+    const results: MapResourceItem[] = []
 
-    // 通过 Rust 命令逐个加载缩略图
-    for (const item of items.value) {
+    for (const category of categories) {
       try {
-        // item.path 以 / 开头，需要去掉前导分隔符再拼接，避免 Windows 混合分隔符报错
-        const fullPath = joinPath(engineDir, item.path)
-        const dataUrl = await invoke<string>('read_image_as_data_url', { path: fullPath })
-        item.thumbnail = dataUrl
+        const dirPath = joinPath(engineDir, 'maps', category)
+        const files = await invoke<string[]>('list_dir', { path: dirPath })
+        for (const file of files) {
+          if (file.endsWith('/')) continue
+          if (!IMAGE_EXTS.test(file)) continue
+          const fullPath = joinPath(dirPath, file)
+          results.push({
+            name: file.replace(IMAGE_EXTS, ''),
+            path: `/maps/${category}/${file}`,
+            category,
+            // 缩略图直接用文件 URL 交给 <img>：WebView 按需异步解码并自带缓存，
+            // 不做 base64 全量读取，图片再多也不卡主线程
+            thumbnail: convertFileSrc(fullPath),
+          })
+        }
       } catch (e) {
-        console.warn(`[MapResourceLib] ${item.name}: 加载缩略图失败 (path=${joinPath(engineDir, item.path)})`, e)
+        console.warn(`[MapResourceLib] 扫描 ${category} 目录失败:`, e)
       }
     }
+
+    // 按名称排序，分类间保持 images -> tiles -> tilesets
+    results.sort((a, b) =>
+      a.category === b.category
+        ? a.name.localeCompare(b.name)
+        : categories.indexOf(a.category) - categories.indexOf(b.category)
+    )
+
+    items.value = results
   }
 
-  return { items, loaded, loadBuiltinResources }
+  return { items, loadBuiltinResources }
 })
