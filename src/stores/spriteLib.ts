@@ -103,6 +103,40 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
     loading.value = false
   }
 
+  // 动画预览缓存：.bgs 悬停预览用，路径 → 帧图 ObjectURL 列表 + fps（null = 无动画）
+  const previewCache = new Map<string, { urls: string[]; fps: number } | null>()
+
+  // 悬停动画预览：解析 .bgs 的帧与动画段（每个包只解析一次）
+  async function getSpritePreview(filePath: string): Promise<{ urls: string[]; fps: number } | null> {
+    if (previewCache.has(filePath)) return previewCache.get(filePath)!
+    try {
+      const bytes = await invoke<number[]>('read_binary', { path: filePath })
+      const JSZip = (await import('jszip')).default
+      const zip = await JSZip.loadAsync(new Uint8Array(bytes))
+      const configEntry = zip.file('config.json')
+      if (!configEntry) { previewCache.set(filePath, null); return null }
+      const config = JSON.parse(await configEntry.async('text'))
+      const frameNames: string[] = config.frames || []
+      if (frameNames.length < 2) { previewCache.set(filePath, null); return null }
+
+      const urls: string[] = []
+      for (const name of frameNames) {
+        const entry = zip.file(name)
+        if (!entry) continue
+        urls.push(URL.createObjectURL(await entry.async('blob')))
+      }
+      const seg = (config.segments || config.animations || [])[0]
+      const fps = seg?.fps || 10
+      const result = urls.length >= 2 ? { urls, fps } : null
+      previewCache.set(filePath, result)
+      return result
+    } catch (e) {
+      console.error('[SpriteLib] 动画预览解析失败:', filePath, e)
+      previewCache.set(filePath, null)
+      return null
+    }
+  }
+
   async function loadSpriteData(bgsUrl: string) {
     const resp = await fetch(bgsUrl)
     const blob = await resp.blob()
@@ -130,5 +164,5 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
     return { name: config.name || '未知角色', frames, animations }
   }
 
-  return { items, loading, loadBuiltinLibrary, loadSpriteData }
+  return { items, loading, loadBuiltinLibrary, loadSpriteData, getSpritePreview }
 })

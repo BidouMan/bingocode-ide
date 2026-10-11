@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { onMounted, onBeforeUnmount, ref, computed } from 'vue'
+import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { useSpriteLibStore } from '../../stores/spriteLib'
 import { useResourceStore } from '../../stores/resource'
 import { useProjectStore } from '../../stores/project'
@@ -19,6 +19,50 @@ const searchText = ref('')
 onMounted(() => {
   spriteLibStore.loadBuiltinLibrary()
 })
+
+// ====== 悬停动画预览 ======
+// .bgs：解析帧按 fps 轮播（解析结果缓存在 store，每个包只解析一次）
+// gif：换成原始文件 URL，<img> 原生播放动画
+// 普通图片：无反应 = 无动画
+const hoverPath = ref('')
+const previewState = ref<{ urls: string[]; fps: number; index: number } | null>(null)
+let previewTimer: ReturnType<typeof setInterval> | null = null
+
+const previewUrl = computed(() => {
+  const p = previewState.value
+  if (!p || p.urls.length === 0) return ''
+  return p.urls[p.index % p.urls.length]
+})
+
+function isPreviewing(filePath: string): boolean {
+  return hoverPath.value === filePath && previewUrl.value !== ''
+}
+
+function stopPreview() {
+  if (previewTimer) { clearInterval(previewTimer); previewTimer = null }
+  previewState.value = null
+  hoverPath.value = ''
+}
+
+async function onCardEnter(item: { filePath: string; type: string }) {
+  stopPreview()
+  hoverPath.value = item.filePath
+  if (item.type === 'image' && item.filePath.toLowerCase().endsWith('.gif')) {
+    previewState.value = { urls: [convertFileSrc(item.filePath)], fps: 0, index: 0 }
+    return
+  }
+  if (item.type !== 'bgs') return
+  const preview = await spriteLibStore.getSpritePreview(item.filePath)
+  // 悬停已移走或已切换到其他卡片时丢弃过期结果
+  if (!preview || hoverPath.value !== item.filePath) return
+  previewState.value = { urls: preview.urls, fps: preview.fps, index: 0 }
+  previewTimer = setInterval(() => {
+    if (!previewState.value) return
+    previewState.value.index = (previewState.value.index + 1) % previewState.value.urls.length
+  }, Math.max(40, Math.round(1000 / preview.fps)))
+}
+
+onBeforeUnmount(stopPreview)
 
 async function selectSprite(item: { name: string; filePath: string; type: string }) {
   const projectRoot = projectStore.root
@@ -86,9 +130,12 @@ async function selectSprite(item: { name: string; filePath: string; type: string
         v-show="!searchText || item.name.toLowerCase().includes(searchText.toLowerCase())"
         class="sprite-card"
         @click="selectSprite(item)"
+        @mouseenter="onCardEnter(item)"
+        @mouseleave="stopPreview"
       >
         <div class="sprite-thumb">
-          <img v-if="item.thumbUrl" :src="item.thumbUrl" class="sprite-thumb-img" />
+          <img v-if="isPreviewing(item.filePath)" :src="previewUrl" class="sprite-thumb-img" />
+          <img v-else-if="item.thumbUrl" :src="item.thumbUrl" class="sprite-thumb-img" />
           <div v-else class="sprite-thumb-placeholder">{{ item.name.charAt(0) }}</div>
         </div>
         <span class="sprite-name">{{ item.name }}</span>
