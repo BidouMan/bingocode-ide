@@ -280,6 +280,12 @@ export const useEditorStore = defineStore('editor', () => {
     return saved
   }
 
+  // 项目整体保存成功后调用：所有标签内容已持久化进项目包
+  function clearAllModified() {
+    for (const t of gameTabs.value) t.modified = false
+    for (const t of codeTabs.value) t.modified = false
+  }
+
   function setRunning(running: boolean) {
     isRunning.value = running
   }
@@ -343,6 +349,7 @@ export const useEditorStore = defineStore('editor', () => {
     saveCurrentTab,
     hasUnsavedTabs,
     saveAllModifiedTabs,
+    clearAllModified,
     setRunning,
     toggleRun,
     zoomIn,

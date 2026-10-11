@@ -86,6 +86,8 @@ export const useProjectStore = defineStore('project', () => {
       })
       codeDirty.value = false
       resourceDirty.value = false
+      const { useEditorStore } = await import('../stores/editor')
+      useEditorStore().clearAllModified()
       return true
     } catch (e) {
       console.error('[Project] 保存失败:', e)
@@ -102,10 +104,12 @@ export const useProjectStore = defineStore('project', () => {
         outputPath,
       })
       bingoPath.value = outputPath
-      const fileName = outputPath.split('/').pop()?.replace('.bingo', '') || '未命名项目'
+      const fileName = outputPath.split('/').pop()?.replace(/\.bc$/, '') || '未命名项目'
       name.value = fileName
       codeDirty.value = false
       resourceDirty.value = false
+      const { useEditorStore } = await import('../stores/editor')
+      useEditorStore().clearAllModified()
       return true
     } catch (e) {
       console.error('[Project] 另存为失败:', e)
@@ -123,7 +127,7 @@ export const useProjectStore = defineStore('project', () => {
       // 关键：解包完成后必须把工作目录写回 root，否则 MainLayout 拿空 root 直接中断
       root.value = projectRoot
       bingoPath.value = bingoFilePath
-      const fileName = bingoFilePath.split('/').pop()?.replace('.bingo', '') || '未命名项目'
+      const fileName = bingoFilePath.split('/').pop()?.replace(/\.bc$/, '') || '未命名项目'
       name.value = fileName
       codeDirty.value = false
       resourceDirty.value = false

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { open, save, ask } from '@tauri-apps/plugin-dialog'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
@@ -322,6 +322,29 @@ window.addEventListener('editor-save', () => { ideSaveFile() })
 window.addEventListener('click', () => { closeTabCtxMenu() })
 window.addEventListener('contextmenu', () => { closeTabCtxMenu() })
 
+// 游戏模式：Cmd/Ctrl+S 保存项目（未保存过弹保存窗口，已保存过直接覆盖旧文件）
+// Monaco 编辑器内按键被其自身命令拦截（不冒泡到 window），因此编辑器内
+// 通过 game-save 事件、编辑器外通过 keydown 监听，两个入口汇合到这里
+let _savingProject = false
+async function runGameSave() {
+  if (_savingProject) return
+  _savingProject = true
+  try {
+    await fileMenuAction('save')
+  } finally {
+    _savingProject = false
+  }
+}
+window.addEventListener('game-save', () => { runGameSave() })
+function onGameSaveShortcut(e: KeyboardEvent) {
+  if (!editorStore.isGameMode) return
+  if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 's') return
+  e.preventDefault()
+  runGameSave()
+}
+onMounted(() => window.addEventListener('keydown', onGameSaveShortcut))
+onUnmounted(() => window.removeEventListener('keydown', onGameSaveShortcut))
+
 // 退出保护：有未保存代码时弹窗提示（Tauri 原生窗口关闭）
 const appWindow = getCurrentWebviewWindow()
 let pendingClose = false
@@ -531,7 +554,7 @@ async function fileMenuAction(action: string) {
     case 'open': {
       const path = await open({
         title: '打开项目',
-        filters: [{ name: 'Bingo 项目', extensions: ['bingo'] }],
+        filters: [{ name: 'BingoCode 项目', extensions: ['bc'] }],
       })
       if (!path) break
       const openOk = await projectStore.openProject(path)
@@ -562,8 +585,8 @@ async function fileMenuAction(action: string) {
         // 首次保存，弹窗选择路径
         const path = await save({
           title: '保存项目',
-          filters: [{ name: 'Bingo 项目', extensions: ['bingo'] }],
-          defaultPath: `${projectStore.name || '未命名项目'}.bingo`,
+          filters: [{ name: 'BingoCode 项目', extensions: ['bc'] }],
+          defaultPath: `${projectStore.name || '未命名项目'}.bc`,
         })
         if (!path) break
         await projectStore.saveProjectAs(path)
@@ -574,8 +597,8 @@ async function fileMenuAction(action: string) {
     case 'saveAs': {
       const path = await save({
         title: '另存为',
-        filters: [{ name: 'Bingo 项目', extensions: ['bingo'] }],
-        defaultPath: `${projectStore.name || '未命名项目'}.bingo`,
+        filters: [{ name: 'BingoCode 项目', extensions: ['bc'] }],
+        defaultPath: `${projectStore.name || '未命名项目'}.bc`,
       })
       if (!path) break
       await projectStore.saveProjectAs(path)

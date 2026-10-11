@@ -449,9 +449,9 @@ async function initMonaco() {
     updateLineNumberWidth()
   })
 
-  // Ctrl+S 保存
+  // Ctrl+S：游戏模式保存整个项目，代码模式保存当前文件
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-    window.dispatchEvent(new CustomEvent('editor-save'))
+    window.dispatchEvent(new CustomEvent(editorStore.isGameMode ? 'game-save' : 'editor-save'))
   })
 
   // 恢复初始标签的状态

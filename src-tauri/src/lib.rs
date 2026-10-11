@@ -696,7 +696,7 @@ fn pack_bingo(workspace_dir: String, output_path: String) -> Result<(), String> 
     }
 
     let file = std::fs::File::create(output)
-        .map_err(|e| format!("创建 .bingo 文件失败: {}", e))?;
+        .map_err(|e| format!("创建 .bc 文件失败: {}", e))?;
     let mut zip = zip::ZipWriter::new(file);
     let options = FileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated)
@@ -757,16 +757,16 @@ fn pack_bingo(workspace_dir: String, output_path: String) -> Result<(), String> 
 #[tauri::command]
 fn unpack_bingo(bingo_path: String, target_dir: String) -> Result<(), String> {
     let data = std::fs::read(&bingo_path)
-        .map_err(|e| format!("读取 .bingo 文件失败: {}", e))?;
+        .map_err(|e| format!("读取 .bc 文件失败: {}", e))?;
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(data))
-        .map_err(|e| format!("解析 .bingo 文件失败: {}", e))?;
+        .map_err(|e| format!("解析 .bc 文件失败: {}", e))?;
 
     let target = std::path::Path::new(&target_dir);
     std::fs::create_dir_all(target)
         .map_err(|e| format!("创建目标目录失败: {}", e))?;
 
     archive.extract(target)
-        .map_err(|e| format!("解压 .bingo 文件失败: {}", e))?;
+        .map_err(|e| format!("解压 .bc 文件失败: {}", e))?;
 
     Ok(())
 }
