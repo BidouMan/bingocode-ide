@@ -1797,8 +1797,6 @@ def load_map(map_name):
         if not os.path.exists(map_dir):
             _try_extract_bgm(map_name)
 
-        print(f"加载地图: {map_name}")
-
         if not os.path.exists(json_file):
             print(f"[错误] 地图文件不存在: {json_file}")
             return False
