@@ -22,6 +22,7 @@ const mapCanvasRef = ref<InstanceType<typeof MapCanvas>>()
 
 const emit = defineEmits<{
   'open-resource-lib': []
+  'map-thumbnail-updated': [itemId: string, dataUrl: string]
 }>()
 
 // ====== 统一数据源：项目目录 maps/<地图名>/map.json ======
@@ -61,6 +62,11 @@ async function saveMapToProject(mapName?: string): Promise<void> {
       const base64 = thumbDataUrl.split(',')[1]
       const raw = Uint8Array.from(atob(base64), c => c.charCodeAt(0))
       await invoke('write_binary', { path: `${dirPath}/thumbnail.png`, data: Array.from(raw) })
+
+      // 直接把刚生成的快照写进资源列表缩略图缓存（经 MainLayout），
+      // 编辑后无需切 tab 重读文件即可第一时间看到最新缩略图
+      const savedItem = resourceStore.maps.find(m => m.name === name)
+      if (savedItem) emit('map-thumbnail-updated', savedItem.id, thumbDataUrl)
     }
 
     // 更新 resource store 中该 map 的 path，供左侧缩略图加载
@@ -97,8 +103,11 @@ async function loadMapFromProject(itemId: string): Promise<boolean> {
     const saveData = JSON.parse(json)
 
     // Rust zip 0.6 解压 .bgm 时 map.json 可能丢失数据（tilesets/layers 被清空）
-    // 检测并从原始 .bgm zip 重新读取
-    if (!saveData.tilesets || saveData.tilesets.length === 0) {
+    // 检测并从原始 .bgm zip 重新读取。
+    // 注意：必须 tilesets 和 layers 双双为空才判定为解压损坏——
+    // 新建空地图 tilesets 天然为空，若只判 tilesets 会误用引擎内置同名 .bgm 覆盖用户地图
+    if ((!saveData.tilesets || saveData.tilesets.length === 0)
+      && (!saveData.layers || saveData.layers.length === 0)) {
       const fixed = await tryReadMapFromBgm(mapName)
       if (fixed) {
         // 用正确的数据覆盖损坏的 map.json

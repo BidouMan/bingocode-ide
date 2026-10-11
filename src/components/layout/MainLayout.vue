@@ -80,6 +80,14 @@ const loadingProgress = computed(() => {
 
 // change_page: 0=编辑器, 1=全屏, 2=地图库, 3=角色库, 4=素材库, 5=声音库
 const currentPage = ref(0)
+// 库页面用 v-show 常驻挂载，key 递增强制每次打开时重建组件：
+// 重置默认 tab/分类，并让 onMounted 的目录重扫真正生效
+const mapLibPageKey = ref(0)
+const mapResLibPageKey = ref(0)
+watch(currentPage, (page) => {
+  if (page === 2) mapLibPageKey.value++
+  else if (page === 4) mapResLibPageKey.value++
+})
 // 控制台面板可见性：状态在 terminal store 中（引擎有输出自动弹出、手动停止收回）
 const consoleVisible = computed({
   get: () => terminalStore.consoleVisible,
@@ -1035,6 +1043,12 @@ async function loadMapThumbnail(item: { id: string; path: string }) {
   }
 }
 
+// 地图保存后用刚生成的快照直接更新缩略图缓存——
+// 编辑完成后资源列表立即显示最新图，无需切 tab 触发文件重读
+function onMapThumbnailUpdated(itemId: string, dataUrl: string) {
+  mapThumbnails.value[itemId] = dataUrl
+}
+
 // 角色右键菜单
 function onSpriteContextMenu(e: MouseEvent, item: { id: string; name: string }) {
   e.preventDefault()
@@ -1765,7 +1779,7 @@ function spriteDisplayName(name: string) {
 
         <!-- ═══ Page 0: 游戏模式 — 地图编辑器 (v-show 保持 PixiJS 实例存活) ═══ -->
         <div v-show="editorStore.isGameMode && editorStore.activeEditorMode === 'map'" class="editor-page-full">
-          <MapEditorView @open-resource-lib="currentPage = 4" />
+          <MapEditorView @open-resource-lib="currentPage = 4" @map-thumbnail-updated="onMapThumbnailUpdated" />
         </div>
 
         <!-- ═══ Page 0: 游戏模式 — 代码编辑 (侧边栏 + 标签 + 代码编辑 + 控制台) ═══ -->
@@ -2095,7 +2109,7 @@ function spriteDisplayName(name: string) {
 
       <!-- ─── page 4: 素材库 ─── -->
       <div v-show="currentPage === 4" class="lib-page">
-        <MapResourceLibPage @close="switchPage(0)" @imported="onResLibImported" />
+        <MapResourceLibPage :key="mapResLibPageKey" @close="switchPage(0)" @imported="onResLibImported" />
       </div>
 
       <!-- ─── page 5: 声音库 ─── -->

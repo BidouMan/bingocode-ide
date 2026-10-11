@@ -12,7 +12,7 @@ const emit = defineEmits<{
 const mapLibStore = useMapLibStore()
 const mapResLibStore = useMapResourceLibStore()
 const searchQuery = ref('')
-const activeTab = ref<'maps' | 'images'>('maps')
+const activeTab = ref<'maps' | 'images'>('images')
 
 onMounted(() => {
   mapLibStore.loadBuiltinLibrary()
@@ -35,8 +35,8 @@ const filteredImages = computed(() => {
 })
 
 const tabs = [
-  { id: 'maps' as const, label: '地图' },
   { id: 'images' as const, label: '图像' },
+  { id: 'maps' as const, label: '地图' },
 ]
 </script>
 
@@ -188,7 +188,6 @@ const tabs = [
 }
 
 .lib-card {
-  aspect-ratio: 1;
   background: rgb(45, 45, 45);
   border-radius: 8px;
   padding: 8px;
@@ -203,10 +202,10 @@ const tabs = [
 }
 
 .lib-card-thumb {
-  flex: 1;
-  min-height: 0;
-  margin: 0 auto 8px;
-  background: var(--bg-hover);
+  width: 100%;
+  height: 120px;
+  flex: none;
+  margin: 0 0 8px;
   border-radius: 4px;
   display: flex;
   align-items: center;

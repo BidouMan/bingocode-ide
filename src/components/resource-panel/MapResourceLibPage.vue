@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, ref, computed, watch } from 'vue'
 import { useMapResourceLibStore } from '../../stores/mapResourceLib'
+import { useMapStore } from '../../stores/map'
 
 const emit = defineEmits<{
   'close': []
@@ -8,25 +9,32 @@ const emit = defineEmits<{
 }>()
 
 const store = useMapResourceLibStore()
+const mapStore = useMapStore()
 const searchQuery = ref('')
-const activeCategory = ref<'all' | 'images' | 'tiles' | 'tilesets'>('all')
 
-const categories = [
-  { id: 'all' as const, label: '全部' },
-  { id: 'images' as const, label: '图像' },
-  { id: 'tiles' as const, label: '图块' },
-  { id: 'tilesets' as const, label: '集合' },
-]
+// 按当前图层模式过滤分类：图像模式只显示图像；绘制模式只显示图块/集合。
+// 页面用 v-show 常驻挂载，分类必须用 watch 跟随图层模式，不能用 ref 初始化一次
+const layerType = computed(() => mapStore.activeLayer?.type ?? 'drawing')
+const isImageMode = computed(() => layerType.value === 'image')
+
+const activeCategory = ref<'images' | 'tiles' | 'tilesets'>('tiles')
+
+watch(isImageMode, (img) => {
+  activeCategory.value = img ? 'images' : 'tiles'
+}, { immediate: true })
+
+const categories = computed(() =>
+  isImageMode.value
+    ? [{ id: 'images' as const, label: '图像' }]
+    : [{ id: 'tiles' as const, label: '图块' }, { id: 'tilesets' as const, label: '集合' }]
+)
 
 onMounted(() => {
   store.loadBuiltinResources()
 })
 
 const filteredResources = computed(() => {
-  let list = store.items
-  if (activeCategory.value !== 'all') {
-    list = list.filter(r => r.category === activeCategory.value)
-  }
+  let list = store.items.filter(r => r.category === activeCategory.value)
   if (searchQuery.value) {
     const q = searchQuery.value.toLowerCase()
     list = list.filter(r => r.name.toLowerCase().includes(q))
@@ -161,7 +169,6 @@ const filteredResources = computed(() => {
 }
 
 .lib-card {
-  aspect-ratio: 1;
   background: rgb(45, 45, 45);
   border-radius: 8px;
   padding: 8px;
@@ -176,10 +183,10 @@ const filteredResources = computed(() => {
 }
 
 .lib-card-thumb {
-  flex: 1;
-  min-height: 0;
-  margin: 0 auto 8px;
-  background: rgb(61, 61, 61);
+  width: 100%;
+  height: 120px;
+  flex: none;
+  margin: 0 0 8px;
   border-radius: 4px;
   display: flex;
   align-items: center;
