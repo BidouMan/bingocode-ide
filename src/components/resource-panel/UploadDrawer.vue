@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import JSZip from 'jszip'
 import { useFileDialog } from '../../composables/useFileDialog'
@@ -75,6 +75,29 @@ const menuConfig: Record<string, { items: { key: string; icon: string }[]; uploa
 }
 
 const config = computed(() => menuConfig[props.type])
+
+// 抽屉按钮功能提示文案（Scratch 风格 tooltip，悬停时显示在按钮左侧）
+const tipTextMap: Record<string, Record<string, string>> = {
+  sprite: { import: '上传角色', paint: '选择角色', library: '选择角色' },
+  map: { import: '上传地图', create: '创建地图', library: '选择地图' },
+  sound: { import: '上传声音', library: '选择声音' },
+  code: { import: '上传代码文件', new: '新建代码文件' },
+}
+const tipState = ref<{ text: string; top: number } | null>(null)
+
+function showTip(e: MouseEvent, key: string) {
+  const btn = e.currentTarget as HTMLElement
+  const texts = tipTextMap[props.type]
+  if (!texts || !texts[key]) { tipState.value = null; return }
+  // drawer-btn 的 offsetParent 是 .upload-drawer（absolute），offsetTop 即相对抽屉容器的位置
+  tipState.value = { text: texts[key], top: btn.offsetTop + btn.offsetHeight / 2 }
+}
+function hideTip() {
+  tipState.value = null
+}
+watch(menuOpen, (open) => {
+  if (!open) hideTip()
+})
 
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']
 function isImageFile(filename: string): boolean {
@@ -239,11 +262,21 @@ async function handleAction(key: string) {
           class="drawer-btn"
           :class="{ 'drawer-btn-first': idx === 0 }"
           @click="handleAction(item.key)"
+          @mouseenter="showTip($event, item.key)"
+          @mouseleave="hideTip"
         >
           <img :src="item.icon" class="drawer-btn-icon" />
         </button>
         <!-- 填充抽屉和按钮之间的缝隙 -->
         <div class="drawer-gap-fill"></div>
+      </div>
+    </Transition>
+
+    <!-- Scratch 风格功能提示：显示在悬停按钮左侧 -->
+    <Transition name="tip">
+      <div v-if="tipState" class="drawer-tip" :style="{ top: tipState.top + 'px' }">
+        {{ tipState.text }}
+        <span class="drawer-tip-arrow"></span>
       </div>
     </Transition>
 
@@ -310,6 +343,42 @@ async function handleAction(key: string) {
   width: 100%;
   height: 20px;
   background: #4B9B5C;
+}
+
+/* Scratch 风格功能提示气泡（显示在悬停按钮左侧） */
+.drawer-tip {
+  position: absolute;
+  right: 48px;
+  transform: translateY(-50%);
+  background: #5bc772;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  padding: 7px 12px;
+  border-radius: 8px;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  z-index: 50;
+}
+/* 气泡右侧小箭头，指向按钮 */
+.drawer-tip-arrow {
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 6px solid #5bc772;
+}
+.tip-enter-active,
+.tip-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.tip-enter-from,
+.tip-leave-to {
+  opacity: 0;
+  transform: translateY(-50%) translateX(-4px);
 }
 
 /* 上传按钮 */

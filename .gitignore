@@ -60,3 +60,7 @@ src-tauri/gen/
 # Vite generated
 vite.config.d.ts
 vite.config.js
+
+# Updater signing keys (never commit)
+updater-key.key
+updater-key.key.pub

@@ -84,9 +84,11 @@ const currentPage = ref(0)
 // 重置默认 tab/分类，并让 onMounted 的目录重扫真正生效
 const mapLibPageKey = ref(0)
 const mapResLibPageKey = ref(0)
+const spriteLibPageKey = ref(0)
 watch(currentPage, (page) => {
   if (page === 2) mapLibPageKey.value++
   else if (page === 4) mapResLibPageKey.value++
+  else if (page === 3) spriteLibPageKey.value++
 })
 // 控制台面板可见性：状态在 terminal store 中（引擎有输出自动弹出、手动停止收回）
 const consoleVisible = computed({
@@ -2099,12 +2101,12 @@ function spriteDisplayName(name: string) {
 
       <!-- ─── page 2: 地图库 ─── -->
       <div v-show="currentPage === 2" class="lib-page">
-        <MapLibraryPage @close="switchPage(0)" @imported="onMapLibImported" @imported-image="onMapLibImportedImage" />
+        <MapLibraryPage :key="mapLibPageKey" @close="switchPage(0)" @imported="onMapLibImported" @imported-image="onMapLibImportedImage" />
       </div>
 
       <!-- ─── page 3: 角色库 (独立全屏页面) ─── -->
       <div v-show="currentPage === 3" class="lib-page">
-        <SpriteLibPage @close="switchPage(0)" @imported="onSpriteLibImported" />
+        <SpriteLibPage :key="spriteLibPageKey" @close="switchPage(0)" @imported="onSpriteLibImported" />
       </div>
 
       <!-- ─── page 4: 素材库 ─── -->
