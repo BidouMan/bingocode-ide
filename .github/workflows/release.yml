@@ -264,10 +264,11 @@ jobs:
           fi
 
           # --- Windows ---
-          WIN_NSIS_ZIP=""
+          # Tauri 2 v2 格式：更新工件就是 -setup.exe 本体 + .exe.sig（不再打 nsis.zip）
+          WIN_EXE=""
           WIN_SIG=""
-          for f in $(find bundles -name "*.nsis.zip" -not -name "*.sig" 2>/dev/null); do
-            WIN_NSIS_ZIP="$f"
+          for f in $(find bundles -name "*-setup.exe" 2>/dev/null); do
+            WIN_EXE="$f"
             SIG_FILE="${f}.sig"
             if [ -f "$SIG_FILE" ]; then
               WIN_SIG=$(cat "$SIG_FILE" | tr -d '\n')
@@ -277,8 +278,8 @@ jobs:
             fi
             break
           done
-          if [ -n "$WIN_NSIS_ZIP" ] && [ -n "$WIN_SIG" ]; then
-            WIN_URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$WIN_NSIS_ZIP")"
+          if [ -n "$WIN_EXE" ] && [ -n "$WIN_SIG" ]; then
+            WIN_URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$WIN_EXE")"
             TARGET="windows-x86_64"
             PLATFORMS_JSON=$(echo "$PLATFORMS_JSON" | jq \
               --arg url "$WIN_URL" \
@@ -318,12 +319,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            bundles/**/*.dmg
-            bundles/**/*.exe
+            bundles/**/*_aarch64.dmg
+            bundles/**/*_x64.dmg
+            bundles/**/*-setup.exe
+            bundles/**/*-setup.exe.sig
             bundles/**/*.app.tar.gz
             bundles/**/*.app.tar.gz.sig
-            bundles/**/*.nsis.zip
-            bundles/**/*.nsis.zip.sig
             latest.json
           generate_release_notes: true
           make_latest: true
