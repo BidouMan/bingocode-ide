@@ -3,7 +3,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useResourceStore } from '../../stores/resource'
 import { useEditorStore } from '../../stores/editor'
 import type { SpriteData, SpriteFrame, SpriteAnimation } from '../../composables/useSpriteData'
-import { readBgsFromUrl, revokeSpriteUrls, saveSpriteConfig } from '../../composables/useSpriteData'
+import { readBgsFromUrl, readImageAsSprite, revokeSpriteUrls, saveSpriteConfig, saveImageSpriteToDirectory } from '../../composables/useSpriteData'
 
 import iconPrev from '../../assets/icons/btn_preview_prev.svg'
 import iconPlay from '../../assets/icons/btn_preview_play.svg'
@@ -80,7 +80,12 @@ async function loadSprite(item: { id: string; name: string; path: string }) {
   try {
     // 释放旧的 ObjectURL 防止内存泄漏
     revokeSpriteUrls(currentSprite.value)
-    currentSprite.value = await readBgsFromUrl(item.path)
+    // 图片角色（上传图片直接作角色）：构造单帧数据；目录角色：读 config.json
+    if (/\.(png|jpe?g|gif|bmp|webp)$/i.test(item.path)) {
+      currentSprite.value = await readImageAsSprite(item.path)
+    } else {
+      currentSprite.value = await readBgsFromUrl(item.path)
+    }
     currentSpritePath.value = item.path
     selectedFrameIndex.value = 0
     canvasDisplayIndex.value = 0

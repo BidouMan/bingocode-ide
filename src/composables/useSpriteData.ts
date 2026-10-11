@@ -132,3 +132,45 @@ export async function saveSpriteConfig(spritePath: string, sprite: SpriteData): 
   const json = JSON.stringify(config, null, 4)
   await invoke('write_file', { path: `${spritePath}/config.json`, content: json })
 }
+
+// 图片文件 → 单帧 SpriteData（上传图片直接作角色时使用）
+export async function readImageAsSprite(path: string): Promise<SpriteData> {
+  const dataUrl = await invoke<string>('read_image_as_data_url', { path })
+  const blob = await (await fetch(dataUrl)).blob()
+  const fileName = path.split(/[\\/]/).pop() || '角色'
+  const name = fileName.replace(/\.[^.]+$/, '')
+  return {
+    name,
+    frames: [{ name, blob, url: dataUrl }],
+    animations: [{ name: '默认动画', start: 1, end: 1, fps: 10, loop: true }],
+  }
+}
+
+function buildSpriteConfigJson(sprite: SpriteData): string {
+  const config: Record<string, any> = { name: sprite.name }
+  config.frames = sprite.frames.map(f => f.name)
+  config.segments = sprite.animations.map(a => {
+    const seg: Record<string, any> = {
+      name: a.name,
+      start: a.start,
+      end: a.end,
+    }
+    if (a.fps != null) seg.fps = a.fps
+    if (a.loop != null) seg.loop = a.loop
+    return seg
+  })
+  return JSON.stringify(config, null, 4)
+}
+
+// 图片角色编辑后转正为目录角色：把内存中的帧图 + config.json 落盘到目录
+// （引擎读取目录角色时按 config.frames 的帧名自动补图片扩展名）
+export async function saveImageSpriteToDirectory(dirPath: string, sprite: SpriteData): Promise<void> {
+  await invoke('create_dir', { path: dirPath })
+  for (const f of sprite.frames) {
+    const buf = new Uint8Array(await f.blob.arrayBuffer())
+    const extMatch = f.name.match(/\.(png|jpe?g|gif|bmp|webp)$/i)
+    const fileName = extMatch ? f.name : `${f.name}.png`
+    await invoke('write_binary', { path: `${dirPath}/${fileName}`, data: Array.from(buf) })
+  }
+  await invoke('write_file', { path: `${dirPath}/config.json`, content: buildSpriteConfigJson(sprite) })
+}

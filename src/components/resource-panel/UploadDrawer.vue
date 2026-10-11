@@ -6,6 +6,7 @@ import { useFileDialog } from '../../composables/useFileDialog'
 import { useResourceStore } from '../../stores/resource'
 import { useEditorStore } from '../../stores/editor'
 import { useProjectStore } from '../../stores/project'
+import { svgToPngBlob } from '../../utils/imageConvert'
 
 import iconFileUpload from '../../assets/icons/icon--file-upload.svg'
 import iconPaint from '../../assets/icons/icon--paint.svg'
@@ -34,8 +35,8 @@ const fileDialog = useFileDialog()
 const menuOpen = ref(false)
 
 const acceptMap: Record<string, string> = {
-  sprite: '.bgs,.png,.jpg,.gif,.jpeg',
-  map: '.bgm,.json,.info,.png,.jpg,.jpeg,.gif,.bmp,.webp',
+  sprite: '.bgs,.png,.jpg,.gif,.jpeg,.svg',
+  map: '.bgm,.json,.info,.png,.jpg,.jpeg,.gif,.bmp,.webp,.svg',
   sound: '.wav,.mp3,.ogg,.flac',
   code: '.py',
 }
@@ -88,7 +89,27 @@ async function handleAction(key: string) {
       const result = await fileDialog.openFile(acceptMap[props.type])
       if (!result) return
 
-      if (props.type === 'sprite' && result.name.endsWith('.bgs')) {
+      if (props.type === 'sprite' && result.name.toLowerCase().endsWith('.svg')) {
+        // SVG 角色：引擎（Pillow）不支持 SVG，导入时栅格化为 PNG 再入库
+        try {
+          const pngBlob = await svgToPngBlob(result.file)
+          const baseName = result.name.replace(/\.svg$/i, '')
+          const projectRoot = projectStore.root
+          if (projectRoot) {
+            const projectPath = `${projectRoot}/assets/sprites/${baseName}.png`
+            await invoke('write_binary', {
+              path: projectPath,
+              data: Array.from(new Uint8Array(await pngBlob.arrayBuffer())),
+            })
+            resourceStore.addItem({ name: baseName, type: 'sprite', path: projectPath })
+            emit('uploaded', 'sprite', baseName)
+          } else {
+            console.warn('[UploadDrawer] 项目目录未就绪，无法导入 SVG 角色')
+          }
+        } catch (e) {
+          console.error('[UploadDrawer] SVG 转 PNG 失败:', e)
+        }
+      } else if (props.type === 'sprite' && result.name.endsWith('.bgs')) {
         // .bgs 文件：用 JSZip 解析，读取 config.json 获取角色名
         try {
           const zip = await JSZip.loadAsync(result.file)
@@ -115,8 +136,10 @@ async function handleAction(key: string) {
             const arrayBuffer = await result.file.arrayBuffer()
             const uint8Array = new Uint8Array(arrayBuffer)
             const relativePath = `assets/sprites/${result.name}`
-            const projectPath = await invoke<string>('write_binary', {
-              path: `${projectRoot}/${relativePath}`,
+            // write_binary 返回 ()，路径需自行拼接
+            const projectPath = `${projectRoot}/${relativePath}`
+            await invoke('write_binary', {
+              path: projectPath,
               data: Array.from(uint8Array),
             })
             resourceStore.addItem({ name: result.name.replace(/\.[^.]+$/, ''), type: 'sprite', path: projectPath })

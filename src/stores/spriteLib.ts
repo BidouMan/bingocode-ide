@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 
 export type SpriteLibType = 'bgs' | 'image'
 
@@ -29,59 +29,64 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
   const loading = ref(false)
 
   async function loadBuiltinLibrary() {
-    if (items.value.length > 0) return
+    if (loading.value) return
     loading.value = true
 
     try {
       const engineDir = await invoke<string>('get_engine_assets_dir')
+      const found = new Map<string, SpriteLibItem>()
 
-      // 加载 .bgs 包文件
+      // 扫描 .bgs 包文件
       const packagesDir = joinPath(engineDir, 'sprites', 'packages')
       try {
         const files = await invoke<string[]>('list_dir', { path: packagesDir })
-        const bgsNames = files
-          .filter(f => f.endsWith('.bgs'))
-          .map(f => f.replace(/\.bgs$/, ''))
-
-        for (const name of bgsNames) {
-          items.value.push({
-            name,
-            filePath: joinPath(packagesDir, `${name}.bgs`),
-            type: 'bgs',
-            thumbUrl: '',
-            loaded: false,
-          })
+        for (const f of files.filter(f => f.endsWith('.bgs'))) {
+          const name = f.replace(/\.bgs$/, '')
+          const filePath = joinPath(packagesDir, f)
+          found.set(filePath, { name, filePath, type: 'bgs', thumbUrl: '', loaded: false })
         }
       } catch (e) {
         console.error('[SpriteLib] 加载 .bgs 列表失败:', e)
       }
 
-      // 加载 images/ 目录下的常规图片文件
+      // 扫描 images/ 目录下的常规图片文件
       const imagesDir = joinPath(engineDir, 'sprites', 'images')
       try {
         const files = await invoke<string[]>('list_dir', { path: imagesDir })
-        const imageFiles = files.filter(f => {
+        for (const filename of files.filter(f => {
           const lower = f.toLowerCase()
           return IMAGE_EXTS.some(ext => lower.endsWith(ext))
-        })
-
-        for (const filename of imageFiles) {
+        })) {
           const name = filename.replace(/\.[^.]+$/, '')
-          items.value.push({
-            name,
-            filePath: joinPath(imagesDir, filename),
-            type: 'image',
-            thumbUrl: '',
-            loaded: false,
-          })
+          const filePath = joinPath(imagesDir, filename)
+          found.set(filePath, { name, filePath, type: 'image', thumbUrl: '', loaded: false })
         }
       } catch (_e) {
         // images 目录可能为空或不存在，静默处理
       }
 
-      // 批量加载缩略图
-      for (const item of items.value) {
+      // 增量合并：已有项复用缩略图缓存，只为新增文件加载缩略图
+      // （.bgs 缩略图需要解包取帧，重复打开库页面时不能重付这份成本）
+      const oldByPath = new Map(items.value.map(i => [i.filePath, i]))
+      const needThumbs: SpriteLibItem[] = []
+      const merged: SpriteLibItem[] = []
+      for (const item of found.values()) {
+        const old = oldByPath.get(item.filePath)
+        if (old && old.loaded) { merged.push(old); continue }
+        merged.push(item)
+        needThumbs.push(item)
+      }
+      items.value = merged
+
+      // 批量加载缩略图（仅新增项）
+      for (const item of needThumbs) {
         try {
+          // SVG 无法由 Rust image 库解码缩略图，改用文件 URL 交给 <img> 直接渲染
+          if (item.filePath.toLowerCase().endsWith('.svg')) {
+            item.thumbUrl = convertFileSrc(item.filePath)
+            item.loaded = true
+            continue
+          }
           const dataUrl = await invoke<string>('get_sprite_thumbnail', {
             path: item.filePath,
           })

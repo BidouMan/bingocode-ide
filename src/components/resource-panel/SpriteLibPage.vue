@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { useSpriteLibStore } from '../../stores/spriteLib'
 import { useResourceStore } from '../../stores/resource'
 import { useProjectStore } from '../../stores/project'
+import { svgToPngBlob } from '../../utils/imageConvert'
 
 const emit = defineEmits<{
   close: []
