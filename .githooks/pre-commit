@@ -1,0 +1,10 @@
+#!/bin/sh
+# 自动将 engine/assets 内置资源的增改纳入当前提交，无需手动 git add
+# 作用：每次 commit 时自动暂存 engine/assets 下的新增/修改/删除，推送远程即随包同步
+status=$(git status --porcelain -- engine/assets 2>/dev/null)
+if [ -n "$status" ]; then
+  git add -- engine/assets 2>/dev/null
+  echo "[内置资源钩子] 已自动暂存 engine/assets 变更："
+  echo "$status" | sed 's/^/    /'
+fi
+exit 0
