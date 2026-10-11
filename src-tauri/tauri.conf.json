@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "BingoCode IDE v0.5.7",
+        "title": "BingoCode IDE v0.5.8",
         "width": 1000,
         "height": 650,
         "minWidth": 960,
@@ -59,7 +59,7 @@
       "open": true
     },
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENBQ0U2Njk2NjNENEVCQwpSV1M4VGoxbWFlYXNEUE8wTm1aanJMQ1FLcFZXNDhjMXI4c3BLMFUwQm5WcG4yVlhBK3ZqOXhPZgo=",
+      "pubkey": "ZFc1MGNuVnpkR1ZrSUdOdmJXMWxiblE2SUcxcGJtbHphV2R1SUhCMVlteHBZeUJyWlhrNklFVTVPREk1TmpFMk9Ua3hOMEkxT0VJS1VsZFRUSFJTWlZwR2NHRkRObVl5UkcxdmVHcGxhRWMxU25Sd1FWRkRlVlJ5VUVkTGNGazNjVzFXTkhwV00xTnBiazB3TDIxQk56WUs=",
       "endpoints": [
         "https://cdn.jsdelivr.net/gh/BidouMan/bingocode-ide@latest/latest.json",
         "https://ghfast.top/https://github.com/BidouMan/bingocode-ide/releases/latest/download/latest.json",

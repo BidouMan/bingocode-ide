@@ -159,6 +159,18 @@ jobs:
           }
           echo "✅ $DEP_CHECK"
 
+      - name: Verify updater signing key
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.UPDATER_PRIVATE_KEY }}
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "❌ FATAL: UPDATER_PRIVATE_KEY secret 未配置，构建将不生成更新包，发布中止"
+            echo "   请到 GitHub 仓库 Settings → Secrets and variables → Actions 配置"
+            exit 1
+          fi
+          echo "✅ UPDATER_PRIVATE_KEY 已配置 (长度: ${#TAURI_SIGNING_PRIVATE_KEY})"
+
       - name: Build Tauri app
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.UPDATER_PRIVATE_KEY }}
@@ -293,6 +305,14 @@ jobs:
 
           echo "✅ latest.json 已生成"
           cat latest.json
+
+          # 校验平台条目：为空说明构建没产出更新包，发布无意义，直接失败
+          PLATFORM_COUNT=$(jq '.platforms | length' latest.json)
+          if [ "$PLATFORM_COUNT" -eq 0 ]; then
+            echo "❌ FATAL: latest.json 的 platforms 为空，未找到任何更新包或签名，发布中止"
+            exit 1
+          fi
+          echo "✅ platforms 包含 $PLATFORM_COUNT 个平台条目"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
