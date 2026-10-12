@@ -288,6 +288,16 @@ watch(() => editorStore.activeEditorMode, (mode) => {
 onMounted(loadAllMapThumbnails)
 
 // 启动时静默检查更新，只显示圆点提示，不弹窗
+// 窗口标题动态显示实际安装的版本号（读取 app bundle 元数据，更新后重启即反映新版本）
+onMounted(async () => {
+  try {
+    const { getVersion } = await import('@tauri-apps/api/app')
+    await getCurrentWebviewWindow().setTitle(`BingoCode IDE v${await getVersion()}`)
+  } catch (_e) {
+    // 静默失败，保留 tauri.conf.json 里的静态标题
+  }
+})
+
 onMounted(async () => {
   try {
     const { check } = await import('@tauri-apps/plugin-updater')

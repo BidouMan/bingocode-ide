@@ -11,11 +11,12 @@ const {
   updateInfo,
   downloadProgress,
   isDownloading,
+  installPhase,
   downloadAndInstall,
 } = useUpdater()
 
 const showDialog = ref(false)
-const dialogMode = ref<'update' | 'none' | 'error' | 'download-error'>('update')
+const dialogMode = ref<'update' | 'none' | 'error' | 'download-error' | 'install-done'>('update')
 const errorMessage = ref('')
 const skippedVersion = localStorage.getItem('skippedVersion')
 const RELEASE_PAGE = 'https://github.com/BidouMan/bingocode-ide/releases/latest'
@@ -95,9 +96,15 @@ function skipVersion() {
 async function handleUpdate() {
   try {
     await downloadAndInstall()
+    // relaunch 成功时进程已退出走不到这里；能走到说明重启被系统拒绝
+    dialogMode.value = 'install-done'
   } catch (e) {
-    // 下载中断/失败：给出明确反馈和手动下载兜底，而不是静默退回
-    dialogMode.value = 'download-error'
+    // 安装已完成只是重启失败时，提示手动重启而不是报下载错误
+    if (installPhase.value === 'done') {
+      dialogMode.value = 'install-done'
+    } else {
+      dialogMode.value = 'download-error'
+    }
     console.error('更新失败:', e)
   }
 }
@@ -150,7 +157,13 @@ async function openReleasePage() {
               <span class="update-progress-text">{{ downloadProgress }}%</span>
             </div>
           </div>
-          <div class="update-footer">
+          <div v-else-if="installPhase === 'installing'" class="update-progress-wrapper">
+            <div class="update-status">安装更新中…</div>
+          </div>
+          <div v-else-if="installPhase === 'done'" class="update-progress-wrapper">
+            <div class="update-status update-status-done">更新完成，正在重启应用…</div>
+          </div>
+          <div v-if="installPhase === 'idle'" class="update-footer">
             <button class="update-btn update-btn-skip" @click="skipVersion">跳过此版本</button>
             <div class="update-footer-right">
               <button class="update-btn update-btn-later" @click="closeDialog">稍后再说</button>
@@ -159,7 +172,7 @@ async function openReleasePage() {
                 :disabled="isDownloading"
                 @click="handleUpdate"
               >
-                {{ isDownloading ? '下载中...' : '立即更新' }}
+                立即更新
               </button>
             </div>
           </div>
@@ -193,6 +206,21 @@ async function openReleasePage() {
             <button class="update-btn update-btn-later" @click="openManualDownload">手动下载</button>
             <button class="update-btn update-btn-later" @click="openReleasePage">下载页</button>
             <button class="update-btn update-btn-install" @click="retryUpdate">重试</button>
+          </div>
+        </template>
+
+        <!-- 安装完成但重启失败 -->
+        <template v-else-if="dialogMode === 'install-done'">
+          <div class="update-header">
+            <span class="update-title">更新完成</span>
+            <button class="update-close" @click="closeDialog">×</button>
+          </div>
+          <div class="update-body">
+            <div class="update-message">新版本已安装，但自动重启未成功</div>
+            <div class="update-hint">请手动退出应用后重新打开</div>
+          </div>
+          <div class="update-footer update-footer-center">
+            <button class="update-btn update-btn-later" @click="closeDialog">确定</button>
           </div>
         </template>
 
@@ -311,6 +339,17 @@ async function openReleasePage() {
 
 .update-progress-wrapper {
   padding: 0 14px 8px;
+}
+
+.update-status {
+  font-size: 12px;
+  color: #a9b1d6;
+  text-align: center;
+  padding: 4px 0;
+}
+
+.update-status-done {
+  color: #5BFB84;
 }
 
 .update-progress {

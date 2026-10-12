@@ -8,6 +8,8 @@ export function useUpdater() {
   const updateInfo = ref<{ version: string; notes: string } | null>(null)
   const downloadProgress = ref(0)
   const isDownloading = ref(false)
+  // 安装阶段：downloading 下载中 / installing 安装替换中 / done 安装完成待重启
+  const installPhase = ref<'idle' | 'downloading' | 'installing' | 'done'>('idle')
 
   async function checkForUpdates() {
     if (isChecking.value) return
@@ -45,6 +47,7 @@ export function useUpdater() {
 
     isDownloading.value = true
     downloadProgress.value = 0
+    installPhase.value = 'downloading'
 
     try {
       let downloaded = 0
@@ -63,11 +66,14 @@ export function useUpdater() {
               : 0
             break
           case 'Finished':
+            // 下载完成，进入安装替换阶段（此时 UI 应显示安装中而非操作按钮）
+            installPhase.value = 'installing'
             console.log('[Updater] 下载完成')
             break
         }
       })
 
+      installPhase.value = 'done'
       console.log('[Updater] 安装完成，准备重启')
       await relaunch()
     } catch (e) {
@@ -84,6 +90,7 @@ export function useUpdater() {
     updateInfo,
     downloadProgress,
     isDownloading,
+    installPhase,
     checkForUpdates,
     downloadAndInstall,
   }
