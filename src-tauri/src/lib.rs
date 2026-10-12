@@ -133,11 +133,19 @@ fn copy_file(src: String, dst_dir: String) -> Result<String, String> {
         .ok_or_else(|| "路径转换失败".to_string())
 }
 
+// Windows: 去掉 \\?\ 扩展前缀。Tauri resource_dir 在 Windows 上可能返回带此前缀的路径，
+// 而 \\?\ 路径下 Win32 不再规范化混合分隔符，前端用 / 拼接的子路径会全部失效；
+// 同时 C:\Users 的 \U 等进入 Python 字符串字面量会触发 Unicode 转义错误
+fn normalize_path_string(p: &std::path::Path) -> String {
+    p.to_string_lossy()
+        .trim_start_matches("\\\\?\\")
+        .to_string()
+}
+
 // Windows: 去掉 \\?\ 前缀再检查，否则 Path::exists() 可能失败
 fn path_exists_impl(p: &std::path::Path) -> bool {
     if cfg!(windows) {
-        let s = p.to_string_lossy().to_string();
-        std::path::PathBuf::from(s.trim_start_matches("\\\\?\\")).exists()
+        std::path::PathBuf::from(normalize_path_string(p)).exists()
     } else {
         p.exists()
     }
@@ -309,7 +317,7 @@ fn get_engine_assets_dir(app: tauri::AppHandle) -> Result<String, String> {
     for c in &candidates {
         if path_exists_impl(&c.join("assets")) || path_exists_impl(&c.join("bingo_engine.py")) {
             let assets_dir = c.join("assets");
-            return Ok(assets_dir.to_string_lossy().to_string());
+            return Ok(normalize_path_string(&assets_dir));
         }
     }
 
@@ -320,7 +328,7 @@ fn get_engine_assets_dir(app: tauri::AppHandle) -> Result<String, String> {
             cur = p;
             let test = cur.join("engine");
             if path_exists_impl(&test.join("assets")) || path_exists_impl(&test.join("bingo_engine.py")) {
-                return Ok(test.join("assets").to_string_lossy().to_string());
+                return Ok(normalize_path_string(&test.join("assets")));
             }
         } else {
             break;
@@ -333,7 +341,7 @@ fn get_engine_assets_dir(app: tauri::AppHandle) -> Result<String, String> {
         for _ in 0..4 {
             let test = cur.join("engine");
             if path_exists_impl(&test.join("assets")) || path_exists_impl(&test.join("bingo_engine.py")) {
-                return Ok(test.join("assets").to_string_lossy().to_string());
+                return Ok(normalize_path_string(&test.join("assets")));
             }
             match cur.parent() {
                 Some(p) => cur = p,
@@ -343,7 +351,7 @@ fn get_engine_assets_dir(app: tauri::AppHandle) -> Result<String, String> {
     }
 
     // 最终回退
-    Ok(resource_dir.join("engine").join("assets").to_string_lossy().to_string())
+    Ok(normalize_path_string(&resource_dir.join("engine").join("assets")))
 }
 
 #[tauri::command]
@@ -533,8 +541,8 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
 
     Ok(EngineEnv {
         python_path,
-        engine_dir: engine_dir.to_string_lossy().to_string(),
-        working_dir,
+        engine_dir: normalize_path_string(&engine_dir),
+        working_dir: normalize_path_string(std::path::Path::new(&working_dir)),
     })
 }
 
@@ -621,7 +629,7 @@ fn ensure_engine_setup(engine_dir: String) -> Result<String, String> {
         engine_path.join("portable-python/bin/python3")
     };
     if portable_python.exists() {
-        return Ok(portable_python.to_string_lossy().to_string());
+        return Ok(normalize_path_string(&portable_python));
     }
 
     // 回退：使用 venv（本地开发环境）
@@ -670,7 +678,7 @@ fn ensure_engine_setup(engine_dir: String) -> Result<String, String> {
         }
     }
 
-    Ok(venv_python.to_string_lossy().to_string())
+    Ok(normalize_path_string(&venv_python))
 }
 
 #[derive(Debug, Serialize, Deserialize)]

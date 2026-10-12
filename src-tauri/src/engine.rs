@@ -39,15 +39,17 @@ pub fn run_script(
     }
 
     let target_arg = script_path.as_deref().unwrap_or("");
-    let start_cmd = format!(
-        "import sys; sys.path.insert(0, '{}'); from bingo_engine import start_game; start_game('{}', '{}')",
-        engine_dir, working_dir, target_arg
-    );
+    // 路径通过 argv 传递（sys.argv），避免拼进 Python 字符串字面量：
+    // Windows 路径 C:\Users 的 \U 会触发 Unicode 转义 SyntaxError
+    let start_cmd = "import sys; sys.path.insert(0, sys.argv[1]); from bingo_engine import start_game; start_game(sys.argv[2], sys.argv[3])";
 
     let mut cmd = Command::new(&python_path);
     cmd.arg("-u")
         .arg("-c")
-        .arg(&start_cmd)
+        .arg(start_cmd)
+        .arg(&engine_dir)
+        .arg(&working_dir)
+        .arg(target_arg)
         .current_dir(&working_dir)
         .env("PYTHONPATH", &engine_dir)
         .env("PYTHONUNBUFFERED", "1")
