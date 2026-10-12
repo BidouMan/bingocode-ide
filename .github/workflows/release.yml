@@ -221,8 +221,10 @@ jobs:
 
           # 收集各平台签名和 URL
           # macOS: Tauri 生成 .app.tar.gz + .app.tar.gz.sig
-          # Windows: Tauri 生成 *.nsis.zip + *.nsis.zip.sig
+          # Windows: Tauri 2 v2 格式生成 *-setup.exe + .exe.sig
+          # 下载 URL 走 ghfast 代理前缀：客户端在国内直连 GitHub release 会断流，代理走国内优化线路
           PLATFORMS_JSON="{}"
+          DL_BASE="https://ghfast.top/https://github.com/${{ github.repository }}"
 
           # --- macOS ---
           MAC_TARGZ=""
@@ -239,7 +241,7 @@ jobs:
             break
           done
           if [ -n "$MAC_TARGZ" ] && [ -n "$MAC_SIG" ]; then
-            MAC_URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$MAC_TARGZ")"
+            MAC_URL="${DL_BASE}/releases/download/v${VERSION}/$(basename "$MAC_TARGZ")"
             # 从 DMG 文件名推断架构（macos-latest 是 ARM64）
             ARCH="aarch64"
             DMG_FILE=$(find bundles -name "*_aarch64.dmg" -o -name "*_x64.dmg" 2>/dev/null | head -1)
@@ -279,7 +281,7 @@ jobs:
             break
           done
           if [ -n "$WIN_EXE" ] && [ -n "$WIN_SIG" ]; then
-            WIN_URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/$(basename "$WIN_EXE")"
+            WIN_URL="${DL_BASE}/releases/download/v${VERSION}/$(basename "$WIN_EXE")"
             TARGET="windows-x86_64"
             PLATFORMS_JSON=$(echo "$PLATFORMS_JSON" | jq \
               --arg url "$WIN_URL" \

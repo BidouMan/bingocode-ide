@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { open } from '@tauri-apps/plugin-shell'
 import { useUpdater } from '../../composables/useUpdater'
 
 const emit = defineEmits<{
@@ -14,9 +15,18 @@ const {
 } = useUpdater()
 
 const showDialog = ref(false)
-const dialogMode = ref<'update' | 'none' | 'error'>('update')
+const dialogMode = ref<'update' | 'none' | 'error' | 'download-error'>('update')
 const errorMessage = ref('')
 const skippedVersion = localStorage.getItem('skippedVersion')
+const RELEASE_PAGE = 'https://github.com/BidouMan/bingocode-ide/releases/latest'
+
+// 手动下载兜底：按平台拼安装包直链（走 ghfast 国内加速代理）
+const manualDownloadUrl = computed(() => {
+  const ver = (updateInfo.value?.version || '').replace(/^v/, '')
+  const isMac = (navigator.platform || navigator.userAgent).toLowerCase().includes('mac')
+  const file = isMac ? `BingoCode_${ver}_aarch64.dmg` : `BingoCode_${ver}_x64-setup.exe`
+  return `https://ghfast.top/https://github.com/BidouMan/bingocode-ide/releases/download/v${ver}/${file}`
+})
 
 // 更新日志接口 - 未来可从服务器获取
 function getUpdateNotes(version: string): string[] {
@@ -86,8 +96,28 @@ async function handleUpdate() {
   try {
     await downloadAndInstall()
   } catch (e) {
+    // 下载中断/失败：给出明确反馈和手动下载兜底，而不是静默退回
+    dialogMode.value = 'download-error'
     console.error('更新失败:', e)
   }
+}
+
+function retryUpdate() {
+  dialogMode.value = 'update'
+}
+
+async function openManualDownload() {
+  try {
+    await open(manualDownloadUrl.value)
+  } catch {
+    try { await open(RELEASE_PAGE) } catch { /* ignore */ }
+  }
+}
+
+async function openReleasePage() {
+  try {
+    await open(RELEASE_PAGE)
+  } catch { /* ignore */ }
 }
 </script>
 
@@ -146,6 +176,23 @@ async function handleUpdate() {
           </div>
           <div class="update-footer update-footer-center">
             <button class="update-btn update-btn-later" @click="closeDialog">确定</button>
+          </div>
+        </template>
+
+        <!-- 下载失败 -->
+        <template v-else-if="dialogMode === 'download-error'">
+          <div class="update-header">
+            <span class="update-title">更新下载失败</span>
+            <button class="update-close" @click="closeDialog">×</button>
+          </div>
+          <div class="update-body">
+            <div class="update-message update-message-error">下载中断了，可能是网络不稳定</div>
+            <div class="update-hint">可重试自动更新，或手动下载安装包覆盖安装</div>
+          </div>
+          <div class="update-footer update-footer-center">
+            <button class="update-btn update-btn-later" @click="openManualDownload">手动下载</button>
+            <button class="update-btn update-btn-later" @click="openReleasePage">下载页</button>
+            <button class="update-btn update-btn-install" @click="retryUpdate">重试</button>
           </div>
         </template>
 
@@ -253,6 +300,13 @@ async function handleUpdate() {
 
 .update-message-error {
   color: #f7768e;
+}
+
+.update-hint {
+  font-size: 12px;
+  color: #565f89;
+  text-align: center;
+  padding-bottom: 8px;
 }
 
 .update-progress-wrapper {
