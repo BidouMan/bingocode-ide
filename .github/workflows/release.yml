@@ -121,11 +121,9 @@ jobs:
           find "$OUTPUT_DIR" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
           find "$OUTPUT_DIR" -name "*.pyc" -delete 2>/dev/null || true
           rm -rf "$OUTPUT_DIR/var/cache" "$OUTPUT_DIR/.cache" 2>/dev/null || true
+          # 注意：不能删 tkinter / turtledemo / unittest —— turtle 依赖 tkinter，unittest 是教学常用库
           rm -rf "$OUTPUT_DIR/lib/python3.12/test" 2>/dev/null || true
           rm -rf "$OUTPUT_DIR/lib/python3.12/idlelib" 2>/dev/null || true
-          rm -rf "$OUTPUT_DIR/lib/python3.12/tkinter" 2>/dev/null || true
-          rm -rf "$OUTPUT_DIR/lib/python3.12/turtledemo" 2>/dev/null || true
-          rm -rf "$OUTPUT_DIR/lib/python3.12/unittest" 2>/dev/null || true
           rm -rf "$OUTPUT_DIR/lib/python3.12/ensurepip" 2>/dev/null || true
           rm -rf "$OUTPUT_DIR/include" 2>/dev/null || true
 

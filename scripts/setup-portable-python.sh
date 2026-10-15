@@ -106,13 +106,10 @@ find "$OUTPUT_DIR" -name "*.pyc" -delete 2>/dev/null || true
 rm -rf "$OUTPUT_DIR/var/cache" 2>/dev/null || true
 rm -rf "$OUTPUT_DIR/.cache" 2>/dev/null || true
 # 删除不必要的 stdlib 模块
+# 注意：不能删 tkinter / turtledemo / unittest —— turtle 依赖 tkinter，unittest 是教学常用库
 rm -rf "$OUTPUT_DIR/lib/python3.12/test" 2>/dev/null || true
 rm -rf "$OUTPUT_DIR/lib/python3.12/idlelib" 2>/dev/null || true
-rm -rf "$OUTPUT_DIR/lib/python3.12/tkinter" 2>/dev/null || true
-rm -rf "$OUTPUT_DIR/lib/python3.12/turtledemo" 2>/dev/null || true
-rm -rf "$OUTPUT_DIR/lib/python3.12/unittest" 2>/dev/null || true
 rm -rf "$OUTPUT_DIR/lib/python3.12/ensurepip" 2>/dev/null || true
-rm -rf "$OUTPUT_DIR/lib/python3.12/unittest" 2>/dev/null || true
 # 删除 include 目录
 rm -rf "$OUTPUT_DIR/include" 2>/dev/null || true
 # 删除 .pyi 和 .pxd 文件（typeshed 和 Cython，运行时不需要）

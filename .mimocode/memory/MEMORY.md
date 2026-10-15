@@ -89,26 +89,7 @@ _Cross-task facts that survive across sessions._
 - **ObjectURL 内存泄漏**: useSpriteData.ts 创建 ObjectURL 但从未释放。切换 sprite 时必须 `URL.revokeObjectURL()` 旧 URL。[ses_f4cfba0c5ffe]
 - **Auto-save debounce pattern**: 300ms 防抖避免快速编辑时频繁写入。用 `setTimeout` + `clearTimeout`。Legacy PySide6 每次变更直接 `model.save()`。[ses_f4cfba0c5ffe]
 
-### 资源加载
-
-- **`fetch()` 无法读取本地文件系统路径**: Tauri webview 中 `fetch(url)` 只能访问 HTTP URL。sprite resource path 是本地路径（如 `/Users/.../assets/sprites/喷火龙`），必须通过 Tauri `invoke()` 读取。只有 `engine/assets/` 通过 Vite `publicDir` 提供 HTTP 服务。[ses_f4cfba0c5ffe]
-- **Sprite 库导入流程**: SpriteLibPage → `invoke('extract_bgs_to_project')` 解压 .bgs 到 `{projectRoot}/assets/sprites/{name}/` → resource store item 的 `path` 指向解压目录。[ses_f4cfba0c5ffe]
-- **引擎 Sprite 查找只认解压目录**: `Sprite('名')` 仅在项目 CWD 的 `assets/sprites/<名>/`（config.json+帧PNG）查找；磁盘上没有解压目录 ⇒ `[警告] 角色 '名' 不存在` + `_is_deleted` + `stop()`（bingo_engine.py:168-194）。引擎不读 .bgs zip 也不读 blob URL。[ses_ecb4859d7ffe]
-- **内置精灵库分类体系（2026-10-13 重构）**: `engine/assets/sprites/` 下按分类子目录组织：`<category>/{packages/*.bgs, images/*}`；现分类 characters（角色）+ items（道具），将来可加 ui 等。`spriteLib.ts loadBuiltinLibrary` 用 `list_dir` 扫 sprites/ 一级子目录（Rust list_dir 对目录返回尾斜杠 `/`）自动发现分类，`CATEGORY_LABELS` 映射中文名（characters→角色、items→道具，未映射目录显示原名）。`SpriteLibPage` 分类标签按钮内嵌工具栏搜索框右侧（与 MapResourceLibPage 的 `lib-tab-btn` 同款样式），默认选中 characters，缺失时回退第一个分类。**目录方案已定**：A（分类在外层）优于 B（packages/images 在外层）——分类是查找第一维度、新增分类只建一处目录、UI 永远不显示 packages/images 层。新分类=建目录即可，无需改代码。[ses_ecb4859d7ffe]
-- **Tauri dev 过期资源副本 `_up_`（2026-10-13 踩坑）**: `src-tauri/target/debug/_up_/engine/` 是 Tauri 增量复制的资源副本，**不删除已移走的文件**——重组 `engine/assets/` 后旧 `sprites/images`、`sprites/packages` 残留其中，`get_engine_assets_dir` 曾优先命中它 → 精灵库扫出 images/packages 假分类，且 `resolve_engine_env` 也会让游戏跑旧版引擎代码（say 修复等不生效）。修复：两函数在 `#[cfg(debug_assertions)]` 下优先 cwd 向上找源码树 engine/；打包版行为不变。再遇 dev 资源/引擎行为陈旧：`rm -rf src-tauri/target/debug/_up_`。[ses_ecb4859d7ffe]
-- **say 气泡三坑（2026-10-13 修复）**: ① `say(text, seconds)` 的定时隐藏只在旧 `run()` 循环处理 `_SAY_TIMERS`，新 `start_game` 主循环漏了 → 永不消失；已补同款逻辑，且 `say()` 换新话时先 `_SAY_TIMERS.pop` 防旧计时器提前隐藏。② 文字锚点原先 `anchor.y=1`（底部）贴气泡底边，内边距全在上方视觉偏下；改 `anchor(0.5,0.5)` + `y=-h/2` 垂直居中。③ 气泡在舞台坐标系随窗口缩小，固定 14px 小窗看不清；`getSayFontSize()` 按 `14/stageContainer.scale.x` 放大（clamp 14~34），底部偏移 = fontSize+26（14 时=原 40）。SayData 现在存精灵**原始 y**（render.ts/useEngine 的 -40 已移除），偏移统一由 GameCanvas 计算。[ses_ecb4859d7ffe]
-- **控制台 print 输出链路两个坑（2026-10-13 修复，已提交 6e0a625）**: ① 游戏模式 stdout 处理（useEngine.ts）把 `read_line` 数据 `split('\n')` 丢弃末尾空串后 `join('\n')`——结尾换行被吃掉，多条 print 挤同一行；必须按 `data.endsWith('\n')` 补回，且中段空行（print()）要保留。② xterm 背后始终跑着一个 zsh；控制台面板自动弹出 → fit()/resize → SIGWINCH → zsh 重画提示符（macOS zsh 默认 `%`）泄漏进控制台。修复：共享 `run()` 启动时统一 `terminalMode='python'`（游戏模式原先漏设，启动失败 catch 恢复 'shell'），TerminalPanel 的 shell 回调在 python 模式下一律丢弃（原先仅代码模式丢弃）。附带收益：游戏运行中终端 Ctrl+C 能正确触发引擎停止。[ses_ecb4859d7ffe]
-- **say 定时消失依赖 `_SAY_TIMERS` 轮询，且旧 `run()` 与新 `start_game` 主循环不一致**: `Sprite.say(text, seconds)` 存 `Timer` 入 `_SAY_TIMERS`；轮询处理只写在旧式 `run()`（bingo_engine.py:2370-2374），`start_game` 主循环漏了 → `say("x", 2)` 气泡永不消失。修复须在 start_game 物理步镜像轮询；另 say() 入口应清残留 timer（`say("a",2); say("b")` 旧 timer 会误删新气泡）。`Timer` 类本身是 wall-clock `is_timeout()`，无问题。[ses_ecb4859d7ffe]
-- **UploadDrawer 本地上传 .bgs 必须走同一解压流程（根因确认 2026-10-13）**: 抽屉 import 分支曾只 JSZip 读 config.json 名字 + `URL.createObjectURL(zip)` 存 blob URL、不写盘 → 卡片缩略图空白（blob URL 是 zip 非图片）+ 引擎报角色不存在。修复必须复用 `extract_bgs_to_project`，path 指向解压目录——与精灵库导入路径统一。[ses_ecb4859d7ffe]
-- **双路径读取**: Sprite 可来自两个来源 — HTTP 服务的 engine assets（via `publicDir`）和本地解压目录（via project dir）。`readBgsFromUrl` 必须同时处理两种情况。[ses_f4cfba0c5ffe]
-- **Map 库导入流程**: MapLibraryPage → `invoke('extract_bgm_to_project')` 解压 .bgm 到 `{projectRoot}/assets/maps/{name}/` → resource store item 的 `path` 指向解压目录。[ses_f4cfba0c5ffe]
-- **.bgm 文件结构**: zip 包含 `map.json`（tilesets with relative image paths like `images/tileset.png`）、`thumbnail.png`、`images/tileset.png`。[ses_f4cfba0c5ffe]
-- **`.bgm` map.json 相对路径 bug**: `.bgm` zip 中 `map.json` 的 tileset `image` 和 layer `resources[].path` 使用相对路径（如 `images/tileset.png`）。`deserializeMap` 不解析这些路径。`MapCanvas.vue` 的 `resolveImagePath` 只处理 `/maps/`、`assets/`、绝对路径三种前缀，裸相对路径走 `convertFileSrc()` 生成无效 URL。修复：在 `loadMapFromProject` 中 `deserializeMap` 后将相对路径解析为绝对路径。`onImportMap` 不受影响（走 `saveMapToProject` 重新序列化）。[ses_f4cfba0c5ffe]
-- **GameCanvas 瓦片渲染数据流**: 引擎 stdout JSON → useEngine `CREATE_BATCH` → renderStore.createBatch()（填充 tiles/tileSets ref）→ gameLoop ticker → async syncTiles() → await getTileFrame(tileSetIndex, tileId) → await getTexture(imagePath) → invoke('read_image_as_data_url') → PIXI.Sprite。tileset image_path 含中文字符时 convertFileSrc 失败，必须用 invoke。syncTiles 是 async 函数被同步 ticker 调用，Promise 未 await，靠 tilesSyncing 锁防并发。[ses_f4cfba0c5ffe]
-- **Tauri asset protocol URL 中文路径编码失败**: `convertFileSrc()` 生成的 `https://asset.localhost/...` URL 在路径含中文字符时图片加载失败（返回空/pink placeholder）。必须用 `invoke('read_image_as_data_url')` 直接读取本地图片。影响：缩略图加载、地图编辑器瓦片集加载、GameCanvas 运行时渲染。[ses_f4cfba0c5ffe]
-- **`path_exists_cmd` 命令名不匹配 (已修复)**: Rust 注册为 `path_exists_cmd`，前端全部调用 `path_exists`（10+ 处），导致 `"Command path_exists not found"` 错误。已统一为 `path_exists`，内部辅助函数用 `path_exists_impl`。[ses_f4cfba0c5ffe]
-- **Rust zip crate 0.6.6 解压 .bgm 数据丢失（根因确认+修复）**: `extract_bgm_to_project` 使用 `zip::ZipArchive` 解压 `.bgm` 时，`map.json`（原始 12147 字节）被截断为 227 字节，tilesets 和 tilelayer 全部丢失。Python `zipfile` 解压正常。**zip crate 0.6.6 的 bug**，不升级版本。**修复方案**：在 `loadMapFromProject` 中检测 `tilesets.length === 0` 时，用 `invoke('read_binary')` 读取 .bgm 二进制 → JSZip 解析 → 提取 map.json → 用 `write_file` 覆盖损坏文件。新增 `tryReadMapFromBgm` 和 `resolveRelativePaths` 公共函数。[ses_f4cfba0c5ffe]
-- **地图缩略图刷新时机不完整**: `loadAllMapThumbnails` 只在 `resourceTab` watcher、`activeEditorMode` watcher、`onMounted` 时触发。`onMapLibImported` 新增地图后可能未触发 watcher 刷新缩略图。修复：新增 `resourceStore.maps.length` watcher。[ses_f4cfba0c5ffe]
+- See MEMORY-assets-loading.md (20 entries) — 资源加载：sprite/map 库导入解压、`_up_` 过期副本、中文路径图片读取、.bgm zip bug、缩略图刷新；另含 say 气泡三坑与控制台 print 输出链路修复（稳定历史知识，2026-10-15 裁剪）
 
 ### 运行时渲染
 
@@ -136,6 +117,16 @@ _Cross-task facts that survive across sessions._
 
 - See MEMORY-tauri-release.md (6 entries) — Tauri updater 签名/endpoint/latest.json 生成 + CI release 工作流（稳定历史知识，2026-10-13 裁剪）
 - See MEMORY-collision.md (4 entries) — 碰撞系统架构：计算全在 Python 引擎 / 轴分离解算 / 命中盒仅翻转不旋转 / 主循环物理排序（稳定参考，2026-10-13 裁剪）
+
+### 代码模式执行链路（turtle 调查，2026-10-15）
+
+- **代码模式完整执行链**: 前端 useEngine.ts 写 `.temp_run.py` → invoke `run_script_file`（engine.rs:204-332）→ Rust 读用户代码拼 21 行 prelude 写 `.wrapped.py` → spawn `<python> -u <script>.wrapped.py`，cwd=tab 源文件目录（无 path 时项目根），env 仅 `PYTHONUNBUFFERED=1`+`PYTHONIOENCODING=utf-8`，stdin/stdout/stderr 全 pipe。**不设 PYTHONPATH、不 import bingo_engine、无 AST 改写**——bingo_engine 的 stdout 重定向/监听线程/sys.path 操作只影响游戏模式。
+- **prelude 仅替换 `builtins.input`** 为 `_safe_input`（stdin.readline，EOF→SystemExit，防 Windows taskkill 后 input() 死循环）。无 import 钩子、无模块屏蔽；副作用：traceback 行号偏移 ~21 行。
+- **python 解析顺序（resolve_engine_env）**: dev 优先 portable-python（bin/python3 或 python.exe）→ venv。dev 仓库 `engine/portable-python/` 只有 `.gitkeep`（空），实际用 `engine/venv/bin/python3`。打包版优先 resource_dir 下 portable-python（含 `_up_/` 路径变体）。
+- **venv 3.14.5 实测**: `import tkinter`（Tk 9.0）/`import turtle` OK；site-packages 无 .pth/sitecustomize，ENABLE_USER_SITE=False。requirements.txt 只有 Pillow/numpy/pyflakes/black——turtle/tkinter 是解释器自带标准库。
+- **Mac dev 复现排除 prelude/pipe 假设**: prelude+piped stdio+`-u` 下 turtle 画线正常 exit=0。`import turtle` 失败的头号嫌疑=**Windows 打包版 portable-python（嵌入式发行版）通常不带 tcl/tk DLL**；次嫌疑=项目根同名 `turtle.py` shadow（`.wrapped.py` 的 `sys.path[0]`=项目根）。
+- **useEngine.ts:256-259 错误友好化会吞真实 traceback**: ModuleNotFoundError 被翻译成"找不到模块 X，请检查 import 语句"——调试时需透传原始 stderr。
+- **产品要求（用户 2026-10-15）**: 代码模式要像正常 IDE——import 后常用标准库（turtle 必学）可用，将来支持 pygame；打包 Python 必须含 tkinter/SDL 等 GUI 依赖。
 
 ### Discovered
 (none)
