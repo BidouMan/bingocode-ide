@@ -4,6 +4,7 @@ import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { useMapStore, type MapResource } from '../../stores/map'
 import { useProjectStore } from '../../stores/project'
 import { useEditorStore } from '../../stores/editor'
+import { isSvgSource, rasterizeSvgImage, SVG_RASTER_SCALE } from '../../utils/svgRasterize'
 
 const emit = defineEmits<{
   'tile-painted': [x: number, y: number, tileId: number]
@@ -153,16 +154,21 @@ async function getTileTexture(resource: MapResource, tileIndex: number): Promise
     const row = Math.floor(tileIndex / cols)
     const col = tileIndex % cols
 
+    // SVG 瓦片超采样（借鉴 scratch-render）：切片按 2x 绘制。
+    // 不用 resolution——renderTile 会显式设置 sprite.width=tileSize，
+    // 2x 纹理自动压回逻辑尺寸，放大时更清晰
+    const ss = isSvgSource(img.src) ? SVG_RASTER_SCALE : 1
     const canvas = document.createElement('canvas')
-    canvas.width = resource.tileWidth
-    canvas.height = resource.tileHeight
+    canvas.width = resource.tileWidth * ss
+    canvas.height = resource.tileHeight * ss
     const ctx = canvas.getContext('2d')!
+    ctx.imageSmoothingEnabled = true
     ctx.drawImage(
       img,
       col * resource.tileWidth, row * resource.tileHeight,
       resource.tileWidth, resource.tileHeight,
       0, 0,
-      resource.tileWidth, resource.tileHeight
+      canvas.width, canvas.height
     )
 
     const texture = PIXI.Texture.from(canvas)
@@ -359,14 +365,24 @@ async function renderImageLayer(container: any, imgData: any) {
   if (!imgData?.imagePath) return
   try {
     const img = await loadImage(imgData.imagePath)
-    const texture = PIXI.Texture.from(img)
+    // SVG 超采样光栅化（借鉴 scratch-render）：2x canvas 上传为纹理；
+    // 精灵 scale 按"逻辑尺寸/纹理像素尺寸"换算 —— 2x 纹理压回 640×480
+    // 逻辑尺寸，既不超框，放大查看时又保留超采样的清晰度
+    const texture = isSvgSource(img.src)
+      ? PIXI.Texture.from(rasterizeSvgImage(img))
+      : PIXI.Texture.from(img)
     texture.source.scaleMode = currentScaleMode
     const sprite = new PIXI.Sprite(texture)
     sprite.x = imgData.position?.[0] ?? 0
     sprite.y = imgData.position?.[1] ?? 0
     const scaleX = (imgData.scaleX ?? imgData.scale ?? 1)
     const scaleY = (imgData.scaleY ?? imgData.scale ?? 1)
-    sprite.scale.set(scaleX, scaleY)
+    const logicalW = imgData.width || img.naturalWidth || 64
+    const logicalH = imgData.height || img.naturalHeight || 64
+    sprite.scale.set(
+      (logicalW * scaleX) / (texture.width || logicalW),
+      (logicalH * scaleY) / (texture.height || logicalH)
+    )
     const rotation = (imgData.rotation ?? 0) * Math.PI / 180
     sprite.anchor.set(0.5, 0.5)
     sprite.x += (imgData.width || 64) * scaleX / 2

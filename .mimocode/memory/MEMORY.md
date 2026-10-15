@@ -60,15 +60,6 @@ _Major design choices with rationale._
 ## Discovered durable knowledge
 _Cross-task facts that survive across sessions._
 
-### Tauri 核心
-
-- **Tauri v2 capabilities mandatory for window ops**: `capabilities/default.json` must declare `core:window:allow-{close,minimize,toggle-maximize,start-dragging}`. #1 trap for custom title bars. [ses_0fca6436bffe]
-- **Tauri `beforeunload` 对原生关闭按钮无效**: 必须用 `getCurrentWebviewWindow().onCloseRequested()` 拦截窗口关闭。[ses_04894c7f7ffe]
-- **Tauri `window.confirm()` 返回 Promise**: 在 Tauri v2 webview 中 `window.confirm()` 返回 Promise 对象而非 boolean，`if(obj)` 永远 true。必须用 `@tauri-apps/plugin-dialog` 的 `ask()`。`onCloseRequested` + `close()` 需防重复触发: `close()` 会再次触发 `onCloseRequested`，需用 flag 防止无限循环。[ses_04894c7f7ffe]
-- **Tauri capabilities 需声明 `close` 和 `destroy`**: `appWindow.close()` 需要 `core:window:allow-close`，`appWindow.destroy()` 需要 `core:window:allow-destroy`。`emit_to("main", ...)` over `emit()`: From background threads, `app.emit()` unreliable. Use `app.emit_to("main", event, payload)` + `"core:event:default"` capability. [ses_0fca6436bffe, ses_0f3269daffe]
-- **Tauri 窗口关闭调试**: 关闭后 console 丢失，需用文件写日志（`invoke('write_file', ...)` 写到 `/tmp/`）排查。productName 影响 About 菜单: `tauri.conf.json` 的 `productName` 和 `Cargo.toml` 的二进制文件名都会影响 macOS About 菜单项。[ses_04894c7f7ffe]
-- **macOS 开发模式图标可能未加载**: productName 和图标变更需要清除构建缓存（`rm -rf src-tauri/target`）才能生效。Windows 图标圆角由系统控制: Windows 11 自动给图标加圆角遮罩，Windows 10 显示正方形。开发者无需在图标中画圆角。[ses_04894c7f7ffe]
-
 ### Tauri/Vue/Monaco/Windows 杂项
 
 - **Vue watch array spread**: `watch(() => [...array])` ensures firing on in-place mutations. Pinia reactive replacement: `obj.name = newName` may not trigger watchers. Use `{ ...obj, name: newName }`。[ses_0fca6436bffe]
@@ -116,9 +107,14 @@ _Cross-task facts that survive across sessions._
 
 - **游戏舞台坐标系约定（画图/课件/前端渲染共用）**: 原点 (0,0) 在**舞台左上角**，X 向右 0→640，Y **向下** 0→480（屏幕坐标系，非数学坐标系 Y 向上）。默认精灵出生点 (320,240)=舞台中心；相机中心 `_CAMERA_X=320,_CAMERA_Y=240`。依据：`bingo_engine.py:138-139`（`_x=320,_y=240`）、`world_bounds {left:0,top:0,right:640,bottom:480}`（:497/706/2418 等）、越界检测 `rect[3]<0`=上边缘越过顶边（:897-898）。给学生讲坐标或生成坐标教学图时必须按此约定，勿画成 Y 向上。
 - **本机 Pillow 画中文图的字体坑**: `/System/Library/Fonts/PingFang.ttc` **在本机不存在**——脚本若首选它会回退到 `load_default()`（无 CJK 字形），中文全变方框 □。本机实测可用中文字体：`Hiragino Sans GB.ttc`（推荐）、`STHeiti Light.ttc`、`Arial Unicode.ttf`（`/System/Library/Fonts/Supplemental/` 与 `/Library/Fonts/` 两处都有）。Windows 侧用 `C:/Windows/Fonts/msyh.ttc`。生成含中文的图前先 `os.path.exists` + `font.getbbox("舞台坐标")` 实测字形，勿假设系统字体存在。
-- **地图编辑器图片加载双通道（2026-10-15 查清并修复）**: ①用户导入：`pick_image_file` → `copyResourceToMapDir` 进项目 `assets/` → `convertFileSrc`（Tauri asset 协议按扩展名自动给 MIME，SVG 天然支持）；②内置 `/maps/` 资源：`read_image_as_data_url` data URL → `new Image()` → PixiJS。原 SVG 阻断点两处均已修复（未提交 lib.rs）：选择器过滤器加 `"svg"`（lib.rs:924）+ MIME 判定加 `.svg → image/svg+xml`（lib.rs:955-963）。带显式 `width`/`height` 的 SVG 经 `new Image()` 可直接作 PixiJS 8 纹理源，无需插件。`engine/assets/maps/images/` 下的 .svg（Blue Sky/Jurassic/Basketball 1）是**死资产**——`地图1.bgm` map.json 只引用 tileset.png，从未被消费，勿当支持先例。[ses_ec075fac1ffe]
+- **地图编辑器图片加载双通道（2026-10-15 查清并修复）**: ①用户导入：`pick_image_file` → `copyResourceToMapDir` 进项目 `assets/` → 曾用 `convertFileSrc`（中文路径会失败，现全部改走 `read_image_as_data_url`）；②内置 `/maps/` 资源：`read_image_as_data_url` data URL → `new Image()` → PixiJS。带显式 `width`/`height` 的 SVG 经 `new Image()` 可直接作 PixiJS 8 纹理源，无需插件。`engine/assets/maps/images/` 下的 .svg（Blue Sky/Jurassic/Basketball 1）是**死资产**——`地图1.bgm` map.json 只引用 tileset.png，从未被消费，勿当支持先例。[ses_ec075fac1ffe]
+- **中文路径 convertFileSrc 加载失败的完整修复面（2026-10-15）**: 不仅缩略图/瓦片集，地图编辑器全部 4 处项目内图片加载点都改走 `read_image_as_data_url`（失败回退 convertFileSrc）：`MainLayout.measureImageSize`、`ResourceListPanel.getResourceUrl`、`MapCanvas.resolveImagePath`、`CollisionEditor.resolveImagePath`。[ses_ec075fac1ffe]
+- **地图图片上传有三条独立路径（2026-10-15 查清，勿混淆）**: ①地图编辑器图像图层：`pick_image_file`（Rust 对话框，已加 svg 过滤器）→ `copyResourceToMapDir` 进项目 `assets/` → `read_image_as_data_url`；②内置 `/maps/` 资源：`read_image_as_data_url` data URL；③资源面板 UploadDrawer 地图 tab：浏览器 file input → `arrayBuffer` → `emit('importMapImage')` → `MainLayout.onImportMapImage:949` → `createImageMapProject(fileName,{bytes})`——把图片变成一张**新地图**（地图名=文件名，40×30×16px=640×480 贴舞台）。路径③全程在前端处理字节，不经 Rust 文件对话框。**已修复**：UploadDrawer 地图 tab 的 `isImageFile` 白名单加了 `.svg`（此前 SVG 掉进 else 分支以 blob URL 塞进地图列表 → 空地图）；精灵 tab 不放开（Python 引擎 PIL 只处理位图）。[ses_ec075fac1ffe]
+- **PixiJS 8 TextureSource.resolution 必须在构造时传入（2026-10-15 踩坑确认）**: `Texture.from(canvas)` 之后设 `source.resolution = 2` **不会回算逻辑宽高**——逻辑尺寸在构造时已按像素尺寸算好，后设 resolution 无效，精灵显示超框（用户实测"大部分超出渲染窗口"）。正确做法：`new PIXI.TextureSource({resource, scaleMode, resolution})` + `new PIXI.Texture(source)`，或 BufferImageSource 构造选项传 resolution。[ses_ec075fac1ffe]
+- **SVG 超采样光栅化架构（2026-10-15，借鉴 scratch-render）**: `src/utils/svgRasterize.ts` 提供 `SVG_RASTER_SCALE=2` + `isSvgSource()` + `rasterizeSvgImage()`（img → 2x canvas）。接入点三处：`GameCanvas.getTexture`、`MapCanvas.getTileTexture`、`MapCanvas.renderImageLayer`。SVG 先光栅化到 2x canvas，配 `resolution=2` 保持逻辑尺寸不变，放大查看更清晰；PNG 不走此路径原样上传。Scratch 原理：SVGRasterizer 运行时 2x 栅格化 SVG → WebGL 纹理；碰撞用 Silhouette（alpha 逐像素）。[ses_ec075fac1ffe]
 - **SVG 生成中文图无 Pillow 字体坑**: SVG `<text>` 用系统字体栈（`PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif`），WKWebView/WebView2 直接渲染，绕开 Pillow 字体发现（本机 PingFang.ttc 不存在的坑不适用于 SVG）。本机栅格化验证：`qlmanage -t -s 960 -o <dir> file.svg`。[ses_ec075fac1ffe]
 - **导入地图编辑器与舞台对齐的图，原点必须与图片左上角像素级对齐（用户 2026-10-15 硬要求，已按此交付）**: 图片要与 640×480 舞台渲染精确对齐，坐标原点标记须落在图片像素 (0,0)；为线宽留白做的内缩偏移（如 axis_off=18）会造成"原点空隙"。定稿实现：轴线用贴边实心 rect（顶 y=0 h=2、左 x=0 w=2），原点 `circle cx="0" cy="0"` 呈四分之一圆。SVG 带 `width="640" height="480"` 自然尺寸，导入后即与舞台 1:1。[ses_ec075fac1ffe]
+- **地图图片上传有三条独立路径（2026-10-15 查清，勿混淆）**: ①地图编辑器图像图层：`pick_image_file`（Rust 对话框）→ `copyResourceToMapDir` 进项目 `assets/` → `convertFileSrc`；②内置 `/maps/` 资源：`read_image_as_data_url` data URL；③资源面板 UploadDrawer 地图 tab：浏览器 file input → `arrayBuffer` → `emit('importMapImage')` → `MainLayout.onImportMapImage:949` → `createImageMapProject(fileName,{bytes})`——把图片变成一张**新地图**（地图名=文件名，40×30×16px=640×480 贴舞台）。路径③全程在前端处理字节，不经 Rust 文件对话框——lib.rs 的 svg 过滤器修复对它无效。已观察：SVG 经此路径能成功栅格化出 640×480 thumbnail.png（webview 解码 SVG 没问题），但存在"上传后地图 imagelayer 为空、原图未入图"的 bug（排查中，根因待查 `createImageMapProject`）。[ses_ec075fac1ffe]
 
 ### 其他
 
@@ -136,6 +132,7 @@ _Cross-task facts that survive across sessions._
 - **引擎 vs Scratch 速度对比（2026-10-13 用户询问，已答复定调）**: 引擎逻辑帧率 60Hz（_PHYSICS_DT=1/60，每物理步 next(gen) 一次），Scratch 30 FPS。两引擎循环都是"每帧一轮"故动画同样平滑不瞬移，但同样数值（如 move(10)）在我们引擎中速度是 Scratch 的 2 倍（600 vs 300 像素/秒）。舞台 640×480 vs Scratch 480×360 部分缓和——横穿舞台净快约 50%（1.07s vs 1.6s）。对齐 Scratch 手感：课件数值减半（move(10)→move(5)），**不在引擎层加速度系数或改帧率**——课件按我们引擎设计。for 与 while True 速度完全相同（均每帧恰一轮，60 轮/秒）。`f.x += N` 经 set_x→_update_transform 每帧发 UPDATE（带值去重缓存），逐帧 yield 即可见移动（用户 fish 测试实测确认）。[ses_ecb4859d7ffe]
 
 - See MEMORY-tauri-release.md (6 entries) — Tauri updater 签名/endpoint/latest.json 生成 + CI release 工作流（稳定历史知识，2026-10-13 裁剪）
+- See MEMORY-tauri-core.md (6 entries) — Tauri v2 capabilities/窗口关闭/confirm Promise/emit_to/图标缓存（稳定历史知识，2026-10-15 裁剪）
 - See MEMORY-collision.md (4 entries) — 碰撞系统架构：计算全在 Python 引擎 / 轴分离解算 / 命中盒仅翻转不旋转 / 主循环物理排序（稳定参考，2026-10-13 裁剪）
 
 - See MEMORY-execution-chain.md (12 entries) — 代码模式执行链/prelude/resolve_engine_env/venv 实测 + turtle import 与窗口调查历史（2026-10-15，部分保活/X 按钮结论已在主文件更正）

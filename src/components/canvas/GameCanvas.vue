@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { convertFileSrc, invoke } from '@tauri-apps/api/core'
+import { invoke } from '@tauri-apps/api/core'
 import { useRenderStore } from '../../stores/render'
 import { useEditorStore } from '../../stores/editor'
 import { useEngine } from '../../composables/useEngine'
