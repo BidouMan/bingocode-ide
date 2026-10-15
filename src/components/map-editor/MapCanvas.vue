@@ -690,8 +690,14 @@ function onPointerMove(e: PointerEvent) {
     const worldPos = screenToWorld(e)
     if (!worldPos) return
     const idx = transformHandleIndex
-    const mx = worldPos.x
-    const my = worldPos.y
+    let mx = worldPos.x
+    let my = worldPos.y
+    // 吸附网格：缩放手柄拖动的边对齐到最近网格线（与图像拖动吸附同一开关）
+    if (mapStore.snapToGrid) {
+      const ts = mapStore.mapData.tileSize
+      mx = Math.round(mx / ts) * ts
+      my = Math.round(my / ts) * ts
+    }
 
     // Each handle controls specific edges: [left, top, right, bottom]
     // Uncontrolled edges stay fixed at their initial position
