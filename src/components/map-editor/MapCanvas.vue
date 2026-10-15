@@ -1224,12 +1224,21 @@ function updateSelectedImageSprite() {
   const pos = selectedImageData.position || [0, 0]
   const scaleX = selectedImageData.scaleX ?? selectedImageData.scale ?? 1
   const scaleY = selectedImageData.scaleY ?? selectedImageData.scale ?? 1
-  const w = (selectedImageData.width || 64) * scaleX
-  const h = (selectedImageData.height || 64) * scaleY
+  const logicalW = selectedImageData.width || 64
+  const logicalH = selectedImageData.height || 64
+  const w = logicalW * scaleX
+  const h = logicalH * scaleY
   selectedImageSprite.x = pos[0] + w / 2
   selectedImageSprite.y = pos[1] + h / 2
   selectedImageSprite.rotation = (selectedImageData.rotation ?? 0) * Math.PI / 180
-  selectedImageSprite.scale.set(scaleX, scaleY)
+  // SVG 等超采样纹理的像素尺寸 ≠ 逻辑尺寸，按 renderImageLayer 同款换算，
+  // 直接 scale.set(scaleX) 会让 2x 纹理瞬间放大一倍
+  const tw = selectedImageSprite.texture?.width || logicalW
+  const th = selectedImageSprite.texture?.height || logicalH
+  selectedImageSprite.scale.set(
+    (logicalW * scaleX) / (tw || logicalW),
+    (logicalH * scaleY) / (th || logicalH)
+  )
   selectedImageSprite.alpha = selectedImageData.opacity ?? 1
   selectedImageSprite.visible = true
 }
