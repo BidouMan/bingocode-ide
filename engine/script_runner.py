@@ -4,7 +4,7 @@
 import os
 import ast
 import keyword
-from code_transform import transform_while_true, _has_while_true
+from code_transform import transform_while_true, _has_while_true, _has_top_level_loop
 
 
 def _is_valid_identifier(name: str) -> bool:
@@ -43,7 +43,8 @@ def discover_and_merge(project_dir: str, target_file: str = None) -> str:
         except SyntaxError:
             return ''
 
-        if _has_while_true(tree):
+        # 含 while True 或顶层循环的文件都转 generator（循环逐帧可见）
+        if _has_while_true(tree) or _has_top_level_loop(tree):
             module_name = os.path.basename(target_file)[:-3]
             func_name = f'__game_{module_name}__'
             if not _is_valid_identifier(func_name):
@@ -88,8 +89,8 @@ def discover_and_merge(project_dir: str, target_file: str = None) -> str:
                     seen_imports.add(stmt_str)
                     all_imports.append(stmt_str)
 
-        # 检查是否有 while True
-        if _has_while_true(tree):
+        # 含 while True 或顶层循环的文件转 generator（循环逐帧可见）
+        if _has_while_true(tree) or _has_top_level_loop(tree):
             # 用文件名作为 generator 函数名（去掉 .py 后缀）
             module_name = f[:-3]
             func_name = f'__game_{module_name}__'
@@ -99,7 +100,7 @@ def discover_and_merge(project_dir: str, target_file: str = None) -> str:
             transformed = transform_while_true(content, func_name=func_name)
             code_blocks.append(transformed)
         else:
-            # 没有 while True 的文件，直接作为模块级代码
+            # 纯函数/常量定义文件，直接作为模块级代码
             code_blocks.append(content)
 
     # 拼接：import 语句 + 所有代码块

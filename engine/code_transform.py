@@ -1,5 +1,6 @@
 """
 AST 代码转换模块：将 while True: 循环转换为 generator
+循环语义对齐 Scratch——for / while 循环每轮让出一帧，移动过程动画可见
 """
 import ast
 
@@ -15,9 +16,50 @@ def _has_while_true(tree: ast.Module) -> bool:
     return False
 
 
+def _make_yield() -> ast.Expr:
+    return ast.Expr(value=ast.Yield(value=ast.Constant(value=None)))
+
+
+def _insert_loop_yields(node: ast.AST):
+    """
+    递归在循环体中插入 yield（Scratch 语义：循环每轮让出一帧）。
+
+    - for：每轮结束 yield（对应 Scratch "重复执行 N 次"）
+    - while（含 while True 和条件 while）：循环体开头 yield（保持原有
+      while True 时序；并让 "while not 按键: continue" 这类等待写法
+      不会在单帧内死循环卡死引擎）
+
+    不进入函数/类定义——用户函数体里插 yield 会把函数变成 generator，
+    调用处拿到 generator 对象而不再执行（旧式 def loop()+run() 写法同理保留）。
+    """
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        if isinstance(child, ast.For):
+            child.body.append(_make_yield())
+            _insert_loop_yields(child)
+        elif isinstance(child, ast.While):
+            # while True 与条件 while 均在开头 yield：保持原有 while True 时序，
+            # 并让 "while not 按键: continue" 这类等待写法不会单帧死循环
+            child.body.insert(0, _make_yield())
+            _insert_loop_yields(child)
+        else:
+            _insert_loop_yields(child)
+
+
+def _has_top_level_loop(tree: ast.Module) -> bool:
+    """检查模块顶层（不在函数/类内）是否有 for / while 循环"""
+    return any(isinstance(n, (ast.For, ast.While)) for n in tree.body)
+
+
 def transform_while_true(source_code: str, func_name: str = '__game__') -> str:
     """
-    将源代码中的 while True: 循环转换为 generator
+    将源代码转换为 generator，循环每轮让出一帧（Scratch 语义）
+
+    两类脚本会被转换：
+    1. 含 while True: 的游戏主循环脚本（原逻辑）
+    2. 无 while True 但顶层含 for / while 循环的启动脚本
+       （如 `for i in range(10): f.x += 5`——否则整段在启动瞬间同步跑完）
 
     Args:
         source_code: Python 源代码
@@ -28,7 +70,7 @@ def transform_while_true(source_code: str, func_name: str = '__game__') -> str:
     except SyntaxError:
         return source_code
 
-    if not _has_while_true(tree):
+    if not _has_while_true(tree) and not _has_top_level_loop(tree):
         return source_code
 
     # 分离 import 语句和非 import 语句
@@ -42,15 +84,6 @@ def transform_while_true(source_code: str, func_name: str = '__game__') -> str:
 
     if not other_stmts:
         return source_code
-
-    # 对非 import 语句：插入 yield，包进 generator 函数
-    for node in other_stmts:
-        if isinstance(node, ast.While):
-            test = node.test
-            if (isinstance(test, ast.Constant) and test.value is True) or \
-               (isinstance(test, ast.Constant) and test.value == 1):
-                yield_stmt = ast.Expr(value=ast.Yield(value=ast.Constant(value=None)))
-                node.body.insert(0, yield_stmt)
 
     # 构建新模块：import 语句 + def func_name(): + 注册调用
     new_body = []
@@ -66,6 +99,10 @@ def transform_while_true(source_code: str, func_name: str = '__game__') -> str:
         decorator_list=[],
         returns=None,
     )
+
+    # 递归给函数体内（while True 及嵌套的 for / 条件 while）插入 yield
+    _insert_loop_yields(func_def)
+
     new_body.append(func_def)
 
     # 添加 register_generator(func_name()) 调用
@@ -97,3 +134,20 @@ while True:
     # 测试带自定义函数名
     print('\n=== 自定义函数名 ===')
     print(transform_while_true(test1, func_name='__game_player__'))
+
+    # 测试 for 循环与条件 while 的 yield 插入
+    test2 = """x = 0
+for i in range(3):
+    x += 10
+while x < 100:
+    x += 1
+
+def run10():
+    for i in range(10):
+        x += 1
+
+while True:
+    y = x
+"""
+    print('\n=== for / 条件 while / 用户函数 ===')
+    print(transform_while_true(test2))

@@ -141,6 +141,8 @@ _Cross-task facts that survive across sessions._
 - **move() vs add_x/add_y**: `move(d)` 沿当前 angle 方向移动（angle 默认 0=向右）；up/down 用 move 会因 angle 不变而全部水平移动，必须用 `add_x`/`add_y`。课件第2课只教左右 move，第3课引入 add_x/add_y。
 - **输入/计时**: `key_down`/`key_pressed`（单帧）、`mouse_down`/`mouse_pressed`/`mouse.x/y`、`Timer(seconds, loop, autostart)`。物理内置重力（上升0.5/下落1.1/vy≤10）；舞台 640×480。
 - **内置资源现状**: 14 个 .bgs 角色包；音效仅 3 个（Chill/Coin/Connect）；地图仅 1 个包 `地图1.bgm`；瓦片集 coin/fruit/tileset.png、瓦片 brick/grass.png。课件涉及声音/多地图/多场景的课程需提前扩充资源或控制需求。
+- **循环 yield 模型（2026-10-13 修复对齐 Scratch，已验证）**: `start_game` 主循环固定步长 1/60s，每物理步对每个 generator 只调一次 `next(gen)`（bingo_engine.py:2576-2587）。`code_transform._insert_loop_yields` 递归插入 yield：for 每轮结束插（Scratch "重复执行 N 次" 语义，移动逐帧可见）；while（含 while True 与条件 while）体首插（原有时序 + 防 "while not 按键: continue" 单帧死循环）；**不进入** FunctionDef/ClassDef/Lambda（函数体内插 yield 会变 generator 导致调用不执行，旧式 `def loop()+run()` 兼容依赖此规则）。**无 while True 但顶层含 for/while 的脚本也整体包 generator**（`_has_top_level_loop`，script_runner 单文件/多文件两处调用点同判），否则启动循环（如 `for i in range(10): f.x += 5`）在 exec 期同步跑完瞬移——用户实测踩过。副作用：generator 内模块级变量变函数局部——"带顶层循环的文件里定义的函数"跨文件共享会 NameError（纯 defs 文件不转换、保持模块级，主教学模式不受影响）；启动期批量 for 摊到多帧（10 次≈0.17s）。**验证**：`python3 engine/code_transform.py` 自测通过；逐帧模拟确认 for 每帧 +5（fish 测试 10 帧到位）、while True 路径不变、helpers 纯定义文件保持模块级。[ses_ecb4859d7ffe]
+- **Transformed-generator 测试方法**: 被 `transform_while_true` 包进 `__game__` 函数的原模块级变量对 `exec` 的 globals 不可见（函数局部作用域），断言状态需通过 `import builtins` 注入的外部观察器（如 `builtins._log.append(...)`）记录。逐帧验证 = 手动循环 `next(gen)`，统计每步新增观察器条目数，勿读取中途变量快照（可能尚未赋值，造成假阴性）。[ses_ecb4859d7ffe]
 
 ### Discovered
 (none)
