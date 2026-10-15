@@ -85,6 +85,7 @@ engine/
 - **Comments and some variable names are in Chinese** — do not change
 - **Respond to user in Chinese**
 - **Cross-platform safety (Mac + Windows)**: This project is a dual-platform (macOS + Windows) desktop app. When fixing Windows-specific bugs, NEVER break macOS functionality. Always check if a change uses platform-specific code paths before modifying. If the fix requires platform branching, use `#[cfg(target_os = "windows")]` / `#[cfg(target_os = "macos")]` in Rust, or `process.platform` checks in TypeScript. When in doubt, preserve the existing Mac behavior and only add Windows-specific handling.
+- **每次打包发版必须更新 CHANGELOG.md**：打 tag 发布前，在根目录 `CHANGELOG.md` 的「更新日志」中为该版本号添加条目（最新在前），按 **新增 / 修复 / 优化 / 资源** 分类写清新功能与修复的 bug。未发版的 master 改动记入「未发布」小节，发版时移入正式版本号。同步更新 README 顶部「功能特性」中的当前版本号，并在 README「更新日志」一节刷新"当前最新版本"一句话摘要。
 
 ## Key quirks
 
