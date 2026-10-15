@@ -366,8 +366,17 @@ async function syncTiles() {
   tilesSyncing = false
 }
 
+// 气泡字号：舞台坐标系内随窗口等比缩小，小窗下屏幕上只剩几个像素看不清。
+// 按显示比例放大字号，保证屏幕上约 14px 可读（下限=原字号，上限防爆）
+function getSayFontSize(): number {
+  const displayScale = stageContainer?.scale?.x || 1
+  return Math.round(Math.min(34, Math.max(14, 14 / displayScale)))
+}
+
 function syncSayTexts() {
   if (!app || !uiContainer) return
+
+  const fontSize = getSayFontSize()
 
   // 回收不再需要的气泡对象（隐藏而非销毁，供后续复用）
   for (const [id, container] of sayDisplayObjects) {
@@ -379,12 +388,12 @@ function syncSayTexts() {
   for (const [id, sayData] of renderStore.sayTexts) {
     let container = sayDisplayObjects.get(id)
     if (!container) {
-      // 优先复用被隐藏的气泡对象
-      for (const [, pooled] of sayDisplayObjects) {
+      // 优先复用被隐藏的气泡对象（注意删除旧 id 的映射）
+      for (const [pooledId, pooled] of sayDisplayObjects) {
         if (!pooled.visible) {
           container = pooled
-          sayDisplayObjects.delete(id)
-          // 重新绑定到新 id
+          sayDisplayObjects.delete(pooledId)
+          container._sayStyleKey = ''
           break
         }
       }
@@ -396,7 +405,8 @@ function syncSayTexts() {
           text: '',
           style: { fill: 0x000000, fontSize: 14, fontFamily: 'Arial' },
         })
-        text.anchor = { x: 0.5, y: 1 }
+        // 锚点居中：文字垂直居中显示在气泡内（原先锚点在底部导致偏下）
+        text.anchor = { x: 0.5, y: 0.5 }
         container.addChild(text)
         uiContainer.addChild(container)
       }
@@ -405,23 +415,31 @@ function syncSayTexts() {
 
     container.visible = true
     container.x = sayData.x
-    container.y = sayData.y
+    // 气泡底边悬浮在角色上方，偏移随字号缩放（fontSize=14 时为 40，与原行为一致）
+    container.y = sayData.y - (fontSize + 26)
     container.zIndex = 1
 
     const textObj = container.children[1]
     if (textObj && textObj.text !== undefined) {
-      if (textObj.text !== sayData.text) {
+      // 文本或字号变化（窗口缩放）时才重设样式与重绘背景
+      const styleKey = `${sayData.text}|${fontSize}`
+      if (container._sayStyleKey !== styleKey) {
+        container._sayStyleKey = styleKey
+        if (textObj.style) textObj.style.fontSize = fontSize
         textObj.text = sayData.text
-        // 仅当文本变化时重绘背景
         const bg = container.children[0]
         if (bg) {
-          const padding = 6
-          const w = textObj.width + padding * 2
-          const h = textObj.height + padding * 2
+          const padX = Math.round(fontSize * 0.5)
+          const padY = Math.round(fontSize * 0.35)
+          const w = textObj.width + padX * 2
+          const h = textObj.height + padY * 2
           bg.clear()
-          bg.roundRect(-w / 2, -h, w, h, 6)
+          bg.roundRect(-w / 2, -h, w, h, Math.round(fontSize * 0.45))
           bg.fill({ color: 0xffffff, alpha: 0.9 })
           bg.stroke({ width: 1, color: 0x333333 })
+          // 文字垂直居中于气泡
+          textObj.x = 0
+          textObj.y = -h / 2
         }
       }
     }

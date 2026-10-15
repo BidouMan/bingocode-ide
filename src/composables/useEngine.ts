@@ -67,11 +67,11 @@ export function useEngine() {
         } else {
           renderStore.removeHitbox(cmd.id!)
         }
-        // 同步气泡位置
+        // 同步气泡位置（存原始坐标，气泡偏移由 GameCanvas 按字号计算）
         const sayText = renderStore.sayTexts.get(cmd.id!)
         if (sayText) {
           sayText.x = cmd.data.x
-          sayText.y = cmd.data.y - 40
+          sayText.y = cmd.data.y
         }
         break
 
@@ -110,11 +110,11 @@ export function useEngine() {
           } else {
             renderStore.removeHitbox(update.id)
           }
-          // 同步气泡位置
+          // 同步气泡位置（存原始坐标，气泡偏移由 GameCanvas 按字号计算）
           const sayText = renderStore.sayTexts.get(update.id)
           if (sayText) {
             sayText.x = update.x
-            sayText.y = update.y - 40
+            sayText.y = update.y
           }
         }
         break

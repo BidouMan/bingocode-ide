@@ -271,7 +271,8 @@ export const useRenderStore = defineStore('render', () => {
         spriteId,
         text,
         x: sprite.x,
-        y: sprite.y - 40,
+        // 存精灵原始 y，气泡上浮偏移由 GameCanvas 按字号动态计算
+        y: sprite.y,
       })
     }
   }

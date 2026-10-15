@@ -781,6 +781,8 @@ class Sprite:
         say("得分+1", 2) → 2秒后自动消失
         """
         self._send_command("SAY", {"text": str(text)})
+        # 新气泡先取消旧的隐藏计时器，防止旧计时器提前隐藏新话
+        _SAY_TIMERS.pop(self.id, None)
         if seconds > 0:
             def _hide():
                 self._send_command("SAY", {"text": ""})
@@ -2585,6 +2587,14 @@ def start_game(project_dir=None, target_file=None):
                     except Exception as e:
                         print(f"[错误] Generator 错误: {e}")
                         _generators.remove(gen)
+
+                # say 计时器：到期自动隐藏气泡（与旧 run() 循环同款逻辑，
+                # start_game 主循环原先漏了这段，导致 say(text, 秒数) 永不消失）
+                for sid in list(_SAY_TIMERS.keys()):
+                    timer, hide_fn = _SAY_TIMERS[sid]
+                    if timer.is_timeout():
+                        hide_fn()
+                        del _SAY_TIMERS[sid]
 
                 # 精灵运动和碰撞
                 for sprite in list(_SPRITES.values()):
