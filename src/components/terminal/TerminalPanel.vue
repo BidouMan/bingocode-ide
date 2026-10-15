@@ -179,8 +179,9 @@ function createTerminal() {
 
   shell.startShell(
     (data) => {
-      // 代码模式运行程序时，不显示 shell 输出（程序输出走事件通道）
-      if (!editorStore.isGameMode && terminalStore.terminalMode === 'python') return
+      // Python 运行期间（游戏/代码模式）程序输出走事件通道，shell 输出一律不显示。
+      // 否则控制台面板弹出引发 resize → zsh 收到 SIGWINCH 重画提示符，'%' 会泄漏到控制台
+      if (terminalStore.terminalMode === 'python') return
       terminal?.write(data)
       throttledScroll()
       // isRunning 完全由 useEngine 的 engine:finished/stop 事件管理，

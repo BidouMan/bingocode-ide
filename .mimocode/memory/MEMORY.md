@@ -69,12 +69,8 @@ _Cross-task facts that survive across sessions._
 - **Tauri 窗口关闭调试**: 关闭后 console 丢失，需用文件写日志（`invoke('write_file', ...)` 写到 `/tmp/`）排查。productName 影响 About 菜单: `tauri.conf.json` 的 `productName` 和 `Cargo.toml` 的二进制文件名都会影响 macOS About 菜单项。[ses_04894c7f7ffe]
 - **macOS 开发模式图标可能未加载**: productName 和图标变更需要清除构建缓存（`rm -rf src-tauri/target`）才能生效。Windows 图标圆角由系统控制: Windows 11 自动给图标加圆角遮罩，Windows 10 显示正方形。开发者无需在图标中画圆角。[ses_04894c7f7ffe]
 
-### Tauri 更新功能
+### Tauri/Vue/Monaco/Windows 杂项
 
-- **jsDelivr 加速 GitHub Releases**: `https://cdn.jsdelivr.net/gh/{owner}/{repo}@latest/latest.json` 可作为 Tauri updater endpoint，国内访问稳定。tauri-plugin-updater: 添加 `tauri-plugin-updater` 依赖 + Builder::new().build() + tauri.conf.json 配置 pubkey 和 endpoint。[ses_0438c194affe]
-- **tauri-plugin-updater 签名**: 首次 `pnpm tauri build` 会生成密钥文件，pubkey 需配置到 `tauri.conf.json`。Ed25519 签名兼容性: OpenSSL 3.x 不允许 Ed25519 使用 `-sha256` 参数，需用 `openssl pkeyutl -sign` 代替。[ses_0438c194affe]
-- **GitHub Actions 自动生成 latest.json**: release.yml 添加步骤自动生成 latest.json，支持 tauri-plugin-updater。更新功能设计: 纯手动检查（设置菜单按钮），启动时静默检查只显示圆点提示。`localStorage` 存储跳过版本。[ses_0438c194affe]
-- **更新日志接口预留**: `getUpdateNotes()` 函数当前返回静态映射，未来需从服务器获取。Vue v-if + ref timing: May need double `nextTick` or `document.querySelector` fallback. [ses_0438c194affe, ses_0fca6436bffe]
 - **Vue watch array spread**: `watch(() => [...array])` ensures firing on in-place mutations. Pinia reactive replacement: `obj.name = newName` may not trigger watchers. Use `{ ...obj, name: newName }`。[ses_0fca6436bffe]
 - **hasUnsavedTabs 条件**: 原条件 `t.modified && t.path` 跳过新文件，应改为只检查 `t.modified`。Monaco comment italic 光标重叠: 斜体字视觉宽度偏移但光标按正体计算。移除 `fontStyle: 'italic'` 修复。[ses_04894c7f7ffe]
 - **Monaco suggest widget 宽度不随字体缩放**: 需非 scoped CSS 设 `min-width: 360px` + `overflow: visible` on `.column-label`。Monaco triggerCharacters 空格陷阱: 空格触发导致每次按空格弹补全。移除后不影响 `.` 触发和 quickSuggestions 自动弹出。不要设 `quickSuggestions: false`。[ses_04894c7f7ffe]
@@ -85,11 +81,6 @@ _Cross-task facts that survive across sessions._
 - **Code mode vs game mode input 分流**: game mode `start_game()` 经 `exec_globals` 注入 `_custom_input`（bingo_engine.py:2518）；code mode `run_script_file()` 直接跑脚本，`input()` 是 Python 内置。input/EOF 类修复必须针对 code mode wrapper。[ses_f4d61514effe]
 - **Tauri 资源打包**: `resources` extracts flat to `resource_dir/portable-python/`。`resolve_engine_env` searches accordingly。`tauri.conf.json` 的 `resources: ["../engine/assets/**/*"]` 会打包所有资源到 `$RESOURCE/_up_/engine/assets/`。`engine/assets/` 是唯一资源目录：sprites/packages/ (14个.bgs), maps/packages/ (.bgm), maps/images/, maps/tiles/, maps/tilesets/, sounds/, ui/。`Child::wait()` over polling: Cross-platform blocking wait, no tasklist needed。resolve_engine_env must include venv Python: Dev needs venv for black. [ses_08c1fa6b0ffe]
 - **`> Selected Element` 非代码输出**: 是浏览器扩展（如 Vue DevTools）的输出，无法在代码中移除。[ses_0438c194affe]
-
-### CI / Release
-
-- **release.yml `cp` same-file bug**: "Commit latest.json to repo for CDN cache" step's `cp latest.json ./latest.json` fails when CWD is repo root. The "Generate latest.json" step already writes to `$GITHUB_WORKSPACE/latest.json` — the `cp` is redundant and should be removed. [ses_f4d61514effe]
-- **Version numbers in 3 places**: `tauri.conf.json` (version + window title), `Cargo.toml` (version), `latest.json` (version + notes). All must be updated together for a release. [ses_f4d61514effe]
 
 ### 角色编辑器
 
@@ -103,6 +94,7 @@ _Cross-task facts that survive across sessions._
 - **`fetch()` 无法读取本地文件系统路径**: Tauri webview 中 `fetch(url)` 只能访问 HTTP URL。sprite resource path 是本地路径（如 `/Users/.../assets/sprites/喷火龙`），必须通过 Tauri `invoke()` 读取。只有 `engine/assets/` 通过 Vite `publicDir` 提供 HTTP 服务。[ses_f4cfba0c5ffe]
 - **Sprite 库导入流程**: SpriteLibPage → `invoke('extract_bgs_to_project')` 解压 .bgs 到 `{projectRoot}/assets/sprites/{name}/` → resource store item 的 `path` 指向解压目录。[ses_f4cfba0c5ffe]
 - **引擎 Sprite 查找只认解压目录**: `Sprite('名')` 仅在项目 CWD 的 `assets/sprites/<名>/`（config.json+帧PNG）查找；磁盘上没有解压目录 ⇒ `[警告] 角色 '名' 不存在` + `_is_deleted` + `stop()`（bingo_engine.py:168-194）。引擎不读 .bgs zip 也不读 blob URL。[ses_ecb4859d7ffe]
+- **控制台 print 输出链路两个坑（2026-10-13 修复）**: ① 游戏模式 stdout 处理（useEngine.ts）把 `read_line` 数据 `split('\n')` 丢弃末尾空串后 `join('\n')`——结尾换行被吃掉，多条 print 挤同一行；必须按 `data.endsWith('\n')` 补回，且中段空行（print()）要保留。② xterm 背后始终跑着一个 zsh；控制台面板自动弹出 → fit()/resize → SIGWINCH → zsh 重画提示符（macOS zsh 默认 `%`）泄漏进控制台。修复：`run()` 启动时统一 `terminalMode='python'`（游戏模式原先漏设），TerminalPanel 的 shell 回调在 python 模式下一律丢弃（原先仅代码模式丢弃）。附带收益：游戏运行中终端 Ctrl+C 能正确触发引擎停止。[ses_ecb4859d7ffe]
 - **UploadDrawer 本地上传 .bgs 必须走同一解压流程（根因确认 2026-10-13）**: 抽屉 import 分支曾只 JSZip 读 config.json 名字 + `URL.createObjectURL(zip)` 存 blob URL、不写盘 → 卡片缩略图空白（blob URL 是 zip 非图片）+ 引擎报角色不存在。修复必须复用 `extract_bgs_to_project`，path 指向解压目录——与精灵库导入路径统一。[ses_ecb4859d7ffe]
 - **双路径读取**: Sprite 可来自两个来源 — HTTP 服务的 engine assets（via `publicDir`）和本地解压目录（via project dir）。`readBgsFromUrl` 必须同时处理两种情况。[ses_f4cfba0c5ffe]
 - **Map 库导入流程**: MapLibraryPage → `invoke('extract_bgm_to_project')` 解压 .bgm 到 `{projectRoot}/assets/maps/{name}/` → resource store item 的 `path` 指向解压目录。[ses_f4cfba0c5ffe]
@@ -142,7 +134,10 @@ _Cross-task facts that survive across sessions._
 - **输入/计时**: `key_down`/`key_pressed`（单帧）、`mouse_down`/`mouse_pressed`/`mouse.x/y`、`Timer(seconds, loop, autostart)`。物理内置重力（上升0.5/下落1.1/vy≤10）；舞台 640×480。
 - **内置资源现状**: 14 个 .bgs 角色包；音效仅 3 个（Chill/Coin/Connect）；地图仅 1 个包 `地图1.bgm`；瓦片集 coin/fruit/tileset.png、瓦片 brick/grass.png。课件涉及声音/多地图/多场景的课程需提前扩充资源或控制需求。
 - **循环 yield 模型（2026-10-13 修复对齐 Scratch，已验证）**: `start_game` 主循环固定步长 1/60s，每物理步对每个 generator 只调一次 `next(gen)`（bingo_engine.py:2576-2587）。`code_transform._insert_loop_yields` 递归插入 yield：for 每轮结束插（Scratch "重复执行 N 次" 语义，移动逐帧可见）；while（含 while True 与条件 while）体首插（原有时序 + 防 "while not 按键: continue" 单帧死循环）；**不进入** FunctionDef/ClassDef/Lambda（函数体内插 yield 会变 generator 导致调用不执行，旧式 `def loop()+run()` 兼容依赖此规则）。**无 while True 但顶层含 for/while 的脚本也整体包 generator**（`_has_top_level_loop`，script_runner 单文件/多文件两处调用点同判），否则启动循环（如 `for i in range(10): f.x += 5`）在 exec 期同步跑完瞬移——用户实测踩过。副作用：generator 内模块级变量变函数局部——"带顶层循环的文件里定义的函数"跨文件共享会 NameError（纯 defs 文件不转换、保持模块级，主教学模式不受影响）；启动期批量 for 摊到多帧（10 次≈0.17s）。**验证**：`python3 engine/code_transform.py` 自测通过；逐帧模拟确认 for 每帧 +5（fish 测试 10 帧到位）、while True 路径不变、helpers 纯定义文件保持模块级。[ses_ecb4859d7ffe]
-- **Transformed-generator 测试方法**: 被 `transform_while_true` 包进 `__game__` 函数的原模块级变量对 `exec` 的 globals 不可见（函数局部作用域），断言状态需通过 `import builtins` 注入的外部观察器（如 `builtins._log.append(...)`）记录。逐帧验证 = 手动循环 `next(gen)`，统计每步新增观察器条目数，勿读取中途变量快照（可能尚未赋值，造成假阴性）。[ses_ecb4859d7ffe]
+- **Transformed-generator 测试方法**: 被 `transform_while_true` 包进 `__game__` 函数的原模块级变量对 `exec` 的 globals 不可见（函数局部作用域），断言状态需通过 `import builtins` 注入的外部观察器（如 `builtins._log.append(...)`）记录，或用类级 observer（如 FakeSprite.instances）。逐帧验证 = 手动循环 `next(gen)`，统计每步新增观察器条目数，勿读取中途变量快照（可能尚未赋值，造成假阴性）。[ses_ecb4859d7ffe]
+- **引擎 vs Scratch 速度对比（2026-10-13 用户询问，已答复定调）**: 引擎逻辑帧率 60Hz（_PHYSICS_DT=1/60，每物理步 next(gen) 一次），Scratch 30 FPS。两引擎循环都是"每帧一轮"故动画同样平滑不瞬移，但同样数值（如 move(10)）在我们引擎中速度是 Scratch 的 2 倍（600 vs 300 像素/秒）。舞台 640×480 vs Scratch 480×360 部分缓和——横穿舞台净快约 50%（1.07s vs 1.6s）。对齐 Scratch 手感：课件数值减半（move(10)→move(5)），**不在引擎层加速度系数或改帧率**——课件按我们引擎设计。for 与 while True 速度完全相同（均每帧恰一轮，60 轮/秒）。`f.x += N` 经 set_x→_update_transform 每帧发 UPDATE（带值去重缓存），逐帧 yield 即可见移动（用户 fish 测试实测确认）。[ses_ecb4859d7ffe]
+
+- See MEMORY-tauri-release.md (6 entries) — Tauri updater 签名/endpoint/latest.json 生成 + CI release 工作流（稳定历史知识，2026-10-13 裁剪）
 
 ### Discovered
 (none)

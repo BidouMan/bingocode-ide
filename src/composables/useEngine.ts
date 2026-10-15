@@ -211,13 +211,16 @@ export function useEngine() {
       }
 
       // 游戏模式：需要解析 JSON 指令
-      const lines = data.split('\n')
+      // Rust read_line 保留结尾 \n，split 后末尾的空串是分隔产物、不是用户输出的空行
+      const hadTrailingNewline = data.endsWith('\n')
+      const parts = data.split('\n')
+      if (parts.length > 1 && parts[parts.length - 1] === '') {
+        parts.pop()
+      }
       const nonJsonParts: string[] = []
 
-      for (const line of lines) {
+      for (const line of parts) {
         const stripped = line.trim()
-        if (!stripped) continue
-
         if (stripped.startsWith('{') && stripped.endsWith('}')) {
           const cmd = parseInstruction(stripped)
           if (cmd) {
@@ -225,12 +228,14 @@ export function useEngine() {
             continue
           }
         }
-
+        // 空行是用户 print() 的输出，保留
         nonJsonParts.push(line)
       }
 
       if (nonJsonParts.length > 0) {
-        terminalStore.handleStdout(nonJsonParts.join('\n'))
+        // 必须补回结尾换行，否则多条 print 会挤在同一行
+        const out = nonJsonParts.join('\n') + (hadTrailingNewline ? '\n' : '')
+        terminalStore.handleStdout(out)
         // 引擎有打印信息时自动弹出控制台（仅游戏模式；JSON 指令不算打印信息）
         terminalStore.consoleVisible = true
       }
@@ -378,6 +383,9 @@ export function useEngine() {
     renderStore.clearAll()
     renderStore.resetTextureLoading()
     terminalStore.clear()
+    // 运行期间切到 python 模式：屏蔽后台 zsh 提示符（%）泄漏到控制台，
+    // 同时让终端 Ctrl+C 走引擎停止逻辑
+    terminalStore.terminalMode = 'python'
     editorStore.setRunning(true)
     runGeneration++
 
@@ -519,6 +527,7 @@ export function useEngine() {
       }
     } catch (err) {
       terminalStore.appendLine(`\x1b[31m启动失败: ${err}\x1b[0m`)
+      terminalStore.terminalMode = 'shell'
       editorStore.setRunning(false)
     }
   }
