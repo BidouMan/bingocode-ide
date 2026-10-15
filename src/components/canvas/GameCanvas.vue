@@ -269,16 +269,17 @@ async function syncSprites() {
     if (displayObj) {
       // 脏检查：只在实际数据变化时更新属性
       const displayAngle = spriteData.angle * Math.PI / 180
-      const s = spriteData.scale * spriteData.scaleX
-      const sy = spriteData.scale * spriteData.scaleY
+      // scale_x/scale_y 已含最终缩放（base×flip），直接使用，不能再乘 scale（会平方）
+      const s = spriteData.scaleX ?? spriteData.scale ?? 1
+      const sy = spriteData.scaleY ?? spriteData.scale ?? 1
       const propsKey = `${spriteData.x.toFixed(1)},${spriteData.y.toFixed(1)},${displayAngle.toFixed(4)},${spriteData.visible},${spriteData.layer},${s.toFixed(4)},${sy.toFixed(4)}`
       if (displayObj._lastPropsKey !== propsKey) {
         displayObj._lastPropsKey = propsKey
         displayObj.x = Math.round(spriteData.x)
         displayObj.y = Math.round(spriteData.y)
         displayObj.rotation = (spriteData.angle * Math.PI) / 180
-        displayObj.scale.x = spriteData.scale * spriteData.scaleX
-        displayObj.scale.y = spriteData.scale * spriteData.scaleY
+        displayObj.scale.x = s
+        displayObj.scale.y = sy
         displayObj.visible = spriteData.visible
         displayObj.zIndex = spriteData.layer
       }
@@ -336,15 +337,17 @@ async function syncTiles() {
 
     if (displayObj) {
       // 脏检查：只在实际数据变化时更新属性
-      const tileScale = tileData.scale ?? 1
-      const propsKey = `${tileData.x},${tileData.y},${tileData.angle ?? 0},${tileScale},${tileData.scaleX ?? 1},${tileData.scaleY ?? 1},${tileData.opacity ?? 1},${tileData.layer}`
+      // scale_x/scale_y 已含最终缩放，直接使用，不能再乘 scale（会平方）
+      const tileScaleX = tileData.scaleX ?? tileData.scale ?? 1
+      const tileScaleY = tileData.scaleY ?? tileData.scale ?? 1
+      const propsKey = `${tileData.x},${tileData.y},${tileData.angle ?? 0},${tileScaleX},${tileScaleY},${tileData.opacity ?? 1},${tileData.layer}`
       if (displayObj._lastPropsKey !== propsKey) {
         displayObj._lastPropsKey = propsKey
         displayObj.x = tileData.x
         displayObj.y = tileData.y
         displayObj.rotation = ((tileData.angle ?? 0) * Math.PI) / 180
-        displayObj.scale.x = tileScale * (tileData.scaleX ?? 1)
-        displayObj.scale.y = tileScale * (tileData.scaleY ?? 1)
+        displayObj.scale.x = tileScaleX
+        displayObj.scale.y = tileScaleY
         displayObj.alpha = tileData.opacity ?? 1
         displayObj.zIndex = tileData.layer
       }

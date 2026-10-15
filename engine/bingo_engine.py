@@ -2127,10 +2127,11 @@ def _render_map():
                 screen_y = position[1]
 
                 # 获取图像旋转、缩放和透明度
+                # 缩放读取需兼容 camelCase（编辑器保存格式）——与碰撞检测路径（约269行）一致
                 rotation = image.get("rotation", 0)
                 scale = image.get("scale", 1.0)
-                scale_x = image.get("scale_x", scale)
-                scale_y = image.get("scale_y", scale)
+                scale_x = image.get("scaleX", image.get("scale_x", scale))
+                scale_y = image.get("scaleY", image.get("scale_y", scale))
                 opacity = image.get("opacity", 1.0)
 
                 # 获取图像路径并转换为绝对路径（兼容 camelCase 和 snake_case）
