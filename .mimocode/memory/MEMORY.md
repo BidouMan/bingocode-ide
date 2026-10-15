@@ -1,3 +1,5 @@
+Topic: BingoCodeIDE 项目记忆 — Tauri v2 + Vue 3 + PixiJS 游戏IDE，Python引擎子进程，服务60节Python游戏启蒙课
+
 # Project memory
 _Durable project-level knowledge. Persists across all sessions in this project. Edit only content under italic instructions._
 
@@ -32,6 +34,13 @@ _Major design choices with rationale._
 - **Bundled Python**: python-build-standalone. `resolve_engine_env` fallback: bundled → venv → system. [ses_0f3269daffe]
 - **移除代码检查按钮**: pyflakes 静态分析与运行时 Python 异常提示高度重叠，对目标用户（小学生）无实际价值，完全移除。pyflakes 也从 PluginManager 内置包列表移除。[ses_04894c7f7ffe]
 - **本地图片统一用 invoke 读取**: 不使用 `convertFileSrc` + `fetch`。`convertFileSrc` 生成的 asset protocol URL 对中文路径编码有问题，`fetch` 对本地路径无效。统一用 `invoke('read_image_as_data_url')` 读取本地图片返回 data URL。适用于：缩略图加载、地图编辑器瓦片集加载、GameCanvas 运行时渲染。[ses_f4cfba0c5ffe]
+- **课程产品定位**: 引擎服务一套 Python 游戏启蒙课——约 60 节 × 2 小时、1–1.5 年，面向学完 Scratch 但基础较弱的小学生；筛选机制：能力强的提前进入 Python/C++，能力弱的继续学。课件以作品为导向（Scratch 风格）、由易到难。教学原则：教概念（变量/循环/事件/坐标）而非引擎 API，以保证迁移性。产品定位是"游戏创作入门"而非"Python 教学工具"（管理家长预期）。[ses_ed1279af4ffe]
+- **课件六阶段结构（大纲已写入桌面）**: 伙伴小镇 L1-10（单角色控制/while True/if/键鼠/随机）→ 水果接接乐 L11-22（变量计分/碰撞/生成销毁/函数/游戏状态）→ 跳跳大冒险 L23-36（地图编辑器/重力跳跃/摄像机/动画/关卡）→ 星际保卫战 L37-48（组/批量碰撞/广播/多文件/状态机/波次）→ 毕业创作 L49-60（选题规划/制作周/内测/展示）。阶段末 L10/L22/L36/L48 设闯关挑战标记 A 层学员；分流点设在阶段末（保证完整作品体验）。课件文件：`/Users/amixc/Desktop/BingoPython游戏创作课-60课时课程大纲.md`。[ses_ed1279af4ffe]
+- **开篇教学法（Run→Modify→Build）**: 文本代码不像积木"拼不上"，弱孩子会卡在读错误信息。开篇策略：先运行预置项目（成就感）→ 改参数（理解代码控制行为）→ 从零搭建（内化）。L1 铁律："第一节课没有人打字超过 10 行代码"。比 Scratch 的"从零拼积木"对文本语言更友好。[ses_ed1279af4ffe]
+- **课件文档已完成（2026-10-12）**: `/Users/amixc/Desktop/BingoPython游戏创作课-60课时课程大纲.md` 现已完整——课程框架 + L1-60 全部 60 课教案 + 评估体系（四类工具/作品评分四维度/A层分流节点 L10/L22/L36/L48/L60/C层支持五措施）+ 教师资源准备清单（素材缺口：引擎仅 3 音效，阶段三四需自备爆炸/跳跃/受伤/过关；背景图按主题各 2-3 张）+ 附录 A-E（Scratch→Python 对照表/常见错误速查/课时弹性调整/Python/C++ 衔接说明/设计理念六条"为什么"）+ 结语。评估原则：作品导向、不考试不排名、闯关为限时解谜挑战。[ses_ed1279af4ffe]
+- **课件扩充方向（用户 2026-10-12 确认）**: 用户认可大纲方向——L1-40 主要学脚本，L40 以后做经典命题游戏。核心痛点：课件数量必须足够多（中期学生 20 分钟写完小课件撑不满 2 小时；数量够才有筛选/删减余量）。整合来源：我的六阶段大纲 + 用户自己的课件草稿（`/Users/amixc/MyWorkSpace/NoteBook/Inbox/Python课件/课程体系.md`）+ Scratch 经典命题。扩充版课件清单交付位置：`/Users/amixc/MyWorkSpace/NoteBook/Inbox/Python课件/`（表格形式、先不写详细）。[ses_ed1279af4ffe]
+- **90课表格版整合交付（2026-10-12 完成）**: `/Users/amixc/MyWorkSpace/NoteBook/Inbox/Python课件/课件总库-90课表格版.md` 已写入。结构：90 课池 / 建议授课 60-70；六阶段：初见代码 L1-12 / 有规则的世界 L13-26 / 代码的复利 L27-40 / 经典命题游戏工坊 L41-72（16 命题×2 课选做制：A骨架版+B完整版）/ 毕业创作 L73-84 / 毕业与远航 L85-90。属性标记 ★核心/○弹性/◆选做。整合取舍：保留用户 print-first+咒语卡24张+代码侦探+掀开引擎盖子+迷你游戏库存；保留我的 Run→Modify→Build+分层+评估；新增 Scratch 经典命题（吃豆人/坦克/节奏/投篮/弹弓/扫雷/五子棋/电子宠物/塔防/冰火/俄罗斯方块）。16 命题：Flappy进阶/无限跑者/吃豆人/坦克大战/弹幕射击/打砖块大作战/节奏大师/投篮高手/弹弓怒鸟/扫雷探险/五子棋AI/电子宠物/塔防保卫战/冰火双人/Boss Rush/俄罗斯方块。附录含弹性策略（快班加餐/慢班减负/时长不足预案）+Scratch 对应表+咒语卡清单+评估分流。[ses_ed1279af4ffe]
+- **用户课件教学理念（《课程体系.md》草稿核心，2026-10-12 读取）**: 三铁律——每课有能玩的作品 / 语法 Just-in-Time / 每课自由改造时间。术语降维：print=咒语、变量=贴了标签的格子、函数=自制咒语、列表=购物袋、报错=引擎在向你求救、调试=当侦探。咒语卡体系 24 张分四阶段。120 分钟节奏：成品演示→热身→咒语卡→跟做→分层自由改造（必做/进阶/王者）→分享→保存仪式。阶段六独有"掀开引擎的盖子"（展示 move() 背后翻译 + 纯 Python 裸奔体验）。教师配套：半成品工程包+课堂模板一键还原（用户列为最高优先级引擎需求）+咒语卡打印+分层挑战卡。评估：第 20/40 课加速评估三维观察制，成长档案"发给家长的不是成绩单，是孩子的创造史"。[ses_ed1279af4ffe]
 
 ## Discovered durable knowledge (terminal/console)
 
@@ -93,6 +102,8 @@ _Cross-task facts that survive across sessions._
 
 - **`fetch()` 无法读取本地文件系统路径**: Tauri webview 中 `fetch(url)` 只能访问 HTTP URL。sprite resource path 是本地路径（如 `/Users/.../assets/sprites/喷火龙`），必须通过 Tauri `invoke()` 读取。只有 `engine/assets/` 通过 Vite `publicDir` 提供 HTTP 服务。[ses_f4cfba0c5ffe]
 - **Sprite 库导入流程**: SpriteLibPage → `invoke('extract_bgs_to_project')` 解压 .bgs 到 `{projectRoot}/assets/sprites/{name}/` → resource store item 的 `path` 指向解压目录。[ses_f4cfba0c5ffe]
+- **引擎 Sprite 查找只认解压目录**: `Sprite('名')` 仅在项目 CWD 的 `assets/sprites/<名>/`（config.json+帧PNG）查找；磁盘上没有解压目录 ⇒ `[警告] 角色 '名' 不存在` + `_is_deleted` + `stop()`（bingo_engine.py:168-194）。引擎不读 .bgs zip 也不读 blob URL。[ses_ecb4859d7ffe]
+- **UploadDrawer 本地上传 .bgs 必须走同一解压流程（根因确认 2026-10-13）**: 抽屉 import 分支曾只 JSZip 读 config.json 名字 + `URL.createObjectURL(zip)` 存 blob URL、不写盘 → 卡片缩略图空白（blob URL 是 zip 非图片）+ 引擎报角色不存在。修复必须复用 `extract_bgs_to_project`，path 指向解压目录——与精灵库导入路径统一。[ses_ecb4859d7ffe]
 - **双路径读取**: Sprite 可来自两个来源 — HTTP 服务的 engine assets（via `publicDir`）和本地解压目录（via project dir）。`readBgsFromUrl` 必须同时处理两种情况。[ses_f4cfba0c5ffe]
 - **Map 库导入流程**: MapLibraryPage → `invoke('extract_bgm_to_project')` 解压 .bgm 到 `{projectRoot}/assets/maps/{name}/` → resource store item 的 `path` 指向解压目录。[ses_f4cfba0c5ffe]
 - **.bgm 文件结构**: zip 包含 `map.json`（tilesets with relative image paths like `images/tileset.png`）、`thumbnail.png`、`images/tileset.png`。[ses_f4cfba0c5ffe]
@@ -122,3 +133,17 @@ _Cross-task facts that survive across sessions._
 ### 其他
 
 - **pnpm PATH gotcha**: `npm install -g pnpm` does NOT add to PATH. Use full path or `npx`. `npm bin -g` removed in npm v11 — use `npm prefix -g`。Engine API design for kids: No import needed, auto-concat args, one-line configs, no blocking in game loops。`__all__` requirement: New functions/classes in `bingo_engine.py` MUST be added to `__all__`。Tauri dev mode: `externalBin`/`resources` can be emptied for dev — `find_system_python()` resolves at runtime。macOS rounded corners: CSS `border-radius` can't do window-level. Use `decorations: true` + `titleBarStyle: "Transparent"` + `hiddenTitle: true`. Windows ignores these。Qt QLayout stretches widgets: When translating Qt to CSS flexbox, use `align-self: stretch` + `padding` on children. Don't assume natural size。Console panel always-render: keep rendered, use internal `collapsed` state. Header bar (26px) stays visible. No `v-show`/`v-if` on wrapper。Sprite data model: `{name, frames[], segments[{name, start, end, fps, loop}]}`. Frames are PNGs in same dir. Three-panel — costume list (100px), canvas, preview (264px)。PNG must be RGBA for Tauri icons: `generate_context!()` panics otherwise. Use `Image.convert('RGBA')`。`.editor-page-full`: Use `flex: 1; min-width: 0; min-height: 0;` in flex parents. Missing `min-width: 0` causes overflow when sibling (side panel) grows. [ses_0fca6436bffe, ses_0f376fc72ffe, ses_04894c7f7ffe, MyIDE MEMORY]
+
+### 引擎教学 API（课件设计参考，2026-10-12 调研确认）
+
+- **学生代码写法**: 推荐 `while True:`（引擎自动转 generator）；`def loop()+run()` 为旧写法仍兼容；多文件项目自动发现合并。`wait(seconds)` 语义特殊——每 N 秒返回一次 True 的节流器（非阻塞 sleep），勿当"等待 N 秒"教。
+- **键盘映射（GameCanvas.vue:612-622）**: 方向键 ArrowUp/Down/Left/Right → `"up"/"down"/"left"/"right"`；其余键 → `key.toLowerCase()`。课件可直接教 `key_down("up")`、`key_down("space")`、`key_down("a")`。
+- **move() vs add_x/add_y**: `move(d)` 沿当前 angle 方向移动（angle 默认 0=向右）；up/down 用 move 会因 angle 不变而全部水平移动，必须用 `add_x`/`add_y`。课件第2课只教左右 move，第3课引入 add_x/add_y。
+- **输入/计时**: `key_down`/`key_pressed`（单帧）、`mouse_down`/`mouse_pressed`/`mouse.x/y`、`Timer(seconds, loop, autostart)`。物理内置重力（上升0.5/下落1.1/vy≤10）；舞台 640×480。
+- **内置资源现状**: 14 个 .bgs 角色包；音效仅 3 个（Chill/Coin/Connect）；地图仅 1 个包 `地图1.bgm`；瓦片集 coin/fruit/tileset.png、瓦片 brick/grass.png。课件涉及声音/多地图/多场景的课程需提前扩充资源或控制需求。
+
+### Discovered
+(none)
+
+### Dead ends
+(none)
