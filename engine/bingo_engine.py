@@ -493,6 +493,12 @@ class Sprite:
                                             return
 
         # 地图边界碰撞检测
+        # 仅重力地图（平台模式）把世界边界当隐形墙钳制；
+        # 无重力地图（俯视/太空）保持自由移动，edge_bounce/is_touch_edge/
+        # is_out_side/子弹出界销毁等边界 API 才能正常工作
+        if not _CURRENT_MAP.get("gravity", False):
+            return
+
         bounds = _CURRENT_MAP.get(
             "world_bounds", {"left": 0, "top": 0, "right": 640, "bottom": 480}
         )
@@ -712,24 +718,31 @@ class Sprite:
         STAGE_RIGHT = bounds["right"]
         STAGE_BOTTOM = bounds["bottom"]
         rect = self._get_hitbox_rect()
+        if not rect:
+            return
         hit = False
+        # move() 内的 _resolve_collision 会把越界精灵钳制回边界内 0.05px，
+        # 所以不能只判 overflow——还要判"贴边"；方向判断避免沿边缘滑动时误触发
+        EPS = 0.5
+        cos_a = math.cos(math.radians(self._angle))
+        sin_a = math.sin(math.radians(self._angle))
 
         # 左右判断
-        if rect[2] > STAGE_RIGHT:
+        if rect[2] >= STAGE_RIGHT - EPS and cos_a > 0:
             self._x -= rect[2] - STAGE_RIGHT
             self._angle = 180 - self._angle
             hit = True
-        elif rect[0] < STAGE_LEFT:
+        elif rect[0] <= STAGE_LEFT + EPS and cos_a < 0:
             self._x += STAGE_LEFT - rect[0]
             self._angle = 180 - self._angle
             hit = True
 
         # 上下判断
-        if rect[3] > STAGE_BOTTOM:
+        if rect[3] >= STAGE_BOTTOM - EPS and sin_a > 0:
             self._y -= rect[3] - STAGE_BOTTOM
             self._angle = -self._angle
             hit = True
-        elif rect[1] < STAGE_TOP:
+        elif rect[1] <= STAGE_TOP + EPS and sin_a < 0:
             self._y += STAGE_TOP - rect[1]
             self._angle = -self._angle
             hit = True
@@ -860,22 +873,27 @@ class Sprite:
     # ---------- 侦测模块 ----------
     def is_touch_edge(self):
         """
-        精准边界检测：判定角色的实际视觉边缘是否越过了 640*480 的舞台
+        精准边界检测：判定角色的实际视觉边缘是否接触或越过 640*480 的舞台边界
         """
         # 1. 获取缩放和偏移后的真实包围盒 [left, top, right, bottom]
         rect = self._get_hitbox_rect()
+        if not rect:
+            return False
 
         # 2. 舞台固定尺寸
         STAGE_W = 640
         STAGE_H = 480
+        # 重力地图的边界钳制会把越界精灵拉回边界内 0.05px，
+        # 只判 overflow 会永远 False——贴边（容差内）也算碰到
+        EPS = 0.5
 
-        # 3. 只要任何一边超出了舞台，就返回 True
+        # 3. 任何一边接触或超出舞台，就返回 True
         if (
-            rect[0] < 0  # 左边出界
-            or rect[2] > STAGE_W  # 右边出界
-            or rect[1] < 0  # 上边出界
-            or rect[3] > STAGE_H
-        ):  # 下边出界
+            rect[0] <= EPS  # 左边贴边/出界
+            or rect[2] >= STAGE_W - EPS  # 右边贴边/出界
+            or rect[1] <= EPS  # 上边贴边/出界
+            or rect[3] >= STAGE_H - EPS
+        ):  # 下边贴边/出界
             return True
 
         return False
@@ -887,6 +905,8 @@ class Sprite:
         """
         # 获取当前精准包围盒 [left, top, right, bottom]
         rect = self._get_hitbox_rect()
+        if not rect:
+            return False
 
         STAGE_W = 640
         STAGE_H = 480
