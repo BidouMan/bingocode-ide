@@ -57,9 +57,19 @@ async function resolveImagePath(path: string): Promise<string> {
       url = ''
     }
   } else if (path.startsWith('assets/')) {
-    url = convertFileSrc(`${projectStore.root}/${path}`)
+    // 中文路径下 convertFileSrc 会加载失败，统一走 data URL
+    const fullPath = `${projectStore.root}/${path}`
+    try {
+      url = await invoke<string>('read_image_as_data_url', { path: fullPath })
+    } catch {
+      url = convertFileSrc(fullPath)
+    }
   } else {
-    url = convertFileSrc(path)
+    try {
+      url = await invoke<string>('read_image_as_data_url', { path })
+    } catch {
+      url = convertFileSrc(path)
+    }
   }
 
   resolvedPathCache.set(path, url)

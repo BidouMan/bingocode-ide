@@ -813,12 +813,19 @@ async function onMapLibImported(bgmUrl: string, name: string) {
 // ====== 图片作为地图导入（上传图片 / 内置资源库选图共用） ======
 
 // 用前端 Image 对象测量图片真实尺寸（图像渲染偏移依赖 width/height）
-function measureImageSize(absPath: string): Promise<{ w: number; h: number }> {
+// 中文路径下 convertFileSrc 生成的 asset URL 会加载失败，统一走 data URL
+async function measureImageSize(absPath: string): Promise<{ w: number; h: number }> {
+  let src: string
+  try {
+    src = await invoke<string>('read_image_as_data_url', { path: absPath })
+  } catch {
+    src = convertFileSrc(absPath)
+  }
   return new Promise((resolve) => {
     const img = new Image()
     img.onload = () => resolve({ w: img.naturalWidth || 640, h: img.naturalHeight || 480 })
     img.onerror = () => resolve({ w: 640, h: 480 })
-    img.src = convertFileSrc(absPath)
+    img.src = src
   })
 }
 

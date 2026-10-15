@@ -201,8 +201,8 @@ async function handleAction(key: string) {
           resourceStore.addItem({ name: result.name, type: 'sprite', path: objectUrl })
           emit('uploaded', 'sprite', result.name)
         }
-      } else if (props.type === 'map' && isImageFile(result.name)) {
-        // 图片文件：读取字节交给主布局创建图像模式地图（图片直接作为地图使用）
+      } else if (props.type === 'map' && (isImageFile(result.name) || result.name.toLowerCase().endsWith('.svg'))) {
+        // 图片文件（含 SVG）：读取字节交给主布局创建图像模式地图（图片直接作为地图使用）
         try {
           const arrayBuffer = await result.file.arrayBuffer()
           emit('importMapImage', result.name, Array.from(new Uint8Array(arrayBuffer)))

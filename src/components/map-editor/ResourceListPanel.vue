@@ -83,12 +83,20 @@ async function getResourceUrl(path: string): Promise<string> {
       url = ''
     }
   } else if (path.startsWith('assets/')) {
-    // 项目目录中的相对路径
+    // 项目目录中的相对路径 —— 中文路径下 convertFileSrc 会加载失败，统一走 data URL
     const fullPath = `${projectStore.root}/${path}`
-    url = convertFileSrc(fullPath)
+    try {
+      url = await invoke<string>('read_image_as_data_url', { path: fullPath })
+    } catch {
+      url = convertFileSrc(fullPath)
+    }
   } else {
     // 绝对文件系统路径（用户导入的原始文件）
-    url = convertFileSrc(path)
+    try {
+      url = await invoke<string>('read_image_as_data_url', { path })
+    } catch {
+      url = convertFileSrc(path)
+    }
   }
 
   globalUrlCache.set(path, url)

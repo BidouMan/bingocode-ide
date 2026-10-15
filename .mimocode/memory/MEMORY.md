@@ -105,11 +105,20 @@ _Cross-task facts that survive across sessions._
 - **打包 Python 必须含 tkinter**（`scripts/setup-portable-python.sh` + `.github/workflows/release.yml` 两处瘦身逻辑同步）: 曾为减体积删除 `tkinter`/`turtledemo`/`unittest`，导致发行版 `import turtle` 报 ModuleNotFoundError。现三者都保留（turtle 依赖 tkinter，unittest 教学常用）；仍删 test/idlelib/ensurepip/include。portable-python 用 python-build-standalone `install_only_stripped`，其 Tcl/Tk DLL 本就齐全。
 - **`engine/requirements.txt` 用 `pygame-ce>=2.5.0`**（非官方 pygame）: pygame-ce 是完全兼容的社区分支，`import pygame` 不变，且**各 Python 版本均有预编译 wheel**（官方 pygame 对新 Python 出包慢，3.14 会退化到源码编译并因缺 SDL.h 失败）。这是"将来要支持 pygame"的前提。
 - **代码模式执行链**: `useEngine.ts run()` 写 `.temp_run.py` → `run_script_file`（engine.rs:204）读文件、在前面拼 input 安全包装 prelude、写 `.wrapped.py`，`<python> -u` 执行，cwd=源文件目录。**不设 PYTHONPATH、不 import bingo_engine、不做 AST 改写**——与游戏模式（run_script + bingo_engine + code_transform）完全独立。`bingo_engine.py` 的 stdout 重定向只影响游戏模式。
-- **turtle 保活与窗口关闭（engine.rs:245-269 postlude，v0.5.19）三个坑**:
-  1. screen 对象在 **`turtle.Turtle._screen` 类属性**上，模块级 `turtle._screen` 不存在——`getattr(turtle,'_screen')` 恒为 None，检测窗口的代码必须用 `turtle.Turtle._screen`。
-  2. 学生未写 `turtle.done()` 时窗口闪退，因为脚本结束进程即退出。但**不能只靠 `mainloop()` 保活**（窗口销毁后 mainloop 收不回来、后台线程启动 Tk 事件循环在 macOS 会崩）；正确做法是用 Tk 的 **`after()` 调度器**轮询 `winfo_exists()` 保活（线程安全、跨平台一致）。注意 `forward()` 等画图命令内部会调 Tk `update()`，会"巧合地"让进程多活一阵子——不要误判为保活生效。
-  3. 点窗口 X 时 turtle 只调 `_Screen._destroy()` 销毁窗口**不退出进程**，主线程仍卡在事件循环 → 窗口消失但进程存活 → IDE 表现为假死、停止键仍亮。修复：postlude 给 `WM_DELETE_WINDOW` 重挂 `os._exit(0)`，关闭即结束进程，Rust `child.wait()` 返回触发 `engine:finished`，前端自动复位运行态。**逻辑 macOS/Windows 完全一致**（无需分平台）。
-- **验证 postlude 时的测试陷阱**: 无窗口管理器的 shell 里 `mainloop()` 可能不因 `bye()`/窗口销毁而返回，会让"D 显式 done()"这类用例误报"仍存活"。可靠做法是直接调用 turtle 的 `Turtle._screen._destroy()` 精确模拟点 X，再断言进程退出。
+- **turtle 保活与窗口关闭（engine.rs:244-269 postlude，v0.5.19 已提交 commit `ee063dc`，tag 已推）三个坑**:
+  1. screen 对象在 **`turtle.Turtle._screen` 类属性**上，模块级 `turtle._screen` 不存在——`getattr(turtle,'_screen')` 恒为 None，检测窗口的代码必须用 `turtle.Turtle._screen`。v0.5.18 用错变量名，保活从未生效。
+  2. `forward()` 等画图命令内部会调 Tk `update()`，会"巧合地"让进程多活一阵子——不要误判为保活生效。决定性实验：只 `import turtle` 不画图 → 进程立即退出（会闪退）。保活正确做法：Tk 的 **`after()` 调度器**轮询 `winfo_exists()`（200ms，线程安全、跨平台一致），不能只靠 `mainloop()`（窗口销毁后 mainloop 收不回来、后台线程启动 Tk 事件循环在 macOS 会崩）。
+  3. 点窗口 X 时 turtle 只调 `_Screen._destroy()` 销毁窗口**不退出进程**（:3897-3905），主线程仍卡在事件循环 → 窗口消失但进程存活 → IDE 假死、停止键仍亮。修复：postlude 给 `WM_DELETE_WINDOW` 重挂 `_ide_close = os._exit(0)`，关闭即结束进程，Rust `child.wait()` 返回触发 `engine:finished`，前端 `useEngine.ts:296-316 tryFinish` 自动复位运行态。**逻辑 macOS/Windows 完全一致**（无需分平台）。
+- **验证 postlude 的测试陷阱**: 无窗口管理器的 shell 里 `mainloop()` 可能不因 `bye()`/窗口销毁而返回，会让"显式 done()"用例误报"仍存活"。可靠做法：直接调 `Turtle._screen._destroy()` 精确模拟点 X，再断言进程退出。`event_generate('WM_DELETE_WINDOW')` 在非主线程可能报 `only one event specification allowed`。
+- **发布状态（截至本 checkpoint）**: v0.5.17 / v0.5.18 / **v0.5.19 均已 tag 发布**（v0.5.19 commit `ee063dc`，tag 已推，CI run `38751877452` 已启动）。发版后需用户实测：点 X → 窗口关闭 + 运行按钮复位；Windows 端同代码但用户从未实测过 Windows。
+
+### 坐标系与图像生成（2026-10-15）
+
+- **游戏舞台坐标系约定（画图/课件/前端渲染共用）**: 原点 (0,0) 在**舞台左上角**，X 向右 0→640，Y **向下** 0→480（屏幕坐标系，非数学坐标系 Y 向上）。默认精灵出生点 (320,240)=舞台中心；相机中心 `_CAMERA_X=320,_CAMERA_Y=240`。依据：`bingo_engine.py:138-139`（`_x=320,_y=240`）、`world_bounds {left:0,top:0,right:640,bottom:480}`（:497/706/2418 等）、越界检测 `rect[3]<0`=上边缘越过顶边（:897-898）。给学生讲坐标或生成坐标教学图时必须按此约定，勿画成 Y 向上。
+- **本机 Pillow 画中文图的字体坑**: `/System/Library/Fonts/PingFang.ttc` **在本机不存在**——脚本若首选它会回退到 `load_default()`（无 CJK 字形），中文全变方框 □。本机实测可用中文字体：`Hiragino Sans GB.ttc`（推荐）、`STHeiti Light.ttc`、`Arial Unicode.ttf`（`/System/Library/Fonts/Supplemental/` 与 `/Library/Fonts/` 两处都有）。Windows 侧用 `C:/Windows/Fonts/msyh.ttc`。生成含中文的图前先 `os.path.exists` + `font.getbbox("舞台坐标")` 实测字形，勿假设系统字体存在。
+- **地图编辑器图片加载双通道（2026-10-15 查清并修复）**: ①用户导入：`pick_image_file` → `copyResourceToMapDir` 进项目 `assets/` → `convertFileSrc`（Tauri asset 协议按扩展名自动给 MIME，SVG 天然支持）；②内置 `/maps/` 资源：`read_image_as_data_url` data URL → `new Image()` → PixiJS。原 SVG 阻断点两处均已修复（未提交 lib.rs）：选择器过滤器加 `"svg"`（lib.rs:924）+ MIME 判定加 `.svg → image/svg+xml`（lib.rs:955-963）。带显式 `width`/`height` 的 SVG 经 `new Image()` 可直接作 PixiJS 8 纹理源，无需插件。`engine/assets/maps/images/` 下的 .svg（Blue Sky/Jurassic/Basketball 1）是**死资产**——`地图1.bgm` map.json 只引用 tileset.png，从未被消费，勿当支持先例。[ses_ec075fac1ffe]
+- **SVG 生成中文图无 Pillow 字体坑**: SVG `<text>` 用系统字体栈（`PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif`），WKWebView/WebView2 直接渲染，绕开 Pillow 字体发现（本机 PingFang.ttc 不存在的坑不适用于 SVG）。本机栅格化验证：`qlmanage -t -s 960 -o <dir> file.svg`。[ses_ec075fac1ffe]
+- **导入地图编辑器与舞台对齐的图，原点必须与图片左上角像素级对齐（用户 2026-10-15 硬要求，已按此交付）**: 图片要与 640×480 舞台渲染精确对齐，坐标原点标记须落在图片像素 (0,0)；为线宽留白做的内缩偏移（如 axis_off=18）会造成"原点空隙"。定稿实现：轴线用贴边实心 rect（顶 y=0 h=2、左 x=0 w=2），原点 `circle cx="0" cy="0"` 呈四分之一圆。SVG 带 `width="640" height="480"` 自然尺寸，导入后即与舞台 1:1。[ses_ec075fac1ffe]
 
 ### 其他
 
@@ -129,16 +138,7 @@ _Cross-task facts that survive across sessions._
 - See MEMORY-tauri-release.md (6 entries) — Tauri updater 签名/endpoint/latest.json 生成 + CI release 工作流（稳定历史知识，2026-10-13 裁剪）
 - See MEMORY-collision.md (4 entries) — 碰撞系统架构：计算全在 Python 引擎 / 轴分离解算 / 命中盒仅翻转不旋转 / 主循环物理排序（稳定参考，2026-10-13 裁剪）
 
-### 代码模式执行链路（turtle 调查，2026-10-15）
-
-- **代码模式完整执行链**: 前端 useEngine.ts 写 `.temp_run.py` → invoke `run_script_file`（engine.rs:204-332）→ Rust 读用户代码拼 21 行 prelude 写 `.wrapped.py` → spawn `<python> -u <script>.wrapped.py`，cwd=tab 源文件目录（无 path 时项目根），env 仅 `PYTHONUNBUFFERED=1`+`PYTHONIOENCODING=utf-8`，stdin/stdout/stderr 全 pipe。**不设 PYTHONPATH、不 import bingo_engine、无 AST 改写**——bingo_engine 的 stdout 重定向/监听线程/sys.path 操作只影响游戏模式。
-- **prelude 仅替换 `builtins.input`** 为 `_safe_input`（stdin.readline，EOF→SystemExit，防 Windows taskkill 后 input() 死循环）。无 import 钩子、无模块屏蔽；副作用：traceback 行号偏移 ~21 行。
-- **python 解析顺序（resolve_engine_env）**: dev 优先 portable-python（bin/python3 或 python.exe）→ venv。dev 仓库 `engine/portable-python/` 只有 `.gitkeep`（空），实际用 `engine/venv/bin/python3`。打包版优先 resource_dir 下 portable-python（含 `_up_/` 路径变体）。
-- **venv 3.14.5 实测**: `import tkinter`（Tk 9.0）/`import turtle` OK；site-packages 无 .pth/sitecustomize，ENABLE_USER_SITE=False。requirements.txt 只有 Pillow/numpy/pyflakes/black——turtle/tkinter 是解释器自带标准库。
-- **Mac dev 复现排除 prelude/pipe 假设**: prelude+piped stdio+`-u` 下 turtle 画线正常 exit=0。
-- **⭐ turtle 失败根因（2026-10-15 确认并已修代码）**: 项目瘦身脚本显式删除 tkinter——`scripts/setup-portable-python.sh`（原 :111-112）与 `.github/workflows/release.yml`（原 :126-127）都 `rm -rf .../lib/python3.12/tkinter` 和 `turtledemo`（另删 unittest）。turtle `from tkinter import *`，打包版因此必失败。**上游 python-build-standalone 20260623 install_only_stripped 自带 Tcl/Tk DLL**（release notes 明确未 strip、保留 tkinter ZipFS 数据）——不是嵌入式发行版天然缺 tcl/tk。修复：两处移除对 tkinter/turtledemo/unittest 的删除，保留 test/idlelib/ensurepip。**修复后尚未在打包版实测**。
-- **次要嫌疑**: 项目根同名 `turtle.py` shadow（`.wrapped.py` 的 `sys.path[0]`=项目根）；useEngine.ts:256-259 把 ModuleNotFoundError 翻译成"找不到模块…"吞掉真实 traceback。
-- **产品要求（用户 2026-10-15）**: 代码模式要像正常 IDE——import 后常用标准库（turtle 必学）可用，将来支持 pygame；打包 Python 必须含 tkinter/SDL 等 GUI 依赖。pygame 预置方式=加入 `engine/requirements.txt`（setup 脚本与 CI 共用）。
+- See MEMORY-execution-chain.md (12 entries) — 代码模式执行链/prelude/resolve_engine_env/venv 实测 + turtle import 与窗口调查历史（2026-10-15，部分保活/X 按钮结论已在主文件更正）
 
 ### Discovered
 (none)

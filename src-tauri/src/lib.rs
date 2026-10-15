@@ -921,7 +921,7 @@ async fn pick_image_file(app: tauri::AppHandle) -> Result<Option<String>, String
     // 必须是 async 命令：blocking_pick_file 在主线程（同步命令）调用会在 macOS 上死锁
     let path = app.dialog()
         .file()
-        .add_filter("图片", &["png", "jpg", "jpeg", "bmp", "gif"])
+        .add_filter("图片", &["png", "jpg", "jpeg", "bmp", "gif", "svg"])
         .blocking_pick_file();
 
     Ok(path.map(|p| p.to_string()))
@@ -958,6 +958,8 @@ fn read_image_as_data_url(path: String) -> Result<String, String> {
         "image/bmp"
     } else if path.ends_with(".gif") {
         "image/gif"
+    } else if path.ends_with(".svg") {
+        "image/svg+xml"
     } else {
         "image/png"
     };
