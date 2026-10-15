@@ -242,12 +242,28 @@ pub fn run_script_file(
          \x20       \x20   raise SystemExit\n\
          _bi.input = _safe_input\n\
          {}\n\
-         # IDE 收尾：turtle 窗口若仍开着则保持显示，避免学生代码未写 turtle.done() 时窗口一闪而过\n\
+         # IDE 收尾（turtle）：\n\
+         # 1) 窗口关闭按钮 → 立即结束整个 Python 进程，避免窗口已销毁但进程仍在运行导致假死\n\
+         # 2) 用 Tk 的 after() 调度器保活（线程安全、跨平台一致），学生未写 turtle.done() 时窗口不闪退\n\
          try:\n\
          \x20   _tm = _sys.modules.get('turtle')\n\
-         \x20   _tsc = getattr(_tm, '_screen', None) if _tm else None\n\
+         \x20   _scr_cls = getattr(_tm, 'Turtle', None)\n\
+         \x20   _tsc = getattr(_scr_cls, '_screen', None) if _scr_cls else None\n\
          \x20   if _tsc is not None:\n\
-         \x20       \x20   _tsc._root.winfo_exists()\n\
+         \x20       \x20   _root = _tsc._root\n\
+         \x20       \x20   _root.winfo_exists()\n\
+         \x20       \x20   def _ide_close(*_a):\n\
+         \x20       \x20   \x20   _os._exit(0)\n\
+         \x20       \x20   _root.protocol('WM_DELETE_WINDOW', _ide_close)\n\
+         \x20       \x20   def _ide_keepalive():\n\
+         \x20       \x20   \x20   try:\n\
+         \x20       \x20   \x20   \x20   if _root.winfo_exists():\n\
+         \x20       \x20   \x20   \x20   \x20   _root.after(200, _ide_keepalive)\n\
+         \x20       \x20   \x20   \x20   else:\n\
+         \x20       \x20   \x20   \x20   \x20   _os._exit(0)\n\
+         \x20       \x20   \x20   except Exception:\n\
+         \x20       \x20   \x20   \x20   _os._exit(0)\n\
+         \x20       \x20   _root.after(200, _ide_keepalive)\n\
          \x20       \x20   _tm.mainloop()\n\
          except Exception:\n\
          \x20   pass\n",
