@@ -12,6 +12,14 @@ export interface SpriteLibItem {
   type: SpriteLibType
   thumbUrl: string
   loaded: boolean
+  /** 分类目录名（sprites/ 下的子目录：characters / items / ...） */
+  category: string
+}
+
+/** 分类目录名 → 显示名；未列出的目录直接显示目录名（新分类自动出现） */
+export const CATEGORY_LABELS: Record<string, string> = {
+  characters: '角色',
+  items: '道具',
 }
 
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']
@@ -27,6 +35,8 @@ function joinPath(base: string, ...parts: string[]): string {
 export const useSpriteLibStore = defineStore('spriteLib', () => {
   const items = ref<SpriteLibItem[]>([])
   const loading = ref(false)
+  /** 发现的分类目录名列表（sprites/ 下的子目录，字母序） */
+  const categories = ref<string[]>([])
 
   async function loadBuiltinLibrary() {
     if (loading.value) return
@@ -34,35 +44,51 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
 
     try {
       const engineDir = await invoke<string>('get_engine_assets_dir')
+      const spritesRoot = joinPath(engineDir, 'sprites')
       const found = new Map<string, SpriteLibItem>()
 
-      // 扫描 .bgs 包文件
-      const packagesDir = joinPath(engineDir, 'sprites', 'packages')
+      // 发现分类目录（list_dir 对目录返回以 / 结尾的名字）
       try {
-        const files = await invoke<string[]>('list_dir', { path: packagesDir })
-        for (const f of files.filter(f => f.endsWith('.bgs'))) {
-          const name = f.replace(/\.bgs$/, '')
-          const filePath = joinPath(packagesDir, f)
-          found.set(filePath, { name, filePath, type: 'bgs', thumbUrl: '', loaded: false })
-        }
+        const entries = await invoke<string[]>('list_dir', { path: spritesRoot })
+        categories.value = entries
+          .filter(e => e.endsWith('/'))
+          .map(e => e.replace(/\/+$/, ''))
+          .filter(Boolean)
       } catch (e) {
-        console.error('[SpriteLib] 加载 .bgs 列表失败:', e)
+        console.error('[SpriteLib] 扫描分类目录失败:', e)
+        categories.value = []
       }
 
-      // 扫描 images/ 目录下的常规图片文件
-      const imagesDir = joinPath(engineDir, 'sprites', 'images')
-      try {
-        const files = await invoke<string[]>('list_dir', { path: imagesDir })
-        for (const filename of files.filter(f => {
-          const lower = f.toLowerCase()
-          return IMAGE_EXTS.some(ext => lower.endsWith(ext))
-        })) {
-          const name = filename.replace(/\.[^.]+$/, '')
-          const filePath = joinPath(imagesDir, filename)
-          found.set(filePath, { name, filePath, type: 'image', thumbUrl: '', loaded: false })
+      // 逐分类扫描 packages/*.bgs 与 images/*
+      for (const cat of categories.value) {
+        // .bgs 包文件
+        const packagesDir = joinPath(spritesRoot, cat, 'packages')
+        try {
+          const files = await invoke<string[]>('list_dir', { path: packagesDir })
+          for (const f of files.filter(f => f.endsWith('.bgs'))) {
+            const name = f.replace(/\.bgs$/, '')
+            const filePath = joinPath(packagesDir, f)
+            found.set(filePath, { name, filePath, type: 'bgs', thumbUrl: '', loaded: false, category: cat })
+          }
+        } catch (_e) {
+          // packages 目录可能为空或不存在，静默处理
         }
-      } catch (_e) {
-        // images 目录可能为空或不存在，静默处理
+
+        // 常规图片文件
+        const imagesDir = joinPath(spritesRoot, cat, 'images')
+        try {
+          const files = await invoke<string[]>('list_dir', { path: imagesDir })
+          for (const filename of files.filter(f => {
+            const lower = f.toLowerCase()
+            return IMAGE_EXTS.some(ext => lower.endsWith(ext))
+          })) {
+            const name = filename.replace(/\.[^.]+$/, '')
+            const filePath = joinPath(imagesDir, filename)
+            found.set(filePath, { name, filePath, type: 'image', thumbUrl: '', loaded: false, category: cat })
+          }
+        } catch (_e) {
+          // images 目录可能为空或不存在，静默处理
+        }
       }
 
       // 增量合并：已有项复用缩略图缓存，只为新增文件加载缩略图
@@ -72,7 +98,11 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
       const merged: SpriteLibItem[] = []
       for (const item of found.values()) {
         const old = oldByPath.get(item.filePath)
-        if (old && old.loaded) { merged.push(old); continue }
+        if (old && old.loaded) {
+          old.category = item.category
+          merged.push(old)
+          continue
+        }
         merged.push(item)
         needThumbs.push(item)
       }
@@ -164,5 +194,5 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
     return { name: config.name || '未知角色', frames, animations }
   }
 
-  return { items, loading, loadBuiltinLibrary, loadSpriteData, getSpritePreview }
+  return { items, categories, loading, loadBuiltinLibrary, loadSpriteData, getSpritePreview }
 })

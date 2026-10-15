@@ -303,6 +303,26 @@ fn extract_bgm_to_project(bgm_path: String, project_root: String, map_name: Stri
 fn get_engine_assets_dir(app: tauri::AppHandle) -> Result<String, String> {
     let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
 
+    // dev 模式优先用源码树的 engine/assets：
+    // target/debug/_up_/ 是 Tauri 增量复制的资源副本，资源目录重组后会残留旧结构
+    // （如 sprites/images、sprites/packages），命中它会让内置精灵库扫出过期分类
+    #[cfg(debug_assertions)]
+    {
+        if let Ok(cwd) = std::env::current_dir() {
+            let mut cur = cwd.as_path();
+            for _ in 0..4 {
+                let test = cur.join("engine");
+                if path_exists_impl(&test.join("assets")) || path_exists_impl(&test.join("bingo_engine.py")) {
+                    return Ok(normalize_path_string(&test.join("assets")));
+                }
+                match cur.parent() {
+                    Some(p) => cur = p,
+                    None => break,
+                }
+            }
+        }
+    }
+
     // 打包后资源布局（tauri.conf.json 列表格式）：
     //   "../engine/assets/**/*" 中的 ../ 会被 Tauri 替换为 _up_/，
     //   实际路径: $RESOURCE/_up_/engine/assets/
@@ -431,7 +451,37 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
     //   macOS 上 resource_dir 是 Contents/Resources/，往上跳一级恰好能找到，
     //   所以 mac 版能成功；Windows 上 resource_dir 是安装根目录，往上跳找不到。
     //   v0.5.2 在查找路径中添加了 _up_ 前缀，两个平台都能正确找到。
-    let python_path = [
+    // dev 模式优先从源码树解析 Python（cwd 向上找 engine/）：
+    // target/debug/_up_/ 是 Tauri 增量复制的资源副本，资源重组后残留旧文件，
+    // 优先命中它会让游戏跑旧版引擎代码（如 bingo_engine.py 的修复不生效）
+    #[cfg(debug_assertions)]
+    let dev_py = {
+        let mut found: Option<String> = None;
+        let mut cur = cwd.as_path();
+        for _ in 0..4 {
+            let engine = cur.join("engine");
+            if path_exists_impl(&engine.join("bingo_engine.py")) {
+                for n in [&py_name, &venv_name] {
+                    let p = engine.join(n);
+                    if path_exists_impl(&p) {
+                        found = Some(p.to_string_lossy().to_string());
+                        break;
+                    }
+                }
+                if found.is_some() { break; }
+            }
+            match cur.parent() {
+                Some(p) => cur = p,
+                None => break,
+            }
+        }
+        found
+    };
+    #[cfg(not(debug_assertions))]
+    let dev_py: Option<String> = None;
+
+    let python_path = dev_py.or_else(|| {
+    [
         // 1. 新布局：portable-python 直接放在 resource_dir 下（未来改用对象映射时）
         find_py(&resource_dir, &py_name),
         // 1b. engine 前缀
@@ -488,7 +538,8 @@ fn resolve_engine_env(app: tauri::AppHandle, script_path: String, project_root: 
             }
             None
         })(),
-    ].into_iter().flatten().next();
+    ].into_iter().flatten().next()
+    });
 
     // ═══ 查找 engine_dir ═══
     let engine_dir = if let Some(ref py) = python_path {

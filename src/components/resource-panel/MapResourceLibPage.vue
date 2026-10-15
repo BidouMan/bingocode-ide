@@ -94,7 +94,6 @@ const filteredResources = computed(() => {
   padding: 0 5px;
   gap: 0;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
 }
 
 .lib-search {

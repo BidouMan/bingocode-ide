@@ -253,7 +253,6 @@ onBeforeUnmount(stopPlayback)
   gap: 0;
   flex-shrink: 0;
   background: var(--bg-root);
-  border-bottom: 1px solid var(--border);
 }
 
 .lib-search {

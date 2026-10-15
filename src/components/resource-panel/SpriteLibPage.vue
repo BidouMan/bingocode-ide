@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, computed } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
-import { useSpriteLibStore } from '../../stores/spriteLib'
+import { useSpriteLibStore, CATEGORY_LABELS } from '../../stores/spriteLib'
 import { useResourceStore } from '../../stores/resource'
 import { useProjectStore } from '../../stores/project'
-import { svgToPngBlob } from '../../utils/imageConvert'
 
 const emit = defineEmits<{
   close: []
@@ -16,8 +15,33 @@ const resourceStore = useResourceStore()
 const projectStore = useProjectStore()
 const searchText = ref('')
 
-onMounted(() => {
-  spriteLibStore.loadBuiltinLibrary()
+// 分类标签：默认显示角色（characters）
+const activeCategory = ref('characters')
+
+onMounted(async () => {
+  await spriteLibStore.loadBuiltinLibrary()
+  ensureValidCategory()
+})
+
+// 分类列表加载后校验当前选中（无 characters 时回退第一个分类）
+function ensureValidCategory() {
+  const cats = spriteLibStore.categories
+  if (cats.length > 0 && !cats.includes(activeCategory.value)) {
+    activeCategory.value = cats.includes('characters') ? 'characters' : cats[0]
+  }
+}
+
+function categoryLabel(cat: string): string {
+  return CATEGORY_LABELS[cat] || cat
+}
+
+// 当前分类 + 搜索过滤后的资源列表
+const visibleItems = computed(() => {
+  const q = searchText.value.trim().toLowerCase()
+  return spriteLibStore.items.filter(item =>
+    item.category === activeCategory.value &&
+    (!q || item.name.toLowerCase().includes(q))
+  )
 })
 
 // ====== 悬停动画预览 ======
@@ -116,8 +140,16 @@ async function selectSprite(item: { name: string; filePath: string; type: string
   <div class="sprite-lib-page">
     <div class="lib-toolbar">
       <input v-model="searchText" class="lib-search" placeholder="搜索角色..." />
-      <div class="lib-spacer"></div>
-      <span class="lib-hint">请选择角色</span>
+      <div style="width:10px" />
+      <button
+        v-for="cat in spriteLibStore.categories"
+        :key="cat"
+        class="lib-tab-btn"
+        :class="{ 'lib-tab-active': activeCategory === cat }"
+        @click="activeCategory = cat"
+      >
+        {{ categoryLabel(cat) }}
+      </button>
       <div class="lib-spacer"></div>
       <div style="width:120px"></div>
       <button class="lib-return-btn" @click="emit('close')">返回</button>
@@ -125,9 +157,8 @@ async function selectSprite(item: { name: string; filePath: string; type: string
 
     <div class="lib-grid">
       <div
-        v-for="item in spriteLibStore.items"
+        v-for="item in visibleItems"
         :key="item.filePath"
-        v-show="!searchText || item.name.toLowerCase().includes(searchText.toLowerCase())"
         class="sprite-card"
         @click="selectSprite(item)"
         @mouseenter="onCardEnter(item)"
@@ -140,6 +171,7 @@ async function selectSprite(item: { name: string; filePath: string; type: string
         </div>
         <span class="sprite-name">{{ item.name }}</span>
       </div>
+      <div v-if="visibleItems.length === 0" class="lib-empty">暂无资源</div>
     </div>
   </div>
 </template>
@@ -158,7 +190,6 @@ async function selectSprite(item: { name: string; filePath: string; type: string
   height: 40px;
   padding: 0 5px;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--border);
 }
 .lib-search {
   width: 200px;
@@ -173,7 +204,36 @@ async function selectSprite(item: { name: string; filePath: string; type: string
 }
 .lib-search:focus {   border-color: var(--accent); }
 .lib-spacer { flex: 1; }
-.lib-hint { font-size: 12px;   color: var(--text-muted); }
+
+/* 分类标签按钮（与地图内置资源页同款样式） */
+.lib-tab-btn {
+  min-width: 80px;
+  height: 28px;
+  padding: 4px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: #9ca0a4;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.lib-tab-btn:hover {
+  background: var(--bg-hover);
+  color: white;
+}
+.lib-tab-active {
+  background: rgb(46, 49, 58);
+  border: 1px solid var(--border-light);
+  color: white;
+}
+.lib-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 40px 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
 .lib-return-btn {
   width: 80px;
   height: 28px;
@@ -188,7 +248,7 @@ async function selectSprite(item: { name: string; filePath: string; type: string
 .lib-grid {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 8px;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   grid-auto-rows: max-content;

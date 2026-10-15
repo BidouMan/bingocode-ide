@@ -64,9 +64,11 @@ engine/
   bingo_engine.py               # Game engine (runs in Python subprocess)
   models/                       # Data models
   assets/                       # 唯一游戏资源库（Vite publicDir 指向此处）
-    sprites/
-      packages/                 # .bgs 精灵包文件
-      images/                   # 精灵图片资源
+    sprites/                     # 按分类目录组织（目录名=库标签，自动发现）
+      characters/                # 角色分类（显示名"角色"）
+        packages/                # .bgs 精灵包文件
+        images/                  # 精灵图片资源
+      items/                     # 道具分类（显示名"道具"，结构同上）
     maps/
       packages/                 # .bgm 地图包文件（JSON格式）
       images/                   # 地图图像素材
@@ -89,11 +91,12 @@ engine/
 - **Python engine runs in subprocess**: Tauri spawns `python3 -u script.py`, captures stdout JSON instructions, sends to frontend via events. stdin receives `K_DOWN:`, `K_UP:`, `M_DOWN:`, `M_UP:`, `M_MOVE:` input events.
 - **Two separate tab systems**: `gameTabs` (game mode) and `codeTabs` (IDE mode). Switching mode preserves both.
 - **Upload drawer**: Green `#4B9B5C` slide-up menu, appears on hover, icons from `assets/icons/`.
-- **Sprite library**: 14 built-in `.bgs` files (zip with config.json + PNG frames), loaded via JSZip.
+- **Sprite library**: Built-in `.bgs` files (zip with config.json + PNG frames) loaded via JSZip. `engine/assets/sprites/` 下按分类子目录组织（characters/items/...），`spriteLib.ts` 自动发现分类并在库页面显示分类标签（`CATEGORY_LABELS` 控制中文名，默认显示"角色"）。新分类=新建子目录（含 packages/ 与 images/），无需改代码。
 - **Monaco editor**: Custom `bingo-dark` theme matching original QSS colors. `automaticLayout` + `nextTick layout()` for proper sizing.
 - **GameCanvas only mounts when running**: Prevents PixiJS from capturing mouse events when not needed.
 - **Event listeners scoped to canvas**: Keyboard/mouse events only on GameCanvas element, not window, to avoid blocking Monaco.
 - **Asset directory**: `engine/assets/` is the single source of truth for all game resources. Vite serves static files from here via `publicDir` config. No `public/` directory - everything goes through `engine/assets/`.
+- **Stale `_up_` resource copy (dev)**: `src-tauri/target/debug/_up_/engine/` is Tauri's incremental resource copy — it does NOT remove deleted files, so reorganizing `engine/assets/` leaves stale dirs behind and `get_engine_assets_dir`/`resolve_engine_env` used to hit them first. Fixed: both now prefer the source tree (cwd upward search) under `debug_assertions`; packaged builds unchanged. If dev behavior looks stale after a reorg, `rm -rf src-tauri/target/debug/_up_`.
 - **Map format**: JSON with base64+zlib compressed tile data. `.bgm` files are zips containing `map.json` + `thumbnail.png`. No binary format.
 - **Default project directory**: `~/BingoCodeIDE/Projects/default/` - cleaned on startup, stores user-created sprites and maps.
 
