@@ -241,7 +241,16 @@ pub fn run_script_file(
          \x20       \x20   _stdin_closed = True\n\
          \x20       \x20   raise SystemExit\n\
          _bi.input = _safe_input\n\
-         {}\n",
+         {}\n\
+         # IDE 收尾：turtle 窗口若仍开着则保持显示，避免学生代码未写 turtle.done() 时窗口一闪而过\n\
+         try:\n\
+         \x20   _tm = _sys.modules.get('turtle')\n\
+         \x20   _tsc = getattr(_tm, '_screen', None) if _tm else None\n\
+         \x20   if _tsc is not None:\n\
+         \x20       \x20   _tsc._root.winfo_exists()\n\
+         \x20       \x20   _tm.mainloop()\n\
+         except Exception:\n\
+         \x20   pass\n",
         script_content
     );
     let wrapped_path = format!("{}.wrapped.py", script_path);

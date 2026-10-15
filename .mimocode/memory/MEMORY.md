@@ -124,9 +124,10 @@ _Cross-task facts that survive across sessions._
 - **prelude 仅替换 `builtins.input`** 为 `_safe_input`（stdin.readline，EOF→SystemExit，防 Windows taskkill 后 input() 死循环）。无 import 钩子、无模块屏蔽；副作用：traceback 行号偏移 ~21 行。
 - **python 解析顺序（resolve_engine_env）**: dev 优先 portable-python（bin/python3 或 python.exe）→ venv。dev 仓库 `engine/portable-python/` 只有 `.gitkeep`（空），实际用 `engine/venv/bin/python3`。打包版优先 resource_dir 下 portable-python（含 `_up_/` 路径变体）。
 - **venv 3.14.5 实测**: `import tkinter`（Tk 9.0）/`import turtle` OK；site-packages 无 .pth/sitecustomize，ENABLE_USER_SITE=False。requirements.txt 只有 Pillow/numpy/pyflakes/black——turtle/tkinter 是解释器自带标准库。
-- **Mac dev 复现排除 prelude/pipe 假设**: prelude+piped stdio+`-u` 下 turtle 画线正常 exit=0。`import turtle` 失败的头号嫌疑=**Windows 打包版 portable-python（嵌入式发行版）通常不带 tcl/tk DLL**；次嫌疑=项目根同名 `turtle.py` shadow（`.wrapped.py` 的 `sys.path[0]`=项目根）。
-- **useEngine.ts:256-259 错误友好化会吞真实 traceback**: ModuleNotFoundError 被翻译成"找不到模块 X，请检查 import 语句"——调试时需透传原始 stderr。
-- **产品要求（用户 2026-10-15）**: 代码模式要像正常 IDE——import 后常用标准库（turtle 必学）可用，将来支持 pygame；打包 Python 必须含 tkinter/SDL 等 GUI 依赖。
+- **Mac dev 复现排除 prelude/pipe 假设**: prelude+piped stdio+`-u` 下 turtle 画线正常 exit=0。
+- **⭐ turtle 失败根因（2026-10-15 确认并已修代码）**: 项目瘦身脚本显式删除 tkinter——`scripts/setup-portable-python.sh`（原 :111-112）与 `.github/workflows/release.yml`（原 :126-127）都 `rm -rf .../lib/python3.12/tkinter` 和 `turtledemo`（另删 unittest）。turtle `from tkinter import *`，打包版因此必失败。**上游 python-build-standalone 20260623 install_only_stripped 自带 Tcl/Tk DLL**（release notes 明确未 strip、保留 tkinter ZipFS 数据）——不是嵌入式发行版天然缺 tcl/tk。修复：两处移除对 tkinter/turtledemo/unittest 的删除，保留 test/idlelib/ensurepip。**修复后尚未在打包版实测**。
+- **次要嫌疑**: 项目根同名 `turtle.py` shadow（`.wrapped.py` 的 `sys.path[0]`=项目根）；useEngine.ts:256-259 把 ModuleNotFoundError 翻译成"找不到模块…"吞掉真实 traceback。
+- **产品要求（用户 2026-10-15）**: 代码模式要像正常 IDE——import 后常用标准库（turtle 必学）可用，将来支持 pygame；打包 Python 必须含 tkinter/SDL 等 GUI 依赖。pygame 预置方式=加入 `engine/requirements.txt`（setup 脚本与 CI 共用）。
 
 ### Discovered
 (none)
