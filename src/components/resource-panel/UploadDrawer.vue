@@ -132,24 +132,47 @@ async function handleAction(key: string) {
         } catch (e) {
           console.error('[UploadDrawer] SVG 转 PNG 失败:', e)
         }
-      } else if (props.type === 'sprite' && result.name.endsWith('.bgs')) {
-        // .bgs 文件：用 JSZip 解析，读取 config.json 获取角色名
+      } else if (props.type === 'sprite' && result.name.toLowerCase().endsWith('.bgs')) {
+        // .bgs 文件：解压到项目目录（与精灵库选择流程一致）
+        // 引擎从 assets/sprites/<名字>/ 加载角色，缩略图也依赖磁盘路径
         try {
           const zip = await JSZip.loadAsync(result.file)
           const configEntry = zip.file('config.json')
-          if (configEntry) {
-            const config = JSON.parse(await configEntry.async('text'))
-            const spriteName = config.name || result.name.replace('.bgs', '')
-            resourceStore.addItem({
-              name: spriteName,
-              type: 'sprite',
-              path: URL.createObjectURL(result.file),
-              extra: { isBgs: true },
-            })
-            emit('uploaded', 'sprite', spriteName)
+          if (!configEntry) {
+            console.error('[UploadDrawer] .bgs 缺少 config.json:', result.name)
+            return
           }
+          const config = JSON.parse(await configEntry.async('text'))
+          const spriteName = config.name || result.name.replace(/\.bgs$/i, '')
+          const projectRoot = projectStore.root
+          if (!projectRoot) {
+            console.warn('[UploadDrawer] 项目目录未就绪，无法导入 .bgs 角色')
+            return
+          }
+          // 先把 .bgs 写到项目目录，再用 Rust 命令解压，最后删除临时 .bgs 文件
+          const tmpBgsPath = `${projectRoot}/assets/sprites/${spriteName}.bgs`
+          await invoke('write_binary', {
+            path: tmpBgsPath,
+            data: Array.from(new Uint8Array(await result.file.arrayBuffer())),
+          })
+          try {
+            await invoke('extract_bgs_to_project', {
+              bgsPath: tmpBgsPath,
+              projectRoot,
+              spriteName,
+            })
+          } finally {
+            // 临时 .bgs 必须删除：项目重载时会把 assets/sprites 下所有条目当角色列出
+            await invoke('delete_path', { path: tmpBgsPath }).catch(() => {})
+          }
+          resourceStore.addItem({
+            name: spriteName,
+            type: 'sprite',
+            path: `${projectRoot}/assets/sprites/${spriteName}`,
+          })
+          emit('uploaded', 'sprite', spriteName)
         } catch (e) {
-          console.error('Failed to parse .bgs:', e)
+          console.error('[UploadDrawer] 导入 .bgs 失败:', e)
         }
       } else if (props.type === 'sprite' && isImageFile(result.name)) {
         // 图片文件：复制到项目目录
