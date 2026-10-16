@@ -286,6 +286,16 @@ async function init(): Promise<typeof Monaco> {
         [/'(?!')/, 'string', '@sglString'],
         [/#.*$/, 'comment'],
         [/\b\d+\.?\d*\b/, 'number'],
+        // 函数/方法调用：标识符后跟 '(' 高亮为 function（如 hero.goto(...)、def foo(...)）
+        // 关键字（if/while/for...）和引擎/内置名保持原有配色
+        [/[a-zA-Z_]\w*(?=\s*\()/, {
+          cases: {
+            '@keywords': 'keyword',
+            '@engine': 'type',
+            '@builtin': 'type',
+            '@default': 'function',
+          },
+        }],
         [/[a-zA-Z_]\w*/, {
           cases: {
             '@keywords': 'keyword',
