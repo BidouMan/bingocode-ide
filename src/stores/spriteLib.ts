@@ -48,12 +48,14 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
       const found = new Map<string, SpriteLibItem>()
 
       // 发现分类目录（list_dir 对目录返回以 / 结尾的名字）
+      // 过滤掉 packages/images 等内部结构目录，避免 Windows 上资源拷贝层级不同导致多余分类
+      const INTERNAL_DIRS = new Set(['packages', 'images'])
       try {
         const entries = await invoke<string[]>('list_dir', { path: spritesRoot })
         categories.value = entries
           .filter(e => e.endsWith('/'))
           .map(e => e.replace(/\/+$/, ''))
-          .filter(Boolean)
+          .filter(name => name && !INTERNAL_DIRS.has(name))
       } catch (e) {
         console.error('[SpriteLib] 扫描分类目录失败:', e)
         categories.value = []
