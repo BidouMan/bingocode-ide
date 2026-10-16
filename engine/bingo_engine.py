@@ -1372,28 +1372,37 @@ class Sprite:
         img_w, img_h = self._orig_w, self._orig_h
         center_x, center_y = self._x, self._y
 
-        # bbox 四角相对图片中心的偏移（像素）
-        corners = [
-            (bbox[0] - img_w / 2.0, bbox[1] - img_h / 2.0),  # 左上
-            (bbox[2] - img_w / 2.0, bbox[1] - img_h / 2.0),  # 右上
-            (bbox[2] - img_w / 2.0, bbox[3] - img_h / 2.0),  # 右下
-            (bbox[0] - img_w / 2.0, bbox[3] - img_h / 2.0),  # 左下
-        ]
+        # 内容重心相对图片中心的偏移（与前端 PixiJS pivot 一致）
+        vox = getattr(self, "_visual_offset_x", 0.0)
+        voy = getattr(self, "_visual_offset_y", 0.0)
 
-        # 逐角点应用：水平镜像 → 旋转 → 缩放 → 平移到世界坐标
+        # PixiJS 变换管线：world = position + R(angle) × S(scale) × (local − pivot)
+        # local 相对图片中心（anchor=0.5），scale 含翻转（scaleX=s×flip, scaleY=s）
         rad = math.radians(effective_angle)
         cos_a, sin_a = math.cos(rad), math.sin(rad)
 
+        corners = [
+            (bbox[0], bbox[1]), (bbox[2], bbox[1]),
+            (bbox[2], bbox[3]), (bbox[0], bbox[3]),
+        ]
+
         world_xs, world_ys = [], []
-        for dx, dy in corners:
-            # 水平镜像
-            dx *= flip_x
-            # 旋转（屏幕坐标系 Y 向下，角度顺时针）
-            rx = dx * cos_a - dy * sin_a
-            ry = dx * sin_a + dy * cos_a
-            # 缩放 + 平移
-            world_xs.append(center_x + rx * s)
-            world_ys.append(center_y + ry * s)
+        for bx, by in corners:
+            # local 相对图片中心
+            lx = bx - img_w / 2.0
+            ly = by - img_h / 2.0
+            # 减去 pivot（内容重心）
+            px = lx - vox
+            py = ly - voy
+            # 缩放（含水平翻转）
+            sx = px * s * flip_x
+            sy = py * s
+            # 旋转
+            rx = sx * cos_a - sy * sin_a
+            ry = sx * sin_a + sy * cos_a
+            # 平移到世界坐标
+            world_xs.append(center_x + rx)
+            world_ys.append(center_y + ry)
 
         rect = [min(world_xs), min(world_ys), max(world_xs), max(world_ys)]
 

@@ -13,6 +13,9 @@ export interface SpriteData {
   visible: boolean
   layer: number
   imagePath: string
+  /** 内容重心相对图片中心的偏移（像素），用于修正翻转/旋转锚点 */
+  vox: number
+  voy: number
 }
 
 export interface SayData {
@@ -117,6 +120,8 @@ export const useRenderStore = defineStore('render', () => {
       visible: data.visible ?? true,
       layer: data.layer ?? 0,
       imagePath: data.imagePath ?? '',
+      vox: data.vox ?? 0,
+      voy: data.voy ?? 0,
     })
   }
 

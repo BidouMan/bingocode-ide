@@ -46,6 +46,8 @@ export function useEngine() {
           visible: true,
           layer: cmd.data.layer,
           imagePath: cmd.data.image,
+          vox: cmd.data.vox ?? 0,
+          voy: cmd.data.voy ?? 0,
         })
         break
 
@@ -60,6 +62,8 @@ export function useEngine() {
           visible: cmd.data.visible ?? true,
           layer: cmd.data.layer,
           imagePath: cmd.data.image,
+          vox: cmd.data.vox ?? 0,
+          voy: cmd.data.voy ?? 0,
         })
         // 更新碰撞盒
         if (cmd.data.hitbox) {

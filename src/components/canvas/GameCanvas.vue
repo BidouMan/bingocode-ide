@@ -272,7 +272,11 @@ async function syncSprites() {
       // scale_x/scale_y 已含最终缩放（base×flip），直接使用，不能再乘 scale（会平方）
       const s = spriteData.scaleX ?? spriteData.scale ?? 1
       const sy = spriteData.scaleY ?? spriteData.scale ?? 1
-      const propsKey = `${spriteData.x.toFixed(1)},${spriteData.y.toFixed(1)},${displayAngle.toFixed(4)},${spriteData.visible},${spriteData.layer},${s.toFixed(4)},${sy.toFixed(4)}`
+      // pivot 控制旋转/翻转中心：用内容重心偏移（vox/voy）替代图片几何中心，
+      // 使 fish_2 等非居中素材翻转时不产生视觉跳动
+      const pivotX = spriteData.vox ?? 0
+      const pivotY = spriteData.voy ?? 0
+      const propsKey = `${spriteData.x.toFixed(1)},${spriteData.y.toFixed(1)},${displayAngle.toFixed(4)},${spriteData.visible},${spriteData.layer},${s.toFixed(4)},${sy.toFixed(4)},${pivotX.toFixed(1)},${pivotY.toFixed(1)}`
       if (displayObj._lastPropsKey !== propsKey) {
         displayObj._lastPropsKey = propsKey
         displayObj.x = Math.round(spriteData.x)
@@ -280,6 +284,8 @@ async function syncSprites() {
         displayObj.rotation = (spriteData.angle * Math.PI) / 180
         displayObj.scale.x = s
         displayObj.scale.y = sy
+        displayObj.pivot.x = pivotX
+        displayObj.pivot.y = pivotY
         displayObj.visible = spriteData.visible
         displayObj.zIndex = spriteData.layer
       }
