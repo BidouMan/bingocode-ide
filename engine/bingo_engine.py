@@ -1350,35 +1350,52 @@ class Sprite:
         if not bbox:
             return None
 
-        # 帧级缓存：同一帧内位置不变时复用结果
+        # 帧级缓存：同一帧内位置/旋转不变时复用结果
         if hasattr(self, "_cached_rect_frame") and self._cached_rect_frame == _PERF_STATS["frame_count"]:
-            if (abs(self._cached_rect_x - self._x) < 0.01 and 
+            if (abs(self._cached_rect_x - self._x) < 0.01 and
                 abs(self._cached_rect_y - self._y) < 0.01 and
                 self._cached_rect_scale == self._scale and
-                getattr(self, "_cached_rect_flip", 1) == getattr(self, "_current_scale_x", 1)):
+                getattr(self, "_cached_rect_flip", 1) == getattr(self, "_current_scale_x", 1) and
+                getattr(self, "_cached_rect_angle", 0) == getattr(self, "_angle", 0)):
                 return self._cached_rect
 
-        # 计算缩放系数（含水平镜像）
         s = self._scale / 100.0
         flip_x = getattr(self, "_current_scale_x", 1)  # 1=正常, -1=水平镜像
 
-        # 图片的视觉中心
+        # 有效旋转角度：与 _update_transform 逻辑一致
+        rot_style = getattr(self, "_rotation_style", "all around")
+        if rot_style == "left_right" or rot_style == "none":
+            effective_angle = 0  # 这两种风格不产生实际旋转，镜像由 flip_x 处理
+        else:
+            effective_angle = self._angle
+
         img_w, img_h = self._orig_w, self._orig_h
         center_x, center_y = self._x, self._y
 
-        # 【核心对齐公式】
-        # 以图片中心为基准，计算非透明内容相对于中心点的偏移，再应用缩放
-        # 镜像时 X 方向翻转：bbox 的 left/right 互换
-        if flip_x < 0:
-            content_left = center_x - (bbox[2] - img_w / 2) * s
-            content_right = center_x - (bbox[0] - img_w / 2) * s
-        else:
-            content_left = center_x + (bbox[0] - img_w / 2) * s
-            content_right = center_x + (bbox[2] - img_w / 2) * s
-        content_top = center_y + (bbox[1] - img_h / 2) * s
-        content_bottom = center_y + (bbox[3] - img_h / 2) * s
+        # bbox 四角相对图片中心的偏移（像素）
+        corners = [
+            (bbox[0] - img_w / 2.0, bbox[1] - img_h / 2.0),  # 左上
+            (bbox[2] - img_w / 2.0, bbox[1] - img_h / 2.0),  # 右上
+            (bbox[2] - img_w / 2.0, bbox[3] - img_h / 2.0),  # 右下
+            (bbox[0] - img_w / 2.0, bbox[3] - img_h / 2.0),  # 左下
+        ]
 
-        rect = [content_left, content_top, content_right, content_bottom]
+        # 逐角点应用：水平镜像 → 旋转 → 缩放 → 平移到世界坐标
+        rad = math.radians(effective_angle)
+        cos_a, sin_a = math.cos(rad), math.sin(rad)
+
+        world_xs, world_ys = [], []
+        for dx, dy in corners:
+            # 水平镜像
+            dx *= flip_x
+            # 旋转（屏幕坐标系 Y 向下，角度顺时针）
+            rx = dx * cos_a - dy * sin_a
+            ry = dx * sin_a + dy * cos_a
+            # 缩放 + 平移
+            world_xs.append(center_x + rx * s)
+            world_ys.append(center_y + ry * s)
+
+        rect = [min(world_xs), min(world_ys), max(world_xs), max(world_ys)]
 
         # 更新帧级缓存
         self._cached_rect = rect
@@ -1387,6 +1404,7 @@ class Sprite:
         self._cached_rect_y = self._y
         self._cached_rect_scale = self._scale
         self._cached_rect_flip = flip_x
+        self._cached_rect_angle = effective_angle
 
         return rect
 
