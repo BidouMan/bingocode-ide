@@ -53,6 +53,9 @@ importers:
       pako:
         specifier: ^3.0.0
         version: 3.0.0
+      paper:
+        specifier: ^0.12.18
+        version: 0.12.18
       pinia:
         specifier: ^3.0.4
         version: 3.0.4(typescript@6.0.3)(vue@3.5.38(typescript@6.0.3))
@@ -906,6 +909,10 @@ packages:
   pako@3.0.0:
     resolution: {integrity: sha512-TGPtlCI1pSUSbkOIxOUUHNrBa0muz4mAp32cYUF3RoSa5c73jiQTKOKo22gaa4DxLggQrda/DAdax5QkcHPvYA==}
 
+  paper@0.12.18:
+    resolution: {integrity: sha512-ZSLIEejQTJZuYHhSSqAf4jXOnii0kPhCJGAnYAANtdS72aNwXJ9cP95tZHgq1tnNpvEwgQhggy+4OarviqTCGw==}
+    engines: {node: '>=8.0.0'}
+
   parse-svg-path@0.2.0:
     resolution: {integrity: sha512-Tf7FFIrguPKQwzD4pWnYkR2VOv3raoHeKED80Bm+BYHI3KxC8KsgsGC5+fSMzAGDA6UEk4bHvmi+RsjmL3khpg==}
 
@@ -1708,6 +1715,8 @@ snapshots:
   pako@1.0.11: {}
 
   pako@3.0.0: {}
+
+  paper@0.12.18: {}
 
   parse-svg-path@0.2.0: {}
 
