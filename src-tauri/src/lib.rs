@@ -824,6 +824,21 @@ fn unpack_bingo(bingo_path: String, target_dir: String) -> Result<(), String> {
     std::fs::create_dir_all(target)
         .map_err(|e| format!("创建目标目录失败: {}", e))?;
 
+    // 打开项目 = 用 .bc 内容整体替换工作目录。所有项目共用同一个工作目录
+    // （~/BingoCodeIDE/Projects/default），解包前必须清空旧内容，
+    // 否则上一个项目的角色/地图会残留在磁盘上，串到新打开的项目里
+    // （资源管理器按磁盘目录扫描，保存时 pack_bingo 也会把残留文件一起打包）
+    let entries = std::fs::read_dir(target)
+        .map_err(|e| format!("读取目标目录失败: {}", e))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let _ = std::fs::remove_dir_all(&path);
+        } else {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+
     archive.extract(target)
         .map_err(|e| format!("解压 .bc 文件失败: {}", e))?;
 
