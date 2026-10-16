@@ -245,28 +245,50 @@ pub fn run_script_file(
          \x20       \x20   _stdin_closed = True\n\
          \x20       \x20   raise SystemExit\n\
          _bi.input = _safe_input\n\
+         # turtle 关窗拦截：在 mainloop 启动前注入 WM_DELETE_WINDOW 处理器，\n\
+         # 用户点关闭按钮时直接 _exit(0) 杀掉进程，避免窗口销毁但进程假死\n\
+         def _ide_turtle_close(*_a):\n\
+         \x20   _os._exit(0)\n\
+         def _ide_install_turtle_hook():\n\
+         \x20   try:\n\
+         \x20       \x20   import turtle as _t\n\
+         \x20       \x20   _orig_ml = _t.mainloop\n\
+         \x20       \x20   def _patched_mainloop(*a, **kw):\n\
+         \x20       \x20       \x20   try:\n\
+         \x20       \x20       \x20       \x20   _root = _t.getscreen().getcanvas().winfo_toplevel()\n\
+         \x20       \x20       \x20       \x20   _root.protocol('WM_DELETE_WINDOW', _ide_turtle_close)\n\
+         \x20       \x20       \x20   except Exception:\n\
+         \x20       \x20       \x20       \x20   pass\n\
+         \x20       \x20       \x20   return _orig_ml(*a, **kw)\n\
+         \x20       \x20   _t.mainloop = _patched_mainloop\n\
+         \x20       \x20   _t.done = _patched_mainloop\n\
+         \x20   except Exception:\n\
+         \x20       \x20   pass\n\
+         import builtins as _bi2\n\
+         _orig_import = _bi2.__import__\n\
+         def _hooked_import(name, *args, **kwargs):\n\
+         \x20   _mod = _orig_import(name, *args, **kwargs)\n\
+         \x20   if name == 'turtle':\n\
+         \x20       \x20   _ide_install_turtle_hook()\n\
+         \x20   return _mod\n\
+         _bi2.__import__ = _hooked_import\n\
          {}\n\
-         # IDE 收尾（turtle）：\n\
-         # 1) 窗口关闭按钮 → 立即结束整个 Python 进程，避免窗口已销毁但进程仍在运行导致假死\n\
-         # 2) 用 Tk 的 after() 调度器保活（线程安全、跨平台一致），学生未写 turtle.done() 时窗口不闪退\n\
+         # IDE 收尾：学生未写 turtle.done() 时用 after() 保活窗口，防止闪退\n\
          try:\n\
          \x20   _tm = _sys.modules.get('turtle')\n\
          \x20   _scr_cls = getattr(_tm, 'Turtle', None)\n\
          \x20   _tsc = getattr(_scr_cls, '_screen', None) if _scr_cls else None\n\
          \x20   if _tsc is not None:\n\
          \x20       \x20   _root = _tsc._root\n\
-         \x20       \x20   _root.winfo_exists()\n\
-         \x20       \x20   def _ide_close(*_a):\n\
-         \x20       \x20   \x20   _os._exit(0)\n\
-         \x20       \x20   _root.protocol('WM_DELETE_WINDOW', _ide_close)\n\
+         \x20       \x20   _root.protocol('WM_DELETE_WINDOW', _ide_turtle_close)\n\
          \x20       \x20   def _ide_keepalive():\n\
-         \x20       \x20   \x20   try:\n\
-         \x20       \x20   \x20   \x20   if _root.winfo_exists():\n\
-         \x20       \x20   \x20   \x20   \x20   _root.after(200, _ide_keepalive)\n\
-         \x20       \x20   \x20   \x20   else:\n\
-         \x20       \x20   \x20   \x20   \x20   _os._exit(0)\n\
-         \x20       \x20   \x20   except Exception:\n\
-         \x20       \x20   \x20   \x20   _os._exit(0)\n\
+         \x20       \x20       \x20   try:\n\
+         \x20       \x20       \x20       \x20   if _root.winfo_exists():\n\
+         \x20       \x20       \x20       \x20       \x20   _root.after(200, _ide_keepalive)\n\
+         \x20       \x20       \x20       \x20   else:\n\
+         \x20       \x20       \x20       \x20       \x20   _os._exit(0)\n\
+         \x20       \x20       \x20   except Exception:\n\
+         \x20       \x20       \x20       \x20   _os._exit(0)\n\
          \x20       \x20   _root.after(200, _ide_keepalive)\n\
          \x20       \x20   _tm.mainloop()\n\
          except Exception:\n\
