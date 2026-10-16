@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, computed } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
-import { useSpriteLibStore, CATEGORY_LABELS } from '../../stores/spriteLib'
+import { useSpriteLibStore, SPRITE_CATEGORIES } from '../../stores/spriteLib'
 import { useResourceStore } from '../../stores/resource'
 import { useProjectStore } from '../../stores/project'
 
@@ -32,7 +32,8 @@ function ensureValidCategory() {
 }
 
 function categoryLabel(cat: string): string {
-  return CATEGORY_LABELS[cat] || cat
+  const found = SPRITE_CATEGORIES.find(c => c.dir === cat)
+  return found?.label || cat
 }
 
 // 当前分类 + 搜索过滤后的资源列表

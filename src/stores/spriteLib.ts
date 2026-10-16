@@ -16,11 +16,14 @@ export interface SpriteLibItem {
   category: string
 }
 
-/** 分类目录名 → 显示名；未列出的目录直接显示目录名（新分类自动出现） */
-export const CATEGORY_LABELS: Record<string, string> = {
-  characters: '角色',
-  items: '道具',
-}
+/**
+ * 精灵库分类配置：显式声明每个分类的标签和对应目录，
+ * 不自动扫描目录——新增分类只需在此添加一行 { dir, label }
+ */
+export const SPRITE_CATEGORIES: Array<{ dir: string; label: string }> = [
+  { dir: 'characters', label: '角色' },
+  { dir: 'items', label: '道具' },
+]
 
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']
 
@@ -47,22 +50,11 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
       const spritesRoot = joinPath(engineDir, 'sprites')
       const found = new Map<string, SpriteLibItem>()
 
-      // 发现分类目录（list_dir 对目录返回以 / 结尾的名字）
-      // 过滤掉 packages/images 等内部结构目录，避免 Windows 上资源拷贝层级不同导致多余分类
-      const INTERNAL_DIRS = new Set(['packages', 'images'])
-      try {
-        const entries = await invoke<string[]>('list_dir', { path: spritesRoot })
-        categories.value = entries
-          .filter(e => e.endsWith('/'))
-          .map(e => e.replace(/\/+$/, ''))
-          .filter(name => name && !INTERNAL_DIRS.has(name))
-      } catch (e) {
-        console.error('[SpriteLib] 扫描分类目录失败:', e)
-        categories.value = []
-      }
+      // 分类来自显式配置，不扫描目录（避免误将内部结构目录当作分类）
+      categories.value = SPRITE_CATEGORIES.map(c => c.dir)
 
       // 逐分类扫描 packages/*.bgs 与 images/*
-      for (const cat of categories.value) {
+      for (const { dir: cat } of SPRITE_CATEGORIES) {
         // .bgs 包文件
         const packagesDir = joinPath(spritesRoot, cat, 'packages')
         try {
