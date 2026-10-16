@@ -22,6 +22,14 @@ struct SessionEnd {
     run_id: u32,
 }
 
+/// 过滤 macOS 系统噪音：Input Method Kit (IMK) 框架在 Tk/turtle 子进程
+/// 与输入法服务交互时输出的无害警告，非用户代码错误
+fn is_macos_system_noise(line: &str) -> bool {
+    line.contains("IMKCFRunLoopWakeUpReliable")
+        || line.contains("mach port for IMK")
+        || line.contains("IMKInputController")
+}
+
 #[tauri::command]
 pub fn run_script(
     app: AppHandle,
@@ -107,7 +115,7 @@ pub fn run_script(
             match buf_reader.read_line(&mut line) {
                 Ok(0) => break,
                 Ok(_) => {
-                    if !line.is_empty() {
+                    if !line.is_empty() && !is_macos_system_noise(&line) {
                         let _ = app_stderr.emit_to("main", "engine:stderr", SessionEvent { run_id: rid, data: line.clone() });
                     }
                 }
@@ -358,7 +366,7 @@ pub fn run_script_file(
             match buf_reader.read_line(&mut line) {
                 Ok(0) => break,
                 Ok(_) => {
-                    if !line.is_empty() {
+                    if !line.is_empty() && !is_macos_system_noise(&line) {
                         let _ = app_stderr.emit_to("main", "engine:stderr", SessionEvent { run_id: rid, data: line.clone() });
                     }
                 }
