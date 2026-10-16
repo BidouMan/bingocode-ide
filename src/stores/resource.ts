@@ -29,6 +29,19 @@ export const useResourceStore = defineStore('resource', () => {
     }
   }
 
+  // 生成下一个顺序名：扫描现有的「前缀+数字」名字，返回 最大序号+1（如 角色1、角色2…/地图1、地图2…）
+  function nextSequentialName(type: ResourceItem['type'], prefix: string) {
+    const existingNames = getList(type).value.map(i => i.name)
+    let max = 0
+    for (const n of existingNames) {
+      const m = n.match(new RegExp(`^${prefix}(\\d+)$`))
+      if (m) max = Math.max(max, parseInt(m[1], 10))
+    }
+    let name = `${prefix}${max + 1}`
+    while (existingNames.includes(name)) name = `${prefix}${++max + 1}`
+    return name
+  }
+
   function addItem(item: Omit<ResourceItem, 'id'>) {
     const list = getList(item.type)
     let name = item.name
@@ -95,5 +108,5 @@ export const useResourceStore = defineStore('resource', () => {
     mapDataCache.value.clear()
   }
 
-  return { sprites, maps, sounds, codes, selectedSpriteId, addItem, removeItem, renameItem, clearAll, getItem, clearAllResources, setCachedMapData, getCachedMapData, clearMapDataCache }
+  return { sprites, maps, sounds, codes, selectedSpriteId, addItem, removeItem, renameItem, clearAll, getItem, clearAllResources, setCachedMapData, getCachedMapData, clearMapDataCache, nextSequentialName }
 })

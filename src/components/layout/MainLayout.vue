@@ -3,6 +3,7 @@ import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { open, save, ask } from '@tauri-apps/plugin-dialog'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
+import JSZip from 'jszip'
 import { useEditorStore } from '../../stores/editor'
 import { useResourceStore } from '../../stores/resource'
 import { useProjectStore } from '../../stores/project'
@@ -188,6 +189,13 @@ async function loadAllMapThumbnails() {
   await Promise.all(promises)
 }
 
+// 判断文件名是否为图片扩展名（用于精灵资源重载时区分图片角色与 .bgs 目录）
+const IMAGE_FILE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']
+function isImageFileName(fileName: string): boolean {
+  const lower = fileName.toLowerCase()
+  return IMAGE_FILE_EXTS.some(ext => lower.endsWith(ext))
+}
+
 /**
  * 从工作目录预加载项目资源（代码/地图/精灵/声音）。
  * 供文件菜单"打开项目"成功后调用。
@@ -235,7 +243,9 @@ async function loadProjectResources(root: string) {
       const dirName = entry.replace(/\/$/, '')
       if (!dirName) continue
       const dirPath = `${root}/assets/sprites/${dirName}`
-      resourceStore.addItem({ name: dirName, type: 'sprite', path: dirPath })
+      // 图片角色（单文件）store 名去掉扩展名，与上传时的命名保持一致
+      const name = isImageFileName(dirName) ? dirName.replace(/\.[^.]+$/, '') : dirName
+      resourceStore.addItem({ name, type: 'sprite', path: dirPath })
     }
   } catch { /* assets/sprites 可能不存在 */ }
 
@@ -733,8 +743,7 @@ async function onCreateMap() {
   const projectRoot = projectStore.root
   if (!projectRoot) return
 
-  const mapCount = resourceStore.maps.length
-  const name = `地图${mapCount + 1}`
+  const name = resourceStore.nextSequentialName('map', '地图')
 
   // 创建地图目录
   const mapDir = `${projectRoot}/assets/maps/${name}`
@@ -792,20 +801,40 @@ async function onMapLibImported(bgmUrl: string, name: string) {
   const engineAssetsDir = await invoke<string>('get_engine_assets_dir')
   const bgmPath = `${engineAssetsDir}/maps/packages/${name}.bgm`
 
+  // 默认名字统一为「地图N」顺序名（磁盘目录名与 store 名字保持一致）
+  const mapName = resourceStore.nextSequentialName('map', '地图')
+
   // 解压 .bgm 到项目目录
   try {
     await invoke<string>('extract_bgm_to_project', {
       bgmPath,
       projectRoot,
-      mapName: name,
+      mapName,
     })
   } catch (e) {
     console.error('[MapLib] 解压失败:', e)
     return
   }
 
-  const projectPath = `${projectRoot}/assets/maps/${name}`
-  resourceStore.addItem({ name, type: 'map', path: projectPath })
+  const projectPath = `${projectRoot}/assets/maps/${mapName}`
+  resourceStore.addItem({ name: mapName, type: 'map', path: projectPath })
+
+  // .bgm 内 map.json 的路径嵌入了原地图名（assets/maps/<原名>/...），且 Rust zip 解压
+  // 可能损坏 map.json（layers/tilesets 被清空）——直接用 JSZip 从原始 .bgm 读 map.json，
+  // 重写路径后写入项目目录，避免瓦片集图片路径指向不存在的目录
+  try {
+    const data = await invoke<number[]>('read_binary', { path: bgmPath })
+    const zip = await JSZip.loadAsync(new Uint8Array(data))
+    const entry = zip.file('map.json')
+    if (entry) {
+      const json = await entry.async('text')
+      const fixed = json.replace(/assets\/maps\/[^/]+\//g, `assets/maps/${mapName}/`)
+      await invoke('write_file', { path: `${projectPath}/map.json`, content: fixed })
+    }
+  } catch (e) {
+    console.warn('[MapLib] 修复 map.json 失败:', e)
+  }
+
   editorStore.setResourceTab('map')
   currentPage.value = 0
 }
@@ -835,12 +864,8 @@ async function createImageMapProject(fileName: string, opts: { bytes?: number[];
   if (!projectRoot) return
 
   const baseName = fileName.replace(/\.[^.]+$/, '') || '图片地图'
-  // 重名处理：与普通地图共用命名空间
-  let mapName = baseName
-  let n = 2
-  while (resourceStore.maps.some(m => m.name === mapName)) {
-    mapName = `${baseName}_${n++}`
-  }
+  // 默认名字统一为「地图N」顺序名（磁盘目录名与 store 名字保持一致）
+  const mapName = resourceStore.nextSequentialName('map', '地图')
 
   const mapDir = `${projectRoot}/assets/maps/${mapName}`
   await invoke('create_dir', { path: `${mapDir}/images` })
@@ -1110,22 +1135,33 @@ function startSpriteRename(id: string) {
     const input = document.querySelector('.sprite-rename-input') as HTMLInputElement | null
     if (input) {
       input.focus()
-      input.setSelectionRange(input.value.length, input.value.length)
+      input.select()  // 默认全选，方便一键删除重写
     }
   }))
 }
 
-async function migrateSpriteDir(oldName: string, newName: string) {
-  if (!projectStore.root) return
-  const oldDir = `${projectStore.root}/assets/sprites/${oldName}`
-  const newDir = `${projectStore.root}/assets/sprites/${newName}`
+async function migrateSpriteDir(oldName: string, newName: string): Promise<string | null> {
+  if (!projectStore.root) return null
+  const base = `${projectStore.root}/assets/sprites`
   try {
-    const exists = await invoke<boolean>('path_exists', { path: oldDir })
-    if (!exists) return
-    await invoke('rename_path', { oldPath: oldDir, newPath: newDir })
+    // .bgs 角色：目录形式，整体改名
+    const oldDir = `${base}/${oldName}`
+    if (await invoke<boolean>('path_exists', { path: oldDir })) {
+      await invoke('rename_path', { oldPath: oldDir, newPath: `${base}/${newName}` })
+      return `${base}/${newName}`
+    }
+    // 图片角色：文件形式（保留原扩展名），按扩展名逐个尝试改名
+    for (const ext of ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']) {
+      const oldFile = `${base}/${oldName}${ext}`
+      if (await invoke<boolean>('path_exists', { path: oldFile })) {
+        await invoke('rename_path', { oldPath: oldFile, newPath: `${base}/${newName}${ext}` })
+        return `${base}/${newName}${ext}`
+      }
+    }
   } catch (e) {
-    console.error('[MainLayout] 迁移角色目录失败:', e)
+    console.error('[MainLayout] 迁移角色资源失败:', e)
   }
+  return null
 }
 
 function confirmSpriteRename() {
@@ -1137,11 +1173,13 @@ function confirmSpriteRename() {
   const oldName = item?.name
   if (!item || !oldName || oldName === val) { spriteRenameId.value = null; return }
 
-  // 先执行目录迁移，再改名字
-  migrateSpriteDir(oldName, val).then(() => {
+  // 先执行磁盘迁移，再改名字
+  migrateSpriteDir(oldName, val).then((newPath) => {
     resourceStore.renameItem(spriteRenameId.value!, val)
-    // 更新 item.path
-    if (projectStore.root) {
+    // 优先用迁移返回的真实路径（图片角色带扩展名）
+    if (newPath) {
+      item.path = newPath
+    } else if (projectStore.root) {
       item.path = `${projectStore.root}/assets/sprites/${val}`
     }
     spriteRenameId.value = null
@@ -1176,7 +1214,7 @@ function startMapRename(id: string) {
     const input = document.querySelector('.map-rename-input') as HTMLInputElement | null
     if (input) {
       input.focus()
-      input.setSelectionRange(input.value.length, input.value.length)
+      input.select()  // 默认全选，方便一键删除重写
     }
   }))
 }

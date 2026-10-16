@@ -116,16 +116,17 @@ async function handleAction(key: string) {
         // SVG 角色：引擎（Pillow）不支持 SVG，导入时栅格化为 PNG 再入库
         try {
           const pngBlob = await svgToPngBlob(result.file)
-          const baseName = result.name.replace(/\.svg$/i, '')
           const projectRoot = projectStore.root
           if (projectRoot) {
-            const projectPath = `${projectRoot}/assets/sprites/${baseName}.png`
+            // 默认名字统一为「角色N」顺序名，磁盘文件名与 store 名字保持一致（引擎按名字查找）
+            const spriteName = resourceStore.nextSequentialName('sprite', '角色')
+            const projectPath = `${projectRoot}/assets/sprites/${spriteName}.png`
             await invoke('write_binary', {
               path: projectPath,
               data: Array.from(new Uint8Array(await pngBlob.arrayBuffer())),
             })
-            resourceStore.addItem({ name: baseName, type: 'sprite', path: projectPath })
-            emit('uploaded', 'sprite', baseName)
+            resourceStore.addItem({ name: spriteName, type: 'sprite', path: projectPath })
+            emit('uploaded', 'sprite', spriteName)
           } else {
             console.warn('[UploadDrawer] 项目目录未就绪，无法导入 SVG 角色')
           }
@@ -142,8 +143,8 @@ async function handleAction(key: string) {
             console.error('[UploadDrawer] .bgs 缺少 config.json:', result.name)
             return
           }
-          const config = JSON.parse(await configEntry.async('text'))
-          const spriteName = config.name || result.name.replace(/\.bgs$/i, '')
+          // 默认名字统一为「角色N」顺序名（磁盘目录名与 store 名字保持一致）
+          const spriteName = resourceStore.nextSequentialName('sprite', '角色')
           const projectRoot = projectStore.root
           if (!projectRoot) {
             console.warn('[UploadDrawer] 项目目录未就绪，无法导入 .bgs 角色')
@@ -175,31 +176,33 @@ async function handleAction(key: string) {
           console.error('[UploadDrawer] 导入 .bgs 失败:', e)
         }
       } else if (props.type === 'sprite' && isImageFile(result.name)) {
-        // 图片文件：复制到项目目录
+        // 图片文件：复制到项目目录（磁盘文件名与 store 名字一致，保留原扩展名供引擎查找）
         const projectRoot = projectStore.root
+        const spriteName = resourceStore.nextSequentialName('sprite', '角色')
+        const ext = result.name.match(/\.[^.]+$/)?.[0] || '.png'
         if (projectRoot) {
           try {
             const arrayBuffer = await result.file.arrayBuffer()
             const uint8Array = new Uint8Array(arrayBuffer)
-            const relativePath = `assets/sprites/${result.name}`
+            const relativePath = `assets/sprites/${spriteName}${ext}`
             // write_binary 返回 ()，路径需自行拼接
             const projectPath = `${projectRoot}/${relativePath}`
             await invoke('write_binary', {
               path: projectPath,
               data: Array.from(uint8Array),
             })
-            resourceStore.addItem({ name: result.name.replace(/\.[^.]+$/, ''), type: 'sprite', path: projectPath })
-            emit('uploaded', 'sprite', result.name)
+            resourceStore.addItem({ name: spriteName, type: 'sprite', path: projectPath })
+            emit('uploaded', 'sprite', spriteName)
           } catch (e) {
             console.error('[UploadDrawer] 复制图片文件失败:', e)
             const objectUrl = URL.createObjectURL(result.file)
-            resourceStore.addItem({ name: result.name, type: 'sprite', path: objectUrl })
-            emit('uploaded', 'sprite', result.name)
+            resourceStore.addItem({ name: spriteName, type: 'sprite', path: objectUrl })
+            emit('uploaded', 'sprite', spriteName)
           }
         } else {
           const objectUrl = URL.createObjectURL(result.file)
-          resourceStore.addItem({ name: result.name, type: 'sprite', path: objectUrl })
-          emit('uploaded', 'sprite', result.name)
+          resourceStore.addItem({ name: spriteName, type: 'sprite', path: objectUrl })
+          emit('uploaded', 'sprite', spriteName)
         }
       } else if (props.type === 'map' && (isImageFile(result.name) || result.name.toLowerCase().endsWith('.svg'))) {
         // 图片文件（含 SVG）：读取字节交给主布局创建图像模式地图（图片直接作为地图使用）

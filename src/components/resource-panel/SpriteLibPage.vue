@@ -93,30 +93,32 @@ async function selectSprite(item: { name: string; filePath: string; type: string
   if (!projectRoot) return
 
   if (item.type === 'bgs') {
-    // .bgs 包文件：解压到项目目录
+    // .bgs 包文件：解压到项目目录（默认名字统一为「角色N」顺序名，磁盘目录名与 store 名字一致）
+    const spriteName = resourceStore.nextSequentialName('sprite', '角色')
     try {
       await invoke<string>('extract_bgs_to_project', {
         bgsPath: item.filePath,
         projectRoot,
-        spriteName: item.name,
+        spriteName,
       })
     } catch (e) {
       console.error('[SpriteLib] 解压 .bgs 失败:', e)
       return
     }
 
-    const projectPath = `${projectRoot}/assets/sprites/${item.name}`
+    const projectPath = `${projectRoot}/assets/sprites/${spriteName}`
     const id = resourceStore.addItem({
-      name: item.name,
+      name: spriteName,
       type: 'sprite',
       path: projectPath,
     })
-    emit('imported', id as string, item.name, item.filePath)
+    emit('imported', id as string, spriteName, item.filePath)
   } else {
-    // 常规图片文件：复制到项目目录
+    // 常规图片文件：复制到项目目录（磁盘文件名与 store 名字一致，保留原扩展名供引擎查找）
+    const spriteName = resourceStore.nextSequentialName('sprite', '角色')
     try {
       const ext = item.filePath.split('.').pop() || 'png'
-      const relativePath = `assets/sprites/${item.name}.${ext}`
+      const relativePath = `assets/sprites/${spriteName}.${ext}`
       const projectPath = await invoke<string>('copy_file_to_project', {
         src: item.filePath,
         projectRoot,
@@ -124,11 +126,11 @@ async function selectSprite(item: { name: string; filePath: string; type: string
       })
 
       const id = resourceStore.addItem({
-        name: item.name,
+        name: spriteName,
         type: 'sprite',
         path: projectPath,
       })
-      emit('imported', id as string, item.name, item.filePath)
+      emit('imported', id as string, spriteName, item.filePath)
     } catch (e) {
       console.error('[SpriteLib] 复制图片失败:', e)
     }

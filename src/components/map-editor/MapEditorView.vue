@@ -244,8 +244,8 @@ async function onNewMap() {
     await saveMapToProject()
   }
 
-  const mapCount = resourceStore.maps.length
-  const name = `地图${mapCount + 1}`
+  // 默认名字统一为「地图N」顺序名
+  const name = resourceStore.nextSequentialName('map', '地图')
   const id = resourceStore.addItem({ name, type: 'map', path: '' })
   const item = resourceStore.maps.find(m => m.id === id)
   if (item && projectStore.root) item.path = mapDirPath(name)
@@ -270,8 +270,8 @@ async function onImportMap() {
         const saveData = JSON.parse(await mapJsonEntry.async('text'))
         const mapData = deserializeMap(saveData)
 
-        // 导入到项目目录，使用文件名作为资源名
-        const name = file.name.replace(/\.bgm$/i, '')
+        // 导入到项目目录，默认名字统一为「地图N」顺序名
+        const name = resourceStore.nextSequentialName('map', '地图')
         // 获取原始地图名，用于更新瓦片集图片路径
         const originalName = saveData.name || mapData.name
         const id = resourceStore.addItem({ name, type: 'map', path: '' })
