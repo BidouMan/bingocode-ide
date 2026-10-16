@@ -204,9 +204,12 @@ export function useEngine() {
       }
       const data = event.payload.data
 
-      // 代码模式：直接写入终端
+      // 代码模式：直接写入终端，有输出时自动弹出控制台
       if (isCodeMode) {
         terminalStore.handleCodeStdout(data)
+        if (data.trim()) {
+          terminalStore.consoleVisible = true
+        }
         return
       }
 

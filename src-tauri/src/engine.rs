@@ -229,7 +229,7 @@ pub fn run_script_file(
          \x20   global _stdin_closed\n\
          \x20   if _stdin_closed:\n\
          \x20       \x20   raise SystemExit\n\
-         \x20   _write_ref(str(prompt))\n\
+         \x20   _write_ref(str(prompt) + '__BINGO_WAITING_INPUT__\\n')\n\
          \x20   _flush_ref()\n\
          \x20   try:\n\
          \x20       \x20   line = _input_ref.readline()\n\

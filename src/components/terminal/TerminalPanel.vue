@@ -163,7 +163,10 @@ function createTerminal() {
   terminal.open(containerRef.value)
   terminalStore.bindTerminal(terminal)
 
-  terminalStore.terminalMode = 'shell'
+  // 引擎运行中不重置为 shell 模式，否则 zsh 提示符会泄漏到 Python 控制台
+  if (!editorStore.isRunning) {
+    terminalStore.terminalMode = 'shell'
+  }
   fitTerminal()
   setTimeout(fitTerminal, 100)
 
@@ -213,6 +216,7 @@ function createTerminal() {
         terminal?.write('\r\n')
         const line = inputBuffer.value
         inputBuffer.value = ''
+        terminalStore.consumeInput()
         invoke('send_stdin_data', { data: line + '\n' }).catch(() => {})
         terminal?.scrollToBottom()
       } else if (data === '\x7f' || data === '\b') {
@@ -389,6 +393,11 @@ onMounted(() => {
   window.addEventListener('resize', onResize)
   resizeObserver = new ResizeObserver(onResize)
   if (containerRef.value) resizeObserver.observe(containerRef.value)
+  // 模式切换后新组件挂载时 consoleVisible 可能已为 true，watch 不会触发，需要主动创建
+  if (props.visible) {
+    collapsed.value = false
+    nextTick(() => createTerminal())
+  }
 })
 
 onBeforeUnmount(() => {
@@ -396,7 +405,12 @@ onBeforeUnmount(() => {
   if (containerRef.value) {
     containerRef.value.removeEventListener('keydown', onTerminalKeydown, true)
   }
-  terminal?.dispose()
+  if (terminal) {
+    terminal.dispose()
+    terminal = null
+  }
+  // 清理 store 中的终端引用，否则新组件挂载后写入会操作已销毁的终端
+  terminalStore.destroy()
   document.removeEventListener('mousemove', onDragMove)
   document.removeEventListener('mouseup', onDragEnd)
   if (highlightTimer) clearTimeout(highlightTimer)

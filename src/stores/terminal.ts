@@ -37,8 +37,13 @@ export const useTerminalStore = defineStore('terminal', () => {
     const text = pendingWrite
     pendingWrite = ''
 
+    // input() 等待输入标记兜底：经 pendingWrite 缓冲的数据也要剥掉标记
+    const cleaned = text.includes('__BINGO_WAITING_INPUT__')
+      ? text.replace('__BINGO_WAITING_INPUT__', '').replace(/\r?\n$/, '')
+      : text
+
     // 过滤游戏引擎 JSON 指令
-    const filtered = filterEngineJson(text)
+    const filtered = filterEngineJson(cleaned)
     if (!filtered) return
 
     // 行数限流：高频输出时只保留最新行，避免 xterm 卡死
@@ -131,6 +136,20 @@ export const useTerminalStore = defineStore('terminal', () => {
   // 代码模式：直接写入，不做 RAF 缓冲，保证实时性
   // input() 的 prompt 不带 \n，延迟会导致用户看到卡顿
   function handleCodeStdout(data: string) {
+    // input() 等待输入标记：剥掉标记和换行，只显示 prompt，光标停在同一行
+    if (data.includes('__BINGO_WAITING_INPUT__')) {
+      const prompt = data.replace('__BINGO_WAITING_INPUT__', '').replace(/\r?\n$/, '')
+      waitingForInput.value = true
+      if (!terminalInstance) {
+        pendingWrite += prompt
+        return
+      }
+      if (prompt) {
+        terminalInstance.write(prompt)
+      }
+      terminalInstance.scrollToBottom()
+      return
+    }
     if (!terminalInstance) {
       pendingWrite += data
       if (pendingWrite.length > 65536) {
