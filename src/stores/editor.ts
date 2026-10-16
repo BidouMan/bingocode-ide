@@ -103,6 +103,23 @@ function saveZoom(zoom: number) {
   } catch {}
 }
 
+// ─── 专注模式（课堂防偷懒开关，仅老师知道入口）───
+// 开 = 禁用代码编辑器复制/剪切/粘贴；关 = 正常可用。默认开（新装即禁用）
+function loadFocusMode(): boolean {
+  try {
+    const saved = localStorage.getItem('bingo-ide-focus-mode')
+    return saved === null ? true : saved === '1'
+  } catch {
+    return true
+  }
+}
+
+function saveFocusMode(on: boolean) {
+  try {
+    localStorage.setItem('bingo-ide-focus-mode', on ? '1' : '0')
+  } catch {}
+}
+
 export const useEditorStore = defineStore('editor', () => {
   // ─── 模式 ───
   const isGameMode = ref(loadSavedMode())
@@ -110,6 +127,7 @@ export const useEditorStore = defineStore('editor', () => {
   const isRunning = ref(false)
   const resourceTab = ref<ResourceTab>('sprite')
   const renderMode = ref<RenderMode>('smooth')
+  const focusMode = ref(loadFocusMode())
   const savedZoom = loadSavedZoom()
   const editorFontSize = ref(Math.round(16 * savedZoom / 100))
 
@@ -298,6 +316,11 @@ export const useEditorStore = defineStore('editor', () => {
     renderMode.value = mode
   }
 
+  function setFocusMode(on: boolean) {
+    focusMode.value = on
+    saveFocusMode(on)
+  }
+
   // ─── 编辑器字体大小 ───
   const editorFontZoom = ref(savedZoom) // 独立的缩放百分比
 
@@ -325,6 +348,7 @@ export const useEditorStore = defineStore('editor', () => {
     isRunning,
     resourceTab,
     renderMode,
+    focusMode,
     editorFontSize,
     editorFontZoom,
     gameTabs,
@@ -339,6 +363,7 @@ export const useEditorStore = defineStore('editor', () => {
     setActiveEditorMode,
     setResourceTab,
     setRenderMode,
+    setFocusMode,
     createTab,
     closeTab,
     closeOtherTabs,

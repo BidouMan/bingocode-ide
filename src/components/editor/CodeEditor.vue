@@ -36,6 +36,7 @@ function doUndo() { closeCtxMenu(); editor?.trigger('contextMenu', 'undo') }
 function doRedo() { closeCtxMenu(); editor?.trigger('contextMenu', 'redo') }
 function doCut() {
   closeCtxMenu()
+  if (editorStore.focusMode) return
   if (!editor || !monaco) return
   const selection = editor.getSelection()
   if (!selection || selection.isEmpty()) return
@@ -52,6 +53,7 @@ function doCut() {
 }
 function doCopy() {
   closeCtxMenu()
+  if (editorStore.focusMode) return
   if (!editor) return
   const selection = editor.getSelection()
   if (!selection || selection.isEmpty()) return
@@ -62,6 +64,7 @@ function doCopy() {
 }
 function doPaste() {
   closeCtxMenu()
+  if (editorStore.focusMode) return
   navigator.clipboard.readText().then(text => {
     if (text && editor) {
       const selection = editor.getSelection()
@@ -368,6 +371,29 @@ async function initMonaco() {
     }
   }
   window.addEventListener('contextmenu', ctxMenuHandler, true)
+
+  // ─── 专注模式：拦截剪贴板快捷键（Cmd/Ctrl + C/X/V）───
+  // Monaco onKeyDown 里 preventDefault + stop 可阻止内置 keybinding 分发
+  editor.onKeyDown((e: any) => {
+    if (!editorStore.focusMode) return
+    if (!(e.ctrlKey || e.metaKey)) return
+    const key = (e.code || '').replace(/^Key/, '').toUpperCase()
+    if (key === 'C' || key === 'X' || key === 'V') {
+      e.preventDefault()
+      e.stop()
+    }
+  })
+
+  // DOM 层兜底：即使快捷键漏过（如原生菜单触发），copy/cut/paste 事件也直接拦截
+  // drop 拦截防止从外部窗口拖拽文本进编辑器变相粘贴
+  const editorDomNode = editor.getDomNode()
+  const blockClipboard = (ev: Event) => {
+    if (editorStore.focusMode) ev.preventDefault()
+  }
+  editorDomNode.addEventListener('copy', blockClipboard)
+  editorDomNode.addEventListener('cut', blockClipboard)
+  editorDomNode.addEventListener('paste', blockClipboard)
+  editorDomNode.addEventListener('drop', blockClipboard)
 
   // IME 输入时固定 textarea 宽度，防止拼音输入导致布局抖动
   if (!document.getElementById('ime-stable-style')) {
@@ -694,13 +720,13 @@ onBeforeUnmount(() => {
         <span>重做</span><span class="editor-ctx-shortcut">{{ modKey }}+Shift+Z</span>
       </div>
       <div class="editor-ctx-divider" />
-      <div class="editor-ctx-item" @click="doCut">
+      <div class="editor-ctx-item editor-ctx-clip" :class="{ 'editor-ctx-disabled': editorStore.focusMode }" @click="doCut">
         <span>剪切</span><span class="editor-ctx-shortcut">{{ modKey }}+X</span>
       </div>
-      <div class="editor-ctx-item" @click="doCopy">
+      <div class="editor-ctx-item editor-ctx-clip" :class="{ 'editor-ctx-disabled': editorStore.focusMode }" @click="doCopy">
         <span>复制</span><span class="editor-ctx-shortcut">{{ modKey }}+C</span>
       </div>
-      <div class="editor-ctx-item" @click="doPaste">
+      <div class="editor-ctx-item editor-ctx-clip" :class="{ 'editor-ctx-disabled': editorStore.focusMode }" @click="doPaste">
         <span>粘贴</span><span class="editor-ctx-shortcut">{{ modKey }}+V</span>
       </div>
       <div class="editor-ctx-divider" />
@@ -776,6 +802,13 @@ onBeforeUnmount(() => {
 .editor-ctx-item:hover {
   background: #24283b;
   color: #c0caf5;
+}
+.editor-ctx-disabled {
+  opacity: 0.35;
+}
+.editor-ctx-disabled:hover {
+  background: transparent;
+  color: #a9b1d6;
 }
 .editor-ctx-shortcut {
   font-size: 11px;

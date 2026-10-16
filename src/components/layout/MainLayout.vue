@@ -1790,6 +1790,12 @@ function spriteDisplayName(name: string) {
             <div v-show="settingsSubmenu === 'engine'" class="settings-submenu">
               <button class="file-menu-item settings-item-disabled">Python 路径</button>
               <button class="file-menu-item settings-item-disabled">引擎参数</button>
+              <div class="file-menu-item settings-menu-item" @click="editorStore.setFocusMode(!editorStore.focusMode)">
+                <span>专注模式</span>
+                <span class="settings-toggle" :class="{ 'settings-toggle-on': editorStore.focusMode }">
+                  <span class="settings-toggle-knob"></span>
+                </span>
+              </div>
             </div>
           </div>
           <!-- 分隔线 -->
@@ -2394,7 +2400,7 @@ function spriteDisplayName(name: string) {
   position: absolute;
   left: 100%;
   top: -4px;
-  width: 128px;
+  width: 152px;
   background: var(--bg-root);
   border-radius: 6px;
   padding: 4px 0;
@@ -2402,6 +2408,32 @@ function spriteDisplayName(name: string) {
 }
 .settings-item-active {
   color: var(--accent);
+}
+/* 引擎设置内的小号 toggle 开关（子菜单仅 128px 宽） */
+.settings-toggle {
+  position: relative;
+  width: 28px;
+  height: 16px;
+  border-radius: 8px;
+  background: rgb(72, 76, 86);
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+.settings-toggle-on {
+  background: var(--accent);
+}
+.settings-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: white;
+  transition: transform 0.2s;
+}
+.settings-toggle-on .settings-toggle-knob {
+  transform: translateX(12px);
 }
 .settings-item-disabled {
   color: rgb(100, 100, 100);
