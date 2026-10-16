@@ -4,6 +4,24 @@ BingoCode IDE 的版本更新记录，最新在前。
 
 > 格式：每次打包发版在对应版本下按 **新增 / 修复 / 优化 / 资源** 分类记录。未发版的 master 改动暂列于「未发布」小节，发版时移入正式版本号并标注日期。
 
+## v0.6.2（2026-10-16）
+
+### 修复
+
+- 代码模式 `input()` 完全不工作：控制台不弹出、prompt 不显示、输入无响应；改为通过 `__BINGO_WAITING_INPUT__` 标记让 prompt 停在光标同一行，控制台有输出自动弹出
+- 游戏模式程序运行结束（无循环）后运行按钮不复位：主循环在所有 generator 结束且无活跃行为时自动退出，进程正常结束触发 `engine:finished`
+- 模式切换运行状态串台：切换游戏/代码模式时自动停止运行中的程序，两套模式运行按钮状态完全隔离
+- `input()` 阻塞时点击停止按钮无效：先关闭 stdin 管道再发 SIGTERM，Python `readline()` 返回空串主动退出
+- 运行按钮连点竞态：停止后立即点击运行可能导致新进程被旧 `stop_script` 误杀；加 400ms 冷却时间
+- turtle 点击关闭窗口后进程假死：改为在 `import turtle` 时拦截并 monkey-patch `mainloop`，关闭协议在事件循环启动前注册
+- Windows 精灵库多出 `packages` 分类标签：分类改为显式配置（`SPRITE_CATEGORIES`），不再自动扫描目录
+- 角色旋转 180° 时碰撞框穿帮：`_get_hitbox_rect` 增加旋转变换（bbox 四角绕中心镜像→旋转→缩放→平移取 AABB），同时修复碰撞框显示和实际碰撞检测
+- macOS 控制台红字 `IMKCFRunLoopWakeUpReliable` 系统噪音：stderr 读取线程过滤 IMK 框架无害警告
+
+### 优化
+
+- 精灵库分类从自动扫描目录改为显式配置，新增分类只需在 `SPRITE_CATEGORIES` 中加一行 `{ dir, label }`
+
 ## v0.6.1（2026-10-16）
 
 ### 新增
