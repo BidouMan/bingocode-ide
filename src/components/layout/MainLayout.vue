@@ -2903,6 +2903,14 @@ function spriteDisplayName(name: string) {
   outline: none;
   caret-color: white;
 }
+/* 重命名输入框选中高亮：主题 accent 绿背景 + 亮白文字，与主题风格统一 */
+.sprite-rename-input::selection,
+.map-rename-input::selection,
+.code-rename-input::selection,
+.tab-rename-input::selection {
+  background: var(--accent);
+  color: #e8eaed;
+}
 .resource-card-del {
   position: absolute;
   top: 2px;
