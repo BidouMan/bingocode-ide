@@ -140,8 +140,12 @@ pub fn stop_script(
 }
 
 fn stop_script_process(process: &mut Option<RunningProcess>) -> Result<(), String> {
-    if let Some(proc) = process.take() {
+    if let Some(mut proc) = process.take() {
         let pid = proc.pid;
+
+        // 先关闭 stdin：Python 阻塞在 input()/readline() 时 SIGTERM 无法中断，
+        // 关闭管道后 readline() 返回空串，_safe_input 会主动 raise SystemExit
+        drop(proc.stdin.take());
 
         #[cfg(unix)]
         unsafe {

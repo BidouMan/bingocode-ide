@@ -2609,6 +2609,18 @@ def start_game(project_dir=None, target_file=None):
                         print(f"[错误] Generator 错误: {e}")
                         _generators.remove(gen)
 
+                # 所有 generator 结束且无活跃行为时自动退出主循环，
+                # 让 Python 进程正常结束，IDE 才能收到 engine:finished 复位运行按钮
+                if not _generators and not _SAY_TIMERS:
+                    _has_active = any(
+                        (s._speed > 0) or
+                        (getattr(s, "animation_state", None) and s.animation_state.get("is_playing", False)) or
+                        bool(s._on_hit_callbacks)
+                        for s in _SPRITES.values() if not s._is_deleted
+                    )
+                    if not _has_active:
+                        return
+
                 # say 计时器：到期自动隐藏气泡（与旧 run() 循环同款逻辑，
                 # start_game 主循环原先漏了这段，导致 say(text, 秒数) 永不消失）
                 for sid in list(_SAY_TIMERS.keys()):
