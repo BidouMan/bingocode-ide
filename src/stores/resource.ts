@@ -88,6 +88,17 @@ export const useResourceStore = defineStore('resource', () => {
     }
   }
 
+  /** 更新资源磁盘路径（如图片角色首次追加帧后转正为目录角色） */
+  function updateItemPath(id: string, path: string) {
+    for (const list of [sprites, maps, sounds, codes]) {
+      const item = list.value.find(i => i.id === id)
+      if (item) {
+        item.path = path
+        return
+      }
+    }
+  }
+
   function clearAll(type: ResourceItem['type']) {
     const list = getList(type)
     list.value = []
@@ -118,5 +129,5 @@ export const useResourceStore = defineStore('resource', () => {
     mapDataCache.value.clear()
   }
 
-  return { sprites, maps, sounds, codes, selectedSpriteId, spriteThumbVersions, bumpSpriteThumb, addItem, removeItem, renameItem, clearAll, getItem, clearAllResources, setCachedMapData, getCachedMapData, clearMapDataCache, nextSequentialName }
+  return { sprites, maps, sounds, codes, selectedSpriteId, spriteThumbVersions, bumpSpriteThumb, addItem, removeItem, renameItem, updateItemPath, clearAll, getItem, clearAllResources, setCachedMapData, getCachedMapData, clearMapDataCache, nextSequentialName }
 })

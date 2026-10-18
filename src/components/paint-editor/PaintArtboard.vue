@@ -8,8 +8,9 @@ const store = usePaintStore()
 const stageRef = ref<HTMLDivElement>()
 const bitmapCanvas = ref<HTMLCanvasElement>()
 
-// 位图绘制引擎（工具状态机/撤销重做/光标），canvas 就绪后自动绑定指针事件
-const { undo, redo, clear, getCanvas } = useBitmapCanvas(bitmapCanvas)
+// 位图绘制引擎（工具状态机/撤销重做/光标/多帧像素），canvas 就绪后自动绑定指针事件
+const { undo, redo, clear, cropToContent, addFrame, removeFrame, loadFrames, getFrameCanvases, getFrameNames, getCanvas } =
+  useBitmapCanvas(bitmapCanvas)
 
 // ─── 缩放/平移（与 SpriteEditorView 同款交互：滚轮以光标为锚缩放、中键拖拽平移、双击复位）───
 const isPanning = ref(false)
@@ -85,8 +86,8 @@ const artboardStyle = computed(() => {
   return style
 })
 
-// 暴露给父页面：撤销/重做/清空按钮与保存管线
-defineExpose({ undo, redo, clear, getCanvas })
+// 暴露给父页面：撤销/重做/清空/裁切/多帧操作与保存管线
+defineExpose({ undo, redo, clear, cropToContent, addFrame, removeFrame, loadFrames, getFrameCanvases, getFrameNames, getCanvas })
 </script>
 
 <template>

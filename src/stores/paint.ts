@@ -4,15 +4,17 @@ import { defineStore } from 'pinia'
 export type PaintTool = 'select' | 'reshape' | 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse' | 'text' | 'eyedropper'
 export type PaintMode = 'vector' | 'bitmap'
 
-export const ARTBOARD_PRESETS = [
-  { label: '96 × 96', w: 96, h: 96 },
-  { label: '240 × 180', w: 240, h: 180 },
-  { label: '480 × 360', w: 480, h: 360 },
-  { label: '640 × 480', w: 640, h: 480 },
-] as const
+/** 绘制帧的 UI 元数据（像素数据在引擎闭包的离屏画布中，不进 store） */
+export interface PaintFrameMeta {
+  id: string
+  /** 帧缩略图 dataURL，由引擎在切换/落盘时更新 */
+  thumb?: string
+}
 
-/** 默认画板尺寸：Scratch 造型区同款 480×360 */
-export const DEFAULT_ARTBOARD = { w: 480, h: 360 }
+/** 画板尺寸上限（手动输入约束） */
+export const ARTBOARD_MAX = 2048
+/** 默认画板尺寸：与游戏窗口一致 640×480 */
+export const DEFAULT_ARTBOARD = { w: 640, h: 480 }
 
 /**
  * 绘制编辑器 UI 状态。
@@ -54,6 +56,22 @@ export const usePaintStore = defineStore('paint', () => {
   const dirty = ref(false)
   /** 矢量模式启用开关：Stage 2 开放前切换按钮禁用 */
   const vectorEnabled = ref(false)
+  /** 追加模式（为现有角色画新帧）：画板尺寸锁定为目标角色帧尺寸，禁止修改 */
+  const sizeForced = ref(false)
+
+  /** 序列帧元数据（像素在绘制引擎闭包；下标与引擎离屏画布数组对齐） */
+  const frames = ref<PaintFrameMeta[]>([{ id: makeFrameId() }])
+  const activeFrameIndex = ref(0)
+
+  function makeFrameId(): string {
+    return `f${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+  }
+
+  function selectFrame(index: number) {
+    if (index >= 0 && index < frames.value.length) {
+      activeFrameIndex.value = index
+    }
+  }
 
   function setTool(tool: PaintTool) {
     activeTool.value = tool
@@ -93,6 +111,9 @@ export const usePaintStore = defineStore('paint', () => {
     canUndo.value = false
     canRedo.value = false
     dirty.value = false
+    sizeForced.value = false
+    frames.value = [{ id: makeFrameId() }]
+    activeFrameIndex.value = 0
   }
 
   return {
@@ -114,6 +135,11 @@ export const usePaintStore = defineStore('paint', () => {
     canRedo,
     dirty,
     vectorEnabled,
+    sizeForced,
+    frames,
+    activeFrameIndex,
+    selectFrame,
+    makeFrameId,
     setTool,
     setMode,
     setZoom,

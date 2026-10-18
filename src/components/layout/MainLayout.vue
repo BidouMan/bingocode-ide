@@ -23,6 +23,8 @@ import MapLibraryPage from '../resource-panel/MapLibraryPage.vue'
 import MapResourceLibPage from '../resource-panel/MapResourceLibPage.vue'
 import SoundLibPage from '../resource-panel/SoundLibPage.vue'
 import PaintEditorPage from '../paint-editor/PaintEditorPage.vue'
+import FramePickerPage from '../resource-panel/FramePickerPage.vue'
+import { appendFramesToSprite } from '../../composables/appendSpriteFrames'
 import HelpPanel from '../help/HelpPanel.vue'
 import PythonHelpPanel from '../help/PythonHelpPanel.vue'
 import AiChatPanel from '../help/AiChatPanel.vue'
@@ -80,7 +82,7 @@ const loadingProgress = computed(() => {
   return Math.floor((renderStore.textureLoaded / renderStore.textureTotal) * 100)
 })
 
-// change_page: 0=编辑器, 1=全屏, 2=地图库, 3=角色库, 4=素材库, 5=声音库, 6=角色绘制器
+// change_page: 0=编辑器, 1=全屏, 2=地图库, 3=角色库, 4=素材库, 5=声音库, 6=角色绘制器, 7=造型选帧库
 const currentPage = ref(0)
 // 库页面用 v-show 常驻挂载，key 递增强制每次打开时重建组件：
 // 重置默认 tab/分类，并让 onMounted 的目录重扫真正生效
@@ -88,11 +90,20 @@ const mapLibPageKey = ref(0)
 const mapResLibPageKey = ref(0)
 const spriteLibPageKey = ref(0)
 const paintPageKey = ref(0)
+const framePickerKey = ref(0)
+/** 绘制页编辑目标（造型抽屉/双击帧时非空；资源抽屉「绘制角色」时为 null = 新建） */
+const paintTarget = ref<{ id: string; name: string; path: string } | null>(null)
+/** 绘制页打开方式：edit = 双击帧（选中该帧）；newFrame = 抽屉（自动新建空白帧） */
+const paintOpenMode = ref<'edit' | 'newFrame'>('newFrame')
+const paintInitialFrameIndex = ref(0)
+/** 角色编辑器实例：追加帧后强制重载帧列表 */
+const spriteEditorRef = ref<{ reload: () => Promise<void> } | null>(null)
 watch(currentPage, (page) => {
   if (page === 2) mapLibPageKey.value++
   else if (page === 4) mapResLibPageKey.value++
   else if (page === 3) spriteLibPageKey.value++
   else if (page === 6) paintPageKey.value++
+  else if (page === 7) framePickerKey.value++
 })
 // 控制台面板可见性：状态在 terminal store 中（引擎有输出自动弹出、手动停止收回）
 const consoleVisible = computed({
@@ -754,16 +765,69 @@ function onOpenLibrary(type: string) {
 }
 
 function onOpenPaint() {
+  // 资源抽屉「绘制角色」= 新建角色
+  paintTarget.value = null
+  paintOpenMode.value = 'newFrame'
   currentPage.value = 6  // paint editor page
 }
 
+/** 造型列表抽屉「绘制新帧」：载入当前角色全部帧 + 自动新建空白帧 */
+function onOpenPaintAppend() {
+  const id = resourceStore.selectedSpriteId
+  const item = id ? resourceStore.getItem(id, 'sprite') : null
+  if (!item) return
+  paintTarget.value = { id: item.id, name: item.name, path: item.path }
+  paintOpenMode.value = 'newFrame'
+  currentPage.value = 6
+}
+
+/** 双击帧卡片：载入全部帧并选中被双击的帧 */
+function onOpenPaintEdit(index: number) {
+  const id = resourceStore.selectedSpriteId
+  const item = id ? resourceStore.getItem(id, 'sprite') : null
+  if (!item) return
+  paintTarget.value = { id: item.id, name: item.name, path: item.path }
+  paintOpenMode.value = 'edit'
+  paintInitialFrameIndex.value = index
+  currentPage.value = 6
+}
+
+/** 造型列表抽屉「内置素材帧」：选一个内置角色，其全部帧追加到当前角色 */
+function onOpenFramePicker() {
+  if (!resourceStore.selectedSpriteId) return
+  currentPage.value = 7
+}
+
+async function onFramePicked(blobs: Blob[]) {
+  const id = resourceStore.selectedSpriteId
+  const item = id ? resourceStore.getItem(id, 'sprite') : null
+  currentPage.value = 0
+  if (!item || blobs.length === 0) return
+  try {
+    const res = await appendFramesToSprite(item.path, blobs)
+    if (res.newPath) {
+      resourceStore.updateItemPath(item.id, res.newPath)
+    }
+    resourceStore.bumpSpriteThumb(item.id)
+    await nextTick()
+    spriteEditorRef.value?.reload()
+  } catch (e) {
+    console.error('[MainLayout] 追加内置素材帧失败:', e)
+  }
+}
+
 function onPaintSaved(id: string, _name: string) {
-  // 保存后自动进入角色编辑器：选中新角色并切到 sprite 编辑模式
+  // 保存后自动进入角色编辑器：选中角色并切到 sprite 编辑模式。
+  // 追加模式下 id 不变 → selectedSpriteId watch 不触发，需手动重载帧列表
+  const isAppend = resourceStore.selectedSpriteId === id
   resourceStore.selectedSpriteId = id
   editorStore.setResourceTab('sprite')
   editorStore.setGameMode(true)
   editorStore.setActiveEditorMode('sprite')
   currentPage.value = 0
+  if (isAppend) {
+    nextTick(() => spriteEditorRef.value?.reload())
+  }
 }
 
 async function onCreateMap() {
@@ -1895,7 +1959,7 @@ function spriteDisplayName(name: string) {
 
         <!-- ═══ Page 0: 游戏模式 — 角色编辑器 ═══ -->
         <div v-if="editorStore.isGameMode && editorStore.activeEditorMode === 'sprite'" class="editor-page-full">
-          <SpriteEditorView />
+          <SpriteEditorView ref="spriteEditorRef" @open-paint-append="onOpenPaintAppend" @open-paint-edit="onOpenPaintEdit" @open-frame-picker="onOpenFramePicker" />
         </div>
 
         <!-- ═══ Page 0: 游戏模式 — 地图编辑器 (v-show 保持 PixiJS 实例存活) ═══ -->
@@ -2240,7 +2304,19 @@ function spriteDisplayName(name: string) {
 
       <!-- ─── page 6: 角色绘制器 ─── -->
       <div v-show="currentPage === 6" class="lib-page">
-        <PaintEditorPage :key="paintPageKey" @close="switchPage(0)" @saved="onPaintSaved" />
+        <PaintEditorPage
+          :key="paintPageKey"
+          :target-sprite="paintTarget"
+          :open-mode="paintOpenMode"
+          :initial-frame-index="paintInitialFrameIndex"
+          @close="switchPage(0)"
+          @saved="onPaintSaved"
+        />
+      </div>
+
+      <!-- ─── page 7: 造型选帧库（内置素材帧追加到当前角色） ─── -->
+      <div v-show="currentPage === 7" class="lib-page">
+        <FramePickerPage :key="framePickerKey" @close="switchPage(0)" @picked="onFramePicked" />
       </div>
 
     </div>

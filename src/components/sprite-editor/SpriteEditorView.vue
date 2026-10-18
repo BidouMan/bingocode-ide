@@ -4,6 +4,17 @@ import { useResourceStore } from '../../stores/resource'
 import { useEditorStore } from '../../stores/editor'
 import type { SpriteData, SpriteAnimation } from '../../composables/useSpriteData'
 import { readSpriteFromPath, revokeSpriteUrls, saveSpriteConfig, saveBsfManifest } from '../../composables/useSpriteData'
+import { appendFramesToSprite } from '../../composables/appendSpriteFrames'
+import FrameUploadDrawer from './FrameUploadDrawer.vue'
+
+const emit = defineEmits<{
+  /** 造型列表抽屉：打开绘制页为当前角色绘制新帧（编辑模式，自动新建空白帧） */
+  openPaintAppend: []
+  /** 双击帧卡片：打开绘制页编辑该帧 */
+  openPaintEdit: [index: number]
+  /** 造型列表抽屉：打开内置素材选帧页 */
+  openFramePicker: []
+}>()
 
 import iconPrev from '../../assets/icons/btn_preview_prev.svg'
 import iconPlay from '../../assets/icons/btn_preview_play.svg'
@@ -126,6 +137,39 @@ function selectFrame(index: number) {
   canvasDisplayIndex.value = index
   markDefaultFrame(index)
 }
+
+/** 从磁盘强制重载当前角色（追加帧后刷新帧列表；绕过 loadSprite 防重复守卫） */
+async function reloadSprite() {
+  const id = resourceStore.selectedSpriteId
+  if (!id) return
+  const item = resourceStore.sprites.find(s => s.id === id)
+  if (!item || !item.path) return
+  currentSpritePath.value = ''
+  await loadSprite(item)
+}
+
+/** 抽屉上传的图片帧 → 追加到当前角色并刷新 */
+async function onImportFrameBlobs(blobs: Blob[]) {
+  if (!currentSpritePath.value || !currentSprite.value || blobs.length === 0) return
+  const oldCount = currentSprite.value.frames.length
+  try {
+    const res = await appendFramesToSprite(currentSpritePath.value, blobs)
+    const id = resourceStore.selectedSpriteId
+    if (res.newPath && id) {
+      resourceStore.updateItemPath(id, res.newPath)
+      currentSpritePath.value = res.newPath
+    }
+    if (id) resourceStore.bumpSpriteThumb(id)
+    await reloadSprite()
+    if (oldCount < (currentSprite.value?.frames.length ?? 0)) {
+      selectFrame(oldCount)
+    }
+  } catch (e) {
+    console.error('[SpriteEditor] 追加帧失败:', e)
+  }
+}
+
+defineExpose({ reload: reloadSprite })
 
 /** 用户手动选中帧 = 设为默认渲染帧（引擎不播动画时显示它，缩略图同步；对齐 Scratch"当前造型"语义） */
 function markDefaultFrame(index: number) {
@@ -395,19 +439,28 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="sprite-editor-page" @click="closeContextMenus">
-    <!-- 左: 造型列表 (100px) -->
-    <div class="costume-list">
-      <div
-        v-for="(frame, idx) in (currentSprite?.frames || [])"
-        :key="idx"
-        class="costume-item"
-        :class="{ 'costume-item-active': costumeHighlightIndex === idx }"
-        @click="selectFrame(idx)"
-        @contextmenu="onCostumeContextMenu($event, idx)"
-      >
-        <img :src="frame.url" class="costume-thumb" :style="{ imageRendering: imageRenderingStyle }" />
-        <span class="costume-frame-num">帧 {{ idx + 1 }}</span>
+    <!-- 左: 造型列表 (100px) + 追加抽屉 -->
+    <div class="costume-list-wrap">
+      <div class="costume-list">
+        <div
+          v-for="(frame, idx) in (currentSprite?.frames || [])"
+          :key="idx"
+          class="costume-item"
+          :class="{ 'costume-item-active': costumeHighlightIndex === idx }"
+          title="双击进入绘制编辑"
+          @click="selectFrame(idx)"
+          @dblclick.stop="emit('openPaintEdit', idx)"
+          @contextmenu="onCostumeContextMenu($event, idx)"
+        >
+          <img :src="frame.url" class="costume-thumb" :style="{ imageRendering: imageRenderingStyle }" />
+          <span class="costume-frame-num">帧 {{ idx + 1 }}</span>
+        </div>
       </div>
+      <FrameUploadDrawer
+        @imported="onImportFrameBlobs"
+        @paint="emit('openPaintAppend')"
+        @library="emit('openFramePicker')"
+      />
     </div>
 
     <!-- 中: 画布 -->
@@ -591,16 +644,26 @@ onBeforeUnmount(() => {
 }
 
 /* ═══ 左: 造型列表 ═══ */
-.costume-list {
-  width: 100px;
+.costume-list-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
   min-width: 100px;
-  padding: 8px 4px;
+  width: 100px;
   border-right: 1px solid var(--border);
+  background: var(--bg-root);
+}
+.costume-list {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 4px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 8px;
   background: var(--bg-root);
+  /* 底部给追加抽屉留出空间，避免最后一帧被遮住 */
+  padding-bottom: 56px;
 }
 .costume-list::-webkit-scrollbar { width: 0; height: 0; }
 .costume-item {

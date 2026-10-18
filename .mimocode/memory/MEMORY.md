@@ -82,15 +82,13 @@ _Cross-task facts that survive across sessions._
 ### Tauri/Vue/Monaco/Windows 杂项
 
 - **内置素材风格 = 插画为主，非像素画（2026-10-16 Pillow 实测）**: characters/images 24 张（boat 128×128、cannon 500×500、car 236×167，>256px 占 15）、items/images 21 张全 108×108、maps/images 43 张全 640×480（与逻辑分辨率 1:1，渲染模式几乎无差别）；真像素画仅 maps/tiles（grass 16×16、brick 32×32）与 tilesets 共 2-3 张。锐利边缘比/半透明比测量确认角色与道具是卡通插画。推论：PixiJS 渲染模式默认 **smooth 更合适**（道具/角色常缩小显示，nearest 对插画 stair-stepping）；pixelated 供像素画项目手动切换。若未来内置库扩充像素画素材包，重新评估默认值。用户已拍板 master 默认保持 smooth（2026-10-16 撤回临时 pixelated 改动，未入库）。[ses_ebd75331bffe]
+- **image-rendering: pixelated 在 WKWebView 需绕开合成图层路径（2026-10-18 绘制页实测）**: 恒等 `transform: scale(1)` 与 `will-change: transform` 会把元素提升为合成图层，WebKit 可能用平滑缩放覆盖 pixelated（观感=设了像素渲染"貌似还是 smooth"）。对策三件套：100% 缩放时不写 transform、去 will-change、CSS 类多重声明渐进回退（`-moz-crisp-edges; crisp-edges; pixelated`）。位图编辑画布用 1:1 逻辑分辨率（canvas 属性=逻辑尺寸）+ pixelated 即 Scratch 同款像素网格（绘制页曾试 HiDPI backing×dpr 后回退——输出尺寸会随机器变化且像素网格变设备级）。[ses_ebce1d478ffe]
 
 - See MEMORY-tauri-windows-misc.md (8 entries) — .bc 共享工作目录 unpack 语义 / 内置资源提交钩子（含 2812c92 二次实例）/ 发版流程 / Windows hidden_command·编码·taskkill / input 分流 / Tauri 资源打包 / Selected Element（稳定历史知识，2026-10-18 裁剪）
 
 ### 角色编辑器
 
-- **Sprite config.json 磁盘格式**: 使用 `"segments"` 数组（不是 `"animations"`），每项 `{name, start, end, fps?, loop?}`。TS reader 兼容 `segments` 和 `animations` 两个 key，但写入只用 `segments`。[ses_f4cfba0c5ffe]
-- **Sprite path 指向解压目录**: `resource.path` 是解压后的目录路径（如 `~/Projects/default/assets/sprites/皮卡丘`），不是 .bgs 文件。config.json 在 `{path}/config.json`。[ses_f4cfba0c5ffe]
-- **ObjectURL 内存泄漏**: useSpriteData.ts 创建 ObjectURL 但从未释放。切换 sprite 时必须 `URL.revokeObjectURL()` 旧 URL。[ses_f4cfba0c5ffe]
-- **Auto-save debounce pattern**: 300ms 防抖避免快速编辑时频繁写入。用 `setTimeout` + `clearTimeout`。Legacy PySide6 每次变更直接 `model.save()`。[ses_f4cfba0c5ffe]
+- See MEMORY-sprite-editor-core.md (4 entries) — config.json segments 磁盘格式 / resource.path 指向解压目录 / ObjectURL 释放 / 300ms auto-save 防抖（稳定历史知识，2026-10-18 裁剪）
 
 - See MEMORY-assets-loading.md (20 entries) — 资源加载：sprite/map 库导入解压、`_up_` 过期副本、中文路径图片读取、.bgm zip bug、缩略图刷新；另含 say 气泡三坑与控制台 print 输出链路修复（稳定历史知识，2026-10-15 裁剪）
 
@@ -110,7 +108,8 @@ _Cross-task facts that survive across sessions._
 ### 其他
 
 - **pnpm workspace `-w` flag**: 项目根 `pnpm-workspace.yaml` 含 `packages: ["."]`，任何 `pnpm add <dep>` 必须带 `-w`（否则 ERR_PNPM_ADDING_TO_ROOT）。[ses_ebce1d478ffe]
-- **pnpm PATH gotcha**: `npm install -g pnpm` does NOT add to PATH. Use full path or `npx`. `npm bin -g` removed in npm v11 — use `npm prefix -g`。Engine API design for kids: No import needed, auto-concat args, one-line configs, no blocking in game loops。`__all__` requirement: New functions/classes in `bingo_engine.py` MUST be added to `__all__`。Tauri dev mode: `externalBin`/`resources` can be emptied for dev — `find_system_python()` resolves at runtime。macOS rounded corners: CSS `border-radius` can't do window-level. Use `decorations: true` + `titleBarStyle: "Transparent"` + `hiddenTitle: true`. Windows ignores these。Qt QLayout stretches widgets: When translating Qt to CSS flexbox, use `align-self: stretch` + `padding` on children. Don't assume natural size。Console panel always-render: keep rendered, use internal `collapsed` state. Header bar (26px) stays visible. No `v-show`/`v-if` on wrapper。Sprite data model: `{name, frames[], segments[{name, start, end, fps, loop}]}`. Frames are PNGs in same dir. Three-panel — costume list (100px), canvas, preview (264px)。PNG must be RGBA for Tauri icons: `generate_context!()` panics otherwise. Use `Image.convert('RGBA')`。`.editor-page-full`: Use `flex: 1; min-width: 0; min-height: 0;` in flex parents. Missing `min-width: 0` causes overflow when sibling (side panel) grows. [ses_0fca6436bffe, ses_0f376fc72ffe, ses_04894c7f7ffe, MyIDE MEMORY]
+- **useFileDialog `multiple` 只返回第一个文件**: `openFile(accept, true)` 的 onChange 取 `input.files?.[0]`——多选需自建 input；纯图片场景 File 本身就是 Blob，无需 FileReader 读字节。[ses_ebce1d478ffe]
+- See MEMORY-legacy-dev-tips.md (9 entries) — pnpm PATH / 引擎 API 设计与 __all__ / Tauri dev mode / macOS 圆角窗口 / Qt→CSS / 控制台常驻 / 精灵数据模型 / Tauri 图标 RGBA / .editor-page-full flex（历史稳定提示，2026-10-18 裁剪）
 
 ### 引擎教学 API（课件设计参考）
 
@@ -123,7 +122,7 @@ _Cross-task facts that survive across sessions._
 - See MEMORY-execution-chain.md (12 entries) — 代码模式执行链/prelude/resolve_engine_env/venv 实测 + turtle import 与窗口调查历史（2026-10-15，部分保活/X 按钮结论已在主文件更正）
 - See MEMORY-graphics-maps.md (17 entries) — 坐标系约定 / Pillow·SVG 中文字体 / 地图图片加载与上传路径 / PixiJS 超采样与 SVG 光栅化 / 内置背景库规范化 / 边界 API 修复 / 缩放手柄吸附（稳定历史知识，2026-10-16 裁剪）
 - See MEMORY-resource-naming.md (5 entries) — 资源创建/重命名入口全景图 / nextSequentialName / .bgm 内嵌路径陷阱 / vue-tsc 基线 / migrateSpriteDir 闭环（稳定历史知识，2026-10-18 裁剪）
-- See MEMORY-paint-editor.md (4 entries) — 绘制角色编辑器：v0.6.1 Stage 进度（Stage 0 验收、Stage 1 代码完成待实测）、独立页宿主架构（用户批准，帧卡片笔刷入口定稿）、Scratch/scratch-paint 上游调研与 Paper.js 选型、Stage 1 位图引擎实现细节（2026-10-18 裁剪，2026-10-16 更新）
+- See MEMORY-paint-editor.md (4 entries) — 绘制角色编辑器：Stage 0/1 已交付并经三轮实测迭代收敛（3bug→单色模型/抗锯齿填充/1:1 像素渲染→1px 缝+模糊残留），T5 修复已提交（ea581a0）；尺寸规格（640×480/手动2048/一键裁切）已验收；**多帧绘制+统一 .bsf 保存管线已落码（src/utils/bsfPacker.ts）**；进行中：角色编辑器造型列表「添加序列帧」抽屉（绘制/内置/本地三来源追加现有角色，.bsf 需保名重打包）；独立页宿主架构（用户批准）、Paper.js 选型、位图引擎细节（2026-10-18 更新）
 - See MEMORY-editor-quirks.md (5 entries) — Monaco/Vue 编辑器渲染与行为杂项：watch 触发、hasUnsavedTabs、suggest 布局、web worker、Monarch 高亮（稳定历史知识，2026-10-18 裁剪）
 
 ### 角色资源格式（.bgs → .bsf）
@@ -147,6 +146,8 @@ _Cross-task facts that survive across sessions._
 - **.bsf 缩略图/预览帧=画回完整画布而非紧致裁剪（2026-10-18，待验收）**: .bsf 的 rect 是贴边紧致裁剪，.bgs 帧是整画布导出带透明边距；CSS `object-fit:contain` 把两者都放大填满 → .bsf 内容显"太大"（用户反馈）。修法：按 manifest `canvas`+帧 `offset` 把帧画回完整参考画布再展示——三处统一（useSpriteData `cropSheetFrame`/`getBsfThumbnail`、spriteLib `loadBsfPreview`），顺带修正编辑器预览帧间对齐（紧致裁剪帧轮播会因 offset 不同而抖动）。[ses_ffe5eb2c4bab9ffeFx4HmZZ03z]
 - **play() 诊断与 E2E 复现法（2026-10-18）**: play() 动画名无效不再静默——打印 `[警告] 角色 'x' 没有动画 'y'，可用动画: [...]`（bingo_engine.py play()）。排查"play 失效"用真实入口 E2E：`python -u -c "…from bingo_engine import start_game; start_game(engine_dir, proj_dir, '')"` cwd=项目根 + generator 脚本（`while True: wait(0.016)`），macOS 无 timeout 命令用 Python subprocess 驱动超时，解析 stdout 统计 distinct frame_rect。编辑器保存往返可先用 Python 移植 saveBsfManifest 逻辑重写 manifest 再跑同一 E2E。实测 pristine 与保存往返均正常——用户最终"成功播放动画了"（诱因大概率是旧 dev 会话未热更新 UPDATE_BATCH 修复）。[ses_ffe5eb2c4bab9ffeFx4HmZZ03z]
 - **.bsf 悬停预览=全部帧顺序播放（2026-10-18，commit 1328886）**: 与 .bgs 行为对齐——按 `frames[]` 数组顺序播完全部帧（打包排列即语义顺序），fps 取首个 clip；不是只播 clips[0]。[ses_ffe5eb2c4bab9ffeFx4HmZZ03z]
+- **绘制器产出 .bsf 的打包契约（2026-10-18 调研定稿，实现已落地 `src/utils/bsfPacker.ts`）**: repo 内**无任何 sheet 打包代码**（唯一打包器=外部 BingoPacker；现有只反向 cropSheetFrame/getBsfThumbnail/loadBsfPreview）——自绘序列帧入库须自研 tight-crop + shelf packing。manifest 键集：`format:"bsf"`(必须)/`version:2`/`name`/`sheet`("sheet.png")/`canvas{w,h}`/`pivot{x,y}`(缺省 canvas 中心)/`frames[{name,rect{x,y,w,h},offset{x,y}}]`(帧名惯例 frame_NNN，rect=贴边紧致裁切约含 2px padding，offset=内容左上在参考画布位置)/`clips[{name,frames[],fps,loop}]`/可选 `defaultFrame`(帧名字符串或 0-based int)；2 空格缩进。vox 桥 `vox = pivot.x - (offset.x + rect.w/2)`——pivot 取画板中心即与 .bsf 行为等价。空帧用 1×1 透明 rect 兜底（读取层校验 frames 非空）。项目形态=薄目录 `assets/sprites/<name>/{manifest.json, sheet.png}`；导入复用 `extract_bgs_to_project`（通用 zip 解压）；saveBsfManifest 只回写 clips+defaultFrame 永不产 sheet；Rust 无 .bsf 缩略图分支（TS getBsfThumbnail zip/目录双形态统一处理）。实例 sun.bsf：canvas 36×36、pivot 17.5/32.0。**已实现**：`packDrawnFrames(canvases,w,h,names?)`（shelf 打包+可选 names 保旧帧名供追加重打包）、`buildDrawnBsfManifest`、`contentBBox`；绘制器保存管线统一输出 .bsf（单帧=1帧 sheet）。[ses_ebce1d478ffe]
+- **绘制器画板规格（2026-10-18 用户定）**: 默认 **640×480**（与游戏窗口一致）；尺寸用手动数字输入（**否决下拉**）、上限精确 **2048**（代码常量 `ARTBOARD_MAX`）；开画后锁定；「裁切画板到内容」=alpha>0 包围盒（多帧时应取全帧联合包围盒防内容裁丢）。[ses_ebce1d478ffe]
 
 ### Discovered
 (none)

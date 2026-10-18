@@ -167,14 +167,29 @@ export async function readSpriteFromPath(path: string): Promise<SpriteData> {
 export async function readBsfFromDir(dirPath: string): Promise<SpriteData> {
   const manifestText = await invoke<string>('read_file', { path: `${dirPath}/manifest.json` })
   const manifest = JSON.parse(manifestText)
-  if (manifest.format !== 'bsf' || !Array.isArray(manifest.frames) || manifest.frames.length === 0) {
-    throw new Error('不是合法的 .bsf manifest（需要 format=bsf 且 frames 非空）')
-  }
-
   const sheetDataUrl = await invoke<string>('read_image_as_data_url', {
     path: `${dirPath}/${manifest.sheet || 'sheet.png'}`,
   })
   const sheetImage = await loadImage(sheetDataUrl)
+  return buildBsfSpriteData(manifest, sheetImage)
+}
+
+/** 读取 .bsf zip 包文件（内置库用）：帧从 sheet 裁剪回全画布 */
+export async function readBsfFile(file: File): Promise<SpriteData> {
+  const zip = await JSZip.loadAsync(file)
+  const manifestEntry = zip.file('manifest.json')
+  const sheetEntry = zip.file('sheet.png')
+  if (!manifestEntry || !sheetEntry) throw new Error('.bsf 缺少 manifest.json 或 sheet.png')
+  const manifest = JSON.parse(await manifestEntry.async('text'))
+  const sheetImage = await loadImage(await sheetEntry.async('blob'))
+  return buildBsfSpriteData(manifest, sheetImage)
+}
+
+/** manifest + sheet 图 → SpriteData（readBsfFromDir / readBsfFile 共用） */
+async function buildBsfSpriteData(manifest: any, sheetImage: HTMLImageElement): Promise<SpriteData> {
+  if (manifest.format !== 'bsf' || !Array.isArray(manifest.frames) || manifest.frames.length === 0) {
+    throw new Error('不是合法的 .bsf manifest（需要 format=bsf 且 frames 非空）')
+  }
   const canvasSize = manifest.canvas || {
     w: manifest.frames[0]?.rect.w ?? 1,
     h: manifest.frames[0]?.rect.h ?? 1,
