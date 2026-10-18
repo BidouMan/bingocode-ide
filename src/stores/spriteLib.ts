@@ -195,11 +195,11 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
     const frames: any[] = manifest.frames || []
     if (frames.length < 2) return null
 
+    // 与 .bgs 行为一致：悬停预览按 frames 数组顺序播完全部帧（语义顺序），
+    // 不限于第一个 clip；fps 取第一个片段（无片段则 10）
     const clip = (manifest.clips || [])[0]
+    const order: string[] = frames.map((f: any) => f.name)
     const byName = new Map(frames.map((f: any) => [f.name, f]))
-    const order: string[] = clip?.frames?.length
-      ? clip.frames.filter((n: string) => byName.has(n))
-      : frames.map((f: any) => f.name)
     if (order.length < 2) return null
 
     const sheetBlob = await sheetEntry.async('blob')
