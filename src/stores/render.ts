@@ -18,6 +18,8 @@ export interface SpriteData {
   voy: number
   /** .bsf 精灵：帧在 sheet 贴图中的 UV 区域 [x, y, w, h]；null = 整张贴图 */
   frameRect: number[] | null
+  /** 需要一并预载的贴图路径（.bgs 目录角色的全部帧文件），用于真实、一次性的加载进度 */
+  preloadPaths?: string[]
 }
 
 export interface SayData {
@@ -125,6 +127,7 @@ export const useRenderStore = defineStore('render', () => {
       vox: data.vox ?? 0,
       voy: data.voy ?? 0,
       frameRect: data.frameRect ?? null,
+      preloadPaths: data.preloadPaths,
     })
   }
 

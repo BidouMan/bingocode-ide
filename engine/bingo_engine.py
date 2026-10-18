@@ -850,6 +850,12 @@ class Sprite:
             animation_config = self.config["animations"].get(animation_name)
 
         if not animation_config:
+            # 排查友好：名字打错/片段缺失时不再静默失败，列出可用动画名
+            if getattr(self, "_is_bsf", False):
+                available = [c.get("name") for c in getattr(self, "_bsf_clips", {}).values()]
+            else:
+                available = [s.get("name") for s in (self.config.get("segments") or [])]
+            print(f"[警告] 角色 '{self.config.get('name', '未知')}' 没有动画 '{animation_name}'，可用动画: {available}")
             return
 
         # 获取动画参数

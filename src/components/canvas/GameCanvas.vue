@@ -1,3 +1,14 @@
+<script lang="ts">
+// 模块级共享缓存：MainLayout 同时挂着两个 GameCanvas 实例（预览窗 + 全屏 v-show 窗），
+// 若各实例自持缓存，同一文件会重复走 IPC 加载且渲染 store 的贴图计数器被翻倍登记，
+// 「加载资源中」覆盖层的进度与完成判定随之失真（表现为覆盖层随动画节奏闪烁）
+export const sharedTextureCache: Map<string, any> = new Map()
+export const sharedTilesetFrameCache: Map<string, Map<number, any>> = new Map()
+export const sharedFrameTextureCache: Map<string, any> = new Map()
+// 同一路径加载中的 Promise：同帧并发请求（两个实例 / 预载+首渲染）只算一次计数
+export const sharedInFlightTextures: Map<string, Promise<any>> = new Map()
+</script>
+
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
@@ -23,10 +34,10 @@ let tileDisplayObjects: Map<string, any> = new Map()
 let sayDisplayObjects: Map<string, any> = new Map()
 let drawTextDisplayObjects: Map<string, any> = new Map()
 let hitboxDisplayObjects: Map<string, any> = new Map()
-let textureCache: Map<string, any> = new Map()
-let tilesetFrameCache: Map<string, Map<number, any>> = new Map()
+const textureCache = sharedTextureCache
+const tilesetFrameCache = sharedTilesetFrameCache
 // .bsf sheet 子纹理缓存：key = sheet路径#x,y,w,h（UV 取帧，复用同一张 BaseTexture）
-let frameTextureCache: Map<string, any> = new Map()
+const frameTextureCache = sharedFrameTextureCache
 let gameContainer: any = null
 let tileLayerContainer: any = null
 let spriteContainer: any = null
@@ -140,11 +151,46 @@ function applyRenderMode() {
   frameTextureCache.clear()
 }
 
-async function getTexture(imagePath: string): Promise<any> {
+function getTexture(imagePath: string): Promise<any> {
   if (textureCache.has(imagePath)) {
-    return textureCache.get(imagePath)
+    return Promise.resolve(textureCache.get(imagePath))
   }
+  // 同帧/并发对同一路径的请求合并为一次加载、一次计数
+  const pending = sharedInFlightTextures.get(imagePath)
+  if (pending) return pending
 
+  const promise = loadTexture(imagePath).finally(() => {
+    sharedInFlightTextures.delete(imagePath)
+  })
+  sharedInFlightTextures.set(imagePath, promise)
+  return promise
+}
+
+/** 从 dataURL 手动解码创建纹理：绕过 PixiJS Assets 缓存，确保 scaleMode 在 GPU 上传前设好 */
+async function createTextureFromDataUrl(url: string): Promise<any> {
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image()
+    el.crossOrigin = 'anonymous'
+    el.onload = () => resolve(el)
+    el.onerror = () => reject(new Error(`Image load failed: ${url.substring(0, 80)}...`))
+    el.src = url
+  })
+  const source = new PIXI.BufferImageSource({
+    resource: img,
+    scaleMode: currentScaleMode,
+  })
+  return new PIXI.Texture(source)
+}
+
+function placeholderTexture(): any {
+  if (!app) return PIXI.Texture.EMPTY
+  const g = new PIXI.Graphics()
+  g.rect(0, 0, 32, 32)
+  g.fill({ color: 0xff00ff })
+  return app.renderer.generateTexture(g)
+}
+
+async function loadTexture(imagePath: string): Promise<any> {
   // 增加总数计数
   renderStore.setTextureTotal(renderStore.textureTotal + 1)
 
@@ -157,37 +203,64 @@ async function getTexture(imagePath: string): Promise<any> {
     } else {
       url = imagePath
     }
-    // 手动加载图片，绕过 PixiJS Assets 全局缓存，
-    // 确保每次清缓存后能用新的 scaleMode 重建纹理
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const el = new Image()
-      el.crossOrigin = 'anonymous'
-      el.onload = () => resolve(el)
-      el.onerror = () => reject(new Error(`Image load failed: ${url.substring(0, 80)}...`))
-      el.src = url
-    })
-    // 手动创建 BaseTexture，绕过 PixiJS Texture.from 的内部 URL 缓存，
-    // 确保 scaleMode 在 GPU 上传前就设置好
-    const source = new PIXI.BufferImageSource({
-      resource: img,
-      scaleMode: currentScaleMode,
-    })
-    const texture = new PIXI.Texture(source)
+    const texture = await createTextureFromDataUrl(url)
     textureCache.set(imagePath, texture)
     // 增加已加载计数
     renderStore.incrementTextureLoaded()
     return texture
   } catch (e) {
     console.warn(`[GameCanvas] 加载纹理失败: ${imagePath}`, e)
-    if (!app) return null
-    const g = new PIXI.Graphics()
-    g.rect(0, 0, 32, 32)
-    g.fill({ color: 0xff00ff })
-    const placeholder = app.renderer.generateTexture(g)
+    const placeholder = placeholderTexture()
+    if (!placeholder) return null
     textureCache.set(imagePath, placeholder)
     // 增加已加载计数（失败也算加载完成）
     renderStore.incrementTextureLoaded()
     return placeholder
+  }
+}
+
+/**
+ * 批量预载（.bgs 逐帧清单）：一次 IPC 读回全部文件，再并发解码。
+ * 之前每帧一次 IPC 往返 + base64，固定开销 × N，机械盘/老机器上进度条明显偏慢；
+ * 现在往返次数 N→1，总数一次性登记为真实文件数，每解码完一张推进一格真实进度。
+ */
+async function preloadTextures(paths: string[]): Promise<void> {
+  const missing = [...new Set(paths)].filter(
+    p => !textureCache.has(p) && !sharedInFlightTextures.has(p),
+  )
+  if (missing.length === 0) return
+
+  // 整批登记真实总量（在任何解码完成前），覆盖层从 0% 开始
+  renderStore.setTextureTotal(renderStore.textureTotal + missing.length)
+
+  const batch = (async () => {
+    let results: (string | null)[] = missing.map(() => null)
+    try {
+      results = await invoke<(string | null)[]>('read_images_as_data_urls', { paths: missing })
+    } catch (e) {
+      console.warn('[GameCanvas] 批量读取贴图失败:', e)
+    }
+    await Promise.all(
+      missing.map(async (p, i) => {
+        try {
+          const dataUrl = results[i]
+          if (!dataUrl) throw new Error('文件读取失败')
+          const texture = await createTextureFromDataUrl(dataUrl)
+          textureCache.set(p, texture)
+        } catch (e) {
+          console.warn(`[GameCanvas] 预载失败: ${p}`, e)
+          textureCache.set(p, placeholderTexture())
+        }
+        renderStore.incrementTextureLoaded()
+      }),
+    )
+  })()
+
+  for (const p of missing) sharedInFlightTextures.set(p, batch)
+  try {
+    await batch
+  } finally {
+    for (const p of missing) sharedInFlightTextures.delete(p)
   }
 }
 
@@ -266,6 +339,13 @@ async function syncSprites() {
       displayObj.anchor = { x: 0.5, y: 0.5 }
       spriteContainer.addChild(displayObj)
       spriteDisplayObjects.set(spriteData.id, displayObj)
+
+      // .bgs 目录角色：批量预载全部帧文件（清单由 CREATE 指令的 config.frames 生成）。
+      // 总数一次性登记为真实总量，覆盖层只做一次显隐——
+      // 而不是动画播放时逐帧追着加载、闪个不停
+      if (spriteData.preloadPaths?.length) {
+        preloadTextures(spriteData.preloadPaths)
+      }
     }
 
     // 纹理脏检查：路径或 sheet 帧区域变化才重新取纹理（.bsf 动画 = 路径不变、rect 变）

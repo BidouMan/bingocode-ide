@@ -965,9 +965,29 @@ fn read_image_as_data_url(path: String) -> Result<String, String> {
     use base64::Engine;
 
     let data = std::fs::read(&path).map_err(|e| format!("读取图片失败: {}", e))?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+    Ok(format!("data:{};base64,{}", image_mime(&path), b64))
+}
 
-    // 根据扩展名判断 MIME 类型
-    let mime = if path.ends_with(".jpg") || path.ends_with(".jpeg") {
+/// 批量读图（.bgs 逐帧预载用）：一次 IPC 往返读取全部路径，
+/// 每项失败返回 null（与前端逐张失败语义一致），不因单张失败中断整批
+#[tauri::command]
+fn read_images_as_data_urls(paths: Vec<String>) -> Vec<Option<String>> {
+    use base64::Engine;
+
+    paths
+        .iter()
+        .map(|p| {
+            std::fs::read(p).ok().map(|data| {
+                let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+                format!("data:{};base64,{}", image_mime(p), b64)
+            })
+        })
+        .collect()
+}
+
+fn image_mime(path: &str) -> &'static str {
+    if path.ends_with(".jpg") || path.ends_with(".jpeg") {
         "image/jpeg"
     } else if path.ends_with(".bmp") {
         "image/bmp"
@@ -977,10 +997,7 @@ fn read_image_as_data_url(path: String) -> Result<String, String> {
         "image/svg+xml"
     } else {
         "image/png"
-    };
-
-    let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
-    Ok(format!("data:{};base64,{}", mime, b64))
+    }
 }
 
 #[tauri::command]
@@ -1264,6 +1281,7 @@ pub fn run() {
             pick_image_file,
             pick_files,
             read_image_as_data_url,
+            read_images_as_data_urls,
             rename_path,
             copy_file,
             pack_bingo,

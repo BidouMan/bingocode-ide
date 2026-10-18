@@ -33,6 +33,25 @@ export function useEngine() {
   // 活跃音频元素
   const activeAudios = new Map<string, HTMLAudioElement>()
 
+  /**
+   * .bgs 目录角色：把 config.frames 全部帧文件生成预载清单。
+   * 让前端在角色创建时一次性登记全部贴图请求——加载进度 = 真实总量，
+   * 加载层只显隐一次，而不是动画播放时逐帧追加载。
+   * （.bsf 有 frame_rect，像素全在 imagePath 一张 sheet 里，无需逐帧预载）
+   */
+  function buildBgsPreloadPaths(data: Record<string, any>): string[] | undefined {
+    if (data.frame_rect) return undefined
+    const dir: string | undefined = data.sprite_dir
+    const frames: any[] | undefined = data.config?.frames
+    if (!dir || !Array.isArray(frames) || frames.length === 0) return undefined
+    const sep = dir.includes('\\') && !dir.includes('/') ? '\\' : '/'
+    // 首帧也包含在内：与创建时的 imagePath 请求通过 in-flight 去重合并，只登记一次
+    return frames
+      .map(f => (typeof f === 'string' ? f : f?.file))
+      .filter((f): f is string => typeof f === 'string' && f.length > 0)
+      .map(f => `${dir}${sep}${f}`)
+  }
+
   function dispatchInstruction(cmd: AnyEngineCommand) {
     switch (cmd.type) {
       case 'CREATE':
@@ -49,6 +68,7 @@ export function useEngine() {
           vox: cmd.data.vox ?? 0,
           voy: cmd.data.voy ?? 0,
           frameRect: cmd.data.frame_rect ?? null,
+          preloadPaths: buildBgsPreloadPaths(cmd.data),
         })
         break
 

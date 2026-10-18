@@ -2756,7 +2756,8 @@ function spriteDisplayName(name: string) {
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(26, 28, 33, 0.92);
+  /* 全不透明：加载完成前完全遮住游戏画面，完成后才"进入"游戏 */
+  background: #1a1c21;
   display: flex;
   align-items: center;
   justify-content: center;
