@@ -25,6 +25,8 @@ let drawTextDisplayObjects: Map<string, any> = new Map()
 let hitboxDisplayObjects: Map<string, any> = new Map()
 let textureCache: Map<string, any> = new Map()
 let tilesetFrameCache: Map<string, Map<number, any>> = new Map()
+// .bsf sheet 子纹理缓存：key = sheet路径#x,y,w,h（UV 取帧，复用同一张 BaseTexture）
+let frameTextureCache: Map<string, any> = new Map()
 let gameContainer: any = null
 let tileLayerContainer: any = null
 let spriteContainer: any = null
@@ -135,6 +137,7 @@ function applyRenderMode() {
   // 清空纹理缓存，强制使用新的 scaleMode 重新创建
   textureCache.clear()
   tilesetFrameCache.clear()
+  frameTextureCache.clear()
 }
 
 async function getTexture(imagePath: string): Promise<any> {
@@ -221,6 +224,22 @@ async function getTileFrame(tileSetIndex: number, tileId: number): Promise<any> 
   return texture
 }
 
+/** 精灵纹理：普通角色用整张贴图；.bsf 角色按 frameRect 从 sheet 裁子纹理（一次解码，多帧复用） */
+async function getSpriteTexture(imagePath: string, frameRect?: number[] | null): Promise<any> {
+  const base = await getTexture(imagePath)
+  if (!base || !base.source || !frameRect || frameRect.length !== 4) return base
+
+  const key = `${imagePath}#${frameRect.join(',')}`
+  if (frameTextureCache.has(key)) return frameTextureCache.get(key)
+
+  const texture = new PIXI.Texture({
+    source: base.source,
+    frame: new PIXI.Rectangle(frameRect[0], frameRect[1], frameRect[2], frameRect[3]),
+  })
+  frameTextureCache.set(key, texture)
+  return texture
+}
+
 async function syncSprites() {
   if (!app || !spriteContainer || spritesSyncing) return
   spritesSyncing = true
@@ -247,23 +266,21 @@ async function syncSprites() {
       displayObj.anchor = { x: 0.5, y: 0.5 }
       spriteContainer.addChild(displayObj)
       spriteDisplayObjects.set(spriteData.id, displayObj)
+    }
 
-      // 异步加载真实纹理后替换
-      if (spriteData.imagePath) {
-        getTexture(spriteData.imagePath).then(texture => {
-          if (displayObj && !displayObj.destroyed) {
+    // 纹理脏检查：路径或 sheet 帧区域变化才重新取纹理（.bsf 动画 = 路径不变、rect 变）
+    if (spriteData.imagePath) {
+      const texKey = spriteData.frameRect
+        ? `${spriteData.imagePath}#${spriteData.frameRect.join(',')}`
+        : spriteData.imagePath
+      if (displayObj._texKey !== texKey) {
+        displayObj._texKey = texKey
+        getSpriteTexture(spriteData.imagePath, spriteData.frameRect).then(texture => {
+          if (displayObj && !displayObj.destroyed && displayObj._texKey === texKey) {
             displayObj.texture = texture
           }
         })
       }
-    }
-
-    if (spriteData.imagePath && displayObj.texture?.label !== spriteData.imagePath) {
-      getTexture(spriteData.imagePath).then(texture => {
-        if (displayObj && !displayObj.destroyed) {
-          displayObj.texture = texture
-        }
-      })
     }
 
     if (displayObj) {
@@ -728,6 +745,7 @@ onBeforeUnmount(() => {
 
   textureCache.clear()
   tilesetFrameCache.clear()
+  frameTextureCache.clear()
   spriteDisplayObjects.clear()
   tileDisplayObjects.clear()
   sayDisplayObjects.clear()

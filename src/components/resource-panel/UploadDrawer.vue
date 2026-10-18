@@ -24,6 +24,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   uploaded: [type: string, name: string, content?: string]
   openLibrary: [type: string]
+  openPaint: [type: string]
   createMap: []
   importMapImage: [name: string, data: number[]]
 }>()
@@ -35,7 +36,7 @@ const fileDialog = useFileDialog()
 const menuOpen = ref(false)
 
 const acceptMap: Record<string, string> = {
-  sprite: '.bgs,.png,.jpg,.gif,.jpeg,.svg',
+  sprite: '.bgs,.bsf,.png,.jpg,.gif,.jpeg,.svg',
   map: '.bgm,.json,.info,.png,.jpg,.jpeg,.gif,.bmp,.webp,.svg',
   sound: '.wav,.mp3,.ogg,.flac',
   code: '.py',
@@ -78,7 +79,7 @@ const config = computed(() => menuConfig[props.type])
 
 // 抽屉按钮功能提示文案（Scratch 风格 tooltip，悬停时显示在按钮左侧）
 const tipTextMap: Record<string, Record<string, string>> = {
-  sprite: { import: '上传角色', paint: '选择角色', library: '选择角色' },
+  sprite: { import: '上传角色', paint: '绘制角色', library: '选择角色' },
   map: { import: '上传地图', create: '创建地图', library: '选择地图' },
   sound: { import: '上传声音', library: '选择声音' },
   code: { import: '上传代码文件', new: '新建代码文件' },
@@ -133,38 +134,43 @@ async function handleAction(key: string) {
         } catch (e) {
           console.error('[UploadDrawer] SVG 转 PNG 失败:', e)
         }
-      } else if (props.type === 'sprite' && result.name.toLowerCase().endsWith('.bgs')) {
-        // .bgs 文件：解压到项目目录（与精灵库选择流程一致）
+      } else if (
+        props.type === 'sprite' &&
+        (result.name.toLowerCase().endsWith('.bgs') || result.name.toLowerCase().endsWith('.bsf'))
+      ) {
+        // .bgs / .bsf 包文件：解压到项目目录（与精灵库选择流程一致）
         // 引擎从 assets/sprites/<名字>/ 加载角色，缩略图也依赖磁盘路径
+        const lowerName = result.name.toLowerCase()
+        const isBsf = lowerName.endsWith('.bsf')
         try {
           const zip = await JSZip.loadAsync(result.file)
-          const configEntry = zip.file('config.json')
-          if (!configEntry) {
-            console.error('[UploadDrawer] .bgs 缺少 config.json:', result.name)
+          const metaEntry = isBsf ? zip.file('manifest.json') : zip.file('config.json')
+          if (!metaEntry) {
+            console.error(`[UploadDrawer] ${isBsf ? '.bsf 缺少 manifest.json' : '.bgs 缺少 config.json'}:`, result.name)
             return
           }
           // 默认名字统一为「角色N」顺序名（磁盘目录名与 store 名字保持一致）
           const spriteName = resourceStore.nextSequentialName('sprite', '角色')
           const projectRoot = projectStore.root
           if (!projectRoot) {
-            console.warn('[UploadDrawer] 项目目录未就绪，无法导入 .bgs 角色')
+            console.warn(`[UploadDrawer] 项目目录未就绪，无法导入 ${isBsf ? '.bsf' : '.bgs'} 角色`)
             return
           }
-          // 先把 .bgs 写到项目目录，再用 Rust 命令解压，最后删除临时 .bgs 文件
-          const tmpBgsPath = `${projectRoot}/assets/sprites/${spriteName}.bgs`
+          // 先把包文件写到项目目录，再用 Rust 命令解压，最后删除临时文件
+          const tmpPkgPath = `${projectRoot}/assets/sprites/${spriteName}${isBsf ? '.bsf' : '.bgs'}`
           await invoke('write_binary', {
-            path: tmpBgsPath,
+            path: tmpPkgPath,
             data: Array.from(new Uint8Array(await result.file.arrayBuffer())),
           })
           try {
             await invoke('extract_bgs_to_project', {
-              bgsPath: tmpBgsPath,
+              bgsPath: tmpPkgPath,
               projectRoot,
               spriteName,
             })
           } finally {
-            // 临时 .bgs 必须删除：项目重载时会把 assets/sprites 下所有条目当角色列出
-            await invoke('delete_path', { path: tmpBgsPath }).catch(() => {})
+            // 临时包文件必须删除：项目重载时会把 assets/sprites 下所有条目当角色列出
+            await invoke('delete_path', { path: tmpPkgPath }).catch(() => {})
           }
           resourceStore.addItem({
             name: spriteName,
@@ -173,7 +179,7 @@ async function handleAction(key: string) {
           })
           emit('uploaded', 'sprite', spriteName)
         } catch (e) {
-          console.error('[UploadDrawer] 导入 .bgs 失败:', e)
+          console.error(`[UploadDrawer] 导入 ${isBsf ? '.bsf' : '.bgs'} 失败:`, e)
         }
       } else if (props.type === 'sprite' && isImageFile(result.name)) {
         // 图片文件：复制到项目目录（磁盘文件名与 store 名字一致，保留原扩展名供引擎查找）
@@ -264,8 +270,15 @@ async function handleAction(key: string) {
         editorStore.createTab('未命名.py', '')
       }
       break
-    case 'library':
     case 'paint':
+      // 角色的 paint 按钮 = 打开绘制编辑器；其他类型暂与 library 行为一致
+      if (props.type === 'sprite') {
+        emit('openPaint', props.type)
+      } else {
+        emit('openLibrary', props.type)
+      }
+      break
+    case 'library':
     case 'create':
       if (props.type === 'map' && key === 'create') {
         emit('createMap')

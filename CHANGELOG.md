@@ -4,6 +4,17 @@ BingoCode IDE 的版本更新记录，最新在前。
 
 > 格式：每次打包发版在对应版本下按 **新增 / 修复 / 优化 / 资源** 分类记录。未发版的 master 改动暂列于「未发布」小节，发版时移入正式版本号并标注日期。
 
+## 未发布
+
+### 新增
+
+- 角色素材支持 `.bsf`（Bingo Sheet File，BingoPacker 导出的 sheet 图集格式）：内置精灵库扫描/缩略图/悬停动画预览、上传抽屉与文件对话框导入（解压为 `sheet.png + manifest.json` 目录）、项目资源缩略图；引擎按 manifest 的 clip 播放动画，渲染协议新增 `frame_rect`（UV 取帧），前端一张 sheet 贴图复用全部帧——替代逐帧独立图片，解码次数与 GPU 纹理数从 N 降为 1，适合老电脑/学生机
+- 精灵编辑器打开 `.bsf` 角色：从 sheet 裁剪帧只读展示、动画段（clips）增删改名/fps/loop 编辑并写回 manifest.json（帧像素编辑需回 BingoPacker 重打包）
+
+### 修复
+
+- 游戏运行中动画换帧不刷新：UPDATE_BATCH 前端映射丢失 `image/vox/voy` 字段，引擎帧更新全部走 batch 通道导致播放动画时贴图与锚点始终停在首帧
+
 ## v0.6.2（2026-10-16）
 
 ### 修复

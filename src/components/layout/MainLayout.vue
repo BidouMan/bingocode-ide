@@ -22,6 +22,7 @@ import SpriteLibPage from '../resource-panel/SpriteLibPage.vue'
 import MapLibraryPage from '../resource-panel/MapLibraryPage.vue'
 import MapResourceLibPage from '../resource-panel/MapResourceLibPage.vue'
 import SoundLibPage from '../resource-panel/SoundLibPage.vue'
+import PaintEditorPage from '../paint-editor/PaintEditorPage.vue'
 import HelpPanel from '../help/HelpPanel.vue'
 import PythonHelpPanel from '../help/PythonHelpPanel.vue'
 import AiChatPanel from '../help/AiChatPanel.vue'
@@ -79,22 +80,30 @@ const loadingProgress = computed(() => {
   return Math.floor((renderStore.textureLoaded / renderStore.textureTotal) * 100)
 })
 
-// change_page: 0=编辑器, 1=全屏, 2=地图库, 3=角色库, 4=素材库, 5=声音库
+// change_page: 0=编辑器, 1=全屏, 2=地图库, 3=角色库, 4=素材库, 5=声音库, 6=角色绘制器
 const currentPage = ref(0)
 // 库页面用 v-show 常驻挂载，key 递增强制每次打开时重建组件：
 // 重置默认 tab/分类，并让 onMounted 的目录重扫真正生效
 const mapLibPageKey = ref(0)
 const mapResLibPageKey = ref(0)
 const spriteLibPageKey = ref(0)
+const paintPageKey = ref(0)
 watch(currentPage, (page) => {
   if (page === 2) mapLibPageKey.value++
   else if (page === 4) mapResLibPageKey.value++
   else if (page === 3) spriteLibPageKey.value++
+  else if (page === 6) paintPageKey.value++
 })
 // 控制台面板可见性：状态在 terminal store 中（引擎有输出自动弹出、手动停止收回）
 const consoleVisible = computed({
   get: () => terminalStore.consoleVisible,
   set: (v) => { terminalStore.consoleVisible = v },
+})
+// 切换游戏/代码模式时自动停止运行中的程序，避免两套模式的运行状态串台
+watch(() => editorStore.isGameMode, () => {
+  if (editorStore.isRunning) {
+    engine.stop()
+  }
 })
 const canvasOffsetX = ref(0)
 const consoleExpanded = ref(true)
@@ -646,15 +655,20 @@ async function fileMenuAction(action: string) {
 }
 
 let _toggling = false
+let _lastToggleTime = 0
+const TOGGLE_COOLDOWN_MS = 400
 async function toggleRun() {
-  // 防抖：疯狂点击时忽略后续点击，直到本次启动流程完成（不阻塞 UI）
-  if (_toggling) return
+  // 防抖 + 冷却：忽略连点，防止停止后立即重启导致 Rust 端 stop_script
+  // 和 run_script 竞态杀死新进程（小学生疯狂点击场景）
+  const now = Date.now()
+  if (_toggling || now - _lastToggleTime < TOGGLE_COOLDOWN_MS) return
   _toggling = true
+  _lastToggleTime = now
   try {
-    // 无论当前状态，点击运行 = 重新开始：
-    // 若正在运行，先停止（立即更新 UI；旧进程由 Rust 端 run_script 内部再次兜底清理）
+    // 正在运行 → 只停止，不重新启动
     if (editorStore.isRunning) {
       engine.stop()
+      return
     }
     // 如果当前在角色/地图编辑器，自动切回代码模式（GameCanvas 只在代码模式下挂载）
     if (editorStore.activeEditorMode === 'sprite' || editorStore.activeEditorMode === 'map') {
@@ -683,7 +697,7 @@ function toggleShowStats() {
 
 async function uploadResource(type: 'sprite' | 'map' | 'sound' | 'code') {
   const acceptMap: Record<string, string> = {
-    sprite: '.bgs,.png,.jpg,.gif',
+    sprite: '.bgs,.bsf,.png,.jpg,.gif',
     map: '.bgm,.json,.info',
     sound: '.wav,.mp3,.ogg',
     code: '.py',
@@ -737,6 +751,19 @@ function onOpenLibrary(type: string) {
   } else if (type === 'sound') {
     currentPage.value = 5  // sound_lib page
   }
+}
+
+function onOpenPaint() {
+  currentPage.value = 6  // paint editor page
+}
+
+function onPaintSaved(id: string, _name: string) {
+  // 保存后自动进入角色编辑器：选中新角色并切到 sprite 编辑模式
+  resourceStore.selectedSpriteId = id
+  editorStore.setResourceTab('sprite')
+  editorStore.setGameMode(true)
+  editorStore.setActiveEditorMode('sprite')
+  currentPage.value = 0
 }
 
 async function onCreateMap() {
@@ -1060,12 +1087,29 @@ function openSpriteEditor(item: { id: string; name: string; path: string }) {
   editorStore.setActiveEditorMode('sprite')
 }
 
-// 加载角色缩略图（通过 Rust 命令从解压目录读取）
+// 加载角色缩略图（通过 Rust 命令从解压目录读取；.bsf sheet 目录由前端裁剪）
 async function loadSpriteThumbnail(item: { id: string; path: string }) {
   if (spriteThumbnails.value[item.id]) return
   if (!item.path) return
   try {
     const { invoke } = await import('@tauri-apps/api/core')
+    // .bsf 文件或含 manifest.json 的 sheet 目录 → 前端从 sheet 裁第一帧
+    if (/\.bsf$/i.test(item.path)) {
+      const { getBsfThumbnail } = await import('../../composables/useSpriteData')
+      spriteThumbnails.value[item.id] = await getBsfThumbnail(item.path)
+      return
+    }
+    const isImage = /\.(png|jpe?g|gif|bmp|webp)$/i.test(item.path)
+    if (!isImage) {
+      const hasManifest = await invoke<boolean>('path_exists', {
+        path: `${item.path}/manifest.json`,
+      }).catch(() => false)
+      if (hasManifest) {
+        const { getBsfThumbnail } = await import('../../composables/useSpriteData')
+        spriteThumbnails.value[item.id] = await getBsfThumbnail(item.path)
+        return
+      }
+    }
     const dataUrl = await invoke<string>('get_sprite_thumbnail', {
       path: item.path,
     })
@@ -1987,7 +2031,7 @@ function spriteDisplayName(name: string) {
                   </div>
                 </div>
               </div>
-              <UploadDrawer v-if="editorStore.resourceTab !== 'code'" :type="editorStore.resourceTab" @uploaded="onResourceUploaded" @open-library="onOpenLibrary" @create-map="onCreateMap" @import-map-image="onImportMapImage" />
+              <UploadDrawer v-if="editorStore.resourceTab !== 'code'" :type="editorStore.resourceTab" @uploaded="onResourceUploaded" @open-library="onOpenLibrary" @open-paint="onOpenPaint" @create-map="onCreateMap" @import-map-image="onImportMapImage" />
             </div>
           </div>
 
@@ -2178,6 +2222,11 @@ function spriteDisplayName(name: string) {
       <!-- ─── page 5: 声音库 ─── -->
       <div v-show="currentPage === 5" class="lib-page">
         <SoundLibPage @close="switchPage(0)" @imported="onSoundLibImported" />
+      </div>
+
+      <!-- ─── page 6: 角色绘制器 ─── -->
+      <div v-show="currentPage === 6" class="lib-page">
+        <PaintEditorPage :key="paintPageKey" @close="switchPage(0)" @saved="onPaintSaved" />
       </div>
 
     </div>

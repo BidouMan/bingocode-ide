@@ -48,7 +48,7 @@ src/
     terminal.ts                 # Console output (30ms throttle, 5000 lines)
     map.ts                      # Map data, layers, tile sets
     resource.ts                 # Resource items (sprites, maps, sounds, code)
-    spriteLib.ts                # Built-in sprite library (.bgs files)
+    spriteLib.ts                # Built-in sprite library (.bgs/.bsf files)
     theme.ts                    # Theme system (dark/light/one-dark/nord/gruvbox)
   composables/
     useEngine.ts                # Tauri IPC: run/stop/sendInput, event listeners
@@ -66,7 +66,7 @@ engine/
   assets/                       # 唯一游戏资源库（Vite publicDir 指向此处）
     sprites/                     # 按分类目录组织（目录名=库标签，自动发现）
       characters/                # 角色分类（显示名"角色"）
-        packages/                # .bgs 精灵包文件
+        packages/                # .bgs / .bsf 精灵包文件
         images/                  # 精灵图片资源
       items/                     # 道具分类（显示名"道具"，结构同上）
     maps/
@@ -92,7 +92,8 @@ engine/
 - **Python engine runs in subprocess**: Tauri spawns `python3 -u script.py`, captures stdout JSON instructions, sends to frontend via events. stdin receives `K_DOWN:`, `K_UP:`, `M_DOWN:`, `M_UP:`, `M_MOVE:` input events.
 - **Two separate tab systems**: `gameTabs` (game mode) and `codeTabs` (IDE mode). Switching mode preserves both.
 - **Upload drawer**: Green `#4B9B5C` slide-up menu, appears on hover, icons from `assets/icons/`.
-- **Sprite library**: Built-in `.bgs` files (zip with config.json + PNG frames) loaded via JSZip. `engine/assets/sprites/` 下按分类子目录组织（characters/items/...），`spriteLib.ts` 自动发现分类并在库页面显示分类标签（`CATEGORY_LABELS` 控制中文名，默认显示"角色"）。新分类=新建子目录（含 packages/ 与 images/），无需改代码。
+- **Sprite library**: Built-in `.bgs` files (zip with config.json + PNG frames) and `.bsf` files (zip with manifest.json + sheet.png, sheet-atlas format from BingoPacker) loaded via JSZip.
+- **`.bsf` runtime model**: imported into project as extracted dir (`manifest.json + sheet.png`, one texture per sprite); engine reads manifest clips and sends `frame_rect` in CREATE/UPDATE protocol, frontend `GameCanvas` swaps UV sub-textures (`getSpriteTexture`) instead of swapping files. Engine x/y for `.bsf` sprites = manifest `pivot` (per bsf-api §4); `vox/voy` computed O(1) from rect/offset/pivot — no PIL per frame. Thumbnails/previews for `.bsf` are cropped from sheet in TS (`getBsfThumbnail`), not in Rust. Sprite editor opens `.bsf` as read-only frames + editable clips (`saveBsfManifest`); frame pixel editing requires re-pack in BingoPacker. Old `.bgs` (config.json + per-frame PNG) path stays supported. `engine/assets/sprites/` 下按分类子目录组织（characters/items/...），`spriteLib.ts` 自动发现分类并在库页面显示分类标签（`CATEGORY_LABELS` 控制中文名，默认显示"角色"）。新分类=新建子目录（含 packages/ 与 images/），无需改代码。
 - **Monaco editor**: Custom `bingo-dark` theme matching original QSS colors. `automaticLayout` + `nextTick layout()` for proper sizing.
 - **GameCanvas only mounts when running**: Prevents PixiJS from capturing mouse events when not needed.
 - **Event listeners scoped to canvas**: Keyboard/mouse events only on GameCanvas element, not window, to avoid blocking Monaco.

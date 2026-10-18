@@ -76,7 +76,7 @@ async function onCardEnter(item: { filePath: string; type: string }) {
     previewState.value = { urls: [convertFileSrc(item.filePath)], fps: 0, index: 0 }
     return
   }
-  if (item.type !== 'bgs') return
+  if (item.type !== 'bgs' && item.type !== 'bsf') return
   const preview = await spriteLibStore.getSpritePreview(item.filePath)
   // 悬停已移走或已切换到其他卡片时丢弃过期结果
   if (!preview || hoverPath.value !== item.filePath) return
@@ -93,8 +93,9 @@ async function selectSprite(item: { name: string; filePath: string; type: string
   const projectRoot = projectStore.root
   if (!projectRoot) return
 
-  if (item.type === 'bgs') {
-    // .bgs 包文件：解压到项目目录（默认名字统一为「角色N」顺序名，磁盘目录名与 store 名字一致）
+  if (item.type === 'bgs' || item.type === 'bsf') {
+    // .bgs / .bsf 包文件：解压到项目目录（默认名字统一为「角色N」顺序名，磁盘目录名与 store 名字一致）
+    // .bsf 解压后为 sheet.png + manifest.json，引擎按 manifest 走 UV 动画
     const spriteName = resourceStore.nextSequentialName('sprite', '角色')
     try {
       await invoke<string>('extract_bgs_to_project', {
@@ -103,7 +104,7 @@ async function selectSprite(item: { name: string; filePath: string; type: string
         spriteName,
       })
     } catch (e) {
-      console.error('[SpriteLib] 解压 .bgs 失败:', e)
+      console.error(`[SpriteLib] 解压 ${item.type} 失败:`, e)
       return
     }
 

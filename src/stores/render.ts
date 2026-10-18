@@ -16,6 +16,8 @@ export interface SpriteData {
   /** 内容重心相对图片中心的偏移（像素），用于修正翻转/旋转锚点 */
   vox: number
   voy: number
+  /** .bsf 精灵：帧在 sheet 贴图中的 UV 区域 [x, y, w, h]；null = 整张贴图 */
+  frameRect: number[] | null
 }
 
 export interface SayData {
@@ -122,6 +124,7 @@ export const useRenderStore = defineStore('render', () => {
       imagePath: data.imagePath ?? '',
       vox: data.vox ?? 0,
       voy: data.voy ?? 0,
+      frameRect: data.frameRect ?? null,
     })
   }
 

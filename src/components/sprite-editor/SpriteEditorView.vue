@@ -2,8 +2,8 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useResourceStore } from '../../stores/resource'
 import { useEditorStore } from '../../stores/editor'
-import type { SpriteData, SpriteFrame, SpriteAnimation } from '../../composables/useSpriteData'
-import { readBgsFromUrl, readImageAsSprite, revokeSpriteUrls, saveSpriteConfig, saveImageSpriteToDirectory } from '../../composables/useSpriteData'
+import type { SpriteData, SpriteAnimation } from '../../composables/useSpriteData'
+import { readSpriteFromPath, revokeSpriteUrls, saveSpriteConfig, saveBsfManifest } from '../../composables/useSpriteData'
 
 import iconPrev from '../../assets/icons/btn_preview_prev.svg'
 import iconPlay from '../../assets/icons/btn_preview_play.svg'
@@ -67,7 +67,12 @@ function scheduleSave() {
   saveTimer = setTimeout(async () => {
     if (!currentSprite.value || !currentSpritePath.value) return
     try {
-      await saveSpriteConfig(currentSpritePath.value, currentSprite.value)
+      // .bsf 角色写回 manifest.json（clips），旧目录角色写回 config.json（segments）
+      if (currentSprite.value.bsf) {
+        await saveBsfManifest(currentSpritePath.value, currentSprite.value)
+      } else {
+        await saveSpriteConfig(currentSpritePath.value, currentSprite.value)
+      }
     } catch (e) {
       console.error('自动保存角色失败:', e)
     }
@@ -80,12 +85,8 @@ async function loadSprite(item: { id: string; name: string; path: string }) {
   try {
     // 释放旧的 ObjectURL 防止内存泄漏
     revokeSpriteUrls(currentSprite.value)
-    // 图片角色（上传图片直接作角色）：构造单帧数据；目录角色：读 config.json
-    if (/\.(png|jpe?g|gif|bmp|webp)$/i.test(item.path)) {
-      currentSprite.value = await readImageAsSprite(item.path)
-    } else {
-      currentSprite.value = await readBgsFromUrl(item.path)
-    }
+    // 图片角色 → 单帧；.bsf 目录 → manifest + sheet 裁帧；.bgs 目录 → config.json
+    currentSprite.value = await readSpriteFromPath(item.path)
     currentSpritePath.value = item.path
     selectedFrameIndex.value = 0
     canvasDisplayIndex.value = 0
@@ -247,12 +248,29 @@ watch(fpsValue, (val) => {
   if (isPlaying.value && selectedAnim.value) {
     restartTimer()
   }
-  // 保存 FPS 到当前动画
+  // 保存 FPS 到当前动画（每个片段独立速度）
   if (selectedAnim.value) {
     selectedAnim.value.fps = val
     scheduleSave()
   }
 })
+
+// FPS 手动输入：输入过程中合法值立即生效（预览 + 保存），空/非法值由 blur 恢复
+function onFpsNumberInput(e: Event) {
+  const el = e.target as HTMLInputElement
+  const raw = el.value.trim()
+  if (raw === '') return
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return
+  fpsValue.value = Math.min(60, Math.max(1, Math.round(n)))
+}
+
+function onFpsNumberBlur(e: Event) {
+  const el = e.target as HTMLInputElement
+  if (el.value.trim() === '' || !Number.isFinite(Number(el.value))) {
+    el.value = String(fpsValue.value)
+  }
+}
 
 function addAnimation() {
   if (!currentSprite.value) return
@@ -263,6 +281,8 @@ function addAnimation() {
   while (existing.includes(name)) { name = `动画${counter}`; counter++ }
   const newAnim: SpriteAnimation = { name, start: 1, end: total, fps: 10, loop: true }
   currentSprite.value.animations.push(newAnim)
+  // 立即选中新片段：速度滑条/数字框随之切换到它，体现"每片段独立速度"
+  selectAnimation(newAnim)
   scheduleSave()
 }
 
@@ -408,11 +428,30 @@ onBeforeUnmount(() => {
             class="preview-image"
             :style="{ transform: `scale(${previewScale})`, imageRendering: imageRenderingStyle }"
           />
-          <!-- FPS 滑块 (悬浮在预览底部) -->
-          <div class="fps-slider-overlay">
-            <div class="fps-spacer"></div>
-            <input type="range" v-model.number="fpsValue" min="1" max="60" class="fps-slider" />
-            <div class="fps-spacer"></div>
+          <!-- FPS 控制 (悬浮在预览底部)：左=拖动滑条，右=帧数手动输入；速度按片段独立保存 -->
+          <div class="fps-slider-overlay" :class="{ 'fps-overlay-disabled': !selectedAnim }">
+            <input
+              type="range"
+              v-model.number="fpsValue"
+              min="1"
+              max="60"
+              class="fps-slider"
+              :disabled="!selectedAnim"
+              title="动画播放速度（帧/秒），每个片段独立"
+            />
+            <input
+              type="number"
+              class="fps-input"
+              :value="fpsValue"
+              min="1"
+              max="60"
+              :disabled="!selectedAnim"
+              title="动画播放速度（帧/秒），每个片段独立"
+              @input="onFpsNumberInput"
+              @blur="onFpsNumberBlur"
+              @keyup.enter="($event.target as HTMLInputElement).blur()"
+            />
+            <span class="fps-unit">帧/秒</span>
           </div>
         </div>
       </div>
@@ -491,7 +530,12 @@ onBeforeUnmount(() => {
         :style="{ left: costumeContextMenu.x + 'px', top: costumeContextMenu.y + 'px' }"
         @click.stop
       >
-        <div class="context-menu-item" @click="deleteCostume(costumeContextMenu.index)">
+        <!-- .bsf 帧是 sheet 图集的一部分，编辑器不支持删除（需回 BingoPacker 重打包） -->
+        <div
+          v-if="!currentSprite?.bsf"
+          class="context-menu-item"
+          @click="deleteCostume(costumeContextMenu.index)"
+        >
           删除造型: {{ costumeContextMenu.index + 1 }}
         </div>
       </div>
@@ -633,7 +677,7 @@ onBeforeUnmount(() => {
   max-height: 248px;
 }
 
-/* FPS 滑块 (悬浮在预览底部) */
+/* FPS 控制 (悬浮在预览底部)：左滑条 + 右数字输入，无底色 */
 .fps-slider-overlay {
   position: absolute;
   bottom: 8px;
@@ -641,18 +685,44 @@ onBeforeUnmount(() => {
   right: 0;
   display: flex;
   align-items: center;
-  padding: 4px 4px;
+  gap: 6px;
+  padding: 0 4px;
 }
-.fps-spacer { flex: 1; }
+.fps-overlay-disabled {
+  opacity: 0.45;
+}
+.fps-input {
+  width: 46px;
+  height: 18px;
+  padding: 0 4px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 11px;
+  text-align: center;
+  outline: none;
+  -moz-appearance: textfield;
+}
+.fps-input::-webkit-outer-spin-button,
+.fps-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.fps-input:focus { border-color: var(--accent); }
+.fps-input:disabled,
+.fps-slider:disabled { cursor: not-allowed; }
+.fps-unit {
+  font-size: 10px;
+  color: #9ca0a4;
+  white-space: nowrap;
+}
 .fps-slider {
-  flex: 2;
+  flex: 1;
   height: 4px;
   -webkit-appearance: none;
   appearance: none;
   background: var(--border-light);
   border-radius: 2px;
   outline: none;
-  margin: 0 4px;
+  margin: 0;
 }
 .fps-slider::-webkit-slider-thumb {
   -webkit-appearance: none;

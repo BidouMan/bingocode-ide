@@ -22,6 +22,8 @@ export interface CreateCommand extends EngineCommand {
     raw_ch: number
     sprite_dir?: string
     config?: any
+    /** .bsf 精灵：帧在 sheet.png 中的 UV 区域 [x, y, w, h] */
+    frame_rect?: number[]
   }
 }
 
@@ -42,6 +44,8 @@ export interface UpdateCommand extends EngineCommand {
     voy: number
     cw: number
     ch: number
+    /** .bsf 精灵：帧在 sheet.png 中的 UV 区域 [x, y, w, h] */
+    frame_rect?: number[]
   }
 }
 
@@ -82,6 +86,8 @@ export interface UpdateBatchCommand extends EngineCommand {
       cw: number
       ch: number
       image?: string
+      /** .bsf 精灵：帧在 sheet.png 中的 UV 区域 [x, y, w, h] */
+      frame_rect?: number[]
     }>
   }
 }

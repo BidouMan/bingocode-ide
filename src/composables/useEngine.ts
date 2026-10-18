@@ -48,6 +48,7 @@ export function useEngine() {
           imagePath: cmd.data.image,
           vox: cmd.data.vox ?? 0,
           voy: cmd.data.voy ?? 0,
+          frameRect: cmd.data.frame_rect ?? null,
         })
         break
 
@@ -64,6 +65,8 @@ export function useEngine() {
           imagePath: cmd.data.image,
           vox: cmd.data.vox ?? 0,
           voy: cmd.data.voy ?? 0,
+          // 部分更新（仅 visible/layer）不带 frame_rect 时保留原 UV，避免瞬时整张贴图
+          ...(cmd.data.frame_rect !== undefined ? { frameRect: cmd.data.frame_rect } : {}),
         })
         // 更新碰撞盒
         if (cmd.data.hitbox) {
@@ -99,7 +102,7 @@ export function useEngine() {
 
       case 'UPDATE_BATCH':
         for (const update of cmd.data.updates) {
-          renderStore.updateSprite(update.id, {
+          const patch: Record<string, any> = {
             x: update.x,
             y: update.y,
             angle: update.angle,
@@ -108,7 +111,14 @@ export function useEngine() {
             scaleY: update.scale_y,
             visible: update.visible ?? true,
             layer: update.layer,
-          })
+            // 动画换帧 / 翻转锚点靠这两项：此前 batch 路径丢失导致 .bgs 动画不刷新
+            vox: update.vox ?? 0,
+            voy: update.voy ?? 0,
+          }
+          // 缺省时不覆盖已有纹理路径（undefined 会让精灵变占位图）
+          if (update.image !== undefined) patch.imagePath = update.image
+          if (update.frame_rect !== undefined) patch.frameRect = update.frame_rect
+          renderStore.updateSprite(update.id, patch)
           if (update.hitbox) {
             renderStore.setHitbox(update.id, update.hitbox)
           } else {

@@ -169,14 +169,18 @@ class Sprite:
 
         # 注意：角色资源必须由用户在资源管理器中添加后才会存在于项目目录
         # 不再自动从引擎内置素材解压
+        self._is_bsf = False
         self.config = self._load_sprite_config()
 
         if self.config:
             # 如果是 BGS 角色包格式
             self.current_costume_index = 0
 
+            if self._is_bsf:
+                # .bsf：唯一贴图是 sheet.png，帧切换只改 UV 区域（frame_rect）
+                self.image = self._bsf_sheet
             # 检查 frames 或 costumes 字段
-            if "frames" in self.config:
+            elif "frames" in self.config:
                 first_frame = self.config["frames"][0]
                 self.image = os.path.join(self.sprite_dir, first_frame)
             elif "costumes" in self.config:
@@ -213,6 +217,10 @@ class Sprite:
             "raw_cw": self._content_w,
             "raw_ch": self._content_h,
         }
+
+        # .bsf：CREATE 即携带首帧在 sheet 中的 UV 区域
+        if self._is_bsf:
+            create_data["frame_rect"] = self._bsf_frame_rect()
 
         # 添加精灵配置信息，用于动画播放
         if self.sprite_dir and self.config:
@@ -820,12 +828,25 @@ class Sprite:
 
         # 获取动画配置
         animation_config = None
-        if "segments" in self.config:
+        # .bsf：优先按 clip 原始帧序列播放（支持非连续帧 / 重复帧）
+        if getattr(self, "_is_bsf", False) and animation_name in getattr(self, "_bsf_clips", {}):
+            clip = self._bsf_clips[animation_name]
+            name_to_idx = {f.get("name"): i for i, f in enumerate(self._bsf_frames)}
+            idxs = [name_to_idx[n] for n in clip.get("frames", []) if n in name_to_idx]
+            if idxs:
+                animation_config = {
+                    "start": 1,
+                    "end": len(idxs),
+                    "fps": clip.get("fps", 10),
+                    "loop": clip.get("loop", True),
+                    "frame_indices": idxs,
+                }
+        if not animation_config and "segments" in self.config:
             for segment in self.config["segments"]:
                 if segment.get("name") == animation_name:
                     animation_config = segment
                     break
-        elif "animations" in self.config:
+        if not animation_config and "animations" in self.config:
             animation_config = self.config["animations"].get(animation_name)
 
         if not animation_config:
@@ -836,6 +857,7 @@ class Sprite:
         end = animation_config.get("end", 1)
         fps = animation_config.get("fps", 10)
         loop = animation_config.get("loop", True)
+        frame_indices = animation_config.get("frame_indices")
 
         # 如果当前没有动画在播放，直接设置新动画
         if not hasattr(self, "animation_state") or not self.animation_state:
@@ -844,6 +866,7 @@ class Sprite:
                 "end": end - 1,
                 "fps": fps,
                 "loop": loop,
+                "frame_indices": frame_indices,
                 "current_frame": start - 1,
                 "last_frame_time": time.time(),
                 "frame_duration": 1.0 / fps,
@@ -860,6 +883,7 @@ class Sprite:
             "end": end - 1,
             "fps": fps,
             "loop": loop,
+            "frame_indices": frame_indices,
             "current_frame": start - 1,
             "last_frame_time": time.time(),
             "frame_duration": 1.0 / fps,
@@ -1272,7 +1296,7 @@ class Sprite:
 
     # ---------- 内部调用 ----------
     def _load_sprite_config(self):
-        """内部工具：尝试读取文件夹下的 config.json"""
+        """内部工具：尝试读取文件夹下的 config.json（.bgs）或 manifest.json（.bsf）"""
         config_path = os.path.join(self.sprite_dir, "config.json")
         if os.path.exists(config_path):
             try:
@@ -1280,7 +1304,77 @@ class Sprite:
                     return json.load(f)
             except Exception as e:
                 print(f"[警告] 读取角色配置 {config_path} 失败: {e}")
+
+        # .bsf 解压目录：sheet 图集格式（manifest.json + sheet.png）
+        manifest_path = os.path.join(self.sprite_dir, "manifest.json")
+        if os.path.exists(manifest_path):
+            try:
+                with open(manifest_path, "r", encoding="utf-8") as f:
+                    manifest = json.load(f)
+                frames = manifest.get("frames")
+                if manifest.get("format") == "bsf" and isinstance(frames, list) and frames:
+                    return self._normalize_bsf_manifest(manifest)
+                print(f"[警告] manifest.json 不是合法的 .bsf v2 文件: {manifest_path}")
+            except Exception as e:
+                print(f"[警告] 读取角色 manifest {manifest_path} 失败: {e}")
         return None
+
+    def _normalize_bsf_manifest(self, manifest):
+        """把 .bsf manifest 规范化为引擎内部 config，同时缓存 BSF 专用字段。
+
+        返回的 config 保持旧字段兼容：
+        - frames: 帧名列表（旧代码按文件名拼路径的分支对 BSF 不生效，走 _is_bsf 分支）
+        - segments: 由 clips 合成的近似连续区间（兜底；play() 优先走原始 clip 帧序列）
+        """
+        self._is_bsf = True
+        self._bsf_manifest = manifest
+        self._bsf_frames = manifest["frames"]
+        canvas = manifest.get("canvas") or {}
+        self._bsf_pivot = manifest.get("pivot") or {
+            "x": (canvas.get("w") or 0) / 2.0,
+            "y": (canvas.get("h") or 0) / 2.0,
+        }
+        self._bsf_clips = {
+            c.get("name"): c
+            for c in manifest.get("clips", [])
+            if isinstance(c, dict) and c.get("name")
+        }
+        self._bsf_frame_index = 0
+        self._bsf_sheet = os.path.join(
+            self.sprite_dir, manifest.get("sheet") or "sheet.png"
+        )
+
+        name_to_idx = {f.get("name"): i for i, f in enumerate(self._bsf_frames)}
+        segments = []
+        for clip in manifest.get("clips", []):
+            if not isinstance(clip, dict):
+                continue
+            idxs = [name_to_idx[n] for n in clip.get("frames", []) if n in name_to_idx]
+            if not idxs:
+                continue
+            segments.append({
+                "name": clip.get("name"),
+                "start": min(idxs) + 1,
+                "end": max(idxs) + 1,
+                "fps": clip.get("fps", 10),
+                "loop": clip.get("loop", True),
+            })
+
+        return {
+            "name": manifest.get("name") or os.path.basename(self.sprite_dir),
+            "frames": [
+                f.get("name") or "frame_%03d" % (i + 1)
+                for i, f in enumerate(self._bsf_frames)
+            ],
+            "segments": segments,
+            "bsf": True,
+        }
+
+    def _bsf_frame_rect(self, index=None):
+        """当前（或指定）帧在 sheet.png 中的 UV 区域 [x, y, w, h]"""
+        idx = self._bsf_frame_index if index is None else index
+        rect = self._bsf_frames[idx]["rect"]
+        return [rect["x"], rect["y"], rect["w"], rect["h"]]
 
     def _resolve_path(self, filename, category):
         """通用路径解析：工程根目录优先，其次是 assets/分类/，自动补全图片扩展名"""
@@ -1301,6 +1395,8 @@ class Sprite:
 
     def _setup_hitbox(self):
         """通用型高性能采样：支持任何尺寸图片，自动定位内容重心"""
+        if getattr(self, "_is_bsf", False):
+            return self._setup_hitbox_bsf()
 
         if hasattr(self, "_content_w") and self._cached_image == self.image:
             return self._cached_hitbox
@@ -1334,6 +1430,42 @@ class Sprite:
             self._cached_hitbox = [0, 0, 50, 50]
             self._cached_image = self.image
 
+        return self._cached_hitbox
+
+    def _setup_hitbox_bsf(self):
+        """.bsf 帧定位：直接用 manifest 的 rect/offset/pivot 计算，无需读像素（O(1)）。
+
+        坐标语义（与旧 .bgs 的"内容重心=x/y"对齐）：
+        - 引擎 (x, y) = manifest.pivot（角色所在点，见 bsf-api §4）
+        - 纹理 = 帧 rect（紧致裁剪），vox/voy = pivot 相对帧纹理中心的偏移
+        """
+        idx = getattr(self, "_bsf_frame_index", 0)
+        if (
+            hasattr(self, "_content_w")
+            and getattr(self, "_cached_bsf_frame", None) == idx
+            and self._cached_image == self.image
+        ):
+            return self._cached_hitbox
+
+        frame = self._bsf_frames[idx]
+        rect = frame["rect"]
+        offset = frame.get("offset") or {"x": 0, "y": 0}
+        pivot = self._bsf_pivot
+        rw, rh = rect["w"], rect["h"]
+
+        # 前端 anchor=0.5：纹理坐标系下 (0,0)-(rw,rh) 即当前帧内容
+        self._orig_w, self._orig_h = rw, rh
+        self._content_w, self._content_h = rw, rh
+        self._content_bbox = (0, 0, rw, rh)
+        # pivot 落在世界 (x, y) ⇒ pivot 相对纹理中心的偏移即 PixiJS pivot
+        self._visual_offset_x = pivot["x"] - (offset["x"] + rw / 2.0)
+        self._visual_offset_y = pivot["y"] - (offset["y"] + rh / 2.0)
+
+        self._cached_hitbox = [0, 0, rw, rh]
+        self._cached_image = self.image
+        self._cached_bsf_frame = idx
+        # 帧切换后让 _get_hitbox_rect 的帧级缓存失效（它不感知 sheet 帧变化）
+        self._cached_rect_frame = None
         return self._cached_hitbox
 
     def _get_hitbox_rect(self):
@@ -1449,6 +1581,8 @@ class Sprite:
             round(base_scale, 4), round(final_scale_x, 4), round(final_scale_y, 4),
             self._visible, self._layer, self._show_hitbox,
             os.path.abspath(self.image) if hasattr(self, "image") and self.image else None,
+            # .bsf 路径不变，帧切换必须进入缓存键否则动画不下发
+            getattr(self, "_bsf_frame_index", None) if getattr(self, "_is_bsf", False) else None,
         )
         if getattr(self, "_last_update_key", None) == current_key:
             return
@@ -1475,6 +1609,10 @@ class Sprite:
         # 添加图像信息（如果有）
         if hasattr(self, "image") and self.image:
             update_data["image"] = os.path.abspath(self.image)
+
+        # .bsf：帧切换携带新的 UV 区域（image 始终是 sheet.png）
+        if getattr(self, "_is_bsf", False) and getattr(self, "_bsf_frames", None):
+            update_data["frame_rect"] = self._bsf_frame_rect()
 
         # 加入帧缓冲，帧末合并发送以减少管道写入次数
         update_data["id"] = self.id
@@ -1509,6 +1647,19 @@ class Sprite:
         else:
             # 正常动画播放
             current_frame = self.animation_state["current_frame"]
+
+        # .bsf：clip 内序号映射到 sheet 帧索引，只切 UV 区域不换文件
+        if getattr(self, "_is_bsf", False) and self._bsf_frames:
+            indices = self.animation_state.get("frame_indices")
+            if indices and 0 <= current_frame < len(indices):
+                frame_idx = indices[current_frame]
+            else:
+                frame_idx = max(0, min(current_frame, len(self._bsf_frames) - 1))
+            if frame_idx != getattr(self, "_bsf_frame_index", 0):
+                self._bsf_frame_index = frame_idx
+                self._setup_hitbox()  # 重新计算当前帧的 vox/voy（O(1)，来自 manifest）
+                self._update_transform()
+            return
 
         # 获取帧文件路径
         if self.config and "frames" in self.config:
