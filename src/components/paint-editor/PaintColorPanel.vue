@@ -50,17 +50,17 @@ function hexToHsv(hex: string): { h: number; s: number; v: number } {
   return { h, s: max === 0 ? 0 : d / max, v: max }
 }
 
-// 外部颜色变化（切 tab / reset）→ 重推 HSV；自身交互变化不回写防抖动
+// 外部颜色变化（reset 等）→ 重推 HSV；自身交互变化不回写防抖动
 let internalChange = false
 
 function commitColor() {
   internalChange = true
-  store.applyColor(hsvToHex(hue.value, sat.value, val.value))
+  store.fillColor = hsvToHex(hue.value, sat.value, val.value)
   internalChange = false
 }
 
 watch(
-  () => store.activeColor(),
+  () => store.fillColor,
   (hex) => {
     if (internalChange) return
     const hsv = hexToHsv(hex)
@@ -126,28 +126,11 @@ const showStrokeWidth = () => store.activeTool === 'line' || store.activeTool ==
 
 <template>
   <div class="color-panel">
-    <!-- 填充 / 描边 目标切换 -->
-    <div class="target-tabs">
-      <button
-        class="target-tab"
-        :class="{ 'target-tab-active': store.colorTarget === 'fill' }"
-        @click="store.setColorTarget('fill')"
-      >
-        填充
-      </button>
-      <button
-        class="target-tab"
-        :class="{ 'target-tab-active': store.colorTarget === 'stroke' }"
-        @click="store.setColorTarget('stroke')"
-      >
-        描边
-      </button>
-    </div>
-
-    <!-- 当前颜色预览 + hex -->
+    <!-- 当前绘制色（所有工具共用，切换工具不变色） -->
+    <div class="panel-label">绘制颜色</div>
     <div class="color-preview-row">
-      <div class="color-swatch" :style="{ background: store.activeColor() }"></div>
-      <span class="color-hex">{{ store.activeColor().toUpperCase() }}</span>
+      <div class="color-swatch" :style="{ background: store.fillColor }"></div>
+      <span class="color-hex">{{ store.fillColor.toUpperCase() }}</span>
     </div>
 
     <!-- 饱和度-明度方块 -->
@@ -234,32 +217,10 @@ const showStrokeWidth = () => store.activeTool === 'line' || store.activeTool ==
   user-select: none;
 }
 
-/* 填充/描边 tab */
-.target-tabs {
-  display: flex;
-  background: var(--bg-panel);
-  border-radius: 6px;
-  padding: 2px;
-  gap: 2px;
-}
-
-.target-tab {
-  flex: 1;
-  padding: 5px 0;
-  font-size: 12px;
+/* 面板小节标题 */
+.panel-label {
+  font-size: 11px;
   color: var(--text-muted);
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-.target-tab:hover:not(.target-tab-active) {
-  color: var(--text-secondary);
-}
-.target-tab-active {
-  background: var(--bg-active);
-  color: var(--text);
 }
 
 /* 当前颜色 */

@@ -5,7 +5,7 @@ import { usePaintStore } from '../../stores/paint'
 import { useResourceStore } from '../../stores/resource'
 import { useProjectStore } from '../../stores/project'
 import { saveImageSpriteToDirectory, type SpriteData } from '../../composables/useSpriteData'
-import { exportCanvasPngBlob } from './utils/artboardExport'
+import { exportArtboardPngBlob } from './utils/artboardExport'
 import PaintTopBar from './PaintTopBar.vue'
 import PaintToolbar from './PaintToolbar.vue'
 import PaintArtboard from './PaintArtboard.vue'
@@ -45,8 +45,8 @@ async function onSave() {
   if (!canvas) return
 
   try {
-    // 位图画板 → PNG Blob（棋盘格是视图辅助，canvas 本身透明背景）
-    const blob = await exportCanvasPngBlob(canvas)
+    // 位图画板 → PNG Blob（输出恒为画板逻辑尺寸；棋盘格是视图辅助，透明背景）
+    const blob = await exportArtboardPngBlob(canvas, store.artboardWidth, store.artboardHeight)
     const projectRoot = projectStore.root
     if (!projectRoot) {
       console.warn('[PaintEditor] 项目目录未就绪，无法保存角色')

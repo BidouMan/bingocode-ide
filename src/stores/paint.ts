@@ -3,7 +3,6 @@ import { defineStore } from 'pinia'
 
 export type PaintTool = 'select' | 'reshape' | 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse' | 'text' | 'eyedropper'
 export type PaintMode = 'vector' | 'bitmap'
-export type ColorTarget = 'fill' | 'stroke'
 
 export const ARTBOARD_PRESETS = [
   { label: '96 × 96', w: 96, h: 96 },
@@ -20,14 +19,17 @@ export const DEFAULT_ARTBOARD = { w: 480, h: 360 }
  * 硬约束：PaperScope / paper.Item / CanvasRenderingContext2D 等非原始对象
  * 一律不得放入本 store（Vue 深层响应式 proxy 会破坏 paper 内部对象），
  * 它们只存放在 paint-editor composables 的闭包中。
+ *
+ * 颜色模型：单一绘制色（fillColor）。画笔/填充/直线/矩形/椭圆全部使用最后一次
+ * 选取的颜色，切换工具不会改变颜色。strokeColor 仅留给后续矢量模式的填充+描边组合。
  */
 export const usePaintStore = defineStore('paint', () => {
   const activeTool = ref<PaintTool>('brush')
   const mode = ref<PaintMode>('bitmap')
-  /** 当前颜色面板编辑目标（填充/描边） */
-  const colorTarget = ref<ColorTarget>('fill')
 
+  /** 唯一绘制色：所有位图绘制工具共用 */
   const fillColor = ref('#5BFB84')
+  /** 矢量模式的描边色（位图工具不使用） */
   const strokeColor = ref('#ffffff')
   const fillEnabled = ref(true)
   const strokeEnabled = ref(false)
@@ -62,20 +64,6 @@ export const usePaintStore = defineStore('paint', () => {
     mode.value = m
   }
 
-  function setColorTarget(target: ColorTarget) {
-    colorTarget.value = target
-  }
-
-  /** 根据当前编辑目标写入颜色 */
-  function applyColor(color: string) {
-    if (colorTarget.value === 'fill') fillColor.value = color
-    else strokeColor.value = color
-  }
-
-  function activeColor(): string {
-    return colorTarget.value === 'fill' ? fillColor.value : strokeColor.value
-  }
-
   function setZoom(z: number) {
     zoom.value = Math.min(32, Math.max(0.1, z))
   }
@@ -90,7 +78,6 @@ export const usePaintStore = defineStore('paint', () => {
   function reset() {
     activeTool.value = 'brush'
     mode.value = 'bitmap'
-    colorTarget.value = 'fill'
     fillColor.value = '#5BFB84'
     strokeColor.value = '#ffffff'
     fillEnabled.value = true
@@ -111,7 +98,6 @@ export const usePaintStore = defineStore('paint', () => {
   return {
     activeTool,
     mode,
-    colorTarget,
     fillColor,
     strokeColor,
     fillEnabled,
@@ -130,9 +116,6 @@ export const usePaintStore = defineStore('paint', () => {
     vectorEnabled,
     setTool,
     setMode,
-    setColorTarget,
-    applyColor,
-    activeColor,
     setZoom,
     resetView,
     reset,
