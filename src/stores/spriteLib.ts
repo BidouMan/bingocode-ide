@@ -205,14 +205,24 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
     const sheetBlob = await sheetEntry.async('blob')
     const { loadImage } = await import('../composables/useSpriteData')
     const sheetImage = await loadImage(sheetBlob)
+    // 画回完整参考画布（与 .bgs 整帧导出观感一致；紧致裁剪帧直接展示会偏大且帧间不齐）
+    const canvasSize = manifest.canvas || {
+      w: frames[0]?.rect?.w ?? 1,
+      h: frames[0]?.rect?.h ?? 1,
+    }
     const urls: string[] = []
     for (const name of order) {
       const f = byName.get(name)
       const canvas = document.createElement('canvas')
-      canvas.width = f.rect.w
-      canvas.height = f.rect.h
+      canvas.width = canvasSize.w
+      canvas.height = canvasSize.h
       const ctx = canvas.getContext('2d')!
-      ctx.drawImage(sheetImage, f.rect.x, f.rect.y, f.rect.w, f.rect.h, 0, 0, f.rect.w, f.rect.h)
+      const offset = f.offset || { x: 0, y: 0 }
+      ctx.drawImage(
+        sheetImage,
+        f.rect.x, f.rect.y, f.rect.w, f.rect.h,
+        offset.x, offset.y, f.rect.w, f.rect.h,
+      )
       const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
       if (blob) urls.push(URL.createObjectURL(blob))
     }

@@ -62,16 +62,26 @@ export function loadImage(source: Blob | string): Promise<HTMLImageElement> {
   })
 }
 
-/** 从 sheet 位图上裁剪一帧并生成 ObjectURL */
+/**
+ * 把 sheet 中的一帧画回完整参考画布（canvas + offset 定位）。
+ * 紧致裁剪的帧直接展示会比 .bgs 整帧导出的观感"大一圈"且预览帧间不齐；
+ * 按 manifest 语义还原画布尺寸后，缩略图边距与动画预览对齐都和 .bgs 一致。
+ */
 async function cropSheetFrame(
   image: HTMLImageElement,
-  rect: { x: number; y: number; w: number; h: number },
+  frame: BsfFrameMeta,
+  canvasSize: { w: number; h: number },
 ): Promise<SpriteFrame> {
   const canvas = document.createElement('canvas')
-  canvas.width = rect.w
-  canvas.height = rect.h
+  canvas.width = canvasSize.w
+  canvas.height = canvasSize.h
   const ctx = canvas.getContext('2d')!
-  ctx.drawImage(image, rect.x, rect.y, rect.w, rect.h, 0, 0, rect.w, rect.h)
+  const offset = frame.offset || { x: 0, y: 0 }
+  ctx.drawImage(
+    image,
+    frame.rect.x, frame.rect.y, frame.rect.w, frame.rect.h,
+    offset.x, offset.y, frame.rect.w, frame.rect.h,
+  )
   const blob = await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(b => (b ? resolve(b) : reject(new Error('canvas.toBlob 失败'))), 'image/png')
   })
@@ -103,12 +113,19 @@ export async function getBsfThumbnail(path: string): Promise<string> {
     sheetImage = await loadImage(dataUrl)
   }
 
-  const rect = manifest.frames?.[0]?.rect
-  if (!rect) throw new Error('manifest.frames 为空')
+  const frame = manifest.frames?.[0]
+  if (!frame?.rect) throw new Error('manifest.frames 为空')
+  // 画回完整参考画布：紧致裁剪帧直接展示会比 .bgs 整帧导出"大一圈"
+  const canvasSize = manifest.canvas || { w: frame.rect.w, h: frame.rect.h }
   const canvas = document.createElement('canvas')
-  canvas.width = rect.w
-  canvas.height = rect.h
-  canvas.getContext('2d')!.drawImage(sheetImage, rect.x, rect.y, rect.w, rect.h, 0, 0, rect.w, rect.h)
+  canvas.width = canvasSize.w
+  canvas.height = canvasSize.h
+  const offset = frame.offset || { x: 0, y: 0 }
+  canvas.getContext('2d')!.drawImage(
+    sheetImage,
+    frame.rect.x, frame.rect.y, frame.rect.w, frame.rect.h,
+    offset.x, offset.y, frame.rect.w, frame.rect.h,
+  )
   return canvas.toDataURL('image/png')
 }
 
@@ -138,10 +155,14 @@ export async function readBsfFromDir(dirPath: string): Promise<SpriteData> {
     path: `${dirPath}/${manifest.sheet || 'sheet.png'}`,
   })
   const sheetImage = await loadImage(sheetDataUrl)
+  const canvasSize = manifest.canvas || {
+    w: manifest.frames[0]?.rect.w ?? 1,
+    h: manifest.frames[0]?.rect.h ?? 1,
+  }
 
   const frames: SpriteFrame[] = []
   for (const f of manifest.frames as BsfFrameMeta[]) {
-    const cropped = await cropSheetFrame(sheetImage, f.rect)
+    const cropped = await cropSheetFrame(sheetImage, f, canvasSize)
     cropped.name = f.name
     frames.push(cropped)
   }
@@ -160,17 +181,13 @@ export async function readBsfFromDir(dirPath: string): Promise<SpriteData> {
     }
   })
 
-  const firstRect = (manifest.frames as BsfFrameMeta[])[0]?.rect
   return {
     name: manifest.name || '未知角色',
     frames,
     animations,
     bsf: {
-      canvas: manifest.canvas || { w: firstRect?.w ?? 1, h: firstRect?.h ?? 1 },
-      pivot: manifest.pivot || {
-        x: (manifest.canvas?.w ?? firstRect?.w ?? 1) / 2,
-        y: (manifest.canvas?.h ?? firstRect?.h ?? 1) / 2,
-      },
+      canvas: canvasSize,
+      pivot: manifest.pivot || { x: canvasSize.w / 2, y: canvasSize.h / 2 },
       frames: manifest.frames,
     },
   }
