@@ -17,6 +17,16 @@ export const useResourceStore = defineStore('resource', () => {
   const codes = ref<ResourceItem[]>([])
   const selectedSpriteId = ref<string | null>(null)
 
+  // 角色缩略图版本号：编辑器改了默认渲染帧后 bump，MainLayout 监听并重载对应缩略图
+  const spriteThumbVersions = ref<Record<string, number>>({})
+  function bumpSpriteThumb(id: string) {
+    if (!id) return
+    spriteThumbVersions.value = {
+      ...spriteThumbVersions.value,
+      [id]: (spriteThumbVersions.value[id] ?? 0) + 1,
+    }
+  }
+
   // 地图数据预解析缓存：mapId → deserialized MapData
   const mapDataCache = ref<Map<string, any>>(new Map())
 
@@ -108,5 +118,5 @@ export const useResourceStore = defineStore('resource', () => {
     mapDataCache.value.clear()
   }
 
-  return { sprites, maps, sounds, codes, selectedSpriteId, addItem, removeItem, renameItem, clearAll, getItem, clearAllResources, setCachedMapData, getCachedMapData, clearMapDataCache, nextSequentialName }
+  return { sprites, maps, sounds, codes, selectedSpriteId, spriteThumbVersions, bumpSpriteThumb, addItem, removeItem, renameItem, clearAll, getItem, clearAllResources, setCachedMapData, getCachedMapData, clearMapDataCache, nextSequentialName }
 })

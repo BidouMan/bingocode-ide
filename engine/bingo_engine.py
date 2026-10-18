@@ -178,10 +178,18 @@ class Sprite:
 
             if self._is_bsf:
                 # .bsf：唯一贴图是 sheet.png，帧切换只改 UV 区域（frame_rect）
+                # 初始帧 = manifest.defaultFrame（编辑器选中帧），缺省第一帧
                 self.image = self._bsf_sheet
             # 检查 frames 或 costumes 字段
             elif "frames" in self.config:
-                first_frame = self.config["frames"][0]
+                frames_list = self.config["frames"]
+                # 默认渲染帧（编辑器选中帧持久化字段），无效/缺省回退第一帧
+                df = self.config.get("defaultFrame")
+                if isinstance(df, str) and df in frames_list:
+                    self.current_costume_index = frames_list.index(df)
+                elif isinstance(df, int) and 0 <= df < len(frames_list):
+                    self.current_costume_index = df
+                first_frame = frames_list[self.current_costume_index]
                 self.image = os.path.join(self.sprite_dir, first_frame)
             elif "costumes" in self.config:
                 first_frame = self.config["costumes"][0]["file"]
@@ -1346,6 +1354,15 @@ class Sprite:
             if isinstance(c, dict) and c.get("name")
         }
         self._bsf_frame_index = 0
+        # 默认渲染帧（编辑器选中帧持久化字段 defaultFrame）：无效/缺省回退第一帧
+        default_frame = manifest.get("defaultFrame")
+        if isinstance(default_frame, str):
+            for i, f in enumerate(self._bsf_frames):
+                if f.get("name") == default_frame:
+                    self._bsf_frame_index = i
+                    break
+        elif isinstance(default_frame, int) and 0 <= default_frame < len(self._bsf_frames):
+            self._bsf_frame_index = default_frame
         self._bsf_sheet = os.path.join(
             self.sprite_dir, manifest.get("sheet") or "sheet.png"
         )

@@ -11,6 +11,7 @@ BingoCode IDE 的版本更新记录，最新在前。
 - 角色素材支持 `.bsf`（Bingo Sheet File，BingoPacker 导出的 sheet 图集格式）：内置精灵库扫描/缩略图/悬停动画预览、上传抽屉与文件对话框导入（解压为 `sheet.png + manifest.json` 目录）、项目资源缩略图；引擎按 manifest 的 clip 播放动画，渲染协议新增 `frame_rect`（UV 取帧），前端一张 sheet 贴图复用全部帧——替代逐帧独立图片，解码次数与 GPU 纹理数从 N 降为 1，适合老电脑/学生机
 - 精灵编辑器打开 `.bsf` 角色：从 sheet 裁剪帧只读展示、动画段（clips）增删改名/fps/loop 编辑并写回 manifest.json（帧像素编辑需回 BingoPacker 重打包）
 - 引擎 `play()` 动画名无效时不再静默失败，打印 `[警告] 角色 'x' 没有动画 'y'，可用动画: [...]`，便于课堂排查
+- 默认渲染帧（对齐 Scratch"当前造型"语义）：角色编辑器中选中的帧持久化为 `defaultFrame`（.bsf 写 manifest / .bgs 写 config.json，可选字段、缺省回退第一帧），不播动画时引擎初始渲染该帧，资源面板缩略图实时同步
 
 ### 修复
 

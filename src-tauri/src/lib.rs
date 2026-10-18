@@ -886,7 +886,11 @@ fn get_sprite_thumbnail(path: String) -> Result<String, String> {
             .map_err(|e| format!("解析 config.json 失败: {}", e))?;
         let frames = config["frames"].as_array()
             .ok_or("config.json 中没有 frames 字段")?;
-        first_frame_name = frames.first()
+        // 默认渲染帧（编辑器选中帧持久化字段），缺省回退第一帧
+        let default_frame = config["defaultFrame"].as_str()
+            .and_then(|d| frames.iter().find(|f| f.as_str() == Some(d)))
+            .or_else(|| frames.first());
+        first_frame_name = default_frame
             .ok_or("frames 为空")?
             .as_str()
             .ok_or("frames[0] 不是字符串")?.to_string();
@@ -913,7 +917,11 @@ fn get_sprite_thumbnail(path: String) -> Result<String, String> {
             .map_err(|e| format!("解析 config.json 失败: {}", e))?;
         let frames = config["frames"].as_array()
             .ok_or("config.json 中没有 frames 字段")?;
-        first_frame_name = frames.first()
+        // 默认渲染帧（编辑器选中帧持久化字段），缺省回退第一帧
+        let default_frame = config["defaultFrame"].as_str()
+            .and_then(|d| frames.iter().find(|f| f.as_str() == Some(d)))
+            .or_else(|| frames.first());
+        first_frame_name = default_frame
             .ok_or("frames 为空")?
             .as_str()
             .ok_or("frames[0] 不是字符串")?.to_string();

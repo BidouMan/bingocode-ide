@@ -34,8 +34,23 @@ export interface SpriteData {
   name: string
   frames: SpriteFrame[]
   animations: SpriteAnimation[]
+  /** 默认渲染帧（下标）：编辑器选中帧持久化后，引擎初始渲染与缩略图都用它（对齐 Scratch 的"当前造型"语义） */
+  defaultFrameIndex?: number
   /** 仅 .bsf 角色有值 */
   bsf?: BsfMeta
+}
+
+/** 从配置里的 defaultFrame 字段解析默认帧下标（缺省/无效 → 0） */
+function resolveDefaultFrameIndex(defaultFrame: unknown, frameNames: string[]): number {
+  if (typeof defaultFrame === 'string') {
+    const idx = frameNames.indexOf(defaultFrame)
+    if (idx >= 0) return idx
+  }
+  if (typeof defaultFrame === 'number' && Number.isInteger(defaultFrame)
+    && defaultFrame >= 0 && defaultFrame < frameNames.length) {
+    return defaultFrame
+  }
+  return 0
 }
 
 /** 解码图片（Blob 或 data URL → HTMLImageElement；老 WebView 无 createImageBitmap） */
@@ -89,7 +104,7 @@ async function cropSheetFrame(
 }
 
 /**
- * .bsf 缩略图：裁剪 manifest 第一帧 → dataURL。
+ * .bsf 缩略图：渲染 defaultFrame（缺省第一帧）→ dataURL。
  * 支持两种形态：内置库的 .bsf zip 文件 / 项目内解压后的 sheet 目录。
  */
 export async function getBsfThumbnail(path: string): Promise<string> {
@@ -113,7 +128,12 @@ export async function getBsfThumbnail(path: string): Promise<string> {
     sheetImage = await loadImage(dataUrl)
   }
 
-  const frame = manifest.frames?.[0]
+  const allFrames: any[] = manifest.frames || []
+  const defaultIdx = resolveDefaultFrameIndex(
+    manifest.defaultFrame,
+    allFrames.map(f => f.name),
+  )
+  const frame = allFrames[defaultIdx] ?? allFrames[0]
   if (!frame?.rect) throw new Error('manifest.frames 为空')
   // 画回完整参考画布：紧致裁剪帧直接展示会比 .bgs 整帧导出"大一圈"
   const canvasSize = manifest.canvas || { w: frame.rect.w, h: frame.rect.h }
@@ -185,6 +205,10 @@ export async function readBsfFromDir(dirPath: string): Promise<SpriteData> {
     name: manifest.name || '未知角色',
     frames,
     animations,
+    defaultFrameIndex: resolveDefaultFrameIndex(
+      manifest.defaultFrame,
+      (manifest.frames as BsfFrameMeta[]).map(f => f.name),
+    ),
     bsf: {
       canvas: canvasSize,
       pivot: manifest.pivot || { x: canvasSize.w / 2, y: canvasSize.h / 2 },
@@ -232,6 +256,10 @@ export async function saveBsfManifest(dirPath: string, sprite: SpriteData): Prom
     pivot: sprite.bsf.pivot,
     frames: sprite.bsf.frames,
     clips,
+    // 默认渲染帧（编辑器选中帧）：可选字段，读取方缺省回退第一帧
+    ...(allNames[sprite.defaultFrameIndex ?? 0]
+      ? { defaultFrame: allNames[sprite.defaultFrameIndex ?? 0] }
+      : {}),
   }
   await invoke('write_file', {
     path: `${dirPath}/manifest.json`,
@@ -268,7 +296,12 @@ export async function readBgsFile(file: File): Promise<SpriteData> {
     })
   )
 
-  return { name: config.name || '未知角色', frames, animations }
+  return {
+    name: config.name || '未知角色',
+    frames,
+    animations,
+    defaultFrameIndex: resolveDefaultFrameIndex(config.defaultFrame, frameNames),
+  }
 }
 
 export async function readBgsFromUrl(url: string): Promise<SpriteData> {
@@ -313,7 +346,12 @@ async function readLocalSpriteDir(dirPath: string): Promise<SpriteData> {
     })
   )
 
-  return { name: config.name || '未知角色', frames, animations }
+  return {
+    name: config.name || '未知角色',
+    frames,
+    animations,
+    defaultFrameIndex: resolveDefaultFrameIndex(config.defaultFrame, frameNames),
+  }
 }
 
 export function createFrameUrl(blob: Blob): string {
@@ -346,6 +384,9 @@ export async function saveSpriteConfig(spritePath: string, sprite: SpriteData): 
     if (a.loop != null) seg.loop = a.loop
     return seg
   })
+  // 默认渲染帧（编辑器选中帧）：可选字段，缺省时读取方回退第一帧
+  const defaultFrame = sprite.frames[sprite.defaultFrameIndex ?? 0]?.name
+  if (defaultFrame) config.defaultFrame = defaultFrame
 
   const json = JSON.stringify(config, null, 4)
   await invoke('write_file', { path: `${spritePath}/config.json`, content: json })

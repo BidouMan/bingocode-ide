@@ -62,6 +62,8 @@ watch(
 
 // 自动保存：每次修改后写回 config.json
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+// 默认渲染帧是否被改过：保存成功后据此刷新资源面板缩略图（其他字段修改不需要）
+let defaultFrameDirty = false
 function scheduleSave() {
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(async () => {
@@ -72,6 +74,13 @@ function scheduleSave() {
         await saveBsfManifest(currentSpritePath.value, currentSprite.value)
       } else {
         await saveSpriteConfig(currentSpritePath.value, currentSprite.value)
+      }
+      if (defaultFrameDirty) {
+        defaultFrameDirty = false
+        // 缩略图走磁盘 manifest/config，必须等写盘完成后再生效
+        if (resourceStore.selectedSpriteId) {
+          resourceStore.bumpSpriteThumb(resourceStore.selectedSpriteId)
+        }
       }
     } catch (e) {
       console.error('自动保存角色失败:', e)
@@ -88,9 +97,12 @@ async function loadSprite(item: { id: string; name: string; path: string }) {
     // 图片角色 → 单帧；.bsf 目录 → manifest + sheet 裁帧；.bgs 目录 → config.json
     currentSprite.value = await readSpriteFromPath(item.path)
     currentSpritePath.value = item.path
-    selectedFrameIndex.value = 0
-    canvasDisplayIndex.value = 0
-    costumeHighlightIndex.value = 0
+    // 初始定位到持久化的默认渲染帧（引擎初始渲染与缩略图同源）
+    const initialFrame = currentSprite.value.defaultFrameIndex ?? 0
+    selectedFrameIndex.value = initialFrame
+    canvasDisplayIndex.value = initialFrame
+    costumeHighlightIndex.value = initialFrame
+    defaultFrameDirty = false
     selectedAnim.value = null
     stopAnimation()
     canvasZoom.value = 1
@@ -112,6 +124,16 @@ function selectFrame(index: number) {
   selectedFrameIndex.value = index
   costumeHighlightIndex.value = index
   canvasDisplayIndex.value = index
+  markDefaultFrame(index)
+}
+
+/** 用户手动选中帧 = 设为默认渲染帧（引擎不播动画时显示它，缩略图同步；对齐 Scratch"当前造型"语义） */
+function markDefaultFrame(index: number) {
+  if (!currentSprite.value) return
+  if (currentSprite.value.defaultFrameIndex === index) return
+  currentSprite.value.defaultFrameIndex = index
+  defaultFrameDirty = true
+  scheduleSave()
 }
 
 function selectAnimation(anim: SpriteAnimation) {
@@ -160,6 +182,7 @@ function prevFrame() {
   selectedFrameIndex.value = Math.max(0, selectedFrameIndex.value - 1)
   canvasDisplayIndex.value = selectedFrameIndex.value
   costumeHighlightIndex.value = selectedFrameIndex.value
+  markDefaultFrame(selectedFrameIndex.value)
 }
 
 function nextFrame() {
@@ -168,6 +191,7 @@ function nextFrame() {
   selectedFrameIndex.value = Math.min(currentSprite.value.frames.length - 1, selectedFrameIndex.value + 1)
   canvasDisplayIndex.value = selectedFrameIndex.value
   costumeHighlightIndex.value = selectedFrameIndex.value
+  markDefaultFrame(selectedFrameIndex.value)
 }
 
 function toggleScale() {

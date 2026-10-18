@@ -1119,6 +1119,20 @@ async function loadSpriteThumbnail(item: { id: string; path: string }) {
   }
 }
 
+// 编辑器修改默认渲染帧后（写盘完成 → bump），重载对应角色缩略图
+watch(
+  () => resourceStore.spriteThumbVersions,
+  (versions, oldVersions) => {
+    for (const [id, ver] of Object.entries(versions)) {
+      if (oldVersions && oldVersions[id] === ver) continue
+      delete spriteThumbnails.value[id]
+      const item = resourceStore.sprites.find(s => s.id === id)
+      if (item) loadSpriteThumbnail(item)
+    }
+  },
+  { deep: true }
+)
+
 async function loadMapThumbnail(item: { id: string; path: string }) {
   if (mapThumbnails.value[item.id]) return
   if (!item.path) return
