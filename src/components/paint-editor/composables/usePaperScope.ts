@@ -701,7 +701,9 @@ export function usePaperScope(
 
   /**
    * 变换框手柄命中（优先级与位图 hitTestFloat 一致）：
-   * rotate > 缩放角/边手柄 > 框内(move) > outside
+   * rotate > 缩放角/边手柄 > 框内(move) > outside。
+   * 旋转柄命中宽容化：圆点命中区加大，且「顶边中点→圆点」的连线线段也可命中
+   * （实际操作常按在连线上，仅圆点可中会表现为"旋转无效"——按下即落到 outside 清选区）。
    */
   function hitTestFrame(
     p: { x: number; y: number }
@@ -710,7 +712,7 @@ export function usePaperScope(
     const z = Math.max(0.1, store.zoom)
     const cs = frameCorners(selFrame)
 
-    // 旋转柄
+    // 旋转柄：圆点 + 连接线段（点到线段距离）
     const topMid = { x: (cs[0].x + cs[1].x) / 2, y: (cs[0].y + cs[1].y) / 2 }
     const nxl = Math.hypot(topMid.x - selFrame.cx, topMid.y - selFrame.cy) || 1
     const rotOff = 14 / z
@@ -718,7 +720,17 @@ export function usePaperScope(
       x: topMid.x + ((topMid.x - selFrame.cx) / nxl) * rotOff,
       y: topMid.y + ((topMid.y - selFrame.cy) / nxl) * rotOff,
     }
-    if (Math.hypot(p.x - rot.x, p.y - rot.y) <= Math.max(6, 8 / z)) return { kind: 'rotate' }
+    if (Math.hypot(p.x - rot.x, p.y - rot.y) <= Math.max(12, 18 / z)) return { kind: 'rotate' }
+    // 连线线段命中（topMid → rot）
+    {
+      const ax = rot.x - topMid.x
+      const ay = rot.y - topMid.y
+      const len2 = ax * ax + ay * ay
+      const t = len2 > 0 ? Math.max(0, Math.min(1, ((p.x - topMid.x) * ax + (p.y - topMid.y) * ay) / len2)) : 0
+      const dx = p.x - (topMid.x + ax * t)
+      const dy = p.y - (topMid.y + ay * t)
+      if (Math.hypot(dx, dy) <= Math.max(6, 10 / z)) return { kind: 'rotate' }
+    }
 
     // 缩放手柄（角+边中点），命中区按屏幕恒定
     const hs = Math.max(4, 10 / z)
@@ -847,7 +859,9 @@ export function usePaperScope(
       const dApply = appliedNow - rs.applied
       if (dApply !== 0) {
         for (const item of selected) {
-          item.rotate(dApply, new scope!.Point(rs.center.x, rs.center.y))
+          // paper 的 Item.rotate 参数单位是「度」（Matrix.rotate 内部 ×π/180），而本模块
+          // 手势数学全部用弧度——必须换算后传入，否则图像只转 1/57、边框（SVG 按弧度画）却在转
+          item.rotate((dApply * 180) / Math.PI, new scope!.Point(rs.center.x, rs.center.y))
         }
         rs.applied = appliedNow
         f.angle = target
@@ -883,8 +897,11 @@ export function usePaperScope(
         newHalfX = f0.hw * r
         newHalfY = f0.hh * r
       }
-      newHalfX = Math.max(0.5, newHalfX)
-      newHalfY = Math.max(0.5, newHalfY)
+      // 穿过对侧边 → 半尺寸变负 = 该轴镜像翻转（对齐位图 signedScale）；
+      // 仅钳制 |half| ≥ 0.5 防矩阵退化与除零（0 处取正方向起步）
+      const clampHalf = (v: number) => (Math.abs(v) < 0.5 ? (v < 0 ? -0.5 : 0.5) : v)
+      newHalfX = clampHalf(newHalfX)
+      newHalfY = clampHalf(newHalfY)
 
       const sx = newHalfX / f0.hw
       const sy = newHalfY / f0.hh
