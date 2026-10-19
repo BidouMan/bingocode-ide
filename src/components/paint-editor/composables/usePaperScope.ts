@@ -217,6 +217,7 @@ export function usePaperScope(
 
   /** 手势/翻转用快照（等价 exportJSON，自动排除代理） */
   function snapshotForGesture(): string {
+    restoreFillPreview() // 悬停预览不得进任何快照（撤销栈/帧槽/导出共用此入口）
     return withRasterDetached(() => scope!.project.exportJSON())
   }
 
@@ -501,6 +502,7 @@ export function usePaperScope(
   /** 导入目标帧内容到 project（进入新帧后调用） */
   function importFrame(index: number) {
     if (!scope) return
+    restoreFillPreview() // 换帧清场景前收口悬停态（防引用悬空到已销毁对象）
     scope.project.clear()
     const json = frameJson[index]
     if (json) {
@@ -595,6 +597,7 @@ export function usePaperScope(
    */
   function clearAllForBake() {
     if (!scope) return
+    restoreFillPreview()
     clearSelection()
     removeBitmapRaster() // 防御：正常由 mode watch 先行摘除
     scope.project.clear()
@@ -858,23 +861,282 @@ export function usePaperScope(
     strokeStart = null
   }
 
-  function doFill(p: { x: number; y: number }) {
-    if (!scope) return
-    const hit = scope.project.hitTest(new scope.Point(p.x, p.y), {
+  // ─── 填充（Scratch fill-tool 同款：命中换色 + 悬停预览 + 洞覆盖）───
+  // 行为规格来自 scratch-paint src/helper/tools/fill-tool.js（develop）：
+  // - 点击形状换色：fill 命中→填充色、stroke 命中→描边色；仅 Path/CompoundPath/PointText
+  //   可填充——位图代理与空区域穿透（矢量模式无洪水填充，点空=无操作，与 Scratch 一致）
+  // - 闭合/近闭合（首尾距<8）路径即使无填充也接受内部填充（Scratch hitUnfilledPaths 语义；
+  //   stock paper 的 fill 命中要求 hasFill → 盲区扫描补齐）
+  // - 复合路径整体换色；洞（反向子路径）克隆覆盖片填充，提交时父无描边且同色则并入父
+  //   （Scratch addedFillItem + reduce 同款）
+  // - 悬停即预览换色、按下压撤销栈、松手提交（Scratch updateFillPreview/onMouseUp 模型）
+
+  type FillTarget =
+    | { kind: 'style'; item: paper.Item; prop: 'fillColor' | 'strokeColor' }
+    | { kind: 'hole'; hole: paper.Path; parent: paper.CompoundPath }
+
+  /** 未提交的悬停预览：还原前不得进快照/导出/剪贴板（snapshotForGesture 统一还原） */
+  type FillPreview =
+    | { kind: 'style'; item: paper.Item; prop: 'fillColor' | 'strokeColor'; orig: paper.Color | null }
+    | { kind: 'cover'; cover: paper.Path; hole: paper.Path; parent: paper.CompoundPath }
+
+  let fillPreview: FillPreview | null = null
+  let fillDown = false
+  /** 本段手势已压撤销栈（压栈时机=目标首次出现：按下即命中或拖动中途碰到，二者只压一次） */
+  let fillPushed = false
+  /** 按下目标与当前色相同（零变更手势 → 松手回滚空撤销步） */
+  let fillNoop = false
+
+  /** 还原未提交的悬停预览（任何快照/切工具/离场前的统一收口） */
+  function restoreFillPreview() {
+    if (!fillPreview) return
+    if (fillPreview.kind === 'style') {
+      if (fillPreview.prop === 'fillColor') fillPreview.item.fillColor = fillPreview.orig
+      else fillPreview.item.strokeColor = fillPreview.orig
+    } else {
+      fillPreview.cover.remove()
+    }
+    fillPreview = null
+  }
+
+  function hasVisibleStroke(item: paper.Item): boolean {
+    const s = item.strokeColor
+    return !!s && s.alpha > 0.004 && item.strokeWidth > 0
+  }
+
+  /**
+   * 复合路径描边邻近（stock paper 复合只回 fill 命中、子级经验性不产 stroke 命中 →
+   * 按几何距离补齐；Scratch 描边点击换描边色。getNearestLocation 走项目坐标全链路
+   *（含父级变换，Node 实测）；loc.distance 即查询点到最近点距离）
+   */
+  function compoundStrokeNear(
+    cp: paper.CompoundPath,
+    p: { x: number; y: number },
+    tol: number
+  ): boolean {
+    if (!hasVisibleStroke(cp)) return false
+    const pt = new scope!.Point(p.x, p.y)
+    const lim = cp.strokeWidth / 2 + tol
+    for (const child of cp.children) {
+      const loc = (child as paper.Path).getNearestLocation(pt)
+      if (loc && loc.distance <= lim) return true
+    }
+    return false
+  }
+
+  /** Scratch helper/math.js expandBy 同款：逐段径向外扩，面积变小则回退（防自交） */
+  function expandPathBy(path: paper.Path, amount: number) {
+    const center = path.position
+    let pathArea = path.area
+    for (const seg of path.segments) {
+      const delta = seg.point.subtract(center).normalize().multiply(amount)
+      seg.point = seg.point.add(delta)
+      if (path.area < pathArea) seg.point = seg.point.subtract(delta.multiply(2))
+      pathArea = path.area
+    }
+  }
+
+  /**
+   * 解析填充目标 = stock hitTest + 盲区扫描，按同一 DFS 序裁决 z 层。
+   * stock paper 打不中而 Scratch 可填的盲区：①无填充闭合/近闭合路径内部 ②复合的洞
+   * ③复合描边。raw 与扫描各取最顶目标，序表先访问（z 更顶）者胜；同项偏 raw
+   *（点在线上优先描边，与 stock Path._hitTestSelf 一致）。
+   */
+  function fillTargetAt(p: { x: number; y: number }): FillTarget | null {
+    if (!scope) return null
+    const S = scope
+    const pt = new S.Point(p.x, p.y)
+    const tol = 2 / Math.max(0.1, store.zoom)
+    const layer = activeLayer()
+    if (!layer) return null
+
+    const order: paper.Item[] = []
+    let blind: { target: FillTarget; idx: number } | null = null
+
+    // 迭代 DFS（显式栈，hitTest 同序：自顶向下；组下钻、复合按单元）。
+    // 不用闭包赋值：TS 对闭包内赋值的变量在闭包外读会按初始化值收窄成 never
+    const stack: paper.Item[] = []
+    for (let i = 0; i < layer.children.length; i++) stack.push(layer.children[i])
+    while (stack.length > 0) {
+      const it = stack.pop()! // 尾 = 最后压入 = 当前层最顶
+      if (it === bitmapRaster) continue // 位图代理穿透（与 match 排除一致，序表不收）
+      if (it instanceof S.Group) {
+        for (let i = 0; i < it.children.length; i++) stack.push(it.children[i])
+        continue // 组内容先于其下兄弟被访问 → z 序与 hitTest 一致
+      }
+      if (it instanceof S.CompoundPath) {
+        order.push(it)
+        if (!blind) {
+          const idx = order.length - 1
+          const hole = it.children.find(
+            (c) => (c as paper.Path).area < 0 && c.contains(pt)
+          ) as paper.Path | undefined
+          if (compoundStrokeNear(it, p, tol)) {
+            blind = { target: { kind: 'style', item: it, prop: 'strokeColor' }, idx }
+          } else if (hole) {
+            blind = { target: { kind: 'hole', hole, parent: it }, idx }
+          } else if (!hasVisibleFill(it) && it.contains(pt)) {
+            blind = { target: { kind: 'style', item: it, prop: 'fillColor' }, idx }
+          }
+        }
+        continue // 复合 = 命中单元，不下钻（stock 同：子级只测描边且经验性不命中）
+      }
+      order.push(it)
+      if (!blind && it instanceof S.Path && !hasVisibleFill(it)) {
+        const almost =
+          it.segments.length > 2 &&
+          it.lastSegment!.point.getDistance(it.firstSegment!.point) < 8
+        if ((it.closed || almost) && it.contains(pt)) {
+          blind = { target: { kind: 'style', item: it, prop: 'fillColor' }, idx: order.length - 1 }
+        }
+      }
+    }
+
+    // stock hitTest（Scratch match：只认 Path/CompoundPath/PointText → 代理等穿透）
+    const raw = S.project.hitTest(pt, {
       fill: true,
       stroke: true,
-      tolerance: 2,
+      segments: false,
+      curves: false,
+      tolerance: tol,
+      match: (hr: paper.HitResult) =>
+        hr.item instanceof S.Path ||
+        hr.item instanceof S.CompoundPath ||
+        hr.item instanceof S.PointText,
     })
-    if (!hit) return
-    // 位图代理不接受矢量填充（位图换色在位图模式用填充工具）
-    if (isBitmapRaster(hit.item)) return
-    pushHistory()
-    const color = styleColor()
-    if (hit.type === 'stroke') {
-      hit.item.strokeColor = color
-    } else {
-      hit.item.fillColor = color
+
+    let target: FillTarget | null = null
+    if (raw) {
+      // 复合子级命中提升为整体（Scratch _getFillItem 同款）
+      let item = raw.item
+      while (item.parent instanceof S.CompoundPath) item = item.parent
+      const rawIdx = order.indexOf(item)
+      if (blind && blind.idx < rawIdx) target = blind.target // 盲区目标更顶 → 胜
+      else target = { kind: 'style', item, prop: raw.type === 'stroke' ? 'strokeColor' : 'fillColor' }
+    } else if (blind) {
+      target = blind.target
     }
+    if (!target) return null
+
+    // 复合整体 fill 命中 + 点在描边邻域 → 改判描边（Scratch 描边点击换描边色）
+    if (
+      target.kind === 'style' &&
+      target.item instanceof S.CompoundPath &&
+      target.prop === 'fillColor' &&
+      compoundStrokeNear(target.item, p, tol)
+    ) {
+      target = { kind: 'style', item: target.item, prop: 'strokeColor' }
+    }
+    return target
+  }
+
+  /** 应用填充预览（写色/创建洞覆盖片），记录还原所需原始态；顺带判定零变更手势 */
+  function applyFillTarget(t: FillTarget) {
+    if (!scope) return
+    const color = styleColor()
+    if (t.kind === 'hole') {
+      // 克隆洞子路径（几何在复合坐标系）→ 转正向 + 微扩 0.1 压缝 → 提到复合上方
+      const cover = t.hole.clone()
+      cover.clockwise = true
+      expandPathBy(cover, 0.1)
+      // 子级移出复合后缺父级变换 → prepend 父全局矩阵（transform = 世界系 prepend）
+      const g = (t.parent as unknown as { getGlobalMatrix: () => paper.Matrix }).getGlobalMatrix()
+      cover.insertAbove(t.parent)
+      cover.transform(g)
+      cover.fillColor = color
+      cover.strokeColor = null
+      fillPreview = { kind: 'cover', cover, hole: t.hole, parent: t.parent }
+      fillNoop = false // 新建对象恒为变更
+    } else {
+      const orig = t.prop === 'fillColor' ? t.item.fillColor : t.item.strokeColor
+      if (t.prop === 'fillColor') t.item.fillColor = color
+      else t.item.strokeColor = color
+      fillPreview = { kind: 'style', item: t.item, prop: t.prop, orig }
+      fillNoop = !!orig && orig.toCSS(false) === color.toCSS(false)
+    }
+  }
+
+  function sameFillTarget(prev: FillPreview, t: FillTarget): boolean {
+    if (t.kind === 'hole') return prev.kind === 'cover' && prev.parent === t.parent && prev.hole === t.hole
+    if (prev.kind === 'cover') return prev.cover === t.item // 覆盖片在场时再命中的就是它自己
+    return prev.item === t.item && prev.prop === t.prop
+  }
+
+  /** 同目标刷色（拾色器改色后继续移动即反映新色） */
+  function recolorFillPreview() {
+    if (!fillPreview) return
+    const color = styleColor()
+    if (fillPreview.kind === 'cover') fillPreview.cover.fillColor = color
+    else if (fillPreview.prop === 'fillColor') fillPreview.item.fillColor = color
+    else fillPreview.item.strokeColor = color
+  }
+
+  /** 悬停/拖动跟随：换目标先还原再应用；同目标只刷色（Scratch updateFillPreview 模型） */
+  function fillMove(p: { x: number; y: number }) {
+    if (fillDown && !fillPushed) {
+      // 手势起于空白、拖动才碰到目标：延迟压栈再应用（等效 fillPress 后半段）——
+      // Scratch mouseup 对当前预览无条件提交，此路径保证其可正确进撤销栈
+      restoreFillPreview() // 幂等清场（press-on-empty 已清；防覆盖片被当目标重套）
+      const t = fillTargetAt(p)
+      if (!t) return
+      pushHistory()
+      applyFillTarget(t)
+      fillPushed = true
+      return
+    }
+    const t = fillTargetAt(p)
+    if (!t) {
+      restoreFillPreview()
+      return
+    }
+    if (fillPreview && sameFillTarget(fillPreview, t)) {
+      recolorFillPreview()
+      return
+    }
+    restoreFillPreview()
+    applyFillTarget(t) // 重算 fillNoop（拖动换目标以新目标判定）
+  }
+
+  function fillPress(p: { x: number; y: number }) {
+    restoreFillPreview() // 干净场景解析（悬停出的覆盖片先摘，否则命中的就是片而非洞）
+    fillDown = true // 点空白也开手势（目标可能中途出现，见 fillMove 延迟压栈）
+    const t = fillTargetAt(p)
+    if (!t) return
+    pushHistory() // 内含快照前预览还原兜底；快照 = 原始色
+    applyFillTarget(t)
+    fillPushed = true
+  }
+
+  /** 洞覆盖片提交合并（Scratch handleMouseUp 同款）：父无描边且填充同色 → 洞消融进父 */
+  function commitCoverMerge(pv: Extract<FillPreview, { kind: 'cover' }>) {
+    const { cover, hole, parent } = pv
+    const noStroke = !parent.strokeColor || parent.strokeColor.alpha === 0 || parent.strokeWidth === 0
+    const css = cover.fillColor ? cover.fillColor.toCSS(false) : ''
+    if (noStroke && css && parent.fillColor && parent.fillColor.toCSS(false) === css) {
+      cover.remove()
+      hole.remove()
+      // 单子路径 reduce 成 Path；≥2 子返回自身（Node 实测幂等），重设填充无害
+      const merged = (parent as unknown as { reduce: () => paper.Item }).reduce()
+      merged.fillColor = cover.fillColor
+    }
+  }
+
+  function fillRelease() {
+    if (!fillDown) return
+    fillDown = false
+    if (!fillPushed) return // 整段手势从未命中目标 → 无压栈无变更
+    fillPushed = false
+    if (!fillPreview) {
+      popHistory() // 拖离目标已还原 → 无变更，回滚空步
+      return
+    }
+    if (fillNoop) {
+      fillPreview = null // 预览色 == 原色，直接收态（无需还原）
+      popHistory()
+      return
+    }
+    if (fillPreview.kind === 'cover') commitCoverMerge(fillPreview)
+    fillPreview = null // 提交：保留写入的预览色
     markDirty()
   }
 
@@ -1523,6 +1785,7 @@ export function usePaperScope(
 
   function copySelection() {
     if (selected.size === 0) return
+    restoreFillPreview() // 悬停预览色不得进剪贴板
     // 克隆为 detached 副本入剪贴板（排除位图代理：位图层的复制走位图模式选区）
     const targets = Array.from(selected).filter((it) => !isBitmapRaster(it))
     if (targets.length === 0) return
@@ -1651,7 +1914,7 @@ export function usePaperScope(
     } else if (tool === 'line' || tool === 'rect' || tool === 'ellipse') {
       beginShape(p, e.shiftKey)
     } else if (tool === 'fill') {
-      doFill(p)
+      fillPress(p)
     } else if (tool === 'eraser') {
       erasePushed = false
       eraseChanged = false
@@ -1672,6 +1935,12 @@ export function usePaperScope(
     ) {
       const hp = clientToArtboard(e)
       store.cursorPos = { x: hp.x, y: hp.y }
+    }
+    // 填充：悬停/按下拖动都走目标跟随预览（Scratch updateFillPreview 移动即预览，
+    // 不区分按键状态——点空白还原也在此分支完成）
+    if (store.mode === 'vector' && store.activeTool === 'fill') {
+      fillMove(clientToArtboard(e))
+      return
     }
     if (e.buttons !== 1) return
     const p = clientToArtboard(e)
@@ -1715,6 +1984,8 @@ export function usePaperScope(
       endShape(p, e.shiftKey)
     } else if (tool === 'select') {
       endSelect()
+    } else if (tool === 'fill') {
+      fillRelease()
     } else if (tool === 'eraser') {
       // 手势结束：整段只压了一步栈；有实际擦除才刷脏标与缩略图
       if (eraseChanged) markDirty()
@@ -1749,6 +2020,7 @@ export function usePaperScope(
 
   function onPointerLeave() {
     store.cursorPos = null
+    if (!fillDown) restoreFillPreview() // 悬停未按下 → 离开还原；按下中走指针捕获 + 拖动分支
   }
 
   // ─── 生命周期 ───
@@ -1875,6 +2147,9 @@ export function usePaperScope(
     clipboardItems = []
     frameJson = []
     frameRaster = []
+    fillPreview = null // scope 已销毁，仅丢引用（无须还原）
+    fillDown = false
+    fillPushed = false
     histMap.clear()
     undoStack = []
     redoStack = []
@@ -1900,12 +2175,16 @@ export function usePaperScope(
 
   watch(
     () => [store.activeTool, store.brushSize, store.zoom],
-    () => updateCursor()
+    () => {
+      restoreFillPreview() // 切工具/缩放 → 悬停态失效还原（再次移入会重新预览）
+      updateCursor()
+    }
   )
 
   // 模式切换：离开矢量收起选中并摘除代理（位图层回到位图模式编辑）；
   // 进入矢量时同步代理（此时位图引擎 mode watch/commit 已先行收口，DOM 即最终像素）
   watch(() => store.mode, (m) => {
+    restoreFillPreview()
     if (m !== 'vector') {
       clearSelection()
       removeBitmapRaster()
