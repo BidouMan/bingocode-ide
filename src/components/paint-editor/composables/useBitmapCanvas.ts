@@ -59,6 +59,42 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
   /** op 开始时的浮动变换快照（up 时比较判断是否产生实际变化） */
   let opStartXf: { cx: number; cy: number; sx: number; sy: number; angle: number } | null = null
 
+  /**
+   * 整帧仿射变换烘入（矢量模式下位图代理 Raster 手势/翻转结束时调用）：
+   * 按画板逻辑坐标的 paper 仿射矩阵重采样当前帧像素并替换；
+   * 变换前压一步撤销（快照 = 变换前像素），随后重绘 DOM 与缩略图。
+   */
+  function transformWholeFrame(m: {
+    a: number
+    b: number
+    c: number
+    d: number
+    tx: number
+    ty: number
+  }) {
+    flushActiveToPixels() // 确保 pixels 与 DOM 一致（flush 顺带收口浮动选区）
+    const base = pixels[currentIdx]
+    if (!base) return
+    pushHistory()
+    const { sx, sy } = pixelScale()
+    const out = makeOffscreen(base.width, base.height)
+    const octx = out.getContext('2d')!
+    // 物理坐标变换 = 缩放 S ∘ 逻辑仿射 M：setTransform 参数 (sx·a, sy·b, sx·c, sy·d, sx·tx, sy·ty)
+    octx.setTransform(sx * m.a, sy * m.b, sx * m.c, sy * m.d, sx * m.tx, sy * m.ty)
+    octx.drawImage(base, 0, 0)
+    pixels[currentIdx] = out
+    const c = ctx2d()
+    const canvas = canvasRef.value
+    if (c && canvas) {
+      c.setTransform(1, 0, 0, 1, 0, 0)
+      c.clearRect(0, 0, canvas.width, canvas.height)
+      c.drawImage(out, 0, 0)
+      applyBackingTransform()
+    }
+    updateThumb(currentIdx, out)
+    markDirty()
+  }
+
   // ─── 撤销/重做（当前帧的栈；切帧时换入换出）───
   let undoStack: ImageData[] = []
   let redoStack: ImageData[] = []
@@ -493,6 +529,32 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
   /** 帧名列表（与 getFrameCanvases 对齐；null = 新帧，回写时生成） */
   function getFrameNames(): (string | null)[] {
     return [...frameNames]
+  }
+
+  /**
+   * 模式转换烘焙回写（vector→bitmap 单向烘焙，PaintArtboard 编排调用）：
+   * 用「位图⊕矢量合成后」的画布整体替换全部帧像素——与 loadFrames 不同，
+   * 保留帧 meta/帧名（不重建 store.frames，矢量 histMap 与帧 id 的关联不失效）；
+   * 清空全部撤销栈（烘焙不可逆，对齐 Scratch 转换语义），重绘 DOM 与逐帧缩略图。
+   */
+  function replacePixelsForBake(canvases: HTMLCanvasElement[]) {
+    pixels = canvases.map((c) => {
+      const off = makeOffscreen(c.width, c.height)
+      off.getContext('2d')!.drawImage(c, 0, 0)
+      return off
+    })
+    // 浮动选区/框选跨模式无意义（切模式瞬间必为空，防御性清理）
+    floatCanvas = null
+    setFloatActive(false)
+    setSelection(null)
+    histMap.clear()
+    undoStack = []
+    redoStack = []
+    syncHistoryFlags()
+    if (currentIdx >= 0 && currentIdx < pixels.length) rerenderComposite()
+    pixels.forEach((pc, i) => {
+      if (pc) updateThumb(i, pc)
+    })
   }
 
   /** 供保存管线取全部帧像素（先 flush 活动帧；调用方只读不改） */
@@ -1227,6 +1289,8 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     addFrame,
     removeFrame,
     loadFrames,
+    replacePixelsForBake,
+    transformWholeFrame,
     getFrameCanvases,
     getFrameNames,
     copySelection,

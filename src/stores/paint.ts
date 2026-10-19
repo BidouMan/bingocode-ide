@@ -27,7 +27,8 @@ export const DEFAULT_ARTBOARD = { w: 640, h: 480 }
  */
 export const usePaintStore = defineStore('paint', () => {
   const activeTool = ref<PaintTool>('brush')
-  const mode = ref<PaintMode>('bitmap')
+  /** 默认矢量模式（对齐 Scratch：新内容默认矢量；vector→bitmap 转换为单向烘焙） */
+  const mode = ref<PaintMode>('vector')
 
   /** 唯一绘制色：所有位图绘制工具共用 */
   const fillColor = ref('#5BFB84')
@@ -140,7 +141,7 @@ export const usePaintStore = defineStore('paint', () => {
   /** 打开绘制页时重置全部状态（配合 MainLayout 的 key 递增重建） */
   function reset() {
     activeTool.value = 'brush'
-    mode.value = 'bitmap'
+    mode.value = 'vector'
     fillColor.value = '#5BFB84'
     strokeColor.value = '#ffffff'
     fillEnabled.value = true

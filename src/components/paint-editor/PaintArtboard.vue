@@ -17,6 +17,8 @@ const {
   addFrame: bitmapAddFrame, removeFrame: bitmapRemoveFrame,
   loadFrames: bitmapLoadFrames, getFrameCanvases: bitmapGetFrameCanvases, getFrameNames,
   copySelection, pasteClipboard, deleteSelection, flipSelection, commitAndDeselect,
+  replacePixelsForBake: bitmapBakeReplacePixels,
+  transformWholeFrame: bitmapTransformFrame,
   getCanvas,
 } = useBitmapCanvas(bitmapCanvas)
 
@@ -29,6 +31,12 @@ const vectorEngine = usePaperScope(vectorCanvas, bitmapCanvas, {
   },
   // 矢量内容变更：刷新活动帧缩略图
   onContentChanged: () => regenThumb(),
+  // 位图代理（Scratch 同款 image 对象）：矢量场景 → 位图层真源的桥
+  bitmapLayer: {
+    getFrame: () => bitmapCanvas.value ?? null,
+    transformFrame: (m) => bitmapTransformFrame(m),
+    clearFrame: () => bitmapClear(),
+  },
 })
 
 /**
@@ -329,6 +337,27 @@ watch(() => store.mode, () => {
   commitAndDeselect()
 })
 
+/**
+ * vector → bitmap 单向烘焙（对齐 Scratch 模式转换语义）：
+ * 切到位图时把全部帧矢量层烘进位图层并清空矢量层与两套撤销栈——转换不可逆，
+ * 之后切回矢量仅切换编辑环境，旧素材保持位图不自动变回矢量（可在矢量模式追加新内容）。
+ * 无矢量内容时为纯模式切换（不清位图历史）。
+ */
+function bakeVectorToBitmap() {
+  if (!vectorEngine.hasVectorContent()) return
+  const composed = getFrameCanvasesComposed() // 位图⊕矢量全帧合成（内部先固化矢量活动帧槽）
+  bitmapBakeReplacePixels(composed)
+  vectorEngine.clearAllForBake()
+  store.dirty = true
+}
+
+watch(
+  () => store.mode,
+  (m, oldM) => {
+    if (oldM === 'vector' && m === 'bitmap') bakeVectorToBitmap()
+  }
+)
+
 // 暴露给父页面：动作按模式路由到对应引擎（父页面无需感知双引擎）
 defineExpose({
   undo: undoActive,
@@ -370,12 +399,15 @@ defineExpose({
       <div class="artboard-checker">
         <!-- 位图画布：绝对定位叠在棋盘格上，透明背景；绘制引擎接管 pointer 事件。
              canvas-pixelated 常驻：位图像素数据任何模式下都按像素块渲染（对齐 Scratch——
-             位图=像素块、矢量=平滑，两种内容渲染观感明显不同，与当前编辑模式无关） -->
+             位图=像素块、矢量=平滑，两种内容渲染观感明显不同，与当前编辑模式无关）。
+             矢量模式下隐藏显示：由场景内位图代理（Raster image）接管显示，
+             否则代理被移动/变换时下层原图重影 -->
         <canvas
           ref="bitmapCanvas"
           class="artboard-canvas canvas-pixelated"
           :width="store.artboardWidth"
           :height="store.artboardHeight"
+          :style="{ visibility: store.mode === 'vector' ? 'hidden' : 'visible' }"
         ></canvas>
       </div>
     </div>

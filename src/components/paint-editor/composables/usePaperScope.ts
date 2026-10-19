@@ -32,6 +32,18 @@ export function usePaperScope(
     onFrameSwitched: (oldIndex: number, newIndex: number) => void
     /** 矢量内容变更后刷新当前帧缩略图 */
     onContentChanged: () => void
+    /**
+     * 位图代理（Scratch 同款：矢量场景底层 image 对象）的位图层真源接口。
+     * 代理只存在于矢量模式；其变换在手势/翻转结束时经 transformFrame 烘回位图像素。
+     */
+    bitmapLayer: {
+      /** 当前帧位图源（DOM canvas 显示真源） */
+      getFrame: () => HTMLCanvasElement | null
+      /** 把代理的累计仿射烘进位图像素（内部压位图撤销栈+重绘+缩略图） */
+      transformFrame: (m: { a: number; b: number; c: number; d: number; tx: number; ty: number }) => void
+      /** 清空当前帧位图像素（矢量模式 Delete 命中代理时，对齐 Scratch 删 image） */
+      clearFrame: () => void
+    }
   }
 ) {
   const store = usePaintStore()
@@ -101,6 +113,136 @@ export function usePaperScope(
   /** 矢量剪贴板（选中项的 detached 克隆，画板会话内有效；不进 store） */
   let clipboardItems: paper.Item[] = []
 
+  // ─── 位图代理（Scratch 同款 <image>：位图层在矢量场景中的可选中/可变换对象）───
+  /** 场景底层的位图 Raster；null = 位图模式或未同步 */
+  let bitmapRaster: paper.Raster | null = null
+  /** 构造定位基线 matrix（position=(w/2,h/2) 会写进 matrix，烘入像素时须扣除） */
+  let bitmapRasterBase: paper.Matrix | null = null
+
+  function isBitmapRaster(item: paper.Item | null | undefined): boolean {
+    return !!item && item === bitmapRaster
+  }
+
+  /**
+   * 位图内容包围盒（非透明像素 bbox，画板逻辑坐标）：代理 Raster 是整帧画布，
+   * 直接用其 bounds 选框会撑满画板——选框须贴合实际内容（空内容返回 null）。
+   * 扫描 DOM canvas（显示真源，1 逻辑像素 = 1 物理像素），仅在选中建立/烘入后调用。
+   */
+  function bitmapContentBounds(): paper.Rectangle | null {
+    const src = hooks.bitmapLayer.getFrame()
+    if (!src || src.width === 0 || src.height === 0) return null
+    const ctx = src.getContext('2d')
+    if (!ctx) return null
+    const w = src.width
+    const h = src.height
+    const data = ctx.getImageData(0, 0, w, h).data
+    let minX = w
+    let minY = h
+    let maxX = -1
+    let maxY = -1
+    for (let y = 0; y < h; y++) {
+      const row = y * w
+      for (let x = 0; x < w; x++) {
+        if (data[(row + x) * 4 + 3] > 8) {
+          if (x < minX) minX = x
+          if (x > maxX) maxX = x
+          if (y < minY) minY = y
+          if (y > maxY) maxY = y
+        }
+      }
+    }
+    if (maxX < 0) return null // 全透明
+    const sx = src.width / store.artboardWidth || 1
+    const sy = src.height / store.artboardHeight || 1
+    return new scope!.Rectangle(
+      minX / sx,
+      minY / sy,
+      (maxX - minX + 1) / sx,
+      (maxY - minY + 1) / sy
+    )
+  }
+
+  /** 摘除位图代理（对象丢弃，下次 sync 重建） */
+  function removeBitmapRaster() {
+    if (bitmapRaster) {
+      bitmapRaster.remove()
+      bitmapRaster = null
+      bitmapRasterBase = null
+      scope?.view.update() // 同步重绘（模式切换同帧交接，防一帧空窗/重影）
+    }
+  }
+
+  /**
+   * 同步位图代理：矢量模式下把当前帧位图作为底层 image 放进场景（重建式）。
+   * - Raster 默认中心在原点（_getBounds setCenter(0,0)），position 定位到画板左上；
+   * - imageSmoothing=false：位图观感恒定像素块（对齐位图层 canvas-pixelated）；
+   * - insertChild(0) 恒压场景底层（矢量对象叠画其上，hitTest 顶层优先）。
+   */
+  function syncBitmapRaster() {
+    if (!scope) return
+    removeBitmapRaster()
+    if (store.mode !== 'vector') return
+    const src = hooks.bitmapLayer.getFrame()
+    if (!src || src.width === 0 || src.height === 0) return
+    const r = new scope.Raster(src)
+    r.smoothing = 'off' // 最近邻渲染：位图观感恒定像素块（对齐位图层 canvas-pixelated）
+    r.position = new scope.Point(src.width / 2, src.height / 2)
+    scope.project.activeLayer?.insertChild(0, r)
+    bitmapRaster = r
+    bitmapRasterBase = r.matrix.clone()
+    scope.view.update() // 同步重绘代理（模式切换同帧交接，位图 canvas 随后隐藏无空窗）
+  }
+
+  /** restoreFrom（undo/redo）后把代理插回场景：历史快照不含代理，保留对象与其变换 */
+  function reattachBitmapRaster() {
+    if (bitmapRaster && !bitmapRaster.parent && store.mode === 'vector') {
+      activeLayer()?.insertChild(0, bitmapRaster)
+    }
+  }
+
+  /**
+   * 导出/绘制时临时摘除位图代理：它不是矢量真源，不进撤销快照/帧槽 JSON/缩略图/保存合成
+   * （否则位图像素被 base64 进快照、保存时两层重复叠加）。嵌套调用幂等。
+   */
+  function withRasterDetached<T>(fn: () => T): T {
+    const r = bitmapRaster
+    const wasAttached = !!r && !!r.parent
+    if (wasAttached) r!.remove()
+    try {
+      return fn()
+    } finally {
+      if (wasAttached && r && !r.parent) activeLayer()?.insertChild(0, r)
+    }
+  }
+
+  /** 手势/翻转用快照（等价 exportJSON，自动排除代理） */
+  function snapshotForGesture(): string {
+    return withRasterDetached(() => scope!.project.exportJSON())
+  }
+
+  /**
+   * 把位图代理的累计变换烘进位图像素并重建代理（Scratch：image 变换即落到 costume，
+   * 切模式/切帧不会丢）。相对矩阵 = 当前 matrix × 基线逆（基线是构造定位，不在像素内容里；
+   * 手势/翻转均为 prepend，m = W·base → rel = W ✓）。烘后保持代理选中态。
+   */
+  function bakeRasterIfTransformed() {
+    const r = bitmapRaster
+    if (!r || !bitmapRasterBase || !r.parent) return
+    const rel = r.matrix.appended(bitmapRasterBase.inverted())
+    if (rel.isIdentity()) return
+    const v = rel.values
+    hooks.bitmapLayer.transformFrame({ a: v[0], b: v[1], c: v[2], d: v[3], tx: v[4], ty: v[5] })
+    const wasSelected = selected.has(r)
+    selected.delete(r)
+    syncBitmapRaster() // 从烘后像素重建（新基线），换对象
+    if (wasSelected && bitmapRaster) {
+      selected.add(bitmapRaster)
+      resetSelFrame() // 框按烘后内容 bbox 重算（代理 bounds 是整帧，不可沿用旧框）
+    }
+    syncVectorSelBox()
+    hooks.onContentChanged()
+  }
+
   /** 屏幕坐标 → 画板逻辑坐标（用位图画布 rect 实测除法：其位于 artboard transform 内，恒准） */
   function clientToArtboard(e: { clientX: number; clientY: number }) {
     const el = coordRef.value ?? canvasRef.value!
@@ -118,10 +260,10 @@ export function usePaperScope(
     store.vectorCanRedo = redoStack.length > 0
   }
 
-  /** 变更前压栈（exportJSON 快照）；redo 分支统一清空 */
+  /** 变更前压栈（exportJSON 快照，摘除位图代理）；redo 分支统一清空 */
   function pushHistory() {
     if (!scope) return
-    undoStack.push(scope.project.exportJSON())
+    undoStack.push(snapshotForGesture())
     if (undoStack.length > HISTORY_LIMIT) undoStack.shift()
     redoStack = []
     syncHistoryFlags()
@@ -135,13 +277,14 @@ export function usePaperScope(
 
   function restoreFrom(json: string) {
     if (!scope) return
-    scope.project.clear()
-    scope.project.importJSON(json)
+    scope.project.clear() // 代理随之脱离（对象引用保留在 bitmapRaster）
+    scope.project.importJSON(json) // 历史快照本身不含代理
     // clear 后无层，importJSON 重建；确保 activeLayer 指向可用层
     if (scope.project.layers.length === 0) {
       new scope.Layer()
     }
     scope.project.activeLayer?.activate()
+    reattachBitmapRaster()
     scope.view.update()
     clearSelection()
     syncVectorContentFlag()
@@ -149,7 +292,7 @@ export function usePaperScope(
 
   function undo() {
     if (undoStack.length === 0) return
-    const cur = scope!.project.exportJSON()
+    const cur = snapshotForGesture()
     const json = undoStack.pop()!
     redoStack.push(cur)
     restoreFrom(json)
@@ -159,7 +302,7 @@ export function usePaperScope(
 
   function redo() {
     if (redoStack.length === 0) return
-    const cur = scope!.project.exportJSON()
+    const cur = snapshotForGesture()
     const json = redoStack.pop()!
     undoStack.push(cur)
     restoreFrom(json)
@@ -185,7 +328,9 @@ export function usePaperScope(
     }))
   }
 
-  /** 由选中内容 AABB 重建变换框（新选中：轴对齐、angle=0）；半尺寸下限 0.5 保证手柄可命中 */
+  /** 由选中内容 AABB 重建变换框（新选中：轴对齐、angle=0）；半尺寸下限 0.5 保证手柄可命中。
+   *  矢量用 strokeBounds（含描边外扩，笔画不露框）；位图代理用内容包围盒
+   *  （代理是整帧画布，bounds 会撑满画板） */
   function resetSelFrame() {
     if (selected.size === 0) {
       selFrame = null
@@ -195,12 +340,25 @@ export function usePaperScope(
     let minY = Infinity
     let maxX = -Infinity
     let maxY = -Infinity
+    let any = false
     for (const item of selected) {
-      const b = item.bounds
+      let b: paper.Rectangle
+      if (isBitmapRaster(item)) {
+        const cb = bitmapContentBounds()
+        if (!cb) continue // 全透明内容不贡献框
+        b = cb
+      } else {
+        b = item.strokeBounds
+      }
+      any = true
       minX = Math.min(minX, b.left)
       minY = Math.min(minY, b.top)
       maxX = Math.max(maxX, b.right)
       maxY = Math.max(maxY, b.bottom)
+    }
+    if (!any) {
+      selFrame = null
+      return
     }
     selFrame = {
       cx: (minX + maxX) / 2,
@@ -266,7 +424,9 @@ export function usePaperScope(
 
   function syncVectorContentFlag() {
     if (!scope) return
-    const live = scope.project.activeLayer ? scope.project.activeLayer.children.length > 0 : false
+    // 位图代理不算矢量内容（否则矢量模式一开就永久禁裁切/保存重复叠加）
+    const layer = scope.project.activeLayer
+    const live = layer ? layer.children.some((c) => c !== bitmapRaster) : false
     store.vectorContent = live || frameJson.some((j) => j !== null)
   }
 
@@ -293,21 +453,24 @@ export function usePaperScope(
    */
   function drawProjectToRaster(): HTMLCanvasElement | null {
     if (!scope) return null
-    const live = scope.project.activeLayer ? scope.project.activeLayer.children.length > 0 : false
+    const layer = scope.project.activeLayer
+    const live = layer ? layer.children.some((c) => c !== bitmapRaster) : false
     if (!live) return null
-    const w = store.artboardWidth
-    const h = store.artboardHeight
-    const rr = clampedPixelRatio(w * h)
-    const c = document.createElement('canvas')
-    c.width = Math.round(w * rr)
-    c.height = Math.round(h * rr)
-    const ctx = c.getContext('2d')!
-    ctx.setTransform(rr, 0, 0, rr, 0, 0)
-    const proj = scope.project as unknown as {
-      draw: (ctx: CanvasRenderingContext2D, m: paper.Matrix, pr: number) => void
-    }
-    proj.draw(ctx, new scope.Matrix(), rr)
-    return c
+    return withRasterDetached(() => {
+      const w = store.artboardWidth
+      const h = store.artboardHeight
+      const rr = clampedPixelRatio(w * h)
+      const c = document.createElement('canvas')
+      c.width = Math.round(w * rr)
+      c.height = Math.round(h * rr)
+      const ctx = c.getContext('2d')!
+      ctx.setTransform(rr, 0, 0, rr, 0, 0)
+      const proj = scope!.project as unknown as {
+        draw: (ctx: CanvasRenderingContext2D, m: paper.Matrix, pr: number) => void
+      }
+      proj.draw(ctx, new scope!.Matrix(), rr)
+      return c
+    })
   }
 
   /**
@@ -329,8 +492,9 @@ export function usePaperScope(
   /** 导出活动帧到槽位（离开当前帧/保存前调用） */
   function exportActiveFrame() {
     if (!scope || currentIdx < 0 || currentIdx >= frameJson.length) return
-    const live = scope.project.activeLayer ? scope.project.activeLayer.children.length > 0 : false
-    frameJson[currentIdx] = live ? scope.project.exportJSON() : null
+    const layer = scope.project.activeLayer
+    const live = layer ? layer.children.some((c) => c !== bitmapRaster) : false
+    frameJson[currentIdx] = live ? snapshotForGesture() : null
     frameRaster[currentIdx] = live ? drawProjectToRaster() : null
   }
 
@@ -347,6 +511,7 @@ export function usePaperScope(
     scope.view.update()
     currentIdx = index
     clearSelection()
+    syncBitmapRaster() // 换帧重建位图代理（新帧位图；位图引擎 watcher 先行，DOM 已切好）
     // 撤销栈换柜
     const meta = store.frames[index]
     if (meta) {
@@ -419,6 +584,29 @@ export function usePaperScope(
   /** 保存前固化活动帧槽位（export 不改 project；栅格直绘 project，与 view 状态无关） */
   function beforeExport() {
     exportActiveFrame()
+    syncVectorContentFlag()
+  }
+
+  /**
+   * 模式转换烘焙清空（vector→bitmap 编排在 PaintArtboard 调用）：
+   * 全部帧矢量槽置空、清场景与两套撤销栈——转换单向不可逆（对齐 Scratch：
+   * 旧素材保持位图、切回矢量不自动恢复）。槽位数组只清内容不改长度，
+   * 持续与位图帧下标对齐；之后仍可在矢量模式追加新矢量内容（双层显示）。
+   */
+  function clearAllForBake() {
+    if (!scope) return
+    clearSelection()
+    removeBitmapRaster() // 防御：正常由 mode watch 先行摘除
+    scope.project.clear()
+    if (scope.project.layers.length === 0) new scope.Layer()
+    scope.project.activeLayer?.activate()
+    scope.view.update()
+    frameJson = frameJson.map(() => null)
+    frameRaster = frameRaster.map(() => null)
+    histMap.clear()
+    undoStack = []
+    redoStack = []
+    syncHistoryFlags()
     syncVectorContentFlag()
   }
 
@@ -582,6 +770,8 @@ export function usePaperScope(
       tolerance: 2,
     })
     if (!hit) return
+    // 位图代理不接受矢量填充（位图换色在位图模式用填充工具）
+    if (isBitmapRaster(hit.item)) return
     pushHistory()
     const color = styleColor()
     if (hit.type === 'stroke') {
@@ -606,6 +796,8 @@ export function usePaperScope(
       tolerance: r,
     })
     if (!hit) return
+    // 矢量橡皮不擦位图层（位图橡皮在位图模式）
+    if (isBitmapRaster(hit.item)) return
     if (!erasePushed) {
       pushHistory()
       erasePushed = true
@@ -675,6 +867,22 @@ export function usePaperScope(
       }
     }
     return inside
+  }
+
+  /**
+   * 缩放描边线宽：几何 transform 不改 strokeWidth（数值恒定），不同步则缩小后
+   * 恒宽描边露出框外、放大后框相对内容偏大。非均匀缩放取面积均值 √|sx·sy|
+   * （canvas strokeWidth 为标量，均匀缩放精确、非均匀 1px 级近似）。
+   */
+  function scaleStrokeWidths(item: paper.Item, f: number) {
+    if (!(f > 0) || Math.abs(f - 1) < 1e-6) return
+    if (item.children && item.children.length > 0) {
+      for (const c of item.children) scaleStrokeWidths(c, f)
+      return
+    }
+    if (item.strokeColor) {
+      item.strokeWidth = Math.max(0.01, item.strokeWidth * f)
+    }
   }
 
   type ScaleDef = {
@@ -747,7 +955,7 @@ export function usePaperScope(
   /** 开始移动手势（框内拖动 / 命中内容拖动共用）：压栈快照供零操作回滚 */
   function startMove(p: { x: number; y: number }) {
     selOp = 'move'
-    opSnapshot = scope!.project.exportJSON()
+    opSnapshot = snapshotForGesture()
     opMoved = false
     lastPointer = p
   }
@@ -759,7 +967,7 @@ export function usePaperScope(
     if (selected.size > 0 && selFrame) {
       const hit = hitTestFrame(p)
       if (hit.kind === 'rotate') {
-        opSnapshot = scope.project.exportJSON()
+        opSnapshot = snapshotForGesture()
         opMoved = false
         rotateStart = {
           angle0: selFrame.angle,
@@ -771,7 +979,7 @@ export function usePaperScope(
         return
       }
       if (hit.kind === 'scale') {
-        opSnapshot = scope.project.exportJSON()
+        opSnapshot = snapshotForGesture()
         opMoved = false
         const f: SelFrame = { ...selFrame }
         const c = Math.cos(f.angle)
@@ -804,12 +1012,24 @@ export function usePaperScope(
     }
 
     const tol = 4 / Math.max(0.1, store.zoom)
-    const hit = scope.project.hitTest(new scope.Point(p.x, p.y), {
+    const rawHit = scope.project.hitTest(new scope.Point(p.x, p.y), {
       fill: true,
       stroke: true,
       segments: true,
       tolerance: tol,
     })
+    // 位图代理命中按像素判定：paper 对 Raster 只查 bounds，透明区应视为未命中
+    //（落到框选，不误选整帧 image；Scratch 同款——点在图像非透明像素上才选中）
+    let hit: paper.HitResult | null = rawHit
+    if (
+      rawHit &&
+      isBitmapRaster(rawHit.item) &&
+      rawHit.type === 'pixel' &&
+      rawHit.color &&
+      rawHit.color.alpha < 0.15
+    ) {
+      hit = null
+    }
     if (hit) {
       const top = topLevelOf(hit.item)
       if (shift) {
@@ -910,7 +1130,11 @@ export function usePaperScope(
       if (Math.abs(incX - 1) > 1e-10 || Math.abs(incY - 1) > 1e-10) {
         // 内容增量变换：共轭缩放连乘 ≡ 起始态绝对量（anchor/θ 全程不变）
         const W = worldScaleMatrix(ss.anchor, f0.angle, incX, incY)
-        for (const item of selected) item.transform(W)
+        const sAvg = Math.sqrt(Math.abs(incX * incY))
+        for (const item of selected) {
+          item.transform(W)
+          scaleStrokeWidths(item, sAvg) // 描边随缩放同步，否则缩小后恒宽描边露出框外
+        }
         ss.sx = sx
         ss.sy = sy
       }
@@ -943,6 +1167,8 @@ export function usePaperScope(
         redoStack = []
         syncHistoryFlags()
         markDirty()
+        // 选中含位图代理时：变换即烘回位图像素（切模式不丢，对齐 Scratch image 落 costume）
+        bakeRasterIfTransformed()
       }
       opSnapshot = null
       opMoved = false
@@ -955,7 +1181,8 @@ export function usePaperScope(
         const rect = new scope.Rectangle(r.x, r.y, r.w, r.h)
         const layer = activeLayer()
         if (layer) {
-          const hits = layer.children.filter((c) => rect.intersects(c.bounds))
+          // 框选只圈矢量对象：位图代理是整帧，纳入会让每次框选都撑满全画板
+          const hits = layer.children.filter((c) => c !== bitmapRaster && rect.intersects(c.strokeBounds))
           setSelection(hits)
         }
       }
@@ -967,16 +1194,26 @@ export function usePaperScope(
 
   function deleteSelection() {
     if (selected.size === 0 || !scope) return
-    pushHistory()
-    for (const item of selected) item.remove()
+    // 矢量对象删除；位图代理命中 = 清空位图层（对齐 Scratch 删 image 的破坏性语义）
+    const hasRaster = Array.from(selected).some((it) => isBitmapRaster(it))
+    const targets = Array.from(selected).filter((it) => !isBitmapRaster(it))
+    if (targets.length > 0) pushHistory()
+    for (const item of targets) item.remove()
+    if (hasRaster) {
+      hooks.bitmapLayer.clearFrame()
+      removeBitmapRaster()
+      hooks.onContentChanged()
+    }
     clearSelection()
-    markDirty()
+    if (targets.length > 0) markDirty()
   }
 
   function copySelection() {
     if (selected.size === 0) return
-    // 克隆为 detached 副本入剪贴板（clone({insert:false}) 不进 project，避免影响场景）
-    clipboardItems = Array.from(selected, (it) => it.clone({ insert: false }))
+    // 克隆为 detached 副本入剪贴板（排除位图代理：位图层的复制走位图模式选区）
+    const targets = Array.from(selected).filter((it) => !isBitmapRaster(it))
+    if (targets.length === 0) return
+    clipboardItems = targets.map((it) => it.clone({ insert: false }))
     store.hasVectorClipboard = true
   }
 
@@ -1005,6 +1242,7 @@ export function usePaperScope(
     if (!scope) return
     const layer = activeLayer()
     if (!layer) return
+    // targets 含位图代理（选中态或无选区的整体翻转）：代理翻转后烘回像素
     const targets = selected.size > 0 ? Array.from(selected) : layer.children.slice()
     if (targets.length === 0) return
     pushHistory()
@@ -1024,12 +1262,14 @@ export function usePaperScope(
     if (selFrame) selFrame.angle = -selFrame.angle
     syncVectorSelBox()
     markDirty()
+    bakeRasterIfTransformed() // 代理有翻转则烘入（无代理/恒等时幂等返回）
   }
 
   function groupSelection() {
-    if (selected.size < 2 || !scope || !activeLayer()) return
+    // 组合只组矢量对象（位图代理必须恒在场景底层，进组会破坏结构约定）
+    const items = Array.from(selected).filter((it) => !isBitmapRaster(it))
+    if (items.length < 2 || !scope || !activeLayer()) return
     pushHistory()
-    const items = Array.from(selected)
     const group = new scope.Group(items)
     setSelection([group])
     markDirty()
@@ -1056,9 +1296,11 @@ export function usePaperScope(
 
   /** 图层上/下移一层（moveAbove/moveBelow = insertAbove/insertBelow 别名） */
   function layerMove(dir: 'up' | 'down') {
-    if (selected.size === 0 || !scope || !activeLayer()) return
+    // 位图代理恒在底层，不参与图层调整
+    const targets = Array.from(selected).filter((it) => !isBitmapRaster(it))
+    if (targets.length === 0 || !scope || !activeLayer()) return
     pushHistory()
-    for (const item of selected) {
+    for (const item of targets) {
       const sibs = item.parent!.children
       const i = item.index
       if (dir === 'up' && i < sibs.length - 1) {
@@ -1072,10 +1314,14 @@ export function usePaperScope(
 
   function clearLayer() {
     const layer = activeLayer()
-    if (!layer || layer.children.length === 0) return
+    if (!layer) return
+    // 清空矢量层（排除位图代理：位图层的清空走位图模式或 Delete 命中代理）
+    const targets = layer.children.filter((c) => c !== bitmapRaster)
+    if (targets.length === 0) return
     pushHistory()
-    layer.removeChildren()
+    for (const c of targets.slice()) c.remove()
     clearSelection()
+    syncVectorContentFlag()
     markDirty()
   }
 
@@ -1268,6 +1514,7 @@ export function usePaperScope(
     updateCursor()
     syncHistoryFlags()
     syncVectorContentFlag()
+    syncBitmapRaster() // canvas 就绪后按当前模式补建位图代理（mode watch 只在切换时触发）
   }
 
   function detach() {
@@ -1290,6 +1537,8 @@ export function usePaperScope(
     selFrame = null
     scaleStart = null
     rotateStart = null
+    bitmapRaster = null // scope.remove 已销毁场景对象，仅丢引用
+    bitmapRasterBase = null
     clipboardItems = []
     frameJson = []
     frameRaster = []
@@ -1321,9 +1570,16 @@ export function usePaperScope(
     () => updateCursor()
   )
 
-  // 离开矢量模式：收起选中（选区框是编辑态 UI，切模式无意义）
+  // 模式切换：离开矢量收起选中并摘除代理（位图层回到位图模式编辑）；
+  // 进入矢量时同步代理（此时位图引擎 mode watch/commit 已先行收口，DOM 即最终像素）
   watch(() => store.mode, (m) => {
-    if (m !== 'vector') clearSelection()
+    if (m !== 'vector') {
+      clearSelection()
+      removeBitmapRaster()
+    } else {
+      syncBitmapRaster()
+      syncVectorContentFlag()
+    }
   })
 
   onBeforeUnmount(() => {
@@ -1355,6 +1611,7 @@ export function usePaperScope(
     onFrameRemoved,
     onLoadFrames,
     beforeExport,
+    clearAllForBake,
     getFrameRaster,
     hasVectorContent,
     exportActiveFrame,
