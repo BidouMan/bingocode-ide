@@ -8,6 +8,15 @@ import iconZoomOut from '../../assets/icons/reduce-one.svg'
 import iconZoomIn from '../../assets/icons/add-one.svg'
 import iconSave from '../../assets/icons/保存.svg'
 import iconCrop from '../../assets/icons/btn_preview_scale.svg'
+import iconCopy from '../../assets/icons/copy.svg'
+import iconPaste from '../../assets/icons/上传本地图片资源.svg'
+import iconDeleteSel from '../../assets/icons/选中删除.svg'
+import iconFlipH from '../../assets/icons/btn_preview_change_bg.svg'
+import iconFlipV from '../../assets/icons/btn_preview_scale.svg'
+import iconGroup from '../../assets/icons/吸附锚点.svg'
+import iconUngroup from '../../assets/icons/重置锚点.svg'
+import iconLayerUp from '../../assets/icons/上移图层.svg'
+import iconLayerDown from '../../assets/icons/下移图层.svg'
 
 const props = defineProps<{
   /** 顶栏标题（编辑既有角色时显示「绘制 - 角色名」） */
@@ -22,6 +31,11 @@ const emit = defineEmits<{
   undo: []
   redo: []
   crop: []
+  copy: []
+  paste: []
+  deleteSel: []
+  flipH: []
+  flipV: []
 }>()
 
 const store = usePaintStore()
@@ -118,6 +132,38 @@ function commitSize(axis: 'w' | 'h', e: Event) {
     >
       <img :src="iconCrop" class="icon-sm" draggable="false" />
     </button>
+
+    <!-- 选区/对象操作组（工业软件 options bar 风格） -->
+    <div class="op-group">
+      <button class="icon-btn" :disabled="!store.selection" v-tooltip="'复制选区 (Ctrl+C)'" @click="emit('copy')">
+        <img :src="iconCopy" class="icon-sm" draggable="false" />
+      </button>
+      <button class="icon-btn" :disabled="!store.hasClipboard" v-tooltip="'粘贴 (Ctrl+V)'" @click="emit('paste')">
+        <img :src="iconPaste" class="icon-sm" draggable="false" />
+      </button>
+      <button class="icon-btn" :disabled="!store.selection" v-tooltip="'删除选区 (Delete)'" @click="emit('deleteSel')">
+        <img :src="iconDeleteSel" class="icon-sm" draggable="false" />
+      </button>
+      <button class="icon-btn" :disabled="store.mode !== 'bitmap'" v-tooltip="'水平翻转（无选区时翻转整帧）'" @click="emit('flipH')">
+        <img :src="iconFlipH" class="icon-sm" draggable="false" />
+      </button>
+      <button class="icon-btn" :disabled="store.mode !== 'bitmap'" v-tooltip="'垂直翻转（无选区时翻转整帧）'" @click="emit('flipV')">
+        <img :src="iconFlipV" class="icon-sm" draggable="false" />
+      </button>
+      <div class="op-divider"></div>
+      <button class="icon-btn" disabled v-tooltip="'组合（矢量模式可用）'" @click.stop>
+        <img :src="iconGroup" class="icon-sm" draggable="false" />
+      </button>
+      <button class="icon-btn" disabled v-tooltip="'取消组合（矢量模式可用）'" @click.stop>
+        <img :src="iconUngroup" class="icon-sm" draggable="false" />
+      </button>
+      <button class="icon-btn" disabled v-tooltip="'上移一层（矢量模式可用）'" @click.stop>
+        <img :src="iconLayerUp" class="icon-sm" draggable="false" />
+      </button>
+      <button class="icon-btn" disabled v-tooltip="'下移一层（矢量模式可用）'" @click.stop>
+        <img :src="iconLayerDown" class="icon-sm" draggable="false" />
+      </button>
+    </div>
 
     <div class="topbar-spacer"></div>
 
@@ -289,6 +335,23 @@ function commitSize(axis: 'w' | 'h', e: Event) {
 
 .topbar-spacer {
   flex: 1;
+}
+
+/* 选区/对象操作组 */
+.op-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 8px;
+  margin-left: 4px;
+  border-left: 1px solid var(--border-light);
+}
+
+.op-divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--border-light);
 }
 
 .topbar-right {

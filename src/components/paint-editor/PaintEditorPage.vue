@@ -187,6 +187,11 @@ async function onSave() {
       @undo="artboardRef?.undo()"
       @redo="artboardRef?.redo()"
       @crop="artboardRef?.cropToContent()"
+      @copy="artboardRef?.copySelection()"
+      @paste="artboardRef?.pasteClipboard()"
+      @delete-sel="artboardRef?.deleteSelection()"
+      @flip-h="artboardRef?.flipSelection('h')"
+      @flip-v="artboardRef?.flipSelection('v')"
     />
     <div class="paint-body">
       <PaintToolbar @clear="artboardRef?.clear()" />

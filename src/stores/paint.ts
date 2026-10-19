@@ -59,6 +59,24 @@ export const usePaintStore = defineStore('paint', () => {
   /** 追加模式（为现有角色画新帧）：画板尺寸锁定为目标角色帧尺寸，禁止修改 */
   const sizeForced = ref(false)
 
+  // ─── 位图选区状态（引擎写入，顶栏按钮/蚂蚁线 overlay 读取）───
+  /** 当前选区矩形（画板逻辑坐标整数）：框选中=拖动矩形；有浮动选区=其 AABB */
+  const selection = ref<{ x: number; y: number; w: number; h: number } | null>(null)
+  /** 存在浮动选区（带变换框+手柄，蚂蚁线 div 隐藏改由画布绘制） */
+  const floatActive = ref(false)
+  /**
+   * 变换框几何（画板逻辑坐标）：由引擎在浮动选区每次变化时计算，
+   * PaintArtboard 用独立 SVG 图层渲染——矢量平滑且绝不污染图像像素。
+   */
+  const transformBox = ref<{
+    corners: { x: number; y: number }[]
+    handles: { x: number; y: number }[]
+    rotateTop: { x: number; y: number }
+    rotateAt: { x: number; y: number }
+  } | null>(null)
+  /** 剪贴板有内容（供粘贴按钮启用） */
+  const hasClipboard = ref(false)
+
   /** 序列帧元数据（像素在绘制引擎闭包；下标与引擎离屏画布数组对齐） */
   const frames = ref<PaintFrameMeta[]>([{ id: makeFrameId() }])
   const activeFrameIndex = ref(0)
@@ -112,6 +130,10 @@ export const usePaintStore = defineStore('paint', () => {
     canRedo.value = false
     dirty.value = false
     sizeForced.value = false
+    selection.value = null
+    floatActive.value = false
+    transformBox.value = null
+    hasClipboard.value = false
     frames.value = [{ id: makeFrameId() }]
     activeFrameIndex.value = 0
   }
@@ -136,6 +158,10 @@ export const usePaintStore = defineStore('paint', () => {
     dirty,
     vectorEnabled,
     sizeForced,
+    selection,
+    floatActive,
+    transformBox,
+    hasClipboard,
     frames,
     activeFrameIndex,
     selectFrame,
