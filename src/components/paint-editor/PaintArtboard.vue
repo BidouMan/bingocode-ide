@@ -1,20 +1,60 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { usePaintStore } from '../../stores/paint'
 import { useBitmapCanvas } from './composables/useBitmapCanvas'
+import { usePaperScope } from './composables/usePaperScope'
 
 const store = usePaintStore()
 
 const stageRef = ref<HTMLDivElement>()
 const bitmapCanvas = ref<HTMLCanvasElement>()
+const vectorCanvas = ref<HTMLCanvasElement>()
 
 // 位图绘制引擎（工具状态机/撤销重做/光标/多帧像素/选区），canvas 就绪后自动绑定指针事件
+// 帧操作函数取别名：下方包装器编排双引擎（矢量槽位与位图像素数组保持下标对齐）
 const {
-  undo, redo, clear, cropToContent,
-  addFrame, removeFrame, loadFrames, getFrameCanvases, getFrameNames,
+  undo: bitmapUndo, redo: bitmapRedo, clear: bitmapClear, cropToContent,
+  addFrame: bitmapAddFrame, removeFrame: bitmapRemoveFrame,
+  loadFrames: bitmapLoadFrames, getFrameCanvases: bitmapGetFrameCanvases, getFrameNames,
   copySelection, pasteClipboard, deleteSelection, flipSelection, commitAndDeselect,
   getCanvas,
 } = useBitmapCanvas(bitmapCanvas)
+
+// 矢量绘制引擎（paper 场景图/对象操作/多帧 JSON 快照），坐标与位图同源（clientToArtboard）
+const vectorEngine = usePaperScope(vectorCanvas, bitmapCanvas, {
+  // 帧切换：新旧两帧缩略图都重新合成（旧帧由位图引擎先写了纯位图缩略图，此处补矢量层）
+  onFrameSwitched: (oldIndex, newIndex) => {
+    regenThumb(oldIndex)
+    regenThumb(newIndex)
+  },
+  // 矢量内容变更：刷新活动帧缩略图
+  onContentChanged: () => regenThumb(),
+})
+
+/**
+ * 合成第 index 帧缩略图（位图层 + 矢量层叠加，高 44px 等比，与位图引擎 updateThumb 同规格）。
+ * 活动帧位图取 DOM canvas（真源）；非活动帧取位图引擎离屏数组（需 flush 活动帧，模式切换后安全）。
+ */
+function regenThumb(index = store.activeFrameIndex) {
+  const meta = store.frames[index]
+  if (!meta) return
+  const vec = vectorEngine.getFrameRaster(index)
+  const isActive = index === store.activeFrameIndex
+  // 非活动帧且无矢量内容：位图引擎已写过缩略图，无需覆盖
+  if (!vec && !isActive) return
+  const bmp = isActive ? bitmapCanvas.value : bitmapGetFrameCanvases()[index]
+  if (!bmp || bmp.height === 0) return
+  const th = 44
+  const tw = Math.max(1, Math.round((bmp.width / bmp.height) * th))
+  const tc = document.createElement('canvas')
+  tc.width = tw
+  tc.height = th
+  const tctx = tc.getContext('2d')!
+  tctx.imageSmoothingEnabled = true
+  tctx.drawImage(bmp, 0, 0, tw, th)
+  if (vec) tctx.drawImage(vec, 0, 0, tw, th)
+  meta.thumb = tc.toDataURL('image/png')
+}
 
 // ─── 缩放/平移（与 SpriteEditorView 同款交互：滚轮以光标为锚缩放、中键拖拽平移、双击复位）───
 const isPanning = ref(false)
@@ -113,14 +153,46 @@ const boxPoints = computed(() => {
   if (!box) return ''
   return box.corners.map(c => `${c.x},${c.y}`).join(' ')
 })
+/** 矢量选中变换框（定向矩形，可随旋转手势带角度） */
+const vectorBoxPoints = computed(() => {
+  const box = store.vectorSelBox
+  if (!box) return ''
+  return box.corners.map(c => `${c.x},${c.y}`).join(' ')
+})
 
 function focusStage() {
   stageRef.value?.focus()
 }
 
-/** 快捷键：Esc 取消选区、Delete 删除选区、Ctrl/Cmd+C/V/X 复制粘贴剪切 */
+/** 快捷键：按模式分发——矢量=对象操作；位图=选区操作 */
 function onStageKeydown(e: KeyboardEvent) {
   const mod = e.ctrlKey || e.metaKey
+
+  if (store.mode === 'vector') {
+    if (e.key === 'Escape') {
+      // 收起矢量选中（引擎侧同步清 selected 与变换框）
+      vectorEngine.deselect()
+      e.preventDefault()
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (store.vectorSelectedCount > 0) {
+        vectorEngine.deleteSelection()
+        e.preventDefault()
+      }
+    } else if (mod && (e.key === 'c' || e.key === 'C')) {
+      vectorEngine.copySelection()
+      e.preventDefault()
+    } else if (mod && (e.key === 'x' || e.key === 'X')) {
+      vectorEngine.cutSelection()
+      e.preventDefault()
+    } else if (mod && (e.key === 'v' || e.key === 'V')) {
+      if (store.hasVectorClipboard) {
+        vectorEngine.pasteClipboard()
+        e.preventDefault()
+      }
+    }
+    return
+  }
+
   if (e.key === 'Escape') {
     commitAndDeselect()
     e.preventDefault()
@@ -148,11 +220,134 @@ function onStageKeydown(e: KeyboardEvent) {
   }
 }
 
-// 暴露给父页面：撤销/重做/清空/裁切/多帧/选区操作与保存管线
+// ─── 双引擎编排：帧操作/保存/顶栏动作按模式路由 ───
+
+/**
+ * 新建/复制帧：先对齐矢量槽位，再走位图引擎。
+ * 不在此显式 sync：两引擎的 activeFrameIndex watcher 按注册序（位图先、矢量后）在同一 flush 中
+ * 依次执行——位图先 flush/load 完成 DOM 切换，矢量再导出/导入并经 onFrameSwitched 合成新旧帧
+ * 缩略图（若此处提前同步，位图 DOM 尚未切换，缩略图会拿旧帧位图 + 新帧矢量错配合成）。
+ */
+function addFrame(duplicate: boolean) {
+  const newIndex = store.frames.length
+  vectorEngine.onFrameAdded(duplicate, newIndex)
+  bitmapAddFrame(duplicate)
+}
+
+/**
+ * 删除帧：矢量槽位先行（histMap 删除须在位图 splice store.frames 之前取到帧 id），
+ * 位图引擎内部同步完成 DOM 切换后，矢量显式 sync（删活动帧时 activeFrameIndex 可能不变、
+ * watcher 不触发，必须显式；hooks 内完成新旧帧缩略图合成）。
+ */
+function removeFrame(index: number): boolean {
+  if (store.frames.length <= 1 || index < 0 || index >= store.frames.length) return false
+  vectorEngine.onFrameRemoved(index)
+  const ok = bitmapRemoveFrame(index)
+  if (ok) vectorEngine.syncActiveFrame()
+  return ok
+}
+
+/** 整体载入（编辑既有角色）：既有帧均为纯位图，矢量槽重置 */
+function loadFrames(
+  canvases: HTMLCanvasElement[],
+  names: (string | null)[],
+  activeIndex: number
+) {
+  bitmapLoadFrames(canvases, names, activeIndex)
+  vectorEngine.onLoadFrames(canvases.length)
+}
+
+/**
+ * 保存取帧：位图帧 + 矢量层叠加。
+ * 先让矢量引擎固化活动帧快照（beforeExport 内部 flush 渲染并重导入保持编辑态），
+ * 再对每帧把矢量层 drawImage 到位图帧副本上（不污染位图引擎的源像素）。
+ */
+function getFrameCanvasesComposed(): HTMLCanvasElement[] {
+  vectorEngine.beforeExport()
+  const bases = bitmapGetFrameCanvases()
+  if (!vectorEngine.hasVectorContent()) return bases
+  const w = store.artboardWidth
+  const h = store.artboardHeight
+  return bases.map((base, i) => {
+    const vec = vectorEngine.getFrameRaster(i)
+    if (!vec) return base
+    const out = document.createElement('canvas')
+    out.width = base.width
+    out.height = base.height
+    const ctx = out.getContext('2d')!
+    ctx.drawImage(base, 0, 0)
+    ctx.drawImage(vec, 0, 0, w, h)
+    return out
+  })
+}
+
+/** 顶栏撤销/重做：按模式路由到对应引擎栈 */
+function undoActive() {
+  if (store.mode === 'vector') vectorEngine.undo()
+  else bitmapUndo()
+}
+
+function redoActive() {
+  if (store.mode === 'vector') vectorEngine.redo()
+  else bitmapRedo()
+}
+
+/** 清空：按模式清当前工作层 */
+function clearActive() {
+  if (store.mode === 'vector') vectorEngine.clearLayer()
+  else bitmapClear()
+}
+
+/** 顶栏复制/粘贴/删除/翻转：按模式路由 */
+function copyActive() {
+  if (store.mode === 'vector') vectorEngine.copySelection()
+  else copySelection()
+}
+
+function pasteActive() {
+  if (store.mode === 'vector') vectorEngine.pasteClipboard()
+  else pasteClipboard()
+}
+
+function deleteActive() {
+  if (store.mode === 'vector') vectorEngine.deleteSelection()
+  else deleteSelection()
+}
+
+function flipActive(axis: 'h' | 'v') {
+  if (store.mode === 'vector') vectorEngine.flipSelection(axis)
+  else flipSelection(axis)
+}
+
+/** 位图浮动选区收口（模式切换时调用，避免浮动选区跨模式残留） */
+function commitBitmapSelection() {
+  commitAndDeselect()
+}
+
+// 模式切换：离开位图先烘焙浮动选区（矢量侧清选由引擎内部 mode watch 处理）
+watch(() => store.mode, () => {
+  commitAndDeselect()
+})
+
+// 暴露给父页面：动作按模式路由到对应引擎（父页面无需感知双引擎）
 defineExpose({
-  undo, redo, clear, cropToContent,
-  addFrame, removeFrame, loadFrames, getFrameCanvases, getFrameNames,
-  copySelection, pasteClipboard, deleteSelection, flipSelection, commitAndDeselect,
+  undo: undoActive,
+  redo: redoActive,
+  clear: clearActive,
+  cropToContent,
+  addFrame,
+  removeFrame,
+  loadFrames,
+  getFrameCanvases: getFrameCanvasesComposed,
+  getFrameNames,
+  copySelection: copyActive,
+  pasteClipboard: pasteActive,
+  deleteSelection: deleteActive,
+  flipSelection: flipActive,
+  commitAndDeselect: commitBitmapSelection,
+  groupSelection: () => vectorEngine.groupSelection(),
+  ungroupSelection: () => vectorEngine.ungroupSelection(),
+  layerMove: (dir: 'up' | 'down') => vectorEngine.layerMove(dir),
   getCanvas,
 })
 </script>
@@ -174,17 +369,92 @@ defineExpose({
       <!-- 棋盘格透明底（与 SpriteEditorView 一致的 CSS conic 棋盘） -->
       <div class="artboard-checker">
         <!-- 位图画布：绝对定位叠在棋盘格上，透明背景；绘制引擎接管 pointer 事件。
-             位图模式 1:1 像素网格：width/height 属性 = 逻辑尺寸（画板尺寸即输出尺寸），
-             canvas-pixelated 类获得 Scratch 同款像素渲染（矢量模式不加此类=平滑） -->
+             canvas-pixelated 常驻：位图像素数据任何模式下都按像素块渲染（对齐 Scratch——
+             位图=像素块、矢量=平滑，两种内容渲染观感明显不同，与当前编辑模式无关） -->
         <canvas
           ref="bitmapCanvas"
-          class="artboard-canvas"
-          :class="{ 'canvas-pixelated': store.mode === 'bitmap' }"
+          class="artboard-canvas canvas-pixelated"
           :width="store.artboardWidth"
           :height="store.artboardHeight"
         ></canvas>
+      </div>
+    </div>
+    <!-- 矢量画布：Scratch 同款架构——铺满舞台、不进 artboard 的 CSS transform 管道，
+         缩放/平移由引擎写入 paper view.matrix（按屏幕像素重新栅格化，画布本身不被拉伸→无合成器重采样发糊）。
+         叠于位图层之上（双层共存，导出叠加）；仅矢量模式接收 pointer 事件（门控），位图模式事件穿透到下层。
+         clip-path 由引擎裁剪到 artboard 视觉盒（防矢量笔画画出画板） -->
+    <canvas
+      ref="vectorCanvas"
+      class="vector-canvas"
+      :style="{ pointerEvents: store.mode === 'vector' ? 'auto' : 'none' }"
+    ></canvas>
+    <!-- 选区 overlay 层：与 artboard 逐像素同位同变换（复用同一 artboardStyle 计算），
+         浮于矢量画布之上——选区框/蚂蚁线必须盖住两层内容 -->
+    <div class="paint-overlay">
+      <div class="paint-overlay-box" :style="artboardStyle">
         <!-- 选区蚂蚁线（仅框选拖动中的进行态预览） -->
         <div v-if="selectionStyle && !store.floatActive" class="selection-ants" :style="selectionStyle"></div>
+        <!-- 矢量选中变换框：定向矩形（可带旋转角）+ 8 缩放手柄 + 旋转柄，
+             与位图浮动选区同一 SVG overlay 方案（不走 paper.item.selected，防烙印进画布） -->
+        <svg
+          v-if="store.vectorSelBox && store.mode === 'vector'"
+          class="transform-box"
+          :viewBox="`0 0 ${store.artboardWidth} ${store.artboardHeight}`"
+          preserveAspectRatio="none"
+        >
+          <!-- 框线：暗色打底（任何底色可见）+ 低饱和蓝紫实线芯 -->
+          <polygon
+            :points="vectorBoxPoints"
+            fill="none"
+            stroke="rgba(18, 20, 38, 0.85)"
+            :stroke-width="2.5 * boxStrokeInv"
+            stroke-linejoin="round"
+          />
+          <polygon
+            :points="vectorBoxPoints"
+            fill="none"
+            :stroke="SEL"
+            :stroke-width="1.4 * boxStrokeInv"
+            stroke-linejoin="round"
+          />
+          <!-- 8 个缩放手柄：白底 + 蓝紫描边（专业软件风格） -->
+          <rect
+            v-for="(h, i) in store.vectorSelBox.handles"
+            :key="i"
+            :x="h.x - boxHandleSize / 2"
+            :y="h.y - boxHandleSize / 2"
+            :width="boxHandleSize"
+            :height="boxHandleSize"
+            fill="#ffffff"
+            :stroke="SEL_DEEP"
+            :stroke-width="1.2 * boxStrokeInv"
+          />
+          <!-- 旋转柄：连接线 + 蓝紫圆点 -->
+          <line
+            :x1="store.vectorSelBox.rotateTop.x"
+            :y1="store.vectorSelBox.rotateTop.y"
+            :x2="store.vectorSelBox.rotateAt.x"
+            :y2="store.vectorSelBox.rotateAt.y"
+            stroke="rgba(18, 20, 38, 0.6)"
+            :stroke-width="2.5 * boxStrokeInv"
+          />
+          <line
+            :x1="store.vectorSelBox.rotateTop.x"
+            :y1="store.vectorSelBox.rotateTop.y"
+            :x2="store.vectorSelBox.rotateAt.x"
+            :y2="store.vectorSelBox.rotateAt.y"
+            :stroke="SEL"
+            :stroke-width="1.4 * boxStrokeInv"
+          />
+          <circle
+            :cx="store.vectorSelBox.rotateAt.x"
+            :cy="store.vectorSelBox.rotateAt.y"
+            :r="4 * boxStrokeInv"
+            :fill="SEL"
+            :stroke="SEL_DEEP"
+            :stroke-width="1.2 * boxStrokeInv"
+          />
+        </svg>
         <!-- 变换框（浮动选区）：独立 SVG 矢量图层——专业绘图软件做法，
              绝不画进图像画布（防烙印），矢量渲染任意缩放平滑 -->
         <svg
@@ -235,7 +505,7 @@ defineExpose({
             :x2="store.transformBox.rotateAt.x"
             :y2="store.transformBox.rotateAt.y"
             :stroke="SEL"
-            :stroke-width="1.2 * boxStrokeInv"
+            :stroke-width="1.4 * boxStrokeInv"
           />
           <circle
             :cx="store.transformBox.rotateAt.x"
@@ -285,6 +555,34 @@ defineExpose({
   display: block;
   /* 触摸操作交给 pointer 事件，禁用浏览器手势避免干扰绘制 */
   touch-action: none;
+}
+
+/* 矢量画布：铺满舞台（Scratch 同款——不随画板 transform 拉伸，缩放走 paper view.matrix）。
+   宽高 100% 必须显式声明：canvas 是替换元素，仅 inset:0 时按内在尺寸 300×150 而非撑满 */
+.vector-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+/* 选区 overlay 层：全舞台 flex 居中复刻 artboard 布局 + 同一 artboardStyle 变换 → 逐像素同位 */
+.paint-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.paint-overlay-box {
+  position: relative;
+  transform-origin: center center;
+  pointer-events: none;
 }
 
 /* 选区蚂蚁线（框选拖动态）：深色虚线 + 蓝紫衬线（与变换框同色系） */

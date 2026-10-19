@@ -192,6 +192,10 @@ async function onSave() {
       @delete-sel="artboardRef?.deleteSelection()"
       @flip-h="artboardRef?.flipSelection('h')"
       @flip-v="artboardRef?.flipSelection('v')"
+      @group="artboardRef?.groupSelection()"
+      @ungroup="artboardRef?.ungroupSelection()"
+      @layer-up="artboardRef?.layerMove('up')"
+      @layer-down="artboardRef?.layerMove('down')"
     />
     <div class="paint-body">
       <PaintToolbar @clear="artboardRef?.clear()" />

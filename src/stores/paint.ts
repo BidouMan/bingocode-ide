@@ -54,10 +54,32 @@ export const usePaintStore = defineStore('paint', () => {
   const canRedo = ref(false)
   /** 画板有内容（用于锁定画板尺寸、拦截未保存关闭等） */
   const dirty = ref(false)
-  /** 矢量模式启用开关：Stage 2 开放前切换按钮禁用 */
-  const vectorEnabled = ref(false)
+  /** 矢量模式启用开关（Stage 2 起开放） */
+  const vectorEnabled = ref(true)
   /** 追加模式（为现有角色画新帧）：画板尺寸锁定为目标角色帧尺寸，禁止修改 */
   const sizeForced = ref(false)
+
+  // ─── 矢量模式状态（usePaperScope 写入，顶栏按钮读取）───
+  /** 矢量撤销/重做可用（与位图 canUndo/canRedo 分开，顶栏按模式取值） */
+  const vectorCanUndo = ref(false)
+  const vectorCanRedo = ref(false)
+  /** 矢量选中对象数（>0 时顶栏复制/删除/图层按钮可用） */
+  const vectorSelectedCount = ref(0)
+  /** 矢量剪贴板有内容 */
+  const hasVectorClipboard = ref(false)
+  /** 任意帧存在矢量内容（禁用裁切：裁位图会与矢量层错位） */
+  const vectorContent = ref(false)
+  /**
+   * 矢量选中变换框几何（画板逻辑坐标，含旋转定向）：由 usePaperScope 写入，
+   * PaintArtboard 用 SVG overlay 渲染（与位图 transformBox 同构）——
+   * 不走 paper.item.selected（那会渲染进 canvas、随保存烙印）。
+   */
+  const vectorSelBox = ref<{
+    corners: { x: number; y: number }[]
+    handles: { x: number; y: number }[]
+    rotateTop: { x: number; y: number }
+    rotateAt: { x: number; y: number }
+  } | null>(null)
 
   // ─── 位图选区状态（引擎写入，顶栏按钮/蚂蚁线 overlay 读取）───
   /** 当前选区矩形（画板逻辑坐标整数）：框选中=拖动矩形；有浮动选区=其 AABB */
@@ -98,6 +120,11 @@ export const usePaintStore = defineStore('paint', () => {
   function setMode(m: PaintMode) {
     if (m === 'vector' && !vectorEnabled.value) return
     mode.value = m
+    // 模式切换工具回退（对齐 Scratch switchModeForFormat）：
+    // reshape 仅矢量存在 → 切位图回退 select；其余工具两模式共有保持不变
+    if (m === 'bitmap' && activeTool.value === 'reshape') {
+      activeTool.value = 'select'
+    }
   }
 
   function setZoom(z: number) {
@@ -130,6 +157,12 @@ export const usePaintStore = defineStore('paint', () => {
     canRedo.value = false
     dirty.value = false
     sizeForced.value = false
+    vectorCanUndo.value = false
+    vectorCanRedo.value = false
+    vectorSelectedCount.value = 0
+    hasVectorClipboard.value = false
+    vectorContent.value = false
+    vectorSelBox.value = null
     selection.value = null
     floatActive.value = false
     transformBox.value = null
@@ -158,6 +191,12 @@ export const usePaintStore = defineStore('paint', () => {
     dirty,
     vectorEnabled,
     sizeForced,
+    vectorCanUndo,
+    vectorCanRedo,
+    vectorSelectedCount,
+    hasVectorClipboard,
+    vectorContent,
+    vectorSelBox,
     selection,
     floatActive,
     transformBox,

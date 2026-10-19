@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { usePaintStore, type PaintTool } from '../../stores/paint'
 
 import iconSelect from '../../assets/icons/选取工具.svg'
@@ -13,22 +14,51 @@ import iconText from '../../assets/icons/代码编辑.svg'
 import iconEyedropper from '../../assets/icons/重置.svg'
 import iconClear from '../../assets/icons/清空.svg'
 
-// 工具顺序与 Scratch 造型编辑器一致（选择/塑形/画笔/橡皮/填充/直线/矩形/椭圆/文字/取色）
-// 图标均为现有资源占位，功能完成后统一替换
-const TOOLS: { key: PaintTool; icon: string; label: string }[] = [
-  { key: 'select', icon: iconSelect, label: '选择' },
-  { key: 'reshape', icon: iconReshape, label: '塑形' },
-  { key: 'brush', icon: iconBrush, label: '画笔' },
-  { key: 'eraser', icon: iconEraser, label: '橡皮' },
-  { key: 'fill', icon: iconFill, label: '填充' },
-  { key: 'line', icon: iconLine, label: '直线' },
-  { key: 'rect', icon: iconRect, label: '矩形' },
-  { key: 'ellipse', icon: iconEllipse, label: '椭圆' },
-  { key: 'text', icon: iconText, label: '文字' },
-  { key: 'eyedropper', icon: iconEyedropper, label: '取色' },
+const ICONS: Record<PaintTool, string> = {
+  select: iconSelect,
+  reshape: iconReshape,
+  brush: iconBrush,
+  eraser: iconEraser,
+  fill: iconFill,
+  line: iconLine,
+  rect: iconRect,
+  ellipse: iconEllipse,
+  text: iconText,
+  eyedropper: iconEyedropper,
+}
+
+const LABELS: Record<PaintTool, string> = {
+  select: '选择',
+  reshape: '塑形',
+  brush: '画笔',
+  eraser: '橡皮',
+  fill: '填充',
+  line: '直线',
+  rect: '矩形',
+  ellipse: '椭圆',
+  text: '文字',
+  eyedropper: '取色',
+}
+
+// 工具集随模式切换（对齐 Scratch 官方两套工具集，仅参考 UX 规格）：
+// 矢量 = 选择/塑形/画笔/橡皮/填充/文字/直线/矩形/椭圆（reshape 仅矢量）
+// 位图 = 画笔/直线/矩形/椭圆/文字/填充/橡皮/选择（无 reshape，Brush 打头）
+const VECTOR_TOOLS: PaintTool[] = [
+  'select', 'reshape', 'brush', 'eraser', 'fill', 'text', 'line', 'rect', 'ellipse', 'eyedropper',
+]
+const BITMAP_TOOLS: PaintTool[] = [
+  'brush', 'line', 'rect', 'ellipse', 'text', 'fill', 'eraser', 'select', 'eyedropper',
 ]
 
 const store = usePaintStore()
+
+const tools = computed(() =>
+  (store.mode === 'vector' ? VECTOR_TOOLS : BITMAP_TOOLS).map((key) => ({
+    key,
+    icon: ICONS[key],
+    label: LABELS[key],
+  }))
+)
 
 const emit = defineEmits<{
   clear: []
@@ -38,7 +68,7 @@ const emit = defineEmits<{
 <template>
   <div class="paint-toolbar">
     <button
-      v-for="tool in TOOLS"
+      v-for="tool in tools"
       :key="tool.key"
       class="tool-btn"
       :class="{ 'tool-btn-active': store.activeTool === tool.key }"

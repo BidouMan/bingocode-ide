@@ -36,9 +36,20 @@ const emit = defineEmits<{
   deleteSel: []
   flipH: []
   flipV: []
+  group: []
+  ungroup: []
+  layerUp: []
+  layerDown: []
 }>()
 
 const store = usePaintStore()
+
+// ─── 模式感知的可用状态（位图看选区/剪贴板，矢量看对象选中/矢量剪贴板）───
+const isVector = () => store.mode === 'vector'
+const canCopy = () => (isVector() ? store.vectorSelectedCount > 0 : !!store.selection)
+const canPaste = () => (isVector() ? store.hasVectorClipboard : !!store.hasClipboard)
+const canUndoActive = () => (isVector() ? store.vectorCanUndo : store.canUndo)
+const canRedoActive = () => (isVector() ? store.vectorCanRedo : store.canRedo)
 
 function onZoomIn() {
   store.setZoom(store.zoom * 1.1)
@@ -126,41 +137,41 @@ function commitSize(axis: 'w' | 'h', e: Event) {
     </div>
     <button
       class="icon-btn"
-      :disabled="!store.dirty || store.mode !== 'bitmap'"
-      v-tooltip="'裁切画板到内容'"
+      :disabled="!store.dirty || store.mode !== 'bitmap' || store.vectorContent"
+      v-tooltip="store.vectorContent ? '存在矢量内容时不能裁切（会与矢量层错位）' : '裁切画板到内容'"
       @click="emit('crop')"
     >
       <img :src="iconCrop" class="icon-sm" draggable="false" />
     </button>
 
-    <!-- 选区/对象操作组（工业软件 options bar 风格） -->
+    <!-- 选区/对象操作组（工业软件 options bar 风格，按模式切换可用性） -->
     <div class="op-group">
-      <button class="icon-btn" :disabled="!store.selection" v-tooltip="'复制选区 (Ctrl+C)'" @click="emit('copy')">
+      <button class="icon-btn" :disabled="!canCopy()" v-tooltip="isVector() ? '复制对象 (Ctrl+C)' : '复制选区 (Ctrl+C)'" @click="emit('copy')">
         <img :src="iconCopy" class="icon-sm" draggable="false" />
       </button>
-      <button class="icon-btn" :disabled="!store.hasClipboard" v-tooltip="'粘贴 (Ctrl+V)'" @click="emit('paste')">
+      <button class="icon-btn" :disabled="!canPaste()" v-tooltip="isVector() ? '粘贴对象 (Ctrl+V)' : '粘贴 (Ctrl+V)'" @click="emit('paste')">
         <img :src="iconPaste" class="icon-sm" draggable="false" />
       </button>
-      <button class="icon-btn" :disabled="!store.selection" v-tooltip="'删除选区 (Delete)'" @click="emit('deleteSel')">
+      <button class="icon-btn" :disabled="!canCopy()" v-tooltip="isVector() ? '删除对象 (Delete)' : '删除选区 (Delete)'" @click="emit('deleteSel')">
         <img :src="iconDeleteSel" class="icon-sm" draggable="false" />
       </button>
-      <button class="icon-btn" :disabled="store.mode !== 'bitmap'" v-tooltip="'水平翻转（无选区时翻转整帧）'" @click="emit('flipH')">
+      <button class="icon-btn" v-tooltip="'水平翻转（无选区时翻转整层/整帧）'" @click="emit('flipH')">
         <img :src="iconFlipH" class="icon-sm" draggable="false" />
       </button>
-      <button class="icon-btn" :disabled="store.mode !== 'bitmap'" v-tooltip="'垂直翻转（无选区时翻转整帧）'" @click="emit('flipV')">
+      <button class="icon-btn" v-tooltip="'垂直翻转（无选区时翻转整层/整帧）'" @click="emit('flipV')">
         <img :src="iconFlipV" class="icon-sm" draggable="false" />
       </button>
       <div class="op-divider"></div>
-      <button class="icon-btn" disabled v-tooltip="'组合（矢量模式可用）'" @click.stop>
+      <button class="icon-btn" :disabled="!isVector() || store.vectorSelectedCount < 2" v-tooltip="'组合选中对象（矢量模式）'" @click="emit('group')">
         <img :src="iconGroup" class="icon-sm" draggable="false" />
       </button>
-      <button class="icon-btn" disabled v-tooltip="'取消组合（矢量模式可用）'" @click.stop>
+      <button class="icon-btn" :disabled="!isVector() || store.vectorSelectedCount < 1" v-tooltip="'取消组合（矢量模式）'" @click="emit('ungroup')">
         <img :src="iconUngroup" class="icon-sm" draggable="false" />
       </button>
-      <button class="icon-btn" disabled v-tooltip="'上移一层（矢量模式可用）'" @click.stop>
+      <button class="icon-btn" :disabled="!isVector() || store.vectorSelectedCount < 1" v-tooltip="'上移一层（矢量模式）'" @click="emit('layerUp')">
         <img :src="iconLayerUp" class="icon-sm" draggable="false" />
       </button>
-      <button class="icon-btn" disabled v-tooltip="'下移一层（矢量模式可用）'" @click.stop>
+      <button class="icon-btn" :disabled="!isVector() || store.vectorSelectedCount < 1" v-tooltip="'下移一层（矢量模式）'" @click="emit('layerDown')">
         <img :src="iconLayerDown" class="icon-sm" draggable="false" />
       </button>
     </div>
@@ -169,10 +180,10 @@ function commitSize(axis: 'w' | 'h', e: Event) {
 
     <!-- 右：撤销/重做、缩放、保存 -->
     <div class="topbar-right">
-      <button class="icon-btn" :disabled="!store.canUndo" v-tooltip="'撤销'" @click="emit('undo')">
+      <button class="icon-btn" :disabled="!canUndoActive()" v-tooltip="isVector() ? '撤销（矢量）' : '撤销'" @click="emit('undo')">
         <img :src="iconUndo" class="icon-sm" draggable="false" />
       </button>
-      <button class="icon-btn" :disabled="!store.canRedo" v-tooltip="'重做'" @click="emit('redo')">
+      <button class="icon-btn" :disabled="!canRedoActive()" v-tooltip="isVector() ? '重做（矢量）' : '重做'" @click="emit('redo')">
         <img :src="iconRedo" class="icon-sm" draggable="false" />
       </button>
 
