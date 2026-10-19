@@ -1213,7 +1213,8 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     if (!canvas) return
     const tool = store.activeTool
     if (tool === 'brush' || tool === 'eraser') {
-      canvas.style.cursor = makeCircleCursor(store.brushSize * store.zoom)
+      // 上限防 dataURL 光标在大 zoom 下超浏览器尺寸上限而失效（矢量模式已改自绘圈）
+      canvas.style.cursor = makeCircleCursor(Math.min(store.brushSize * store.zoom, 128))
     } else if (tool === 'line' || tool === 'rect' || tool === 'ellipse' || tool === 'fill') {
       canvas.style.cursor = 'crosshair'
     } else {

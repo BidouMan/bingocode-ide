@@ -658,38 +658,134 @@ export function usePaperScope(
     }
   }
 
+  // ─── 画笔（Scratch segment-brush 同款：带宽度的填充胶囊段逐段 unite）───
+  // 笔画本体是填充轮廓而非"中心线+描边"——这是擦除断口形态的根源：
+  // stroke 中心线被切开后 round cap 从断口两侧各伸 strokeWidth/2 会把缺口盖住
+  //（40px 粗笔画切 12px 口只剩细缝）；填充轮廓走布尔差集，断口=橡皮圆弧切面，
+  // 与矩形/圆形擦除观感完全统一。每段 unite 前 flatten 规避 paper 曲线 union
+  // 丢块缺陷（paper #1321，Scratch 同款规避手段）。
+  /** 进行中的笔画 blob（unite 会替换对象，动态追踪引用） */
+  let blobPath: paper.PathItem | null = null
+  /** 上一采样点 */
+  let blobLast: { x: number; y: number } | null = null
+  /** 落笔点（收笔开环 simplify 会扭曲首端——重并落笔原始圆修复，Scratch 同款） */
+  let brushStartPt: { x: number; y: number } | null = null
+
+  /** 单个胶囊段：a→b 两端直线 + 两端半圆弧（paper arcTo 原语），flatten+填充后返回 */
+  function makeCapsule(
+    a: { x: number; y: number },
+    b: { x: number; y: number }
+  ): paper.Path | null {
+    const r = Math.max(1, store.brushSize / 2)
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    const dd = Math.hypot(dx, dy)
+    if (dd < 1e-6) return null
+    const ux = dx / dd
+    const uy = dy / dd
+    const nx = -uy * r
+    const ny = ux * r
+    const cap = new scope!.Path()
+    cap.add(new scope!.Point(a.x + nx, a.y + ny))
+    cap.add(new scope!.Point(b.x + nx, b.y + ny))
+    cap.arcTo(new scope!.Point(b.x + ux * r, b.y + uy * r), new scope!.Point(b.x - nx, b.y - ny))
+    cap.add(new scope!.Point(a.x - nx, a.y - ny))
+    cap.arcTo(new scope!.Point(a.x - ux * r, a.y - uy * r), new scope!.Point(a.x + nx, a.y + ny))
+    cap.closed = true
+    // 帽弧离散精度：弦高 = r/50（R=8→9 点、R=30→13 点半圆，圆润收尾）。
+    // 原 min(5, brush/5) 在粗笔刷下半圆只剩 2~3 条弦 → 收笔呈三角尖
+    cap.flatten(Math.max(0.2, r / 50))
+    cap.fillColor = styleColor()
+    cap.strokeColor = null
+    return cap
+  }
+
   function beginBrush(p: { x: number; y: number }) {
     pushHistory()
-    const path = new scope!.Path()
-    path.strokeColor = styleColor()
-    path.strokeWidth = store.brushSize
-    path.strokeCap = 'round'
-    path.strokeJoin = 'round'
-    path.fillColor = null as unknown as paper.Color
-    path.add(new scope!.Point(p.x, p.y))
-    activePath = path
-    strokeStart = p
+    const dot = new scope!.Path.Circle(
+      new scope!.Point(p.x, p.y),
+      Math.max(1, store.brushSize / 2)
+    )
+    dot.fillColor = styleColor()
+    dot.strokeColor = null
+    blobPath = dot
+    blobLast = p
+    brushStartPt = { x: p.x, y: p.y }
   }
 
   function continueBrush(p: { x: number; y: number }) {
-    if (!activePath) return
-    // 节流：位移过小不加点
-    const last = activePath.lastSegment?.point
-    if (last && Math.hypot(p.x - last.x, p.y - last.y) < 0.5) return
-    activePath.add(new scope!.Point(p.x, p.y))
+    if (!blobPath || !blobLast) return
+    const r = Math.max(1, store.brushSize / 2)
+    const dx = p.x - blobLast.x
+    const dy = p.y - blobLast.y
+    const dist = Math.hypot(dx, dy)
+    if (dist < 1) return // 过密节流（Scratch minDistance 同意）
+    // 细分步长 = 1.5r：相邻胶囊轴向距 1.5r < 2r（帽必相交、侧边重叠 0.5r 无洞），
+    // unite 次数比步长 r 少 1/3（对冲高精度帽带来的单次 unite 成本）
+    const n = Math.min(Math.ceil(dist / (r * 1.5)), 64)
+    let current: paper.PathItem = blobPath
+    let from = blobLast
+    for (let i = 1; i <= n; i++) {
+      const to = { x: blobLast.x + (dx * i) / n, y: blobLast.y + (dy * i) / n }
+      const cap = makeCapsule(from, to)
+      if (cap) {
+        const merged: paper.PathItem | null = current.unite(cap)
+        if (merged) {
+          cap.remove()
+          current.remove()
+          current = merged
+        } else {
+          cap.remove() // union 极端失败：丢这一小段，保留整笔
+        }
+      }
+      from = to
+    }
+    blobPath = current
+    blobLast = p
   }
 
   function endBrush() {
-    if (!activePath) return
-    if (activePath.segments.length === 1) {
-      // 单击落点：加 0.01 偏移保证 round cap 渲染出圆点
-      const pt = activePath.firstSegment!.point
-      activePath.add(new scope!.Point(pt.x + 0.01, pt.y + 0.01))
-    } else if (activePath.segments.length > 2) {
-      activePath.smooth()
+    if (!blobPath || !scope) return
+    const S = scope
+    const r = Math.max(1, store.brushSize / 2)
+    const capAt = (c: { x: number; y: number }) => {
+      const cap = new S.Path.Circle(new S.Point(c.x, c.y), r)
+      cap.fillColor = styleColor()
+      cap.strokeColor = null
+      return cap
     }
-    activePath = null
-    strokeStart = null
+    // ── Scratch 收笔三步（SegmentBrushHelper.onSegmentMouseUp 同款）──
+    // simplify(2)：删除内部冗余点、把 flatten 密点重拟合为平滑曲线——
+    // 实测 222→24 点（-89%），形状偏移 0.69%（<1%，肉眼无感）；
+    // 点数大减 = 后续擦除布尔/渲染/撤销快照全链路提速
+    if (blobPath instanceof S.Path && blobPath.segments.length > 4) {
+      blobPath.closed = false
+      blobPath.simplify(2)
+      blobPath.closed = true
+      // 开环闭合会扭曲首端（Scratch 注释同款）→ 重并落笔原始圆修复
+      if (brushStartPt) {
+        const cap = capAt(brushStartPt)
+        const m = blobPath.unite(cap)
+        cap.remove()
+        if (m) {
+          blobPath.remove()
+          blobPath = m
+        }
+      }
+    }
+    // 尾端对称：补并尾部原始圆（起笔为纯贝塞尔圆，收笔保持同级圆润）
+    if (blobLast) {
+      const cap = capAt(blobLast)
+      const m = blobPath.unite(cap)
+      cap.remove()
+      if (m) {
+        blobPath.remove()
+        blobPath = m
+      }
+    }
+    blobPath = null
+    blobLast = null
+    brushStartPt = null
     markDirty()
   }
 
@@ -785,44 +881,261 @@ export function usePaperScope(
   /** 橡皮手势状态：首次命中才压栈（未命中不产生空撤销步）；拖过整段只记一步、结束统一刷缩略图 */
   let erasePushed = false
   let eraseChanged = false
+  /** 上一个擦除点（轨迹连续化：事件间距可超过擦除圆直径，插值补点防留空洞） */
+  let eraseLast: { x: number; y: number } | null = null
+
+  /**
+   * 橡皮擦除核心（行为对齐 Scratch mergeEraser，读规格自实现）：
+   * - 闭合填充形状 → 布尔差集局部挖洞；擦成多个实心块时拆为独立对象、洞归还所属块
+   * - 开放笔画/无填充路径 → 与擦除圆求交点切段，删除被擦到的段（擦哪删哪，不整删）
+   * - 逐点实时处理（比 Scratch 的 mouseup 一次性反馈更快）
+   */
+
+  /** 可见填充判定（对齐 Scratch：无填充或 alpha≈0 视为笔画，走切分分支） */
+  function hasVisibleFill(item: paper.Item): boolean {
+    const f = item.fillColor
+    return !!f && f.alpha > 0.004
+  }
+
+  /**
+   * 橡皮接触判定（对齐 Scratch touches=几何相交，替代点 hitTest）：
+   * 点 hitTest 在圆心进入已咬空区域/贴边缘时会漏判 → 该刀跳过 → 漏咬出
+   * 梯形回缩与尖角残留（擦除边缘不规则的根因）。几何判定与圆心位置无关：
+   * 圆心在实心内，或橡皮圆（⊕描边半宽——视觉橡皮须碰到描边带）与对象相交。
+   */
+  function eraserTouches(
+    item: paper.PathItem,
+    p: { x: number; y: number },
+    r: number
+  ): boolean {
+    const S = scope!
+    if (item.contains(p)) return true
+    let sw = 0
+    if (item instanceof S.Path) {
+      const sc = item.strokeColor
+      if (sc && sc.alpha > 0.004) sw = (item.strokeWidth || 0) / 2
+    }
+    const probe = new S.Path.Circle(new S.Point(p.x, p.y), r + sw)
+    const hit = item.intersects(probe)
+    probe.remove()
+    return hit
+  }
+
+  /** 递归收集与橡皮接触的可擦对象：PathItem 整体收（复合不深入）、组递归、跳过位图代理 */
+  function collectErasable(
+    items: paper.Item[],
+    p: { x: number; y: number },
+    r: number,
+    out: paper.PathItem[]
+  ) {
+    const S = scope!
+    for (const it of items) {
+      if (isBitmapRaster(it)) continue
+      if (it instanceof S.PathItem) {
+        if (eraserTouches(it, p, r)) out.push(it)
+      } else if (it.children) {
+        collectErasable(it.children, p, r, out)
+      }
+    }
+  }
+
+  /**
+   * 沿擦除圆切分路径并删除中点落在圆内的段（Scratch 开放笔画分支行为）：
+   * 交点倒序 splitAt（保持前方交点位置有效）→ 逐段 contains 判定移除。
+   * @returns 是否发生实际删除
+   */
+  function splitPathAtCircle(path: paper.Path, circle: paper.Path): boolean {
+    const inter = path.getIntersections(circle)
+    if (inter.length === 0) return false
+    const subs: paper.Path[] = []
+    for (let j = inter.length - 1; j >= 0; j--) {
+      const split = path.splitAt(inter[j])
+      if (split) {
+        split.insertAbove(path)
+        subs.push(split)
+      }
+    }
+    subs.push(path)
+    let removedAny = false
+    for (let k = subs.length - 1; k >= 0; k--) {
+      const s = subs[k]
+      const loc = s.length > 1e-6 ? s.getLocationAt(s.length / 2) : null
+      if (!loc || circle.contains(loc.point)) {
+        s.remove()
+        subs.splice(k, 1)
+        removedAny = true
+      }
+    }
+    // 擦剩退化残留（不足两点）的空路径清理
+    if (path.parent && path.segments.length < 2) {
+      path.remove()
+      removedAny = true
+    }
+    return removedAny
+  }
+
+  /**
+   * 布尔差集结果整理（对齐 Scratch separateCompoundPath 语义，自实现）：
+   * 擦成多个实心块时拆为独立对象、洞（反向子路径）按包含关系归还所属块；
+   * 单块（一个实心区域，无论带不带洞）保持原对象——渲染与选中语义都正确。
+   */
+  function separateErasedCompound(cp: paper.Item) {
+    const S = scope!
+    if (!(cp instanceof S.CompoundPath) || !cp.children) return
+    const paths = cp.children.filter((c): c is paper.Path => c instanceof S.Path)
+    const cws = paths.filter((c) => c.clockwise)
+    const holes = paths.filter((c) => !c.clockwise)
+    if (cws.length <= 1) return // 单块带洞 = 挖洞后的一整块，保持复合
+    const parent = cp.parent
+    if (!parent) return
+    // 每块克隆为独立对象（样式取自原复合路径）
+    const blocks: paper.Item[] = cws.map((cw) => {
+      const b = cw.clone({ insert: false }) as paper.Path
+      b.copyAttributes(cp, false)
+      b.fillColor = cp.fillColor
+      b.strokeColor = cp.strokeColor
+      b.strokeWidth = cp.strokeWidth
+      return b
+    })
+    // 洞按包含关系归还所属块（擦除产生的块互不重叠，归属唯一）
+    for (const hole of holes) {
+      const pt = hole.firstSegment?.point
+      if (!pt) continue
+      const idx = blocks.findIndex(
+        (b) => b instanceof S.PathItem && b.contains(pt)
+      )
+      if (idx >= 0) {
+        const owner = blocks[idx] as paper.PathItem
+        const cut = owner.subtract(hole)
+        if (cut && !cut.isEmpty()) {
+          cut.insertAbove(owner)
+          owner.remove()
+          blocks[idx] = cut
+        }
+      }
+    }
+    for (const b of blocks) b.insertAbove(cp)
+    cp.remove()
+  }
+
+  /**
+   * 擦后局部修边（对齐 Scratch 修正逻辑：只修正被擦的那条边）：
+   * 只扫描橡皮圆邻域内的顶点，删除布尔交界产生的低曲率多余点
+   *（点到前后弦距离 < 0.75px 的内部点=微折锯齿；真实弧的弓高点>0.75 保留），
+   * 删点后以直线连接 → 被擦边整齐，未擦区域一律不动（无全路径重拟合的形状漂移）。
+   */
+  function trimErasedEdges(item: paper.Item, c: { x: number; y: number }, radius: number) {
+    const S = scope!
+    const paths: paper.Path[] = []
+    if (item instanceof S.Path) {
+      paths.push(item)
+    } else if (item instanceof S.CompoundPath && item.children) {
+      for (const ch of item.children) {
+        if (ch instanceof S.Path) paths.push(ch)
+      }
+    }
+    const zone = radius * 2
+    const z2 = zone * zone
+    for (const pth of paths) {
+      // 多轮扫描（删点会改变邻域索引），直到无点可删
+      for (let round = 0; round < 8; round++) {
+        const segs = pth.segments
+        const n = segs.length
+        if (n <= 3) break
+        let removed = false
+        const last = pth.closed ? n - 1 : n - 2
+        for (let i = 1; i <= last; i++) {
+          if (i >= pth.segments.length - 1 && !pth.closed) break
+          const seg = pth.segments[i]
+          if (!seg) break
+          const p = seg.point
+          const dx = p.x - c.x
+          const dy = p.y - c.y
+          if (dx * dx + dy * dy > z2) continue
+          const prev = pth.segments[i - 1]
+          const next = pth.segments[i + 1]
+          if (!prev || !next) continue
+          const a = prev.point
+          const b = next.point
+          const ax = b.x - a.x
+          const ay = b.y - a.y
+          const len = Math.hypot(ax, ay)
+          if (len < 1e-6) {
+            seg.remove()
+            removed = true
+            break
+          }
+          const d = Math.abs((p.x - a.x) * ay - (p.y - a.y) * ax) / len
+          if (d < 0.75) {
+            seg.remove()
+            removed = true
+            break
+          }
+        }
+        if (!removed) break
+      }
+    }
+  }
 
   function eraseAt(p: { x: number; y: number }) {
     if (!scope) return
+    const S = scope
     const r = Math.max(2, store.brushSize / 2)
-    const hit = scope.project.hitTest(new scope.Point(p.x, p.y), {
-      fill: true,
-      stroke: true,
-      segments: true,
-      tolerance: r,
-    })
-    if (!hit) return
-    // 矢量橡皮不擦位图层（位图橡皮在位图模式）
-    if (isBitmapRaster(hit.item)) return
+    const layer = activeLayer()
+    if (!layer) return
+
+    // 几何接触收集（可一圆同时作用多个相交对象；位图代理在收集时排除）
+    const targets: paper.PathItem[] = []
+    collectErasable(layer.children, p, r, targets)
+    if (targets.length === 0) return
     if (!erasePushed) {
       pushHistory()
       erasePushed = true
     }
-    const item = topLevelOf(hit.item)
-    // 填充闭合路径：布尔差集局部擦除；开放笔画/组：整对象移除（保底，避免布尔把开放路径闭合化）
-    if (item instanceof scope.Path && item.closed && item.hasFill()) {
+
+    let acted = false
+    for (const target of targets) {
       try {
-        const circle = new scope.Path.Circle(new scope.Point(p.x, p.y), r)
-        const result = item.subtract(circle)
-        circle.remove()
-        if (result && !result.isEmpty()) {
-          result.insertBelow(item)
-          item.remove()
+        const closedFilled =
+          (target instanceof S.Path || target instanceof S.CompoundPath) &&
+          target.closed &&
+          hasVisibleFill(target)
+        if (closedFilled) {
+          // 闭合填充（形状/画笔 blob/复合）：橡皮像素圆布尔差集挖洞
+          //（断口=橡皮圆弧切面，与矩形/圆形擦除统一）；擦断多块时拆为独立对象。
+          // 注意：擦后不做全路径 simplify——那会挪动未擦区域的点（反复执行=形状漂移）
+          // 并破坏精确圆弧断面（Scratch mergeEraser 同：布尔后直接落位）；
+          // 断面本身是 paper 精确贝塞尔弧，天然光滑
+          const circle = new S.Path.Circle(new S.Point(p.x, p.y), r)
+          const result = target.subtract(circle)
+          if (result && !result.isEmpty()) {
+            trimErasedEdges(result, p, r) // 只修被擦边：删圆邻域内多余顶点，未擦区域不动
+            result.insertBelow(target)
+            target.remove()
+            separateErasedCompound(result)
+          } else {
+            target.remove()
+          }
+          acted = true
+        } else if (target instanceof S.Path) {
+          // 开放笔画/无填充路径：切分圆 ⊕ cap 外伸（可见断开=橡皮直径）
+          const capExt = target.strokeCap === 'butt' ? 0 : (target.strokeWidth || 0) / 2
+          const circle = new S.Path.Circle(new S.Point(p.x, p.y), r + capExt)
+          acted = splitPathAtCircle(target, circle) || acted
+          circle.remove()
         } else {
-          item.remove()
+          // 罕见兜底（无填充复合环等）：整体移除
+          target.remove()
+          acted = true
         }
       } catch {
-        item.remove()
+        // 布尔运算极端退化时的保底：移除目标而非留下半损坏状态
+        if (target.parent) target.remove()
+        acted = true
       }
-    } else {
-      item.remove()
     }
     clearSelection()
-    eraseChanged = true
+    if (acted) eraseChanged = true
   }
 
   // ─── select 工具（变换框手柄：移动/缩放/旋转，对齐位图浮动选区模型）───
@@ -1342,6 +1655,7 @@ export function usePaperScope(
     } else if (tool === 'eraser') {
       erasePushed = false
       eraseChanged = false
+      eraseLast = p
       eraseAt(p)
     } else if (tool === 'select') {
       beginSelect(p, e.shiftKey)
@@ -1351,6 +1665,14 @@ export function usePaperScope(
 
   function onPointerMove(e: PointerEvent) {
     if (!scope) return
+    // 自绘光标圈位置（hover 跟随，须在 buttons 判定前——不按键也要更新）
+    if (
+      store.mode === 'vector' &&
+      (store.activeTool === 'eraser' || store.activeTool === 'brush')
+    ) {
+      const hp = clientToArtboard(e)
+      store.cursorPos = { x: hp.x, y: hp.y }
+    }
     if (e.buttons !== 1) return
     const p = clientToArtboard(e)
     const tool = store.activeTool
@@ -1359,7 +1681,25 @@ export function usePaperScope(
     } else if (tool === 'line' || tool === 'rect' || tool === 'ellipse') {
       continueShape(p, e.shiftKey)
     } else if (tool === 'eraser') {
-      eraseAt(p)
+      // 轨迹连续化：pointermove 事件间距可超过擦除圆直径（快速拖动一帧几十 px），
+      // 逐事件点擦会在轨迹上留下永远擦不到的空洞——沿上一点按半径步长插值补擦
+      // （与画笔引擎 fixedDistance 连续采样同等保证）
+      const from = eraseLast ?? p
+      const dx = p.x - from.x
+      const dy = p.y - from.y
+      const dist = Math.hypot(dx, dy)
+      // 圆心距 = 半径/2（重叠 75%）：逐刀咬出的圆并集交界更密，断口包络更接近
+      // 理想平滑带（步长=半径时交角明显，放大可见台阶）
+      const step = Math.max(1, store.brushSize / 4)
+      const n = Math.min(Math.ceil(dist / step), 64)
+      if (n <= 1) {
+        eraseAt(p)
+      } else {
+        for (let i = 1; i <= n; i++) {
+          eraseAt({ x: from.x + (dx * i) / n, y: from.y + (dy * i) / n })
+        }
+      }
+      eraseLast = p
     } else if (tool === 'select') {
       continueSelect(p, e.shiftKey)
     }
@@ -1380,38 +1720,21 @@ export function usePaperScope(
       if (eraseChanged) markDirty()
       erasePushed = false
       eraseChanged = false
+      eraseLast = null
     }
     selOp = 'none'
   }
 
   // ─── 光标 ───
 
-  /** 双环圆圈光标（与位图引擎同款，深浅底都可见） */
-  function makeCircleCursor(screenSize: number): string {
-    const d = Math.max(4, Math.round(screenSize))
-    const c = document.createElement('canvas')
-    c.width = d
-    c.height = d
-    const cc = c.getContext('2d')!
-    cc.beginPath()
-    cc.arc(d / 2, d / 2, d / 2 - 1, 0, Math.PI * 2)
-    cc.strokeStyle = 'rgba(255, 255, 255, 0.9)'
-    cc.lineWidth = 1.5
-    cc.stroke()
-    cc.beginPath()
-    cc.arc(d / 2, d / 2, d / 2 - 1, 0, Math.PI * 2)
-    cc.strokeStyle = 'rgba(0, 0, 0, 0.8)'
-    cc.lineWidth = 1
-    cc.stroke()
-    return `url(${c.toDataURL()}) ${d / 2} ${d / 2}, crosshair`
-  }
-
   function updateCursor() {
     const canvas = canvasRef.value
     if (!canvas) return
     const tool = store.activeTool
     if (tool === 'brush' || tool === 'eraser') {
-      canvas.style.cursor = makeCircleCursor(store.brushSize * store.zoom)
+      // 原生光标隐藏，由 overlay 自绘圈接管——dataURL 圆圈光标在大 zoom 下
+      // 尺寸超浏览器上限会直接失效（放大画布后光标消失的根因），Scratch 同为画布内圈
+      canvas.style.cursor = 'none'
     } else if (
       tool === 'line' ||
       tool === 'rect' ||
@@ -1422,6 +1745,10 @@ export function usePaperScope(
     } else {
       canvas.style.cursor = 'default'
     }
+  }
+
+  function onPointerLeave() {
+    store.cursorPos = null
   }
 
   // ─── 生命周期 ───
@@ -1509,6 +1836,7 @@ export function usePaperScope(
     canvas.addEventListener('pointermove', onPointerMove)
     canvas.addEventListener('pointerup', onPointerUp)
     canvas.addEventListener('pointercancel', onPointerUp)
+    canvas.addEventListener('pointerleave', onPointerLeave)
     resizeObserver = new ResizeObserver(() => syncVectorView())
     resizeObserver.observe(canvas)
     updateCursor()
@@ -1524,7 +1852,9 @@ export function usePaperScope(
       canvas.removeEventListener('pointermove', onPointerMove)
       canvas.removeEventListener('pointerup', onPointerUp)
       canvas.removeEventListener('pointercancel', onPointerUp)
+      canvas.removeEventListener('pointerleave', onPointerLeave)
       canvas.style.clipPath = ''
+      store.cursorPos = null
     }
     resizeObserver?.disconnect()
     resizeObserver = null
@@ -1539,6 +1869,9 @@ export function usePaperScope(
     rotateStart = null
     bitmapRaster = null // scope.remove 已销毁场景对象，仅丢引用
     bitmapRasterBase = null
+    blobPath = null
+    blobLast = null
+    brushStartPt = null
     clipboardItems = []
     frameJson = []
     frameRaster = []

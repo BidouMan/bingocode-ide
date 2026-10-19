@@ -168,6 +168,24 @@ const vectorBoxPoints = computed(() => {
   return box.corners.map(c => `${c.x},${c.y}`).join(' ')
 })
 
+/**
+ * 画笔/橡皮自绘光标圈（矢量模式，Scratch 同款画布内圈）：
+ * 位于 overlay（与 artboard 同 transform）→ 位置用画板逻辑坐标、
+ * 直径=brushSize 逻辑尺寸，随视图缩放屏幕尺寸自动正确（dataURL 光标超浏览器上限会失效）。
+ * 用 SVG 双圆而非 div+box-shadow：阴影环在 translate 亚像素定位下会断裂成细小黑线段。
+ */
+const brushCursorStyle = computed(() => {
+  if (store.mode !== 'vector') return null
+  const t = store.activeTool
+  if (t !== 'eraser' && t !== 'brush') return null
+  const c = store.cursorPos
+  if (!c) return null
+  return {
+    left: `${c.x}px`,
+    top: `${c.y}px`,
+  }
+})
+
 function focusStage() {
   stageRef.value?.focus()
 }
@@ -548,6 +566,17 @@ defineExpose({
             :stroke-width="1.2 * boxStrokeInv"
           />
         </svg>
+        <!-- 画笔/橡皮自绘光标圈（矢量模式；SVG 双圆 = 深浅底可见，0 尺寸 svg + overflow visible
+             以定位点为圆心；r 用画板逻辑坐标随视图正确缩放） -->
+        <svg
+          v-if="brushCursorStyle"
+          class="brush-cursor-ring"
+          :style="brushCursorStyle"
+          overflow="visible"
+        >
+          <circle :r="store.brushSize / 2" fill="none" stroke="rgba(0, 0, 0, 0.55)" stroke-width="3" />
+          <circle :r="store.brushSize / 2" fill="none" stroke="rgba(255, 255, 255, 0.95)" stroke-width="1.5" />
+        </svg>
       </div>
     </div>
   </div>
@@ -635,6 +664,17 @@ defineExpose({
   pointer-events: none;
   z-index: 6;
   overflow: visible;
+}
+
+/* 画笔/橡皮自绘光标圈：0 尺寸 svg 锚定在光标逻辑坐标，overflow visible 画圆，
+   随画板 transform 缩放（任意 zoom 屏幕尺寸正确）；SVG 双圆避免阴影环亚像素断裂 */
+.brush-cursor-ring {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 7;
 }
 
 /* 位图模式像素渲染：多重声明渐进回退（旧引擎认 crisp-edges，新引擎 pixelated 覆盖生效） */

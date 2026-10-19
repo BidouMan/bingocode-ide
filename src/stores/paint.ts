@@ -50,6 +50,12 @@ export const usePaintStore = defineStore('paint', () => {
   const zoom = ref(1)
   const panX = ref(0)
   const panY = ref(0)
+  /**
+   * 矢量模式画笔/橡皮的自绘光标位置（画板逻辑坐标，hover 跟随）。
+   * dataURL 圆圈光标在大 zoom 下尺寸超浏览器上限会失效，改为 overlay 自绘圈
+   *（Scratch 同款：画布内光标圈，随视图正确缩放）。
+   */
+  const cursorPos = ref<{ x: number; y: number } | null>(null)
 
   const canUndo = ref(false)
   const canRedo = ref(false)
@@ -154,6 +160,7 @@ export const usePaintStore = defineStore('paint', () => {
     zoom.value = 1
     panX.value = 0
     panY.value = 0
+    cursorPos.value = null
     canUndo.value = false
     canRedo.value = false
     dirty.value = false
@@ -187,6 +194,7 @@ export const usePaintStore = defineStore('paint', () => {
     zoom,
     panX,
     panY,
+    cursorPos,
     canUndo,
     canRedo,
     dirty,
