@@ -377,6 +377,9 @@ export function usePaperScope(
   }
 
   function syncVectorSelBox() {
+    // 「取消组合」可用性：选中项里真有 Group 才可点（普通 Path/文字点了也是空操作）
+    store.vectorCanUngroup =
+      !!scope && Array.from(selected).some((it) => it instanceof scope!.Group)
     // 塑形工具：锚点显示取代变换框（框隐藏，计数照常同步）
     if (store.activeTool === 'reshape') {
       selFrame = null
@@ -3365,6 +3368,7 @@ export function usePaperScope(
     forceEndTextEdit()
     store.vectorSelBox = null
     store.vectorSelectedCount = 0
+    store.vectorCanUngroup = false
     store.vectorCanUndo = false
     store.vectorCanRedo = false
     store.hasVectorClipboard = false

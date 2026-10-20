@@ -7,18 +7,18 @@ import iconRedo from '../../assets/icons/redo.svg'
 import iconZoomOut from '../../assets/icons/reduce-one.svg'
 import iconZoomIn from '../../assets/icons/add-one.svg'
 import iconSave from '../../assets/icons/保存.svg'
-import iconCrop from '../../assets/icons/btn_preview_scale.svg'
+import iconCrop from '../../assets/icons/裁切画板.svg'
 import iconCopy from '../../assets/icons/copy.svg'
-import iconPaste from '../../assets/icons/上传本地图片资源.svg'
+import iconPaste from '../../assets/icons/粘贴.svg'
 import iconDeleteSel from '../../assets/icons/选中删除.svg'
-import iconFlipH from '../../assets/icons/btn_preview_change_bg.svg'
-import iconFlipV from '../../assets/icons/btn_preview_scale.svg'
-import iconGroup from '../../assets/icons/吸附锚点.svg'
-import iconUngroup from '../../assets/icons/重置锚点.svg'
+import iconFlipH from '../../assets/icons/水平翻转.svg'
+import iconFlipV from '../../assets/icons/垂直翻转.svg'
+import iconGroup from '../../assets/icons/组合.svg'
+import iconUngroup from '../../assets/icons/取消组合.svg'
 import iconLayerUp from '../../assets/icons/上移图层.svg'
 import iconLayerDown from '../../assets/icons/下移图层.svg'
-import iconCurve from '../../assets/icons/曲线模式.svg'
-import iconStraight from '../../assets/icons/折线模式.svg'
+import iconCurve from '../../assets/icons/曲线.svg'
+import iconStraight from '../../assets/icons/折线.svg'
 
 const props = defineProps<{
   /** 顶栏标题（编辑既有角色时显示「绘制 - 角色名」） */
@@ -55,6 +55,12 @@ const canCopy = () => (isVector() ? store.vectorSelectedCount > 0 : !!store.sele
 const canPaste = () => (isVector() ? store.hasVectorClipboard : !!store.hasClipboard)
 const canUndoActive = () => (isVector() ? store.vectorCanUndo : store.canUndo)
 const canRedoActive = () => (isVector() ? store.vectorCanRedo : store.canRedo)
+
+// ─── 塑形锚点形态 toggle：选中锚点含手柄=曲线态；无手柄或未选=折线态（默认折线）───
+const reshapeCurveActive = () => store.reshapeHasPointed
+// 激活侧点击为安全空操作；未激活侧仅在确有可转换锚点时可点
+const curveDisabled = () => !store.reshapeHasUncurved && !store.reshapeHasPointed
+const pointDisabled = () => false
 
 function onZoomIn() {
   store.setZoom(store.zoom * 1.1)
@@ -149,25 +155,26 @@ function commitSize(axis: 'w' | 'h', e: Event) {
       <img :src="iconCrop" class="icon-sm" draggable="false" />
     </button>
 
-    <!-- 塑形工具专属：选中锚点的曲线/折线模式切换（对齐 Scratch reshape 顶栏按钮） -->
+    <!-- 塑形工具专属：选中锚点形态 toggle（曲线 ⇄ 折线，二选一激活；默认折线） -->
     <div v-if="store.mode === 'vector' && store.activeTool === 'reshape'" class="op-group">
       <button
         class="icon-btn"
-        :disabled="!store.reshapeHasUncurved"
-        v-tooltip="'选中锚点转为曲线'"
+        :class="{ 'icon-btn-active': reshapeCurveActive() }"
+        :disabled="curveDisabled()"
+        v-tooltip="reshapeCurveActive() ? '曲线（当前）' : '选中锚点转为曲线'"
         @click="emit('curvePoints')"
       >
         <img :src="iconCurve" class="icon-sm" draggable="false" />
       </button>
       <button
         class="icon-btn"
-        :disabled="!store.reshapeHasPointed"
-        v-tooltip="'选中锚点转为折线（尖角）'"
+        :class="{ 'icon-btn-active': !reshapeCurveActive() }"
+        :disabled="pointDisabled()"
+        v-tooltip="!reshapeCurveActive() ? '折线（当前）' : '选中锚点转为折线（尖角）'"
         @click="emit('pointPoints')"
       >
         <img :src="iconStraight" class="icon-sm" draggable="false" />
       </button>
-      <div class="op-divider"></div>
     </div>
 
     <!-- 选区/对象操作组（工业软件 options bar 风格，按模式切换可用性） -->
@@ -181,17 +188,11 @@ function commitSize(axis: 'w' | 'h', e: Event) {
       <button class="icon-btn" :disabled="!canCopy()" v-tooltip="isVector() ? '删除对象 (Delete)' : '删除选区 (Delete)'" @click="emit('deleteSel')">
         <img :src="iconDeleteSel" class="icon-sm" draggable="false" />
       </button>
-      <button class="icon-btn" v-tooltip="'水平翻转（无选区时翻转整层/整帧）'" @click="emit('flipH')">
-        <img :src="iconFlipH" class="icon-sm" draggable="false" />
-      </button>
-      <button class="icon-btn" v-tooltip="'垂直翻转（无选区时翻转整层/整帧）'" @click="emit('flipV')">
-        <img :src="iconFlipV" class="icon-sm" draggable="false" />
-      </button>
       <div class="op-divider"></div>
       <button class="icon-btn" :disabled="!isVector() || store.vectorSelectedCount < 2" v-tooltip="'组合选中对象（矢量模式）'" @click="emit('group')">
         <img :src="iconGroup" class="icon-sm" draggable="false" />
       </button>
-      <button class="icon-btn" :disabled="!isVector() || store.vectorSelectedCount < 1" v-tooltip="'取消组合（矢量模式）'" @click="emit('ungroup')">
+      <button class="icon-btn" :disabled="!isVector() || !store.vectorCanUngroup" v-tooltip="'取消组合（矢量模式）'" @click="emit('ungroup')">
         <img :src="iconUngroup" class="icon-sm" draggable="false" />
       </button>
       <button class="icon-btn" :disabled="!isVector() || store.vectorSelectedCount < 1" v-tooltip="'上移一层（矢量模式）'" @click="emit('layerUp')">
@@ -199,6 +200,13 @@ function commitSize(axis: 'w' | 'h', e: Event) {
       </button>
       <button class="icon-btn" :disabled="!isVector() || store.vectorSelectedCount < 1" v-tooltip="'下移一层（矢量模式）'" @click="emit('layerDown')">
         <img :src="iconLayerDown" class="icon-sm" draggable="false" />
+      </button>
+      <div class="op-divider"></div>
+      <button class="icon-btn" v-tooltip="'水平翻转（无选区时翻转整层/整帧）'" @click="emit('flipH')">
+        <img :src="iconFlipH" class="icon-sm" draggable="false" />
+      </button>
+      <button class="icon-btn" v-tooltip="'垂直翻转（无选区时翻转整层/整帧）'" @click="emit('flipV')">
+        <img :src="iconFlipV" class="icon-sm" draggable="false" />
       </button>
     </div>
 
@@ -283,6 +291,11 @@ function commitSize(axis: 'w' | 'h', e: Event) {
 .icon-btn:disabled {
   opacity: 0.35;
   cursor: default;
+}
+/* toggle 激活态（曲线/折线互斥）：对齐 mode-btn-active */
+.icon-btn-active,
+.icon-btn-active:hover:not(:disabled) {
+  background: var(--bg-active);
 }
 
 .icon-sm {

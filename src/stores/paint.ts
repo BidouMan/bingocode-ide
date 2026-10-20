@@ -106,6 +106,8 @@ export const usePaintStore = defineStore('paint', () => {
   const vectorCanRedo = ref(false)
   /** 矢量选中对象数（>0 时顶栏复制/删除/图层按钮可用） */
   const vectorSelectedCount = ref(0)
+  /** 选中项中含 Group（顶栏「取消组合」仅此情况可点，防误触普通对象） */
+  const vectorCanUngroup = ref(false)
   /** 矢量剪贴板有内容 */
   const hasVectorClipboard = ref(false)
   /** 任意帧存在矢量内容（禁用裁切：裁位图会与矢量层错位） */
@@ -257,6 +259,7 @@ export const usePaintStore = defineStore('paint', () => {
     vectorCanUndo.value = false
     vectorCanRedo.value = false
     vectorSelectedCount.value = 0
+    vectorCanUngroup.value = false
     hasVectorClipboard.value = false
     vectorContent.value = false
     vectorSelBox.value = null
@@ -305,6 +308,7 @@ export const usePaintStore = defineStore('paint', () => {
     vectorCanUndo,
     vectorCanRedo,
     vectorSelectedCount,
+    vectorCanUngroup,
     hasVectorClipboard,
     vectorContent,
     vectorSelBox,

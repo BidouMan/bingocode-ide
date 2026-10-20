@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { usePaintStore } from '../../stores/paint'
-import iconPick from '../../assets/icons/吸管.svg'
+import iconPick from '../../assets/icons/取色器.svg'
 
 const store = usePaintStore()
 

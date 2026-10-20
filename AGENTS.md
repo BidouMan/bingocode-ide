@@ -13,21 +13,17 @@ pnpm dev          # Frontend dev server (Vite)
 pnpm tauri dev    # Desktop app (Tauri)
 ```
 
-## Critical Rule: Reference Original First
+## UI 规格参考（原 PySide6 版已归档删除）
 
-**Before implementing ANY UI or interaction, ALWAYS read the original PySide6 UI files first:**
+原 PySide6 版完整源码（`legacy/`）已于 2026-10-20 从仓库移除，仅保留一份本机归档：`~/BingoCodeIDE-legacy-pyside6-archive-20261020.tar.gz`（含 ui/*.py、qss、图标、字体等，已排除 .venv）。需要查阅原始布局/交互细节时从归档解压临时目录阅读，不要恢复回仓库。
 
-- `legacy/ui/main_window_ui.py` — Main layout, all widget hierarchy
-- `legacy/ui/file_menu_ui.py` — File menu popup
-- `legacy/ui/upload_menu_ui.py` — Sprite upload drawer
-- `legacy/ui/map_upload_ui.py` — Map upload drawer
-- `legacy/ui/sound_upload_ui.py` — Sound upload drawer
-- `legacy/ui/map_resource_import_ui.py` — Map resource import dialog
-- `legacy/assets/qss/dark_style.qss` — All styling (colors, sizes, spacing)
-- `legacy/assets/qss/sprite_editor_style.qss` — Sprite editor styles
-- `legacy/assets/qss/map_editor_style.qss` — Map editor styles
+- UI 颜色/尺寸规格以本文末尾「Original QSS color reference」为准
+- **不要凭空设计 UI**：新 UI 应与现有 Vue 组件风格及原版 QSS 规格保持一致
 
-**Never design UI from scratch.** The original has carefully crafted layouts, colors, and interaction patterns. Match them exactly.
+## 素材目录约定
+
+- **应用内 UI 图标唯一存放处：`src/assets/icons/`**（svg，前端直接 import）。不要在其它目录放应用图标的副本——改图标只改这里
+- 游戏资源（精灵/地图/音效/字体）唯一存放处：`engine/assets/`（详见 Architecture 一节）
 
 ## Architecture
 

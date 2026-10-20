@@ -2,17 +2,17 @@
 import { computed } from 'vue'
 import { usePaintStore, type PaintTool } from '../../stores/paint'
 
-import iconSelect from '../../assets/icons/选取工具.svg'
+import iconSelect from '../../assets/icons/选择箭头.svg'
 import iconReshape from '../../assets/icons/移动锚点.svg'
 import iconBrush from '../../assets/icons/icon--paint.svg'
-import iconEraser from '../../assets/icons/icon--delete.svg'
-import iconFill from '../../assets/icons/填充.svg'
-import iconLine from '../../assets/icons/添加锚点.svg'
-import iconRect from '../../assets/icons/新建地图.svg'
-import iconEllipse from '../../assets/icons/btn_preview_scale.svg'
-import iconText from '../../assets/icons/代码编辑.svg'
-import iconEyedropper from '../../assets/icons/重置.svg'
-import iconClear from '../../assets/icons/清空.svg'
+import iconEraser from '../../assets/icons/清空.svg'
+import iconFill from '../../assets/icons/填充_fill.svg'
+import iconLine from '../../assets/icons/直线工具.svg'
+import iconRect from '../../assets/icons/矩形_rectangle.svg'
+import iconEllipse from '../../assets/icons/圆形_round.svg'
+import iconText from '../../assets/icons/文字_text.svg'
+import iconEyedropper from '../../assets/icons/取色器.svg'
+import iconClear from '../../assets/icons/清空画布.svg'
 
 const ICONS: Record<PaintTool, string> = {
   select: iconSelect,
