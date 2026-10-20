@@ -251,7 +251,7 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   display: flex;
   align-items: center;
   height: 44px;
-  padding: 0 10px;
+  padding: 0 10px 0 4px;
   gap: 10px;
   background: var(--bg-base);
   border-bottom: 1px solid var(--border);
@@ -299,13 +299,14 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   height: 13px;
 }
 
-/* 矢量|位图 分段切换 */
+/* 矢量|位图 分段切换（不参与压缩：窄窗口下文字不竖排） */
 .mode-switch {
   display: flex;
   background: var(--bg-panel);
   border-radius: 6px;
   padding: 2px;
   gap: 2px;
+  flex-shrink: 0;
 }
 
 .mode-btn {
@@ -317,13 +318,16 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   border-radius: 4px;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
 }
 .mode-btn:hover:not(:disabled):not(.mode-btn-active) {
   color: var(--text-secondary);
 }
+/* 激活态：强调绿底 + 深色文字（亮绿底上深色对比最佳） */
 .mode-btn-active {
-  background: var(--bg-active);
-  color: var(--text);
+  background: var(--accent);
+  color: #16201a;
+  font-weight: 600;
 }
 .mode-btn:disabled {
   opacity: 0.45;
@@ -421,6 +425,7 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .zoom-group {
@@ -440,6 +445,7 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   border-radius: 4px;
   cursor: pointer;
   transition: background 0.15s;
+  white-space: nowrap;
 }
 .zoom-label:hover {
   background: var(--bg-hover);
@@ -458,6 +464,7 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
+  white-space: nowrap;
   background: transparent;
   border: 1px solid var(--border-light);
   border-radius: 8px;
@@ -483,6 +490,7 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   font-size: 12px;
   font-weight: 600;
   color: #ffffff;
+  white-space: nowrap;
   background: #2b8a48;
   border: none;
   border-radius: 8px;
