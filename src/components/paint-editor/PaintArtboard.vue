@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { usePaintStore } from '../../stores/paint'
 import { useBitmapCanvas } from './composables/useBitmapCanvas'
 import { usePaperScope } from './composables/usePaperScope'
+import { ensurePaintFont } from './utils/paintFont'
 
 const store = usePaintStore()
 
@@ -20,6 +21,7 @@ const {
   replacePixelsForBake: bitmapBakeReplacePixels,
   transformWholeFrame: bitmapTransformFrame,
   getCanvas,
+  textEditInput: bitmapTextInput, textEditCommit: bitmapTextCommit,
 } = useBitmapCanvas(bitmapCanvas)
 
 // 矢量绘制引擎（paper 场景图/对象操作/多帧 JSON 快照），坐标与位图同源（clientToArtboard）
@@ -118,6 +120,7 @@ function onStageDblClick() {
 
 onMounted(() => {
   window.addEventListener('mouseup', onGlobalMouseUp)
+  ensurePaintFont() // 预加载绘制字体（文字工具首次使用前就绪）
 })
 
 onUnmounted(() => {
@@ -196,7 +199,8 @@ function focusStage() {
 
 // ─── 拾色（吸管）：合成位图层+矢量层读点击点像素色，写入目标通道后退出 ───
 function onStagePointerDownForPick(e: PointerEvent) {
-  focusStage()
+  // 文字编辑中不抢焦点（stage.focus 会 blur 掉 textarea → 光标消失）
+  if (!store.textEdit) focusStage()
   if (!store.eyedropperActive) return
   e.preventDefault()
   e.stopPropagation()
@@ -242,6 +246,16 @@ function onStagePointerDownForPick(e: PointerEvent) {
 /** 快捷键：按模式分发——矢量=对象操作；位图=选区操作 */
 function onStageKeydown(e: KeyboardEvent) {
   const mod = e.ctrlKey || e.metaKey
+
+  // 文字编辑中：Esc 结束编辑；其余键交给 textarea（本 handler 不应收到——
+  // 但 textarea blur/合成事件可能冒泡到 stage，防御性放行）
+  if (store.textEdit) {
+    if (e.key === 'Escape') {
+      commitTextEdit()
+      e.preventDefault()
+    }
+    return
+  }
 
   // 拾色模式：Esc 取消（优先于一切快捷键）
   if (store.eyedropperActive) {
@@ -317,6 +331,7 @@ function onStageKeydown(e: KeyboardEvent) {
  * 缩略图（若此处提前同步，位图 DOM 尚未切换，缩略图会拿旧帧位图 + 新帧矢量错配合成）。
  */
 function addFrame(duplicate: boolean) {
+  commitTextEdit()
   const newIndex = store.frames.length
   vectorEngine.onFrameAdded(duplicate, newIndex)
   bitmapAddFrame(duplicate)
@@ -329,6 +344,7 @@ function addFrame(duplicate: boolean) {
  */
 function removeFrame(index: number): boolean {
   if (store.frames.length <= 1 || index < 0 || index >= store.frames.length) return false
+  commitTextEdit()
   vectorEngine.onFrameRemoved(index)
   const ok = bitmapRemoveFrame(index)
   if (ok) vectorEngine.syncActiveFrame()
@@ -341,6 +357,7 @@ function loadFrames(
   names: (string | null)[],
   activeIndex: number
 ) {
+  commitTextEdit() // 载入前收口编辑中的文字
   bitmapLoadFrames(canvases, names, activeIndex)
   vectorEngine.onLoadFrames(canvases.length)
 }
@@ -351,6 +368,7 @@ function loadFrames(
  * 再对每帧把矢量层 drawImage 到位图帧副本上（不污染位图引擎的源像素）。
  */
 function getFrameCanvasesComposed(): HTMLCanvasElement[] {
+  commitTextEdit() // 导出前收口编辑中的文字（避免 textarea 内容未落进场景/像素）
   vectorEngine.beforeExport()
   const bases = bitmapGetFrameCanvases()
   if (!vectorEngine.hasVectorContent()) return bases
@@ -371,17 +389,20 @@ function getFrameCanvasesComposed(): HTMLCanvasElement[] {
 
 /** 顶栏撤销/重做：按模式路由到对应引擎栈 */
 function undoActive() {
+  commitTextEdit()
   if (store.mode === 'vector') vectorEngine.undo()
   else bitmapUndo()
 }
 
 function redoActive() {
+  commitTextEdit()
   if (store.mode === 'vector') vectorEngine.redo()
   else bitmapRedo()
 }
 
 /** 清空：按模式清当前工作层 */
 function clearActive() {
+  commitTextEdit()
   if (store.mode === 'vector') vectorEngine.clearLayer()
   else bitmapClear()
 }
@@ -414,7 +435,147 @@ function commitBitmapSelection() {
 
 // 模式切换：离开位图先烘焙浮动选区（矢量侧清选由引擎内部 mode watch 处理）
 watch(() => store.mode, () => {
+  commitTextEdit() // 编辑态不得跨模式残留（引擎内也有兜底，此处保证顺序在 commitAndDeselect 前）
   commitAndDeselect()
+})
+
+// ─── 文字编辑 textarea 覆盖层 ───
+const textAreaRef = ref<HTMLTextAreaElement>()
+/**
+ * IME 组词进行中（拼音输入法 composition）：
+ * 组词期间 input 事件会带中间态（如 "ni" / "nih"），若此时同步进 PointText，
+ * 会把每个音节都当成最终文本提交 → 出现 "nnini'hni..." 乱码。
+ * 组词结束（compositionend）才把最终值写入引擎。
+ */
+const textComposing = ref(false)
+
+/** 离屏测宽 ctx（组词中引擎不收中间态，UI 层自量 textarea 内容撑开边框） */
+let measureCtx: CanvasRenderingContext2D | null = null
+
+/**
+ * 按当前字符串测内容框（画板逻辑坐标）。
+ * 组词期间引擎不更新 internalBounds，必须在 UI 层自己量——否则边框停在初始光标宽，字全挤在一起。
+ */
+function measureTextContentSize(
+  value: string,
+  fontSize: number,
+  lineHeightRatio: number
+): { w: number; h: number } {
+  if (!measureCtx) {
+    measureCtx = document.createElement('canvas').getContext('2d')
+  }
+  const lh = fontSize * lineHeightRatio
+  const lines = value.split('\n')
+  if (!measureCtx || !value) {
+    return { w: fontSize * 0.5, h: lh } // 空：一个光标位
+  }
+  measureCtx.font = `500 ${fontSize}px "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif`
+  let maxW = 0
+  for (const line of lines) {
+    // 空行按一个空格宽计（保持多行高度正确）
+    maxW = Math.max(maxW, measureCtx.measureText(line || ' ').width)
+  }
+  return { w: Math.max(maxW, 1), h: Math.max(lines.length, 1) * lh }
+}
+
+/** 用 DOM 当前值刷新边框尺寸（input/composition 全程调用，不依赖引擎） */
+function refreshTextEditSizeFromDom() {
+  const te = store.textEdit
+  const el = textAreaRef.value
+  if (!te || !el) return
+  const size = measureTextContentSize(el.value, te.fontSize, te.lineHeight)
+  // 幅度阈值防高频无谓响应式写入
+  if (Math.abs(te.width - size.w) > 0.5 || Math.abs(te.height - size.h) > 0.5) {
+    te.width = size.w
+    te.height = size.h
+  }
+}
+
+/** textarea 样式：画板逻辑坐标系内定位（随 artboardStyle 父 transform 缩放），尺寸动态贴合内容 */
+const textEditStyle = computed(() => {
+  const te = store.textEdit
+  if (!te) return null
+  const base: Record<string, string> = {
+    fontSize: `${te.fontSize}px`,
+    lineHeight: String(te.lineHeight),
+    color: te.color,
+    left: `${te.x}px`,
+    top: `${te.y}px`,
+    // 动态贴合内容（引擎按 internalBounds/measureText 写入；+1 防末字裁切，对齐 Scratch）
+    width: `${Math.max(te.width, 1) + 1}px`,
+    height: `${Math.max(te.height, 1)}px`,
+  }
+  // 矢量：附加线性 matrix（旋转/缩放）；位图无 matrix
+  if (te.matrix) {
+    base.transform = te.matrix
+    base.transformOrigin = te.transformOrigin
+  }
+  return base
+})
+
+function commitTextEdit() {
+  if (!store.textEdit) return
+  if (store.mode === 'vector') vectorEngine.textEditCommit()
+  else bitmapTextCommit()
+}
+
+/** 把 textarea 当前值同步进引擎（组词中跳过） */
+function syncTextAreaToEngine(value: string) {
+  if (store.mode === 'vector') vectorEngine.textEditInput(value)
+  else bitmapTextInput(value)
+}
+
+function onTextAreaInput(e: Event) {
+  const el = e.target as HTMLTextAreaElement
+  // 边框始终跟随 DOM 实际内容（含 IME 中间态拼音）
+  refreshTextEditSizeFromDom()
+  // 组词中内容不同步：中间态只活在 textarea，不进 PointText
+  if (textComposing.value) return
+  syncTextAreaToEngine(el.value)
+}
+
+function onTextAreaCompositionStart() {
+  textComposing.value = true
+}
+
+function onTextAreaCompositionEnd(e: CompositionEvent) {
+  textComposing.value = false
+  const el = e.target as HTMLTextAreaElement
+  refreshTextEditSizeFromDom()
+  // 组词结束：最终值（可能含多字）一次性写入引擎
+  syncTextAreaToEngine(el.value)
+}
+
+function onTextAreaKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    commitTextEdit()
+  }
+  // 阻止键事件冒泡到 stage 快捷键（Delete/方向键等）
+  e.stopPropagation()
+}
+
+// 出现编辑会话 → textarea 聚焦（Scratch element.focus preventScroll 同款）。
+// 不用 :value 受控绑定：组词期间受控回写会打断 IME，改为挂载时一次性写入初值。
+// 双保险：nextTick + rAF——单靠 nextTick 时，pointerdown 默认焦点转移可能后到又抢走。
+watch(() => store.textEdit, (te) => {
+  if (te) {
+    textComposing.value = false
+    const focusTa = () => {
+      const el = textAreaRef.value
+      if (!el) return
+      if (!el.value) el.value = te.value // 空时写初值；已有内容不动（不打断 IME）
+      el.focus({ preventScroll: true })
+      const len = el.value.length
+      el.setSelectionRange(len, len)
+    }
+    nextTick(() => {
+      focusTa()
+      requestAnimationFrame(focusTa)
+    })
+  } else {
+    textComposing.value = false
+  }
 })
 
 /**
@@ -710,6 +871,20 @@ defineExpose({
           <circle :r="store.brushSize / 2" fill="none" stroke="rgba(0, 0, 0, 0.55)" stroke-width="3" />
           <circle :r="store.brushSize / 2" fill="none" stroke="rgba(255, 255, 255, 0.95)" stroke-width="1.5" />
         </svg>
+        <!-- 文字编辑 textarea（Scratch 同款透明覆盖层）：与 PointText/栅格化文字逐字对齐，
+             虚线外框示意编辑范围；pointer-events: auto 接收键鼠（父层 none 不穿透） -->
+        <textarea
+          v-if="store.textEdit"
+          ref="textAreaRef"
+          class="text-edit-area"
+          :style="textEditStyle"
+          spellcheck="false"
+          autocomplete="off"
+          @input="onTextAreaInput"
+          @compositionstart="onTextAreaCompositionStart"
+          @compositionend="onTextAreaCompositionEnd"
+          @keydown="onTextAreaKeydown"
+        ></textarea>
       </div>
     </div>
   </div>
@@ -725,6 +900,12 @@ defineExpose({
   background: var(--bg-root);
   overflow: hidden;
   position: relative;
+}
+
+/* 去掉浏览器默认焦点环（tabindex=0 聚焦时会在舞台外圈画深蓝框，与绘制内容无关） */
+.paint-stage:focus,
+.paint-stage:focus-visible {
+  outline: none;
 }
 
 /* 拾色模式：全画板十字光标（覆盖引擎按工具设置的 cursor） */
@@ -814,6 +995,31 @@ defineExpose({
   overflow: visible;
   pointer-events: none;
   z-index: 7;
+}
+
+/* ─── 文字编辑覆盖层（Scratch text-tool 同款）─── */
+.text-edit-area {
+  position: absolute;
+  pointer-events: auto;
+  z-index: 9;
+  /* 与 PointText 渲染对齐：无边框无衬距（padding/border 会偏移字形），透明底，不换行。
+     尺寸由引擎按内容 internalBounds 动态写入 width/height（对齐 Scratch resizeGuide） */
+  margin: 0;
+  padding: 0;
+  border: none;
+  outline: 1px dashed rgba(24, 27, 50, 0.7);
+  outline-offset: 2px;
+  background: transparent;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  font-family: 'HarmonyOS Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-weight: 500;
+  /* 光标跟随当前文字色（te.color = 绘制色） */
+  caret-color: currentColor;
+  box-sizing: content-box;
+  /* 合成器不拉伸：textarea 随 artboard transform 缩放，文字用逻辑字号渲染 */
+  transform-origin: 0 0;
 }
 
 /* 位图模式像素渲染：多重声明渐进回退（旧引擎认 crisp-edges，新引擎 pixelated 覆盖生效） */

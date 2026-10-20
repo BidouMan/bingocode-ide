@@ -30,8 +30,8 @@ export const usePaintStore = defineStore('paint', () => {
   /** 默认矢量模式（对齐 Scratch：新内容默认矢量；vector→bitmap 转换为单向烘焙） */
   const mode = ref<PaintMode>('vector')
 
-  /** 唯一绘制色：所有位图绘制工具共用 */
-  const fillColor = ref('#5BFB84')
+  /** 唯一绘制色：所有绘制工具共用（默认 Scratch 紫 #9A66FF = rgb(154,102,255)） */
+  const fillColor = ref('#9A66FF')
   /** 矢量模式的描边色（默认柔和深灰——接近黑但不刺眼，便于一眼识别描边；位图工具不使用） */
   const strokeColor = ref('#2d2d2d')
   /**
@@ -144,6 +144,31 @@ export const usePaintStore = defineStore('paint', () => {
   /** 选中锚点中存在带手柄的点（顶栏「折线」按钮可用性） */
   const reshapeHasPointed = ref(false)
 
+  // ─── 文字编辑 overlay（引擎写入，PaintArtboard 定位 textarea）───
+  /**
+   * 活跃文字编辑会话（textarea 覆盖层状态）；null=未在编辑。
+   * 矢量模式对应 paper.PointText 编辑；位图模式为一次性输入（结束即栅格化）。
+   * 定位：vector 用 matrix（对齐 PointText 变换，含旋转/缩放）；
+   * bitmap 用 x/y 绝对定位（画板逻辑坐标，无旋转）。
+   */
+  const textEdit = ref<{
+    /** 矢量：完整 CSS matrix（画板坐标系，含 PointText 自身变换）；位图 null */
+    matrix: string | null
+    /** matrix 模式下 transform-origin（相对 textarea 左上，px） */
+    transformOrigin: string
+    /** 位图：画板逻辑坐标（文字框左上） */
+    x: number
+    y: number
+    fontSize: number
+    /** 行高比（leading/fontSize） */
+    lineHeight: number
+    color: string
+    value: string
+    /** 内容框尺寸（画板逻辑坐标，动态贴合文字；空文字≈一个光标位） */
+    width: number
+    height: number
+  } | null>(null)
+
   // ─── 位图选区状态（引擎写入，顶栏按钮/蚂蚁线 overlay 读取）───
   /** 当前选区矩形（画板逻辑坐标整数）：框选中=拖动矩形；有浮动选区=其 AABB */
   const selection = ref<{ x: number; y: number; w: number; h: number } | null>(null)
@@ -204,7 +229,7 @@ export const usePaintStore = defineStore('paint', () => {
   function reset() {
     activeTool.value = 'brush'
     mode.value = 'vector'
-    fillColor.value = '#5BFB84'
+    fillColor.value = '#9A66FF'
     strokeColor.value = '#2d2d2d'
     fillEnabled.value = true
     strokeEnabled.value = false
@@ -243,6 +268,7 @@ export const usePaintStore = defineStore('paint', () => {
     floatActive.value = false
     transformBox.value = null
     hasClipboard.value = false
+    textEdit.value = null
     frames.value = [{ id: makeFrameId() }]
     activeFrameIndex.value = 0
   }
@@ -290,6 +316,7 @@ export const usePaintStore = defineStore('paint', () => {
     floatActive,
     transformBox,
     hasClipboard,
+    textEdit,
     frames,
     activeFrameIndex,
     selectFrame,

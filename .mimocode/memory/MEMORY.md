@@ -55,6 +55,8 @@ _Major design choices with rationale._
 
 - **Vue store watch 三陷阱（2026-10-20 揘边 UI 迭代取证，跨任务耐久）**: ①**同 tick 值往返不触发**——`setSelection` 同步块内 count 1→0→1，watch 新旧值相同（都是 1）直接不触发 → 依赖"选中变化"的同步必须挂在必经函数（如 syncVectorSelBox）内联调用，不能靠 watch 计数器；②**同值写入不触发**——`store.x = true` 当已是 true 时 watch 不触发 → 勾选/开关类信号需配 tick 计数器（`xxxTick++`）做边沿强制，watch getter 写成数组 `[value, tick]`；③**多 watcher 同 flush 按注册序执行**，A watcher 内改 store 会把受影响 watcher 追加到本 flush 尾部 → 抑制窗口不能立即解锁，须 `nextTick(() => lock=false)`（nextTick 回调在 flush 之后）。[ses_ebce1d478ffe]
 
+- **绘制编辑器文字工具（2026-10-20 用户拍板+全链路落码，两轮 bug 修复后待 dev 验收）**: 用户三问确认——完整 HarmonyOS Sans SC 8.2MB 直接打包（`engine/assets/fonts/`，publicDir `/fonts/` 服务）、矢量+位图都做、默认字号 40 无字号 UI（靠缩放手柄）。规格对齐 scratch-paint `src/helper/tools/text-tool.js`（TEXT_EDIT/SELECT 双态、fontSize 40、leading 46.15、空文字删除、双击 250ms 重编辑）。矢量=paper.PointText + store.textEdit overlay；结束编辑自动 setSelection+setTool('select') 复用变换框；位图=textarea 绝对定位+commit 时 ctx.fillText 逐行栅格化（一次性）。加载入口 `paintFont.ts` ensurePaintFont。**已改**：paint.ts textEdit state（含 width/height 动态尺寸）、usePaperScope 文字工具全段+expose、useBitmapCanvas commitBitmapText+measureBitmapText+expose、tintTargets 纳 PointText、PaintArtboard textarea 模板/CSS/textEditStyle/onStageKeydown Esc/onMounted 预加载/导出撤销清空增删帧前 commitTextEdit。**textarea 定位**：left/top=PointText 内容左上角项目坐标 + CSS matrix 仅线性部分 (a,b,c,d,0,0)（不乘 view.matrix）。**动态边框**：矢量 internalBounds / 位图 measureText 驱动 width/height；空文字仅光标位。**IME**：compositionstart/end 门控、组词中不上屏、textarea 非受控（挂载写一次初值）。**焦点**：编辑态 stage 不 focusStage、text 工具不 setPointerCapture、nextTick+rAF 聚焦；`.paint-stage:focus outline:none` 去深蓝焦点环。**光标色** caret-color #2a2d33 固定不吃字体色。**收口禁用 stage mousedown**（pointerdown 新建会话会被冒泡 mousedown 误杀）；撤销 push 在 beginTextTool 创建/重编辑**前**（栈顶=改动前）；endTextEdit(switchToSelect) 分手势结束（true）与 forceEnd（false，不覆盖用户工具）。paint-editor 相关 vue-tsc 已清零；**dev 验收未完成**（用户已能输入，两轮 bug 修复待回报）。[ses_ffe5ea7fb3831ffe3TChf2A9H3]
+
 ## Discovered durable knowledge (terminal/console)
 
 - **终端双通道**: 游戏模式 `engine.rs` 子进程（piped），代码模式 `shell.rs` PTY。完全独立 I/O。[ses_09c5077a4ffe]
@@ -109,6 +111,9 @@ _Cross-task facts that survive across sessions._
 
 ### 其他
 
+- **项目内可用字体文件（2026-10-20 勘察，同日已复制进 publicDir）**: 源头 `legacy/assets/font/HarmonyOS_Sans_SC_Regular.ttf`（约 8.2MB 中文字体，PySide6 遗留）与 JetBrains Mono 两处。**已复制到 `engine/assets/fonts/HarmonyOS_Sans_SC_Regular.ttf`**（Vite publicDir，前端经 `/fonts/` 加载；加载封装 `src/components/paint-editor/utils/paintFont.ts` 的 `ensurePaintFont()`）。用户拍板完整 8.2MB 直接打包（不做子集化）。[ses_ffe5ea7fb3831ffe3TChf2A9H3]
+- **中文输入法（IME）组词必须 composition 门控（2026-10-20 绘制器文字工具实测）**: 受控 `:value` 绑定 + 每个 `input` 事件同步引擎 = 拼音音节被逐字提交成最终文本（用户实测乱码 `nnini'hni'hani...`）。正确模式：`compositionstart` 置位 → 组词中 `input` 跳过引擎同步（中间态只活在 textarea）→ `compositionend` 一次提交最终值；textarea 用**非受控**（挂载时写一次初值，之后 DOM 由用户输入主导）。对任何「输入框驱动画布对象」的交互（文字工具、标注、重命名就地编辑）都适用。[ses_ffe5ea7fb3831ffe3TChf2A9H3]
+- **textarea 刚挂载就失焦的两个常见源（2026-10-20）**: ①父/兄弟元素的 pointerdown 回调里调 `el.focus()`（本例 `.paint-stage` 的 focusStage，tabindex=0）抢走刚聚焦的 textarea；②canvas `setPointerCapture` 把后续指针/焦点事件钉在画布上。文字/标注类覆盖层：编辑态跳过 focusStage、对应工具不 capture；聚焦用 `nextTick + requestAnimationFrame` 双保险。另：`.paint-stage:focus/:focus-visible { outline: none }` 去掉 tabindex=0 带来的浏览器深蓝焦点环（用户取色 ≈ rgb(31,74,148)）。[ses_ffe5ea7fb3831ffe3TChf2A9H3]
 - **pnpm workspace `-w` flag**: 项目根 `pnpm-workspace.yaml` 含 `packages: ["."]`，任何 `pnpm add <dep>` 必须带 `-w`（否则 ERR_PNPM_ADDING_TO_ROOT）。[ses_ebce1d478ffe]
 - **useFileDialog `multiple` 只返回第一个文件**: `openFile(accept, true)` 的 onChange 取 `input.files?.[0]`——多选需自建 input；纯图片场景 File 本身就是 Blob，无需 FileReader 读字节。[ses_ebce1d478ffe]
 - See MEMORY-legacy-dev-tips.md (9 entries) — pnpm PATH / 引擎 API 设计与 __all__ / Tauri dev mode / macOS 圆角窗口 / Qt→CSS / 控制台常驻 / 精灵数据模型 / Tauri 图标 RGBA / .editor-page-full flex（历史稳定提示，2026-10-18 裁剪）

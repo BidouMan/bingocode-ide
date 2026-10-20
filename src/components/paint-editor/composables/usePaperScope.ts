@@ -2,6 +2,12 @@ import { watch, onBeforeUnmount, type Ref } from 'vue'
 import paper from 'paper'
 import { usePaintStore } from '../../../stores/paint'
 import { rgbaCss } from '../utils/artboardExport'
+import {
+  ensurePaintFont,
+  PAINT_FONT_FAMILY,
+  PAINT_TEXT_SIZE,
+  PAINT_TEXT_LEADING_RATIO,
+} from '../utils/paintFont'
 
 /** 矢量撤销栈上限（exportJSON 快照，与位图 25 步对齐） */
 const HISTORY_LIMIT = 25
@@ -554,7 +560,10 @@ export function usePaperScope(
     hooks.onFrameSwitched(old, target)
   }
 
-  watch(() => store.activeFrameIndex, () => syncActiveFrame())
+  watch(() => store.activeFrameIndex, () => {
+    forceEndTextEdit() // 切帧前收口编辑（编辑态引用不能跨帧）
+    syncActiveFrame()
+  })
 
   /** 帧数组增删同步（由 PaintArtboard 编排，须与位图像素数组保持下标对齐） */
   function onFrameAdded(duplicate: boolean, newIndex: number) {
@@ -1809,7 +1818,7 @@ export function usePaperScope(
   // 画笔/橡皮/直线不显示——直线本体粗细走独立 lineWidth）。线宽滑条直改描边宽度，
   // 0=移除描边。撤销按编辑手势合并（colorEditing：一次拖动一步）。
 
-  /** 递归收集可着色目标（Path/CompoundPath；组下钻、位图代理排除） */
+  /** 递归收集可着色目标（Path/CompoundPath/PointText；组下钻、位图代理排除） */
   function tintTargets(): paper.Item[] {
     if (!scope) return []
     const S = scope
@@ -1817,6 +1826,10 @@ export function usePaperScope(
     const walk = (it: paper.Item) => {
       if (it === bitmapRaster) return
       if (it instanceof S.CompoundPath) {
+        out.push(it)
+        return
+      }
+      if (it instanceof S.PointText) {
         out.push(it)
         return
       }
@@ -1838,6 +1851,10 @@ export function usePaperScope(
   function tintSelection(targets: paper.Item[]) {
     const color = styleColor()
     for (const it of targets) {
+      if (it instanceof scope!.PointText) {
+        it.fillColor = color // 文字只有填充色
+        continue
+      }
       if (hasVisibleFill(it)) it.fillColor = color
       else if (hasVisibleStroke(it)) it.strokeColor = color
       else it.fillColor = color // 双无的隐形形状 → 填充使其可见
@@ -1879,6 +1896,12 @@ export function usePaperScope(
     () => [store.fillColor, store.opacity],
     () => {
       if (store.mode !== 'vector') return
+      // 编辑中文字：即时跟随填充色（不压撤销栈，结束编辑时统一快照）
+      if (textMode === 'edit' && textBox) {
+        textBox.fillColor = styleColor()
+        syncTextEditOverlay()
+        return
+      }
       const targets = tintTargets()
       if (targets.length === 0) return
       tintApply(() => tintSelection(targets))
@@ -2277,6 +2300,215 @@ export function usePaperScope(
     if (acted) eraseChanged = true
   }
 
+  // ─── 文字工具（Scratch text-tool 同款：TEXT_EDIT_MODE / SELECT_MODE 双态）───
+  // 行为规格来自 scratch-paint src/helper/tools/text-tool.js：
+  // - 点击空白 → 新建 PointText（fontSize 40、填充色=绘制色）并进入编辑（textarea 覆盖）
+  // - 编辑中：textarea 输入实时写 content；虚线边框示意编辑范围；Esc/点空白结束
+  // - 结束编辑：空文字删除；非空进入 SELECT_MODE（可移动/缩放/旋转）
+  // - SELECT_MODE 下双击文字（250ms）→ 重新进入编辑；点其他文字 → 编辑那个
+  // - 编辑中途切工具/切帧/切模式 → 强制结束编辑（空删、非空保留并选中）
+
+  const TEXT_DBL_MS = 250
+  /** 编辑会话：当前正在编辑的 PointText；null=未在编辑 */
+  let textBox: paper.PointText | null = null
+  /** 文字工具内部模式（对齐 Scratch TEXT_EDIT_MODE / SELECT_MODE） */
+  let textMode: 'none' | 'edit' | 'select' = 'none'
+  /** 上次点击（双击判定） */
+  let textLastClickTime = 0
+  /** 本次编辑会话是否已压撤销栈（beginTextTool 在创建/重编辑前压） */
+  let textPushed = false
+  /** 编辑会话内是否有实际输入（无输入的重编辑结束时回滚空撤销步） */
+  let textDirty = false
+
+  /** 更新 store.textEdit（textarea 定位：内容左上角绝对坐标 + 线性 matrix 随旋转/缩放） */
+  function syncTextEditOverlay() {
+    if (!scope || !textBox || textMode !== 'edit') {
+      store.textEdit = null
+      return
+    }
+    const S = scope
+    // internalBounds 在 PointText 局部坐标（相对 point，含负 y=基线上方）
+    const ib = textBox.internalBounds
+    const m = textBox.matrix
+    // 内容左上角在项目坐标（画板逻辑坐标）中的位置
+    const tl = m.transform(new S.Point(ib.x, ib.y))
+    // 动态尺寸（对齐 Scratch resizeGuide）：贴合内容；空文字保一个光标位（约 0.5em 宽）
+    const fs = Number(textBox.fontSize) || PAINT_TEXT_SIZE
+    const hasContent = !!(textBox.content && textBox.content.length > 0)
+    const w = hasContent ? Math.max(ib.width, 1) : fs * 0.5
+    const h = hasContent ? Math.max(ib.height, fs * 0.5) : fs * PAINT_TEXT_LEADING_RATIO
+    // 元素放在内容左上角；CSS matrix 只保留线性部分（旋转/缩放），
+    // 平移由 left/top 承担——元素 (0,0) 经 matrix 线性变换后落在 tl，与 paper 渲染对齐。
+    store.textEdit = {
+      matrix: `matrix(${m.a}, ${m.b}, ${m.c}, ${m.d}, 0, 0)`,
+      transformOrigin: '0 0',
+      x: tl.x,
+      y: tl.y,
+      fontSize: fs,
+      lineHeight: (Number(textBox.leading) || 0) / fs,
+      color: textBox.fillColor ? textBox.fillColor.toCSS(true) : '#000',
+      value: textBox.content ?? '',
+      width: w,
+      height: h,
+    }
+  }
+
+  /** 结束编辑：空文字删除并回滚；非空保留。switchToSelect=true 时选中并切选择工具 */
+  function endTextEdit(switchToSelect: boolean = true) {
+    if (textMode !== 'edit' || !textBox) {
+      return
+    }
+    const item = textBox
+    const hadContent = !!item.content && item.content.trim().length > 0
+    const changed = textDirty
+    store.textEdit = null
+    textBox = null
+    textMode = 'none'
+    textDirty = false
+    item.opacity = 1 // 编辑中隐藏的 PointText 恢复可见
+    if (!hadContent) {
+      // 空文字：删除并回滚（新建时快照在创建前；重编辑时快照在改动前）
+      if (item.parent) item.remove()
+      if (textPushed) popHistory()
+      textPushed = false
+      clearSelection()
+      return
+    }
+    if (!changed && textPushed) {
+      // 重编辑但未改内容：回滚空步，避免多余撤销
+      popHistory()
+      textPushed = false
+      setSelection([item])
+      if (switchToSelect) store.setTool('select')
+      syncVectorSelBox()
+      return
+    }
+    // hadContent && changed：begin 时已压「改动前」快照，此处只清标记
+    textPushed = false
+    setSelection([item])
+    if (switchToSelect) store.setTool('select')
+    markDirty()
+    syncVectorSelBox()
+  }
+
+  /** 开始编辑既有/新建 PointText（调用前须已 pushHistory 覆盖「编辑前」状态） */
+  function beginTextEdit(item: paper.PointText, isNew: boolean) {
+    if (!scope) return
+    if (textMode === 'edit' && textBox === item) return
+    if (textMode === 'edit') endTextEdit(false)
+    ensurePaintFont()
+    textBox = item
+    textMode = 'edit'
+    textDirty = false
+    // 撤销快照：由调用方在创建 PointText / 重编辑前 push（保证栈顶=改动前）
+    if (!isNew) {
+      // 重编辑：若调用方未压栈则在此压（防御；正常 beginTextTool/double-click 已压）
+      if (!textPushed) {
+        pushHistory()
+        textPushed = true
+      }
+    }
+    // 样式：字体/字号/填充色（leading 对齐 Scratch 实验值）
+    item.fontFamily = PAINT_FONT_FAMILY
+    item.fontWeight = '500' // Medium：比 Regular 更清晰可读（画布渲染不吃浏览器 faux-bold）
+    if (isNew) {
+      item.fontSize = PAINT_TEXT_SIZE
+      item.leading = PAINT_TEXT_SIZE * PAINT_TEXT_LEADING_RATIO
+      item.fillColor = styleColor()
+      item.strokeColor = null
+    }
+    item.justification = 'left'
+    // 编辑中隐藏 PointText：textarea 独占显示——两层同时画同一段字会因亚像素/抗锯齿
+    // 差异产生重影发糊（提交后恢复渲染即清晰）
+    item.opacity = 0
+    // 编辑中收起变换框（选中态由编辑会话接管）
+    clearSelection()
+    syncTextEditOverlay()
+    scope.view.update()
+    // 字体异步加载完成后重测 internalBounds（首帧可能用回退字体量宽，加载完再贴合一次）
+    ensurePaintFont().then(() => {
+      if (textMode === 'edit' && textBox === item) {
+        syncTextEditOverlay()
+        scope?.view.update()
+      }
+    })
+  }
+
+  /** textarea 输入 → 同步 content + 刷新 overlay 尺寸 */
+  function onTextEditInput(value: string) {
+    if (!textBox || textMode !== 'edit') return
+    textDirty = true
+    textBox.content = value
+    syncTextEditOverlay()
+    scope?.view.update()
+  }
+
+  /** 命中 PointText（文字工具专用：fill 命中即可编辑；位图代理是 Raster 不会命中） */
+  function hitTextEditTarget(p: { x: number; y: number }): paper.PointText | null {
+    if (!scope) return null
+    const S = scope
+    const tol = 2 / Math.max(0.1, store.zoom)
+    const hit = S.project.hitTest(new S.Point(p.x, p.y), {
+      fill: true,
+      stroke: false,
+      segments: false,
+      tolerance: tol,
+      match: (hr: paper.HitResult) => hr.item instanceof S.PointText,
+    })
+    return hit ? (hit.item as paper.PointText) : null
+  }
+
+  function beginTextTool(p: { x: number; y: number }, time: number) {
+    if (!scope) return
+    const S = scope
+    const dbl = time - textLastClickTime < TEXT_DBL_MS
+    textLastClickTime = time
+
+    // 编辑中点击：结束当前编辑并选中（切 select），不再继续本手势
+    if (textMode === 'edit' && textBox) {
+      endTextEdit(true)
+      return
+    }
+
+    // 双击已选中文字 → 重新编辑
+    if (selected.size === 1) {
+      const only = Array.from(selected)[0]
+      if (only instanceof S.PointText && dbl && only.hitTest(new S.Point(p.x, p.y))) {
+        pushHistory() // 重编辑：快照=改动前
+        textPushed = true
+        beginTextEdit(only, false)
+        return
+      }
+    }
+
+    const hit = hitTextEditTarget(p)
+    if (hit) {
+      // 点击已有文字 → 进入编辑
+      pushHistory()
+      textPushed = true
+      beginTextEdit(hit, false)
+      return
+    }
+
+    // 点空白：新建 PointText 进入编辑（对齐 Scratch：text 工具点空地=建新文字）
+    pushHistory() // 新建：快照=创建前（含空 PointText 移除的回滚）
+    textPushed = true
+    const t = new S.PointText(new S.Point(p.x, p.y))
+    t.content = ''
+    beginTextEdit(t, true)
+    // 初始光标：textarea 由 PaintArtboard 挂载后 focus
+  }
+
+  /** 切工具/切帧/卸载前收口（空删非空留；不强制切 select——尊重用户刚切到的工具） */
+  function forceEndTextEdit() {
+    if (textMode === 'edit') endTextEdit(false)
+    textMode = 'none'
+    textBox = null
+    textPushed = false
+    textDirty = false
+    store.textEdit = null
+  }
+
   // ─── select 工具（变换框手柄：移动/缩放/旋转，对齐位图浮动选区模型）───
 
   /** 共轭缩放线性部分：L = R(θ)·diag(sx,sy)·R(-θ)（对称矩阵） */
@@ -2412,8 +2644,14 @@ export function usePaperScope(
     lastPointer = p
   }
 
-  function beginSelect(p: { x: number; y: number }, shift: boolean) {
+  function beginSelect(p: { x: number; y: number }, shift: boolean, time = 0) {
     if (!scope) return
+
+    // 文字编辑中点画布：先收口编辑（保留内容并选中），不继续本次选择手势
+    if (textMode === 'edit') {
+      endTextEdit(false)
+      return
+    }
 
     // 变换框手柄优先（旋转 > 缩放 > 框内移动），随后才是内容命中与框选
     if (selected.size > 0 && selFrame) {
@@ -2484,6 +2722,20 @@ export function usePaperScope(
     }
     if (hit) {
       const top = topLevelOf(hit.item)
+      // 双击 PointText → 进入文字编辑（对齐 Scratch text-tool SELECT_MODE 双击语义）
+      if (
+        !shift &&
+        top instanceof scope!.PointText &&
+        time - textLastClickTime < TEXT_DBL_MS &&
+        store.activeTool === 'select'
+      ) {
+        textLastClickTime = time
+        pushHistory() // 重编辑：快照=改动前
+        textPushed = true
+        beginTextEdit(top, false)
+        return
+      }
+      textLastClickTime = time
       if (shift) {
         if (selected.has(top)) selected.delete(top)
         else selected.add(top)
@@ -2784,8 +3036,13 @@ export function usePaperScope(
     if (e.button !== 0 || store.mode !== 'vector' || !scope) return
     if (store.eyedropperActive) return // 拾色模式：点击由 PaintArtboard 冒泡消费取色
     const p = clientToArtboard(e)
-    canvasRef.value?.setPointerCapture(e.pointerId)
     const tool = store.activeTool
+
+    // 文字工具不 setPointerCapture：捕获会把后续指针/焦点事件钉在画布上，
+    // textarea 刚挂载就被 blur → 单击后看不到输入光标
+    if (tool !== 'text') {
+      canvasRef.value?.setPointerCapture(e.pointerId)
+    }
 
     if (tool === 'brush') {
       beginBrush(p)
@@ -2799,11 +3056,14 @@ export function usePaperScope(
       eraseLast = p
       eraseAt(p)
     } else if (tool === 'select') {
-      beginSelect(p, e.shiftKey)
+      beginSelect(p, e.shiftKey, e.timeStamp)
     } else if (tool === 'reshape') {
       beginReshape(p, e.shiftKey, e.timeStamp)
+    } else if (tool === 'text') {
+      // 编辑中 textarea 吃指针事件；画布仍可点 = 结束编辑（下方 beginTextTool 处理）
+      beginTextTool(p, e.timeStamp)
     }
-    // text / eyedropper：占位（Stage 3/4）
+    // eyedropper：由 PaintArtboard 冒泡消费
   }
 
   function onPointerMove(e: PointerEvent) {
@@ -2894,7 +3154,8 @@ export function usePaperScope(
       tool === 'line' ||
       tool === 'rect' ||
       tool === 'ellipse' ||
-      tool === 'fill'
+      tool === 'fill' ||
+      tool === 'text'
     ) {
       canvas.style.cursor = 'crosshair'
     } else {
@@ -3063,6 +3324,10 @@ export function usePaperScope(
     () => {
       restoreFillPreview() // 切工具/缩放 → 悬停态失效还原（再次移入会重新预览）
       updateCursor()
+      // 切走文字/选择工具时收口编辑会话（空删非空留）
+      if (textMode === 'edit' && store.activeTool !== 'text' && store.activeTool !== 'select') {
+        forceEndTextEdit()
+      }
     }
   )
 
@@ -3085,6 +3350,7 @@ export function usePaperScope(
   // 进入矢量时同步代理（此时位图引擎 mode watch/commit 已先行收口，DOM 即最终像素）
   watch(() => store.mode, (m) => {
     restoreFillPreview()
+    forceEndTextEdit() // 编辑态不得跨模式残留
     if (m !== 'vector') {
       clearSelection()
       removeBitmapRaster()
@@ -3096,6 +3362,7 @@ export function usePaperScope(
 
   onBeforeUnmount(() => {
     detach()
+    forceEndTextEdit()
     store.vectorSelBox = null
     store.vectorSelectedCount = 0
     store.vectorCanUndo = false
@@ -3139,5 +3406,11 @@ export function usePaperScope(
     exportActiveFrame,
     /** 矢量剪贴板是否有内容（供顶栏粘贴按钮） */
     hasClipboard: () => clipboardItems.length > 0,
+    /** 文字编辑：textarea input 事件（PaintArtboard 转发） */
+    textEditInput: onTextEditInput,
+    /** 文字编辑：结束编辑（Esc/blur/外部调用；空删非空留并切选择） */
+    textEditCommit: () => endTextEdit(),
+    /** 文字编辑是否进行中 */
+    isTextEditing: () => textMode === 'edit',
   }
 }

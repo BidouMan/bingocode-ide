@@ -3,6 +3,12 @@ import { usePaintStore } from '../../../stores/paint'
 import { floodFill } from '../tools/floodFill'
 import { rgbaCss, hexToRgba } from '../utils/artboardExport'
 import { contentBBox } from '../../../utils/bsfPacker'
+import {
+  ensurePaintFont,
+  PAINT_FONT_FAMILY,
+  PAINT_TEXT_SIZE,
+  PAINT_TEXT_LEADING_RATIO,
+} from '../utils/paintFont'
 
 /** 撤销栈上限：位图后备为 1:1 逻辑像素（640×480 ≈ 1.2MB/张），每帧独立计 */
 const HISTORY_LIMIT = 25
@@ -429,6 +435,7 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     const target = store.activeFrameIndex
     if (target === currentIdx && currentIdx >= 0) return
 
+    commitBitmapText() // 切帧前收口编辑中的文字（栅格化进旧帧）
     if (currentIdx >= 0 && currentIdx < pixels.length) flushActiveToPixels()
 
     // 旧帧历史入柜
@@ -1140,6 +1147,101 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     setSelection(null)
   }
 
+  // ─── 文字工具（位图：textarea 输入 → 结束时栅格化进像素，对齐 Scratch bitmap commitText）───
+  /** 编辑会话锚点（画板逻辑坐标，文字框左上）；null=未在编辑 */
+  let textAnchor: { x: number; y: number } | null = null
+
+  /** 用离屏 ctx 测量多行文字内容尺寸（画板逻辑坐标） */
+  function measureBitmapText(
+    value: string,
+    fontSize: number,
+    lineHeight: number
+  ): { w: number; h: number } {
+    const c = ctx2d()
+    const fs = fontSize
+    const lh = fs * lineHeight
+    const lines = value.split('\n')
+    if (!c || !value) {
+      return { w: fs * 0.5, h: lh } // 空：一个光标位
+    }
+    const prevFont = c.font
+    c.font = `500 ${fs}px "${PAINT_FONT_FAMILY}", "PingFang SC", "Microsoft YaHei", sans-serif`
+    let maxW = 0
+    for (const line of lines) {
+      maxW = Math.max(maxW, c.measureText(line || ' ').width)
+    }
+    c.font = prevFont
+    return { w: Math.max(maxW, 1), h: Math.max(lines.length, 1) * lh }
+  }
+
+  /** 刷新位图编辑 overlay 的动态尺寸（每次 input 调用） */
+  function syncBitmapTextEditSize() {
+    if (!store.textEdit) return
+    const size = measureBitmapText(
+      store.textEdit.value,
+      store.textEdit.fontSize,
+      store.textEdit.lineHeight
+    )
+    store.textEdit.width = size.w
+    store.textEdit.height = size.h
+  }
+
+  function beginBitmapTextEdit(p: { x: number; y: number }) {
+    if (textAnchor) commitBitmapText() // 已有编辑会话：先收口上一个
+    ensurePaintFont()
+    textAnchor = p
+    const size = measureBitmapText('', PAINT_TEXT_SIZE, PAINT_TEXT_LEADING_RATIO)
+    store.textEdit = {
+      matrix: null,
+      transformOrigin: '0 0',
+      x: p.x,
+      y: p.y,
+      fontSize: PAINT_TEXT_SIZE,
+      lineHeight: PAINT_TEXT_LEADING_RATIO,
+      color: store.fillColor,
+      value: '',
+      width: size.w,
+      height: size.h,
+    }
+    // 字体加载完成后重测（空态尺寸几乎不变，但保证 measureText 用对字体）
+    ensurePaintFont().then(() => syncBitmapTextEditSize())
+  }
+
+  /** 把编辑中的文字栅格化进当前帧（空文字跳过）；返回是否有实际绘制 */
+  function commitBitmapText(): boolean {
+    if (!textAnchor || !store.textEdit) {
+      textAnchor = null
+      store.textEdit = null
+      return false
+    }
+    const value = store.textEdit.value
+    const anchor = textAnchor
+    const fontSize = store.textEdit.fontSize
+    const lineHeight = store.textEdit.lineHeight
+    const color = store.textEdit.color
+    store.textEdit = null
+    textAnchor = null
+    if (!value.trim()) return false
+
+    const c = ctx2d()
+    if (!c) return false
+    pushHistory()
+    const { sx, sy } = pixelScale()
+    c.setTransform(sx, 0, 0, sy, 0, 0)
+    c.font = `500 ${fontSize}px "${PAINT_FONT_FAMILY}", "PingFang SC", "Microsoft YaHei", sans-serif`
+    c.fillStyle = color
+    c.textBaseline = 'top'
+    c.textAlign = 'left'
+    const lh = fontSize * lineHeight
+    const lines = value.split('\n')
+    for (let i = 0; i < lines.length; i++) {
+      c.fillText(lines[i], anchor.x, anchor.y + i * lh)
+    }
+    applyBackingTransform()
+    markDirty()
+    return true
+  }
+
   // ─── 指针事件路由 ───
 
   function onPointerDown(e: PointerEvent) {
@@ -1158,8 +1260,11 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
       beginShape(point)
     } else if (store.activeTool === 'fill') {
       doFill(point)
+    } else if (store.activeTool === 'text') {
+      beginBitmapTextEdit(point)
+      return // textarea 接管焦点，不 setPointerCapture
     } else {
-      // reshape / text / eyedropper：后续阶段实现
+      // reshape / eyedropper：后续阶段实现
       return
     }
     canvas.setPointerCapture(e.pointerId)
@@ -1222,7 +1327,7 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     if (tool === 'brush' || tool === 'eraser') {
       // 上限防 dataURL 光标在大 zoom 下超浏览器尺寸上限而失效（矢量模式已改自绘圈）
       canvas.style.cursor = makeCircleCursor(Math.min(store.brushSize * store.zoom, 128))
-    } else if (tool === 'line' || tool === 'rect' || tool === 'ellipse' || tool === 'fill') {
+    } else if (tool === 'line' || tool === 'rect' || tool === 'ellipse' || tool === 'fill' || tool === 'text') {
       canvas.style.cursor = 'crosshair'
     } else {
       canvas.style.cursor = 'default'
@@ -1268,6 +1373,10 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     if (oldTool === 'select' && tool !== 'select') {
       commitAndDeselect()
     }
+    // 切走文字工具：栅格化编辑中的文字
+    if (oldTool === 'text' && tool !== 'text') {
+      commitBitmapText()
+    }
   })
 
   // 画板尺寸变化：canvas 属性变更会清空内容并把 ctx 变换重置为单位矩阵。
@@ -1283,6 +1392,7 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
 
   onBeforeUnmount(() => {
     detach()
+    commitBitmapText() // 未收口的文字不丢失（组件卸载前栅格化）
     undoStack = []
     redoStack = []
     histMap.clear()
@@ -1307,5 +1417,17 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     flipSelection,
     commitAndDeselect,
     getCanvas: () => canvasRef.value ?? null,
+    /** 文字编辑：textarea input（PaintArtboard 转发） */
+    textEditInput: (value: string) => {
+      if (store.textEdit) {
+        store.textEdit.value = value
+        syncBitmapTextEditSize() // 内容变化 → 动态贴合边框
+      }
+    },
+    /** 文字编辑：结束（Esc/blur；栅格化进像素） */
+    textEditCommit: () => {
+      commitBitmapText()
+    },
+    isTextEditing: () => textAnchor !== null,
   }
 }
