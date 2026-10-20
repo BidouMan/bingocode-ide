@@ -42,6 +42,12 @@ export const usePaintStore = defineStore('paint', () => {
   const brushSize = ref(12)
   /** 0-100 */
   const opacity = ref(100)
+  /**
+   * 颜色面板编辑手势进行中（SV 方块/色相条/滑条 pointerdown ~ window pointerup）。
+   * 引擎用它区分「一次拖动改色」与「多次独立改色」——撤销只在手势首次压一步、
+   * 缩略图只在手势结束统一刷新。
+   */
+  const colorEditing = ref(false)
 
   const artboardWidth = ref(DEFAULT_ARTBOARD.w)
   const artboardHeight = ref(DEFAULT_ARTBOARD.h)
@@ -177,6 +183,7 @@ export const usePaintStore = defineStore('paint', () => {
     strokeWidth.value = 4
     brushSize.value = 12
     opacity.value = 100
+    colorEditing.value = false
     artboardWidth.value = DEFAULT_ARTBOARD.w
     artboardHeight.value = DEFAULT_ARTBOARD.h
     zoom.value = 1
@@ -215,6 +222,7 @@ export const usePaintStore = defineStore('paint', () => {
     strokeWidth,
     brushSize,
     opacity,
+    colorEditing,
     artboardWidth,
     artboardHeight,
     zoom,

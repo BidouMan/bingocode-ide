@@ -1,8 +1,19 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { usePaintStore } from '../../stores/paint'
 
 const store = usePaintStore()
+
+// ─── 编辑手势跟踪：面板内按下 → 编辑中；window 松手（含捕获元素上的释放）→ 结束。
+// 引擎据此把一次拖动的连续改色合并为一步撤销、缩略图只在结束时刷新 ───
+function onPanelPointerDown() {
+  store.colorEditing = true
+}
+function endColorEdit() {
+  store.colorEditing = false
+}
+onMounted(() => window.addEventListener('pointerup', endColorEdit))
+onBeforeUnmount(() => window.removeEventListener('pointerup', endColorEdit))
 
 // ─── HSV 模型（本地编辑状态，与 store 的 hex 颜色双向同步）───
 const hue = ref(120) // 0-360
@@ -125,7 +136,7 @@ const showStrokeWidth = () => store.activeTool === 'line' || store.activeTool ==
 </script>
 
 <template>
-  <div class="color-panel">
+  <div class="color-panel" @pointerdown="onPanelPointerDown">
     <!-- 当前绘制色（所有工具共用，切换工具不变色） -->
     <div class="panel-label">绘制颜色</div>
     <div class="color-preview-row">

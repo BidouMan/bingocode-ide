@@ -1793,6 +1793,76 @@ export function usePaperScope(
     return false
   }
 
+  // ─── 选中改色（调色板直改图形）───
+  // 有选中矢量对象时，右侧调色（绘制色/不透明度）即时应用到对象——
+  // 有可见填充改填充（图形主体色），仅描边改描边（直线/描边形状），组递归子级；
+  // 无选中时仍只改绘制色供下次绘制。撤销按编辑手势合并（colorEditing：一次拖动一步）。
+
+  /** 递归收集可着色目标（Path/CompoundPath；组下钻、位图代理排除） */
+  function tintTargets(): paper.Item[] {
+    if (!scope) return []
+    const S = scope
+    const out: paper.Item[] = []
+    const walk = (it: paper.Item) => {
+      if (it === bitmapRaster) return
+      if (it instanceof S.CompoundPath) {
+        out.push(it)
+        return
+      }
+      if (it instanceof S.Group) {
+        for (const c of it.children) walk(c)
+        return
+      }
+      if (it instanceof S.Path) out.push(it)
+    }
+    for (const it of selected) walk(it)
+    return out
+  }
+
+  function tintSelection(targets: paper.Item[]) {
+    const color = styleColor()
+    for (const it of targets) {
+      if (hasVisibleFill(it)) it.fillColor = color
+      else if (hasVisibleStroke(it)) it.strokeColor = color
+      else it.fillColor = color // 双无的隐形形状 → 填充使其可见
+    }
+  }
+
+  /** 本次改色手势是否已压撤销栈 / 是否产生可见变更（收口时统一刷缩略图） */
+  let tintPushed = false
+  let tintTouched = false
+
+  watch(
+    () => [store.fillColor, store.opacity],
+    () => {
+      if (store.mode !== 'vector') return
+      const targets = tintTargets()
+      if (targets.length === 0) return
+      if (!tintPushed) {
+        pushHistory() // 手势首次：快照 = 改色前
+        tintPushed = true
+      }
+      tintSelection(targets)
+      if (store.colorEditing) {
+        tintTouched = true
+        store.dirty = true // 拖动中画布由 paper 实时重绘；缩略图收口统一刷
+      } else {
+        tintPushed = false // 非手势单次改色：一步一清
+        markDirty()
+      }
+    }
+  )
+
+  watch(() => store.colorEditing, (editing) => {
+    if (!editing) {
+      tintPushed = false
+      if (tintTouched) {
+        tintTouched = false
+        markDirty()
+      }
+    }
+  })
+
   /** 橡皮手势状态：首次命中才压栈（未命中不产生空撤销步）；拖过整段只记一步、结束统一刷缩略图 */
   let erasePushed = false
   let eraseChanged = false
