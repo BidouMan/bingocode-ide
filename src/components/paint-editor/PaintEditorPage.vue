@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, nextTick, computed } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { ask } from '@tauri-apps/plugin-dialog'
 import { usePaintStore } from '../../stores/paint'
@@ -47,10 +47,6 @@ const projectStore = useProjectStore()
 
 const artboardRef = ref<InstanceType<typeof PaintArtboard>>()
 const loadingFrames = ref(false)
-
-const topbarTitle = computed(() =>
-  props.targetSprite ? `绘制 - ${props.targetSprite.name}` : '角色绘制'
-)
 
 /** 帧图片（全画布 blob）→ 目标尺寸画布（.bgs 异尺寸帧自动归一化，动画不抖动） */
 async function frameBlobToCanvas(blob: Blob, w: number, h: number): Promise<HTMLCanvasElement> {
@@ -180,7 +176,6 @@ async function onSave() {
 <template>
   <div class="paint-page">
     <PaintTopBar
-      :title="topbarTitle"
       :save-title="targetSprite ? '保存回角色' : undefined"
       @close="onClose"
       @save="onSave"

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { usePaintStore, ARTBOARD_MAX } from '../../stores/paint'
 
-import iconClose from '../../assets/icons/关闭_2.svg'
+import iconClose from '../../assets/icons/关闭.svg'
 import iconUndo from '../../assets/icons/undo.svg'
 import iconRedo from '../../assets/icons/redo.svg'
 import iconZoomOut from '../../assets/icons/reduce-one.svg'
@@ -21,8 +21,6 @@ import iconCurve from '../../assets/icons/曲线.svg'
 import iconStraight from '../../assets/icons/折线.svg'
 
 const props = defineProps<{
-  /** 顶栏标题（编辑既有角色时显示「绘制 - 角色名」） */
-  title?: string
   /** 保存按钮提示（编辑模式为「保存回角色」） */
   saveTitle?: string
 }>()
@@ -87,15 +85,7 @@ function commitSize(axis: 'w' | 'h', e: Event) {
 
 <template>
   <div class="paint-topbar">
-    <!-- 左：关闭 + 标题 -->
-    <div class="topbar-left">
-      <button class="icon-btn" v-tooltip="'关闭'" @click="emit('close')">
-        <img :src="iconClose" class="icon-sm" draggable="false" />
-      </button>
-      <span class="topbar-title">{{ props.title || '角色绘制' }}</span>
-    </div>
-
-    <!-- 中：矢量 | 位图 模式切换 -->
+    <!-- 左：矢量 | 位图 模式切换 -->
     <div class="mode-switch">
       <button
         class="mode-btn"
@@ -215,8 +205,8 @@ function commitSize(axis: 'w' | 'h', e: Event) {
 
     <div class="topbar-spacer"></div>
 
-    <!-- 右：撤销/重做、缩放、保存 -->
-    <div class="topbar-right">
+    <!-- 撤销/重做/缩放：绝对钉在距右 200px 处——放大按钮右缘恰好压在属性面板左边框（分割线）上 -->
+    <div class="topbar-right zoom-align">
       <button class="icon-btn" :disabled="!canUndoActive()" v-tooltip="isVector() ? '撤销（矢量）' : '撤销'" @click="emit('undo')">
         <img :src="iconUndo" class="icon-sm" draggable="false" />
       </button>
@@ -235,7 +225,14 @@ function commitSize(axis: 'w' | 'h', e: Event) {
           <img :src="iconZoomIn" class="icon-sm" draggable="false" />
         </button>
       </div>
+    </div>
 
+    <!-- 最右：关闭 + 保存 -->
+    <div class="topbar-actions">
+      <button class="back-btn" v-tooltip="'关闭'" @click="emit('close')">
+        <img :src="iconClose" class="icon-sm icon-close" draggable="false" />
+        <span>关闭</span>
+      </button>
       <button
         class="save-btn"
         :disabled="!store.dirty"
@@ -260,20 +257,10 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   user-select: none;
+  position: relative;
 }
 
-.topbar-left {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.topbar-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-  white-space: nowrap;
-}
+/* 纯白 SVG 图标在暗色主题下直接可见，无需滤镜 */
 
 .icon-btn {
   display: flex;
@@ -305,6 +292,11 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   width: 18px;
   height: 18px;
   pointer-events: none;
+}
+/* 关闭图标单独缩小（须在 .icon-sm 之后，同权重后者生效） */
+.icon-close {
+  width: 13px;
+  height: 13px;
 }
 
 /* 矢量|位图 分段切换 */
@@ -413,6 +405,24 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   gap: 4px;
 }
 
+/* 缩放组钉在距右 200px = 属性面板左边框（分割线）上，放大按钮右缘与之对齐 */
+.zoom-align {
+  position: absolute;
+  right: 200px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* 最右关闭/保存组：钉成与下方颜色面板同宽的列（左缘=面板左边框 200px，右缘=顶栏内边距） */
+.topbar-actions {
+  position: absolute;
+  right: 10px;
+  width: 190px; /* 面板 200px − 顶栏右 padding 10px */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .zoom-group {
   display: flex;
   align-items: center;
@@ -435,24 +445,53 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   background: var(--bg-hover);
 }
 
+/* 关闭：次级按钮（描边幽灵风，占列内剩余宽度） */
+.back-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  flex: 1;
+  min-width: 0;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.back-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+/* 保存：主操作（中深绿底 + 纯白图标/文字；brightness 1.15 = 背景与前景整体提亮 15%） */
 .save-btn {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   height: 30px;
-  padding: 0 14px;
-  margin-left: 6px;
+  flex: 1; /* 与关闭等宽 */
+  min-width: 0;
+  padding: 0 8px;
   font-size: 12px;
   font-weight: 600;
-  color: #16201a;
-  background: var(--accent);
+  color: #ffffff;
+  background: #2b8a48;
   border: none;
   border-radius: 8px;
   cursor: pointer;
+  filter: brightness(1.15);
   transition: background 0.15s, opacity 0.15s;
 }
 .save-btn:hover:not(:disabled) {
-  background: var(--accent-hover);
+  background: #33a056;
 }
 .save-btn:disabled {
   opacity: 0.45;
