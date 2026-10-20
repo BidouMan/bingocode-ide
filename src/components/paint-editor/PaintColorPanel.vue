@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { usePaintStore } from '../../stores/paint'
+import iconPick from '../../assets/icons/吸管.svg'
 
 const store = usePaintStore()
 
@@ -151,6 +152,16 @@ function onWindowPointerDown(e: PointerEvent) {
   if (!t || !t.closest('.stroke-color-wrap')) strokePop.value = false
 }
 
+// ─── 拾色（吸管）：开启后点击画板取该点像素色写入目标通道（引擎在画板点击时消费）───
+function startPick(target: 'fill' | 'stroke') {
+  if (store.eyedropperActive && store.eyedropperTarget === target) {
+    store.eyedropperActive = false // 再点同按钮=取消
+  } else {
+    store.eyedropperTarget = target
+    store.eyedropperActive = true
+  }
+}
+
 const sSvRef = ref<HTMLDivElement>()
 const sHueRef = ref<HTMLDivElement>()
 
@@ -254,7 +265,16 @@ const showLineWidth = () => store.activeTool === 'line'
   <div class="color-panel" @pointerdown="onPanelPointerDown">
     <!-- 当前绘制色（所有工具共用，切换工具不变色） -->
     <div class="panel-label">绘制颜色</div>
+    <!-- 当前绘制色：吸管 + 色块（统一 24px，与描边行按钮成列对齐）+ hex -->
     <div class="color-preview-row">
+      <button
+        class="pick-btn"
+        :class="{ 'pick-btn-active': store.eyedropperActive && store.eyedropperTarget === 'fill' }"
+        title="从画板拾取颜色"
+        @click="startPick('fill')"
+      >
+        <img :src="iconPick" class="pick-icon" draggable="false" />
+      </button>
       <div class="color-swatch" :style="{ background: store.fillColor }"></div>
       <span class="color-hex">{{ store.fillColor.toUpperCase() }}</span>
     </div>
@@ -339,39 +359,49 @@ const showLineWidth = () => store.activeTool === 'line'
         />
         描边
       </label>
-      <!-- 勾选后展开：描边颜色 + 描边粗细 -->
+      <!-- 勾选后展开：吸管 + 描边色块（与主色行按钮成列对齐）+ 描边粗细 -->
       <template v-if="strokeChecked()">
-        <div v-if="store.mode === 'vector'" class="stroke-color-wrap">
+        <div v-if="store.mode === 'vector'" class="stroke-color-row">
           <button
-            class="stroke-color-btn"
-            :style="{ background: store.strokeColor }"
-            title="描边颜色"
-            @click.stop="strokePop = !strokePop"
-          ></button>
-          <div v-if="strokePop" class="stroke-pop">
-            <div
-              ref="sSvRef"
-              class="sv-square"
-              :style="{ background: sSvBackground() }"
-              @pointerdown="onPopSvPointerDown"
-              @pointermove="onPopSvPointerMove"
-            >
-              <div class="sv-bright"></div>
-              <div class="sv-sat"></div>
+            class="pick-btn"
+            :class="{ 'pick-btn-active': store.eyedropperActive && store.eyedropperTarget === 'stroke' }"
+            title="从画板拾取描边颜色"
+            @click="startPick('stroke')"
+          >
+            <img :src="iconPick" class="pick-icon" draggable="false" />
+          </button>
+          <div class="stroke-color-wrap">
+            <button
+              class="stroke-color-btn"
+              :style="{ background: store.strokeColor }"
+              title="描边颜色"
+              @click.stop="strokePop = !strokePop"
+            ></button>
+            <div v-if="strokePop" class="stroke-pop">
               <div
-                class="sv-marker"
-                :style="{ left: `${sSat * 100}%`, top: `${(1 - sVal) * 100}%` }"
-              ></div>
+                ref="sSvRef"
+                class="sv-square"
+                :style="{ background: sSvBackground() }"
+                @pointerdown="onPopSvPointerDown"
+                @pointermove="onPopSvPointerMove"
+              >
+                <div class="sv-bright"></div>
+                <div class="sv-sat"></div>
+                <div
+                  class="sv-marker"
+                  :style="{ left: `${sSat * 100}%`, top: `${(1 - sVal) * 100}%` }"
+                ></div>
+              </div>
+              <div
+                ref="sHueRef"
+                class="hue-strip"
+                @pointerdown="onPopHuePointerDown"
+                @pointermove="onPopHuePointerMove"
+              >
+                <div class="hue-marker" :style="{ left: `${(sHue / 360) * 100}%` }"></div>
+              </div>
+              <div class="stroke-pop-hex">{{ store.strokeColor.toUpperCase() }}</div>
             </div>
-            <div
-              ref="sHueRef"
-              class="hue-strip"
-              @pointerdown="onPopHuePointerDown"
-              @pointermove="onPopHuePointerMove"
-            >
-              <div class="hue-marker" :style="{ left: `${(sHue / 360) * 100}%` }"></div>
-            </div>
-            <div class="stroke-pop-hex">{{ store.strokeColor.toUpperCase() }}</div>
           </div>
         </div>
         <!-- 描边粗细（0=无描边/移除描边；选中本体描边对象时下限 1，防删本体致线条消失） -->
@@ -443,8 +473,16 @@ const showLineWidth = () => store.activeTool === 'line'
   opacity: 0.6;
 }
 
+.stroke-color-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* flex 容器消除 inline 基线间隙——否则与相邻按钮出现一高一低 */
 .stroke-color-wrap {
   position: relative;
+  display: flex;
 }
 
 .stroke-color-btn {
@@ -482,16 +520,16 @@ const showLineWidth = () => store.activeTool === 'line'
   text-align: center;
 }
 
-/* 当前颜色 */
+/* 当前颜色（色块/按钮统一 24px） */
 .color-preview-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .color-swatch {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border-radius: 6px;
   border: 1px solid var(--border-light);
   flex-shrink: 0;
@@ -501,6 +539,36 @@ const showLineWidth = () => store.activeTool === 'line'
   font-size: 12px;
   font-family: var(--font-mono, monospace);
   color: var(--text-secondary);
+  flex: 1;
+}
+
+/* 拾色按钮（与色块同尺寸 24px） */
+.pick-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s;
+}
+.pick-btn:hover {
+  border-color: var(--text-muted);
+}
+.pick-btn-active {
+  background: var(--bg-active);
+  border-color: var(--accent);
+}
+
+.pick-icon {
+  width: 15px;
+  height: 15px;
+  pointer-events: none;
 }
 
 /* 饱和度-明度方块 */

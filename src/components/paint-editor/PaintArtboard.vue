@@ -194,9 +194,61 @@ function focusStage() {
   stageRef.value?.focus()
 }
 
+// ─── 拾色（吸管）：合成位图层+矢量层读点击点像素色，写入目标通道后退出 ───
+function onStagePointerDownForPick(e: PointerEvent) {
+  focusStage()
+  if (!store.eyedropperActive) return
+  e.preventDefault()
+  e.stopPropagation()
+  const bc = bitmapCanvas.value
+  if (!bc) {
+    store.eyedropperActive = false
+    return
+  }
+  const rect = bc.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) {
+    store.eyedropperActive = false
+    return
+  }
+  const w = store.artboardWidth
+  const h = store.artboardHeight
+  const x = Math.floor(((e.clientX - rect.left) / rect.width) * w)
+  const y = Math.floor(((e.clientY - rect.top) / rect.height) * h)
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  const ctx = c.getContext('2d', { willReadFrequently: true })
+  if (!ctx) {
+    store.eyedropperActive = false
+    return
+  }
+  // 与显示/保存同序：位图层在下、矢量层叠加
+  ctx.drawImage(bc, 0, 0, w, h)
+  const vec = vectorEngine.getFrameRaster(store.activeFrameIndex)
+  if (vec) ctx.drawImage(vec, 0, 0, w, h)
+  const d = ctx.getImageData(Math.min(Math.max(x, 0), w - 1), Math.min(Math.max(y, 0), h - 1), 1, 1).data
+  store.eyedropperActive = false
+  if (d[3] >= 16) {
+    const hex =
+      '#' +
+      [d[0], d[1], d[2]]
+        .map((v) => v.toString(16).padStart(2, '0'))
+        .join('')
+    if (store.eyedropperTarget === 'stroke') store.strokeColor = hex
+    else store.fillColor = hex
+  }
+}
+
 /** 快捷键：按模式分发——矢量=对象操作；位图=选区操作 */
 function onStageKeydown(e: KeyboardEvent) {
   const mod = e.ctrlKey || e.metaKey
+
+  // 拾色模式：Esc 取消（优先于一切快捷键）
+  if (store.eyedropperActive) {
+    store.eyedropperActive = false
+    e.preventDefault()
+    return
+  }
 
   if (store.mode === 'vector') {
     if (e.key === 'Escape') {
@@ -416,13 +468,14 @@ defineExpose({
   <div
     ref="stageRef"
     class="paint-stage"
+    :class="{ picking: store.eyedropperActive }"
     tabindex="0"
     @wheel.prevent="onStageWheel"
     @mousedown="onStageMouseDown"
     @mousemove="onStageMouseMove"
     @mouseup="isPanning = false"
     @dblclick="onStageDblClick"
-    @pointerdown="focusStage"
+    @pointerdown="onStagePointerDownForPick"
     @keydown="onStageKeydown"
   >
     <div class="artboard" :style="artboardStyle">
@@ -672,6 +725,12 @@ defineExpose({
   background: var(--bg-root);
   overflow: hidden;
   position: relative;
+}
+
+/* 拾色模式：全画板十字光标（覆盖引擎按工具设置的 cursor） */
+.paint-stage.picking,
+.paint-stage.picking canvas {
+  cursor: crosshair !important;
 }
 
 .artboard {

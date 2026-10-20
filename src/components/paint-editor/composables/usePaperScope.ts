@@ -2782,6 +2782,7 @@ export function usePaperScope(
 
   function onPointerDown(e: PointerEvent) {
     if (e.button !== 0 || store.mode !== 'vector' || !scope) return
+    if (store.eyedropperActive) return // 拾色模式：点击由 PaintArtboard 冒泡消费取色
     const p = clientToArtboard(e)
     canvasRef.value?.setPointerCapture(e.pointerId)
     const tool = store.activeTool

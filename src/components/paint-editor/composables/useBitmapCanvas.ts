@@ -1144,6 +1144,7 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
 
   function onPointerDown(e: PointerEvent) {
     if (e.button !== 0 || store.mode !== 'bitmap') return
+    if (store.eyedropperActive) return // 拾色模式：点击由 PaintArtboard 冒泡消费取色
     const canvas = canvasRef.value
     if (!canvas) return
     e.preventDefault()

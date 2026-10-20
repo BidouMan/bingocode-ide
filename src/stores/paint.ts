@@ -51,6 +51,12 @@ export const usePaintStore = defineStore('paint', () => {
    * Vue watch 不触发导致勾选无效——每次勾选动作递增 tick 保证信号必达。
    */
   const strokeToggleTick = ref(0)
+  /**
+   * 拾色模式：面板吸管按钮开启后，下一次画板点击取该点像素色写入目标通道
+   * （fill=绘制色 / stroke=描边色），随即退出。Esc 或再点按钮取消。
+   */
+  const eyedropperActive = ref(false)
+  const eyedropperTarget = ref<'fill' | 'stroke'>('fill')
   const fillEnabled = ref(true)
   const strokeEnabled = ref(false)
   /** 形状/直线工具的描边线宽（默认 0=无描边；画线时引擎保底 1 保证可见） */
@@ -206,6 +212,8 @@ export const usePaintStore = defineStore('paint', () => {
     selectionHasBodyStroke.value = false
     selectionBodyOnly.value = false
     strokeToggleTick.value = 0
+    eyedropperActive.value = false
+    eyedropperTarget.value = 'fill'
     strokeWidth.value = 0
     lineWidth.value = 8
     brushSize.value = 12
@@ -248,6 +256,8 @@ export const usePaintStore = defineStore('paint', () => {
     selectionHasBodyStroke,
     selectionBodyOnly,
     strokeToggleTick,
+    eyedropperActive,
+    eyedropperTarget,
     fillEnabled,
     strokeEnabled,
     strokeWidth,
