@@ -66,6 +66,102 @@ function regenThumb(index = store.activeFrameIndex) {
   meta.thumb = tc.toDataURL('image/png')
 }
 
+// ─── 拾色放大镜（Scratch 同款）：激活后圆形镜片跟随光标，最近邻放大光标下像素，中心准心 ───
+const LENS_SIZE = 92 // 镜片直径（屏幕 px，恒定不随画板缩放）
+const LENS_ZOOM = 10 // 放大倍率（镜内 1 个画板逻辑像素 = 10 镜内 px）
+const pickLensRef = ref<HTMLCanvasElement>()
+/** 镜中心相对 stage 的屏幕坐标；null=隐藏（未激活/光标离开舞台） */
+const pickLensPos = ref<{ x: number; y: number } | null>(null)
+/** 合成缓存（激活时构建一次：拾色期间内容不变，避免 pointermove 高频重渲染矢量层） */
+let pickComposite: HTMLCanvasElement | null = null
+
+/** 位图层⊕矢量层合成一张离屏图（与显示/保存同序） */
+function buildPickComposite(): HTMLCanvasElement | null {
+  const bc = bitmapCanvas.value
+  if (!bc) return null
+  const w = store.artboardWidth
+  const h = store.artboardHeight
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  const ctx = c.getContext('2d', { willReadFrequently: true })
+  if (!ctx) return null
+  ctx.drawImage(bc, 0, 0, w, h)
+  const vec = vectorEngine.getFrameRaster(store.activeFrameIndex)
+  if (vec) ctx.drawImage(vec, 0, 0, w, h)
+  return c
+}
+
+/** 鼠标 client 坐标 → 画板逻辑坐标 */
+function clientToArtboard(clientX: number, clientY: number): { x: number; y: number } | null {
+  const bc = bitmapCanvas.value
+  if (!bc) return null
+  const rect = bc.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return null
+  const w = store.artboardWidth
+  const h = store.artboardHeight
+  return {
+    x: ((clientX - rect.left) / rect.width) * w,
+    y: ((clientY - rect.top) / rect.height) * h,
+  }
+}
+
+/** 把镜片画到 canvas（位置已就绪；lens 由模板 v-if 挂载） */
+function paintPickLens(lens: HTMLCanvasElement, p: { x: number; y: number }) {
+  if (!pickComposite) return
+  // dpr 适配：物理像素绘制，CSS 尺寸恒定
+  const dpr = window.devicePixelRatio || 1
+  const px = Math.round(LENS_SIZE * dpr)
+  if (lens.width !== px) {
+    lens.width = px
+    lens.height = px
+  }
+  const ctx = lens.getContext('2d')
+  if (!ctx) return
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.imageSmoothingEnabled = false
+  ctx.clearRect(0, 0, LENS_SIZE, LENS_SIZE)
+  const src = LENS_SIZE / LENS_ZOOM
+  ctx.drawImage(pickComposite, p.x - src / 2, p.y - src / 2, src, src, 0, 0, LENS_SIZE, LENS_SIZE)
+}
+
+/** 重绘镜片：先写位置（v-if 挂载 canvas），首次 move 时 canvas 未挂载则 nextTick 补画 */
+function drawPickLens(clientX: number, clientY: number) {
+  const stage = stageRef.value
+  if (!stage || !pickComposite) return
+  const p = clientToArtboard(clientX, clientY)
+  if (!p) return
+  const sr = stage.getBoundingClientRect()
+  // 镜中心 = 光标位置：准心指哪取哪（中心采样点即光标像素）
+  pickLensPos.value = {
+    x: clientX - sr.left,
+    y: clientY - sr.top,
+  }
+  const lens = pickLensRef.value
+  if (!lens) {
+    // 首次 move：canvas 因 v-if 尚未挂载，DOM 更新后补画一帧
+    nextTick(() => {
+      const l = pickLensRef.value
+      if (l && store.eyedropperActive && pickLensPos.value) paintPickLens(l, p)
+    })
+    return
+  }
+  paintPickLens(lens, p)
+}
+
+function onStagePointerLeavePick() {
+  if (store.eyedropperActive) pickLensPos.value = null
+}
+
+// 激活/退出拾色：构建/释放合成缓存（首次 move 前镜不显示）
+watch(
+  () => store.eyedropperActive,
+  (v) => {
+    pickComposite = v ? buildPickComposite() : null
+    pickLensPos.value = null
+  }
+)
+
 // ─── 缩放/平移（与 SpriteEditorView 同款交互：滚轮以光标为锚缩放、中键拖拽平移、双击复位）───
 const isPanning = ref(false)
 let panStartX = 0
@@ -103,6 +199,10 @@ function onStageMouseDown(e: MouseEvent) {
 }
 
 function onStageMouseMove(e: MouseEvent) {
+  if (store.eyedropperActive) {
+    drawPickLens(e.clientX, e.clientY)
+    return
+  }
   if (!isPanning.value) return
   store.panX = panBaseX + (e.clientX - panStartX)
   store.panY = panBaseY + (e.clientY - panStartY)
@@ -197,7 +297,7 @@ function focusStage() {
   stageRef.value?.focus()
 }
 
-// ─── 拾色（吸管）：合成位图层+矢量层读点击点像素色，写入目标通道后退出 ───
+// ─── 拾色（吸管）：从合成缓存读点击点像素色，写入目标通道后退出 ───
 function onStagePointerDownForPick(e: PointerEvent) {
   // 文字编辑中不抢焦点（stage.focus 会 blur 掉 textarea → 光标消失）
   if (!store.textEdit) focusStage()
@@ -205,33 +305,28 @@ function onStagePointerDownForPick(e: PointerEvent) {
   e.preventDefault()
   e.stopPropagation()
   const bc = bitmapCanvas.value
-  if (!bc) {
-    store.eyedropperActive = false
+  const comp = pickComposite ?? buildPickComposite()
+  if (!bc || !comp) {
+    store.endEyedropper()
     return
   }
   const rect = bc.getBoundingClientRect()
   if (rect.width <= 0 || rect.height <= 0) {
-    store.eyedropperActive = false
+    store.endEyedropper()
     return
   }
   const w = store.artboardWidth
   const h = store.artboardHeight
   const x = Math.floor(((e.clientX - rect.left) / rect.width) * w)
   const y = Math.floor(((e.clientY - rect.top) / rect.height) * h)
-  const c = document.createElement('canvas')
-  c.width = w
-  c.height = h
-  const ctx = c.getContext('2d', { willReadFrequently: true })
+  const ctx = comp.getContext('2d', { willReadFrequently: true })
   if (!ctx) {
-    store.eyedropperActive = false
+    store.endEyedropper()
     return
   }
-  // 与显示/保存同序：位图层在下、矢量层叠加
-  ctx.drawImage(bc, 0, 0, w, h)
-  const vec = vectorEngine.getFrameRaster(store.activeFrameIndex)
-  if (vec) ctx.drawImage(vec, 0, 0, w, h)
   const d = ctx.getImageData(Math.min(Math.max(x, 0), w - 1), Math.min(Math.max(y, 0), h - 1), 1, 1).data
-  store.eyedropperActive = false
+  // 一次性取色：结束会话并回退到取色前的工具（面板吸管则不动工具）
+  store.endEyedropper()
   if (d[3] >= 16) {
     const hex =
       '#' +
@@ -257,9 +352,9 @@ function onStageKeydown(e: KeyboardEvent) {
     return
   }
 
-  // 拾色模式：Esc 取消（优先于一切快捷键）
+  // 拾色模式：Esc 取消（优先于一切快捷键）；回退到取色前的工具
   if (store.eyedropperActive) {
-    store.eyedropperActive = false
+    store.endEyedropper()
     e.preventDefault()
     return
   }
@@ -637,6 +732,7 @@ defineExpose({
     @mouseup="isPanning = false"
     @dblclick="onStageDblClick"
     @pointerdown="onStagePointerDownForPick"
+    @pointerleave="onStagePointerLeavePick"
     @keydown="onStageKeydown"
   >
     <div class="artboard" :style="artboardStyle">
@@ -887,6 +983,18 @@ defineExpose({
         ></textarea>
       </div>
     </div>
+    <!-- 拾色放大镜（Scratch 同款）：屏幕坐标跟随光标，中心准心对准取样像素；
+         canvas 最近邻放大合成图，中心十字线指示精确取色点 -->
+    <div
+      v-if="store.eyedropperActive && pickLensPos"
+      class="pick-lens"
+      :style="{ left: `${pickLensPos.x}px`, top: `${pickLensPos.y}px` }"
+    >
+      <canvas ref="pickLensRef" class="pick-lens-canvas" :width="LENS_SIZE" :height="LENS_SIZE"></canvas>
+      <!-- 中心准心：横竖线 + 中心点（指示镜中心=取样像素） -->
+      <div class="pick-lens-cross-h"></div>
+      <div class="pick-lens-cross-v"></div>
+    </div>
   </div>
 </template>
 
@@ -908,10 +1016,54 @@ defineExpose({
   outline: none;
 }
 
-/* 拾色模式：全画板十字光标（覆盖引擎按工具设置的 cursor） */
+/* 拾色模式：放大镜准心接管取样指示，隐藏系统光标（对齐 Scratch） */
 .paint-stage.picking,
 .paint-stage.picking canvas {
-  cursor: crosshair !important;
+  cursor: none !important;
+}
+
+/* ─── 拾色放大镜 ─── */
+.pick-lens {
+  position: absolute;
+  z-index: 20;
+  width: 92px;
+  height: 92px;
+  /* 以镜中心定位（left/top = 中心点） */
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.pick-lens-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  /* 双环：深色打底 + 白色内环（任何底色上可见） */
+  box-shadow:
+    0 0 0 2px rgba(18, 20, 30, 0.85),
+    0 0 0 3.5px rgba(255, 255, 255, 0.95),
+    0 4px 16px rgba(0, 0, 0, 0.35);
+  background: repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 50% / 12px 12px;
+}
+/* 中心准心十字线（贯穿镜片） */
+.pick-lens-cross-h,
+.pick-lens-cross-v {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.55);
+}
+.pick-lens-cross-h {
+  width: 18px;
+  height: 1px;
+  transform: translate(-50%, -50%);
+}
+.pick-lens-cross-v {
+  width: 1px;
+  height: 18px;
+  transform: translate(-50%, -50%);
 }
 
 .artboard {

@@ -1,5 +1,24 @@
 import type { Directive, DirectiveBinding } from 'vue'
 
+type TooltipPosition = 'top' | 'bottom' | 'left' | 'right'
+
+/** v-tooltip 支持纯字符串（默认下方）或 { text, position } 对象 */
+interface TooltipValue {
+  text: string
+  position?: TooltipPosition
+}
+
+function parseTooltipValue(value: unknown): { text: string; position: TooltipPosition } {
+  if (typeof value === 'string' || value == null) {
+    return { text: value == null ? '' : String(value), position: 'bottom' }
+  }
+  if (typeof value === 'object' && 'text' in (value as object)) {
+    const v = value as TooltipValue
+    return { text: v.text ?? '', position: v.position ?? 'bottom' }
+  }
+  return { text: String(value), position: 'bottom' }
+}
+
 interface TooltipElement extends HTMLElement {
   _tooltip?: {
     element: HTMLDivElement
@@ -13,6 +32,7 @@ interface TooltipElement extends HTMLElement {
     onBlur: () => void
   }
   _tooltipCurrentText?: string
+  _tooltipPosition?: TooltipPosition
 }
 
 function createTooltipElement(text: string): HTMLDivElement {
@@ -38,27 +58,49 @@ function createTooltipElement(text: string): HTMLDivElement {
   return el
 }
 
-function positionTooltip(element: HTMLElement, tooltip: HTMLDivElement): void {
+function positionTooltip(
+  element: HTMLElement,
+  tooltip: HTMLDivElement,
+  position: TooltipPosition = 'bottom'
+): void {
   const rect = element.getBoundingClientRect()
   const tooltipRect = tooltip.getBoundingClientRect()
-  
-  let left = rect.left + (rect.width - tooltipRect.width) / 2
-  let top = rect.bottom + 8
-  
+
+  let left: number
+  let top: number
+  switch (position) {
+    case 'right':
+      left = rect.right + 4
+      top = rect.top + (rect.height - tooltipRect.height) / 2
+      break
+    case 'left':
+      left = rect.left - tooltipRect.width - 8
+      top = rect.top + (rect.height - tooltipRect.height) / 2
+      break
+    case 'top':
+      left = rect.left + (rect.width - tooltipRect.width) / 2
+      top = rect.top - tooltipRect.height - 8
+      break
+    default: // bottom
+      left = rect.left + (rect.width - tooltipRect.width) / 2
+      top = rect.bottom + 8
+  }
+
   // Keep within viewport
   if (left < 8) left = 8
   if (left + tooltipRect.width > window.innerWidth - 8) {
     left = window.innerWidth - tooltipRect.width - 8
   }
+  if (top < 8) top = 8
   if (top + tooltipRect.height > window.innerHeight - 8) {
-    top = rect.top - tooltipRect.height - 8
+    top = window.innerHeight - tooltipRect.height - 8
   }
-  
+
   tooltip.style.left = `${left}px`
   tooltip.style.top = `${top}px`
 }
 
-function showTooltip(el: TooltipElement, text: string): void {
+function showTooltip(el: TooltipElement, text: string, position: TooltipPosition): void {
   if (!text) return
   
   // Clear any pending hide
@@ -85,7 +127,7 @@ function showTooltip(el: TooltipElement, text: string): void {
   
   // Position and show after delay
   tooltip.showTimeout = setTimeout(() => {
-    positionTooltip(el, el._tooltip!.element)
+    positionTooltip(el, el._tooltip!.element, position)
     el._tooltip!.element.style.opacity = '1'
   }, 500)
 }
@@ -112,11 +154,15 @@ function hideTooltip(el: TooltipElement): void {
 
 export const vTooltip: Directive = {
   mounted(el: TooltipElement, binding: DirectiveBinding) {
-    el._tooltipCurrentText = binding.value
+    const parsed = parseTooltipValue(binding.value)
+    el._tooltipCurrentText = parsed.text
+    el._tooltipPosition = parsed.position
 
-    const onMouseEnter = () => showTooltip(el, el._tooltipCurrentText!)
+    const onMouseEnter = () =>
+      showTooltip(el, el._tooltipCurrentText!, el._tooltipPosition ?? 'bottom')
     const onMouseLeave = () => hideTooltip(el)
-    const onFocus = () => showTooltip(el, el._tooltipCurrentText!)
+    const onFocus = () =>
+      showTooltip(el, el._tooltipCurrentText!, el._tooltipPosition ?? 'bottom')
     const onBlur = () => hideTooltip(el)
 
     el.addEventListener('mouseenter', onMouseEnter)
@@ -128,9 +174,12 @@ export const vTooltip: Directive = {
   },
 
   updated(el: TooltipElement, binding: DirectiveBinding) {
-    el._tooltipCurrentText = binding.value
-    if (el._tooltip && binding.value !== binding.oldValue) {
-      el._tooltip.element.textContent = binding.value || ''
+    const parsed = parseTooltipValue(binding.value)
+    const changed = parsed.text !== el._tooltipCurrentText
+    el._tooltipCurrentText = parsed.text
+    el._tooltipPosition = parsed.position
+    if (el._tooltip && changed) {
+      el._tooltip.element.textContent = parsed.text || ''
     }
   },
 

@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { usePaintStore, type PaintTool } from '../../stores/paint'
 
 import iconSelect from '../../assets/icons/选择箭头.svg'
+import iconSelectBox from '../../assets/icons/选取工具.svg'
 import iconReshape from '../../assets/icons/移动锚点.svg'
 import iconBrush from '../../assets/icons/icon--paint.svg'
 import iconEraser from '../../assets/icons/清空.svg'
@@ -42,20 +43,29 @@ const LABELS: Record<PaintTool, string> = {
 
 // 工具集随模式切换（对齐 Scratch 官方两套工具集，仅参考 UX 规格）：
 // 矢量 = 选择/塑形/画笔/橡皮/填充/文字/直线/矩形/椭圆（reshape 仅矢量）
-// 位图 = 画笔/直线/矩形/椭圆/文字/填充/橡皮/选择（无 reshape，Brush 打头）
+// 位图 = 选择(框选)/画笔/橡皮/填充/文字/直线/矩形/椭圆/取色（无 reshape）
 const VECTOR_TOOLS: PaintTool[] = [
   'select', 'reshape', 'brush', 'eraser', 'fill', 'text', 'line', 'rect', 'ellipse', 'eyedropper',
 ]
 const BITMAP_TOOLS: PaintTool[] = [
-  'brush', 'line', 'rect', 'ellipse', 'text', 'fill', 'eraser', 'select', 'eyedropper',
+  'select', 'brush', 'eraser', 'fill', 'text', 'line', 'rect', 'ellipse', 'eyedropper',
 ]
 
+// 侧边工具 tips 固定显示在按钮右侧（避开画布/面板遮挡）
+const tipRight = (text: string) => ({ text, position: 'right' as const })
+
 const store = usePaintStore()
+
+// 位图「选择」是框选（marquee），与矢量点选语义不同 → 专用图标
+function toolIcon(key: PaintTool): string {
+  if (key === 'select' && store.mode === 'bitmap') return iconSelectBox
+  return ICONS[key]
+}
 
 const tools = computed(() =>
   (store.mode === 'vector' ? VECTOR_TOOLS : BITMAP_TOOLS).map((key) => ({
     key,
-    icon: ICONS[key],
+    icon: toolIcon(key),
     label: LABELS[key],
   }))
 )
@@ -72,7 +82,7 @@ const emit = defineEmits<{
       :key="tool.key"
       class="tool-btn"
       :class="{ 'tool-btn-active': store.activeTool === tool.key }"
-      v-tooltip="tool.label"
+      v-tooltip="tipRight(tool.label)"
       @click="store.setTool(tool.key)"
     >
       <img :src="tool.icon" class="tool-icon" draggable="false" />
@@ -80,7 +90,7 @@ const emit = defineEmits<{
 
     <div class="tool-divider"></div>
 
-    <button class="tool-btn" v-tooltip="'清空画板'" @click="emit('clear')">
+    <button class="tool-btn" v-tooltip="tipRight('清空画板')" @click="emit('clear')">
       <img :src="iconClear" class="tool-icon" draggable="false" />
     </button>
   </div>

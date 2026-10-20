@@ -188,19 +188,22 @@ function commitSize(axis: 'w' | 'h', e: Event) {
       <button class="icon-btn" :disabled="!canCopy()" v-tooltip="isVector() ? '删除对象 (Delete)' : '删除选区 (Delete)'" @click="emit('deleteSel')">
         <img :src="iconDeleteSel" class="icon-sm" draggable="false" />
       </button>
-      <div class="op-divider"></div>
-      <button class="icon-btn" :disabled="!isVector() || store.vectorSelectedCount < 2" v-tooltip="'组合选中对象（矢量模式）'" @click="emit('group')">
-        <img :src="iconGroup" class="icon-sm" draggable="false" />
-      </button>
-      <button class="icon-btn" :disabled="!isVector() || !store.vectorCanUngroup" v-tooltip="'取消组合（矢量模式）'" @click="emit('ungroup')">
-        <img :src="iconUngroup" class="icon-sm" draggable="false" />
-      </button>
-      <button class="icon-btn" :disabled="!isVector() || store.vectorSelectedCount < 1" v-tooltip="'上移一层（矢量模式）'" @click="emit('layerUp')">
-        <img :src="iconLayerUp" class="icon-sm" draggable="false" />
-      </button>
-      <button class="icon-btn" :disabled="!isVector() || store.vectorSelectedCount < 1" v-tooltip="'下移一层（矢量模式）'" @click="emit('layerDown')">
-        <img :src="iconLayerDown" class="icon-sm" draggable="false" />
-      </button>
+      <!-- 矢量专属：组合/解组/图层（位图无对象层级，整组隐藏） -->
+      <template v-if="isVector()">
+        <div class="op-divider"></div>
+        <button class="icon-btn" :disabled="store.vectorSelectedCount < 2" v-tooltip="'组合选中对象'" @click="emit('group')">
+          <img :src="iconGroup" class="icon-sm" draggable="false" />
+        </button>
+        <button class="icon-btn" :disabled="!store.vectorCanUngroup" v-tooltip="'取消组合'" @click="emit('ungroup')">
+          <img :src="iconUngroup" class="icon-sm" draggable="false" />
+        </button>
+        <button class="icon-btn" :disabled="store.vectorSelectedCount < 1" v-tooltip="'上移一层'" @click="emit('layerUp')">
+          <img :src="iconLayerUp" class="icon-sm" draggable="false" />
+        </button>
+        <button class="icon-btn" :disabled="store.vectorSelectedCount < 1" v-tooltip="'下移一层'" @click="emit('layerDown')">
+          <img :src="iconLayerDown" class="icon-sm" draggable="false" />
+        </button>
+      </template>
       <div class="op-divider"></div>
       <button class="icon-btn" v-tooltip="'水平翻转（无选区时翻转整层/整帧）'" @click="emit('flipH')">
         <img :src="iconFlipH" class="icon-sm" draggable="false" />

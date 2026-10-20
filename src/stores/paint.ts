@@ -203,8 +203,30 @@ export const usePaintStore = defineStore('paint', () => {
     }
   }
 
+  /** 取色前的工具（取色结束回退；null=非工具栏触发的取色会话） */
+  const toolBeforePick = ref<PaintTool | null>(null)
+
   function setTool(tool: PaintTool) {
+    // 取色工具：进入拾色会话（画板放大镜+准心），记录来源工具供结束后回退
+    if (tool === 'eyedropper') {
+      if (activeTool.value !== 'eyedropper') toolBeforePick.value = activeTool.value
+      eyedropperTarget.value = 'fill'
+      eyedropperActive.value = true
+    } else if (activeTool.value === 'eyedropper') {
+      // 切到其它工具 = 手动取消取色
+      toolBeforePick.value = null
+      eyedropperActive.value = false
+    }
     activeTool.value = tool
+  }
+
+  /** 取色完成/取消：结束会话；工具栏取色回退到取色前的工具（面板吸管不动工具） */
+  function endEyedropper() {
+    eyedropperActive.value = false
+    if (activeTool.value === 'eyedropper') {
+      activeTool.value = toolBeforePick.value ?? 'select'
+    }
+    toolBeforePick.value = null
   }
 
   function setMode(m: PaintMode) {
@@ -241,6 +263,7 @@ export const usePaintStore = defineStore('paint', () => {
     strokeToggleTick.value = 0
     eyedropperActive.value = false
     eyedropperTarget.value = 'fill'
+    toolBeforePick.value = null
     strokeWidth.value = 0
     lineWidth.value = 8
     brushSize.value = 12
@@ -326,6 +349,7 @@ export const usePaintStore = defineStore('paint', () => {
     selectFrame,
     makeFrameId,
     setTool,
+    endEyedropper,
     setMode,
     setZoom,
     resetView,

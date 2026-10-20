@@ -155,7 +155,7 @@ function onWindowPointerDown(e: PointerEvent) {
 // ─── 拾色（吸管）：开启后点击画板取该点像素色写入目标通道（引擎在画板点击时消费）───
 function startPick(target: 'fill' | 'stroke') {
   if (store.eyedropperActive && store.eyedropperTarget === target) {
-    store.eyedropperActive = false // 再点同按钮=取消
+    store.endEyedropper() // 再点同按钮=取消（工具栏取色则一并回退工具）
   } else {
     store.eyedropperTarget = target
     store.eyedropperActive = true
