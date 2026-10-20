@@ -865,8 +865,15 @@ export function usePaperScope(
         shapePreview = null
         popHistory()
       } else {
+        const created = shapePreview
         shapePreview = null
         markDirty()
+        // 仅矩形/圆形：绘制完成自动激活选择工具并选中该形状——
+        // 立即可拖手柄缩放/旋转（直线/画笔等不触发）
+        if (created && (store.activeTool === 'rect' || store.activeTool === 'ellipse')) {
+          setSelection([created])
+          store.setTool('select')
+        }
       }
     }
     strokeStart = null
