@@ -12,8 +12,14 @@ function onPanelPointerDown() {
 function endColorEdit() {
   store.colorEditing = false
 }
-onMounted(() => window.addEventListener('pointerup', endColorEdit))
-onBeforeUnmount(() => window.removeEventListener('pointerup', endColorEdit))
+onMounted(() => {
+  window.addEventListener('pointerup', endColorEdit)
+  window.addEventListener('pointerdown', onWindowPointerDown)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('pointerup', endColorEdit)
+  window.removeEventListener('pointerdown', onWindowPointerDown)
+})
 
 // ─── HSV 模型（本地编辑状态，与 store 的 hex 颜色双向同步）───
 const hue = ref(120) // 0-360
@@ -82,6 +88,113 @@ watch(
   { immediate: true }
 )
 
+// ─── 描边勾选区（Scratch 模型：仅形状预设与选中图形编辑；画笔/橡皮/直线不显示）───
+// 勾选态：有选中图形=其实际描边态（引擎同步）；其余=新形状预设 strokeEnabled。
+const showStrokeSection = () => {
+  if (store.activeTool === 'brush' || store.activeTool === 'eraser' || store.activeTool === 'line') {
+    return false
+  }
+  if (store.activeTool === 'rect' || store.activeTool === 'ellipse') return true
+  // 选择/塑形等：有选中矢量图形时可编辑其描边
+  return store.mode === 'vector' && store.vectorSelectedCount > 0
+}
+const strokeChecked = () => {
+  if (store.mode === 'vector' && store.vectorSelectedCount > 0) return store.selectionHasStroke
+  return store.strokeEnabled
+}
+// 选中图形全部为"本体描边"（直线/描边轮廓）：本体不可去描边 → 勾选框禁用
+const strokeToggleDisabled = () =>
+  store.mode === 'vector' && store.vectorSelectedCount > 0 && store.selectionBodyOnly
+// 粗细下限：选中含本体描边对象时抬到 1（拖到 0 会删本体致整条线消失）
+const strokeMin = () =>
+  store.mode === 'vector' && store.vectorSelectedCount > 0 && store.selectionHasBodyStroke ? 1 : 0
+
+function onStrokeToggle(e: Event) {
+  store.strokeEnabled = (e.target as HTMLInputElement).checked
+  store.strokeToggleTick++ // 预设残留时 strokeEnabled 新旧值可能相同，tick 保证 watch 必触发
+}
+
+// 勾选收起时同步关闭描边色弹层（防下次勾选时弹层自动弹开）
+watch(strokeChecked, (v) => {
+  if (!v) strokePop.value = false
+})
+
+// ─── 描边色弹层（迷你 SV+色相条，编辑 store.strokeColor）───
+const strokePop = ref(false)
+const sHue = ref(0)
+const sSat = ref(0)
+const sVal = ref(1)
+let internalS = false
+
+function commitStrokeColor() {
+  internalS = true
+  store.strokeColor = hsvToHex(sHue.value, sSat.value, sVal.value)
+  internalS = false
+}
+
+watch(
+  () => store.strokeColor,
+  (hex) => {
+    if (internalS) return
+    const hsv = hexToHsv(hex)
+    sHue.value = hsv.h
+    sSat.value = hsv.s
+    sVal.value = hsv.v
+  },
+  { immediate: true }
+)
+
+// 点击弹层外部关闭
+function onWindowPointerDown(e: PointerEvent) {
+  if (!strokePop.value) return
+  const t = e.target as HTMLElement | null
+  if (!t || !t.closest('.stroke-color-wrap')) strokePop.value = false
+}
+
+const sSvRef = ref<HTMLDivElement>()
+const sHueRef = ref<HTMLDivElement>()
+
+function updatePopSvFromEvent(e: PointerEvent) {
+  const el = sSvRef.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  sSat.value = clamp((e.clientX - rect.left) / rect.width, 0, 1)
+  sVal.value = clamp(1 - (e.clientY - rect.top) / rect.height, 0, 1)
+  commitStrokeColor()
+}
+
+function onPopSvPointerDown(e: PointerEvent) {
+  if (e.button !== 0) return
+  sSvRef.value?.setPointerCapture(e.pointerId)
+  updatePopSvFromEvent(e)
+}
+
+function onPopSvPointerMove(e: PointerEvent) {
+  if (e.buttons !== 1) return
+  updatePopSvFromEvent(e)
+}
+
+function updatePopHueFromEvent(e: PointerEvent) {
+  const el = sHueRef.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  sHue.value = clamp(((e.clientX - rect.left) / rect.width) * 360, 0, 360)
+  commitStrokeColor()
+}
+
+function onPopHuePointerDown(e: PointerEvent) {
+  if (e.button !== 0) return
+  sHueRef.value?.setPointerCapture(e.pointerId)
+  updatePopHueFromEvent(e)
+}
+
+function onPopHuePointerMove(e: PointerEvent) {
+  if (e.buttons !== 1) return
+  updatePopHueFromEvent(e)
+}
+
+const sSvBackground = () => `hsl(${sHue.value}, 100%, 50%)`
+
 // ─── SV 方块交互 ───
 const svRef = ref<HTMLDivElement>()
 
@@ -130,9 +243,11 @@ function onHuePointerMove(e: PointerEvent) {
 // SV 方块底色 = 当前色相的纯色
 const svBackground = () => `hsl(${hue.value}, 100%, 50%)`
 
-// 尺寸滑条：按当前工具显示 笔刷大小 或 线宽
+// 尺寸滑条：按当前工具显示 笔刷大小
+// 尺寸滑条：按当前工具显示 笔刷大小
 const showBrushSize = () => store.activeTool === 'brush' || store.activeTool === 'eraser'
-const showStrokeWidth = () => store.activeTool === 'line' || store.activeTool === 'rect' || store.activeTool === 'ellipse'
+// 直线本体粗细（独立于描边机制，默认 8）
+const showLineWidth = () => store.activeTool === 'line'
 </script>
 
 <template>
@@ -198,18 +313,82 @@ const showStrokeWidth = () => store.activeTool === 'line' || store.activeTool ==
       <span class="slider-value">{{ store.brushSize }}</span>
     </div>
 
-    <!-- 线宽（直线/矩形/椭圆） -->
-    <div v-if="showStrokeWidth()" class="slider-row">
+    <!-- 线宽（直线本体粗细，独立于描边机制，默认 8） -->
+    <div v-if="showLineWidth()" class="slider-row">
       <label class="slider-label">线宽</label>
       <input
-        v-model.number="store.strokeWidth"
+        v-model.number="store.lineWidth"
         class="paint-slider"
         type="range"
         min="1"
         max="40"
         step="1"
       />
-      <span class="slider-value">{{ store.strokeWidth }}</span>
+      <span class="slider-value">{{ store.lineWidth }}</span>
+    </div>
+
+    <!-- 描边（Scratch 模型：仅形状预设与选中图形编辑；勾选后展开颜色与粗细） -->
+    <div v-if="showStrokeSection()" class="stroke-section">
+      <label class="stroke-toggle-label">
+        <input
+          type="checkbox"
+          class="stroke-check"
+          :checked="strokeChecked()"
+          :disabled="strokeToggleDisabled()"
+          @change="onStrokeToggle"
+        />
+        描边
+      </label>
+      <!-- 勾选后展开：描边颜色 + 描边粗细 -->
+      <template v-if="strokeChecked()">
+        <div v-if="store.mode === 'vector'" class="stroke-color-wrap">
+          <button
+            class="stroke-color-btn"
+            :style="{ background: store.strokeColor }"
+            title="描边颜色"
+            @click.stop="strokePop = !strokePop"
+          ></button>
+          <div v-if="strokePop" class="stroke-pop">
+            <div
+              ref="sSvRef"
+              class="sv-square"
+              :style="{ background: sSvBackground() }"
+              @pointerdown="onPopSvPointerDown"
+              @pointermove="onPopSvPointerMove"
+            >
+              <div class="sv-bright"></div>
+              <div class="sv-sat"></div>
+              <div
+                class="sv-marker"
+                :style="{ left: `${sSat * 100}%`, top: `${(1 - sVal) * 100}%` }"
+              ></div>
+            </div>
+            <div
+              ref="sHueRef"
+              class="hue-strip"
+              @pointerdown="onPopHuePointerDown"
+              @pointermove="onPopHuePointerMove"
+            >
+              <div class="hue-marker" :style="{ left: `${(sHue / 360) * 100}%` }"></div>
+            </div>
+            <div class="stroke-pop-hex">{{ store.strokeColor.toUpperCase() }}</div>
+          </div>
+        </div>
+        <!-- 描边粗细（0=无描边/移除描边；选中本体描边对象时下限 1，防删本体致线条消失） -->
+        <div class="slider-row">
+          <label class="slider-label">描边粗细</label>
+          <input
+            v-model.number="store.strokeWidth"
+            class="paint-slider"
+            type="range"
+            :min="strokeMin()"
+            max="40"
+            step="1"
+            :title="strokeMin() > 0 ? '本体描边（直线/轮廓）最细 1' : '0 = 无描边'"
+          />
+          <span class="slider-value">{{ store.strokeWidth || '无' }}</span>
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -232,6 +411,75 @@ const showStrokeWidth = () => store.activeTool === 'line' || store.activeTool ==
 .panel-label {
   font-size: 11px;
   color: var(--text-muted);
+}
+
+/* 描边勾选区 */
+.stroke-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-light);
+}
+
+.stroke-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.stroke-check {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.stroke-check:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.stroke-color-wrap {
+  position: relative;
+}
+
+.stroke-color-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border-light);
+  cursor: pointer;
+  padding: 0;
+}
+.stroke-color-btn:hover {
+  border-color: var(--text-muted);
+}
+
+.stroke-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  width: 170px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.stroke-pop-hex {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-secondary);
+  text-align: center;
 }
 
 /* 当前颜色 */

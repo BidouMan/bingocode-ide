@@ -376,12 +376,14 @@ export function usePaperScope(
       selFrame = null
       store.vectorSelBox = null
       store.vectorSelectedCount = selected.size
+      syncStrokeWidthFromSelection() // 选中变化 → 线宽滑条跟随对象实际描边宽
       return
     }
     if (selected.size === 0) {
       selFrame = null
       store.vectorSelBox = null
       store.vectorSelectedCount = 0
+      syncStrokeWidthFromSelection() // 清选复位 selectionHasStroke
       return
     }
     if (!selFrame) resetSelFrame()
@@ -406,6 +408,7 @@ export function usePaperScope(
       rotateAt: { x: topMid.x + (nx / nl) * rotOff, y: topMid.y + (ny / nl) * rotOff },
     }
     store.vectorSelectedCount = selected.size
+    syncStrokeWidthFromSelection() // 选中变化 → 线宽滑条跟随对象实际描边宽
   }
 
   function clearSelection() {
@@ -641,8 +644,15 @@ export function usePaperScope(
     if (fillOn) item.fillColor = styleColor()
     else item.fillColor = null as unknown as paper.Color
     if (strokeOn) {
-      item.strokeColor = styleColor()
-      item.strokeWidth = store.strokeWidth
+      if (isLine) {
+        // 直线=纯描边对象：本体色=绘制色、本体粗细=lineWidth（独立于描边机制，默认 8）
+        item.strokeColor = styleColor()
+        item.strokeWidth = Math.max(1, store.lineWidth)
+      } else {
+        // 形状描边：色=描边通道色（UI 色块所见即所画），宽=描边粗细（0=未设→默认 4）
+        item.strokeColor = styleStrokeColor()
+        item.strokeWidth = store.strokeWidth > 0 ? store.strokeWidth : 4
+      }
       item.strokeJoin = 'round'
       item.strokeCap = 'round'
     } else {
@@ -1794,9 +1804,10 @@ export function usePaperScope(
   }
 
   // ─── 选中改色（调色板直改图形）───
-  // 有选中矢量对象时，右侧调色（绘制色/不透明度）即时应用到对象——
-  // 有可见填充改填充（图形主体色），仅描边改描边（直线/描边形状），组递归子级；
-  // 无选中时仍只改绘制色供下次绘制。撤销按编辑手势合并（colorEditing：一次拖动一步）。
+  // 有选中矢量对象时，右侧调色即时应用到对象：填充通道改填充（有可见填充改填充、
+  // 仅描边改描边）；描边由面板勾选区管理（仅矩形/椭圆预设与选中图形编辑时显示；
+  // 画笔/橡皮/直线不显示——直线本体粗细走独立 lineWidth）。线宽滑条直改描边宽度，
+  // 0=移除描边。撤销按编辑手势合并（colorEditing：一次拖动一步）。
 
   /** 递归收集可着色目标（Path/CompoundPath；组下钻、位图代理排除） */
   function tintTargets(): paper.Item[] {
@@ -1819,6 +1830,11 @@ export function usePaperScope(
     return out
   }
 
+  /** 描边通道绘制色（strokeColor + 不透明度） */
+  function styleStrokeColor(): paper.Color {
+    return new scope!.Color(rgbaCss(store.strokeColor, store.opacity))
+  }
+
   function tintSelection(targets: paper.Item[]) {
     const color = styleColor()
     for (const it of targets) {
@@ -1828,9 +1844,36 @@ export function usePaperScope(
     }
   }
 
+  function tintStrokeSelection(targets: paper.Item[]) {
+    const color = styleStrokeColor()
+    for (const it of targets) {
+      const p = it as paper.Path
+      const had = hasVisibleStroke(p)
+      it.strokeColor = color
+      // 从未有描边的对象：宽度归 0（改色只定色相，线宽滑条显示 0，拖宽才出现描边）
+      if (!had) p.strokeWidth = 0
+    }
+  }
+
   /** 本次改色手势是否已压撤销栈 / 是否产生可见变更（收口时统一刷缩略图） */
   let tintPushed = false
   let tintTouched = false
+
+  /** 改色/线宽统一收口：首变压栈（同手势合并），拖动中只置脏标、结束统一刷缩略图 */
+  function tintApply(apply: () => void) {
+    if (!tintPushed) {
+      pushHistory() // 手势首次：快照 = 改动前
+      tintPushed = true
+    }
+    apply()
+    if (store.colorEditing) {
+      tintTouched = true
+      store.dirty = true // 拖动中画布由 paper 实时重绘；缩略图收口统一刷
+    } else {
+      tintPushed = false // 非手势单次改动：一步一清
+      markDirty()
+    }
+  }
 
   watch(
     () => [store.fillColor, store.opacity],
@@ -1838,18 +1881,86 @@ export function usePaperScope(
       if (store.mode !== 'vector') return
       const targets = tintTargets()
       if (targets.length === 0) return
-      if (!tintPushed) {
-        pushHistory() // 手势首次：快照 = 改色前
-        tintPushed = true
+      tintApply(() => tintSelection(targets))
+    }
+  )
+
+  watch(
+    () => [store.strokeColor, store.opacity],
+    () => {
+      if (store.mode !== 'vector') return
+      if (!store.selectionHasStroke) return
+      const targets = tintTargets()
+      if (targets.length === 0) return
+      tintApply(() => tintStrokeSelection(targets))
+    }
+  )
+
+  // 勾选「描边」（store.strokeEnabled=勾选态，strokeToggleTick=强制信号——预设残留时
+  // 新旧值相同 watch 不触发）。有选中图形 → 立即加/去描边；无选中 → 新形状预设。
+  watch(
+    () => [store.strokeEnabled, store.strokeToggleTick],
+    () => {
+      if (store.mode !== 'vector') return
+      const on = store.strokeEnabled
+      const targets = tintTargets()
+      if (targets.length === 0) return
+      // 只处理会实际变化的目标；取消勾选不动"本体描边"（无填充的直线/轮廓——去描边=删本体致线条消失）
+      const changed = targets.filter((it) => {
+        const p = it as paper.Path
+        if (on) return !hasVisibleStroke(p)
+        return hasVisibleStroke(p) && hasVisibleFill(p)
+      })
+      if (changed.length === 0) {
+        syncStrokeWidthFromSelection()
+        return
       }
-      tintSelection(targets)
-      if (store.colorEditing) {
-        tintTouched = true
-        store.dirty = true // 拖动中画布由 paper 实时重绘；缩略图收口统一刷
-      } else {
-        tintPushed = false // 非手势单次改色：一步一清
-        markDirty()
-      }
+      const color = styleStrokeColor()
+      const w = store.strokeWidth > 0 ? store.strokeWidth : 4 // 勾选加描边默认粗细 4
+      tintApply(() => {
+        for (const it of changed) {
+          const p = it as paper.Path
+          if (on) {
+            p.strokeColor = color
+            p.strokeWidth = w
+          } else {
+            p.strokeColor = null
+          }
+        }
+      })
+      syncStrokeWidthFromSelection() // 刷新勾选态与线宽滑条
+    }
+  )
+
+  // 线宽滑条（面板内，勾选描边后显示）：直改描边宽度，0=移除描边；
+  // 无描边对象拖宽会先以描边通道色出现描边（直觉：拖宽即想看到描边）
+  watch(
+    () => store.strokeWidth,
+    () => {
+      if (store.mode !== 'vector') return
+      const targets = tintTargets()
+      if (targets.length === 0) return
+      const w = store.strokeWidth
+      tintApply(() => {
+        for (const it of targets) {
+          const p = it as paper.Path
+          if (w <= 0) {
+            // 0=去描边只对"真描边"（有填充的对象）生效；本体描边（直线/轮廓）保底可见
+            if (hasVisibleFill(p)) {
+              p.strokeColor = null
+            } else if (!hasVisibleStroke(p)) {
+              p.strokeColor = styleStrokeColor()
+              p.strokeWidth = Math.max(1, p.strokeWidth || 4)
+            } else {
+              p.strokeWidth = Math.max(1, p.strokeWidth)
+            }
+          } else {
+            if (!hasVisibleStroke(p)) p.strokeColor = styleStrokeColor()
+            p.strokeWidth = w
+          }
+        }
+      })
+      syncStrokeWidthFromSelection() // 拖宽可能让无描边对象出现描边 → 刷新勾选态
     }
   )
 
@@ -1862,6 +1973,49 @@ export function usePaperScope(
       }
     }
   })
+
+  // 选中矢量图形时线宽滑条同步为该图形实际描边宽（无描边=0）。
+  // 不走 watch(vectorSelectedCount)：setSelection 在同一同步块内 count 1→0→1，
+  // 新旧值相同 watch 不触发（图形 A 宽10 → 画 B 选中后滑条残留 10 的根因）——
+  // 挂在 syncVectorSelBox（一切选中变化的必经点）内联调用。
+  function syncStrokeWidthFromSelection() {
+    if (store.mode !== 'vector') return
+    // 直线工具操作焦点=直线本体：滑条保持直线组存值，不用选中对象覆盖
+    if (store.activeTool === 'line') return
+    if (selected.size === 0) {
+      store.selectionHasStroke = false
+      store.selectionHasBodyStroke = false
+      store.selectionBodyOnly = false
+      return
+    }
+    const targets = tintTargets()
+    if (targets.length === 0) {
+      store.selectionHasStroke = false
+      store.selectionHasBodyStroke = false
+      store.selectionBodyOnly = false
+      return
+    }
+    let w = 0
+    let has = false
+    let hasBody = false
+    let allBody = true
+    for (const it of targets) {
+      const p = it as paper.Path
+      const stroked = hasVisibleStroke(p)
+      // 本体描边 = 无可见填充（直线/描边轮廓形：描边就是对象本身）
+      const isBody = stroked && !hasVisibleFill(p)
+      if (stroked) {
+        has = true
+        if (w === 0) w = p.strokeWidth
+      }
+      if (isBody) hasBody = true
+      else allBody = false
+    }
+    store.strokeWidth = w
+    store.selectionHasStroke = has
+    store.selectionHasBodyStroke = hasBody
+    store.selectionBodyOnly = allBody
+  }
 
   /** 橡皮手势状态：首次命中才压栈（未命中不产生空撤销步）；拖过整段只记一步、结束统一刷缩略图 */
   let erasePushed = false

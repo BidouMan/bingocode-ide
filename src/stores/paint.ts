@@ -32,12 +32,34 @@ export const usePaintStore = defineStore('paint', () => {
 
   /** 唯一绘制色：所有位图绘制工具共用 */
   const fillColor = ref('#5BFB84')
-  /** 矢量模式的描边色（位图工具不使用） */
-  const strokeColor = ref('#ffffff')
+  /** 矢量模式的描边色（默认柔和深灰——接近黑但不刺眼，便于一眼识别描边；位图工具不使用） */
+  const strokeColor = ref('#2d2d2d')
+  /**
+   * 选中矢量图形是否有可见描边（引擎在选中变化时同步）——
+   * 面板「描边」勾选框的选中态来源（无选中时用 strokeEnabled 预设）。
+   */
+  const selectionHasStroke = ref(false)
+  /**
+   * 选中图形中存在"本体描边"对象（无可见填充，描边即本体——直线/描边轮廓形）：
+   * 粗细滑条下限抬到 1（拖到 0 会删本体致线条消失）。
+   */
+  const selectionHasBodyStroke = ref(false)
+  /** 选中图形全部为本体描边对象：勾选框禁用（本体不可"去描边"） */
+  const selectionBodyOnly = ref(false)
+  /**
+   * 勾选强制信号：strokeEnabled 新旧值可能相同（预设残留时勾选/取消写入值不变），
+   * Vue watch 不触发导致勾选无效——每次勾选动作递增 tick 保证信号必达。
+   */
+  const strokeToggleTick = ref(0)
   const fillEnabled = ref(true)
   const strokeEnabled = ref(false)
-  /** 形状/直线工具的描边线宽 */
-  const strokeWidth = ref(4)
+  /** 形状/直线工具的描边线宽（默认 0=无描边；画线时引擎保底 1 保证可见） */
+  const strokeWidth = ref(0)
+  /**
+   * 直线工具的本体粗细（独立于描边机制：直线=纯描边对象，本体宽与"给图形加描边"的
+   * 粗细是两回事——共用一个值会互相污染）。默认 8。
+   */
+  const lineWidth = ref(8)
   /** 画笔/橡皮的笔刷直径 */
   const brushSize = ref(12)
   /** 0-100 */
@@ -177,10 +199,15 @@ export const usePaintStore = defineStore('paint', () => {
     activeTool.value = 'brush'
     mode.value = 'vector'
     fillColor.value = '#5BFB84'
-    strokeColor.value = '#ffffff'
+    strokeColor.value = '#2d2d2d'
     fillEnabled.value = true
     strokeEnabled.value = false
-    strokeWidth.value = 4
+    selectionHasStroke.value = false
+    selectionHasBodyStroke.value = false
+    selectionBodyOnly.value = false
+    strokeToggleTick.value = 0
+    strokeWidth.value = 0
+    lineWidth.value = 8
     brushSize.value = 12
     opacity.value = 100
     colorEditing.value = false
@@ -217,9 +244,14 @@ export const usePaintStore = defineStore('paint', () => {
     mode,
     fillColor,
     strokeColor,
+    selectionHasStroke,
+    selectionHasBodyStroke,
+    selectionBodyOnly,
+    strokeToggleTick,
     fillEnabled,
     strokeEnabled,
     strokeWidth,
+    lineWidth,
     brushSize,
     opacity,
     colorEditing,

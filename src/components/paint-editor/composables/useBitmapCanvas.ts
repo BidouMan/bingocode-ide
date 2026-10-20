@@ -282,7 +282,13 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     const fillOn = store.activeTool !== 'line' && (store.fillEnabled || !store.strokeEnabled)
     const strokeOn = store.activeTool === 'line' || store.strokeEnabled
 
-    c.lineWidth = store.strokeWidth
+    // 直线本体粗细走独立 lineWidth（默认 8）；形状描边走 strokeWidth（0=未设→默认 4）
+    c.lineWidth =
+      store.activeTool === 'line'
+        ? Math.max(1, store.lineWidth)
+        : store.strokeWidth > 0
+          ? store.strokeWidth
+          : 4
     c.lineJoin = 'round'
     c.lineCap = 'round'
     c.beginPath()
