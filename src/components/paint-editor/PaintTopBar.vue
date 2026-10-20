@@ -2,10 +2,6 @@
 import { usePaintStore, ARTBOARD_MAX } from '../../stores/paint'
 
 import iconClose from '../../assets/icons/关闭.svg'
-import iconUndo from '../../assets/icons/undo.svg'
-import iconRedo from '../../assets/icons/redo.svg'
-import iconZoomOut from '../../assets/icons/reduce-one.svg'
-import iconZoomIn from '../../assets/icons/add-one.svg'
 import iconSave from '../../assets/icons/保存.svg'
 import iconCrop from '../../assets/icons/裁切画板.svg'
 import iconCopy from '../../assets/icons/copy.svg'
@@ -28,8 +24,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: []
   save: []
-  undo: []
-  redo: []
   crop: []
   copy: []
   paste: []
@@ -51,22 +45,12 @@ const store = usePaintStore()
 const isVector = () => store.mode === 'vector'
 const canCopy = () => (isVector() ? store.vectorSelectedCount > 0 : !!store.selection)
 const canPaste = () => (isVector() ? store.hasVectorClipboard : !!store.hasClipboard)
-const canUndoActive = () => (isVector() ? store.vectorCanUndo : store.canUndo)
-const canRedoActive = () => (isVector() ? store.vectorCanRedo : store.canRedo)
 
 // ─── 塑形锚点形态 toggle：选中锚点含手柄=曲线态；无手柄或未选=折线态（默认折线）───
 const reshapeCurveActive = () => store.reshapeHasPointed
 // 激活侧点击为安全空操作；未激活侧仅在确有可转换锚点时可点
 const curveDisabled = () => !store.reshapeHasUncurved && !store.reshapeHasPointed
 const pointDisabled = () => false
-
-function onZoomIn() {
-  store.setZoom(store.zoom * 1.1)
-}
-
-function onZoomOut() {
-  store.setZoom(store.zoom * 0.9)
-}
 
 /** 手动输入画板尺寸：clamp 1~2048，失焦/回车提交 */
 function commitSize(axis: 'w' | 'h', e: Event) {
@@ -204,28 +188,6 @@ function commitSize(axis: 'w' | 'h', e: Event) {
     </div>
 
     <div class="topbar-spacer"></div>
-
-    <!-- 撤销/重做/缩放：绝对钉在距右 200px 处——放大按钮右缘恰好压在属性面板左边框（分割线）上 -->
-    <div class="topbar-right zoom-align">
-      <button class="icon-btn" :disabled="!canUndoActive()" v-tooltip="isVector() ? '撤销（矢量）' : '撤销'" @click="emit('undo')">
-        <img :src="iconUndo" class="icon-sm" draggable="false" />
-      </button>
-      <button class="icon-btn" :disabled="!canRedoActive()" v-tooltip="isVector() ? '重做（矢量）' : '重做'" @click="emit('redo')">
-        <img :src="iconRedo" class="icon-sm" draggable="false" />
-      </button>
-
-      <div class="zoom-group">
-        <button class="icon-btn" v-tooltip="'缩小'" @click="onZoomOut">
-          <img :src="iconZoomOut" class="icon-sm" draggable="false" />
-        </button>
-        <button class="zoom-label" title="重置缩放" @click="store.resetView()">
-          {{ Math.round(store.zoom * 100) }}%
-        </button>
-        <button class="icon-btn" v-tooltip="'放大'" @click="onZoomIn">
-          <img :src="iconZoomIn" class="icon-sm" draggable="false" />
-        </button>
-      </div>
-    </div>
 
     <!-- 最右：关闭 + 保存 -->
     <div class="topbar-actions">
@@ -403,20 +365,6 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   background: var(--border-light);
 }
 
-.topbar-right {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-/* 缩放组钉在距右 200px = 属性面板左边框（分割线）上，放大按钮右缘与之对齐 */
-.zoom-align {
-  position: absolute;
-  right: 200px;
-  top: 50%;
-  transform: translateY(-50%);
-}
-
 /* 最右关闭/保存组：钉成与下方颜色面板同宽的列（左缘=面板左边框 200px，右缘=顶栏内边距） */
 .topbar-actions {
   position: absolute;
@@ -426,29 +374,6 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
-}
-
-.zoom-group {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  margin: 0 6px;
-}
-
-.zoom-label {
-  min-width: 44px;
-  height: 26px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background 0.15s;
-  white-space: nowrap;
-}
-.zoom-label:hover {
-  background: var(--bg-hover);
 }
 
 /* 关闭：次级按钮（描边幽灵风，占列内剩余宽度） */

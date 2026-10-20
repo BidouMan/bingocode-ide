@@ -179,8 +179,6 @@ async function onSave() {
       :save-title="targetSprite ? '保存回角色' : undefined"
       @close="onClose"
       @save="onSave"
-      @undo="artboardRef?.undo()"
-      @redo="artboardRef?.redo()"
       @crop="artboardRef?.cropToContent()"
       @copy="artboardRef?.copySelection()"
       @paste="artboardRef?.pasteClipboard()"

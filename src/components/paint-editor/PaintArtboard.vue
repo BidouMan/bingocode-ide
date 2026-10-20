@@ -4,6 +4,10 @@ import { usePaintStore } from '../../stores/paint'
 import { useBitmapCanvas } from './composables/useBitmapCanvas'
 import { usePaperScope } from './composables/usePaperScope'
 import { ensurePaintFont } from './utils/paintFont'
+import iconUndo from '../../assets/icons/undo.svg'
+import iconRedo from '../../assets/icons/redo.svg'
+import iconZoomOut from '../../assets/icons/reduce-one.svg'
+import iconZoomIn from '../../assets/icons/add-one.svg'
 
 const store = usePaintStore()
 
@@ -295,6 +299,17 @@ const brushCursorStyle = computed(() => {
 
 function focusStage() {
   stageRef.value?.focus()
+}
+
+// ─── 浮动视图工具条（画布右下，对齐代码编辑器 ide-float-bar 风格）：撤销/重做/缩放 ───
+const floatCanUndo = () => (store.mode === 'vector' ? store.vectorCanUndo : store.canUndo)
+const floatCanRedo = () => (store.mode === 'vector' ? store.vectorCanRedo : store.canRedo)
+// 固定 ±10 个百分点步进（整数百分比防浮点漂移：100→110→120，来回点可精确回到原值）
+function onZoomIn() {
+  store.setZoom(Math.round((store.zoom + 0.1) * 100) / 100)
+}
+function onZoomOut() {
+  store.setZoom(Math.round((store.zoom - 0.1) * 100) / 100)
 }
 
 // ─── 拾色（吸管）：从合成缓存读点击点像素色，写入目标通道后退出 ───
@@ -995,6 +1010,36 @@ defineExpose({
       <div class="pick-lens-cross-h"></div>
       <div class="pick-lens-cross-v"></div>
     </div>
+    <!-- 浮动视图工具条：撤销/重做/缩放（顶栏窄窗口避让，拾色时隐藏防遮挡）。
+         @dblclick.stop：快速连点按钮会被浏览器判成 dblclick 冒泡到舞台触发双击复位——必须拦截 -->
+    <div v-show="!store.eyedropperActive" class="view-float-bar" @dblclick.stop>
+      <button class="view-float-btn" v-tooltip="'缩小'" @click="onZoomOut">
+        <img :src="iconZoomOut" width="16" height="16" draggable="false" />
+      </button>
+      <button class="view-float-zoom" v-tooltip="'重置缩放'" @click="store.resetView()">
+        {{ Math.round(store.zoom * 100) }}%
+      </button>
+      <button class="view-float-btn" v-tooltip="'放大'" @click="onZoomIn">
+        <img :src="iconZoomIn" width="16" height="16" draggable="false" />
+      </button>
+      <div class="view-float-divider"></div>
+      <button
+        class="view-float-btn"
+        :disabled="!floatCanUndo()"
+        v-tooltip="store.mode === 'vector' ? '撤销（矢量）' : '撤销'"
+        @click="undoActive()"
+      >
+        <img :src="iconUndo" width="14" height="14" draggable="false" />
+      </button>
+      <button
+        class="view-float-btn"
+        :disabled="!floatCanRedo()"
+        v-tooltip="store.mode === 'vector' ? '重做（矢量）' : '重做'"
+        @click="redoActive()"
+      >
+        <img :src="iconRedo" width="14" height="14" draggable="false" />
+      </button>
+    </div>
   </div>
 </template>
 
@@ -1147,6 +1192,70 @@ defineExpose({
   overflow: visible;
   pointer-events: none;
   z-index: 7;
+}
+
+/* ─── 浮动视图工具条（画布右下；对齐代码编辑器 ide-float-bar 胶囊风格）─── */
+.view-float-bar {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: rgba(30, 32, 40, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 4px;
+  z-index: 30;
+}
+.view-float-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 26px;
+  padding: 0 6px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.view-float-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+.view-float-btn:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+}
+.view-float-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.view-float-zoom {
+  min-width: 44px;
+  height: 26px;
+  padding: 0 4px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, background 0.15s;
+}
+.view-float-zoom:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+}
+.view-float-divider {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 4px;
 }
 
 /* ─── 文字编辑覆盖层（Scratch text-tool 同款）─── */
