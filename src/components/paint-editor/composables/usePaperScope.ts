@@ -371,6 +371,13 @@ export function usePaperScope(
   }
 
   function syncVectorSelBox() {
+    // 塑形工具：锚点显示取代变换框（框隐藏，计数照常同步）
+    if (store.activeTool === 'reshape') {
+      selFrame = null
+      store.vectorSelBox = null
+      store.vectorSelectedCount = selected.size
+      return
+    }
     if (selected.size === 0) {
       selFrame = null
       store.vectorSelBox = null
@@ -403,6 +410,9 @@ export function usePaperScope(
 
   function clearSelection() {
     selected.clear()
+    reshapeSel.clear() // 锚点选择随对象选择一并清空
+    store.reshapePts = null
+    store.reshapeOutline = null
     syncVectorSelBox()
   }
 
@@ -419,6 +429,7 @@ export function usePaperScope(
     clearSelection()
     for (const it of items) selected.add(it)
     syncVectorSelBox()
+    syncReshapePts() // 塑形工具下刷新锚点显示（非塑形幂等清空）
   }
 
   // ─── 内容标记（保存锁尺寸/裁切禁用）───
@@ -1138,6 +1149,641 @@ export function usePaperScope(
     if (fillPreview.kind === 'cover') commitCoverMerge(fillPreview)
     fillPreview = null // 提交：保留写入的预览色
     markDirty()
+  }
+
+  // ─── 塑形（Scratch reshape-tool 同款：4 级命中分派 + 锚点/手柄/曲线操作）───
+  // 行为规格来自 scratch-paint src/helper/selection-tools/{reshape,point,handle}-tool.js
+  // 与 containers/mode-tools.jsx（develop）：
+  // - 命中优先级：选中锚点 → 选中锚点的手柄（项未全选时显示）→ 选中项的曲线
+  //  → 任意可编辑路径填充/描边/曲线（位图代理穿透——塑形不作用于位图）
+  // - 点曲线插入锚点（divideAt+smooth，立即可拖）；双击锚点删除（松手执行、拖动取消）
+  // - 拖锚点=全部选中锚点同拖（Shift=45° 吸附）；拖柄=共线联动（已断开或 Alt=独立）
+  // - 点空白框选锚点（框内锚点连同其对象一起选中）；点击已选中锚点松手反选（只留它）
+  // - 顶栏「曲线/折线」按钮作用于选中锚点（mode-tools 同款算法，HANDLE_RATIO=0.39026…）
+
+  const HANDLE_RATIO = 0.3902628565
+  /** 双击判定窗口（Scratch DOUBLE_CLICK_MILLIS） */
+  const RESHAPE_DBL_MS = 250
+  /** 锚点/手柄命中半径（Scratch HANDLE_RADIUS 5.25 + PADDING 1，屏幕像素恒定） */
+  const RESHAPE_TOL = 6.25
+
+  /** 塑形选中的锚点 */
+  let reshapeSel = new Set<paper.Segment>()
+  let reshapeOp: 'none' | 'point' | 'handle' | 'move' | 'box' = 'none'
+  let reshapeLast: { x: number; y: number } | null = null
+  let reshapeDownPt: { x: number; y: number } | null = null
+  /** 拖动起点各选中锚点的全局位置（Shift 45° 吸附基准 + 位移换算 local） */
+  let reshapeOrigPts = new Map<paper.Segment, paper.Point>()
+  let reshapeHandleHit: 'handle-in' | 'handle-out' | null = null
+  let reshapeHandleSeg: paper.Segment | null = null
+  /** 双击删点/取消选中挂起（拖动即取消，松手执行） */
+  let reshapePendingDelete: paper.Segment | null = null
+  let reshapePendingDesel: paper.Segment | null = null
+  let reshapeInvertDesel = false
+  let reshapeClickTime = 0
+  let reshapeClickSeg: paper.Segment | null = null
+  /** 手势快照（同 select opSnapshot：移动了才入栈） */
+  let reshapeSnapshot: string | null = null
+  let reshapeMoved = false
+  let reshapeBoxAnchor: { x: number; y: number } | null = null
+  /** 框选加选标志（按下时的 Shift，松手时决定是否清空旧选择） */
+  let reshapeBoxAdditive = false
+
+  /** 可锚点编辑的选中项（Path/CompoundPath；组与位图代理不参与塑形） */
+  function reshapeItems(): paper.Item[] {
+    if (!scope) return []
+    const S = scope
+    const out: paper.Item[] = []
+    for (const it of selected) {
+      if (it === bitmapRaster) continue
+      if (it instanceof S.Path || it instanceof S.CompoundPath) out.push(it)
+    }
+    return out
+  }
+
+  /** 把选中项的全部锚点同步到 store（SVG overlay 渲染 + 顶栏曲线/折线按钮可用性） */
+  function syncReshapePts() {
+    const base = () => {
+      store.reshapePts = null
+      store.reshapeOutline = null
+      store.reshapeHasUncurved = false
+      store.reshapeHasPointed = false
+      store.vectorSelectedCount = selected.size
+    }
+    if (store.activeTool !== 'reshape' || store.mode !== 'vector') {
+      base()
+      return
+    }
+    const items = reshapeItems()
+    if (items.length === 0) {
+      base()
+      return
+    }
+    const pts: NonNullable<typeof store.reshapePts> = []
+    const outlines: string[] = []
+    let hasUncurved = false
+    let hasPointed = false
+    for (const item of items) {
+      // 轮廓 path data（项目坐标）：运行时 getPathData(matrix) d.ts 未收录 → 窄 cast
+      outlines.push(
+        (item as unknown as { getPathData: (m: paper.Matrix) => string }).getPathData(
+          item.globalMatrix
+        )
+      )
+      // segments 是 PathItem 运行时聚合（d.ts 仅 Path 收录）——CompoundPath 同样可用
+      const segs = (item as paper.Path).segments
+      // 项内锚点全选 = Scratch fullySelected → 手柄隐藏
+      const allSel = segs.length > 0 && segs.every((s) => reshapeSel.has(s))
+      for (const seg of segs) {
+        const path = seg.path
+        const c = path.localToGlobal(seg.point)
+        // 手柄只对选中锚点下发（Scratch：segment.selected 才画柄），项内全选时隐藏
+        const sel = reshapeSel.has(seg)
+        const showHandles = sel && !allSel
+        const hi =
+          showHandles && seg.handleIn.length > 0
+            ? path.localToGlobal(seg.point.add(seg.handleIn))
+            : null
+        const ho =
+          showHandles && seg.handleOut.length > 0
+            ? path.localToGlobal(seg.point.add(seg.handleOut))
+            : null
+        pts.push({
+          x: c.x,
+          y: c.y,
+          handleIn: hi ? { x: hi.x, y: hi.y } : null,
+          handleOut: ho ? { x: ho.x, y: ho.y } : null,
+          selected: sel,
+        })
+        if (sel) {
+          // 曲线化判定（mode-tools _getSelectedUncurvedPoints 同款）
+          const prev = seg.previous
+          const next = seg.next
+          const isCurved =
+            (!prev || seg.handleIn.length > 0) &&
+            (!next || seg.handleOut.length > 0) &&
+            (prev && next ? seg.handleOut.isCollinear(seg.handleIn) : true)
+          if (!isCurved) hasUncurved = true
+          if (seg.handleIn.length > 0 || seg.handleOut.length > 0) hasPointed = true
+        }
+      }
+    }
+    store.reshapePts = pts
+    store.reshapeOutline = outlines
+    store.reshapeHasUncurved = hasUncurved
+    store.reshapeHasPointed = hasPointed
+    store.vectorSelectedCount = selected.size
+  }
+
+  function clearReshapeOverlay() {
+    reshapeSel.clear()
+    reshapeOp = 'none'
+    reshapePendingDelete = null
+    reshapePendingDesel = null
+    reshapeHandleSeg = null
+    reshapeHandleHit = null
+    reshapeSnapshot = null
+    reshapeMoved = false
+    reshapeLast = null
+    reshapeDownPt = null
+    reshapeBoxAnchor = null
+    reshapeOrigPts.clear()
+    store.reshapePts = null
+    store.reshapeOutline = null
+    store.reshapeHasUncurved = false
+    store.reshapeHasPointed = false
+  }
+
+  /** 4 级命中分派（reshape-tool.getHitResult 同构；hitTestAll 返回序=自顶向下，取首即最顶） */
+  function reshapeTopHit(p: { x: number; y: number }): paper.HitResult | null {
+    if (!scope) return null
+    const S = scope
+    const pt = new S.Point(p.x, p.y)
+    const tol = RESHAPE_TOL / Math.max(0.1, store.zoom)
+    const items = reshapeItems()
+    if (items.length > 0) {
+      const itemSet = new Set(items)
+      // 1) 选中对象的任意锚点——match 按对象级（Scratch hitResult.item.selected 同款）。
+      // 曾误写成锚点级（reshapeSel.has）：点未选中锚点第 1 级落空 → 落到第 3 级曲线
+      // 命中 → 走 divideAt 加点分支 → 拖出新点而原点残留
+      let hits = S.project.hitTestAll(pt, {
+        segments: true,
+        tolerance: tol,
+        match: (hr: paper.HitResult) =>
+          hr.type === 'segment' && !!hr.segment && itemSet.has(hr.item),
+      })
+      if (hits.length) return hits[0]
+      // 2) 选中锚点的手柄（所属项未全选才可见可命中）
+      hits = S.project.hitTestAll(pt, {
+        handles: true,
+        tolerance: tol,
+        match: (hr: paper.HitResult) => {
+          if (!hr.segment || !reshapeSel.has(hr.segment)) return false
+          const segs = (hr.item as paper.Path).segments
+          return !segs.every((s) => reshapeSel.has(s))
+        },
+      })
+      if (hits.length) return hits[0]
+      // 3) 选中项的曲线
+      hits = S.project.hitTestAll(pt, {
+        segments: false,
+        curves: true,
+        stroke: false,
+        fill: false,
+        tolerance: tol,
+        match: (hr: paper.HitResult) => hr.type === 'curve' && itemSet.has(hr.item),
+      })
+      if (hits.length) return hits[0]
+    }
+    // 4) 任意可编辑路径的填充/描边/曲线（位图代理 match 排除 → 穿透）
+    const hits4 = S.project.hitTestAll(pt, {
+      fill: true,
+      stroke: true,
+      curves: true,
+      tolerance: tol,
+      match: (hr: paper.HitResult) =>
+        hr.item !== bitmapRaster &&
+        (hr.item instanceof S.Path || hr.item instanceof S.CompoundPath),
+    })
+    return hits4.length ? hits4[0] : null
+  }
+
+  /** Scratch math.js snapDeltaToAngle 同款：向量夹角吸附到 angle 步进（长度不变） */
+  function snapDeltaToAngle(d: paper.Point, angle: number): paper.Point {
+    const len = d.length
+    if (len < 1e-9) return d
+    const a = Math.round(Math.atan2(d.y, d.x) / angle) * angle
+    return new scope!.Point(Math.cos(a) * len, Math.sin(a) * len)
+  }
+
+  /** point-tool.removePoint 同款：删段 + 邻接两段手柄长度按曲线长×HANDLE_RATIO 重调 */
+  function reshapeRemovePoint(seg: paper.Segment) {
+    const path = seg.path
+    if (!path || path.segments.length <= 2) return // 至少保留两点防退化
+    const index = seg.index
+    path.removeSegment(index)
+    const beforeSegment = path.segments[index - 1]
+    const afterSegment = path.segments[index]
+    const curveLength = beforeSegment && beforeSegment.curve ? beforeSegment.curve.length : null
+    const zero = new scope!.Point(0, 0)
+    if (beforeSegment && beforeSegment.handleOut.length > 0) {
+      if (afterSegment && curveLength !== null) {
+        beforeSegment.handleOut = beforeSegment.handleOut.multiply(
+          (curveLength * HANDLE_RATIO) / beforeSegment.handleOut.length
+        )
+      } else {
+        beforeSegment.handleOut = zero
+      }
+    }
+    if (afterSegment && afterSegment.handleIn.length > 0) {
+      if (beforeSegment && curveLength !== null) {
+        afterSegment.handleIn = afterSegment.handleIn.multiply(
+          (curveLength * HANDLE_RATIO) / afterSegment.handleIn.length
+        )
+      } else {
+        afterSegment.handleIn = zero
+      }
+    }
+  }
+
+  /** 选中锚点转全局起始位置（拖动位移换算与 45° 吸附共用基准） */
+  function captureReshapeOrigs() {
+    reshapeOrigPts.clear()
+    for (const s of reshapeSel) {
+      reshapeOrigPts.set(s, s.path.localToGlobal(s.point))
+    }
+  }
+
+  function beginReshape(p: { x: number; y: number }, shift: boolean, time: number) {
+    if (!scope) return
+    const hit = reshapeTopHit(p)
+    // 双击窗口（Scratch：只看时间间隔）
+    const dbl = !!reshapeClickSeg && time - reshapeClickTime < RESHAPE_DBL_MS
+    reshapeClickTime = time
+    reshapeClickSeg =
+      hit && hit.segment && (hit.type === 'segment' || hit.type === 'handle-in' || hit.type === 'handle-out')
+        ? hit.segment
+        : null
+
+    if (!hit) {
+      // 空白 → 锚点框选（选择结果在 endReshape 落定）
+      reshapeOp = 'box'
+      reshapeBoxAnchor = p
+      reshapeBoxAdditive = shift
+      store.selection = { x: p.x, y: p.y, w: 0, h: 0 }
+      store.floatActive = false
+      return
+    }
+
+    const item = hit.item
+    // FILL/Move：未选中项的任何命中、已选中项的填充/描边、双击非锚点
+    if (
+      !selected.has(item) ||
+      hit.type === 'fill' ||
+      hit.type === 'stroke' ||
+      (hit.type !== 'segment' && dbl)
+    ) {
+      reshapeOp = 'move'
+      if (!selected.has(item)) {
+        if (!shift) {
+          clearSelection()
+        }
+        selected.add(item)
+      }
+      syncVectorSelBox()
+      syncReshapePts()
+      reshapeSnapshot = snapshotForGesture()
+      reshapeMoved = false
+      reshapeLast = p
+      reshapeDownPt = p
+      return
+    }
+
+    if (hit.type === 'segment') {
+      const seg = hit.segment!
+      reshapeOp = 'point'
+      if (dbl) reshapePendingDelete = seg
+      if (reshapeSel.has(seg)) {
+        // 已选中：Shift=松手取消选中；无 Shift=松手反选（只留它，point-tool 同款）
+        reshapePendingDesel = seg
+        reshapeInvertDesel = !shift
+      } else {
+        if (!shift) reshapeSel.clear()
+        reshapeSel.add(seg)
+      }
+      syncReshapePts()
+      reshapeSnapshot = snapshotForGesture()
+      reshapeMoved = false
+      reshapeLast = p
+      reshapeDownPt = p
+      captureReshapeOrigs()
+      return
+    }
+
+    if (hit.type === 'curve') {
+      // 曲线上插入锚点并立即进入拖动（point-tool.addPoint 同款；
+      // stock paper 加点原语是 Curve.divideAt → 右段的 segment1 即新锚点）
+      const nc = hit.location.curve.divideAt(hit.location)
+      const ns = nc ? nc.segment1 : null
+      if (ns) {
+        if (!ns.hasHandles()) ns.smooth()
+        reshapeOp = 'point'
+        if (!shift) reshapeSel.clear()
+        reshapeSel.add(ns)
+        syncReshapePts()
+        reshapeSnapshot = snapshotForGesture()
+        reshapeMoved = false
+        reshapeLast = p
+        reshapeDownPt = p
+        captureReshapeOrigs()
+      }
+      return
+    }
+
+    if (hit.type === 'handle-in' || hit.type === 'handle-out') {
+      reshapeOp = 'handle'
+      reshapeHandleHit = hit.type
+      reshapeHandleSeg = hit.segment!
+      reshapeSnapshot = snapshotForGesture()
+      reshapeMoved = false
+      reshapeLast = p
+      return
+    }
+  }
+
+  function continueReshape(p: { x: number; y: number }, shift: boolean, alt: boolean) {
+    if (!scope || !reshapeLast) return
+    const S = scope
+    if (reshapeOp === 'box' && reshapeBoxAnchor) {
+      const a = reshapeBoxAnchor
+      store.selection = {
+        x: Math.min(a.x, p.x),
+        y: Math.min(a.y, p.y),
+        w: Math.abs(p.x - a.x),
+        h: Math.abs(p.y - a.y),
+      }
+      return
+    }
+    const dx = p.x - reshapeLast.x
+    const dy = p.y - reshapeLast.y
+    if (dx === 0 && dy === 0) return
+
+    if (reshapeOp === 'point') {
+      // 拖动取消挂起的删除/反选（point-tool：click 语义被 drag 覆盖）
+      reshapePendingDelete = null
+      reshapePendingDesel = null
+      reshapeInvertDesel = false
+      const snapBase = reshapeDownPt ?? p
+      for (const [seg, origG] of reshapeOrigPts) {
+        const path = seg.path
+        const ng = shift
+          ? origG.add(snapDeltaToAngle(new S.Point(p.x - snapBase.x, p.y - snapBase.y), Math.PI / 4))
+          : new S.Point(origG.x + (p.x - snapBase.x), origG.y + (p.y - snapBase.y))
+        seg.point = path.globalToLocal(ng)
+      }
+      reshapeMoved = true
+      reshapeLast = p
+      syncReshapePts()
+      return
+    }
+
+    if (reshapeOp === 'handle' && reshapeHandleSeg && reshapeHandleHit) {
+      const seg = reshapeHandleSeg
+      const path = seg.path
+      const isOut = reshapeHandleHit === 'handle-out'
+      const g0 = isOut
+        ? path.localToGlobal(seg.point.add(seg.handleOut))
+        : path.localToGlobal(seg.point.add(seg.handleIn))
+      const localH = path
+        .globalToLocal(new S.Point(g0.x + dx, g0.y + dy))
+        .subtract(seg.point)
+      // 共线联动（handle-tool：两柄共线且非 Alt → 对侧柄保持共线反向、长度不变）
+      const colinear = seg.handleIn.length > 0 && seg.handleOut.isCollinear(seg.handleIn)
+      const mirror = !alt && colinear
+      if (isOut) {
+        seg.handleOut = localH
+        if (mirror) seg.handleIn = seg.handleOut.multiply(-seg.handleIn.length / seg.handleOut.length)
+      } else {
+        seg.handleIn = localH
+        if (mirror) seg.handleOut = seg.handleIn.multiply(-seg.handleOut.length / seg.handleIn.length)
+      }
+      reshapeMoved = true
+      reshapeLast = p
+      syncReshapePts()
+      return
+    }
+
+    if (reshapeOp === 'move') {
+      const t = new S.Point(dx, dy)
+      for (const it of reshapeItems()) it.translate(t)
+      reshapeMoved = true
+      reshapeLast = p
+      syncReshapePts()
+    }
+  }
+
+  function endReshape() {
+    if (!scope) return
+    const S = scope
+    if (reshapeOp === 'box') {
+      const r = store.selection
+      store.selection = null
+      if (r && r.w >= 2 && r.h >= 2) {
+        // 框选：框内锚点连同其对象一起选中（Shift=加选）
+        const rect = new S.Rectangle(r.x, r.y, r.w, r.h)
+        if (!reshapeBoxAdditive) {
+          selected.clear()
+          reshapeSel.clear()
+        }
+        const layer = activeLayer()
+        if (layer) {
+          for (const it of layer.children) {
+            if (it === bitmapRaster) continue
+            if (!(it instanceof S.Path || it instanceof S.CompoundPath)) continue
+            let hitAny = false
+            for (const seg of (it as paper.Path).segments) {
+              const c = it.localToGlobal(seg.point)
+              if (rect.contains(new S.Point(c.x, c.y))) {
+                reshapeSel.add(seg)
+                hitAny = true
+              }
+            }
+            if (hitAny) selected.add(it)
+          }
+        }
+        syncVectorSelBox()
+        syncReshapePts()
+      } else if (!reshapeBoxAdditive) {
+        // 点击空白无框 → 取消全部选择
+        clearSelection()
+      }
+    } else if (
+      (reshapeOp === 'move' || reshapeOp === 'point' || reshapeOp === 'handle') &&
+      reshapeMoved &&
+      reshapeSnapshot
+    ) {
+      undoStack.push(reshapeSnapshot)
+      if (undoStack.length > HISTORY_LIMIT) undoStack.shift()
+      redoStack = []
+      syncHistoryFlags()
+      markDirty()
+    } else if (reshapeOp === 'point' && !reshapeMoved) {
+      // 未拖动 → 执行挂起的删除/反选（click 语义）
+      if (reshapePendingDelete && reshapePendingDelete.path && reshapePendingDelete.path.parent) {
+        if (reshapeSnapshot) {
+          undoStack.push(reshapeSnapshot)
+          if (undoStack.length > HISTORY_LIMIT) undoStack.shift()
+          redoStack = []
+          syncHistoryFlags()
+        }
+        const del = reshapePendingDelete
+        reshapeRemovePoint(del)
+        reshapeSel.delete(del)
+        markDirty()
+        syncReshapePts()
+      } else if (reshapePendingDesel) {
+        if (reshapeInvertDesel) {
+          const keep = reshapePendingDesel
+          reshapeSel.clear()
+          reshapeSel.add(keep)
+        } else {
+          reshapeSel.delete(reshapePendingDesel)
+        }
+        syncReshapePts()
+      }
+    }
+    reshapeOp = 'none'
+    reshapeLast = null
+    reshapeDownPt = null
+    reshapeSnapshot = null
+    reshapeMoved = false
+    reshapePendingDelete = null
+    reshapePendingDesel = null
+    reshapeInvertDesel = false
+    reshapeOrigPts.clear()
+    reshapeHandleSeg = null
+    reshapeHandleHit = null
+    reshapeBoxAnchor = null
+    reshapeBoxAdditive = false
+  }
+
+  /**
+   * 顶栏「曲线」：把选中锚点曲线化（mode-tools.handleCurvePoints 同款算法）。
+   * 无柄双邻点：柄平行于前邻→后邻连线；端点：凸侧法线与回看方向的平均；
+   * 第二柄 = 第一柄镜像（共线等长）——此即「曲线点」定义。
+   */
+  function curveSelectedPoints() {
+    if (!scope || reshapeSel.size === 0) return false
+    pushHistory()
+    let changed = false
+    for (const seg of reshapeSel) {
+      const prev = seg.previous
+      const next = seg.next
+      if (!prev && !next) continue // 单点路径无可 curve
+      const isCurved =
+        (!prev || seg.handleIn.length > 0) &&
+        (!next || seg.handleOut.length > 0) &&
+        (prev && next ? seg.handleOut.isCollinear(seg.handleIn) : true)
+      if (isCurved) continue
+      const noHandles = seg.handleIn.length === 0 && seg.handleOut.length === 0
+      if (prev && next && noHandles) {
+        seg.handleIn = prev.point
+          .subtract(next.point)
+          .normalize()
+          .multiply(prev.curve.length * HANDLE_RATIO)
+      } else if (prev && !next && seg.handleIn.length === 0) {
+        const convexity = prev.curve.getCurvatureAtTime(0.5) < 0 ? -1 : 1
+        seg.handleIn = prev.curve
+          .getNormalAtTime(1)
+          .multiply(convexity)
+          .add(prev.point.subtract(seg.point).normalize())
+          .normalize()
+          .multiply(prev.curve.length * HANDLE_RATIO)
+      } else if (next && !prev && seg.handleOut.length === 0) {
+        const convexity = seg.curve.getCurvatureAtTime(0.5) < 0 ? -1 : 1
+        seg.handleOut = seg.curve
+          .getNormalAtTime(0)
+          .multiply(convexity)
+          .add(next.point.subtract(seg.point).normalize())
+          .normalize()
+          .multiply(seg.curve.length * HANDLE_RATIO)
+      }
+      if (seg.handleIn.length > 0 && next) seg.handleOut = seg.handleIn.multiply(-1)
+      else if (seg.handleOut.length > 0 && prev) seg.handleIn = seg.handleOut.multiply(-1)
+      changed = true
+    }
+    if (changed) {
+      markDirty()
+      syncReshapePts()
+    } else {
+      popHistory()
+    }
+    return changed
+  }
+
+  /** 顶栏「折线」：选中锚点清空两柄变尖角（mode-tools.handlePointPoints 同款） */
+  function pointSelectedPoints() {
+    if (reshapeSel.size === 0) return false
+    pushHistory()
+    const zero = scope ? new scope.Point(0, 0) : null
+    let changed = false
+    for (const seg of reshapeSel) {
+      if (seg.handleIn.length > 0 || seg.handleOut.length > 0) {
+        seg.handleIn = zero!
+        seg.handleOut = zero!
+        changed = true
+      }
+    }
+    if (changed) {
+      markDirty()
+      syncReshapePts()
+    } else {
+      popHistory()
+    }
+    return changed
+  }
+
+  /** 方向键微移（reshape-tool.handleKeyDown 同款：优先移锚点，无锚点选中则移整项） */
+  function reshapeNudge(key: string, repeat: boolean): boolean {
+    if (!scope || store.activeTool !== 'reshape' || store.mode !== 'vector') return false
+    const S = scope
+    const d = 1 / Math.max(0.1, store.zoom)
+    let dx = 0
+    let dy = 0
+    if (key === 'ArrowUp') dy = -d
+    else if (key === 'ArrowDown') dy = d
+    else if (key === 'ArrowLeft') dx = -d
+    else if (key === 'ArrowRight') dx = d
+    else return false
+    const t = new S.Point(dx, dy)
+    if (reshapeSel.size > 0) {
+      if (!repeat) pushHistory() // 按住 repeat 合并为一步
+      for (const seg of reshapeSel) {
+        seg.point = seg.path.globalToLocal(seg.path.localToGlobal(seg.point).add(t))
+      }
+      markDirty()
+      syncReshapePts()
+      return true
+    }
+    const items = reshapeItems()
+    if (items.length > 0) {
+      if (!repeat) pushHistory()
+      for (const it of items) it.translate(t)
+      markDirty()
+      syncReshapePts()
+      return true
+    }
+    return false
+  }
+
+  /** Delete/Backspace：删除选中锚点（有锚点选中时优先于对象删除） */
+  function reshapeDeletePoints(): boolean {
+    if (store.activeTool !== 'reshape' || store.mode !== 'vector' || reshapeSel.size === 0) {
+      return false
+    }
+    pushHistory()
+    for (const seg of Array.from(reshapeSel)) {
+      reshapeRemovePoint(seg)
+      reshapeSel.delete(seg)
+    }
+    markDirty()
+    syncReshapePts()
+    return true
+  }
+
+  /** Escape：先清锚点选择，再清对象选择（返回是否已处理） */
+  function reshapeEscape(): boolean {
+    if (store.activeTool !== 'reshape' || store.mode !== 'vector') return false
+    if (reshapeSel.size > 0) {
+      reshapeSel.clear()
+      syncReshapePts()
+      return true
+    }
+    if (selected.size > 0) {
+      clearSelection()
+      return true
+    }
+    return false
   }
 
   /** 橡皮手势状态：首次命中才压栈（未命中不产生空撤销步）；拖过整段只记一步、结束统一刷缩略图 */
@@ -1922,8 +2568,10 @@ export function usePaperScope(
       eraseAt(p)
     } else if (tool === 'select') {
       beginSelect(p, e.shiftKey)
+    } else if (tool === 'reshape') {
+      beginReshape(p, e.shiftKey, e.timeStamp)
     }
-    // reshape / text / eyedropper：占位（Stage 3/4）
+    // text / eyedropper：占位（Stage 3/4）
   }
 
   function onPointerMove(e: PointerEvent) {
@@ -1971,6 +2619,8 @@ export function usePaperScope(
       eraseLast = p
     } else if (tool === 'select') {
       continueSelect(p, e.shiftKey)
+    } else if (tool === 'reshape') {
+      continueReshape(p, e.shiftKey, e.altKey)
     }
   }
 
@@ -1984,6 +2634,8 @@ export function usePaperScope(
       endShape(p, e.shiftKey)
     } else if (tool === 'select') {
       endSelect()
+    } else if (tool === 'reshape') {
+      endReshape()
     } else if (tool === 'fill') {
       fillRelease()
     } else if (tool === 'eraser') {
@@ -2150,6 +2802,7 @@ export function usePaperScope(
     fillPreview = null // scope 已销毁，仅丢引用（无须还原）
     fillDown = false
     fillPushed = false
+    clearReshapeOverlay()
     histMap.clear()
     undoStack = []
     redoStack = []
@@ -2178,6 +2831,21 @@ export function usePaperScope(
     () => {
       restoreFillPreview() // 切工具/缩放 → 悬停态失效还原（再次移入会重新预览）
       updateCursor()
+    }
+  )
+
+  // 塑形工具互斥：进入=收起变换框、显示已选对象的锚点；离开=清锚点显示并恢复变换框
+  watch(
+    () => store.activeTool,
+    (t) => {
+      if (t !== 'reshape') {
+        clearReshapeOverlay()
+        syncVectorSelBox() // 切回 select 等：reshape 期间被抑制的变换框按选中状态重建
+      } else {
+        selFrame = null
+        store.vectorSelBox = null
+        syncReshapePts()
+      }
     }
   )
 
@@ -2218,6 +2886,16 @@ export function usePaperScope(
     layerMove,
     /** 收起选中（Esc 路由；清 selected 与变换框） */
     deselect: clearSelection,
+    /** 塑形：选中锚点曲线化（顶栏「曲线」按钮） */
+    curveSelectedPoints,
+    /** 塑形：选中锚点折线化（顶栏「折线」按钮） */
+    pointSelectedPoints,
+    /** 塑形：方向键微移（返回是否已处理） */
+    reshapeNudge,
+    /** 塑形：删除选中锚点（返回是否已处理，优先于对象删除） */
+    reshapeDeletePoints,
+    /** 塑形：Escape 分级清除（先锚点后对象，返回是否已处理） */
+    reshapeEscape,
     syncActiveFrame,
     onFrameAdded,
     onFrameRemoved,

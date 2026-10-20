@@ -168,6 +168,10 @@ const vectorBoxPoints = computed(() => {
   return box.corners.map(c => `${c.x},${c.y}`).join(' ')
 })
 
+// ─── 塑形锚点 overlay（SVG，屏幕尺寸恒定：8px 锚点圆点 / 6.5px 手柄圆点）───
+const boxPtSize = computed(() => 8 / Math.max(0.1, store.zoom))
+const boxHandleDot = computed(() => 6.5 / Math.max(0.1, store.zoom))
+
 /**
  * 画笔/橡皮自绘光标圈（矢量模式，Scratch 同款画布内圈）：
  * 位于 overlay（与 artboard 同 transform）→ 位置用画板逻辑坐标、
@@ -196,14 +200,20 @@ function onStageKeydown(e: KeyboardEvent) {
 
   if (store.mode === 'vector') {
     if (e.key === 'Escape') {
-      // 收起矢量选中（引擎侧同步清 selected 与变换框）
-      vectorEngine.deselect()
+      // 塑形：先清锚点选择再清对象选择；其余收起矢量选中
+      if (!vectorEngine.reshapeEscape()) vectorEngine.deselect()
       e.preventDefault()
     } else if (e.key === 'Delete' || e.key === 'Backspace') {
-      if (store.vectorSelectedCount > 0) {
+      // 塑形有锚点选中时删锚点，否则删整个对象
+      if (vectorEngine.reshapeDeletePoints()) {
+        e.preventDefault()
+      } else if (store.vectorSelectedCount > 0) {
         vectorEngine.deleteSelection()
         e.preventDefault()
       }
+    } else if (e.key.startsWith('Arrow')) {
+      // 塑形方向键微移（优先锚点；按住 repeat 合并为一步撤销）
+      if (vectorEngine.reshapeNudge(e.key, e.repeat)) e.preventDefault()
     } else if (mod && (e.key === 'c' || e.key === 'C')) {
       vectorEngine.copySelection()
       e.preventDefault()
@@ -395,6 +405,9 @@ defineExpose({
   groupSelection: () => vectorEngine.groupSelection(),
   ungroupSelection: () => vectorEngine.ungroupSelection(),
   layerMove: (dir: 'up' | 'down') => vectorEngine.layerMove(dir),
+  /** 塑形：选中锚点曲线化/折线化（顶栏按钮路由） */
+  curveSelectedPoints: () => vectorEngine.curveSelectedPoints(),
+  pointSelectedPoints: () => vectorEngine.pointSelectedPoints(),
   getCanvas,
 })
 </script>
@@ -504,6 +517,73 @@ defineExpose({
             :stroke="SEL_DEEP"
             :stroke-width="1.2 * boxStrokeInv"
           />
+        </svg>
+        <!-- 塑形选中对象高亮（reshape 工具）：轮廓线 + 锚点圆点 + 选中点的贝塞尔手柄
+             （手柄仅选中锚点下发；所属项被全选时引擎隐藏，对齐 Scratch） -->
+        <svg
+          v-if="store.reshapePts && store.mode === 'vector'"
+          class="transform-box"
+          :viewBox="`0 0 ${store.artboardWidth} ${store.artboardHeight}`"
+          preserveAspectRatio="none"
+        >
+          <!-- 对象轮廓（描边高亮盖在内容上、锚点之下；1.5/zoom → 屏幕恒定 1.5px） -->
+          <path
+            v-for="(d, i) in store.reshapeOutline || []"
+            :key="'o' + i"
+            :d="d"
+            fill="none"
+            :stroke="SEL"
+            :stroke-width="1.5 * boxStrokeInv"
+            stroke-linejoin="round"
+            stroke-linecap="round"
+          />
+          <g v-for="(pt, i) in store.reshapePts" :key="i">
+            <template v-if="pt.handleIn">
+              <line
+                :x1="pt.x"
+                :y1="pt.y"
+                :x2="pt.handleIn.x"
+                :y2="pt.handleIn.y"
+                stroke="rgba(18, 20, 38, 0.7)"
+                :stroke-width="1.8 * boxStrokeInv"
+              />
+              <circle
+                :cx="pt.handleIn.x"
+                :cy="pt.handleIn.y"
+                :r="boxHandleDot / 2"
+                fill="#ffffff"
+                :stroke="SEL_DEEP"
+                :stroke-width="1.2 * boxStrokeInv"
+              />
+            </template>
+            <template v-if="pt.handleOut">
+              <line
+                :x1="pt.x"
+                :y1="pt.y"
+                :x2="pt.handleOut.x"
+                :y2="pt.handleOut.y"
+                stroke="rgba(18, 20, 38, 0.7)"
+                :stroke-width="1.8 * boxStrokeInv"
+              />
+              <circle
+                :cx="pt.handleOut.x"
+                :cy="pt.handleOut.y"
+                :r="boxHandleDot / 2"
+                fill="#ffffff"
+                :stroke="SEL_DEEP"
+                :stroke-width="1.2 * boxStrokeInv"
+              />
+            </template>
+            <!-- 锚点圆点：未选中白底、选中填充主色 -->
+            <circle
+              :cx="pt.x"
+              :cy="pt.y"
+              :r="boxPtSize / 2"
+              :fill="pt.selected ? SEL : '#ffffff'"
+              :stroke="SEL_DEEP"
+              :stroke-width="1.4 * boxStrokeInv"
+            />
+          </g>
         </svg>
         <!-- 变换框（浮动选区）：独立 SVG 矢量图层——专业绘图软件做法，
              绝不画进图像画布（防烙印），矢量渲染任意缩放平滑 -->

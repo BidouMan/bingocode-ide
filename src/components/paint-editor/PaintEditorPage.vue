@@ -196,6 +196,8 @@ async function onSave() {
       @ungroup="artboardRef?.ungroupSelection()"
       @layer-up="artboardRef?.layerMove('up')"
       @layer-down="artboardRef?.layerMove('down')"
+      @curve-points="artboardRef?.curveSelectedPoints()"
+      @point-points="artboardRef?.pointSelectedPoints()"
     />
     <div class="paint-body">
       <PaintToolbar @clear="artboardRef?.clear()" />

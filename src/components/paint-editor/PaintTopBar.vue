@@ -17,6 +17,8 @@ import iconGroup from '../../assets/icons/吸附锚点.svg'
 import iconUngroup from '../../assets/icons/重置锚点.svg'
 import iconLayerUp from '../../assets/icons/上移图层.svg'
 import iconLayerDown from '../../assets/icons/下移图层.svg'
+import iconCurve from '../../assets/icons/曲线模式.svg'
+import iconStraight from '../../assets/icons/折线模式.svg'
 
 const props = defineProps<{
   /** 顶栏标题（编辑既有角色时显示「绘制 - 角色名」） */
@@ -40,6 +42,9 @@ const emit = defineEmits<{
   ungroup: []
   layerUp: []
   layerDown: []
+  /** 塑形：选中锚点曲线化/折线化 */
+  curvePoints: []
+  pointPoints: []
 }>()
 
 const store = usePaintStore()
@@ -143,6 +148,27 @@ function commitSize(axis: 'w' | 'h', e: Event) {
     >
       <img :src="iconCrop" class="icon-sm" draggable="false" />
     </button>
+
+    <!-- 塑形工具专属：选中锚点的曲线/折线模式切换（对齐 Scratch reshape 顶栏按钮） -->
+    <div v-if="store.mode === 'vector' && store.activeTool === 'reshape'" class="op-group">
+      <button
+        class="icon-btn"
+        :disabled="!store.reshapeHasUncurved"
+        v-tooltip="'选中锚点转为曲线'"
+        @click="emit('curvePoints')"
+      >
+        <img :src="iconCurve" class="icon-sm" draggable="false" />
+      </button>
+      <button
+        class="icon-btn"
+        :disabled="!store.reshapeHasPointed"
+        v-tooltip="'选中锚点转为折线（尖角）'"
+        @click="emit('pointPoints')"
+      >
+        <img :src="iconStraight" class="icon-sm" draggable="false" />
+      </button>
+      <div class="op-divider"></div>
+    </div>
 
     <!-- 选区/对象操作组（工业软件 options bar 风格，按模式切换可用性） -->
     <div class="op-group">

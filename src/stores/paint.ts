@@ -88,6 +88,28 @@ export const usePaintStore = defineStore('paint', () => {
     rotateAt: { x: number; y: number }
   } | null>(null)
 
+  // ─── 塑形工具锚点状态（usePaperScope 写入，PaintArtboard SVG overlay 渲染）───
+  /**
+   * 塑形工具选中对象的全部锚点（画板逻辑坐标）。手柄为绝对坐标（锚点+偏移经
+   * localToGlobal），null=该侧无柄；选中锚点所属项被全选时手柄不下发
+   *（对齐 Scratch fullySelected 隐藏手柄语义）。
+   */
+  const reshapePts = ref<
+    {
+      x: number
+      y: number
+      handleIn: { x: number; y: number } | null
+      handleOut: { x: number; y: number } | null
+      selected: boolean
+    }[] | null
+  >(null)
+  /** 选中对象的轮廓 path data（项目坐标，与 reshapePts 同生同灭，SVG overlay 描边高亮） */
+  const reshapeOutline = ref<string[] | null>(null)
+  /** 选中锚点中存在未曲线化的点（顶栏「曲线」按钮可用性） */
+  const reshapeHasUncurved = ref(false)
+  /** 选中锚点中存在带手柄的点（顶栏「折线」按钮可用性） */
+  const reshapeHasPointed = ref(false)
+
   // ─── 位图选区状态（引擎写入，顶栏按钮/蚂蚁线 overlay 读取）───
   /** 当前选区矩形（画板逻辑坐标整数）：框选中=拖动矩形；有浮动选区=其 AABB */
   const selection = ref<{ x: number; y: number; w: number; h: number } | null>(null)
@@ -171,6 +193,10 @@ export const usePaintStore = defineStore('paint', () => {
     hasVectorClipboard.value = false
     vectorContent.value = false
     vectorSelBox.value = null
+    reshapePts.value = null
+    reshapeOutline.value = null
+    reshapeHasUncurved.value = false
+    reshapeHasPointed.value = false
     selection.value = null
     floatActive.value = false
     transformBox.value = null
@@ -206,6 +232,10 @@ export const usePaintStore = defineStore('paint', () => {
     hasVectorClipboard,
     vectorContent,
     vectorSelBox,
+    reshapePts,
+    reshapeOutline,
+    reshapeHasUncurved,
+    reshapeHasPointed,
     selection,
     floatActive,
     transformBox,
