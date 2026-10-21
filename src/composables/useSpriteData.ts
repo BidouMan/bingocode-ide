@@ -17,12 +17,25 @@ export interface SpriteAnimation {
   frameNames?: string[]
 }
 
+/**
+ * 自定义碰撞形状（画布坐标系，与 pivot 同一坐标空间）。
+ * 语义对齐 Godot：rect = RectangleShape2D（中心+尺寸）；capsule = CapsuleShape2D
+ * （竖直取向，height 含两端圆帽总高）；polygon 点集（运行时降 AABB，与地图碰撞编辑器先例一致）。
+ * 无此字段 = 自动碰撞（引擎按内容包围盒计算，学生默认路径）。
+ */
+export type SpriteCollisionShape =
+  | { type: 'rect'; cx: number; cy: number; w: number; h: number }
+  | { type: 'capsule'; cx: number; cy: number; radius: number; height: number }
+  | { type: 'polygon'; points: [number, number][] }
+
 export interface BsfFrameMeta {
   name: string
   rect: { x: number; y: number; w: number; h: number }
   offset: { x: number; y: number }
   /** 帧级中心点覆盖（画布坐标）：缺省时用 BsfMeta.pivot 统一值 */
   pivot?: { x: number; y: number }
+  /** 帧级碰撞覆盖：缺省时用 BsfMeta.collision，再缺省走引擎自动碰撞 */
+  collision?: SpriteCollisionShape
 }
 
 /** .bsf（Bingo Sheet File）sheet 元数据：保存 manifest 时完整回写 */
@@ -30,6 +43,8 @@ export interface BsfMeta {
   canvas: { w: number; h: number }
   pivot: { x: number; y: number }
   frames: BsfFrameMeta[]
+  /** 统一碰撞形状：缺省 = 自动碰撞（引擎内容包围盒） */
+  collision?: SpriteCollisionShape
 }
 
 export interface SpriteData {
@@ -230,6 +245,7 @@ async function buildBsfSpriteData(manifest: any, sheetImage: HTMLImageElement): 
       canvas: canvasSize,
       pivot: manifest.pivot || { x: canvasSize.w / 2, y: canvasSize.h / 2 },
       frames: manifest.frames,
+      ...(manifest.collision ? { collision: manifest.collision } : {}),
     },
   }
 }
@@ -271,6 +287,8 @@ export async function saveBsfManifest(dirPath: string, sprite: SpriteData): Prom
     sheet: 'sheet.png',
     canvas: sprite.bsf.canvas,
     pivot: sprite.bsf.pivot,
+    // 自定义碰撞（可选）：无 = 引擎自动碰撞
+    ...(sprite.bsf.collision ? { collision: sprite.bsf.collision } : {}),
     frames: sprite.bsf.frames,
     clips,
     // 默认渲染帧（编辑器选中帧）：可选字段，读取方缺省回退第一帧

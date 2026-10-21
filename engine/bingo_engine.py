@@ -1348,6 +1348,8 @@ class Sprite:
             "x": (canvas.get("w") or 0) / 2.0,
             "y": (canvas.get("h") or 0) / 2.0,
         }
+        # 自定义碰撞形状（可选）：无/非法 = 自动碰撞（内容包围盒）
+        self._bsf_collision = manifest.get("collision")
         self._bsf_clips = {
             c.get("name"): c
             for c in manifest.get("clips", [])
@@ -1461,6 +1463,8 @@ class Sprite:
         坐标语义（与旧 .bgs 的"内容重心=x/y"对齐）：
         - 引擎 (x, y) = manifest.pivot（角色所在点，见 bsf-api §4）
         - 纹理 = 帧 rect（紧致裁剪），vox/voy = pivot 相对帧纹理中心的偏移
+        - 自定义碰撞（manifest collision，画布坐标）存在时覆盖 _content_bbox，
+          缺省回退帧内容框（= 自动碰撞）；胶囊/多边形运行时按其包围盒参与 AABB 判定
         """
         idx = getattr(self, "_bsf_frame_index", 0)
         if (
@@ -1480,10 +1484,20 @@ class Sprite:
         # 前端 anchor=0.5：纹理坐标系下 (0,0)-(rw,rh) 即当前帧内容
         self._orig_w, self._orig_h = rw, rh
         self._content_w, self._content_h = rw, rh
-        self._content_bbox = (0, 0, rw, rh)
         # pivot 落在世界 (x, y) ⇒ pivot 相对纹理中心的偏移即 PixiJS pivot
         self._visual_offset_x = pivot["x"] - (offset["x"] + rw / 2.0)
         self._visual_offset_y = pivot["y"] - (offset["y"] + rh / 2.0)
+        # 碰撞框：自定义形状（帧覆盖 > 统一值）优先，否则帧内容框（自动碰撞）
+        collision = frame.get("collision") or getattr(self, "_bsf_collision", None)
+        bbox = self._collision_canvas_bbox(collision)
+        if bbox is None:
+            self._content_bbox = (0, 0, rw, rh)
+        else:
+            x0, y0, x1, y1 = bbox
+            self._content_bbox = (
+                x0 - offset["x"], y0 - offset["y"],
+                x1 - offset["x"], y1 - offset["y"],
+            )
 
         self._cached_hitbox = [0, 0, rw, rh]
         self._cached_image = self.image
@@ -1491,6 +1505,40 @@ class Sprite:
         # 帧切换后让 _get_hitbox_rect 的帧级缓存失效（它不感知 sheet 帧变化）
         self._cached_rect_frame = None
         return self._cached_hitbox
+
+    def _collision_canvas_bbox(self, collision):
+        """自定义碰撞形状 → 画布坐标系 AABB (x0, y0, x1, y1)；无有效形状返回 None。
+
+        rect: 中心+尺寸（Godot RectangleShape2D 语义）
+        capsule: 竖直取向，height 含两端圆帽总高（Godot CapsuleShape2D 语义）→ 外接矩形
+        polygon: 点集范围（与地图碰撞编辑器运行时降级为 AABB 的先例一致）
+        """
+        if not isinstance(collision, dict):
+            return None
+        ctype = collision.get("type")
+        try:
+            if ctype == "rect":
+                cx, cy = float(collision.get("cx", 0)), float(collision.get("cy", 0))
+                w = max(1.0, float(collision.get("w", 1)))
+                h = max(1.0, float(collision.get("h", 1)))
+                return (cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0)
+            if ctype == "capsule":
+                cx, cy = float(collision.get("cx", 0)), float(collision.get("cy", 0))
+                r = max(0.5, float(collision.get("radius", 1)))
+                total_h = max(2.0 * r, float(collision.get("height", 2.0 * r)))
+                return (cx - r, cy - total_h / 2.0, cx + r, cy + total_h / 2.0)
+            if ctype == "polygon":
+                pts = collision.get("points") or []
+                xs, ys = [], []
+                for p in pts:
+                    if isinstance(p, (list, tuple)) and len(p) >= 2:
+                        xs.append(float(p[0]))
+                        ys.append(float(p[1]))
+                if len(xs) >= 3:
+                    return (min(xs), min(ys), max(xs), max(ys))
+        except (TypeError, ValueError):
+            return None
+        return None
 
     def _get_hitbox_rect(self):
         """获取当前角色在舞台上的真实内容包围盒 [left, top, right, bottom]

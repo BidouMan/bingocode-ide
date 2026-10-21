@@ -4,8 +4,10 @@ import { useResourceStore } from '../../stores/resource'
 import { useEditorStore } from '../../stores/editor'
 import type { SpriteData, SpriteAnimation } from '../../composables/useSpriteData'
 import { readSpriteFromPath, revokeSpriteUrls, saveSpriteConfig, saveBsfManifest } from '../../composables/useSpriteData'
+import type { SpriteCollisionShape } from '../../composables/useSpriteData'
 import { appendFramesToSprite } from '../../composables/appendSpriteFrames'
 import FrameUploadDrawer from './FrameUploadDrawer.vue'
+import CollisionShapeOverlay from './CollisionShapeOverlay.vue'
 
 const emit = defineEmits<{
   /** 造型列表抽屉：打开绘制页为当前角色绘制新帧（编辑模式，自动新建空白帧） */
@@ -118,6 +120,7 @@ async function loadSprite(item: { id: string; name: string; path: string }) {
     selectedAnim.value = null
     stopAnimation()
     annoScope.value = 'all'
+    activeAnnoLayer.value = 'pivot'
     annoDefaultPivot.value = currentSprite.value.bsf
       ? { ...currentSprite.value.bsf.pivot }
       : null
@@ -362,6 +365,135 @@ function resetAnno() {
   scheduleSave()
 }
 
+// ═══ 碰撞标注（仅 .bsf；无自定义 = 引擎自动碰撞，学生默认路径） ═══
+
+/** 当前激活的标注图层：中心点编辑 / 碰撞编辑（单选，同一套画布框架） */
+const activeAnnoLayer = ref<'pivot' | 'collision'>('pivot')
+
+/** 第 i 帧的有效碰撞形状：帧覆盖 > 统一值 > null（自动碰撞） */
+function effCollision(i: number): SpriteCollisionShape | null {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf || i < 0 || i >= bsf.frames.length) return null
+  return bsf.frames[i].collision ?? bsf.collision ?? null
+}
+
+function hasCollisionOverride(i: number): boolean {
+  return !!currentSprite.value?.bsf?.frames[i]?.collision
+}
+
+const effCol = computed(() => effCollision(annoFrameIndex.value))
+
+/**
+ * 画布显示用碰撞形状：自定义优先；自动态显示当前帧内容框
+ * （= 引擎自动碰撞实际用的框，所见即所得；拖动手柄会立即转为自定义矩形）
+ */
+const collisionDisplay = computed<SpriteCollisionShape>(() =>
+  effCol.value ?? frameContentCollision(),
+)
+
+function setCollision(shape: SpriteCollisionShape) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  if (annoScope.value === 'all') {
+    bsf.collision = shape
+  } else {
+    const f = bsf.frames[annoFrameIndex.value]
+    if (f) f.collision = shape
+  }
+  scheduleSave()
+}
+
+function onCollisionUpdate(shape: SpriteCollisionShape) {
+  setCollision(shape)
+}
+
+function clearCollisionOverride() {
+  const f = currentSprite.value?.bsf?.frames[annoFrameIndex.value]
+  if (!f) return
+  delete f.collision
+  scheduleSave()
+}
+
+/** 自动：删除自定义碰撞（统一值 + 全部帧覆盖），回引擎内容包围盒默认 */
+function resetCollisionToAuto() {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  delete bsf.collision
+  for (const f of bsf.frames) delete f.collision
+  scheduleSave()
+}
+
+/** 当前帧内容框（画布坐标）→ 自定义碰撞初值：与自动碰撞行为一致起步 */
+function frameContentCollision(): SpriteCollisionShape {
+  const bsf = currentSprite.value!.bsf!
+  const f = bsf.frames[annoFrameIndex.value]
+  return {
+    type: 'rect',
+    cx: f.offset.x + f.rect.w / 2,
+    cy: f.offset.y + f.rect.h / 2,
+    w: f.rect.w,
+    h: f.rect.h,
+  }
+}
+
+function activateAnnoLayer(layer: 'pivot' | 'collision') {
+  activeAnnoLayer.value = layer
+  if (layer !== 'collision') return
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  // 首次启用：以当前帧内容框初始化统一碰撞（行为与自动一致，用户在此基础上调）
+  if (!bsf.collision && !bsf.frames[annoFrameIndex.value]?.collision) {
+    bsf.collision = frameContentCollision()
+    scheduleSave()
+  }
+}
+
+/** 形状类型互转：保持当前包围盒中心/范围（Godot 无此机制，对用户友好）；自动态以当前帧内容框为基准 */
+function convertCollisionType(type: 'rect' | 'capsule' | 'polygon') {
+  const cur = effCol.value ?? frameContentCollision()
+  if (cur.type === type && effCol.value) return
+  const b = collisionBBox(cur)
+  const cx = Math.round(((b.x0 + b.x1) / 2) * 2) / 2
+  const cy = Math.round(((b.y0 + b.y1) / 2) * 2) / 2
+  const w = Math.max(0.5, Math.round((b.x1 - b.x0) * 2) / 2)
+  const h = Math.max(0.5, Math.round((b.y1 - b.y0) * 2) / 2)
+  if (type === 'rect') {
+    setCollision({ type: 'rect', cx, cy, w, h })
+  } else if (type === 'capsule') {
+    const r = Math.max(0.5, Math.min(w, h) / 2)
+    setCollision({ type: 'capsule', cx, cy, radius: r, height: Math.max(2 * r, h) })
+  } else {
+    const x0 = cx - w / 2
+    const x1 = cx + w / 2
+    const y0 = cy - h / 2
+    const y1 = cy + h / 2
+    setCollision({
+      type: 'polygon',
+      points: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(
+        ([x, y]) => [Math.round(x * 2) / 2, Math.round(y * 2) / 2] as [number, number],
+      ),
+    })
+  }
+}
+
+/** 碰撞形状 → 画布系 AABB（与引擎 _collision_canvas_bbox 同一语义） */
+function collisionBBox(shape: SpriteCollisionShape): { x0: number; y0: number; x1: number; y1: number } {
+  if (shape.type === 'rect') {
+    return {
+      x0: shape.cx - shape.w / 2, y0: shape.cy - shape.h / 2,
+      x1: shape.cx + shape.w / 2, y1: shape.cy + shape.h / 2,
+    }
+  }
+  if (shape.type === 'capsule') {
+    const r = Math.max(0.5, shape.radius)
+    const h = Math.max(2 * r, shape.height)
+    return { x0: shape.cx - r, y0: shape.cy - h / 2, x1: shape.cx + r, y1: shape.cy + h / 2 }
+  }
+  const xs = shape.points.map(p => p[0])
+  const ys = shape.points.map(p => p[1])
+  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) }
+}
+
 /** 「脚底」预设：所有帧内容包围盒的底部中心（贴地角色锚点） */
 function feetPresetPoint(): { x: number; y: number } {
   const bsf = currentSprite.value?.bsf!
@@ -403,19 +535,6 @@ const pivotGhosts = computed(() => {
     out.push({ i: ni, x: np.x, y: np.y })
   }
   return out
-})
-
-/** 预览区只读中心点标记（百分比定位，随预览缩放反向补偿保持点大小） */
-const previewDotStyle = computed(() => {
-  const bsf = currentSprite.value?.bsf
-  if (!bsf) return {}
-  const p = effPivot(selectedFrameIndex.value)
-  if (!p) return {}
-  return {
-    left: `${(p.x / bsf.canvas.w) * 100}%`,
-    top: `${(p.y / bsf.canvas.h) * 100}%`,
-    transform: `translate(-50%, -50%) scale(${1 / previewScale.value})`,
-  }
 })
 
 const pivotHandleStyle = computed(() => {
@@ -614,6 +733,11 @@ onBeforeUnmount(() => {
             v-if="hasPivotOverride(idx)"
             class="pivot-override-badge"
           ></span>
+          <!-- 碰撞单帧覆盖标记 -->
+          <span
+            v-if="hasCollisionOverride(idx)"
+            class="collision-override-badge"
+          ></span>
         </div>
       </div>
       <FrameUploadDrawer
@@ -625,58 +749,114 @@ onBeforeUnmount(() => {
 
     <!-- 中: 画布列（标注工具条 + 画布） -->
     <div class="canvas-col">
-      <!-- 标注图层工具条：中心点已实现，碰撞/挂点为同一框架的后续图层 -->
+      <!-- 标注图层工具条：图层单选切换，同一画布框架 -->
       <div v-if="canAnno" class="anno-toolbar">
-        <button class="layer-chip active" type="button">
+        <button
+          class="layer-chip"
+          :class="{ active: activeAnnoLayer === 'pivot' }"
+          type="button"
+          @click="activateAnnoLayer('pivot')"
+        >
           <img :src="iconCenterPivot" class="layer-chip-icon" alt="" />中心点
         </button>
-        <button class="layer-chip" type="button" disabled>碰撞<span class="soon">即将</span></button>
-        <button class="layer-chip" type="button" disabled>挂点<span class="soon">即将</span></button>
-        <!-- 与底部浮动条同源的标注控件（共享状态，供对比两版布局） -->
-        <div class="props-sep"></div>
-        <div class="coord-group">
-          <label>X</label>
-          <input
-            class="coord-input"
-            type="number"
-            step="0.5"
-            :value="annoPivot ? annoPivot.x.toFixed(1) : ''"
-            @change="onCoordChange('x', $event)"
-          />
-        </div>
-        <div class="coord-group">
-          <label>Y</label>
-          <input
-            class="coord-input"
-            type="number"
-            step="0.5"
-            :value="annoPivot ? annoPivot.y.toFixed(1) : ''"
-            @change="onCoordChange('y', $event)"
-          />
-        </div>
-        <div class="props-sep"></div>
-        <div class="scope-seg">
-          <button
-            type="button"
-            :class="{ on: annoScope === 'all' }"
-            @click="annoScope = 'all'"
-          >全部帧</button>
-          <button
-            type="button"
-            :class="{ on: annoScope === 'one' }"
-            @click="annoScope = 'one'"
-          >仅当前帧</button>
-        </div>
-        <div class="props-sep"></div>
-        <button class="preset-btn" type="button" @click="applyPivotPreset('center')">中心</button>
-        <button class="preset-btn" type="button" @click="applyPivotPreset('feet')">脚底</button>
-        <button class="preset-btn" type="button" @click="resetAnno">重置</button>
         <button
-          v-if="hasPivotOverride(annoFrameIndex)"
-          class="clear-override-btn"
+          class="layer-chip"
+          :class="{ active: activeAnnoLayer === 'collision' }"
           type="button"
-          @click="clearPivotOverride"
-        >恢复统一</button>
+          @click="activateAnnoLayer('collision')"
+        >碰撞</button>
+        <!-- 标注控件随激活图层切换（与底部浮动条同源，共享状态） -->
+        <template v-if="activeAnnoLayer === 'pivot'">
+          <div class="props-sep"></div>
+          <div class="coord-group">
+            <label>X</label>
+            <input
+              class="coord-input"
+              type="number"
+              step="0.5"
+              :value="annoPivot ? annoPivot.x.toFixed(1) : ''"
+              @change="onCoordChange('x', $event)"
+            />
+          </div>
+          <div class="coord-group">
+            <label>Y</label>
+            <input
+              class="coord-input"
+              type="number"
+              step="0.5"
+              :value="annoPivot ? annoPivot.y.toFixed(1) : ''"
+              @change="onCoordChange('y', $event)"
+            />
+          </div>
+          <div class="props-sep"></div>
+          <button class="preset-btn" type="button" @click="applyPivotPreset('center')">中心</button>
+          <button class="preset-btn" type="button" @click="applyPivotPreset('feet')">脚底</button>
+          <button class="preset-btn" type="button" @click="resetAnno">重置</button>
+          <button
+            v-if="hasPivotOverride(annoFrameIndex)"
+            class="clear-override-btn"
+            type="button"
+            @click="clearPivotOverride"
+          >恢复统一</button>
+          <div class="props-sep"></div>
+          <div class="scope-seg">
+            <button
+              type="button"
+              :class="{ on: annoScope === 'all' }"
+              @click="annoScope = 'all'"
+            >全部帧</button>
+            <button
+              type="button"
+              :class="{ on: annoScope === 'one', 'on-blue': annoScope === 'one' }"
+              @click="annoScope = 'one'"
+            >仅当前帧</button>
+          </div>
+        </template>
+        <template v-else>
+          <div class="props-sep"></div>
+          <div class="scope-seg">
+            <button
+              type="button"
+              :class="{ on: !effCol }"
+              @click="resetCollisionToAuto"
+            >自动</button>
+            <button
+              type="button"
+              :class="{ on: effCol?.type === 'rect' }"
+              @click="convertCollisionType('rect')"
+            >矩形</button>
+            <button
+              type="button"
+              :class="{ on: effCol?.type === 'capsule' }"
+              @click="convertCollisionType('capsule')"
+            >胶囊</button>
+            <button
+              type="button"
+              :class="{ on: effCol?.type === 'polygon' }"
+              @click="convertCollisionType('polygon')"
+            >多边形</button>
+          </div>
+          <div class="props-sep"></div>
+          <button
+            v-if="hasCollisionOverride(annoFrameIndex)"
+            class="clear-override-btn"
+            type="button"
+            @click="clearCollisionOverride"
+          >恢复统一</button>
+          <div class="props-sep"></div>
+          <div class="scope-seg">
+            <button
+              type="button"
+              :class="{ on: annoScope === 'all' }"
+              @click="annoScope = 'all'"
+            >全部帧</button>
+            <button
+              type="button"
+              :class="{ on: annoScope === 'one', 'on-blue': annoScope === 'one' }"
+              @click="annoScope = 'one'"
+            >仅当前帧</button>
+          </div>
+        </template>
       </div>
 
       <div
@@ -701,11 +881,12 @@ onBeforeUnmount(() => {
               v-if="currentSprite?.frames[canvasDisplayIndex]"
               :src="currentSprite.frames[canvasDisplayIndex].url"
               class="canvas-sprite"
+              draggable="false"
               :style="{ imageRendering: imageRenderingStyle }"
             />
-            <!-- 洋葱皮幽灵：相邻帧有效中心点不一致时显示 -->
+            <!-- 洋葱皮幽灵：相邻帧有效中心点不一致时显示（中心点图层） -->
             <div
-              v-for="g in pivotGhosts"
+              v-for="g in (activeAnnoLayer === 'pivot' ? pivotGhosts : [])"
               :key="g.i"
               class="pivot-ghost"
               :style="{ left: `${g.x}px`, top: `${g.y}px` }"
@@ -714,11 +895,11 @@ onBeforeUnmount(() => {
                 <span class="ghost-ring"></span>
               </div>
             </div>
-            <!-- 中心点手柄 -->
+            <!-- 中心点手柄（碰撞图层下弱化显示、不响应交互） -->
             <div
               v-if="annoPivot"
               class="pivot-handle"
-              :class="{ 'is-override': annoScope === 'one' }"
+              :class="{ 'is-override': annoScope === 'one', 'is-inactive': activeAnnoLayer !== 'pivot' }"
               :style="pivotHandleStyle"
               @mousedown="onPivotMouseDown"
             >
@@ -726,55 +907,112 @@ onBeforeUnmount(() => {
                 <div class="pivot-ring"></div>
               </div>
             </div>
+            <!-- 碰撞形状叠加层（自动态显示引擎内容框；拖动手柄立即转为自定义） -->
+            <CollisionShapeOverlay
+              v-if="canAnno && activeAnnoLayer === 'collision' && currentSprite?.bsf"
+              :canvas-w="currentSprite.bsf.canvas.w"
+              :canvas-h="currentSprite.bsf.canvas.h"
+              :shape="collisionDisplay"
+              :zoom="canvasZoom"
+              @update="onCollisionUpdate"
+            />
           </div>
         </div>
 
-        <!-- 底部浮动属性条：作用域 + 数值 + 预设 -->
+        <!-- 底部浮动属性条：按激活图层切换控件组 -->
         <div v-if="canAnno" class="anno-props">
-          <span class="props-title">中心点</span>
-          <div class="coord-group">
-            <label>X</label>
-            <input
-              class="coord-input"
-              type="number"
-              step="0.5"
-              :value="annoPivot ? annoPivot.x.toFixed(1) : ''"
-              @change="onCoordChange('x', $event)"
-            />
-          </div>
-          <div class="coord-group">
-            <label>Y</label>
-            <input
-              class="coord-input"
-              type="number"
-              step="0.5"
-              :value="annoPivot ? annoPivot.y.toFixed(1) : ''"
-              @change="onCoordChange('y', $event)"
-            />
-          </div>
-          <div class="props-sep"></div>
-          <div class="scope-seg">
+          <template v-if="activeAnnoLayer === 'pivot'">
+            <span class="props-title">中心点</span>
+            <div class="coord-group">
+              <label>X</label>
+              <input
+                class="coord-input"
+                type="number"
+                step="0.5"
+                :value="annoPivot ? annoPivot.x.toFixed(1) : ''"
+                @change="onCoordChange('x', $event)"
+              />
+            </div>
+            <div class="coord-group">
+              <label>Y</label>
+              <input
+                class="coord-input"
+                type="number"
+                step="0.5"
+                :value="annoPivot ? annoPivot.y.toFixed(1) : ''"
+                @change="onCoordChange('y', $event)"
+              />
+            </div>
+            <div class="props-sep"></div>
+            <button class="preset-btn" type="button" @click="applyPivotPreset('center')">中心</button>
+            <button class="preset-btn" type="button" @click="applyPivotPreset('feet')">脚底</button>
+            <button class="preset-btn" type="button" @click="resetAnno">重置</button>
             <button
+              v-if="hasPivotOverride(annoFrameIndex)"
+              class="clear-override-btn"
               type="button"
-              :class="{ on: annoScope === 'all' }"
-              @click="annoScope = 'all'"
-            >全部帧</button>
+              @click="clearPivotOverride"
+            >恢复统一</button>
+            <div class="props-sep"></div>
+            <div class="scope-seg">
+              <button
+                type="button"
+                :class="{ on: annoScope === 'all' }"
+                @click="annoScope = 'all'"
+              >全部帧</button>
+              <button
+                type="button"
+                :class="{ on: annoScope === 'one', 'on-blue': annoScope === 'one' }"
+                @click="annoScope = 'one'"
+              >仅当前帧</button>
+            </div>
+          </template>
+          <template v-else>
+            <span class="props-title">碰撞</span>
+            <!-- 类型 toggle：自动 = 引擎内容包围盒（无 manifest 字段），始终显示在画布 -->
+            <div class="scope-seg">
+              <button
+                type="button"
+                :class="{ on: !effCol }"
+                @click="resetCollisionToAuto"
+              >自动</button>
+              <button
+                type="button"
+                :class="{ on: effCol?.type === 'rect' }"
+                @click="convertCollisionType('rect')"
+              >矩形</button>
+              <button
+                type="button"
+                :class="{ on: effCol?.type === 'capsule' }"
+                @click="convertCollisionType('capsule')"
+              >胶囊</button>
+              <button
+                type="button"
+                :class="{ on: effCol?.type === 'polygon' }"
+                @click="convertCollisionType('polygon')"
+              >多边形</button>
+            </div>
+            <div class="props-sep"></div>
             <button
+              v-if="hasCollisionOverride(annoFrameIndex)"
+              class="clear-override-btn"
               type="button"
-              :class="{ on: annoScope === 'one' }"
-              @click="annoScope = 'one'"
-            >仅当前帧</button>
-          </div>
-          <div class="props-sep"></div>
-          <button class="preset-btn" type="button" @click="applyPivotPreset('center')">中心</button>
-          <button class="preset-btn" type="button" @click="applyPivotPreset('feet')">脚底</button>
-          <button class="preset-btn" type="button" @click="resetAnno">重置</button>
-          <button
-            v-if="hasPivotOverride(annoFrameIndex)"
-            class="clear-override-btn"
-            type="button"
-            @click="clearPivotOverride"
-          >恢复统一</button>
+              @click="clearCollisionOverride"
+            >恢复统一</button>
+            <div class="props-sep"></div>
+            <div class="scope-seg">
+              <button
+                type="button"
+                :class="{ on: annoScope === 'all' }"
+                @click="annoScope = 'all'"
+              >全部帧</button>
+              <button
+                type="button"
+                :class="{ on: annoScope === 'one', 'on-blue': annoScope === 'one' }"
+                @click="annoScope = 'one'"
+              >仅当前帧</button>
+            </div>
+          </template>
         </div>
       </div>
     </div>
@@ -793,13 +1031,6 @@ onBeforeUnmount(() => {
               class="preview-image"
               :style="{ imageRendering: imageRenderingStyle }"
             />
-            <!-- 中心点只读标记：绿=统一值 / 蓝=该帧有覆盖 -->
-            <span
-              v-if="canAnno"
-              class="preview-pivot-dot"
-              :class="{ 'is-override': hasPivotOverride(selectedFrameIndex) }"
-              :style="previewDotStyle"
-            ></span>
           </div>
           <!-- FPS 控制 (悬浮在预览底部)：左=拖动滑条，右=帧数手动输入；速度按片段独立保存 -->
           <div class="fps-slider-overlay" :class="{ 'fps-overlay-disabled': !selectedAnim }">
@@ -1058,11 +1289,12 @@ onBeforeUnmount(() => {
 .anno-toolbar .clear-override-btn { padding: 3px 8px; }
 
 /* 中心点手柄（锚点为逻辑坐标，反向缩放保持屏幕大小恒定） */
+/* 中心点手柄：锚点光标用箭头（拖拽区=形状内部才用移动图标） */
 .pivot-handle {
   position: absolute;
   width: 0;
   height: 0;
-  cursor: move;
+  cursor: default;
   z-index: 5;
 }
 .pivot-visual {
@@ -1098,6 +1330,8 @@ onBeforeUnmount(() => {
 }
 .pivot-handle.is-override .pivot-ring::before,
 .pivot-handle.is-override .pivot-ring::after { background: #61afef; }
+/* 碰撞图层激活时中心点手柄弱化（仅作位置参考，不响应交互） */
+.pivot-handle.is-inactive { pointer-events: none; opacity: 0.4; }
 
 /* 洋葱皮幽灵（相邻帧有效中心点） */
 .pivot-ghost {
@@ -1182,7 +1416,7 @@ onBeforeUnmount(() => {
 }
 .scope-seg button:hover { background: var(--bg-hover); }
 .scope-seg button.on { background: var(--accent); color: #10131a; font-weight: 600; }
-.scope-seg button.on:nth-child(2) { background: #61afef; }
+.scope-seg button.on-blue { background: #61afef; }
 .preset-btn {
   padding: 4px 10px;
   border-radius: 4px;
@@ -1206,7 +1440,7 @@ onBeforeUnmount(() => {
 }
 .clear-override-btn:hover { background: rgba(97, 175, 239, 0.22); }
 
-/* 造型列表：单帧覆盖角标 */
+/* 造型列表：单帧覆盖角标（蓝=中心点，橙=碰撞） */
 .costume-item { position: relative; }
 .pivot-override-badge {
   position: absolute;
@@ -1217,6 +1451,16 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   background: #61afef;
   box-shadow: 0 0 4px #61afef;
+}
+.collision-override-badge {
+  position: absolute;
+  top: 3px;
+  right: 14px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e5c07b;
+  box-shadow: 0 0 4px #e5c07b;
 }
 
 /* ═══ 右: 预览面板 ═══ */
@@ -1234,8 +1478,9 @@ onBeforeUnmount(() => {
   color: #00FF8C;
   font-size: 12px;
   text-align: center;
-  height: 26px;
-  line-height: 26px;
+  /* 与画布顶部标注工具条等高，横向分隔线对齐 */
+  height: 36px;
+  line-height: 36px;
   padding: 0;
   margin: 0;
   border: none;
@@ -1263,25 +1508,11 @@ onBeforeUnmount(() => {
   max-width: 248px;
   max-height: 248px;
 }
-/* 预览图包裹层：缩放移到包裹层，让中心点标记随图缩放并反向补偿保持点大小 */
+/* 预览图包裹层：缩放移到包裹层，与画布区结构一致 */
 .preview-image-wrap {
   position: relative;
   display: flex;
   flex-shrink: 0;
-}
-.preview-pivot-dot {
-  position: absolute;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  border: 2px solid var(--accent);
-  background: rgba(91, 251, 132, 0.3);
-  pointer-events: none;
-  z-index: 3;
-}
-.preview-pivot-dot.is-override {
-  border-color: #61afef;
-  background: rgba(97, 175, 239, 0.3);
 }
 
 /* FPS 控制 (悬浮在预览底部)：左滑条 + 右数字输入，无底色 */

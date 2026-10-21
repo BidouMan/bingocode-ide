@@ -21,6 +21,7 @@ import {
   type SpriteData,
 } from './useSpriteData'
 import { packDrawnFrames } from '../utils/bsfPacker'
+import type { BsfFrameMeta } from './useSpriteData'
 
 export interface AppendFramesResult {
   added: number
@@ -34,12 +35,14 @@ function canvasToPng(canvas: HTMLCanvasElement): Promise<Blob> {
   })
 }
 
-/** 重打包后按帧名把帧级 pivot 覆盖搬回新元数据（帧名是唯一稳定标识） */
-function carryFramePivots(next: { name: string; pivot?: { x: number; y: number } }[], prev: { name: string; pivot?: { x: number; y: number } }[]) {
-  const prevPivots = new Map(prev.filter(f => f.pivot).map(f => [f.name, f.pivot]))
+/** 重打包后按帧名把帧级扩展字段（pivot/collision 覆盖）搬回新元数据（帧名是唯一稳定标识） */
+function carryFrameMetaExtras(next: BsfFrameMeta[], prev: BsfFrameMeta[]) {
+  const prevByName = new Map(prev.map(f => [f.name, f]))
   for (const f of next) {
-    const p = prevPivots.get(f.name)
-    if (p) f.pivot = { ...p }
+    const p = prevByName.get(f.name)
+    if (!p) continue
+    if (p.pivot) f.pivot = { ...p.pivot }
+    if (p.collision) f.collision = JSON.parse(JSON.stringify(p.collision))
   }
 }
 
@@ -161,8 +164,8 @@ async function appendToBsf(dirPath: string, sprite: Awaited<ReturnType<typeof re
 
   const packed = packDrawnFrames(canvases, canvasW, canvasH, names)
   // 只更新帧矩形；pivot/canvas 保持原 manifest 值（saveBsfManifest 回写 sprite.bsf.*）
-  // 帧级 pivot 覆盖按帧名搬回新 packed 元数据（rect/offset 变了但帧名稳定）
-  carryFramePivots(packed.frames, meta.frames)
+  // 帧级 pivot/collision 覆盖按帧名搬回新 packed 元数据（rect/offset 变了但帧名稳定）
+  carryFrameMetaExtras(packed.frames, meta.frames)
   meta.frames = packed.frames
 
   for (const a of sprite.animations) {
@@ -283,8 +286,8 @@ async function rewriteBsfDir(
 ) {
   const meta = sprite.bsf!
   const packed = packDrawnFrames(canvases, meta.canvas.w, meta.canvas.h, names)
-  // 帧级 pivot 覆盖按帧名保留（重打包后 rect/offset 变化不影响 pivot 语义）
-  carryFramePivots(packed.frames, meta.frames)
+  // 帧级 pivot/collision 覆盖按帧名保留（重打包后 rect/offset 变化不影响语义）
+  carryFrameMetaExtras(packed.frames, meta.frames)
 
   // clips：帧序列过滤已删帧名；空 clip 移除（readSpriteFromPath 读取的 clips 带 frameNames）
   const nameSet = new Set(names)
