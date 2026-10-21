@@ -26,7 +26,7 @@ const spriteMethods: EngineCompletionItem[] = [
   { label: 'Sprite', kind: CompletionItemKind.Class, insertText: 'Sprite', documentation: '创建一个精灵角色\n\n用法：sprite = Sprite("文件名")\n文件名对应 assets/sprites/ 下的精灵包或 PNG 文件', detail: 'class Sprite(filename)' },
 
   // 移动
-  { label: 'goto', kind: CompletionItemKind.Method, insertText: 'goto', documentation: '移到指定坐标\n\ngoto(x, y)', detail: 'goto(x, y)' },
+  { label: 'goto', kind: CompletionItemKind.Method, insertText: 'goto', documentation: '移到指定坐标；也接受标记引用或另一个角色\n\ngoto(320, 240)\ngoto(player.get_marker())  # 武器对准角色的「标记」\ngoto(enemy)  # 对齐另一个角色的注册点', detail: 'goto(x, y)' },
   { label: 'set_xy', kind: CompletionItemKind.Method, insertText: 'set_xy', documentation: '设置坐标（带碰撞检测）\n\nset_xy(x, y)', detail: 'set_xy(x, y)' },
   { label: 'set_x', kind: CompletionItemKind.Method, insertText: 'set_x', documentation: '设置水平位置\n\nset_x(x)', detail: 'set_x(x)' },
   { label: 'set_y', kind: CompletionItemKind.Method, insertText: 'set_y', documentation: '设置垂直位置\n\nset_y(y)', detail: 'set_y(y)' },
@@ -53,6 +53,11 @@ const spriteMethods: EngineCompletionItem[] = [
 
   // 朝向
   { label: 'look_at', kind: CompletionItemKind.Method, insertText: 'look_at', documentation: '让当前角色看向另一个角色或鼠标（自动旋转角度）\n\ntarget 可以是另一个 Sprite 或 mouse 对象', detail: 'look_at(target)' },
+
+  // 标记（.bsf 角色编辑器「标记」图层标注的锚点，默认名「标记」，新建自动编号）
+  { label: 'get_marker', kind: CompletionItemKind.Method, insertText: 'get_marker', documentation: '获取标记引用（武器/道具挂载锚点）\n\nm = player.get_marker()      # 默认第一个标记\nm2 = player.get_marker("标记2")\nw.goto(m)        # 一次性到位\nw.follow(m)      # 持续跟随\nm.x / m.y        # 读标记世界坐标', detail: 'get_marker(name="标记")' },
+  { label: 'follow', kind: CompletionItemKind.Method, insertText: 'follow', documentation: '持续跟随目标的位置（每帧自动更新，只跟位置不跟朝向）\n\nw.follow(player.get_marker())\nw.follow(enemy)\nw.follow(m, flip=False)  # 不继承左右翻转（鼠标瞄准武器）\n默认继承目标的左右翻转（父翻面武器跟着翻）；朝向仍可独立控制（如 w.look_at(mouse)）；目标被删除时自动停止', detail: 'follow(target, flip=True)' },
+  { label: 'unfollow', kind: CompletionItemKind.Method, insertText: 'unfollow', documentation: '停止跟随', detail: 'unfollow()' },
 
   // 边界
   { label: 'edge_bounce', kind: CompletionItemKind.Method, insertText: 'edge_bounce', documentation: '基于 Hitbox 的精准反弹，自动识别世界边界\n碰到边界时自动反转角度', detail: 'edge_bounce()' },

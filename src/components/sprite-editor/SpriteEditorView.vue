@@ -28,6 +28,9 @@ import iconAdd from '../../assets/icons/btn_preview_add.svg'
 import iconLoop from '../../assets/icons/anim_loop.svg'
 import iconLoopOff from '../../assets/icons/anim_loop_off.svg'
 import iconCenterPivot from '../../assets/icons/中心点.svg'
+import iconResetAnchor from '../../assets/icons/重置锚点.svg'
+import iconMarker from '../../assets/icons/标记.svg'
+import iconMarkerRaw from '../../assets/icons/标记.svg?raw'
 
 const resourceStore = useResourceStore()
 const editorStore = useEditorStore()
@@ -367,8 +370,8 @@ function resetAnno() {
 
 // ═══ 碰撞标注（仅 .bsf；无自定义 = 引擎自动碰撞，学生默认路径） ═══
 
-/** 当前激活的标注图层：中心点编辑 / 碰撞编辑（单选，同一套画布框架） */
-const activeAnnoLayer = ref<'pivot' | 'collision'>('pivot')
+/** 当前激活的标注图层：中心 / 碰撞 / 标记（单选，同一套画布框架） */
+const activeAnnoLayer = ref<'pivot' | 'collision' | 'marker'>('pivot')
 
 /** 第 i 帧的有效碰撞形状：帧覆盖 > 统一值 > null（自动碰撞） */
 function effCollision(i: number): SpriteCollisionShape | null {
@@ -436,15 +439,27 @@ function frameContentCollision(): SpriteCollisionShape {
   }
 }
 
-function activateAnnoLayer(layer: 'pivot' | 'collision') {
+function activateAnnoLayer(layer: 'pivot' | 'collision' | 'marker') {
   activeAnnoLayer.value = layer
-  if (layer !== 'collision') return
-  const bsf = currentSprite.value?.bsf
-  if (!bsf) return
-  // 首次启用：以当前帧内容框初始化统一碰撞（行为与自动一致，用户在此基础上调）
-  if (!bsf.collision && !bsf.frames[annoFrameIndex.value]?.collision) {
-    bsf.collision = frameContentCollision()
-    scheduleSave()
+  if (layer === 'collision') {
+    const bsf = currentSprite.value?.bsf
+    if (!bsf) return
+    // 首次启用：以当前帧内容框初始化统一碰撞（行为与自动一致，用户在此基础上调）
+    if (!bsf.collision && !bsf.frames[annoFrameIndex.value]?.collision) {
+      bsf.collision = frameContentCollision()
+      scheduleSave()
+    }
+    return
+  }
+  if (layer === 'marker') {
+    const bsf = currentSprite.value?.bsf
+    if (!bsf) return
+    // 首次启用：默认创建一个标记（内容框中心），选中待编辑
+    if (markerNames.value.length === 0) {
+      addMarker()
+    } else if (!selMarkerName.value || !markerNames.value.includes(selMarkerName.value)) {
+      selMarkerName.value = markerNames.value[0]
+    }
   }
 }
 
@@ -492,6 +507,142 @@ function collisionBBox(shape: SpriteCollisionShape): { x0: number; y0: number; x
   const xs = shape.points.map(p => p[0])
   const ys = shape.points.map(p => p[1])
   return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) }
+}
+
+// ═══ 标记标注（锚点，武器/道具挂载用；统一值 + 帧级覆盖，与中心/碰撞同构） ═══
+
+const selMarkerName = ref<string | null>(null)
+
+/** 全部标记名（统一值 key ∪ 各帧覆盖 key——被删统一值但帧覆盖仍在的名字也要能清除） */
+const markerNames = computed(() => {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return [] as string[]
+  const names = new Set<string>()
+  for (const k of Object.keys(bsf.markers || {})) names.add(k)
+  for (const f of bsf.frames) {
+    for (const k of Object.keys(f.markers || {})) names.add(k)
+  }
+  return [...names]
+})
+
+/** 第 i 帧某标记的有效位置：帧覆盖 > 统一值 > null */
+function effMarker(name: string, i: number): { x: number; y: number } | null {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf || i < 0 || i >= bsf.frames.length) return null
+  return bsf.frames[i].markers?.[name] ?? bsf.markers?.[name] ?? null
+}
+
+function hasMarkerOverride(name: string, i: number): boolean {
+  return !!currentSprite.value?.bsf?.frames[i]?.markers?.[name]
+}
+
+/** 当前帧是否有任意标记覆盖（造型列表角标用） */
+function hasAnyMarkerOverride(i: number): boolean {
+  const m = currentSprite.value?.bsf?.frames[i]?.markers
+  return !!m && Object.keys(m).length > 0
+}
+
+const selMarkerPos = computed(() =>
+  selMarkerName.value ? effMarker(selMarkerName.value, annoFrameIndex.value) : null,
+)
+
+function markerHandleStyle(name: string) {
+  const p = effMarker(name, annoFrameIndex.value)
+  return p ? { left: `${p.x}px`, top: `${p.y}px` } : { display: 'none' }
+}
+
+/**
+ * 画布标记图钉：直接把 标记.svg 内联为 DOM（fill 换成 currentColor），
+ * 颜色由 CSS color 控制（主题绿 / 帧覆盖蓝），不依赖 mask-image 的跨 WebView 支持差异。
+ */
+const markerIconSvg = computed(() =>
+  iconMarkerRaw
+    .replace(/fill="#ffffff"/gi, 'fill="currentColor"')
+    .replace(/fill:white/gi, 'fill:currentColor'),
+)
+
+function setMarkerPos(name: string, p: { x: number; y: number }) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf || !name) return
+  if (annoScope.value === 'all') {
+    if (!bsf.markers) bsf.markers = {}
+    bsf.markers[name] = { x: p.x, y: p.y }
+  } else {
+    const f = bsf.frames[annoFrameIndex.value]
+    if (!f) return
+    if (!f.markers) f.markers = {}
+    f.markers[name] = { x: p.x, y: p.y }
+  }
+  scheduleSave()
+}
+
+function onMarkerCoordChange(axis: 'x' | 'y', e: Event) {
+  const v = Number((e.target as HTMLInputElement).value)
+  const cur = selMarkerPos.value
+  if (!selMarkerName.value || !cur || !Number.isFinite(v)) return
+  setMarkerPos(selMarkerName.value, axis === 'x' ? { x: v, y: cur.y } : { x: cur.x, y: v })
+}
+
+/** 新增标记：唯一命名 标记 / 标记1 / 标记2 / ...，初值=当前帧内容框中心 */
+function addMarker() {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  if (!bsf.markers) bsf.markers = {}
+  const existing = new Set(markerNames.value)
+  let name = '标记'
+  let n = 1
+  while (existing.has(name)) { name = `标记${n}`; n++ }
+  const f = bsf.frames[annoFrameIndex.value]
+  const cx = f ? Math.round(f.offset.x + f.rect.w / 2) : Math.round(bsf.canvas.w / 2)
+  const cy = f ? Math.round(f.offset.y + f.rect.h / 2) : Math.round(bsf.canvas.h / 2)
+  bsf.markers[name] = { x: cx, y: cy }
+  selMarkerName.value = name
+  scheduleSave()
+}
+
+/** 重命名标记：统一值与全部帧覆盖同步改 key；空/重名不生效 */
+function renameMarker(name: string, newName: string) {
+  const bsf = currentSprite.value?.bsf
+  const trimmed = newName.trim()
+  if (!bsf || !name || !trimmed || trimmed === name) return
+  if (markerNames.value.includes(trimmed)) return
+  if (bsf.markers && name in bsf.markers) {
+    bsf.markers[trimmed] = bsf.markers[name]
+    delete bsf.markers[name]
+  }
+  for (const f of bsf.frames) {
+    if (f.markers && name in f.markers) {
+      f.markers[trimmed] = f.markers[name]
+      delete f.markers[name]
+    }
+  }
+  selMarkerName.value = trimmed
+  scheduleSave()
+}
+
+/** 删除标记：统一值 + 全部帧覆盖 */
+function deleteMarker(name: string) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf || !name) return
+  if (bsf.markers) delete bsf.markers[name]
+  for (const f of bsf.frames) {
+    if (f.markers) {
+      delete f.markers[name]
+      if (Object.keys(f.markers).length === 0) delete f.markers
+    }
+  }
+  if (selMarkerName.value === name) {
+    selMarkerName.value = Object.keys(bsf.markers || {})[0] ?? null
+  }
+  scheduleSave()
+}
+
+function clearMarkerOverride() {
+  const f = currentSprite.value?.bsf?.frames[annoFrameIndex.value]
+  if (!f?.markers || !selMarkerName.value) return
+  delete f.markers[selMarkerName.value]
+  if (Object.keys(f.markers).length === 0) delete f.markers
+  scheduleSave()
 }
 
 /** 「脚底」预设：所有帧内容包围盒的底部中心（贴地角色锚点） */
@@ -569,6 +720,28 @@ function onPivotDragMove(e: MouseEvent) {
 
 function onPivotDragUp() {
   isPivotDragging.value = false
+}
+
+// ── 标记拖拽（选中 + 拖动；复用中心的全局监听模式） ──
+
+const isMarkerDragging = ref(false)
+
+function onMarkerMouseDown(name: string, e: MouseEvent) {
+  if (e.button !== 0) return
+  e.stopPropagation()
+  e.preventDefault()
+  selMarkerName.value = name
+  isMarkerDragging.value = true
+}
+
+function onMarkerDragMove(e: MouseEvent) {
+  if (!isMarkerDragging.value || !selMarkerName.value) return
+  const p = screenToCanvas(e)
+  if (p) setMarkerPos(selMarkerName.value, p)
+}
+
+function onMarkerDragUp() {
+  isMarkerDragging.value = false
 }
 
 
@@ -696,9 +869,11 @@ function closeContextMenus() {
 // 注册全局 mouseup 监听
 onMounted(() => {
   document.addEventListener('mouseup', onGlobalMouseUp)
-  // 中心点拖拽用全局监听：拖出画布也不中断
+  // 中心/标记拖拽用全局监听：拖出画布也不中断
   document.addEventListener('mousemove', onPivotDragMove)
   document.addEventListener('mouseup', onPivotDragUp)
+  document.addEventListener('mousemove', onMarkerDragMove)
+  document.addEventListener('mouseup', onMarkerDragUp)
 })
 
 onBeforeUnmount(() => {
@@ -708,6 +883,8 @@ onBeforeUnmount(() => {
   document.removeEventListener('mouseup', onGlobalMouseUp)
   document.removeEventListener('mousemove', onPivotDragMove)
   document.removeEventListener('mouseup', onPivotDragUp)
+  document.removeEventListener('mousemove', onMarkerDragMove)
+  document.removeEventListener('mouseup', onMarkerDragUp)
 })
 </script>
 
@@ -738,6 +915,11 @@ onBeforeUnmount(() => {
             v-if="hasCollisionOverride(idx)"
             class="collision-override-badge"
           ></span>
+          <!-- 标记单帧覆盖标记 -->
+          <span
+            v-if="hasAnyMarkerOverride(idx)"
+            class="marker-override-badge"
+          ></span>
         </div>
       </div>
       <FrameUploadDrawer
@@ -757,14 +939,24 @@ onBeforeUnmount(() => {
           type="button"
           @click="activateAnnoLayer('pivot')"
         >
-          <img :src="iconCenterPivot" class="layer-chip-icon" alt="" />中心点
+          <img :src="iconCenterPivot" class="layer-chip-icon" alt="" />中心
         </button>
         <button
           class="layer-chip"
           :class="{ active: activeAnnoLayer === 'collision' }"
           type="button"
           @click="activateAnnoLayer('collision')"
-        >碰撞</button>
+        >
+          <img :src="iconResetAnchor" class="layer-chip-icon" alt="" />碰撞
+        </button>
+        <button
+          class="layer-chip"
+          :class="{ active: activeAnnoLayer === 'marker' }"
+          type="button"
+          @click="activateAnnoLayer('marker')"
+        >
+          <img :src="iconMarker" class="layer-chip-icon" alt="" />标记
+        </button>
         <!-- 标注控件随激活图层切换（与底部浮动条同源，共享状态） -->
         <template v-if="activeAnnoLayer === 'pivot'">
           <div class="props-sep"></div>
@@ -812,7 +1004,7 @@ onBeforeUnmount(() => {
             >仅当前帧</button>
           </div>
         </template>
-        <template v-else>
+        <template v-else-if="activeAnnoLayer === 'collision'">
           <div class="props-sep"></div>
           <div class="scope-seg">
             <button
@@ -842,6 +1034,66 @@ onBeforeUnmount(() => {
             class="clear-override-btn"
             type="button"
             @click="clearCollisionOverride"
+          >恢复统一</button>
+          <div class="props-sep"></div>
+          <div class="scope-seg">
+            <button
+              type="button"
+              :class="{ on: annoScope === 'all' }"
+              @click="annoScope = 'all'"
+            >全部帧</button>
+            <button
+              type="button"
+              :class="{ on: annoScope === 'one', 'on-blue': annoScope === 'one' }"
+              @click="annoScope = 'one'"
+            >仅当前帧</button>
+          </div>
+        </template>
+        <template v-else>
+          <!-- 标记：画布点选操作 + 添加/改名/删除 + 坐标 + 作用域 -->
+          <div class="props-sep"></div>
+          <button class="preset-btn" type="button" title="添加标记" @click="addMarker">添加</button>
+          <input
+            v-if="selMarkerName"
+            class="marker-rename-input"
+            :value="selMarkerName"
+            title="标记名称"
+            @change="renameMarker(selMarkerName!, ($event.target as HTMLInputElement).value)"
+          />
+          <button
+            v-if="selMarkerName"
+            class="preset-btn"
+            type="button"
+            title="删除标记"
+            @click="deleteMarker(selMarkerName)"
+          >删除</button>
+          <div class="props-sep"></div>
+          <div class="coord-group">
+            <label>X</label>
+            <input
+              class="coord-input"
+              type="number"
+              step="0.5"
+              :value="selMarkerPos ? selMarkerPos.x.toFixed(1) : ''"
+              @change="onMarkerCoordChange('x', $event)"
+            />
+          </div>
+          <div class="coord-group">
+            <label>Y</label>
+            <input
+              class="coord-input"
+              type="number"
+              step="0.5"
+              :value="selMarkerPos ? selMarkerPos.y.toFixed(1) : ''"
+              @change="onMarkerCoordChange('y', $event)"
+            />
+          </div>
+          <div class="props-sep"></div>
+          <button
+            v-if="selMarkerName && hasMarkerOverride(selMarkerName, annoFrameIndex)"
+            class="clear-override-btn"
+            type="button"
+            @click="clearMarkerOverride"
           >恢复统一</button>
           <div class="props-sep"></div>
           <div class="scope-seg">
@@ -916,13 +1168,30 @@ onBeforeUnmount(() => {
               :zoom="canvasZoom"
               @update="onCollisionUpdate"
             />
+            <!-- 标记手柄：标记.svg 图钉（图标配色独立于 svg 填充，mask 上色），画布点选/拖拽 -->
+            <div
+              v-for="name in (activeAnnoLayer === 'marker' ? markerNames : [])"
+              :key="name"
+              class="marker-handle"
+              :class="{
+                'is-selected': name === selMarkerName,
+                'is-override': hasMarkerOverride(name, annoFrameIndex),
+              }"
+              :style="markerHandleStyle(name)"
+              @mousedown="onMarkerMouseDown(name, $event)"
+            >
+              <div class="marker-visual" :style="{ transform: `scale(${1 / canvasZoom})` }">
+                <div class="marker-icon" v-html="markerIconSvg"></div>
+                <span class="marker-label">{{ name }}</span>
+              </div>
+            </div>
           </div>
         </div>
 
         <!-- 底部浮动属性条：按激活图层切换控件组 -->
         <div v-if="canAnno" class="anno-props">
           <template v-if="activeAnnoLayer === 'pivot'">
-            <span class="props-title">中心点</span>
+            <span class="props-title">中心</span>
             <div class="coord-group">
               <label>X</label>
               <input
@@ -967,7 +1236,7 @@ onBeforeUnmount(() => {
               >仅当前帧</button>
             </div>
           </template>
-          <template v-else>
+          <template v-else-if="activeAnnoLayer === 'collision'">
             <span class="props-title">碰撞</span>
             <!-- 类型 toggle：自动 = 引擎内容包围盒（无 manifest 字段），始终显示在画布 -->
             <div class="scope-seg">
@@ -998,6 +1267,65 @@ onBeforeUnmount(() => {
               class="clear-override-btn"
               type="button"
               @click="clearCollisionOverride"
+            >恢复统一</button>
+            <div class="props-sep"></div>
+            <div class="scope-seg">
+              <button
+                type="button"
+                :class="{ on: annoScope === 'all' }"
+                @click="annoScope = 'all'"
+              >全部帧</button>
+              <button
+                type="button"
+                :class="{ on: annoScope === 'one', 'on-blue': annoScope === 'one' }"
+                @click="annoScope = 'one'"
+              >仅当前帧</button>
+            </div>
+          </template>
+          <template v-else>
+            <span class="props-title">标记</span>
+            <button class="preset-btn" type="button" title="添加标记" @click="addMarker">添加</button>
+            <input
+              v-if="selMarkerName"
+              class="marker-rename-input"
+              :value="selMarkerName"
+              title="标记名称"
+              @change="renameMarker(selMarkerName!, ($event.target as HTMLInputElement).value)"
+            />
+            <button
+              v-if="selMarkerName"
+              class="preset-btn"
+              type="button"
+              title="删除标记"
+              @click="deleteMarker(selMarkerName)"
+            >删除</button>
+            <div class="props-sep"></div>
+            <div class="coord-group">
+              <label>X</label>
+              <input
+                class="coord-input"
+                type="number"
+                step="0.5"
+                :value="selMarkerPos ? selMarkerPos.x.toFixed(1) : ''"
+                @change="onMarkerCoordChange('x', $event)"
+              />
+            </div>
+            <div class="coord-group">
+              <label>Y</label>
+              <input
+                class="coord-input"
+                type="number"
+                step="0.5"
+                :value="selMarkerPos ? selMarkerPos.y.toFixed(1) : ''"
+                @change="onMarkerCoordChange('y', $event)"
+              />
+            </div>
+            <div class="props-sep"></div>
+            <button
+              v-if="selMarkerName && hasMarkerOverride(selMarkerName, annoFrameIndex)"
+              class="clear-override-btn"
+              type="button"
+              @click="clearMarkerOverride"
             >恢复统一</button>
             <div class="props-sep"></div>
             <div class="scope-seg">
@@ -1358,6 +1686,92 @@ onBeforeUnmount(() => {
   opacity: 0.55;
 }
 
+/* 标记手柄（标记.svg 图钉，mask 上色主题绿；图钉尖对准锚点坐标） */
+.marker-handle {
+  position: absolute;
+  width: 0;
+  height: 0;
+  cursor: grab;
+  z-index: 5;
+}
+.marker-handle:active { cursor: grabbing; }
+.marker-visual {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+/* 图钉：内联 svg（fill=currentColor）；配色走 CSS 变量，图钉尖对准锚点坐标。
+   默认=标记红 rgb(234,73,66)；帧覆盖=蓝（与其他标注图层惯例一致） */
+.marker-handle {
+  --mk-color: #EA4942;
+  --mk-glow: rgba(234, 73, 66, 0.6);
+}
+.marker-handle.is-override {
+  --mk-color: #61afef;
+  --mk-glow: rgba(97, 175, 239, 0.6);
+}
+.marker-icon {
+  position: absolute;
+  left: -10px;
+  top: -18.5px;
+  width: 20px;
+  height: 20px;
+  color: var(--mk-color);
+  filter: drop-shadow(0 0 4px var(--mk-glow));
+  pointer-events: auto;
+  transition: transform 0.1s ease;
+}
+.marker-icon :deep(svg) {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.marker-label {
+  position: absolute;
+  left: 11px;
+  top: -16px;
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--mk-color);
+  background: rgba(34, 37, 43, 0.85);
+  padding: 0 4px;
+  border-radius: 3px;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+/* 选中态：三重区分——白色描边 + 放大 + 标签反色实心（一眼定位当前编辑的标记） */
+.marker-handle.is-selected .marker-icon {
+  transform: scale(1.2);
+  transform-origin: 50% 92.5%; /* 钉尖固定，放大时不脱离锚点 */
+  filter:
+    drop-shadow(0 0 1px #fff)
+    drop-shadow(0 0 2px #fff)
+    drop-shadow(0 0 7px var(--mk-glow));
+}
+.marker-handle.is-selected .marker-label {
+  color: #10131a;
+  background: var(--mk-color);
+  font-weight: 600;
+}
+/* 标记改名输入框 */
+.marker-rename-input {
+  width: 76px;
+  height: 22px;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border-light);
+  background: var(--bg-root);
+  color: #fff;
+  font-size: 11px;
+}
+.marker-rename-input:focus {
+  outline: none;
+  border-color: #EA4942;
+}
+.anno-toolbar .marker-rename-input { height: 20px; }
+
 /* 底部浮动属性条 */
 .anno-props {
   position: absolute;
@@ -1461,6 +1875,16 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   background: #e5c07b;
   box-shadow: 0 0 4px #e5c07b;
+}
+.marker-override-badge {
+  position: absolute;
+  top: 3px;
+  right: 25px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #EA4942;
+  box-shadow: 0 0 4px #EA4942;
 }
 
 /* ═══ 右: 预览面板 ═══ */

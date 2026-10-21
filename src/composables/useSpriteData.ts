@@ -36,6 +36,8 @@ export interface BsfFrameMeta {
   pivot?: { x: number; y: number }
   /** 帧级碰撞覆盖：缺省时用 BsfMeta.collision，再缺省走引擎自动碰撞 */
   collision?: SpriteCollisionShape
+  /** 帧级挂点覆盖（按名字，画布坐标）：缺省时用 BsfMeta.markers 同名项 */
+  markers?: Record<string, { x: number; y: number }>
 }
 
 /** .bsf（Bingo Sheet File）sheet 元数据：保存 manifest 时完整回写 */
@@ -45,6 +47,8 @@ export interface BsfMeta {
   frames: BsfFrameMeta[]
   /** 统一碰撞形状：缺省 = 自动碰撞（引擎内容包围盒） */
   collision?: SpriteCollisionShape
+  /** 统一挂点（按名字，画布坐标）：武器/道具挂载锚点，如 hand_r / head */
+  markers?: Record<string, { x: number; y: number }>
 }
 
 export interface SpriteData {
@@ -246,6 +250,7 @@ async function buildBsfSpriteData(manifest: any, sheetImage: HTMLImageElement): 
       pivot: manifest.pivot || { x: canvasSize.w / 2, y: canvasSize.h / 2 },
       frames: manifest.frames,
       ...(manifest.collision ? { collision: manifest.collision } : {}),
+      ...(manifest.markers ? { markers: manifest.markers } : {}),
     },
   }
 }
@@ -289,6 +294,10 @@ export async function saveBsfManifest(dirPath: string, sprite: SpriteData): Prom
     pivot: sprite.bsf.pivot,
     // 自定义碰撞（可选）：无 = 引擎自动碰撞
     ...(sprite.bsf.collision ? { collision: sprite.bsf.collision } : {}),
+    // 挂点（可选）：名字 → 画布坐标；空表不写字段
+    ...(sprite.bsf.markers && Object.keys(sprite.bsf.markers).length > 0
+      ? { markers: sprite.bsf.markers }
+      : {}),
     frames: sprite.bsf.frames,
     clips,
     // 默认渲染帧（编辑器选中帧）：可选字段，读取方缺省回退第一帧

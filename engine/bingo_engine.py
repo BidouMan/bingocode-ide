@@ -66,6 +66,42 @@ class _MouseType:
 
 mouse = _MouseType()  # 🚀 定义全局变量 mouse
 
+
+class _MarkerRef:
+    """挂点引用（get_marker 返回）：读取时实时求值世界坐标。
+
+    支持动画帧切换（帧级覆盖）、父的旋转/缩放/镜像变换；
+    可直接用于 goto() / follow()，也可读 .x / .y。
+    """
+
+    def __init__(self, sprite, name):
+        self._sprite = sprite
+        self.name = name
+
+    @property
+    def x(self):
+        pos = self._sprite._marker_world_xy(self.name)
+        return pos[0] if pos else 0.0
+
+    @property
+    def y(self):
+        pos = self._sprite._marker_world_xy(self.name)
+        return pos[1] if pos else 0.0
+
+    def __repr__(self):
+        return "marker('%s')" % self.name
+
+
+def _resolve_target_xy(target):
+    """把挂点引用 / Sprite 解析为世界坐标 (x, y)；无法解析返回 None"""
+    if isinstance(target, _MarkerRef):
+        return target._sprite._marker_world_xy(target.name)
+    if isinstance(target, Sprite):
+        if target._is_deleted:
+            return None
+        return (target.x, target.y)
+    return None
+
 __all__ = [
     "Sprite",
     "Timer",
@@ -155,6 +191,14 @@ class Sprite:
         self._speed = 0
         self._on_hit_callbacks = []
         self._auto_destroy = False
+        # 位置跟随目标（get_marker 挂点引用 / 另一个 Sprite）：None = 不跟随
+        self._follow_ref = None
+        # 跟随镜像继承（±1）：父翻面武器跟着翻（Godot 子节点语义）；非跟随者恒 1.0
+        self._follow_flip = 1.0
+        # follow(target, flip=False) 可关闭镜像继承（如鼠标瞄准武器）
+        self._follow_flip_on = True
+        # 本帧实际显示的镜像倍率（含自身翻转与跟随继承），供挂点求值/链式跟随读取
+        self._display_flip = 1.0
 
         # 3. 渲染预设缓存（必须在 early return 之前初始化，避免 deleted 精灵崩溃）
         self._cached_image = None
@@ -546,9 +590,63 @@ class Sprite:
                     center_to_bottom = sprite_rect[3] - self._y
                     self._y = bounds["bottom"] - center_to_bottom - 0.05
 
-    def goto(self, x, y):
-        """移到指定坐标"""
+    def goto(self, x, y=None):
+        """移到指定坐标；也接受标记引用或另一个角色（注册点对齐）
+
+        w.goto(320, 240)
+        w.goto(player.get_marker())        # 对准角色的「标记」
+        w.goto(enemy)
+        """
+        if y is None:
+            pos = _resolve_target_xy(x)
+            if pos is None:
+                print("[警告] goto 参数无效：需要 (x, y)、标记或角色")
+                return
+            self.set_xy(pos[0], pos[1])
+            return
         self.set_xy(x, y)
+
+    def get_marker(self, name="标记"):
+        """获取标记引用（.bsf 角色在编辑器「标记」图层标注的锚点）
+
+        返回值可直接给 goto()/follow() 用，也可读 .x/.y 世界坐标：
+            w.goto(player.get_marker())        # 第一个标记「标记」
+            w.follow(player.get_marker('标记2'))
+        """
+        if not getattr(self, "_is_bsf", False):
+            print("[警告] 标记仅 .bsf 角色支持（先在角色编辑器「标记」图层添加）")
+            return None
+        if self._marker_world_xy(name) is None:
+            known = sorted((getattr(self, "_bsf_markers", None) or {}).keys())
+            hint = ("已有标记: " + ", ".join(known)) if known else "该角色还没有标记"
+            print(f"[警告] 角色没有名为 '{name}' 的标记（{hint}）")
+            return None
+        return _MarkerRef(self, name)
+
+    def follow(self, target, flip=True):
+        """持续跟随目标的位置（每帧自动更新，只跟位置不跟朝向）
+
+        target = get_marker() 返回的标记引用，或另一个 Sprite：
+            w.follow(player.get_marker())
+            w.follow(enemy)
+        默认继承目标的左右镜像（父翻面武器跟着翻，Godot 子节点观感）；
+        鼠标瞄准类武器可关：w.follow(m, flip=False)。
+        朝向/缩放仍可独立控制（如 w.look_at(mouse) 瞄准）；
+        目标被删除时自动停止跟随。w.unfollow() 手动解除。
+        """
+        if isinstance(target, (_MarkerRef, Sprite)):
+            self._follow_ref = target
+            self._follow_flip_on = bool(flip)
+            self._follow_flip = 1.0  # 下一帧 _update_follows 重算
+        else:
+            print("[警告] follow 参数无效：需要标记或角色")
+
+    def unfollow(self):
+        """停止跟随（镜像继承一并解除）"""
+        self._follow_ref = None
+        if self._follow_flip != 1.0:
+            self._follow_flip = 1.0
+            self._update_transform()
 
     def set_xy(self, x, y):
         """设置坐标"""
@@ -1350,6 +1448,8 @@ class Sprite:
         }
         # 自定义碰撞形状（可选）：无/非法 = 自动碰撞（内容包围盒）
         self._bsf_collision = manifest.get("collision")
+        # 挂点（可选）：名字 → {x, y}（画布坐标）；帧级覆盖在 frames[i].markers
+        self._bsf_markers = manifest.get("markers") or {}
         self._bsf_clips = {
             c.get("name"): c
             for c in manifest.get("clips", [])
@@ -1400,6 +1500,49 @@ class Sprite:
         idx = self._bsf_frame_index if index is None else index
         rect = self._bsf_frames[idx]["rect"]
         return [rect["x"], rect["y"], rect["w"], rect["h"]]
+
+    def _marker_world_xy(self, name):
+        """挂点画布坐标 → 世界坐标（应用父的旋转/缩放/镜像）；不存在返回 None。
+
+        与 _update_transform 同一显示语义：left_right 镜像走 scale_x、
+        display_angle 在 none/left_right 下为 0；帧级覆盖 frames[i].markers 优先。
+        """
+        if not getattr(self, "_is_bsf", False) or self._is_deleted:
+            return None
+        idx = getattr(self, "_bsf_frame_index", 0)
+        frame = self._bsf_frames[idx] if 0 <= idx < len(self._bsf_frames) else {}
+        m = None
+        if isinstance(frame, dict):
+            m = (frame.get("markers") or {}).get(name)
+        if m is None:
+            m = (getattr(self, "_bsf_markers", None) or {}).get(name)
+        if not isinstance(m, dict) or "x" not in m or "y" not in m:
+            return None
+        pivot = frame.get("pivot") or self._bsf_pivot
+        try:
+            dx = float(m["x"]) - float(pivot["x"])
+            dy = float(m["y"]) - float(pivot["y"])
+        except (TypeError, ValueError):
+            return None
+        # 显示缩放/镜像（与 _update_transform 一致；_display_flip 含跟随继承）
+        base_scale = self._scale / 100.0
+        sx = base_scale * getattr(self, "_display_flip", self._current_scale_x)
+        sy = base_scale
+        style = self._rotation_style
+        if style == "left_right":
+            display_angle = 0.0
+        elif style == "none":
+            display_angle = 0.0
+            sx = base_scale
+        else:
+            display_angle = float(self._angle)
+        rad = math.radians(display_angle)
+        cos_a = math.cos(rad)
+        sin_a = math.sin(rad)
+        # 局部 → 缩放/镜像 → 旋转 → 平移（PixiJS 变换顺序）
+        wx = self._x + dx * sx * cos_a - dy * sy * sin_a
+        wy = self._y + dx * sx * sin_a + dy * sy * cos_a
+        return (wx, wy)
 
     def _resolve_path(self, filename, category):
         """通用路径解析：工程根目录优先，其次是 assets/分类/，自动补全图片扩展名"""
@@ -1559,12 +1702,13 @@ class Sprite:
             if (abs(self._cached_rect_x - self._x) < 0.01 and
                 abs(self._cached_rect_y - self._y) < 0.01 and
                 self._cached_rect_scale == self._scale and
-                getattr(self, "_cached_rect_flip", 1) == getattr(self, "_current_scale_x", 1) and
+                getattr(self, "_cached_rect_flip", 1) == getattr(self, "_display_flip", getattr(self, "_current_scale_x", 1)) and
                 getattr(self, "_cached_rect_angle", 0) == getattr(self, "_angle", 0)):
                 return self._cached_rect
 
         s = self._scale / 100.0
-        flip_x = getattr(self, "_current_scale_x", 1)  # 1=正常, -1=水平镜像
+        # 显示镜像倍率（含跟随继承；非跟随者等于 _current_scale_x）
+        flip_x = getattr(self, "_display_flip", getattr(self, "_current_scale_x", 1))
 
         # 有效旋转角度：与 _update_transform 逻辑一致
         rot_style = getattr(self, "_rotation_style", "all around")
@@ -1629,8 +1773,8 @@ class Sprite:
 
         # 默认情况下，Y轴只受 size 影响
         final_scale_y = base_scale
-        # X轴受 size 和 镜像状态 共同影响
-        final_scale_x = base_scale * self._current_scale_x
+        # X轴受 size、自身镜像状态、跟随镜像继承共同影响（Godot 子节点语义）
+        final_scale_x = base_scale * self._current_scale_x * self._follow_flip
 
         if self._rotation_style == "left_right":
             norm_angle = self._angle % 360
@@ -1639,13 +1783,17 @@ class Sprite:
             elif (0 <= norm_angle < 90) or (270 < norm_angle <= 360):
                 self._current_scale_x = 1.0
 
-            # 重新计算镜像后的 X 缩放
-            final_scale_x = base_scale * self._current_scale_x
+            # 重新计算镜像后的 X 缩放（含跟随继承）
+            final_scale_x = base_scale * self._current_scale_x * self._follow_flip
             display_angle = 0
 
         elif self._rotation_style == "none":
             display_angle = 0
+            # "none" = 永不旋转永不翻转（含跟随继承），Scratch「不旋转」语义
             final_scale_x = base_scale
+
+        # 本帧显示镜像倍率：供挂点世界坐标求值与链式跟随读取
+        self._display_flip = final_scale_x / base_scale if base_scale else 1.0
 
         # 🚀 缓存比对：如果上次发送值相同，跳过发送以减少管道压力
         current_key = (
@@ -2032,6 +2180,35 @@ def _flush_frame_updates():
     packet = {"type": "UPDATE_BATCH", "data": {"updates": _FRAME_UPDATES}}
     print(json.dumps(packet))
     _FRAME_UPDATES = []
+
+
+def _update_follows():
+    """每帧同步所有跟随者的位置与镜像继承（flush 前调用）。
+
+    只写 x/y 与镜像（不碰 angle/scale）——朝向永远归用户控制；
+    镜像继承目标的显示翻转（父翻面武器跟着翻，Godot 子节点观感，
+    follow(target, flip=False) 可关）；目标被删除时自动停止跟随。
+    """
+    for sprite in list(_SPRITES.values()):
+        if sprite._is_deleted or sprite._follow_ref is None:
+            continue
+        ref = sprite._follow_ref
+        pos = _resolve_target_xy(ref)
+        if pos is None:
+            sprite._follow_ref = None
+            if sprite._follow_flip != 1.0:
+                sprite._follow_flip = 1.0
+                sprite._update_transform()
+            continue
+        # 镜像继承：取目标的本帧显示翻转（链式跟随时含祖辈继承）
+        flip = 1.0
+        if sprite._follow_flip_on:
+            parent = ref._sprite if isinstance(ref, _MarkerRef) else ref
+            flip = getattr(parent, "_display_flip", 1.0)
+        sprite._follow_flip = flip
+        sprite._x, sprite._y = pos
+        # 缓存比对在 _update_transform 内部，位置/镜像未变则不发包
+        sprite._update_transform()
 
 
 def follow(sprite):
@@ -2711,7 +2888,8 @@ def run():
                 ):
                     _render_map()
 
-        # 合并发送本帧所有精灵更新
+        # 同步位置跟随（挂点/角色），再合并发送本帧所有精灵更新
+        _update_follows()
         _flush_frame_updates()
 
         _MOUSE_STATE["last_down"] = _MOUSE_STATE["down"]
@@ -2865,7 +3043,8 @@ def start_game(project_dir=None, target_file=None):
                     _has_active = any(
                         (s._speed > 0) or
                         (getattr(s, "animation_state", None) and s.animation_state.get("is_playing", False)) or
-                        bool(s._on_hit_callbacks)
+                        bool(s._on_hit_callbacks) or
+                        s._follow_ref is not None
                         for s in _SPRITES.values() if not s._is_deleted
                     )
                     if not _has_active:
@@ -2931,7 +3110,8 @@ def start_game(project_dir=None, target_file=None):
                 if abs(_CAMERA_X - old_camera_x) >= tile_size // 2 or abs(_CAMERA_Y - old_camera_y) >= tile_size // 2:
                     _render_map()
 
-        # 帧合并发送
+        # 同步位置跟随（挂点/角色），再帧合并发送
+        _update_follows()
         _flush_frame_updates()
 
         # 状态更新

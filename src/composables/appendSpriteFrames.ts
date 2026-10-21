@@ -35,7 +35,7 @@ function canvasToPng(canvas: HTMLCanvasElement): Promise<Blob> {
   })
 }
 
-/** 重打包后按帧名把帧级扩展字段（pivot/collision 覆盖）搬回新元数据（帧名是唯一稳定标识） */
+/** 重打包后按帧名把帧级扩展字段（pivot/collision/markers 覆盖）搬回新元数据（帧名是唯一稳定标识） */
 function carryFrameMetaExtras(next: BsfFrameMeta[], prev: BsfFrameMeta[]) {
   const prevByName = new Map(prev.map(f => [f.name, f]))
   for (const f of next) {
@@ -43,6 +43,7 @@ function carryFrameMetaExtras(next: BsfFrameMeta[], prev: BsfFrameMeta[]) {
     if (!p) continue
     if (p.pivot) f.pivot = { ...p.pivot }
     if (p.collision) f.collision = JSON.parse(JSON.stringify(p.collision))
+    if (p.markers) f.markers = JSON.parse(JSON.stringify(p.markers))
   }
 }
 
@@ -317,6 +318,9 @@ async function rewriteBsfDir(
     sheet: 'sheet.png',
     canvas: meta.canvas,
     pivot: meta.pivot,
+    // 根级可选标注字段：统一碰撞 / 统一挂点（缺省不写）
+    ...(meta.collision ? { collision: meta.collision } : {}),
+    ...(meta.markers && Object.keys(meta.markers).length > 0 ? { markers: meta.markers } : {}),
     frames: packed.frames,
     clips: clips.length > 0
       ? clips
