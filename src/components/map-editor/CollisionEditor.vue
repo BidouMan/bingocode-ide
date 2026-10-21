@@ -218,8 +218,7 @@ function saveCollision(target?: MapResource | null) {
   } else {
     const tileIndex = mapStore.selectedTileIndex
     if (tileIndex < 0) return
-    const globalIdx = mapStore.globalResourceOffset + mapStore.selectedResourceIndex
-    const tileSet = mapStore.mapData.tileSets[globalIdx]
+    const tileSet = mapStore.getTileSetForResource(resource)
     if (!tileSet) return
     while (tileSet.tiles.length <= tileIndex) {
       tileSet.tiles.push({ collision: false, tag: '', collisionType: '图像' })
@@ -257,8 +256,7 @@ function loadCollision() {
   } else {
     const tileIndex = mapStore.selectedTileIndex
     if (tileIndex < 0) { collisionPoints.value = []; return }
-    const globalIdx = mapStore.globalResourceOffset + mapStore.selectedResourceIndex
-    const tileSet = mapStore.mapData.tileSets[globalIdx]
+    const tileSet = mapStore.getTileSetForResource(resource)
     if (tileSet && tileSet.tiles[tileIndex]?.collisionShape?.points) {
       collisionPoints.value = tileSet.tiles[tileIndex].collisionShape!.points.map(
         (p: number[]) => ({ x: p[0] * contentSize + contentOffset, y: p[1] * contentSize + contentOffset })
@@ -377,10 +375,10 @@ const currentCollisionEnabled = computed(() => {
   if (isImageLayer) return resource?.collisionEnabled ?? false
   const tileIndex = mapStore.selectedTileIndex
   if (tileIndex >= 0) {
-    const ts = mapStore.mapData.tileSets[mapStore.globalResourceOffset + mapStore.selectedResourceIndex]
+    const ts = mapStore.getTileSetForResource(resource)
     return ts?.tiles[tileIndex]?.collision ?? false
   }
-  const ts = mapStore.mapData.tileSets.find(t => t.name === resource?.name)
+  const ts = mapStore.getTileSetForResource(resource)
   return ts?.collisionEnabled ?? false
 })
 

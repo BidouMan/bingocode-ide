@@ -25,6 +25,9 @@ export interface LayerSaveData {
 }
 
 export interface ResourceSaveData {
+  // 稳定标识与 GID 起点：新存档写入，旧存档缺失时由读取方迁移补全
+  id?: string
+  firstgid?: number
   name: string
   path: string
   resourceType: string
@@ -51,6 +54,7 @@ export interface ImageSaveData {
 }
 
 export interface TilesetSaveData {
+  id?: string
   name: string
   image: string
   firstgid: number
@@ -129,6 +133,7 @@ export function decompressTileData(
 export function serializeMap(mapData: any): MapSaveData {
   const tilesets: TilesetSaveData[] = mapData.tileSets.map((ts: any) => {
     return {
+      id: ts.id || undefined,
       name: ts.name,
       image: ts.imagePath,
       firstgid: ts.firstgid || 1,
@@ -178,6 +183,8 @@ export function serializeMap(mapData: any): MapSaveData {
 
     if (layer.resources?.length) {
       base.resources = layer.resources.map((r: any) => ({
+        id: r.id || undefined,
+        firstgid: r.firstgid || undefined,
         name: r.name,
         path: r.path,
         resourceType: r.resourceType,
@@ -210,6 +217,7 @@ export function serializeMap(mapData: any): MapSaveData {
  */
 export function deserializeMap(data: MapSaveData): MapLoadData {
   const tileSets = data.tilesets.map(ts => ({
+    id: ts.id || '',
     name: ts.name,
     imagePath: ts.image,
     resourceType: 'tileset',
@@ -226,14 +234,63 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
     })) || [],
   }))
 
+  // 旧存档没有 id/firstgid：按 path/name 把资源与 tileset 一一配对并补全
+  const createResourceId = () =>
+    `res_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+  const claimedTileSets = new Set<any>()
+  let nextFirstgid = tileSets.length > 0
+    ? Math.max(...tileSets.map(ts => ts.firstgid || 1))
+    : 0
+
   const layers = data.layers.map(layer => {
-    const base: any = {
-      id: layer.id,
-      name: layer.name,
-      type: layer.type === 'imagelayer' ? 'image' : 'drawing',
-      visible: layer.visible,
-      locked: layer.locked,
-      resources: (layer.resources || []).map((r: any) => ({
+    const resources = (layer.resources || []).map((r: any) => {
+      let matched: any = null
+      if (r.id) matched = tileSets.find(ts => ts.id === r.id) ?? null
+      if (!matched && r.firstgid != null) {
+        matched = tileSets.find(ts => ts.firstgid === r.firstgid) ?? null
+      }
+      if (!matched) {
+        matched = tileSets.find(
+          ts => !claimedTileSets.has(ts) && ts.imagePath === r.path && ts.name === r.name,
+        ) ?? tileSets.find(
+          ts => !claimedTileSets.has(ts) && ts.imagePath === r.path,
+        ) ?? null
+      }
+      if (matched) claimedTileSets.add(matched)
+
+      const id = r.id || matched?.id || createResourceId()
+      let firstgid = r.firstgid ?? matched?.firstgid
+      if (!firstgid || firstgid <= 0) {
+        firstgid = nextFirstgid > 0 ? nextFirstgid + 10000 : 1
+        nextFirstgid = firstgid
+      } else if (firstgid > nextFirstgid) {
+        nextFirstgid = firstgid
+      }
+
+      if (matched) {
+        if (!matched.id) matched.id = id
+        // 资源声明的 firstgid 优先，保证已有瓦片 GID 不变
+        matched.firstgid = firstgid
+      } else {
+        matched = {
+          id,
+          name: r.name,
+          imagePath: r.path,
+          resourceType: r.resourceType || 'tileset',
+          tileWidth: r.tileWidth,
+          tileHeight: r.tileHeight,
+          firstgid,
+          collisionType: r.collisionType || '图像',
+          collisionEnabled: r.collisionEnabled || false,
+          tiles: [],
+        }
+        tileSets.push(matched)
+        claimedTileSets.add(matched)
+      }
+
+      return {
+        id,
+        firstgid,
         name: r.name,
         path: r.path,
         resourceType: r.resourceType,
@@ -242,8 +299,16 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
         collisionType: r.collisionType || '图像',
         collisionEnabled: r.collisionEnabled || false,
         collisionShape: r.collisionShape,
-        tileSetIndex: 0,
-      })),
+      }
+    })
+
+    const base: any = {
+      id: layer.id,
+      name: layer.name,
+      type: layer.type === 'imagelayer' ? 'image' : 'drawing',
+      visible: layer.visible,
+      locked: layer.locked,
+      resources,
       images: layer.images || [],
     }
 

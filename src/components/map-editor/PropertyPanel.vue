@@ -35,8 +35,7 @@ const selectedTileData = computed(() => {
   if (mapStore.selectedTileIndex < 0) return null
   const layer = mapStore.activeLayer
   if (!layer || layer.type !== 'drawing') return null
-  const globalIdx = mapStore.globalResourceOffset + mapStore.selectedResourceIndex
-  const tileSet = mapStore.mapData.tileSets[globalIdx]
+  const tileSet = mapStore.getTileSetForResource(mapStore.selectedResource)
   if (!tileSet) return null
   return tileSet.tiles[mapStore.selectedTileIndex] ?? null
 })
@@ -63,8 +62,7 @@ const collisionEnabledValue = computed(() => {
   if (mapStore.selectedTileIndex >= 0) {
     const layer = mapStore.activeLayer
     if (layer?.type === 'drawing') {
-      const globalIdx = mapStore.globalResourceOffset + mapStore.selectedResourceIndex
-      const tileSet = mapStore.mapData.tileSets[globalIdx]
+      const tileSet = mapStore.getTileSetForResource(mapStore.selectedResource)
       if (tileSet && tileSet.tiles[mapStore.selectedTileIndex]) {
         return tileSet.tiles[mapStore.selectedTileIndex].collision
       }
@@ -91,8 +89,10 @@ function onCollisionTypeChange(val: string) {
   if (selectedTileData.value && mapStore.selectedTileIndex >= 0) {
     const layer = mapStore.activeLayer
     if (layer?.type === 'drawing') {
-      const globalIdx = mapStore.globalResourceOffset + mapStore.selectedResourceIndex
-      mapStore.setTileCollisionType(globalIdx, mapStore.selectedTileIndex, val)
+      const tileSetIndex = mapStore.tileSetIndexOfResource(mapStore.selectedResource)
+      if (tileSetIndex >= 0) {
+        mapStore.setTileCollisionType(tileSetIndex, mapStore.selectedTileIndex, val)
+      }
       return
     }
   }
@@ -103,7 +103,7 @@ function onCollisionTypeChange(val: string) {
   if (resource) {
     resource.collisionType = val
     resource.collisionEnabled = val !== '图像'
-    const ts = mapStore.mapData.tileSets.find(t => t.name === resource.name)
+    const ts = mapStore.getTileSetForResource(resource)
     if (ts) {
       ts.collisionType = val
       ts.collisionEnabled = val !== '图像'
@@ -147,8 +147,7 @@ function onCollisionEnabledChange(enabled: boolean) {
   if (selectedTileData.value && mapStore.selectedTileIndex >= 0) {
     const layer = mapStore.activeLayer
     if (layer?.type === 'drawing') {
-      const globalIdx = mapStore.globalResourceOffset + mapStore.selectedResourceIndex
-      const tileSet = mapStore.mapData.tileSets[globalIdx]
+      const tileSet = mapStore.getTileSetForResource(mapStore.selectedResource)
       if (tileSet && tileSet.tiles[mapStore.selectedTileIndex]) {
         tileSet.tiles[mapStore.selectedTileIndex].collision = enabled
       }
@@ -160,7 +159,7 @@ function onCollisionEnabledChange(enabled: boolean) {
   const resource = mapStore.selectedResource
   if (resource) {
     resource.collisionEnabled = enabled
-    const ts = mapStore.mapData.tileSets.find(t => t.name === resource.name)
+    const ts = mapStore.getTileSetForResource(resource)
     if (ts) ts.collisionEnabled = enabled
   }
 }

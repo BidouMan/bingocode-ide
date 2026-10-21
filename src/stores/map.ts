@@ -9,6 +9,7 @@ export interface TileData {
 }
 
 export interface TileSet {
+  id: string
   name: string
   imagePath: string
   resourceType: string
@@ -47,6 +48,9 @@ export interface ImageData {
 }
 
 export interface MapResource {
+  // 稳定标识：创建时分配，删除/重排图层都不会改变
+  id: string
+  firstgid: number
   name: string
   path: string
   resourceType: string
@@ -55,8 +59,11 @@ export interface MapResource {
   collisionType: string
   collisionEnabled: boolean
   collisionShape?: { points: number[][] }
-  tileSetIndex: number
 }
+
+// 新增素材时 id/firstgid 由 store 统一分配
+export type MapResourceInput = Omit<MapResource, 'id' | 'firstgid'> &
+  Partial<Pick<MapResource, 'id' | 'firstgid'>>
 
 export interface MapData {
   name: string
@@ -143,15 +150,27 @@ export const useMapStore = defineStore('map', () => {
     return layer?.images[selectedImageIndex.value] ?? null
   })
 
-  // 计算当前图层资源在全局 tileSets 中的起始索引
-  const globalResourceOffset = computed(() => {
-    let offset = 0
-    for (const l of mapData.value.layers) {
-      if (l.id === activeLayer.value?.id) break
-      offset += l.resources.length
-    }
-    return offset
-  })
+  // 素材与 tileset 通过稳定 id / firstgid 绑定，不再依赖图层顺序或全局偏移
+  function getTileSetForResource(resource: MapResource | null): TileSet | null {
+    if (!resource) return null
+    const byId = resource.id
+      ? mapData.value.tileSets.find(ts => ts.id === resource.id)
+      : undefined
+    if (byId) return byId
+    return mapData.value.tileSets.find(ts => ts.firstgid === resource.firstgid)
+      ?? mapData.value.tileSets.find(ts => ts.imagePath === resource.path && ts.name === resource.name)
+      ?? mapData.value.tileSets.find(ts => ts.imagePath === resource.path)
+      ?? null
+  }
+
+  function tileSetIndexOfResource(resource: MapResource | null): number {
+    const tileSet = getTileSetForResource(resource)
+    return tileSet ? mapData.value.tileSets.indexOf(tileSet) : -1
+  }
+
+  function createResourceId(): string {
+    return `res_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+  }
 
   function setMapPath(path: string) {
     currentMapPath.value = path
@@ -341,21 +360,27 @@ export const useMapStore = defineStore('map', () => {
     selectedTileIndex.value = tileIndex
   }
 
-  function addResource(resource: MapResource) {
+  function addResource(input: MapResourceInput) {
     const layer = activeLayer.value
     if (!layer) return
-    layer.resources.push(resource)
-    // 分配firstgid（Tiled标准：每个瓦片集递增10000，避免冲突）
+    // firstgid 只在创建时分配一次，之后不再随图层/素材顺序变化
     const nextFirstgid = mapData.value.tileSets.length > 0
       ? Math.max(...mapData.value.tileSets.map(ts => ts.firstgid)) + 10000
       : 1
+    const resource: MapResource = {
+      ...input,
+      id: input.id || createResourceId(),
+      firstgid: input.firstgid ?? nextFirstgid,
+    }
+    layer.resources.push(resource)
     mapData.value.tileSets.push({
+      id: resource.id,
       name: resource.name,
       imagePath: resource.path,
       resourceType: resource.resourceType,
       tileWidth: resource.tileWidth,
       tileHeight: resource.tileHeight,
-      firstgid: nextFirstgid,
+      firstgid: resource.firstgid,
       collisionType: resource.collisionType,
       collisionEnabled: resource.collisionEnabled,
       tiles: [],
@@ -366,21 +391,20 @@ export const useMapStore = defineStore('map', () => {
     const layer = activeLayer.value
     if (!layer || index < 0 || index >= layer.resources.length) return
 
-    // 先记录被删 tileset 的索引与 GID 范围，再移除；
-    // 否则 splice 后同一索引已经指向下一个 tileset，清理范围会算错
-    let globalIdx = 0
-    for (const l of mapData.value.layers) {
-      if (l.id === layer.id) break
-      globalIdx += l.resources.length
-    }
-    globalIdx += index
-
-    const removedTileSet = mapData.value.tileSets[globalIdx]
-    const nextFirstgid = mapData.value.tileSets[globalIdx + 1]?.firstgid ?? Infinity
+    const removedResource = layer.resources[index]
+    const removedTileSet = getTileSetForResource(removedResource)
+    // 下一个更大的 firstgid 决定该 tileset 的 GID 空间上界
+    const higherGids = removedTileSet
+      ? mapData.value.tileSets
+          .map(ts => ts.firstgid)
+          .filter(gid => gid > removedTileSet.firstgid)
+      : []
+    const nextFirstgid = higherGids.length > 0 ? Math.min(...higherGids) : Infinity
 
     layer.resources.splice(index, 1)
-    if (globalIdx < mapData.value.tileSets.length) {
-      mapData.value.tileSets.splice(globalIdx, 1)
+    if (removedTileSet) {
+      const tileSetIndex = mapData.value.tileSets.indexOf(removedTileSet)
+      if (tileSetIndex >= 0) mapData.value.tileSets.splice(tileSetIndex, 1)
     }
 
     // 清理所有图层中属于该 tileset 的瓦片（GID 编码）
@@ -403,13 +427,12 @@ export const useMapStore = defineStore('map', () => {
   function clearResources() {
     const layer = activeLayer.value
     if (!layer) return
-    let startIdx = 0
-    for (const l of mapData.value.layers) {
-      if (l.id === layer.id) break
-      startIdx += l.resources.length
-    }
-    const count = layer.resources.length
-    mapData.value.tileSets.splice(startIdx, count)
+    // 按素材自身的 id/firstgid 精确移除对应 tileset，不再假设它们在数组中连续
+    const removedIds = new Set(layer.resources.map(r => r.id))
+    const removedFirstgids = new Set(layer.resources.map(r => r.firstgid))
+    mapData.value.tileSets = mapData.value.tileSets.filter(
+      ts => !removedIds.has(ts.id) && !removedFirstgids.has(ts.firstgid),
+    )
     layer.resources = []
     // 清空该图层的所有瓦片
     if (layer.type === 'drawing') {
@@ -570,7 +593,8 @@ export const useMapStore = defineStore('map', () => {
     cursorY,
     activeLayer,
     selectedResource,
-    globalResourceOffset,
+    getTileSetForResource,
+    tileSetIndexOfResource,
     setMapPath,
     loadMap,
     newMap,

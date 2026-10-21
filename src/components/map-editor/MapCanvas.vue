@@ -183,10 +183,10 @@ async function getTileTexture(resource: MapResource, tileIndex: number): Promise
 // 编码 tileId: 使用Tiled标准，GID = firstgid + tileIndex
 // firstgid 由 tileSets 数组中的瓦片集确定
 function encodeTileId(_layerId: number, localRIdx: number, tileIndex: number): number {
-  const globalTsIdx = mapStore.globalResourceOffset + localRIdx
-  const tileSet = mapStore.mapData.tileSets[globalTsIdx]
-  if (!tileSet) return tileIndex + 1
-  return tileSet.firstgid + tileIndex
+  // 直接用素材自己的 firstgid，不再依赖图层顺序偏移
+  const resource = mapStore.activeLayer?.resources[localRIdx]
+  if (resource) return resource.firstgid + tileIndex
+  return tileIndex + 1
 }
 
 // 获取或创建图层容器
@@ -244,9 +244,11 @@ async function renderTile(layerId: number, x: number, y: number, tileId: number)
   if (!matchedTileSet) return
   const tileIndex = tileId - matchedTileSet.firstgid
 
-  // 在当前图层的 resources 中通过 imagePath 匹配，避免 offset 偏移计算错误
+  // 在当前图层的 resources 中优先按 firstgid 精确匹配，回退到路径匹配
   const tileLayer = mapStore.mapData.layers.find(l => l.id === layerId)
   const resource: MapResource | null = tileLayer?.resources.find(
+    (r: MapResource) => r.firstgid === matchedTileSet.firstgid
+  ) ?? tileLayer?.resources.find(
     (r: MapResource) => r.path === matchedTileSet.imagePath
   ) ?? null
   if (!resource) return

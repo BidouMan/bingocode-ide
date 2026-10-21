@@ -1113,7 +1113,6 @@ async function onResLibImported(path: string) {
     tileHeight: isImageLayer ? 64 : tileSize,
     collisionType: '图像',
     collisionEnabled: false,
-    tileSetIndex: 0,
   })
   editorStore.setActiveEditorMode('map')
   editorStore.setResourceTab('map')

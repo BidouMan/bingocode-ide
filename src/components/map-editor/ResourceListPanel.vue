@@ -285,7 +285,6 @@ async function onResourceImported(options: { path: string; mode: 'image' | 'tile
     tileHeight: isImageLayer ? 64 : th,
     collisionType: '图像',
     collisionEnabled: false,
-    tileSetIndex: 0,
   })
   showImportDialog.value = false
   refreshAllThumbnails()
