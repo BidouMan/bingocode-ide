@@ -25,6 +25,7 @@ import iconChangeBg from '../../assets/icons/btn_preview_change_bg.svg'
 import iconAdd from '../../assets/icons/btn_preview_add.svg'
 import iconLoop from '../../assets/icons/anim_loop.svg'
 import iconLoopOff from '../../assets/icons/anim_loop_off.svg'
+import iconCenterPivot from '../../assets/icons/中心点.svg'
 
 const resourceStore = useResourceStore()
 const editorStore = useEditorStore()
@@ -116,6 +117,10 @@ async function loadSprite(item: { id: string; name: string; path: string }) {
     defaultFrameDirty = false
     selectedAnim.value = null
     stopAnimation()
+    annoScope.value = 'all'
+    annoDefaultPivot.value = currentSprite.value.bsf
+      ? { ...currentSprite.value.bsf.pivot }
+      : null
     canvasZoom.value = 1
     canvasPanX.value = 0
     canvasPanY.value = 0
@@ -303,6 +308,151 @@ function resetCanvas() {
   canvasPanY.value = 0
 }
 
+// ═══ 中心点标注（仅 .bsf 角色：manifest 带 pivot 元数据） ═══
+
+/** 编辑作用域：all = 改统一值（全部帧生效）；one = 写当前帧覆盖 */
+const annoScope = ref<'all' | 'one'>('all')
+const isPivotDragging = ref(false)
+/** 加载时快照的默认统一 pivot（「重置」按钮的恢复目标） */
+const annoDefaultPivot = ref<{ x: number; y: number } | null>(null)
+
+const canAnno = computed(() => !!currentSprite.value?.bsf)
+
+/** 正在标注的帧 = 画布显示帧（动画播放时画布停在选中帧） */
+const annoFrameIndex = computed(() => canvasDisplayIndex.value)
+
+/** 第 i 帧的有效中心点：帧级覆盖优先，缺省回退统一值 */
+function effPivot(i: number): { x: number; y: number } | null {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf || i < 0 || i >= bsf.frames.length) return null
+  return bsf.frames[i].pivot || bsf.pivot
+}
+
+function hasPivotOverride(i: number): boolean {
+  return !!currentSprite.value?.bsf?.frames[i]?.pivot
+}
+
+const annoPivot = computed(() => effPivot(annoFrameIndex.value))
+
+function setPivot(p: { x: number; y: number }) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  if (annoScope.value === 'all') {
+    bsf.pivot = { x: p.x, y: p.y }
+  } else {
+    const f = bsf.frames[annoFrameIndex.value]
+    if (f) f.pivot = { x: p.x, y: p.y }
+  }
+  scheduleSave()
+}
+
+function clearPivotOverride() {
+  const f = currentSprite.value?.bsf?.frames[annoFrameIndex.value]
+  if (!f) return
+  delete f.pivot
+  scheduleSave()
+}
+
+/** 重置：统一值回到加载时快照，并清除全部帧的单帧覆盖 */
+function resetAnno() {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf || !annoDefaultPivot.value) return
+  bsf.pivot = { ...annoDefaultPivot.value }
+  for (const f of bsf.frames) delete f.pivot
+  scheduleSave()
+}
+
+/** 「脚底」预设：所有帧内容包围盒的底部中心（贴地角色锚点） */
+function feetPresetPoint(): { x: number; y: number } {
+  const bsf = currentSprite.value?.bsf!
+  let maxX = 0
+  let maxY = 0
+  for (const f of bsf.frames) {
+    maxX = Math.max(maxX, f.offset.x + f.rect.w)
+    maxY = Math.max(maxY, f.offset.y + f.rect.h)
+  }
+  return { x: Math.round(maxX / 2), y: maxY }
+}
+
+function applyPivotPreset(kind: 'center' | 'feet') {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  const p = kind === 'center'
+    ? { x: Math.round(bsf.canvas.w / 2), y: Math.round(bsf.canvas.h / 2) }
+    : feetPresetPoint()
+  setPivot(p)
+}
+
+function onCoordChange(axis: 'x' | 'y', e: Event) {
+  const v = Number((e.target as HTMLInputElement).value)
+  const cur = annoPivot.value
+  if (!cur || !Number.isFinite(v)) return
+  setPivot(axis === 'x' ? { x: v, y: cur.y } : { x: cur.x, y: v })
+}
+
+/** 洋葱皮幽灵：相邻帧有效中心点与当前帧不同时显示，防碰撞框/重心抖动 */
+const pivotGhosts = computed(() => {
+  if (!canAnno.value) return []
+  const cur = effPivot(annoFrameIndex.value)
+  if (!cur) return []
+  const out: { i: number; x: number; y: number }[] = []
+  for (const ni of [annoFrameIndex.value - 1, annoFrameIndex.value + 1]) {
+    const np = effPivot(ni)
+    if (!np) continue
+    if (Math.abs(np.x - cur.x) < 0.01 && Math.abs(np.y - cur.y) < 0.01) continue
+    out.push({ i: ni, x: np.x, y: np.y })
+  }
+  return out
+})
+
+/** 预览区只读中心点标记（百分比定位，随预览缩放反向补偿保持点大小） */
+const previewDotStyle = computed(() => {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return {}
+  const p = effPivot(selectedFrameIndex.value)
+  if (!p) return {}
+  return {
+    left: `${(p.x / bsf.canvas.w) * 100}%`,
+    top: `${(p.y / bsf.canvas.h) * 100}%`,
+    transform: `translate(-50%, -50%) scale(${1 / previewScale.value})`,
+  }
+})
+
+const pivotHandleStyle = computed(() => {
+  const p = annoPivot.value
+  return p ? { left: `${p.x}px`, top: `${p.y}px` } : {}
+})
+
+/** 屏幕坐标 → 逻辑画布坐标（画布中心锚点 + pan + zoom，0.5px 吸附） */
+function screenToCanvas(e: MouseEvent): { x: number; y: number } | null {
+  const rect = canvasRef.value?.getBoundingClientRect()
+  const bsf = currentSprite.value?.bsf
+  if (!rect || !bsf) return null
+  const offX = e.clientX - rect.left - rect.width / 2
+  const offY = e.clientY - rect.top - rect.height / 2
+  const lx = (offX - canvasPanX.value + bsf.canvas.w / 2) / canvasZoom.value
+  const ly = (offY - canvasPanY.value + bsf.canvas.h / 2) / canvasZoom.value
+  return { x: Math.round(lx * 2) / 2, y: Math.round(ly * 2) / 2 }
+}
+
+function onPivotMouseDown(e: MouseEvent) {
+  if (e.button !== 0) return // 中键放行画布平移，仅左键起拖
+  e.stopPropagation()
+  e.preventDefault()
+  isPivotDragging.value = true
+}
+
+function onPivotDragMove(e: MouseEvent) {
+  if (!isPivotDragging.value) return
+  const p = screenToCanvas(e)
+  if (p) setPivot(p)
+}
+
+function onPivotDragUp() {
+  isPivotDragging.value = false
+}
+
+
 function getPreviewBgStyle() {
   const bgs = [
     { background: '#2b2b2b' },
@@ -427,6 +577,9 @@ function closeContextMenus() {
 // 注册全局 mouseup 监听
 onMounted(() => {
   document.addEventListener('mouseup', onGlobalMouseUp)
+  // 中心点拖拽用全局监听：拖出画布也不中断
+  document.addEventListener('mousemove', onPivotDragMove)
+  document.addEventListener('mouseup', onPivotDragUp)
 })
 
 onBeforeUnmount(() => {
@@ -434,6 +587,8 @@ onBeforeUnmount(() => {
   revokeSpriteUrls(currentSprite.value)
   if (saveTimer) clearTimeout(saveTimer)
   document.removeEventListener('mouseup', onGlobalMouseUp)
+  document.removeEventListener('mousemove', onPivotDragMove)
+  document.removeEventListener('mouseup', onPivotDragUp)
 })
 </script>
 
@@ -454,6 +609,11 @@ onBeforeUnmount(() => {
         >
           <img :src="frame.url" class="costume-thumb" :style="{ imageRendering: imageRenderingStyle }" />
           <span class="costume-frame-num">帧 {{ idx + 1 }}</span>
+          <!-- 中心点单帧覆盖标记 -->
+          <span
+            v-if="hasPivotOverride(idx)"
+            class="pivot-override-badge"
+          ></span>
         </div>
       </div>
       <FrameUploadDrawer
@@ -463,31 +623,158 @@ onBeforeUnmount(() => {
       />
     </div>
 
-    <!-- 中: 画布 -->
-    <div
-      ref="canvasRef"
-      class="sprite-canvas"
-      :class="{ 'is-panning': isPanning }"
-      @wheel.prevent="onCanvasWheel"
-      @mousedown="onCanvasMouseDown"
-      @mousemove="onCanvasMouseMove"
-      @mouseup="onCanvasMouseUp"
-      @mouseleave="onCanvasMouseUp"
-      @dblclick="resetCanvas"
-    >
-      <div class="canvas-center-anchor">
-        <div
-          class="canvas-sprite-wrapper"
-          :style="{
-            transform: `translate(${canvasPanX}px, ${canvasPanY}px) scale(${canvasZoom})`
-          }"
-        >
-          <img
-            v-if="currentSprite?.frames[canvasDisplayIndex]"
-            :src="currentSprite.frames[canvasDisplayIndex].url"
-            class="canvas-sprite"
-            :style="{ imageRendering: imageRenderingStyle }"
+    <!-- 中: 画布列（标注工具条 + 画布） -->
+    <div class="canvas-col">
+      <!-- 标注图层工具条：中心点已实现，碰撞/挂点为同一框架的后续图层 -->
+      <div v-if="canAnno" class="anno-toolbar">
+        <button class="layer-chip active" type="button">
+          <img :src="iconCenterPivot" class="layer-chip-icon" alt="" />中心点
+        </button>
+        <button class="layer-chip" type="button" disabled>碰撞<span class="soon">即将</span></button>
+        <button class="layer-chip" type="button" disabled>挂点<span class="soon">即将</span></button>
+        <!-- 与底部浮动条同源的标注控件（共享状态，供对比两版布局） -->
+        <div class="props-sep"></div>
+        <div class="coord-group">
+          <label>X</label>
+          <input
+            class="coord-input"
+            type="number"
+            step="0.5"
+            :value="annoPivot ? annoPivot.x.toFixed(1) : ''"
+            @change="onCoordChange('x', $event)"
           />
+        </div>
+        <div class="coord-group">
+          <label>Y</label>
+          <input
+            class="coord-input"
+            type="number"
+            step="0.5"
+            :value="annoPivot ? annoPivot.y.toFixed(1) : ''"
+            @change="onCoordChange('y', $event)"
+          />
+        </div>
+        <div class="props-sep"></div>
+        <div class="scope-seg">
+          <button
+            type="button"
+            :class="{ on: annoScope === 'all' }"
+            @click="annoScope = 'all'"
+          >全部帧</button>
+          <button
+            type="button"
+            :class="{ on: annoScope === 'one' }"
+            @click="annoScope = 'one'"
+          >仅当前帧</button>
+        </div>
+        <div class="props-sep"></div>
+        <button class="preset-btn" type="button" @click="applyPivotPreset('center')">中心</button>
+        <button class="preset-btn" type="button" @click="applyPivotPreset('feet')">脚底</button>
+        <button class="preset-btn" type="button" @click="resetAnno">重置</button>
+        <button
+          v-if="hasPivotOverride(annoFrameIndex)"
+          class="clear-override-btn"
+          type="button"
+          @click="clearPivotOverride"
+        >恢复统一</button>
+      </div>
+
+      <div
+        ref="canvasRef"
+        class="sprite-canvas"
+        :class="{ 'is-panning': isPanning }"
+        @wheel.prevent="onCanvasWheel"
+        @mousedown="onCanvasMouseDown"
+        @mousemove="onCanvasMouseMove"
+        @mouseup="onCanvasMouseUp"
+        @mouseleave="onCanvasMouseUp"
+        @dblclick="resetCanvas"
+      >
+        <div class="canvas-center-anchor">
+          <div
+            class="canvas-sprite-wrapper"
+            :style="{
+              transform: `translate(${canvasPanX}px, ${canvasPanY}px) scale(${canvasZoom})`
+            }"
+          >
+            <img
+              v-if="currentSprite?.frames[canvasDisplayIndex]"
+              :src="currentSprite.frames[canvasDisplayIndex].url"
+              class="canvas-sprite"
+              :style="{ imageRendering: imageRenderingStyle }"
+            />
+            <!-- 洋葱皮幽灵：相邻帧有效中心点不一致时显示 -->
+            <div
+              v-for="g in pivotGhosts"
+              :key="g.i"
+              class="pivot-ghost"
+              :style="{ left: `${g.x}px`, top: `${g.y}px` }"
+            >
+              <div class="ghost-counter" :style="{ transform: `scale(${1 / canvasZoom})` }">
+                <span class="ghost-ring"></span>
+              </div>
+            </div>
+            <!-- 中心点手柄 -->
+            <div
+              v-if="annoPivot"
+              class="pivot-handle"
+              :class="{ 'is-override': annoScope === 'one' }"
+              :style="pivotHandleStyle"
+              @mousedown="onPivotMouseDown"
+            >
+              <div class="pivot-visual" :style="{ transform: `scale(${1 / canvasZoom})` }">
+                <div class="pivot-ring"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 底部浮动属性条：作用域 + 数值 + 预设 -->
+        <div v-if="canAnno" class="anno-props">
+          <span class="props-title">中心点</span>
+          <div class="coord-group">
+            <label>X</label>
+            <input
+              class="coord-input"
+              type="number"
+              step="0.5"
+              :value="annoPivot ? annoPivot.x.toFixed(1) : ''"
+              @change="onCoordChange('x', $event)"
+            />
+          </div>
+          <div class="coord-group">
+            <label>Y</label>
+            <input
+              class="coord-input"
+              type="number"
+              step="0.5"
+              :value="annoPivot ? annoPivot.y.toFixed(1) : ''"
+              @change="onCoordChange('y', $event)"
+            />
+          </div>
+          <div class="props-sep"></div>
+          <div class="scope-seg">
+            <button
+              type="button"
+              :class="{ on: annoScope === 'all' }"
+              @click="annoScope = 'all'"
+            >全部帧</button>
+            <button
+              type="button"
+              :class="{ on: annoScope === 'one' }"
+              @click="annoScope = 'one'"
+            >仅当前帧</button>
+          </div>
+          <div class="props-sep"></div>
+          <button class="preset-btn" type="button" @click="applyPivotPreset('center')">中心</button>
+          <button class="preset-btn" type="button" @click="applyPivotPreset('feet')">脚底</button>
+          <button class="preset-btn" type="button" @click="resetAnno">重置</button>
+          <button
+            v-if="hasPivotOverride(annoFrameIndex)"
+            class="clear-override-btn"
+            type="button"
+            @click="clearPivotOverride"
+          >恢复统一</button>
         </div>
       </div>
     </div>
@@ -499,12 +786,21 @@ onBeforeUnmount(() => {
       <!-- 预览区域 256×256 -->
       <div class="preview-bg">
         <div class="preview-image-box" :style="getPreviewBgStyle()">
-          <img
-            v-if="currentSprite?.frames[selectedFrameIndex]"
-            :src="currentSprite.frames[selectedFrameIndex].url"
-            class="preview-image"
-            :style="{ transform: `scale(${previewScale})`, imageRendering: imageRenderingStyle }"
-          />
+          <div class="preview-image-wrap" :style="{ transform: `scale(${previewScale})` }">
+            <img
+              v-if="currentSprite?.frames[selectedFrameIndex]"
+              :src="currentSprite.frames[selectedFrameIndex].url"
+              class="preview-image"
+              :style="{ imageRendering: imageRenderingStyle }"
+            />
+            <!-- 中心点只读标记：绿=统一值 / 蓝=该帧有覆盖 -->
+            <span
+              v-if="canAnno"
+              class="preview-pivot-dot"
+              :class="{ 'is-override': hasPivotOverride(selectedFrameIndex) }"
+              :style="previewDotStyle"
+            ></span>
+          </div>
           <!-- FPS 控制 (悬浮在预览底部)：左=拖动滑条，右=帧数手动输入；速度按片段独立保存 -->
           <div class="fps-slider-overlay" :class="{ 'fps-overlay-disabled': !selectedAnim }">
             <input
@@ -693,6 +989,7 @@ onBeforeUnmount(() => {
 
 /* ═══ 中: 画布 ═══ */
 .sprite-canvas {
+  position: relative;
   flex: 1;
   display: flex;
   align-items: center;
@@ -717,6 +1014,209 @@ onBeforeUnmount(() => {
   display: block;
   background-color: #ffffff;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='16' height='16' fill='%23fff'/%3E%3Crect width='8' height='8' fill='%23e0e0e0'/%3E%3Crect x='8' y='8' width='8' height='8' fill='%23e0e0e0'/%3E%3C/svg%3E");
+}
+
+/* ═══ 中: 画布列 — 标注图层 ═══ */
+.canvas-col {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.anno-toolbar {
+  height: 36px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  background: var(--bg-root);
+  border-bottom: 1px solid var(--border);
+}
+.layer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border-light);
+  background: transparent;
+  color: #8a8f98;
+  cursor: pointer;
+  font-size: 12px;
+}
+.layer-chip:hover:not(:disabled) { background: var(--bg-hover); color: #fff; }
+.layer-chip.active { border-color: var(--accent); color: var(--accent); background: rgba(91, 251, 132, 0.08); }
+.layer-chip:disabled { opacity: 0.4; cursor: not-allowed; }
+.layer-chip .soon { font-size: 9px; opacity: 0.7; margin-left: 2px; }
+.layer-chip-icon { width: 14px; height: 14px; }
+/* 工具条内的标注控件紧凑排布（36px 行高） */
+.anno-toolbar .coord-input { height: 20px; padding: 0 4px; }
+.anno-toolbar .scope-seg button { padding: 3px 8px; }
+.anno-toolbar .preset-btn,
+.anno-toolbar .clear-override-btn { padding: 3px 8px; }
+
+/* 中心点手柄（锚点为逻辑坐标，反向缩放保持屏幕大小恒定） */
+.pivot-handle {
+  position: absolute;
+  width: 0;
+  height: 0;
+  cursor: move;
+  z-index: 5;
+}
+.pivot-visual {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+.pivot-ring {
+  position: absolute;
+  left: -11px;
+  top: -11px;
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  background: rgba(91, 251, 132, 0.12);
+  box-shadow: 0 0 6px rgba(91, 251, 132, 0.5);
+}
+.pivot-ring::before,
+.pivot-ring::after {
+  content: "";
+  position: absolute;
+  background: var(--accent);
+}
+.pivot-ring::before { left: 50%; top: -6px; width: 1.5px; height: 32px; margin-left: -0.75px; }
+.pivot-ring::after { top: 50%; left: -6px; height: 1.5px; width: 32px; margin-top: -0.75px; }
+/* 单帧覆盖模式：手柄变蓝（区别于统一绿） */
+.pivot-handle.is-override .pivot-ring {
+  border-color: #61afef;
+  background: rgba(97, 175, 239, 0.12);
+  box-shadow: 0 0 6px rgba(97, 175, 239, 0.5);
+}
+.pivot-handle.is-override .pivot-ring::before,
+.pivot-handle.is-override .pivot-ring::after { background: #61afef; }
+
+/* 洋葱皮幽灵（相邻帧有效中心点） */
+.pivot-ghost {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+.ghost-counter {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+.ghost-ring {
+  position: absolute;
+  left: -7px;
+  top: -7px;
+  width: 14px;
+  height: 14px;
+  border: 1.5px dashed #e5c07b;
+  border-radius: 50%;
+  opacity: 0.55;
+}
+
+/* 底部浮动属性条 */
+.anno-props {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(41, 44, 52, 0.92);
+  border: 1px solid var(--border-light);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  z-index: 10;
+}
+.props-title {
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.props-sep { width: 1px; height: 18px; background: var(--border-light); flex-shrink: 0; }
+.coord-group { display: flex; align-items: center; gap: 4px; }
+.coord-group label { color: #8a8f98; font-size: 12px; }
+.coord-input {
+  width: 54px;
+  padding: 3px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--border-light);
+  background: var(--bg-root);
+  color: #fff;
+  font-size: 12px;
+  text-align: right;
+  outline: none;
+  -moz-appearance: textfield;
+}
+.coord-input::-webkit-outer-spin-button,
+.coord-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.coord-input:focus { border-color: var(--accent); }
+.scope-seg {
+  display: flex;
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.scope-seg button {
+  padding: 4px 10px;
+  border: none;
+  background: transparent;
+  color: #8a8f98;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.scope-seg button:hover { background: var(--bg-hover); }
+.scope-seg button.on { background: var(--accent); color: #10131a; font-weight: 600; }
+.scope-seg button.on:nth-child(2) { background: #61afef; }
+.preset-btn {
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid var(--border-light);
+  background: transparent;
+  color: #ddd;
+  white-space: nowrap;
+}
+.preset-btn:hover { background: var(--bg-hover); border-color: #8a8f98; }
+.clear-override-btn {
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid #61afef;
+  background: rgba(97, 175, 239, 0.1);
+  color: #61afef;
+  white-space: nowrap;
+}
+.clear-override-btn:hover { background: rgba(97, 175, 239, 0.22); }
+
+/* 造型列表：单帧覆盖角标 */
+.costume-item { position: relative; }
+.pivot-override-badge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #61afef;
+  box-shadow: 0 0 4px #61afef;
 }
 
 /* ═══ 右: 预览面板 ═══ */
@@ -762,6 +1262,26 @@ onBeforeUnmount(() => {
 .preview-image {
   max-width: 248px;
   max-height: 248px;
+}
+/* 预览图包裹层：缩放移到包裹层，让中心点标记随图缩放并反向补偿保持点大小 */
+.preview-image-wrap {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+}
+.preview-pivot-dot {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  background: rgba(91, 251, 132, 0.3);
+  pointer-events: none;
+  z-index: 3;
+}
+.preview-pivot-dot.is-override {
+  border-color: #61afef;
+  background: rgba(97, 175, 239, 0.3);
 }
 
 /* FPS 控制 (悬浮在预览底部)：左滑条 + 右数字输入，无底色 */

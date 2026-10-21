@@ -21,6 +21,8 @@ export interface BsfFrameMeta {
   name: string
   rect: { x: number; y: number; w: number; h: number }
   offset: { x: number; y: number }
+  /** 帧级中心点覆盖（画布坐标）：缺省时用 BsfMeta.pivot 统一值 */
+  pivot?: { x: number; y: number }
 }
 
 /** .bsf（Bingo Sheet File）sheet 元数据：保存 manifest 时完整回写 */

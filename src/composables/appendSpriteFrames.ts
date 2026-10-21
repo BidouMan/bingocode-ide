@@ -34,6 +34,15 @@ function canvasToPng(canvas: HTMLCanvasElement): Promise<Blob> {
   })
 }
 
+/** 重打包后按帧名把帧级 pivot 覆盖搬回新元数据（帧名是唯一稳定标识） */
+function carryFramePivots(next: { name: string; pivot?: { x: number; y: number } }[], prev: { name: string; pivot?: { x: number; y: number } }[]) {
+  const prevPivots = new Map(prev.filter(f => f.pivot).map(f => [f.name, f.pivot]))
+  for (const f of next) {
+    const p = prevPivots.get(f.name)
+    if (p) f.pivot = { ...p }
+  }
+}
+
 /** 图片帧归一化到目标画布（等比 contain 缩小居中；SVG 请先在调用方栅格化为 PNG） */
 export async function normalizeFrameToCanvas(blob: Blob, w: number, h: number): Promise<Blob> {
   const img = await loadImage(blob)
@@ -152,6 +161,8 @@ async function appendToBsf(dirPath: string, sprite: Awaited<ReturnType<typeof re
 
   const packed = packDrawnFrames(canvases, canvasW, canvasH, names)
   // 只更新帧矩形；pivot/canvas 保持原 manifest 值（saveBsfManifest 回写 sprite.bsf.*）
+  // 帧级 pivot 覆盖按帧名搬回新 packed 元数据（rect/offset 变了但帧名稳定）
+  carryFramePivots(packed.frames, meta.frames)
   meta.frames = packed.frames
 
   for (const a of sprite.animations) {
@@ -272,6 +283,8 @@ async function rewriteBsfDir(
 ) {
   const meta = sprite.bsf!
   const packed = packDrawnFrames(canvases, meta.canvas.w, meta.canvas.h, names)
+  // 帧级 pivot 覆盖按帧名保留（重打包后 rect/offset 变化不影响 pivot 语义）
+  carryFramePivots(packed.frames, meta.frames)
 
   // clips：帧序列过滤已删帧名；空 clip 移除（readSpriteFromPath 读取的 clips 带 frameNames）
   const nameSet = new Set(names)

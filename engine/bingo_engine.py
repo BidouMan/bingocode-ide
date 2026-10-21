@@ -1473,7 +1473,8 @@ class Sprite:
         frame = self._bsf_frames[idx]
         rect = frame["rect"]
         offset = frame.get("offset") or {"x": 0, "y": 0}
-        pivot = self._bsf_pivot
+        # 帧级 pivot 覆盖优先（编辑器「仅当前帧」修改），缺省回退 manifest 统一值
+        pivot = frame.get("pivot") or self._bsf_pivot
         rw, rh = rect["w"], rect["h"]
 
         # 前端 anchor=0.5：纹理坐标系下 (0,0)-(rw,rh) 即当前帧内容
