@@ -184,7 +184,7 @@ async function getTileTexture(resource: MapResource, tileIndex: number): Promise
 // firstgid 由 tileSets 数组中的瓦片集确定
 function encodeTileId(_layerId: number, localRIdx: number, tileIndex: number): number {
   // 直接用素材自己的 firstgid，不再依赖图层顺序偏移
-  const resource = mapStore.activeLayer?.resources[localRIdx]
+  const resource = mapStore.activeLayerResources[localRIdx]
   if (resource) return resource.firstgid + tileIndex
   return tileIndex + 1
 }
@@ -244,11 +244,10 @@ async function renderTile(layerId: number, x: number, y: number, tileId: number)
   if (!matchedTileSet) return
   const tileIndex = tileId - matchedTileSet.firstgid
 
-  // 在当前图层的 resources 中优先按 firstgid 精确匹配，回退到路径匹配
-  const tileLayer = mapStore.mapData.layers.find(l => l.id === layerId)
-  const resource: MapResource | null = tileLayer?.resources.find(
+  // 在地图级素材库中优先按 firstgid 精确匹配，回退到路径匹配
+  const resource: MapResource | null = mapStore.mapData.resources.find(
     (r: MapResource) => r.firstgid === matchedTileSet.firstgid
-  ) ?? tileLayer?.resources.find(
+  ) ?? mapStore.mapData.resources.find(
     (r: MapResource) => r.path === matchedTileSet.imagePath
   ) ?? null
   if (!resource) return
@@ -625,10 +624,10 @@ function onPointerDown(e: PointerEvent) {
               if (tileId >= tileSets[i].firstgid) { matchedTs = tileSets[i]; break }
             }
             const tIdx = matchedTs ? tileId - matchedTs.firstgid : 0
-            const texLayer = mapStore.mapData.layers.find(l => l.id === layer.id)
-            const texRes = matchedTs ? texLayer?.resources.find(
-              (r: MapResource) => r.path === matchedTs.imagePath
-            ) : null
+            const texRes = matchedTs
+              ? mapStore.mapData.resources.find((r: MapResource) => r.firstgid === matchedTs.firstgid)
+                ?? mapStore.mapData.resources.find((r: MapResource) => r.path === matchedTs.imagePath)
+              : null
             if (texRes) {
               getTileTexture(texRes, tIdx).then(texture => {
                 if (!texture || !moveTileId) return
@@ -945,7 +944,7 @@ function onScratchDrop(e: CustomEvent) {
   const layer = mapStore.activeLayer
 
   if (!layer || layer.type !== 'image') return
-  const resource = layer.resources[resourceIndex]
+  const resource = mapStore.activeLayerResources[resourceIndex]
   if (!resource) return
 
   // 拖入的图片左上角自动对齐到坐标原点
@@ -968,7 +967,7 @@ function onDrop(e: DragEvent) {
   if (imageData && layer && layer.type === 'image') {
     try {
       const { resourceIndex } = JSON.parse(imageData)
-      const resource = layer.resources[resourceIndex]
+      const resource = mapStore.activeLayerResources[resourceIndex]
       const worldPos = screenToWorld(e)
       if (resource && worldPos) {
         placeImage(layer, resource, worldPos.x, worldPos.y)

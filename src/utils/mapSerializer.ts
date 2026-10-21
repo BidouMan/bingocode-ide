@@ -9,6 +9,8 @@ export interface MapSaveData {
   collisionType: string
   collisionEnabled: boolean
   renderMode?: 'smooth' | 'pixelated'
+  // 地图级素材库（新增）；旧存档没有该字段时从各图层收集
+  resources?: ResourceSaveData[]
   layers: LayerSaveData[]
   tilesets: TilesetSaveData[]
 }
@@ -75,6 +77,7 @@ export interface MapLoadData {
   collisionType: string
   collisionEnabled: boolean
   renderMode?: 'smooth' | 'pixelated'
+  resources: any[]
   layers: any[]
   tileSets: any[]
 }
@@ -131,6 +134,23 @@ export function decompressTileData(
  * 从编辑器内部格式转换为保存格式
  */
 export function serializeMap(mapData: any): MapSaveData {
+  const serializeResource = (r: any): ResourceSaveData => ({
+    id: r.id || undefined,
+    firstgid: r.firstgid || undefined,
+    name: r.name,
+    path: r.path,
+    resourceType: r.resourceType,
+    tileWidth: r.tileWidth,
+    tileHeight: r.tileHeight,
+    collisionType: r.collisionType || '图像',
+    collisionEnabled: r.collisionEnabled || false,
+    collisionShape: r.collisionShape,
+  })
+
+  const mapResources = (mapData.resources || []).map(serializeResource)
+  const imageResources = (mapData.resources || []).filter((r: any) => r.resourceType === 'image')
+  const tileResources = (mapData.resources || []).filter((r: any) => r.resourceType !== 'image')
+
   const tilesets: TilesetSaveData[] = mapData.tileSets.map((ts: any) => {
     return {
       id: ts.id || undefined,
@@ -181,19 +201,11 @@ export function serializeMap(mapData: any): MapSaveData {
       }))
     }
 
-    if (layer.resources?.length) {
-      base.resources = layer.resources.map((r: any) => ({
-        id: r.id || undefined,
-        firstgid: r.firstgid || undefined,
-        name: r.name,
-        path: r.path,
-        resourceType: r.resourceType,
-        tileWidth: r.tileWidth,
-        tileHeight: r.tileHeight,
-        collisionType: r.collisionType || '图像',
-        collisionEnabled: r.collisionEnabled || false,
-        collisionShape: r.collisionShape,
-      }))
+    // 层内镜像只用于兼容旧版本与引擎的 tileset 碰撞回填；
+    // 编辑器真正读取的是顶层地图级 resources
+    const layerResources = layer.type === 'image' ? imageResources : tileResources
+    if (layerResources.length > 0) {
+      base.resources = layerResources.map(serializeResource)
     }
 
     return base
@@ -207,6 +219,7 @@ export function serializeMap(mapData: any): MapSaveData {
     gravity: mapData.gravity,
     collisionType: mapData.collisionType || '图像',
     collisionEnabled: mapData.collisionEnabled || false,
+    resources: mapResources,
     layers,
     tilesets,
   }
@@ -242,73 +255,101 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
     ? Math.max(...tileSets.map(ts => ts.firstgid || 1))
     : 0
 
-  const layers = data.layers.map(layer => {
-    const resources = (layer.resources || []).map((r: any) => {
-      let matched: any = null
-      if (r.id) matched = tileSets.find(ts => ts.id === r.id) ?? null
-      if (!matched && r.firstgid != null) {
-        matched = tileSets.find(ts => ts.firstgid === r.firstgid) ?? null
-      }
-      if (!matched) {
-        matched = tileSets.find(
-          ts => !claimedTileSets.has(ts) && ts.imagePath === r.path && ts.name === r.name,
-        ) ?? tileSets.find(
-          ts => !claimedTileSets.has(ts) && ts.imagePath === r.path,
-        ) ?? null
-      }
-      if (matched) claimedTileSets.add(matched)
+  // 统一解析素材：补全 id/firstgid，并与 tileset 一一配对
+  const resolveResource = (r: any): any => {
+    let matched: any = null
+    if (r.id) matched = tileSets.find(ts => ts.id === r.id) ?? null
+    if (!matched && r.firstgid != null) {
+      matched = tileSets.find(ts => ts.firstgid === r.firstgid) ?? null
+    }
+    if (!matched) {
+      matched = tileSets.find(
+        ts => !claimedTileSets.has(ts) && ts.imagePath === r.path && ts.name === r.name,
+      ) ?? tileSets.find(
+        ts => !claimedTileSets.has(ts) && ts.imagePath === r.path,
+      ) ?? null
+    }
+    if (matched) claimedTileSets.add(matched)
 
-      const id = r.id || matched?.id || createResourceId()
-      let firstgid = r.firstgid ?? matched?.firstgid
-      if (!firstgid || firstgid <= 0) {
-        firstgid = nextFirstgid > 0 ? nextFirstgid + 10000 : 1
-        nextFirstgid = firstgid
-      } else if (firstgid > nextFirstgid) {
-        nextFirstgid = firstgid
-      }
+    const resourceType = r.resourceType === 'image' ? 'image' : 'tileset'
+    const id = r.id || matched?.id || createResourceId()
+    let firstgid = r.firstgid ?? matched?.firstgid
+    if (!firstgid || firstgid <= 0) {
+      firstgid = nextFirstgid > 0 ? nextFirstgid + 10000 : 1
+      nextFirstgid = firstgid
+    } else if (firstgid > nextFirstgid) {
+      nextFirstgid = firstgid
+    }
 
-      if (matched) {
-        if (!matched.id) matched.id = id
-        // 资源声明的 firstgid 优先，保证已有瓦片 GID 不变
-        matched.firstgid = firstgid
-      } else {
-        matched = {
-          id,
-          name: r.name,
-          imagePath: r.path,
-          resourceType: r.resourceType || 'tileset',
-          tileWidth: r.tileWidth,
-          tileHeight: r.tileHeight,
-          firstgid,
-          collisionType: r.collisionType || '图像',
-          collisionEnabled: r.collisionEnabled || false,
-          tiles: [],
-        }
-        tileSets.push(matched)
-        claimedTileSets.add(matched)
-      }
-
-      return {
+    if (matched) {
+      if (!matched.id) matched.id = id
+      // 资源声明的 firstgid 优先，保证已有瓦片 GID 不变
+      matched.firstgid = firstgid
+    } else {
+      matched = {
         id,
-        firstgid,
         name: r.name,
-        path: r.path,
-        resourceType: r.resourceType,
+        imagePath: r.path,
+        resourceType,
         tileWidth: r.tileWidth,
         tileHeight: r.tileHeight,
+        firstgid,
         collisionType: r.collisionType || '图像',
         collisionEnabled: r.collisionEnabled || false,
-        collisionShape: r.collisionShape,
+        tiles: [],
       }
-    })
+      tileSets.push(matched)
+      claimedTileSets.add(matched)
+    }
 
+    return {
+      id,
+      firstgid,
+      name: r.name,
+      path: r.path,
+      resourceType,
+      tileWidth: r.tileWidth,
+      tileHeight: r.tileHeight,
+      collisionType: r.collisionType || '图像',
+      collisionEnabled: r.collisionEnabled || false,
+      collisionShape: r.collisionShape,
+    }
+  }
+
+  let resources: any[]
+  if (Array.isArray(data.resources)) {
+    // 新存档：直接读地图级素材库
+    resources = data.resources.map(resolveResource)
+  } else {
+    // 旧存档：从各图层收集，并按来源图层归一化素材类型
+    const legacy: any[] = []
+    for (const layer of data.layers) {
+      for (const r of layer.resources || []) {
+        legacy.push({
+          ...r,
+          resourceType: layer.type === 'imagelayer' ? 'image' : 'tileset',
+        })
+      }
+    }
+    resources = legacy.map(resolveResource)
+  }
+
+  // 图像素材只按路径被实例引用，重复条目直接合并
+  const seenImagePaths = new Set<string>()
+  resources = resources.filter(r => {
+    if (r.resourceType !== 'image') return true
+    if (seenImagePaths.has(r.path)) return false
+    seenImagePaths.add(r.path)
+    return true
+  })
+
+  const layers = data.layers.map(layer => {
     const base: any = {
       id: layer.id,
       name: layer.name,
       type: layer.type === 'imagelayer' ? 'image' : 'drawing',
       visible: layer.visible,
       locked: layer.locked,
-      resources,
       images: layer.images || [],
     }
 
@@ -330,6 +371,7 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
     gravity: data.gravity,
     collisionType: data.collisionType || '图像',
     collisionEnabled: data.collisionEnabled || false,
+    resources,
     layers,
     tileSets,
   }

@@ -2477,6 +2477,11 @@ def load_map(map_name):
         with open(json_file, "r", encoding="utf-8") as f:
             save_data = json.load(f)
 
+        # 新存档的素材库在地图顶层；旧存档仍然散落在各图层的 resources 里
+        top_resources = save_data.get("resources")
+        if not isinstance(top_resources, list):
+            top_resources = None
+
         # 解析行业标准格式（带 firstgid 和压缩瓦片数据）
         tilesets_raw = save_data.get("tilesets", save_data.get("tileSets", []))
         tilesets = []
@@ -2523,7 +2528,9 @@ def load_map(map_name):
             elif layer_type == "imagelayer":
                 # 兼容两种格式：images（带位置）和 resources（资源引用，无位置）
                 images = layer_raw.get("images", [])
-                if not images:
+                # 只在旧存档（没有顶层素材库）时回退到层内 resources，
+                # 避免新版层内镜像让每个空图像层都重复生成素材实例
+                if not images and top_resources is None:
                     # 将 resources 转换为 images 格式（资源默认放在 0,0）
                     for res in layer_raw.get("resources", []):
                         images.append({
@@ -2549,16 +2556,23 @@ def load_map(map_name):
                     "images": images,
                 })
 
-        # 用图层中资源的碰撞信息补全 tileset（用户可能在 PropertyPanel 中设置了 tileset 级的碰撞）
+        # 用素材的碰撞信息补全 tileset（用户可能在 PropertyPanel 中设置了 tileset 级的碰撞）
         resource_collision_map = {}
-        for layer_raw in layers_raw:
-            for res in layer_raw.get("resources", []):
-                rname = res.get("name", "")
-                if rname and res.get("collisionEnabled", False):
-                    resource_collision_map[rname] = {
-                        "collisionType": res.get("collisionType", "图像"),
-                        "collisionEnabled": True,
-                    }
+        if top_resources is not None:
+            resource_entries = top_resources
+        else:
+            resource_entries = [
+                res
+                for layer_raw in layers_raw
+                for res in layer_raw.get("resources", [])
+            ]
+        for res in resource_entries:
+            rname = res.get("name", "")
+            if rname and res.get("collisionEnabled", False):
+                resource_collision_map[rname] = {
+                    "collisionType": res.get("collisionType", "图像"),
+                    "collisionEnabled": True,
+                }
         for ts in tilesets:
             rname = ts.get("name", "")
             if rname in resource_collision_map:

@@ -154,6 +154,11 @@ function resolveRelativePaths(mapData: any, dir: string) {
       ts.imagePath = `${dir}/${ts.imagePath}`
     }
   }
+  for (const res of mapData.resources || []) {
+    if (res.path && !res.path.startsWith('/') && !res.path.startsWith('assets/') && !res.path.startsWith('/maps/')) {
+      res.path = `${dir}/${res.path}`
+    }
+  }
   for (const layer of mapData.layers) {
     if (layer.images) {
       for (const img of layer.images) {
@@ -176,6 +181,7 @@ function createEmptyMapData(name: string): import('../../stores/map').MapData {
     gravity: false,
     collisionType: '图像',
     collisionEnabled: false,
+    resources: [],
     layers: [
       {
         id: 0,
@@ -184,7 +190,6 @@ function createEmptyMapData(name: string): import('../../stores/map').MapData {
         visible: true,
         locked: false,
         tiles: {} as Record<string, number>,
-        resources: [],
         images: [],
       },
     ],
@@ -289,6 +294,11 @@ async function onImportMap() {
           for (const tileSet of mapData.tileSets) {
             if (tileSet.imagePath && tileSet.imagePath.includes(originalName)) {
               tileSet.imagePath = tileSet.imagePath.replace(originalName, name)
+            }
+          }
+          for (const resource of mapData.resources) {
+            if (resource.path && resource.path.includes(originalName)) {
+              resource.path = resource.path.replace(originalName, name)
             }
           }
         }

@@ -971,6 +971,15 @@ async function createImageMapProject(fileName: string, opts: { bytes?: number[];
 
   const { w, h } = await measureImageSize(`${projectRoot}/${imageRelPath}`)
 
+  const imageResource = {
+    name: baseName,
+    path: imageRelPath,
+    resourceType: 'image',
+    tileWidth: 64,
+    tileHeight: 64,
+    collisionType: '图像',
+    collisionEnabled: false,
+  }
   const mapData = {
     name: mapName,
     width: 40,
@@ -979,6 +988,7 @@ async function createImageMapProject(fileName: string, opts: { bytes?: number[];
     gravity: false,
     collisionType: '图像',
     collisionEnabled: false,
+    resources: [imageResource],
     layers: [
       {
         id: 0,
@@ -1001,17 +1011,8 @@ async function createImageMapProject(fileName: string, opts: { bytes?: number[];
             collisionEnabled: false,
           },
         ],
-        resources: [
-          {
-            name: baseName,
-            path: imageRelPath,
-            resourceType: 'image',
-            tileWidth: 64,
-            tileHeight: 64,
-            collisionType: '图像',
-            collisionEnabled: false,
-          },
-        ],
+        // 兼容旧版本与引擎的层内镜像
+        resources: [imageResource],
       },
     ],
     tilesets: [],
@@ -1380,6 +1381,12 @@ async function migrateMapDir(oldName: string, newName: string) {
       const json = await invoke<string>('read_file', { path: jsonPath })
       const data = JSON.parse(json)
       let changed = false
+      for (const res of data.resources || []) {
+        if (res.path?.startsWith(`assets/maps/${oldName}/`)) {
+          res.path = res.path.replace(`assets/maps/${oldName}/`, `assets/maps/${newName}/`)
+          changed = true
+        }
+      }
       for (const layer of data.layers || []) {
         for (const res of layer.resources || []) {
           if (res.path?.startsWith(`assets/maps/${oldName}/`)) {

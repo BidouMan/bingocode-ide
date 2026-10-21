@@ -46,11 +46,8 @@ async function copyResourceToMapDir(srcPath: string): Promise<string> {
   return relativePath
 }
 
-// 当前图层的资源列表
-const currentResources = computed(() => {
-  const layer = mapStore.activeLayer
-  return layer?.resources ?? []
-})
+// 当前图层可用的素材（地图级素材库按图层类型过滤）
+const currentResources = computed(() => mapStore.activeLayerResources)
 
 // 监听图层变化
 watch(() => mapStore.activeLayerIndex, () => {})
@@ -280,7 +277,7 @@ async function onResourceImported(options: { path: string; mode: 'image' | 'tile
   mapStore.addResource({
     name: options.path.split('/').pop()?.split('.')[0] || '资源',
     path: relativePath,
-    resourceType: isImageLayer ? 'image' : options.mode,
+    resourceType: isImageLayer ? 'image' : 'tileset',
     tileWidth: isImageLayer ? 64 : tw,
     tileHeight: isImageLayer ? 64 : th,
     collisionType: '图像',

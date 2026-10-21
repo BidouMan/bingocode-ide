@@ -28,7 +28,6 @@ export interface MapLayer {
   visible: boolean
   locked: boolean
   tiles: Record<string, number>
-  resources: MapResource[]
   images: ImageData[]
 }
 
@@ -74,9 +73,10 @@ export interface MapData {
   gravity: boolean
   collisionType: string
   collisionEnabled: boolean
+  // 地图级素材库：图层只引用素材，不再各自持有一份
+  resources: MapResource[]
   layers: MapLayer[]
   tileSets: TileSet[]
-  layerResourcesMap?: Record<number, number[]>
 }
 
 export type MapTool = 'move' | 'select' | 'draw' | 'erase' | 'fill'
@@ -95,6 +95,7 @@ export const useMapStore = defineStore('map', () => {
     gravity: false,
     collisionType: '图像',
     collisionEnabled: false,
+    resources: [],
     layers: [
       {
         id: 0,
@@ -103,7 +104,6 @@ export const useMapStore = defineStore('map', () => {
         visible: true,
         locked: false,
         tiles: {},
-        resources: [],
         images: [],
       },
     ],
@@ -116,8 +116,6 @@ export const useMapStore = defineStore('map', () => {
   const currentTool = ref<MapTool>('select')
   const selectedResourceIndex = ref(-1)
   const selectedTileIndex = ref(-1)
-  const mapResources = ref<MapResource[]>([])
-  const layerResources = ref<Record<number, MapResource[]>>({})
   const collisionTool = ref<CollisionTool>('move')
   const snapToPixel = ref(true)
   const cursorX = ref<number | null>(null)
@@ -142,7 +140,14 @@ export const useMapStore = defineStore('map', () => {
     const layer = mapData.value.layers[activeLayerIndex.value] ?? null
     return layer
   })
-  const selectedResource = computed(() => activeLayer.value?.resources[selectedResourceIndex.value] ?? null)
+  // 当前图层可用的素材：图像图层只看图像素材，绘制图层看瓦片素材
+  const activeLayerResources = computed(() => {
+    const layer = activeLayer.value
+    if (!layer) return []
+    const wantImage = layer.type === 'image'
+    return mapData.value.resources.filter(r => (r.resourceType === 'image') === wantImage)
+  })
+  const selectedResource = computed(() => activeLayerResources.value[selectedResourceIndex.value] ?? null)
   // 画布上选中的图像实例
   const selectedImage = computed<ImageData | null>(() => {
     if (selectedImageLayerId.value < 0 || selectedImageIndex.value < 0) return null
@@ -200,6 +205,7 @@ export const useMapStore = defineStore('map', () => {
       gravity: false,
       collisionType: '图像',
       collisionEnabled: false,
+      resources: [],
       layers: [
         {
           id: 0,
@@ -208,7 +214,6 @@ export const useMapStore = defineStore('map', () => {
           visible: true,
           locked: false,
           tiles: {},
-          resources: [],
           images: [],
         },
       ],
@@ -218,8 +223,6 @@ export const useMapStore = defineStore('map', () => {
     selectedResourceIndex.value = -1
     selectedTileIndex.value = -1
     clearImageSelection()
-    mapResources.value = []
-    layerResources.value = {}
     currentMapPath.value = ''
   }
 
@@ -263,7 +266,6 @@ export const useMapStore = defineStore('map', () => {
       visible: true,
       locked: false,
       tiles: {},
-      resources: [],
       images: [],
     }
     mapData.value.layers.push(newLayer)
@@ -330,11 +332,16 @@ export const useMapStore = defineStore('map', () => {
     if (!layer) return
     if (layer.type === 'image') {
       currentTool.value = 'select'
+      selectedResourceIndex.value = -1
+      selectedTileIndex.value = -1
     } else {
       currentTool.value = 'draw'
-      if (layer.resources.length > 0) {
+      if (activeLayerResources.value.length > 0) {
         selectedResourceIndex.value = 0
         selectedTileIndex.value = 0
+      } else {
+        selectedResourceIndex.value = -1
+        selectedTileIndex.value = -1
       }
     }
   }
@@ -361,8 +368,6 @@ export const useMapStore = defineStore('map', () => {
   }
 
   function addResource(input: MapResourceInput) {
-    const layer = activeLayer.value
-    if (!layer) return
     // firstgid 只在创建时分配一次，之后不再随图层/素材顺序变化
     const nextFirstgid = mapData.value.tileSets.length > 0
       ? Math.max(...mapData.value.tileSets.map(ts => ts.firstgid)) + 10000
@@ -372,7 +377,7 @@ export const useMapStore = defineStore('map', () => {
       id: input.id || createResourceId(),
       firstgid: input.firstgid ?? nextFirstgid,
     }
-    layer.resources.push(resource)
+    mapData.value.resources.push(resource)
     mapData.value.tileSets.push({
       id: resource.id,
       name: resource.name,
@@ -388,10 +393,11 @@ export const useMapStore = defineStore('map', () => {
   }
 
   function removeResource(index: number) {
-    const layer = activeLayer.value
-    if (!layer || index < 0 || index >= layer.resources.length) return
+    const removedResource = activeLayerResources.value[index]
+    if (!removedResource) return
+    const resourceIndex = mapData.value.resources.indexOf(removedResource)
+    if (resourceIndex < 0) return
 
-    const removedResource = layer.resources[index]
     const removedTileSet = getTileSetForResource(removedResource)
     // 下一个更大的 firstgid 决定该 tileset 的 GID 空间上界
     const higherGids = removedTileSet
@@ -401,7 +407,7 @@ export const useMapStore = defineStore('map', () => {
       : []
     const nextFirstgid = higherGids.length > 0 ? Math.min(...higherGids) : Infinity
 
-    layer.resources.splice(index, 1)
+    mapData.value.resources.splice(resourceIndex, 1)
     if (removedTileSet) {
       const tileSetIndex = mapData.value.tileSets.indexOf(removedTileSet)
       if (tileSetIndex >= 0) mapData.value.tileSets.splice(tileSetIndex, 1)
@@ -422,18 +428,30 @@ export const useMapStore = defineStore('map', () => {
     }
     // 瓦片被移除后必须通知画布重绘，否则残留的 sprite 不会消失
     if (tilesChanged) tileRevision.value++
+
+    // 选中的是过滤后的列表下标，删除后需要修正
+    if (selectedResourceIndex.value === index) {
+      selectedResourceIndex.value = -1
+      selectedTileIndex.value = -1
+    } else if (selectedResourceIndex.value > index) {
+      selectedResourceIndex.value--
+    }
   }
 
   function clearResources() {
     const layer = activeLayer.value
     if (!layer) return
-    // 按素材自身的 id/firstgid 精确移除对应 tileset，不再假设它们在数组中连续
-    const removedIds = new Set(layer.resources.map(r => r.id))
-    const removedFirstgids = new Set(layer.resources.map(r => r.firstgid))
+    const removed = activeLayerResources.value
+    const removedIds = new Set(removed.map(r => r.id))
+    const removedFirstgids = new Set(removed.map(r => r.firstgid))
+    // 从地图级素材库移除当前图层可见的素材
+    mapData.value.resources = mapData.value.resources.filter(r => !removedIds.has(r.id))
+    // 按素材自身的 id/firstgid 精确移除对应 tileset
     mapData.value.tileSets = mapData.value.tileSets.filter(
       ts => !removedIds.has(ts.id) && !removedFirstgids.has(ts.firstgid),
     )
-    layer.resources = []
+    selectedResourceIndex.value = -1
+    selectedTileIndex.value = -1
     // 清空该图层的所有瓦片
     if (layer.type === 'drawing') {
       layer.tiles = {}
@@ -447,11 +465,9 @@ export const useMapStore = defineStore('map', () => {
 
   function updateTileSize(newSize: number) {
     mapData.value.tileSize = newSize
-    for (const layer of mapData.value.layers) {
-      for (const resource of layer.resources) {
-        resource.tileWidth = newSize
-        resource.tileHeight = newSize
-      }
+    for (const resource of mapData.value.resources) {
+      resource.tileWidth = newSize
+      resource.tileHeight = newSize
     }
     for (const ts of mapData.value.tileSets) {
       ts.tileWidth = newSize
@@ -585,8 +601,7 @@ export const useMapStore = defineStore('map', () => {
     currentTool,
     selectedResourceIndex,
     selectedTileIndex,
-    mapResources,
-    layerResources,
+    activeLayerResources,
     collisionTool,
     snapToPixel,
     cursorX,
