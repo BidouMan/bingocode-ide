@@ -1,5 +1,6 @@
 import JSZip from 'jszip'
 import { invoke } from '@tauri-apps/api/core'
+import { contentBBox } from '../utils/bsfPacker'
 
 export interface SpriteFrame {
   name: string
@@ -170,9 +171,14 @@ export async function getBsfThumbnail(path: string): Promise<string> {
   return canvas.toDataURL('image/png')
 }
 
+/** 路径是否为单图角色（单张 png/jpg/... 贴图，而非目录角色） */
+export function isImageSpritePath(path: string): boolean {
+  return /\.(png|jpe?g|gif|bmp|webp)$/i.test(path)
+}
+
 /** 统一入口：项目内的角色资源（图片 / .bgs 目录 / .bsf sheet 目录） */
 export async function readSpriteFromPath(path: string): Promise<SpriteData> {
-  if (/\.(png|jpe?g|gif|bmp|webp)$/i.test(path)) {
+  if (isImageSpritePath(path)) {
     return readImageAsSprite(path)
   }
   // 本地目录：优先检测 .bsf（manifest.json），否则按 .bgs（config.json）
@@ -449,31 +455,63 @@ export async function readImageAsSprite(path: string): Promise<SpriteData> {
   }
 }
 
-function buildSpriteConfigJson(sprite: SpriteData): string {
-  const config: Record<string, any> = { name: sprite.name }
-  config.frames = sprite.frames.map(f => f.name)
-  config.segments = sprite.animations.map(a => {
-    const seg: Record<string, any> = {
-      name: a.name,
-      start: a.start,
-      end: a.end,
-    }
-    if (a.fps != null) seg.fps = a.fps
-    if (a.loop != null) seg.loop = a.loop
-    return seg
-  })
-  return JSON.stringify(config, null, 4)
+/** 图片非透明内容包围盒（图片坐标）；整图全透明时回退整图 */
+function imageContentBox(img: HTMLImageElement): { x: number; y: number; w: number; h: number } {
+  const canvas = document.createElement('canvas')
+  canvas.width = img.naturalWidth || img.width
+  canvas.height = img.naturalHeight || img.height
+  const ctx = canvas.getContext('2d')!
+  ctx.drawImage(img, 0, 0)
+  return contentBBox(canvas) ?? { x: 0, y: 0, w: canvas.width, h: canvas.height }
 }
 
-// 图片角色编辑后转正为目录角色：把内存中的帧图 + config.json 落盘到目录
-// （引擎读取目录角色时按 config.frames 的帧名自动补图片扩展名）
-export async function saveImageSpriteToDirectory(dirPath: string, sprite: SpriteData): Promise<void> {
-  await invoke('create_dir', { path: dirPath })
-  for (const f of sprite.frames) {
-    const buf = new Uint8Array(await f.blob.arrayBuffer())
-    const extMatch = f.name.match(/\.(png|jpe?g|gif|bmp|webp)$/i)
-    const fileName = extMatch ? f.name : `${f.name}.png`
-    await invoke('write_binary', { path: `${dirPath}/${fileName}`, data: Array.from(buf) })
+/**
+ * 单图角色（单张 png 贴图）→ 单帧 .bsf 元数据。
+ * 画布 = 图片尺寸，帧矩形 = 非透明内容框、中心点 = 内容框中心——
+ * 与引擎对单图角色的原有语义（x/y 落在内容重心、自动碰撞取内容框）完全一致，
+ * 转正后位置/碰撞/缩放表现不变，但多了 pivot/碰撞/挂点的承载字段。
+ */
+export async function buildSingleFrameBsfMeta(sprite: SpriteData): Promise<BsfMeta> {
+  const img = await loadImage(sprite.frames[0].blob)
+  const w = img.naturalWidth || img.width
+  const h = img.naturalHeight || img.height
+  const box = imageContentBox(img)
+  const name = sprite.frames[0]?.name || 'frame_001'
+  return {
+    canvas: { w, h },
+    pivot: { x: box.x + box.w / 2, y: box.y + box.h / 2 },
+    frames: [{
+      name,
+      rect: { x: box.x, y: box.y, w: box.w, h: box.h },
+      offset: { x: box.x, y: box.y },
+    }],
   }
-  await invoke('write_file', { path: `${dirPath}/config.json`, content: buildSpriteConfigJson(sprite) })
+}
+
+/**
+ * 单图角色转正为 .bsf 目录（sheet.png = 原图 + manifest.json）。
+ * 中心点/碰撞/挂点只能由 manifest 承载（引擎也只读 .bsf 的这些字段），
+ * 因此第一次标注时把角色升级成 .bsf 目录。返回新目录路径。
+ */
+export async function imageSpriteToBsfDir(imgPath: string, sprite: SpriteData): Promise<string> {
+  if (!sprite.bsf) throw new Error('缺少 .bsf 元数据，无法转正单图角色')
+  const dirPath = imgPath.replace(/\.[^./\\]+$/, '')
+  const img = await loadImage(sprite.frames[0].blob)
+  const canvas = document.createElement('canvas')
+  canvas.width = img.naturalWidth || img.width
+  canvas.height = img.naturalHeight || img.height
+  canvas.getContext('2d')!.drawImage(img, 0, 0)
+  const sheetBlob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(b => (b ? resolve(b) : reject(new Error('canvas.toBlob 失败'))), 'image/png')
+  })
+
+  await invoke('create_dir', { path: dirPath })
+  await invoke('write_binary', {
+    path: `${dirPath}/sheet.png`,
+    data: Array.from(new Uint8Array(await sheetBlob.arrayBuffer())),
+  })
+  // 先写 manifest 再删原图：中途失败也不会出现"目录缺 manifest、原图已删"
+  await saveBsfManifest(dirPath, sprite)
+  await invoke('delete_path', { path: imgPath }).catch(() => {})
+  return dirPath
 }

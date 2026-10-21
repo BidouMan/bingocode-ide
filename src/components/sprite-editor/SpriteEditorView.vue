@@ -3,7 +3,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useResourceStore } from '../../stores/resource'
 import { useEditorStore } from '../../stores/editor'
 import type { SpriteData, SpriteAnimation } from '../../composables/useSpriteData'
-import { readSpriteFromPath, revokeSpriteUrls, saveSpriteConfig, saveBsfManifest } from '../../composables/useSpriteData'
+import { readSpriteFromPath, revokeSpriteUrls, saveSpriteConfig, saveBsfManifest, isImageSpritePath, buildSingleFrameBsfMeta, imageSpriteToBsfDir } from '../../composables/useSpriteData'
 import type { SpriteCollisionShape } from '../../composables/useSpriteData'
 import { appendFramesToSprite } from '../../composables/appendSpriteFrames'
 import FrameUploadDrawer from './FrameUploadDrawer.vue'
@@ -77,32 +77,47 @@ watch(
   { immediate: true }
 )
 
-// 自动保存：每次修改后写回 config.json
+// 自动保存：每次修改后写回 config.json / manifest.json
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 // 默认渲染帧是否被改过：保存成功后据此刷新资源面板缩略图（其他字段修改不需要）
 let defaultFrameDirty = false
 function scheduleSave() {
   if (saveTimer) clearTimeout(saveTimer)
-  saveTimer = setTimeout(async () => {
-    if (!currentSprite.value || !currentSpritePath.value) return
-    try {
-      // .bsf 角色写回 manifest.json（clips），旧目录角色写回 config.json（segments）
-      if (currentSprite.value.bsf) {
-        await saveBsfManifest(currentSpritePath.value, currentSprite.value)
+  saveTimer = setTimeout(persistSprite, 300)
+}
+
+/**
+ * 落盘：
+ * - .bsf 角色写 manifest.json（clips + pivot/碰撞/挂点）
+ * - 单图角色（png 等）：中心点/碰撞/挂点无处可存 → 首次落盘时转正为 .bsf 目录
+ * - 旧 .bgs 目录角色写 config.json（segments）
+ */
+async function persistSprite() {
+  const sprite = currentSprite.value
+  let path = currentSpritePath.value
+  if (!sprite || !path) return
+  try {
+    if (sprite.bsf) {
+      if (isImageSpritePath(path)) {
+        path = await imageSpriteToBsfDir(path, sprite)
+        currentSpritePath.value = path
+        if (resourceStore.selectedSpriteId) resourceStore.updateItemPath(resourceStore.selectedSpriteId, path)
       } else {
-        await saveSpriteConfig(currentSpritePath.value, currentSprite.value)
+        await saveBsfManifest(path, sprite)
       }
-      if (defaultFrameDirty) {
-        defaultFrameDirty = false
-        // 缩略图走磁盘 manifest/config，必须等写盘完成后再生效
-        if (resourceStore.selectedSpriteId) {
-          resourceStore.bumpSpriteThumb(resourceStore.selectedSpriteId)
-        }
-      }
-    } catch (e) {
-      console.error('自动保存角色失败:', e)
+    } else {
+      await saveSpriteConfig(path, sprite)
     }
-  }, 300)
+    if (defaultFrameDirty) {
+      defaultFrameDirty = false
+      // 缩略图走磁盘 manifest/config，必须等写盘完成后再生效
+      if (resourceStore.selectedSpriteId) {
+        resourceStore.bumpSpriteThumb(resourceStore.selectedSpriteId)
+      }
+    }
+  } catch (e) {
+    console.error('自动保存角色失败:', e)
+  }
 }
 
 async function loadSprite(item: { id: string; name: string; path: string }) {
@@ -113,6 +128,15 @@ async function loadSprite(item: { id: string; name: string; path: string }) {
     revokeSpriteUrls(currentSprite.value)
     // 图片角色 → 单帧；.bsf 目录 → manifest + sheet 裁帧；.bgs 目录 → config.json
     currentSprite.value = await readSpriteFromPath(item.path)
+    // 单图角色（单张 png/jpg 贴图）：内存合成单帧 .bsf 元数据，让中心/碰撞/标记工具可用；
+    // 只有 manifest 能承载这些标注，首次标注落盘时转正为 .bsf 目录（见 persistSprite）
+    if (!currentSprite.value.bsf && isImageSpritePath(item.path)) {
+      try {
+        currentSprite.value.bsf = await buildSingleFrameBsfMeta(currentSprite.value)
+      } catch (e) {
+        console.warn('[SpriteEditor] 单图角色标注元数据合成失败:', e)
+      }
+    }
     currentSpritePath.value = item.path
     // 初始定位到持久化的默认渲染帧（引擎初始渲染与缩略图同源）
     const initialFrame = currentSprite.value.defaultFrameIndex ?? 0
@@ -314,7 +338,7 @@ function resetCanvas() {
   canvasPanY.value = 0
 }
 
-// ═══ 中心点标注（仅 .bsf 角色：manifest 带 pivot 元数据） ═══
+// ═══ 中心点标注（.bsf 角色 / 单图角色合成单帧 bsf：manifest 带 pivot 元数据） ═══
 
 /** 编辑作用域：all = 改统一值（全部帧生效）；one = 写当前帧覆盖 */
 const annoScope = ref<'all' | 'one'>('all')
@@ -368,7 +392,7 @@ function resetAnno() {
   scheduleSave()
 }
 
-// ═══ 碰撞标注（仅 .bsf；无自定义 = 引擎自动碰撞，学生默认路径） ═══
+// ═══ 碰撞标注（.bsf / 单图角色；无自定义 = 引擎自动碰撞，学生默认路径） ═══
 
 /** 当前激活的标注图层：中心 / 碰撞 / 标记（单选，同一套画布框架） */
 const activeAnnoLayer = ref<'pivot' | 'collision' | 'marker'>('pivot')
@@ -1187,161 +1211,6 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </div>
-
-        <!-- 底部浮动属性条：按激活图层切换控件组 -->
-        <div v-if="canAnno" class="anno-props">
-          <template v-if="activeAnnoLayer === 'pivot'">
-            <span class="props-title">中心</span>
-            <div class="coord-group">
-              <label>X</label>
-              <input
-                class="coord-input"
-                type="number"
-                step="0.5"
-                :value="annoPivot ? annoPivot.x.toFixed(1) : ''"
-                @change="onCoordChange('x', $event)"
-              />
-            </div>
-            <div class="coord-group">
-              <label>Y</label>
-              <input
-                class="coord-input"
-                type="number"
-                step="0.5"
-                :value="annoPivot ? annoPivot.y.toFixed(1) : ''"
-                @change="onCoordChange('y', $event)"
-              />
-            </div>
-            <div class="props-sep"></div>
-            <button class="preset-btn" type="button" @click="applyPivotPreset('center')">中心</button>
-            <button class="preset-btn" type="button" @click="applyPivotPreset('feet')">脚底</button>
-            <button class="preset-btn" type="button" @click="resetAnno">重置</button>
-            <button
-              v-if="hasPivotOverride(annoFrameIndex)"
-              class="clear-override-btn"
-              type="button"
-              @click="clearPivotOverride"
-            >恢复统一</button>
-            <div class="props-sep"></div>
-            <div class="scope-seg">
-              <button
-                type="button"
-                :class="{ on: annoScope === 'all' }"
-                @click="annoScope = 'all'"
-              >全部帧</button>
-              <button
-                type="button"
-                :class="{ on: annoScope === 'one', 'on-blue': annoScope === 'one' }"
-                @click="annoScope = 'one'"
-              >仅当前帧</button>
-            </div>
-          </template>
-          <template v-else-if="activeAnnoLayer === 'collision'">
-            <span class="props-title">碰撞</span>
-            <!-- 类型 toggle：自动 = 引擎内容包围盒（无 manifest 字段），始终显示在画布 -->
-            <div class="scope-seg">
-              <button
-                type="button"
-                :class="{ on: !effCol }"
-                @click="resetCollisionToAuto"
-              >自动</button>
-              <button
-                type="button"
-                :class="{ on: effCol?.type === 'rect' }"
-                @click="convertCollisionType('rect')"
-              >矩形</button>
-              <button
-                type="button"
-                :class="{ on: effCol?.type === 'capsule' }"
-                @click="convertCollisionType('capsule')"
-              >胶囊</button>
-              <button
-                type="button"
-                :class="{ on: effCol?.type === 'polygon' }"
-                @click="convertCollisionType('polygon')"
-              >多边形</button>
-            </div>
-            <div class="props-sep"></div>
-            <button
-              v-if="hasCollisionOverride(annoFrameIndex)"
-              class="clear-override-btn"
-              type="button"
-              @click="clearCollisionOverride"
-            >恢复统一</button>
-            <div class="props-sep"></div>
-            <div class="scope-seg">
-              <button
-                type="button"
-                :class="{ on: annoScope === 'all' }"
-                @click="annoScope = 'all'"
-              >全部帧</button>
-              <button
-                type="button"
-                :class="{ on: annoScope === 'one', 'on-blue': annoScope === 'one' }"
-                @click="annoScope = 'one'"
-              >仅当前帧</button>
-            </div>
-          </template>
-          <template v-else>
-            <span class="props-title">标记</span>
-            <button class="preset-btn" type="button" title="添加标记" @click="addMarker">添加</button>
-            <input
-              v-if="selMarkerName"
-              class="marker-rename-input"
-              :value="selMarkerName"
-              title="标记名称"
-              @change="renameMarker(selMarkerName!, ($event.target as HTMLInputElement).value)"
-            />
-            <button
-              v-if="selMarkerName"
-              class="preset-btn"
-              type="button"
-              title="删除标记"
-              @click="deleteMarker(selMarkerName)"
-            >删除</button>
-            <div class="props-sep"></div>
-            <div class="coord-group">
-              <label>X</label>
-              <input
-                class="coord-input"
-                type="number"
-                step="0.5"
-                :value="selMarkerPos ? selMarkerPos.x.toFixed(1) : ''"
-                @change="onMarkerCoordChange('x', $event)"
-              />
-            </div>
-            <div class="coord-group">
-              <label>Y</label>
-              <input
-                class="coord-input"
-                type="number"
-                step="0.5"
-                :value="selMarkerPos ? selMarkerPos.y.toFixed(1) : ''"
-                @change="onMarkerCoordChange('y', $event)"
-              />
-            </div>
-            <div class="props-sep"></div>
-            <button
-              v-if="selMarkerName && hasMarkerOverride(selMarkerName, annoFrameIndex)"
-              class="clear-override-btn"
-              type="button"
-              @click="clearMarkerOverride"
-            >恢复统一</button>
-            <div class="props-sep"></div>
-            <div class="scope-seg">
-              <button
-                type="button"
-                :class="{ on: annoScope === 'all' }"
-                @click="annoScope = 'all'"
-              >全部帧</button>
-              <button
-                type="button"
-                :class="{ on: annoScope === 'one', 'on-blue': annoScope === 'one' }"
-                @click="annoScope = 'one'"
-              >仅当前帧</button>
-            </div>
-          </template>
-        </div>
       </div>
     </div>
 
@@ -1772,28 +1641,6 @@ onBeforeUnmount(() => {
 }
 .anno-toolbar .marker-rename-input { height: 20px; }
 
-/* 底部浮动属性条 */
-.anno-props {
-  position: absolute;
-  left: 50%;
-  bottom: 14px;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: rgba(41, 44, 52, 0.92);
-  border: 1px solid var(--border-light);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
-  z-index: 10;
-}
-.props-title {
-  color: var(--accent);
-  font-weight: 600;
-  white-space: nowrap;
-  font-size: 12px;
-}
 .props-sep { width: 1px; height: 18px; background: var(--border-light); flex-shrink: 0; }
 .coord-group { display: flex; align-items: center; gap: 4px; }
 .coord-group label { color: #8a8f98; font-size: 12px; }

@@ -5,7 +5,8 @@
  *   覆盖到旧尾帧的 clip 自动延展），写 sheet.png + manifest.json
  * - .bgs（config.json 目录）：新帧归一化落盘 PNG + config.json（frames 追加，
  *   end 到旧尾帧的动画段延展）
- * - 图片角色（单文件）：先转正为目录角色，再走 .bgs 追加；资源项 path 由返回值告知调用方
+ * - 图片角色（单文件）：转正为 .bsf 目录（sheet 打包；.bsf 才能承载中心点/碰撞/挂点），
+ *   资源项 path 由返回值告知调用方
  *
  * 所有新帧都会归一化到目标画布尺寸（等比缩小居中，小图原尺寸居中），
  * 保证动画帧尺寸一致不抖动。
@@ -17,10 +18,9 @@ import {
   loadImage,
   saveSpriteConfig,
   saveBsfManifest,
-  saveImageSpriteToDirectory,
   type SpriteData,
 } from './useSpriteData'
-import { packDrawnFrames } from '../utils/bsfPacker'
+import { packDrawnFrames, buildDrawnBsfManifest } from '../utils/bsfPacker'
 import type { BsfFrameMeta } from './useSpriteData'
 
 export interface AppendFramesResult {
@@ -32,6 +32,41 @@ export interface AppendFramesResult {
 function canvasToPng(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('canvas.toBlob 失败'))), 'image/png')
+  })
+}
+
+/** 图片等比 contain 居中绘制到目标画布（不放大；SVG 请先在调用方栅格化为 PNG） */
+async function blobToCanvas(blob: Blob, w: number, h: number): Promise<HTMLCanvasElement> {
+  const img = await loadImage(blob)
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const iw = img.naturalWidth || img.width
+  const ih = img.naturalHeight || img.height
+  const scale = Math.min(1, w / Math.max(1, iw), h / Math.max(1, ih))
+  const dw = Math.max(1, Math.round(iw * scale))
+  const dh = Math.max(1, Math.round(ih * scale))
+  canvas.getContext('2d')!.drawImage(img, Math.round((w - dw) / 2), Math.round((h - dh) / 2), dw, dh)
+  return canvas
+}
+
+/** 全画布帧 → .bsf 目录（sheet.png + manifest.json；先写 sheet 再写 manifest） */
+async function writeBsfDir(
+  dirPath: string,
+  name: string,
+  canvases: HTMLCanvasElement[],
+  names?: string[]
+) {
+  const packed = packDrawnFrames(canvases, canvases[0].width, canvases[0].height, names)
+  await invoke('create_dir', { path: dirPath })
+  const sheetBlob = await canvasToPng(packed.sheet)
+  await invoke('write_binary', {
+    path: `${dirPath}/sheet.png`,
+    data: Array.from(new Uint8Array(await sheetBlob.arrayBuffer())),
+  })
+  await invoke('write_file', {
+    path: `${dirPath}/manifest.json`,
+    content: JSON.stringify(buildDrawnBsfManifest(name, packed), null, 2),
   })
 }
 
@@ -49,18 +84,7 @@ function carryFrameMetaExtras(next: BsfFrameMeta[], prev: BsfFrameMeta[]) {
 
 /** 图片帧归一化到目标画布（等比 contain 缩小居中；SVG 请先在调用方栅格化为 PNG） */
 export async function normalizeFrameToCanvas(blob: Blob, w: number, h: number): Promise<Blob> {
-  const img = await loadImage(blob)
-  const canvas = document.createElement('canvas')
-  canvas.width = w
-  canvas.height = h
-  const ctx = canvas.getContext('2d')!
-  const iw = img.naturalWidth || img.width
-  const ih = img.naturalHeight || img.height
-  const scale = Math.min(1, w / Math.max(1, iw), h / Math.max(1, ih))
-  const dw = Math.max(1, Math.round(iw * scale))
-  const dh = Math.max(1, Math.round(ih * scale))
-  ctx.drawImage(img, Math.round((w - dw) / 2), Math.round((h - dh) / 2), dw, dh)
-  return canvasToPng(canvas)
+  return canvasToPng(await blobToCanvas(blob, w, h))
 }
 
 /** 生成不与既有帧名冲突的 .bgs 帧文件名 */
@@ -190,32 +214,14 @@ async function appendImageSprite(
   const w = first.naturalWidth || first.width
   const h = first.naturalHeight || first.height
 
-  // 首帧也重编码为 PNG（原文件可能是 jpg，转正后统一 png 内容与扩展名一致）
-  const firstPng = await normalizeFrameToCanvas(sprite.frames[0].blob, w, h)
-  const frames = [{ name: sprite.frames[0].name, blob: firstPng, url: '' }]
-
-  const existing = new Set(frames.map(f => f.name))
-  const baseName = sprite.name
-  let n = 1
+  // 首帧 + 新帧（统一归一化到首帧画布）→ 打包为 .bsf：中心点/碰撞/挂点此后可用
+  const canvases = [await blobToCanvas(sprite.frames[0].blob, w, h)]
   for (const blob of newFrames) {
-    const norm = await normalizeFrameToCanvas(blob, w, h)
-    let name = `${baseName}_${String(n).padStart(2, '0')}`
-    while (existing.has(name)) {
-      n++
-      name = `${baseName}_${String(n).padStart(2, '0')}`
-    }
-    existing.add(name)
-    n++
-    frames.push({ name, blob: norm, url: '' })
-  }
-
-  const oldCount = 1
-  for (const a of sprite.animations) {
-    if (a.end === oldCount) a.end = frames.length
+    canvases.push(await blobToCanvas(blob, w, h))
   }
 
   const dirPath = imgPath.replace(/\.[^.]+$/, '')
-  await saveImageSpriteToDirectory(dirPath, { ...sprite, frames })
+  await writeBsfDir(dirPath, sprite.name, canvases)
   // 旧的单文件删除，避免项目扫描时同时出现图片与同名目录
   await invoke('delete_path', { path: imgPath }).catch(() => {})
 
@@ -231,7 +237,7 @@ async function appendImageSprite(
  * @param names 与 canvases 对齐的帧名：非空 = 保留原帧名（clips 引用）；null = 新帧，生成唯一名
  * - .bsf：全帧重打包 sheet + 手写 manifest（clips 过滤已删帧名、空 clip 移除；canvas/pivot 保留）
  * - .bgs：全量重写帧文件 + config.json（旧文件名不在新列表中的删除；动画段 start/end clamp）
- * - 图片角色（单文件）：转正为目录角色（返回 newPath）
+ * - 图片角色（单文件）：转正为 .bsf 目录角色（sheet 打包；返回 newPath）
  */
 export async function rewriteSpriteFrames(
   spritePath: string,
@@ -245,14 +251,20 @@ export async function rewriteSpriteFrames(
 
   const sprite = await readSpriteFromPath(spritePath)
   const isBsf = !!sprite.bsf
-  const finalNames = buildFinalNames(canvases.length, names, isBsf)
+  const finalNames = buildFinalNames(canvases.length, names, isBsf || isImageFile)
 
+  if (isImageFile) {
+    await writeBsfDir(dirPath, sprite.name, canvases, finalNames)
+    // 旧的单文件删除，避免项目扫描时同时出现图片与同名目录
+    await invoke('delete_path', { path: spritePath }).catch(() => {})
+    return { newPath: dirPath }
+  }
   if (isBsf) {
     await rewriteBsfDir(dirPath, sprite, canvases, finalNames)
   } else {
-    await rewriteBgsDir(dirPath, sprite, canvases, finalNames, isImageFile ? spritePath : null)
+    await rewriteBgsDir(dirPath, sprite, canvases, finalNames)
   }
-  return isImageFile ? { newPath: dirPath } : {}
+  return {}
 }
 
 /** 生成最终帧名：保留传入名；null 位生成 frame_NNN（.bsf）/ frame_NN.png（.bgs）且避开碰撞 */
@@ -347,10 +359,8 @@ async function rewriteBgsDir(
   dirPath: string,
   sprite: SpriteData,
   canvases: HTMLCanvasElement[],
-  names: string[],
-  oldImageFile: string | null
+  names: string[]
 ) {
-  // 图片角色转目录时目录尚不存在；已存在时 create_dir_all 幂等
   await invoke('create_dir', { path: dirPath })
 
   // 先写新帧（保留名同名文件原地覆盖；新名不冲突）
@@ -369,10 +379,6 @@ async function rewriteBgsDir(
     if (!newSet.has(file)) {
       await invoke('delete_path', { path: `${dirPath}/${file}` }).catch(() => {})
     }
-  }
-  // 图片角色转目录：删除旧单文件
-  if (oldImageFile) {
-    await invoke('delete_path', { path: oldImageFile }).catch(() => {})
   }
 
   // config.json：动画段 start/end clamp 到新帧数

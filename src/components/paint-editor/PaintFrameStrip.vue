@@ -4,7 +4,7 @@ import { usePaintStore } from '../../stores/paint'
 
 import iconAdd from '../../assets/icons/add-one.svg'
 import iconCopy from '../../assets/icons/copy.svg'
-import iconDelete from '../../assets/icons/icon--delete.svg'
+import iconDelete from '../../assets/icons/选中删除.svg'
 
 const store = usePaintStore()
 

@@ -1408,8 +1408,28 @@ class Sprite:
 
     # ---------- 内部调用 ----------
     def _load_sprite_config(self):
-        """内部工具：尝试读取文件夹下的 config.json（.bgs）或 manifest.json（.bsf）"""
-        config_path = os.path.join(self.sprite_dir, "config.json")
+        """内部尝试读取角色文件夹下的 config.json（.bgs）或 manifest.json（.bsf）。
+
+        兼容带扩展名的引用：`Sprite("角色1.png")` 而角色已转正为 `角色1/` 目录
+        （编辑器给单图角色加中心点/碰撞/挂点时会把 png 升级成 .bsf 目录）。
+        """
+        stem_dir = os.path.splitext(self.sprite_dir)[0]
+        candidates = [self.sprite_dir] if stem_dir == self.sprite_dir else [self.sprite_dir, stem_dir]
+        for sprite_dir in candidates:
+            if not sprite_dir:
+                continue
+            # 先切到候选目录：_normalize_bsf_manifest 用 self.sprite_dir 定位 sheet.png
+            prev_dir = self.sprite_dir
+            self.sprite_dir = sprite_dir
+            config = self._load_config_in_dir(sprite_dir)
+            if config:
+                return config
+            self.sprite_dir = prev_dir
+        return None
+
+    def _load_config_in_dir(self, sprite_dir):
+        """读取指定目录下的 config.json（.bgs）或 manifest.json（.bsf）"""
+        config_path = os.path.join(sprite_dir, "config.json")
         if os.path.exists(config_path):
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
@@ -1418,7 +1438,7 @@ class Sprite:
                 print(f"[警告] 读取角色配置 {config_path} 失败: {e}")
 
         # .bsf 解压目录：sheet 图集格式（manifest.json + sheet.png）
-        manifest_path = os.path.join(self.sprite_dir, "manifest.json")
+        manifest_path = os.path.join(sprite_dir, "manifest.json")
         if os.path.exists(manifest_path):
             try:
                 with open(manifest_path, "r", encoding="utf-8") as f:
