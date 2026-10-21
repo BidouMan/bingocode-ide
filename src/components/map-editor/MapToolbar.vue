@@ -14,6 +14,11 @@ import iconExportMap from '../../assets/icons/导出地图.svg'
 import iconGrid from '../../assets/icons/显示网格.svg'
 import iconSnapGrid from '../../assets/icons/吸附锚点.svg'
 import iconDelete from '../../assets/icons/选中删除.svg'
+import iconCollisionRect from '../../assets/icons/矩形_rectangle.svg'
+import iconCollisionPolygon from '../../assets/icons/折线.svg'
+import iconCollisionVertex from '../../assets/icons/移动锚点.svg'
+import iconCollisionClear from '../../assets/icons/重置.svg'
+import iconCollisionShow from '../../assets/icons/hitbox.svg'
 
 const props = defineProps<{
   disabled?: boolean
@@ -31,6 +36,20 @@ const mapStore = useMapStore()
 const resourceStore = useResourceStore()
 
 const isImageLayer = computed(() => mapStore.activeLayer?.type === 'image')
+
+const hasSelectedImage = computed(() => !!mapStore.selectedImage)
+const hasCollisionShape = computed(() => (mapStore.selectedImage?.collisionShape?.points?.length ?? 0) >= 3)
+
+function toggleCollisionTool(tool: 'rect' | 'polygon' | 'vertex') {
+  if (!hasSelectedImage.value) return
+  mapStore.setImageCollisionTool(mapStore.imageCollisionTool === tool ? 'none' : tool)
+}
+
+// 切回普通工具时退出碰撞编辑，避免指针事件仍被碰撞工具截获
+function onImageToolClick(tool: MapTool) {
+  mapStore.setImageCollisionTool('none')
+  mapStore.setTool(tool)
+}
 
 const selectedMap = ref('')
 
@@ -87,7 +106,7 @@ const imageTools: { id: MapTool; icon: string; label: string }[] = [
         :class="{ 'toolbar-btn-active': mapStore.currentTool === tool.id }"
         :disabled="disabled"
         v-tooltip="tool.label"
-        @click="mapStore.setTool(tool.id)"
+        @click="onImageToolClick(tool.id)"
       >
         <img :src="tool.icon" class="toolbar-icon" />
       </button>
@@ -98,6 +117,54 @@ const imageTools: { id: MapTool; icon: string; label: string }[] = [
         @click="emit('delete-image')"
       >
         <img :src="iconDelete" class="toolbar-icon" />
+      </button>
+
+      <div class="toolbar-separator" />
+
+      <!-- 图像碰撞编辑：先选中图片再使用 -->
+      <button
+        class="toolbar-btn"
+        :class="{ 'toolbar-btn-active': mapStore.imageCollisionTool === 'rect' }"
+        :disabled="disabled || !hasSelectedImage"
+        v-tooltip="hasSelectedImage ? '矩形碰撞：在图片上拖动绘制' : '先在画布上选中图像实例'"
+        @click="toggleCollisionTool('rect')"
+      >
+        <img :src="iconCollisionRect" class="toolbar-icon" />
+      </button>
+      <button
+        class="toolbar-btn"
+        :class="{ 'toolbar-btn-active': mapStore.imageCollisionTool === 'polygon' }"
+        :disabled="disabled || !hasSelectedImage"
+        v-tooltip="hasSelectedImage ? '多边形碰撞：逐点点击，点首点/回车闭合' : '先在画布上选中图像实例'"
+        @click="toggleCollisionTool('polygon')"
+      >
+        <img :src="iconCollisionPolygon" class="toolbar-icon" />
+      </button>
+      <button
+        class="toolbar-btn"
+        :class="{ 'toolbar-btn-active': mapStore.imageCollisionTool === 'vertex' }"
+        :disabled="disabled || !hasSelectedImage"
+        v-tooltip="hasSelectedImage ? '编辑锚点：拖动顶点，点边插点，右键/Del 删点' : '先在画布上选中图像实例'"
+        @click="toggleCollisionTool('vertex')"
+      >
+        <img :src="iconCollisionVertex" class="toolbar-icon" />
+      </button>
+      <button
+        class="toolbar-btn"
+        :disabled="disabled || !hasCollisionShape"
+        v-tooltip="'清除碰撞'"
+        @click="mapStore.clearImageCollision()"
+      >
+        <img :src="iconCollisionClear" class="toolbar-icon" />
+      </button>
+      <button
+        class="toolbar-btn"
+        :class="{ 'toolbar-btn-active': mapStore.showCollision }"
+        :disabled="disabled"
+        v-tooltip="'显示所有图像碰撞'"
+        @click="mapStore.toggleShowCollision()"
+      >
+        <img :src="iconCollisionShow" class="toolbar-icon" />
       </button>
     </template>
     <!-- 绘制模式：选取、绘制、擦除、移动 -->

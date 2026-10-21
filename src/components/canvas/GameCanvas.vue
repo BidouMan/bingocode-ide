@@ -16,6 +16,7 @@ import { useRenderStore } from '../../stores/render'
 import { useEditorStore } from '../../stores/editor'
 import { useEngine } from '../../composables/useEngine'
 import { signalGameCanvasReady, resetGameCanvasReady } from '../../utils/gameCanvasReady'
+import { effectiveScaleMode } from '../../utils/renderMode'
 
 const renderStore = useRenderStore()
 const editorStore = useEditorStore()
@@ -44,6 +45,12 @@ let spriteContainer: any = null
 let uiContainer: any = null
 let stageContainer: any = null
 let currentScaleMode: 'nearest' | 'linear' = 'linear'
+/**
+ * 自动模式下每个纹理源的采样方式：只判定一次（WeakMap，按纹理源缓存）。
+ * 判定依据是素材自然尺寸（引擎 raw_cw/raw_ch），是静态属性——
+ * 不随缩放/帧变化，所以每帧零成本，也不会在阈值附近来回翻。
+ */
+let autoScaleModes = new WeakMap<object, 'nearest' | 'linear'>()
 let resizeObserver: ResizeObserver | null = null
 let tilesSyncing = false
 let spritesSyncing = false
@@ -149,6 +156,32 @@ function applyRenderMode() {
   textureCache.clear()
   tilesetFrameCache.clear()
   frameTextureCache.clear()
+  autoScaleModes = new WeakMap()
+  // 已创建的精灵仍持有旧 scaleMode 的纹理：清掉 texKey 让下一帧重新取纹理
+  for (const obj of spriteDisplayObjects.values()) obj._texKey = null
+}
+
+/**
+ * 自动渲染模式：按素材自然尺寸给纹理源定采样方式（小图最近邻、大插画平滑）。
+ * 每个纹理源只判定一次，之后每帧只是一次 WeakMap 查表，无逐帧计算。
+ */
+function applyAutoScaleMode(
+  texture: any,
+  spriteData: { frameW?: number; frameH?: number; imagePath?: string }
+) {
+  const source = texture?.source
+  if (!source || editorStore.renderMode !== 'auto') return
+  // 尺寸未知（引擎暂未下发 cw/ch）时不判定，等下一帧有了再说
+  if (!spriteData.frameW || !spriteData.frameH) return
+  const cached = autoScaleModes.get(source)
+  if (cached) return
+  // 矢量素材（SVG）恒平滑：它按目标像素重绘，最近邻会把栅格化锯齿固化下来
+  const isVector = !!spriteData.imagePath?.toLowerCase().endsWith('.svg')
+  const mode = isVector
+    ? 'linear'
+    : effectiveScaleMode('auto', spriteData.frameW, spriteData.frameH)
+  autoScaleModes.set(source, mode)
+  if (source.scaleMode !== mode) source.scaleMode = mode
 }
 
 function getTexture(imagePath: string): Promise<any> {
@@ -358,12 +391,15 @@ async function syncSprites() {
         getSpriteTexture(spriteData.imagePath, spriteData.frameRect).then(texture => {
           if (displayObj && !displayObj.destroyed && displayObj._texKey === texKey) {
             displayObj.texture = texture
+            applyAutoScaleMode(texture, spriteData)
           }
         })
       }
     }
 
     if (displayObj) {
+      // 自动渲染判定（已判定过的纹理源直接命中缓存返回，逐帧开销≈一次 WeakMap 查表）
+      applyAutoScaleMode(displayObj.texture, spriteData)
       // 脏检查：只在实际数据变化时更新属性
       const displayAngle = spriteData.angle * Math.PI / 180
       // scale_x/scale_y 已含最终缩放（base×flip），直接使用，不能再乘 scale（会平方）

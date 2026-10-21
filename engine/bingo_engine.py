@@ -51,6 +51,290 @@ _IMAGE_SIZE_CACHE = {}   # 图像尺寸缓存，避免重复磁盘IO
 _FRAME_UPDATES = []      # 每帧精灵更新缓冲，帧末合并发送
 
 
+# ---------- 图像实例碰撞几何（图像模式） ----------
+
+def _polygon_signed_area(points):
+    """鞋带公式，返回有符号面积"""
+    area = 0.0
+    n = len(points)
+    for i in range(n):
+        x1, y1 = points[i]
+        x2, y2 = points[(i + 1) % n]
+        area += x1 * y2 - x2 * y1
+    return area / 2.0
+
+
+def _is_convex_polygon(points):
+    """判断多边形是否为凸（用于决定是否需要三角剖分）"""
+    n = len(points)
+    if n < 3:
+        return False
+    sign = 0
+    for i in range(n):
+        ax, ay = points[i]
+        bx, by = points[(i + 1) % n]
+        cx, cy = points[(i + 2) % n]
+        cross = (bx - ax) * (cy - by) - (by - ay) * (cx - bx)
+        if abs(cross) < 1e-9:
+            continue
+        s = 1 if cross > 0 else -1
+        if sign == 0:
+            sign = s
+        elif s != sign:
+            return False
+    return sign != 0
+
+
+def _point_in_triangle(px, py, ax, ay, bx, by, cx, cy):
+    d1 = (px - bx) * (ay - by) - (ax - bx) * (py - by)
+    d2 = (px - cx) * (by - cy) - (bx - cx) * (py - cy)
+    d3 = (px - ax) * (cy - ay) - (cx - ax) * (py - ay)
+    has_neg = d1 < -1e-9 or d2 < -1e-9 or d3 < -1e-9
+    has_pos = d1 > 1e-9 or d2 > 1e-9 or d3 > 1e-9
+    return not (has_neg and has_pos)
+
+
+def _triangulate_polygon(points):
+    """耳切法把凹多边形拆成三角形；失败时回退扇形三角化"""
+    pts = [list(p) for p in points]
+    if len(pts) < 3:
+        return None
+    if _polygon_signed_area(pts) < 0:
+        pts.reverse()
+
+    indices = list(range(len(pts)))
+    tris = []
+    guard = 0
+    max_guard = len(pts) * len(pts) + 16
+    while len(indices) > 3 and guard < max_guard:
+        guard += 1
+        ear_found = False
+        n = len(indices)
+        for i in range(n):
+            i0 = indices[(i - 1) % n]
+            i1 = indices[i]
+            i2 = indices[(i + 1) % n]
+            ax, ay = pts[i0]
+            bx, by = pts[i1]
+            cx, cy = pts[i2]
+            cross = (bx - ax) * (cy - by) - (by - ay) * (cx - bx)
+            if cross <= 1e-9:
+                continue
+            contains_other = False
+            for j in indices:
+                if j == i0 or j == i1 or j == i2:
+                    continue
+                if _point_in_triangle(pts[j][0], pts[j][1], ax, ay, bx, by, cx, cy):
+                    contains_other = True
+                    break
+            if contains_other:
+                continue
+            tris.append([pts[i0], pts[i1], pts[i2]])
+            indices.pop(i)
+            ear_found = True
+            break
+        if not ear_found:
+            break
+
+    if len(indices) == 3:
+        tris.append([pts[indices[0]], pts[indices[1]], pts[indices[2]]])
+
+    if not tris:
+        # 回退：扇形三角化（至少保证有碰撞体）
+        tris = [[pts[0], pts[i], pts[i + 1]] for i in range(1, len(pts) - 1)]
+    return tris
+
+
+def _image_collision_local_polygons(image):
+    """图像实例碰撞形状 → 图片本地归一化凸多边形列表（缓存到运行时字典）"""
+    cached = image.get("_collision_local_polys")
+    if cached is not None:
+        return cached
+
+    shape = image.get("collisionShape") or image.get("collision_shape")
+    raw_points = []
+    if isinstance(shape, dict):
+        for p in shape.get("points") or []:
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                try:
+                    raw_points.append([float(p[0]), float(p[1])])
+                except (TypeError, ValueError):
+                    continue
+
+    img_w = float(image.get("width") or 0) or 1.0
+    img_h = float(image.get("height") or 0) or 1.0
+    # 兼容历史像素坐标（绝对值 > 1.5 视为像素）
+    if raw_points and any(abs(x) > 1.5 or abs(y) > 1.5 for x, y in raw_points):
+        raw_points = [[x / img_w, y / img_h] for x, y in raw_points]
+
+    # 去掉相邻重复点与首尾重合点
+    points = []
+    for p in raw_points:
+        if not points or abs(p[0] - points[-1][0]) > 1e-6 or abs(p[1] - points[-1][1]) > 1e-6:
+            points.append(p)
+    if len(points) >= 2:
+        if abs(points[0][0] - points[-1][0]) < 1e-6 and abs(points[0][1] - points[-1][1]) < 1e-6:
+            points.pop()
+
+    if len(points) < 3 or abs(_polygon_signed_area(points)) < 1e-8:
+        # 没有有效形状时按整张图片处理
+        polys = [[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]]
+    elif _is_convex_polygon(points):
+        polys = [points]
+    else:
+        tris = _triangulate_polygon(points)
+        polys = tris if tris else [points]
+
+    image["_collision_local_polys"] = polys
+    return polys
+
+
+def _image_collision_world_polygons(image):
+    """把归一化本地多边形转换到世界坐标（中心缩放 + 旋转 + 平移）"""
+    local_polys = _image_collision_local_polygons(image)
+
+    pos = image.get("position") or [0, 0]
+    try:
+        px, py = float(pos[0]), float(pos[1])
+    except (TypeError, ValueError, IndexError):
+        px, py = 0.0, 0.0
+
+    img_w = float(image.get("width") or 64) or 64.0
+    img_h = float(image.get("height") or 64) or 64.0
+    try:
+        scale = float(image.get("scale", 1.0) or 1.0)
+    except (TypeError, ValueError):
+        scale = 1.0
+    try:
+        sx = abs(float(image.get("scaleX", image.get("scale_x", scale)) or scale))
+    except (TypeError, ValueError):
+        sx = abs(scale)
+    try:
+        sy = abs(float(image.get("scaleY", image.get("scale_y", scale)) or scale))
+    except (TypeError, ValueError):
+        sy = abs(scale)
+    if sx <= 0:
+        sx = abs(scale) or 1.0
+    if sy <= 0:
+        sy = abs(scale) or 1.0
+
+    try:
+        rotation = float(image.get("rotation", 0) or 0)
+    except (TypeError, ValueError):
+        rotation = 0.0
+
+    # 同一帧内 x/y 两次碰撞检测、is_on_floor 会重复调用；
+    # 变换未变化时直接复用世界多边形，避免每帧重复分配
+    cache_key = (px, py, img_w, img_h, sx, sy, rotation)
+    if image.get("_collision_world_key") == cache_key:
+        return image.get("_collision_world_polys") or []
+
+    rad = math.radians(rotation)
+    cos_a, sin_a = math.cos(rad), math.sin(rad)
+
+    # 前端 anchor=0.5：position 是未旋转包围盒左上角，旋转围绕中心
+    cx = px + img_w * sx / 2.0
+    cy = py + img_h * sy / 2.0
+
+    world_polys = []
+    for poly in local_polys:
+        out = []
+        for p in poly:
+            lx = (p[0] - 0.5) * img_w * sx
+            ly = (p[1] - 0.5) * img_h * sy
+            out.append((cx + lx * cos_a - ly * sin_a, cy + lx * sin_a + ly * cos_a))
+        world_polys.append(out)
+
+    image["_collision_world_key"] = cache_key
+    image["_collision_world_polys"] = world_polys
+    return world_polys
+
+
+def _polygon_center(points):
+    n = len(points)
+    return (sum(p[0] for p in points) / n, sum(p[1] for p in points) / n)
+
+
+def _project_points(points, axis):
+    ax, ay = axis
+    vals = [p[0] * ax + p[1] * ay for p in points]
+    return min(vals), max(vals)
+
+
+def _rect_corners(rect):
+    return [(rect[0], rect[1]), (rect[2], rect[1]), (rect[2], rect[3]), (rect[0], rect[3])]
+
+
+def _aabb_polygon_mtv(rect, polygon):
+    """SAT：返回把矩形推出多边形的最小平移向量 (mtv_x, mtv_y)；不相交返回 None"""
+    axes = [(1.0, 0.0), (0.0, 1.0)]
+    n = len(polygon)
+    for i in range(n):
+        x1, y1 = polygon[i]
+        x2, y2 = polygon[(i + 1) % n]
+        ex, ey = x2 - x1, y2 - y1
+        length = math.hypot(ex, ey)
+        if length < 1e-9:
+            continue
+        axes.append((-ey / length, ex / length))
+
+    rect_points = _rect_corners(rect)
+    rect_cx, rect_cy = _polygon_center(rect_points)
+    poly_cx, poly_cy = _polygon_center(polygon)
+
+    min_overlap = float("inf")
+    best_axis = None
+    best_sign = 1.0
+    for axis in axes:
+        rmin, rmax = _project_points(rect_points, axis)
+        pmin, pmax = _project_points(polygon, axis)
+        overlap = min(rmax, pmax) - max(rmin, pmin)
+        if overlap <= 1e-7:
+            return None
+        if overlap < min_overlap:
+            min_overlap = overlap
+            best_axis = axis
+            rc = rect_cx * axis[0] + rect_cy * axis[1]
+            pc = poly_cx * axis[0] + poly_cy * axis[1]
+            best_sign = 1.0 if rc >= pc else -1.0
+
+    if best_axis is None:
+        return None
+    return (best_axis[0] * min_overlap * best_sign, best_axis[1] * min_overlap * best_sign)
+
+
+def _point_in_polygon(x, y, polygon):
+    inside = False
+    n = len(polygon)
+    for i in range(n):
+        x1, y1 = polygon[i]
+        x2, y2 = polygon[(i + 1) % n]
+        if (y1 > y) != (y2 > y):
+            xin = (x2 - x1) * (y - y1) / (y2 - y1) + x1
+            if x < xin:
+                inside = not inside
+    return inside
+
+
+def _polygon_hits_horizontal(polygon, x0, x1, y):
+    """多边形是否与水平检测带 [x0,x1] × y 相交（用于 is_on_floor）"""
+    n = len(polygon)
+    for i in range(n):
+        x1p, y1p = polygon[i]
+        x2p, y2p = polygon[(i + 1) % n]
+        if (y1p > y) != (y2p > y):
+            xin = (x2p - x1p) * (y - y1p) / (y2p - y1p) + x1p
+            if x0 <= xin <= x1:
+                return True
+    # 采样判断脚下是否已经陷入碰撞体内部
+    samples = 5
+    for k in range(samples + 1):
+        x = x0 + (x1 - x0) * k / samples
+        if _point_in_polygon(x, y, polygon):
+            return True
+    return False
+
+
 class _MouseType:
     @property
     def x(self):
@@ -291,6 +575,55 @@ class Sprite:
         self._get_hitbox_rect()
 
     # ---------- 运动模块 ----------
+    def _image_collision_correction(self, layer, axis):
+        """计算图像图层对当前精灵的轴分离位移量；没有碰撞返回 None
+
+        图像实例的碰撞形状是图片本地归一化多边形，运行时按缩放/旋转转换到世界坐标；
+        凹多边形已在加载时三角剖分，用 SAT 求最小穿透并按移动轴取分量。
+        """
+        sprite_rect = self._get_hitbox_rect()
+        if not sprite_rect:
+            return None
+
+        best = None
+        for image in layer.get("images", []):
+            collision_enabled = image.get(
+                "collisionEnabled", image.get("collision_enabled", False)
+            )
+            if not collision_enabled:
+                continue
+
+            col_type = image.get("collisionType", image.get("collision_type", "图像"))
+            is_one_way = col_type == "跳板"
+            if is_one_way and axis == "x":
+                continue
+            if is_one_way and self._drop_through:
+                continue
+
+            world_polys = _image_collision_world_polygons(image)
+            if not world_polys:
+                continue
+
+            # 单向平台：只在下落且脚底在平台顶面之上时生效
+            if is_one_way:
+                poly_top = min(p[1] for poly in world_polys for p in poly)
+                if self._prev_bottom_y > poly_top:
+                    continue
+
+            for poly in world_polys:
+                mtv = _aabb_polygon_mtv(sprite_rect, poly)
+                if not mtv:
+                    continue
+                correction = mtv[0] if axis == "x" else mtv[1]
+                if is_one_way and axis == "y" and correction >= 0:
+                    continue
+                if abs(correction) < 1e-6:
+                    continue
+                if best is None or abs(correction) > abs(best):
+                    best = correction
+
+        return best
+
     def _resolve_collision(self, axis):
         """
         处理碰撞检测和位移修正
@@ -308,119 +641,24 @@ class Sprite:
         if not sprite_rect:
             return
 
-        # 计算角色的half_width和half_height
-        half_width = (sprite_rect[2] - sprite_rect[0]) / 2
-        half_height = (sprite_rect[3] - sprite_rect[1]) / 2
-
         # 检测所有图层中的实心图块
         for layer in _CURRENT_MAP.get("layers", []):
-            # --- 图像图层碰撞检测（优先于瓦片碰撞） ---
+            # --- 图像图层碰撞检测（优先级高于瓦片碰撞） ---
+            # 图像实例使用真实多边形碰撞：SAT 求最小穿透，再按移动轴取分量
             if layer.get("type") == "image" and "images" in layer:
-                for image in layer["images"]:
-                    collision_enabled = image.get("collisionEnabled", image.get("collision_enabled", False))
-                    if not collision_enabled:
-                        continue
-
-                    col_type = image.get("collisionType", image.get("collision_type", "图像"))
-                    is_one_way = col_type == "跳板"
-
-                    pos = image.get("position", [0, 0])
-                    scale = image.get("scale", 1.0)
-                    scale_x = image.get("scaleX", image.get("scale_x", scale))
-                    scale_y = image.get("scaleY", image.get("scale_y", scale))
-
-                    # 计算图像碰撞包围盒（世界坐标）
-                    collision_shape = image.get("collision_shape", None)
-                    if (
-                        collision_shape
-                        and "points" in collision_shape
-                        and len(collision_shape["points"]) >= 2
-                    ):
-                        points = collision_shape["points"]
-                        world_points = [
-                            (
-                                pos[0] + p[0] * abs(scale_x),
-                                pos[1] + p[1] * abs(scale_y),
-                            )
-                            for p in points
-                        ]
-                        img_left = min(p[0] for p in world_points)
-                        img_top = min(p[1] for p in world_points)
-                        img_right = max(p[0] for p in world_points)
-                        img_bottom = max(p[1] for p in world_points)
-                    else:
-                        img_w = image.get("width", image.get("_cache_w", 0))
-                        img_h = image.get("height", image.get("_cache_h", 0))
-                        if img_w <= 0 or img_h <= 0:
-                            continue
-                        img_left = pos[0]
-                        img_top = pos[1]
-                        img_right = img_left + img_w * abs(scale_x)
-                        img_bottom = img_top + img_h * abs(scale_y)
-
-                    if is_one_way and axis == "x":
-                        continue
-
-                    if is_one_way and self._drop_through:
-                        continue
-
-                    check_overlap_x = min(img_right, sprite_rect[2]) - max(
-                        img_left, sprite_rect[0]
-                    )
+                correction = self._image_collision_correction(layer, axis)
+                if correction is not None:
+                    margin = 0.05 if correction > 0 else -0.05
                     if axis == "x":
-                        check_top = sprite_rect[1] + 8
-                        check_bottom = sprite_rect[3] - 8
-                        if check_top >= check_bottom:
-                            continue
-                        check_overlap_y = min(img_bottom, check_bottom) - max(
-                            img_top, check_top
-                        )
+                        self._x += correction + margin
                     else:
-                        check_left = sprite_rect[0] - 2
-                        check_right = sprite_rect[2] + 2
-                        check_overlap_x = min(img_right, check_right) - max(
-                            img_left, check_left
-                        )
-                        check_overlap_y = min(img_bottom, sprite_rect[3]) - max(
-                            img_top, sprite_rect[1]
-                        )
-
-                    if check_overlap_x > 0 and check_overlap_y > 0:
-                        if is_one_way and axis == "y":
-                            if self._prev_bottom_y <= img_top:
-                                rect = self._get_hitbox_rect()
-                                if rect:
-                                    self._y = img_top - (rect[3] - self._y) - 0.05
-                                    self.on_ground = True
-                                    self.vy = 0
-                                return
-                            continue
-
-                        if axis == "x":
-                            dist_to_right = abs(sprite_rect[0] - img_right)
-                            dist_to_left = abs(sprite_rect[2] - img_left)
-                            if dist_to_right < dist_to_left:
-                                center_to_left = self._x - sprite_rect[0]
-                                self._x = img_right + center_to_left + 0.05
-                            else:
-                                center_to_right = sprite_rect[2] - self._x
-                                self._x = img_left - center_to_right - 0.05
-                            return
-
-                        elif axis == "y":
-                            rect = self._get_hitbox_rect()
-                            if not rect:
-                                return
-                            # 按穿透深度选择最近的边缘推出（支持任意深度穿透）
-                            overlap_up = img_bottom - rect[1]
-                            overlap_down = rect[3] - img_top
-                            if overlap_up < overlap_down:
-                                self._y = img_bottom + (self._y - rect[1]) + 0.05
-                            else:
-                                self._y = img_top - (rect[3] - self._y) - 0.05
-                                self.on_ground = True
-                                self.vy = 0
-                            return
+                        self._y += correction + margin
+                        # 向上推出 = 落到平台/地面
+                        if correction < 0:
+                            self.on_ground = True
+                            self.vy = 0
+                    return
+                continue
 
             tiles = layer.get("tiles", {})
 
@@ -566,10 +804,6 @@ class Sprite:
         # 获取精灵的碰撞盒
         sprite_rect = self._get_hitbox_rect()
         if sprite_rect:
-            # 计算精灵的半宽和半高
-            half_width = (sprite_rect[2] - sprite_rect[0]) / 2
-            half_height = (sprite_rect[3] - sprite_rect[1]) / 2
-
             # 检查地图边界（使用 world_bounds，支持负坐标）
             if axis == "x":
                 # 左边界
@@ -1233,62 +1467,32 @@ class Sprite:
 
         # 遍历所有图层
         for layer in _CURRENT_MAP.get("layers", []):
-            # --- 图像图层地面检测 ---
+            # --- 图像图层地面检测（按真实多边形采样） ---
             if layer.get("type") == "image" and "images" in layer:
                 for image in layer["images"]:
-                    collision_enabled = image.get("collisionEnabled", image.get("collision_enabled", False))
+                    collision_enabled = image.get(
+                        "collisionEnabled", image.get("collision_enabled", False)
+                    )
                     if not collision_enabled:
                         continue
 
                     col_type = image.get("collisionType", image.get("collision_type", "图像"))
                     is_one_way = col_type == "跳板"
-
-                    pos = image.get("position", [0, 0])
-                    scale = image.get("scale", 1.0)
-                    scale_x = image.get("scaleX", image.get("scale_x", scale))
-                    scale_y = image.get("scaleY", image.get("scale_y", scale))
-
-                    collision_shape = image.get("collision_shape", None)
-                    if (
-                        collision_shape
-                        and "points" in collision_shape
-                        and len(collision_shape["points"]) >= 2
-                    ):
-                        points = collision_shape["points"]
-                        world_points = [
-                            (
-                                pos[0] + p[0] * abs(scale_x),
-                                pos[1] + p[1] * abs(scale_y),
-                            )
-                            for p in points
-                        ]
-                        img_left = min(p[0] for p in world_points)
-                        img_top = min(p[1] for p in world_points)
-                        img_right = max(p[0] for p in world_points)
-                        img_bottom = max(p[1] for p in world_points)
-                    else:
-                        img_w = image.get("width", image.get("_cache_w", 0))
-                        img_h = image.get("height", image.get("_cache_h", 0))
-                        if img_w <= 0 or img_h <= 0:
-                            continue
-                        img_left = pos[0]
-                        img_top = pos[1]
-                        img_right = img_left + img_w * abs(scale_x)
-                        img_bottom = img_top + img_h * abs(scale_y)
-
-                    if is_one_way and self._prev_bottom_y > img_top:
-                        continue
-
                     if is_one_way and self._drop_through:
                         continue
 
-                    if (
-                        rect[0] - 2 <= img_right
-                        and rect[2] + 2 >= img_left
-                        and check_y >= img_top
-                        and check_y <= img_bottom
-                    ):
-                        return True
+                    world_polys = _image_collision_world_polygons(image)
+                    if not world_polys:
+                        continue
+
+                    if is_one_way:
+                        poly_top = min(p[1] for poly in world_polys for p in poly)
+                        if self._prev_bottom_y > poly_top:
+                            continue
+
+                    for poly in world_polys:
+                        if _polygon_hits_horizontal(poly, rect[0] - 2, rect[2] + 2, check_y):
+                            return True
 
             tiles = layer.get("tiles", {})
 

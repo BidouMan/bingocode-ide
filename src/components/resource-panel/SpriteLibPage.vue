@@ -15,6 +15,7 @@ const resourceStore = useResourceStore()
 const projectStore = useProjectStore()
 const searchText = ref('')
 
+
 // 分类标签：默认显示角色（characters）
 const activeCategory = ref('characters')
 
@@ -169,8 +170,16 @@ async function selectSprite(item: { name: string; filePath: string; type: string
         @mouseleave="stopPreview"
       >
         <div class="sprite-thumb">
-          <img v-if="isPreviewing(item.filePath)" :src="previewUrl" class="sprite-thumb-img" />
-          <img v-else-if="item.thumbUrl" :src="item.thumbUrl" class="sprite-thumb-img" />
+          <img
+            v-if="isPreviewing(item.filePath)"
+            :src="previewUrl"
+            class="sprite-thumb-img"
+          />
+          <img
+            v-else-if="item.thumbUrl"
+            :src="item.thumbUrl"
+            class="sprite-thumb-img"
+          />
           <div v-else class="sprite-thumb-placeholder">{{ item.name.charAt(0) }}</div>
         </div>
         <span class="sprite-name">{{ item.name }}</span>
@@ -285,8 +294,8 @@ async function selectSprite(item: { name: string; filePath: string; type: string
   overflow: hidden;
 }
 .sprite-thumb-img {
-  max-width: 100%;
-  max-height: 100%;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
 }
 .sprite-thumb-placeholder {

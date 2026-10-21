@@ -96,7 +96,7 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 - hero.vy — 垂直速度属性，正数=下落，负数=上升，静止=0
 
 ### 运动
-- hero.goto(x, y) — 瞬间传送到(x,y)，自动检测碰撞
+- hero.goto(x, y) — 瞬间传送到(x,y)，自动检测碰撞。也接受标记引用（hero.goto(player.get_marker())）或另一个 Sprite（hero.goto(enemy)），对准目标的注册点
 - hero.move(步数) — 朝当前 angle 方向移动指定像素，自动检测碰撞，会拆分成小步避免穿墙
 - hero.jump(power=10) — 施加向上的力，vy 设为 -power。不判断地面！必须配合 on_ground 使用。用法：if hero.on_ground: hero.jump(10)
 - hero.cut_jump() — 截断跳跃。只在 vy<0（正在上升）时生效，将 _jump_cut 标记为 True，下一帧重力从 0.5 变为 2.8，角色快速下落。用于控制跳跃高度：按住跳得高，轻点跳得矮
@@ -108,6 +108,16 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 - hero.set_speed(速度) — 设置持续移动速度，之后每帧自动沿当前方向移动，写 0 停下
 - hero.edge_bounce() — 碰到画面边缘(640x480)自动反弹
 - hero.goto_rand() — 随机传送到画面内任意位置
+
+### 标记与挂载（仅 .bsf 角色有标记）
+- 标记是角色身上预先画好的锚点（在角色编辑器「标记」图层添加，默认名「标记」，新增自动编号「标记1」「标记2」…），用于把武器/道具挂到角色身上
+- m = hero.get_marker() — 获取第一个标记（名「标记」）的引用；hero.get_marker("标记1") 取指定名字的标记
+- m.x / m.y — 读取该标记此刻在画面上的世界坐标（已算上角色的位置、旋转、缩放和左右翻转；动画换帧时标记位置也会跟着变）
+- sword.follow(m) — 让 sword 每帧贴在标记 m 上。只同步位置和左右翻转，**不改变朝向**，所以仍可 sword.look_at(mouse) 单独瞄准
+- sword.follow(m, flip=False) — 同上但不继承角色的左右翻转（鼠标瞄准类武器用这个）
+- sword.unfollow() — 解除跟随，恢复自由移动
+- 目标角色被 delete 后跟随自动停止；不写 follow 时可用手写循环 sword.goto(m) 每帧对准（等价效果）
+- 注意：follow 是普通方法调用，不是属性赋值（不要写成 sword.follow = m）
 
 ### 外观
 - hero.show() / hero.hide() — 显示/隐藏（不是删除，隐藏后还能 show）

@@ -21,6 +21,9 @@ const collisionTypeOptions = [
   { label: '自定义', value: '自定义' },
 ]
 
+// 选中画布图像实例时，物理属性/碰撞作用于该实例
+const selectedImage = computed(() => mapStore.selectedImage)
+
 const tileSizeValue = computed(() => `${mapStore.mapData.tileSize}x${mapStore.mapData.tileSize}`)
 function onTileSizeChange(val: string) {
   const newSize = Number(val.split('x')[0])
@@ -39,7 +42,10 @@ const selectedTileData = computed(() => {
 })
 
 const collisionTypeValue = computed(() => {
-  // 优先显示选中瓦片的碰撞类型
+  // 优先显示选中图像实例的碰撞类型
+  const image = selectedImage.value
+  if (image) return image.collisionType || '图像'
+  // 其次显示选中瓦片的碰撞类型
   const tileData = selectedTileData.value
   if (tileData) return tileData.collisionType || '图像'
   // 其次显示选中资源的碰撞类型
@@ -50,6 +56,9 @@ const collisionTypeValue = computed(() => {
 
 // 碰撞checkbox：直接根据物理属性类型决定勾选状态
 const collisionEnabledValue = computed(() => {
+  // 选中图像实例时，使用该实例的碰撞状态
+  const image = selectedImage.value
+  if (image) return image.collisionEnabled ?? false
   // 选中瓦片时，使用该瓦片的碰撞状态
   if (mapStore.selectedTileIndex >= 0) {
     const layer = mapStore.activeLayer
@@ -73,6 +82,11 @@ const collisionEnabledValue = computed(() => {
 })
 
 function onCollisionTypeChange(val: string) {
+  // 选中图像实例时，直接更新该实例
+  if (selectedImage.value) {
+    mapStore.setImageCollisionType(val)
+    return
+  }
   // 如果选中了单个瓦片，只更新该瓦片的碰撞类型
   if (selectedTileData.value && mapStore.selectedTileIndex >= 0) {
     const layer = mapStore.activeLayer
@@ -111,12 +125,24 @@ function onCollisionTypeChange(val: string) {
   }
 }
 
-const customCollisionType = computed(() => mapStore.mapData.collisionType || '')
+const customCollisionType = computed(() => {
+  if (selectedImage.value) return selectedImage.value.collisionType || ''
+  return mapStore.mapData.collisionType || ''
+})
 function onCustomCollisionTypeChange(val: string) {
+  if (selectedImage.value) {
+    mapStore.setImageCollisionType(val)
+    return
+  }
   mapStore.updateMapProperty('collisionType', val)
 }
 
 function onCollisionEnabledChange(enabled: boolean) {
+  // 选中图像实例时，直接更新该实例
+  if (selectedImage.value) {
+    mapStore.setImageCollisionEnabled(enabled)
+    return
+  }
   // 如果选中了单个瓦片，更新该瓦片的碰撞状态
   if (selectedTileData.value && mapStore.selectedTileIndex >= 0) {
     const layer = mapStore.activeLayer

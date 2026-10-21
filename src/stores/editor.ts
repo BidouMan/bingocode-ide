@@ -1,10 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import type { RenderMode } from '../utils/renderMode'
 
 export type EditorMode = 'code' | 'sprite' | 'map'
 export type ResourceTab = 'sprite' | 'map' | 'sound' | 'code'
-export type RenderMode = 'smooth' | 'pixelated'
+export type { RenderMode }
 
 export interface Tab {
   id: string
@@ -126,7 +127,8 @@ export const useEditorStore = defineStore('editor', () => {
   const activeEditorMode = ref<EditorMode>('code')
   const isRunning = ref(false)
   const resourceTab = ref<ResourceTab>('sprite')
-  const renderMode = ref<RenderMode>('smooth')
+  // 默认「自动」：按素材自然尺寸判定（小图走最近邻，大插画走平滑，见 utils/renderMode.ts）
+  const renderMode = ref<RenderMode>('auto')
   const focusMode = ref(loadFocusMode())
   const savedZoom = loadSavedZoom()
   const editorFontSize = ref(Math.round(16 * savedZoom / 100))

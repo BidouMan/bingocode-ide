@@ -68,6 +68,8 @@ export function useEngine() {
           vox: cmd.data.vox ?? 0,
           voy: cmd.data.voy ?? 0,
           frameRect: cmd.data.frame_rect ?? null,
+          frameW: cmd.data.raw_cw,
+          frameH: cmd.data.raw_ch,
           preloadPaths: buildBgsPreloadPaths(cmd.data),
         })
         break
@@ -87,6 +89,8 @@ export function useEngine() {
           voy: cmd.data.voy ?? 0,
           // 部分更新（仅 visible/layer）不带 frame_rect 时保留原 UV，避免瞬时整张贴图
           ...(cmd.data.frame_rect !== undefined ? { frameRect: cmd.data.frame_rect } : {}),
+          // 自然尺寸（自动渲染判定用）：帧大小变化时随 UPDATE 一起更新
+          ...(cmd.data.cw ? { frameW: cmd.data.cw, frameH: cmd.data.ch } : {}),
         })
         // 更新碰撞盒
         if (cmd.data.hitbox) {
@@ -138,6 +142,9 @@ export function useEngine() {
           // 缺省时不覆盖已有纹理路径（undefined 会让精灵变占位图）
           if (update.image !== undefined) patch.imagePath = update.image
           if (update.frame_rect !== undefined) patch.frameRect = update.frame_rect
+          // 自然尺寸（自动渲染判定用）：.bsf 换帧时帧大小会变
+          if (update.cw) patch.frameW = update.cw
+          if (update.ch) patch.frameH = update.ch
           renderStore.updateSprite(update.id, patch)
           if (update.hitbox) {
             renderStore.setHitbox(update.id, update.hitbox)

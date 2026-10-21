@@ -44,7 +44,7 @@ const categories = [
     name: '运动',
     color: '#4C97FF',
     funcs: [
-      { label: 'goto 传送到某个位置', code: 'hero.goto(100, 200)', desc: '让角色瞬间传送到画面的某个位置。x 是左右方向（0~640），y 是上下方向（0~480）。', badgeType: 'object' },
+      { label: 'goto 传送到某个位置', code: 'hero.goto(100, 200)\nhero.goto(player.get_marker())', desc: '让角色瞬间传送到画面的某个位置。x 是左右方向（0~640），y 是上下方向（0~480）。也可以传送到某个标记上，比如把武器对准角色的手。', badgeType: 'object' },
       { label: 'move 朝前走', code: 'hero.move(5)', desc: '让角色朝着它面朝的方向走几步。比如 move(5) 就往前走 5 步。走的时候会自动避开墙壁。', badgeType: 'object' },
       { label: 'jump 跳起来', code: 'if hero.on_ground:\n    hero.jump(12)', desc: '让角色跳起来！数字越大跳得越高，默认是 10。jump 只是施加向上的力，需要自己用 on_ground 判断是否在地面。', badgeType: 'object' },
       { label: 'cut_jump 提前落地', code: 'if key_pressed("space") and hero.on_ground:\n    hero.jump(10)\nif key_up("space"):\n    hero.cut_jump()', desc: '松手的时候调用，角色会提前下落。按住跳键跳得高，松手就落下来，这样你就能控制跳多高。', badgeType: 'object' },
@@ -58,6 +58,9 @@ const categories = [
       { label: 'set_speed 持续移动', code: 'hero.set_speed(3)', desc: '设置角色的持续移动速度。之后角色会自动一直朝当前方向走。写 0 就停下来。', badgeType: 'object' },
       { label: 'edge_bounce 碰边反弹', code: 'hero.edge_bounce()', desc: '角色碰到画面边缘会自动弹回来，就像弹力球撞墙一样。', badgeType: 'object' },
       { label: 'goto_rand 传送到随机位置', code: 'hero.goto_rand()', desc: '让角色随机传送到画面上的某个位置。', badgeType: 'object' },
+      { label: 'get_marker 获取标记', code: 'm = hero.get_marker()\nm = hero.get_marker("标记1")', desc: '取得角色身上某个标记的位置。标记要在角色编辑器的「标记」图层里先画好。不写名字就是第一个标记。拿到后可以给 goto 和 follow 用。', badgeType: 'object' },
+      { label: 'follow 挂上去跟着走', code: 'sword.follow(player.get_marker())\nsword.follow(player.get_marker(), flip=False)', desc: '让一个角色一直贴在另一个角色的标记上，像给角色拿武器一样。位置会跟着走，但朝向还是自己控制（所以还能用 look_at 瞄准）。不写 flip 时角色翻面武器也跟着翻，写 flip=False 就不跟着翻。', badgeType: 'object' },
+      { label: 'unfollow 不再跟随', code: 'sword.unfollow()', desc: '让角色不再跟着标记走，恢复到自由移动。', badgeType: 'object' },
     ],
   },
   // ════════ 外观 ════════

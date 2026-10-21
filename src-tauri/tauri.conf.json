@@ -55,7 +55,10 @@
     "resources": [
       "../engine/*.py",
       "../engine/models/*",
-      "../engine/assets/**/*",
+      "../engine/assets/maps/**/*",
+      "../engine/assets/sprites/**/*",
+      "../engine/assets/sounds/**/*",
+      "../engine/assets/ui/**/*",
       "../engine/portable-python/**/*",
       "../engine/requirements.txt"
     ]

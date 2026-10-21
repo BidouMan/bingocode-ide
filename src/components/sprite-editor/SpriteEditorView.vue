@@ -3,9 +3,11 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useResourceStore } from '../../stores/resource'
 import { useEditorStore } from '../../stores/editor'
 import type { SpriteData, SpriteAnimation } from '../../composables/useSpriteData'
-import { readSpriteFromPath, revokeSpriteUrls, saveSpriteConfig, saveBsfManifest, isImageSpritePath, buildSingleFrameBsfMeta, imageSpriteToBsfDir } from '../../composables/useSpriteData'
+import { readSpriteFromPath, revokeSpriteUrls, saveSpriteConfig, saveBsfManifest, isImageSpritePath, buildSingleFrameBsfMeta, imageSpriteToBsfDir, loadImage } from '../../composables/useSpriteData'
 import type { SpriteCollisionShape } from '../../composables/useSpriteData'
 import { appendFramesToSprite } from '../../composables/appendSpriteFrames'
+import { cssImageRendering } from '../../utils/renderMode'
+import { drawImageCrisp } from '../../utils/pixelCanvas'
 import FrameUploadDrawer from './FrameUploadDrawer.vue'
 import CollisionShapeOverlay from './CollisionShapeOverlay.vue'
 
@@ -35,12 +37,124 @@ import iconMarkerRaw from '../../assets/icons/标记.svg?raw'
 const resourceStore = useResourceStore()
 const editorStore = useEditorStore()
 
-const imageRenderingStyle = computed(() => {
-  return editorStore.renderMode === 'pixelated' ? 'pixelated' : 'auto'
+/** 当前角色素材的自然尺寸（.bsf 用 canvas，其余用首帧图片尺寸）：自动渲染模式的判定依据 */
+const spriteNaturalW = ref(0)
+const spriteNaturalH = ref(0)
+
+const imageRenderingStyle = computed(() =>
+  cssImageRendering(editorStore.renderMode, spriteNaturalW.value, spriteNaturalH.value),
+)
+
+/**
+ * 画布图片的显示尺寸 = 帧原始尺寸 × 缩放。
+ * 采用 canvas 自绘（而非 <img> + image-rendering）：WKWebView 下被放大的图层会走
+ * 合成层平滑重采样，pixelated 直接被覆盖，小素材一放大就糊；canvas 里
+ * imageSmoothingEnabled=false 就是最近邻采样（等价 Godot 纹理过滤设 nearest）。
+ */
+const canvasFrameNatural = ref<{ w: number; h: number } | null>(null)
+
+/** 光栅化安全上限（像素）：大插画 × 高倍缩放不能无限放大布局尺寸，否则显存/内存爆掉 */
+const RASTER_CAP = 4096
+
+/** 参与布局的缩放倍率：小图（≤128px）在 32× 上限内永远走布局放大，始终清晰 */
+const canvasLayoutZoom = computed(() => {
+  const size = canvasFrameNatural.value
+  if (!size) return canvasZoom.value
+  const naturalMax = Math.max(size.w, size.h, 1)
+  return Math.min(canvasZoom.value, RASTER_CAP / naturalMax)
 })
+
+/** 超出光栅上限的余量交给合成层缩放（倍数很小，观感损失可忽略） */
+const canvasResidualScale = computed(() =>
+  canvasLayoutZoom.value > 0 ? canvasZoom.value / canvasLayoutZoom.value : 1,
+)
+
+const canvasWrapperStyle = computed(() => {
+  const parts: string[] = []
+  if (canvasPanX.value || canvasPanY.value) {
+    parts.push(`translate(${canvasPanX.value}px, ${canvasPanY.value}px)`)
+  }
+  if (Math.abs(canvasResidualScale.value - 1) > 0.001) {
+    parts.push(`scale(${canvasResidualScale.value})`)
+  }
+  return parts.length > 0 ? { transform: parts.join(' ') } : {}
+})
+
+/** 标注层：画布坐标 + transform 缩放（缩放不影响图片采样，只放大矢量手柄） */
+const annoLayerStyle = computed(() => {
+  const canvas = currentSprite.value?.bsf?.canvas
+  if (!canvas) return {}
+  return {
+    width: `${canvas.w}px`,
+    height: `${canvas.h}px`,
+    transform: `scale(${canvasLayoutZoom.value})`,
+  }
+})
+
+// ─── canvas 自绘：画布帧 + 预览帧（采样方式由 imageSmoothingEnabled 决定） ───
+const spriteCanvasEl = ref<HTMLCanvasElement | null>(null)
+const previewCanvasEl = ref<HTMLCanvasElement | null>(null)
+/** 帧图片解码缓存（key = 帧 url；同一帧反复重绘/缩放只解码一次） */
+const frameImages = new Map<string, HTMLImageElement>()
+let spriteDrawToken = 0
+let previewDrawToken = 0
+
+async function frameImage(url: string): Promise<HTMLImageElement> {
+  const cached = frameImages.get(url)
+  if (cached) return cached
+  const img = await loadImage(url)
+  frameImages.set(url, img)
+  return img
+}
+
+async function drawSpriteFrame() {
+  const el = spriteCanvasEl.value
+  const frame = currentSprite.value?.frames[canvasDisplayIndex.value]
+  if (!el || !frame) return
+  const token = ++spriteDrawToken
+  const img = await frameImage(frame.url).catch(() => null)
+  if (!img || token !== spriteDrawToken) return
+  const natural = { w: img.naturalWidth || img.width, h: img.naturalHeight || img.height }
+  // 先落原始尺寸：光栅上限与标注层对齐都以它为准（.bsf 各帧同画布，.bgs 可能不同）
+  canvasFrameNatural.value = natural
+  const zoom = canvasLayoutZoom.value
+  drawImageCrisp(
+    el,
+    img,
+    natural.w * zoom,
+    natural.h * zoom,
+    imageRenderingStyle.value !== 'pixelated',
+    RASTER_CAP,
+  )
+}
+
+async function drawPreviewFrame() {
+  const el = previewCanvasEl.value
+  const frame = currentSprite.value?.frames[selectedFrameIndex.value]
+  if (!el || !frame) return
+  const token = ++previewDrawToken
+  const img = await frameImage(frame.url).catch(() => null)
+  if (!img || token !== previewDrawToken) return
+  const natural = { w: img.naturalWidth || img.width, h: img.naturalHeight || img.height }
+  const scale = previewScale.value
+  drawImageCrisp(
+    el,
+    img,
+    Math.min(natural.w, 248) * scale,
+    Math.min(natural.h, 248) * scale,
+    imageRenderingStyle.value !== 'pixelated',
+  )
+}
+
+function redrawSpriteImages() {
+  drawSpriteFrame()
+  drawPreviewFrame()
+}
 
 const currentSprite = ref<SpriteData | null>(null)
 const currentSpritePath = ref('')
+/** 载入失败信息（读盘/解析异常直接显示出来，避免"点了没反应"看起来像跳转失败） */
+const loadError = ref<string | null>(null)
 const selectedFrameIndex = ref(0)
 const selectedAnim = ref<SpriteAnimation | null>(null)
 const isPlaying = ref(false)
@@ -120,6 +234,25 @@ async function persistSprite() {
   }
 }
 
+/** 记录当前角色的自然尺寸（自动渲染模式的判定依据）：.bsf 取画布，其余取首帧图片尺寸 */
+async function updateSpriteNaturalSize() {
+  const sprite = currentSprite.value
+  if (!sprite) return
+  if (sprite.bsf) {
+    spriteNaturalW.value = sprite.bsf.canvas.w
+    spriteNaturalH.value = sprite.bsf.canvas.h
+    return
+  }
+  try {
+    const img = await loadImage(sprite.frames[0].blob)
+    spriteNaturalW.value = img.naturalWidth || img.width
+    spriteNaturalH.value = img.naturalHeight || img.height
+  } catch {
+    spriteNaturalW.value = 0
+    spriteNaturalH.value = 0
+  }
+}
+
 async function loadSprite(item: { id: string; name: string; path: string }) {
   // 防重复加载：同一个角色不重新加载
   if (currentSpritePath.value === item.path && currentSprite.value) return
@@ -138,6 +271,12 @@ async function loadSprite(item: { id: string; name: string; path: string }) {
       }
     }
     currentSpritePath.value = item.path
+    loadError.value = null
+    // 自然尺寸：.bsf 取画布（sheet 是几十帧拼图，尺寸不能当素材尺寸），其余取首帧图片尺寸
+    await updateSpriteNaturalSize()
+    // 画布帧尺寸与解码缓存都属于上一个角色，换角色先清掉
+    canvasFrameNatural.value = null
+    frameImages.clear()
     // 初始定位到持久化的默认渲染帧（引擎初始渲染与缩略图同源）
     const initialFrame = currentSprite.value.defaultFrameIndex ?? 0
     selectedFrameIndex.value = initialFrame
@@ -162,6 +301,7 @@ async function loadSprite(item: { id: string; name: string; path: string }) {
     }
   } catch (e) {
     console.error('Failed to load sprite:', e)
+    loadError.value = e instanceof Error ? e.message : String(e)
   }
 }
 
@@ -890,6 +1030,22 @@ function closeContextMenus() {
   animContextMenu.value.show = false
 }
 
+// 帧切换 / 缩放 / 预览倍率 / 渲染模式变化 → 重绘（flush: post 保证 canvas 已挂载）
+// 注意：必须放在所有 ref/computed 声明之后——watch 创建时会立即求值一次来源，
+// 提前注册会在 setup 阶段抛 TDZ（Cannot access 'canvasZoom' before initialization），
+// 整个角色编辑器挂载失败、连 Vue 的更新队列都会卡住
+watch(
+  [
+    () => currentSprite.value?.frames[canvasDisplayIndex.value]?.url,
+    () => currentSprite.value?.frames[selectedFrameIndex.value]?.url,
+    () => canvasZoom.value,
+    () => previewScale.value,
+    () => editorStore.renderMode,
+  ],
+  () => redrawSpriteImages(),
+  { flush: 'post' },
+)
+
 // 注册全局 mouseup 监听
 onMounted(() => {
   document.addEventListener('mouseup', onGlobalMouseUp)
@@ -898,6 +1054,8 @@ onMounted(() => {
   document.addEventListener('mouseup', onPivotDragUp)
   document.addEventListener('mousemove', onMarkerDragMove)
   document.addEventListener('mouseup', onMarkerDragUp)
+  // 首屏：canvas 挂载后按当前帧画一次
+  nextTick(redrawSpriteImages)
 })
 
 onBeforeUnmount(() => {
@@ -914,6 +1072,11 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="sprite-editor-page" @click="closeContextMenus">
+    <!-- 载入失败提示：路径失效 / 目录缺 manifest.json 等会走到这里（否则页面一片空白像是没跳转） -->
+    <div v-if="loadError" class="load-error">
+      角色载入失败：{{ loadError }}
+      <span class="load-error-path">{{ currentSpritePath }}</span>
+    </div>
     <!-- 左: 造型列表 (100px) + 追加抽屉 -->
     <div class="costume-list-wrap">
       <div class="costume-list">
@@ -1149,64 +1312,70 @@ onBeforeUnmount(() => {
         <div class="canvas-center-anchor">
           <div
             class="canvas-sprite-wrapper"
-            :style="{
-              transform: `translate(${canvasPanX}px, ${canvasPanY}px) scale(${canvasZoom})`
-            }"
+            :style="canvasWrapperStyle"
           >
-            <img
+            <!-- 帧图由 canvas 自绘：采样方式（最近邻/平滑）由 imageSmoothingEnabled 决定，
+                 不受浏览器对 <img> 放大时的合成层重采样影响 -->
+            <canvas
               v-if="currentSprite?.frames[canvasDisplayIndex]"
-              :src="currentSprite.frames[canvasDisplayIndex].url"
+              ref="spriteCanvasEl"
               class="canvas-sprite"
-              draggable="false"
               :style="{ imageRendering: imageRenderingStyle }"
             />
-            <!-- 洋葱皮幽灵：相邻帧有效中心点不一致时显示（中心点图层） -->
+            <!-- 标注层：画布坐标 + transform 缩放（手柄内部再 1/zoom 反向缩放保持屏幕尺寸恒定） -->
             <div
-              v-for="g in (activeAnnoLayer === 'pivot' ? pivotGhosts : [])"
-              :key="g.i"
-              class="pivot-ghost"
-              :style="{ left: `${g.x}px`, top: `${g.y}px` }"
+              v-if="canAnno && currentSprite?.bsf"
+              class="canvas-anno-layer"
+              :style="annoLayerStyle"
             >
-              <div class="ghost-counter" :style="{ transform: `scale(${1 / canvasZoom})` }">
-                <span class="ghost-ring"></span>
+              <!-- 洋葱皮幽灵：相邻帧有效中心点不一致时显示（中心点图层） -->
+              <div
+                v-for="g in (activeAnnoLayer === 'pivot' ? pivotGhosts : [])"
+                :key="g.i"
+                class="pivot-ghost"
+                :style="{ left: `${g.x}px`, top: `${g.y}px` }"
+              >
+                <div class="ghost-counter" :style="{ transform: `scale(${1 / canvasZoom})` }">
+                  <span class="ghost-ring"></span>
+                </div>
               </div>
-            </div>
-            <!-- 中心点手柄（碰撞图层下弱化显示、不响应交互） -->
-            <div
-              v-if="annoPivot"
-              class="pivot-handle"
-              :class="{ 'is-override': annoScope === 'one', 'is-inactive': activeAnnoLayer !== 'pivot' }"
-              :style="pivotHandleStyle"
-              @mousedown="onPivotMouseDown"
-            >
-              <div class="pivot-visual" :style="{ transform: `scale(${1 / canvasZoom})` }">
-                <div class="pivot-ring"></div>
+              <!-- 中心点手柄（碰撞图层下弱化显示、不响应交互） -->
+              <div
+                v-if="annoPivot"
+                class="pivot-handle"
+                :class="{ 'is-override': annoScope === 'one', 'is-inactive': activeAnnoLayer !== 'pivot' }"
+                :style="pivotHandleStyle"
+                @mousedown="onPivotMouseDown"
+              >
+                <div class="pivot-visual" :style="{ transform: `scale(${1 / canvasZoom})` }">
+                  <div class="pivot-ring"></div>
+                </div>
               </div>
-            </div>
-            <!-- 碰撞形状叠加层（自动态显示引擎内容框；拖动手柄立即转为自定义） -->
-            <CollisionShapeOverlay
-              v-if="canAnno && activeAnnoLayer === 'collision' && currentSprite?.bsf"
-              :canvas-w="currentSprite.bsf.canvas.w"
-              :canvas-h="currentSprite.bsf.canvas.h"
-              :shape="collisionDisplay"
-              :zoom="canvasZoom"
-              @update="onCollisionUpdate"
-            />
-            <!-- 标记手柄：标记.svg 图钉（图标配色独立于 svg 填充，mask 上色），画布点选/拖拽 -->
-            <div
-              v-for="name in (activeAnnoLayer === 'marker' ? markerNames : [])"
-              :key="name"
-              class="marker-handle"
-              :class="{
-                'is-selected': name === selMarkerName,
-                'is-override': hasMarkerOverride(name, annoFrameIndex),
-              }"
-              :style="markerHandleStyle(name)"
-              @mousedown="onMarkerMouseDown(name, $event)"
-            >
-              <div class="marker-visual" :style="{ transform: `scale(${1 / canvasZoom})` }">
-                <div class="marker-icon" v-html="markerIconSvg"></div>
-                <span class="marker-label">{{ name }}</span>
+              <!-- 碰撞形状叠加层（自动态显示引擎内容框；拖动手柄立即转为自定义） -->
+              <CollisionShapeOverlay
+                v-if="activeAnnoLayer === 'collision'"
+                :canvas-w="currentSprite.bsf.canvas.w"
+                :canvas-h="currentSprite.bsf.canvas.h"
+                :shape="collisionDisplay"
+                :zoom="canvasZoom"
+                @update="onCollisionUpdate"
+              />
+              <!-- 标记手柄：标记.svg 图钉（图标配色独立于 svg 填充，mask 上色），画布点选/拖拽 -->
+              <div
+                v-for="name in (activeAnnoLayer === 'marker' ? markerNames : [])"
+                :key="name"
+                class="marker-handle"
+                :class="{
+                  'is-selected': name === selMarkerName,
+                  'is-override': hasMarkerOverride(name, annoFrameIndex),
+                }"
+                :style="markerHandleStyle(name)"
+                @mousedown="onMarkerMouseDown(name, $event)"
+              >
+                <div class="marker-visual" :style="{ transform: `scale(${1 / canvasZoom})` }">
+                  <div class="marker-icon" v-html="markerIconSvg"></div>
+                  <span class="marker-label">{{ name }}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -1221,10 +1390,10 @@ onBeforeUnmount(() => {
       <!-- 预览区域 256×256 -->
       <div class="preview-bg">
         <div class="preview-image-box" :style="getPreviewBgStyle()">
-          <div class="preview-image-wrap" :style="{ transform: `scale(${previewScale})` }">
-            <img
+          <div class="preview-image-wrap">
+            <canvas
               v-if="currentSprite?.frames[selectedFrameIndex]"
-              :src="currentSprite.frames[selectedFrameIndex].url"
+              ref="previewCanvasEl"
               class="preview-image"
               :style="{ imageRendering: imageRenderingStyle }"
             />
@@ -1359,6 +1528,28 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.load-error {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  max-width: 80%;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(95, 45, 39, 0.95);
+  border: 1px solid #a1443a;
+  color: #ffd9d4;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.load-error-path {
+  display: block;
+  margin-top: 4px;
+  color: #ffb3a8;
+  font-size: 11px;
+  word-break: break-all;
+}
 .sprite-editor-page {
   display: flex;
   height: 100%;
@@ -1436,8 +1627,19 @@ onBeforeUnmount(() => {
   justify-content: center;
 }
 .canvas-sprite-wrapper {
-  transform-origin: 0 0;
+  position: relative;
+  /* 以中心为原点缩放：超出光栅上限的余量由外层 transform 补齐时仍然居中 */
+  transform-origin: center center;
 }
+/* 标注层：尺寸=画布坐标尺寸，zoom 由 transform 提供（只放大矢量 UI，不影响图片采样） */
+.canvas-anno-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+.canvas-anno-layer > * { pointer-events: auto; }
 .canvas-sprite {
   display: block;
   background-color: #ffffff;
@@ -1775,11 +1977,11 @@ onBeforeUnmount(() => {
   justify-content: center;
   overflow: hidden;
 }
+/* 尺寸由 drawImageCrisp 按「min(自然尺寸,248) × 预览倍率」写入（canvas 自绘，采样自控） */
 .preview-image {
-  max-width: 248px;
-  max-height: 248px;
+  display: block;
 }
-/* 预览图包裹层：缩放移到包裹层，与画布区结构一致 */
+/* 预览图包裹层：仅作排布容器（缩放已在图片自身尺寸上完成） */
 .preview-image-wrap {
   position: relative;
   display: flex;

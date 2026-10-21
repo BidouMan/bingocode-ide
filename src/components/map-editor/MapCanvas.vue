@@ -189,34 +189,6 @@ function encodeTileId(_layerId: number, localRIdx: number, tileIndex: number): n
   return tileSet.firstgid + tileIndex
 }
 
-function decodeTileId(tileId: number, layerId?: number): { resourceIndex: number; tileIndex: number } {
-  // 通过firstgid范围查找瓦片集
-  const tileSets = mapStore.mapData.tileSets
-  let globalTsIdx = 0
-  for (let i = tileSets.length - 1; i >= 0; i--) {
-    if (tileId >= tileSets[i].firstgid) {
-      globalTsIdx = i
-      break
-    }
-  }
-  const tileIndex = tileId - tileSets[globalTsIdx].firstgid
-
-  // 转换为图层内的资源索引
-  let resourceIndex = globalTsIdx
-  if (layerId !== undefined) {
-    const layer = mapStore.mapData.layers.find(l => l.id === layerId)
-    if (layer) {
-      let offset = 0
-      for (const l of mapStore.mapData.layers) {
-        if (l.id === layerId) break
-        offset += l.resources.length
-      }
-      resourceIndex = globalTsIdx - offset
-    }
-  }
-  return { resourceIndex, tileIndex }
-}
-
 // 获取或创建图层容器
 function getOrCreateLayerContainer(layerId: number): any {
   if (layerContainers.has(layerId)) return layerContainers.get(layerId)
@@ -359,6 +331,9 @@ async function renderAllLayers() {
     const container = layerContainers.get(layers[i].id)
     if (container) tileContainer.addChild(container)
   }
+
+  // 图像精灵重建后重绘碰撞叠加层
+  drawCollisionOverlay()
 }
 
 async function renderImageLayer(container: any, imgData: any) {
@@ -439,6 +414,7 @@ async function placeImage(layer: any, resource: any, x: number, y: number) {
   selectedImageData = imgData
   selectedImageLayerId = layer.id
   selectedImageIndex = layer.images.length - 1
+  mapStore.selectImage(layer.id, selectedImageIndex)
   showTransformBox(imgData)
   mapStore.setTool('select')
 }
@@ -547,6 +523,8 @@ function onWheel(e: WheelEvent) {
   app.stage.x = mouseX - worldX * currentScale
   app.stage.y = mouseY - worldY * currentScale
   applyScale()
+  // 手柄尺寸随缩放变化，重绘碰撞叠加层
+  drawCollisionOverlay()
 }
 
 function onPointerDown(e: PointerEvent) {
@@ -555,6 +533,13 @@ function onPointerDown(e: PointerEvent) {
     lastPointer = { x: e.clientX, y: e.clientY }
     ;(app.canvas as HTMLCanvasElement).style.cursor = 'grabbing'
     e.preventDefault()
+    return
+  }
+
+  // 碰撞编辑模式下，指针事件全部交给碰撞工具，避免拖动/缩放图像
+  if (mapStore.activeLayer?.type === 'image' && mapStore.imageCollisionTool !== 'none' && mapStore.selectedImage) {
+    const worldPos = screenToWorld(e)
+    if (worldPos) handleCollisionPointerDown(mapStore.selectedImage, worldPos, e.button)
     return
   }
 
@@ -574,6 +559,7 @@ function onPointerDown(e: PointerEvent) {
             selectedImageData = hit.imageData
             selectedImageLayerId = hit.layerId
             selectedImageIndex = hit.imageIndex
+            mapStore.selectImage(hit.layerId, hit.imageIndex)
             showTransformBox(hit.imageData)
             cacheSelectedImageSprite()
           }
@@ -589,6 +575,7 @@ function onPointerDown(e: PointerEvent) {
           return
         } else {
           removeTransformBox()
+          mapStore.clearImageSelection()
         }
       }
       return
@@ -665,6 +652,13 @@ function onPointerMove(e: PointerEvent) {
     app.stage.x += dx
     app.stage.y += dy
     lastPointer = { x: e.clientX, y: e.clientY }
+    return
+  }
+
+  // 碰撞编辑：拖动顶点 / 拉矩形 / 钢笔预览
+  if (mapStore.imageCollisionTool !== 'none' && mapStore.selectedImage) {
+    const worldPos = screenToWorld(e)
+    if (worldPos) handleCollisionPointerMove(mapStore.selectedImage, worldPos)
     return
   }
 
@@ -845,6 +839,17 @@ function onPointerMove(e: PointerEvent) {
 }
 
 function onPointerUp() {
+  // 碰撞编辑：矩形收尾 / 顶点结束拖拽
+  if (mapStore.imageCollisionTool === 'rect' && collisionRectStart) {
+    finishCollisionRect()
+    return
+  }
+  if (draggingVertexIndex >= 0) {
+    draggingVertexIndex = -1
+    drawCollisionOverlay()
+    return
+  }
+
   if (transformDragging) {
     transformDragging = false
     transformHandleIndex = -1
@@ -906,6 +911,16 @@ function onPointerLeave() {
   cursorGridPos.value = null
   if (previewTile) {
     previewTile.visible = false
+  }
+  // 离开画布时取消未完成的碰撞草稿，避免残留预览
+  if (mapStore.imageCollisionTool !== 'none') {
+    if (collisionRectStart) {
+      collisionRectStart = null
+      collisionRectCurrent = null
+    }
+    collisionPreviewLocal = null
+    draggingVertexIndex = -1
+    drawCollisionOverlay()
   }
 }
 
@@ -989,6 +1004,32 @@ function onKeyDown(e: KeyboardEvent) {
   }
   // Tool shortcuts (only when not typing in an input)
   if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return
+
+  // 碰撞编辑快捷键：Esc 取消/退出，Enter 闭合多边形，Delete 删除顶点
+  if (mapStore.imageCollisionTool !== 'none') {
+    if (e.key === 'Escape') {
+      if (collisionDraftActive || collisionRectStart) {
+        cancelCollisionDraft()
+      } else {
+        mapStore.setImageCollisionTool('none')
+      }
+      drawCollisionOverlay()
+      return
+    }
+    if (e.key === 'Enter' && mapStore.imageCollisionTool === 'polygon' && collisionDraftActive) {
+      e.preventDefault()
+      closeCollisionDraft()
+      return
+    }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && mapStore.imageCollisionTool === 'vertex') {
+      e.preventDefault()
+      deleteSelectedVertex()
+      return
+    }
+    // 碰撞编辑期间不响应工具切换快捷键
+    return
+  }
+
   // Delete/Backspace 删除选中图像（图像图层时）
   if ((e.key === 'Delete' || e.key === 'Backspace') && mapStore.activeLayer?.type === 'image') {
     e.preventDefault()
@@ -1043,14 +1084,9 @@ function hitTestImage(worldX: number, worldY: number): { layerId: number; imageI
   // Check images in reverse order (top-most first)
   for (let i = layer.images.length - 1; i >= 0; i--) {
     const img = layer.images[i]
-    const pos = img.position || [0, 0]
-    const scaleX = img.scaleX ?? img.scale ?? 1
-    const scaleY = img.scaleY ?? img.scale ?? 1
-    const w = (img.width || 64) * scaleX
-    const h = (img.height || 64) * scaleY
-
-    if (worldX >= pos[0] && worldX <= pos[0] + w &&
-        worldY >= pos[1] && worldY <= pos[1] + h) {
+    // 转到图片本地坐标判定，支持缩放与旋转
+    const local = imageWorldToLocal(img, worldX, worldY)
+    if (local.x >= 0 && local.x <= 1 && local.y >= 0 && local.y <= 1) {
       return { layerId: layer.id, imageIndex: i, imageData: img }
     }
   }
@@ -1140,6 +1176,375 @@ let transformStartBox = { left: 0, top: 0, right: 0, bottom: 0 }
 let isRotating = false
 let rotationStartAngle = 0
 let isImageDragging = false
+
+// --- 图像实例碰撞编辑 ---
+let collisionGraphics: any = null
+let collisionDraft: { x: number; y: number }[] = []      // 钢笔草稿（图片本地归一化坐标）
+let collisionDraftActive = false
+let collisionPreviewLocal: { x: number; y: number } | null = null
+let collisionRectStart: { x: number; y: number } | null = null
+let collisionRectCurrent: { x: number; y: number } | null = null
+let draggingVertexIndex = -1
+let selectedVertexIndex = -1
+let lastPolygonClickAt = 0
+
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v))
+
+function getImageRectInfo(img: any) {
+  const pos = img.position || [0, 0]
+  const sx = img.scaleX ?? img.scale ?? 1
+  const sy = img.scaleY ?? img.scale ?? 1
+  const w = Math.max(1, (img.width || 64) * Math.abs(sx))
+  const h = Math.max(1, (img.height || 64) * Math.abs(sy))
+  return {
+    x: pos[0],
+    y: pos[1],
+    w,
+    h,
+    cx: pos[0] + w / 2,
+    cy: pos[1] + h / 2,
+    rot: (img.rotation ?? 0) * Math.PI / 180,
+  }
+}
+
+// 归一化本地坐标 → 世界坐标（与 MapCanvas 渲染的 anchor=0.5 + 旋转保持一致）
+function imageLocalToWorld(img: any, p: { x: number; y: number }) {
+  const r = getImageRectInfo(img)
+  const lx = (p.x - 0.5) * r.w
+  const ly = (p.y - 0.5) * r.h
+  const cos = Math.cos(r.rot)
+  const sin = Math.sin(r.rot)
+  return { x: r.cx + lx * cos - ly * sin, y: r.cy + lx * sin + ly * cos }
+}
+
+function imageWorldToLocal(img: any, x: number, y: number) {
+  const r = getImageRectInfo(img)
+  const dx = x - r.cx
+  const dy = y - r.cy
+  const cos = Math.cos(r.rot)
+  const sin = Math.sin(r.rot)
+  return { x: (dx * cos + dy * sin) / r.w + 0.5, y: (-dx * sin + dy * cos) / r.h + 0.5 }
+}
+
+// 吸附到图片像素，保证碰撞边缘清晰
+function snapImageLocal(img: any, p: { x: number; y: number }) {
+  const iw = Math.max(1, img.width || 64)
+  const ih = Math.max(1, img.height || 64)
+  return {
+    x: clamp01(Math.round(p.x * iw) / iw),
+    y: clamp01(Math.round(p.y * ih) / ih),
+  }
+}
+
+function pointToSegmentDistance(p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }): number {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const lenSq = dx * dx + dy * dy
+  if (lenSq === 0) return Math.hypot(p.x - a.x, p.y - a.y)
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq))
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
+}
+
+function findNearestVertex(img: any, world: { x: number; y: number }, threshold: number): number {
+  const pts = img.collisionShape?.points || []
+  let best = -1
+  let bestDist = threshold
+  pts.forEach((p: number[], i: number) => {
+    const wp = imageLocalToWorld(img, { x: p[0], y: p[1] })
+    const d = Math.hypot(wp.x - world.x, wp.y - world.y)
+    if (d < bestDist) {
+      bestDist = d
+      best = i
+    }
+  })
+  return best
+}
+
+// 查找最近的边，返回边起点顶点下标（用于插点）
+function findNearestEdge(img: any, world: { x: number; y: number }, threshold: number): number {
+  const pts = img.collisionShape?.points || []
+  if (pts.length < 2) return -1
+  let best = -1
+  let bestDist = threshold
+  for (let i = 0; i < pts.length; i++) {
+    const a = imageLocalToWorld(img, { x: pts[i][0], y: pts[i][1] })
+    const b = imageLocalToWorld(img, { x: pts[(i + 1) % pts.length][0], y: pts[(i + 1) % pts.length][1] })
+    const d = pointToSegmentDistance(world, a, b)
+    if (d < bestDist) {
+      bestDist = d
+      best = i
+    }
+  }
+  return best
+}
+
+function drawCollisionPolygon(
+  g: any,
+  img: any,
+  localPoints: { x: number; y: number }[],
+  color: number,
+  fillAlpha: number,
+  lineWidth: number,
+  withHandles: boolean,
+) {
+  if (localPoints.length < 2) return
+  const world = localPoints.map(p => imageLocalToWorld(img, p))
+  g.moveTo(world[0].x, world[0].y)
+  for (let i = 1; i < world.length; i++) g.lineTo(world[i].x, world[i].y)
+  g.closePath()
+  g.fill({ color, alpha: fillAlpha })
+  g.stroke({ width: lineWidth, color, alpha: 0.9 })
+
+  if (!withHandles) return
+  const radius = 4 / currentScale
+  world.forEach((p, i) => {
+    if (i === selectedVertexIndex) {
+      g.circle(p.x, p.y, radius * 1.6)
+      g.fill({ color: 0x528bff, alpha: 0.9 })
+    }
+    g.circle(p.x, p.y, radius)
+    g.fill({ color: i === 0 ? 0x5BFB84 : 0xffffff })
+    g.stroke({ width: 1 / currentScale, color: 0xff5050 })
+  })
+}
+
+function drawCollisionOverlay() {
+  if (!app || !PIXI) return
+  if (!collisionGraphics) {
+    collisionGraphics = new PIXI.Graphics()
+    collisionGraphics.eventMode = 'none'
+  }
+  // 始终保持在舞台最上层
+  if (collisionGraphics.parent) collisionGraphics.parent.removeChild(collisionGraphics)
+  app.stage.addChild(collisionGraphics)
+
+  const g = collisionGraphics
+  g.clear()
+  const lineWidth = 1.5 / currentScale
+
+  const img = mapStore.selectedImage
+
+  // 全局碰撞可视化（所有图像图层）
+  if (mapStore.showCollision) {
+    for (const layer of mapStore.mapData.layers) {
+      if (layer.type !== 'image' || !layer.visible) continue
+      for (const layerImg of layer.images) {
+        const pts = layerImg.collisionShape?.points
+        if (!layerImg.collisionEnabled || !pts || pts.length < 3 || layerImg === img) continue
+        drawCollisionPolygon(
+          g, layerImg,
+          pts.map((p: number[]) => ({ x: p[0], y: p[1] })),
+          0xff5050, 0.12, lineWidth, false,
+        )
+      }
+    }
+  }
+
+  if (!img) return
+
+  // 已保存的碰撞形状
+  const pts = img.collisionShape?.points
+  if (pts && pts.length >= 3) {
+    const editing = mapStore.imageCollisionTool !== 'none'
+    drawCollisionPolygon(
+      g, img,
+      pts.map((p: number[]) => ({ x: p[0], y: p[1] })),
+      img.collisionEnabled ? 0xff5050 : 0x888888,
+      img.collisionEnabled ? 0.2 : 0.1,
+      lineWidth,
+      editing,
+    )
+  }
+
+  // 矩形拖拽预览
+  if (collisionRectStart && collisionRectCurrent) {
+    const x0 = Math.min(collisionRectStart.x, collisionRectCurrent.x)
+    const x1 = Math.max(collisionRectStart.x, collisionRectCurrent.x)
+    const y0 = Math.min(collisionRectStart.y, collisionRectCurrent.y)
+    const y1 = Math.max(collisionRectStart.y, collisionRectCurrent.y)
+    drawCollisionPolygon(
+      g, img,
+      [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }],
+      0x5BFB84, 0.15, lineWidth, false,
+    )
+  }
+
+  // 钢笔草稿
+  if (collisionDraftActive && collisionDraft.length > 0) {
+    const world = collisionDraft.map(p => imageLocalToWorld(img, p))
+    g.moveTo(world[0].x, world[0].y)
+    for (let i = 1; i < world.length; i++) g.lineTo(world[i].x, world[i].y)
+    if (collisionPreviewLocal) {
+      const preview = imageLocalToWorld(img, collisionPreviewLocal)
+      g.lineTo(preview.x, preview.y)
+    }
+    g.stroke({ width: lineWidth, color: 0x5BFB84, alpha: 0.9 })
+
+    const radius = 4 / currentScale
+    world.forEach((p, i) => {
+      g.circle(p.x, p.y, radius)
+      g.fill({ color: i === 0 ? 0x5BFB84 : 0xffffff })
+      g.stroke({ width: 1 / currentScale, color: 0xff5050 })
+    })
+  }
+}
+
+function cancelCollisionDraft() {
+  collisionDraftActive = false
+  collisionDraft = []
+  collisionPreviewLocal = null
+  collisionRectStart = null
+  collisionRectCurrent = null
+  draggingVertexIndex = -1
+}
+
+function closeCollisionDraft() {
+  if (collisionDraft.length >= 3) {
+    mapStore.setImageCollisionPoints(collisionDraft.map(p => [p.x, p.y]))
+  }
+  collisionDraftActive = false
+  collisionDraft = []
+  collisionPreviewLocal = null
+  drawCollisionOverlay()
+}
+
+function deleteSelectedVertex() {
+  const img = mapStore.selectedImage
+  if (!img) return
+  const pts = img.collisionShape?.points
+  if (!pts || pts.length <= 3 || selectedVertexIndex < 0) return
+  const next = pts.map((p: number[]) => [p[0], p[1]])
+  next.splice(selectedVertexIndex, 1)
+  selectedVertexIndex = -1
+  mapStore.setImageCollisionPoints(next)
+  drawCollisionOverlay()
+}
+
+function handleCollisionPointerDown(img: any, world: { x: number; y: number }, button: number) {
+  const raw = imageWorldToLocal(img, world.x, world.y)
+  const tool = mapStore.imageCollisionTool
+  // 点击图片范围外：只用于取消顶点选中，不在图片外生成锚点
+  if (raw.x < -0.02 || raw.x > 1.02 || raw.y < -0.02 || raw.y > 1.02) {
+    if (tool === 'vertex') {
+      selectedVertexIndex = -1
+      drawCollisionOverlay()
+    }
+    return
+  }
+  const local = snapImageLocal(img, raw)
+
+  // 右键：钢笔撤销上一点 / 删除顶点
+  if (button === 2) {
+    if (tool === 'polygon' && collisionDraftActive && collisionDraft.length > 0) {
+      collisionDraft.pop()
+      if (collisionDraft.length === 0) collisionDraftActive = false
+    } else if (tool === 'vertex') {
+      const idx = findNearestVertex(img, world, 10 / currentScale)
+      if (idx >= 0) {
+        selectedVertexIndex = idx
+        deleteSelectedVertex()
+      }
+    }
+    drawCollisionOverlay()
+    return
+  }
+  if (button !== 0) return
+
+  if (tool === 'rect') {
+    collisionRectStart = local
+    collisionRectCurrent = local
+  } else if (tool === 'polygon') {
+    if (collisionDraftActive && collisionDraft.length >= 3) {
+      const firstWorld = imageLocalToWorld(img, collisionDraft[0])
+      // 点首点闭合
+      if (Math.hypot(firstWorld.x - world.x, firstWorld.y - world.y) < 10 / currentScale) {
+        closeCollisionDraft()
+        return
+      }
+      // 双击闭合
+      const now = Date.now()
+      const lastWorld = imageLocalToWorld(img, collisionDraft[collisionDraft.length - 1])
+      if (now - lastPolygonClickAt < 350 &&
+          Math.hypot(lastWorld.x - world.x, lastWorld.y - world.y) < 10 / currentScale) {
+        closeCollisionDraft()
+        return
+      }
+    }
+    if (!collisionDraftActive) {
+      collisionDraftActive = true
+      collisionDraft = []
+    }
+    const last = collisionDraft[collisionDraft.length - 1]
+    if (!last || Math.hypot(last.x - local.x, last.y - local.y) > 1e-5) {
+      collisionDraft.push(local)
+    }
+    lastPolygonClickAt = Date.now()
+  } else if (tool === 'vertex') {
+    const idx = findNearestVertex(img, world, 10 / currentScale)
+    if (idx >= 0) {
+      draggingVertexIndex = idx
+      selectedVertexIndex = idx
+    } else {
+      const edge = findNearestEdge(img, world, 8 / currentScale)
+      if (edge >= 0) {
+        const next = (img.collisionShape?.points || []).map((p: number[]) => [p[0], p[1]])
+        next.splice(edge + 1, 0, [local.x, local.y])
+        mapStore.setImageCollisionPoints(next)
+        draggingVertexIndex = edge + 1
+        selectedVertexIndex = edge + 1
+      }
+    }
+  }
+  drawCollisionOverlay()
+}
+
+function handleCollisionPointerMove(img: any, world: { x: number; y: number }) {
+  const local = snapImageLocal(img, imageWorldToLocal(img, world.x, world.y))
+  const tool = mapStore.imageCollisionTool
+
+  if (tool === 'rect' && collisionRectStart) {
+    collisionRectCurrent = local
+    drawCollisionOverlay()
+  } else if (tool === 'polygon' && collisionDraftActive) {
+    collisionPreviewLocal = local
+    drawCollisionOverlay()
+  } else if (tool === 'vertex' && draggingVertexIndex >= 0) {
+    const next = (img.collisionShape?.points || []).map((p: number[]) => [p[0], p[1]])
+    next[draggingVertexIndex] = [local.x, local.y]
+    mapStore.setImageCollisionPoints(next)
+    drawCollisionOverlay()
+  }
+}
+
+function finishCollisionRect() {
+  if (!collisionRectStart || !collisionRectCurrent) return
+  const img = mapStore.selectedImage
+  if (img) {
+    const x0 = Math.min(collisionRectStart.x, collisionRectCurrent.x)
+    const x1 = Math.max(collisionRectStart.x, collisionRectCurrent.x)
+    const y0 = Math.min(collisionRectStart.y, collisionRectCurrent.y)
+    const y1 = Math.max(collisionRectStart.y, collisionRectCurrent.y)
+    if (x1 - x0 > 0.005 && y1 - y0 > 0.005) {
+      mapStore.setImageCollisionPoints([
+        [x0, y0], [x1, y0], [x1, y1], [x0, y1],
+      ])
+    }
+  }
+  collisionRectStart = null
+  collisionRectCurrent = null
+  drawCollisionOverlay()
+}
+
+// 退出碰撞编辑时恢复选中图像的变换框
+function restoreSelectedImageUI() {
+  const img = mapStore.selectedImage
+  if (!img) return
+  selectedImageData = img
+  selectedImageLayerId = mapStore.selectedImageLayerId
+  selectedImageIndex = mapStore.selectedImageIndex
+  showTransformBox(img)
+  cacheSelectedImageSprite()
+}
 
 function showTransformBox(imgData: any) {
   removeTransformBox()
@@ -1241,6 +1646,8 @@ function updateSelectedImageSprite() {
   )
   selectedImageSprite.alpha = selectedImageData.opacity ?? 1
   selectedImageSprite.visible = true
+  // 图像移动/缩放/旋转时碰撞叠加层跟随（在更新位置之后重绘）
+  if (mapStore.showCollision) drawCollisionOverlay()
 }
 
 function cacheSelectedImageSprite() {
@@ -1314,7 +1721,6 @@ function updateTransformBox() {
 
   // Update rotation handle position
   const cx = pos[0] + w / 2
-  const cy = pos[1] + h / 2
   const rotX = cx
   const rotY = pos[1] - 30
 
@@ -1338,6 +1744,8 @@ function updateTransformBox() {
 // 切换地图时清理所有选中状态、变换框、拖拽状态
 function resetCanvasState() {
   removeTransformBox()
+  mapStore.clearImageSelection()
+  cancelCollisionDraft()
   selectedImageData = null
   selectedImageLayerId = -1
   selectedImageIndex = -1
@@ -1403,7 +1811,10 @@ watch(
 // 切换图层时清除图像变换框（防止绘制图层上残留图像的选择框）
 watch(
   () => mapStore.activeLayerIndex,
-  () => { removeTransformBox() }
+  () => {
+    removeTransformBox()
+    mapStore.clearImageSelection()
+  }
 )
 
 // 监听图层可见性变化
@@ -1435,6 +1846,35 @@ watch(
   () => {
     if (isImageDragging) return
     scheduleRender()
+  }
+)
+
+// 碰撞数据 / 显示开关 / 选中实例变化 → 只重绘叠加层
+watch(() => mapStore.collisionRevision, () => drawCollisionOverlay())
+watch(() => mapStore.showCollision, () => drawCollisionOverlay())
+watch(
+  () => [mapStore.selectedImageLayerId, mapStore.selectedImageIndex],
+  () => {
+    cancelCollisionDraft()
+    selectedVertexIndex = -1
+    drawCollisionOverlay()
+  }
+)
+
+// 进入碰撞编辑时隐藏变换框（避免手柄抢事件），退出时恢复
+watch(
+  () => mapStore.imageCollisionTool,
+  (tool, prev) => {
+    cancelCollisionDraft()
+    selectedVertexIndex = -1
+    if (tool !== 'none') {
+      removeTransformBox()
+      if (app?.canvas) (app.canvas as HTMLCanvasElement).style.cursor = 'crosshair'
+    } else if (prev !== 'none') {
+      restoreSelectedImageUI()
+      if (app?.canvas) (app.canvas as HTMLCanvasElement).style.cursor = 'default'
+    }
+    drawCollisionOverlay()
   }
 )
 
@@ -1506,6 +1946,7 @@ onBeforeUnmount(() => {
     app = null
   }
   PIXI = null
+  collisionGraphics = null
 })
 
 function getThumbnailDataUrl(): string | null {
@@ -1529,11 +1970,17 @@ function getThumbnailDataUrl(): string | null {
 }
 
 function deleteSelectedImage() {
-  if (!selectedImageData || selectedImageIndex < 0) return
-  const layer = mapStore.mapData.layers.find(l => l.id === selectedImageLayerId)
+  // 碰撞编辑时变换框已被移除，优先用 store 里的选中状态
+  const layerId = mapStore.selectedImageLayerId >= 0 ? mapStore.selectedImageLayerId : selectedImageLayerId
+  const index = mapStore.selectedImageIndex >= 0 ? mapStore.selectedImageIndex : selectedImageIndex
+  if (index < 0) return
+  const layer = mapStore.mapData.layers.find(l => l.id === layerId)
   if (!layer) return
-  layer.images.splice(selectedImageIndex, 1)
+  layer.images.splice(index, 1)
   removeTransformBox()
+  mapStore.clearImageSelection()
+  cancelCollisionDraft()
+  drawCollisionOverlay()
   mapStore.imageRevision++
   scheduleRender()
 }

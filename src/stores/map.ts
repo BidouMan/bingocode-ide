@@ -74,6 +74,8 @@ export interface MapData {
 
 export type MapTool = 'move' | 'select' | 'draw' | 'erase' | 'fill'
 export type CollisionTool = 'move' | 'add' | 'delete' | 'reset'
+// 图像模式碰撞编辑工具（none = 未进入碰撞编辑）
+export type ImageCollisionTool = 'none' | 'rect' | 'polygon' | 'vertex'
 
 export const useMapStore = defineStore('map', () => {
   const currentMapPath = ref('')
@@ -114,9 +116,18 @@ export const useMapStore = defineStore('map', () => {
   const cursorX = ref<number | null>(null)
   const cursorY = ref<number | null>(null)
 
+  // 图像实例选中状态（画布选中图像后，属性面板/工具栏共用）
+  const selectedImageLayerId = ref(-1)
+  const selectedImageIndex = ref(-1)
+  const imageCollisionTool = ref<ImageCollisionTool>('none')
+  // 全局显示所有图像碰撞形状（调试用）
+  const showCollision = ref(false)
+
   // Revision counters for cheap watcher dependency tracking (avoid expensive JSON.stringify in watcher getters)
   const tileRevision = ref(0)
   const imageRevision = ref(0)
+  // 碰撞数据变更计数器（只触发叠加层重绘，不触发整图重渲染）
+  const collisionRevision = ref(0)
   // 完整地图加载计数器（loadMap 时递增，用于 ResourceListPanel 刷新缩略图）
   const mapLoadCount = ref(0)
 
@@ -125,6 +136,12 @@ export const useMapStore = defineStore('map', () => {
     return layer
   })
   const selectedResource = computed(() => activeLayer.value?.resources[selectedResourceIndex.value] ?? null)
+  // 画布上选中的图像实例
+  const selectedImage = computed<ImageData | null>(() => {
+    if (selectedImageLayerId.value < 0 || selectedImageIndex.value < 0) return null
+    const layer = mapData.value.layers.find(l => l.id === selectedImageLayerId.value)
+    return layer?.images[selectedImageIndex.value] ?? null
+  })
 
   // 计算当前图层资源在全局 tileSets 中的起始索引
   const globalResourceOffset = computed(() => {
@@ -146,6 +163,7 @@ export const useMapStore = defineStore('map', () => {
     activeLayerIndex.value = Math.max(0, data.layers.length - 1)
     selectedResourceIndex.value = -1
     selectedTileIndex.value = -1
+    clearImageSelection()
     syncToolWithLayer()
     // 强制触发 canvas 重新渲染（mapData 完全替换后所有瓦片和图像都变了）
     tileRevision.value++
@@ -180,6 +198,7 @@ export const useMapStore = defineStore('map', () => {
     activeLayerIndex.value = 0
     selectedResourceIndex.value = -1
     selectedTileIndex.value = -1
+    clearImageSelection()
     mapResources.value = []
     layerResources.value = {}
     currentMapPath.value = ''
@@ -236,6 +255,8 @@ export const useMapStore = defineStore('map', () => {
 
   function removeLayer(index: number) {
     if (index >= 0 && index < mapData.value.layers.length && mapData.value.layers.length > 1) {
+      const removed = mapData.value.layers[index]
+      if (removed && removed.id === selectedImageLayerId.value) clearImageSelection()
       mapData.value.layers.splice(index, 1)
       if (activeLayerIndex.value >= mapData.value.layers.length) {
         activeLayerIndex.value = mapData.value.layers.length - 1
@@ -303,6 +324,7 @@ export const useMapStore = defineStore('map', () => {
     activeLayerIndex.value = index
     selectedResourceIndex.value = -1
     selectedTileIndex.value = -1
+    clearImageSelection()
     syncToolWithLayer()
   }
 
@@ -343,42 +365,39 @@ export const useMapStore = defineStore('map', () => {
   function removeResource(index: number) {
     const layer = activeLayer.value
     if (!layer || index < 0 || index >= layer.resources.length) return
-    const removedResource = layer.resources[index]
-    layer.resources.splice(index, 1)
-    // 移除对应的 TileSet
+
+    // 先记录被删 tileset 的索引与 GID 范围，再移除；
+    // 否则 splice 后同一索引已经指向下一个 tileset，清理范围会算错
     let globalIdx = 0
     for (const l of mapData.value.layers) {
       if (l.id === layer.id) break
       globalIdx += l.resources.length
     }
     globalIdx += index
+
+    const removedTileSet = mapData.value.tileSets[globalIdx]
+    const nextFirstgid = mapData.value.tileSets[globalIdx + 1]?.firstgid ?? Infinity
+
+    layer.resources.splice(index, 1)
     if (globalIdx < mapData.value.tileSets.length) {
       mapData.value.tileSets.splice(globalIdx, 1)
     }
-    // 清理画布上的相关瓦片（GID编码：通过firstgid范围查找）
-    if (removedResource) {
-      // 计算被删除资源对应的tileset firstgid范围
-      const globalIdx = (() => {
-        let idx = 0
-        for (const l of mapData.value.layers) {
-          if (l.id === layer.id) break
-          idx += l.resources.length
-        }
-        return idx + index
-      })()
-      const removedTileSet = mapData.value.tileSets[globalIdx]
-      if (removedTileSet) {
-        const nextFirstgid = mapData.value.tileSets[globalIdx + 1]?.firstgid ?? Infinity
-        for (const l of mapData.value.layers) {
-          for (const key of Object.keys(l.tiles)) {
-            const gid = l.tiles[key]
-            if (gid >= removedTileSet.firstgid && gid < nextFirstgid) {
-              delete l.tiles[key]
-            }
+
+    // 清理所有图层中属于该 tileset 的瓦片（GID 编码）
+    let tilesChanged = false
+    if (removedTileSet) {
+      for (const l of mapData.value.layers) {
+        for (const key of Object.keys(l.tiles)) {
+          const gid = l.tiles[key]
+          if (gid >= removedTileSet.firstgid && gid < nextFirstgid) {
+            delete l.tiles[key]
+            tilesChanged = true
           }
         }
       }
     }
+    // 瓦片被移除后必须通知画布重绘，否则残留的 sprite 不会消失
+    if (tilesChanged) tileRevision.value++
   }
 
   function clearResources() {
@@ -395,6 +414,7 @@ export const useMapStore = defineStore('map', () => {
     // 清空该图层的所有瓦片
     if (layer.type === 'drawing') {
       layer.tiles = {}
+      tileRevision.value++
     }
   }
 
@@ -427,6 +447,83 @@ export const useMapStore = defineStore('map', () => {
   function setCursorPos(x: number | null, y: number | null) {
     cursorX.value = x
     cursorY.value = y
+  }
+
+  // ====== 图像实例碰撞（图像模式） ======
+
+  function selectImage(layerId: number, index: number) {
+    selectedImageLayerId.value = layerId
+    selectedImageIndex.value = index
+  }
+
+  function clearImageSelection() {
+    selectedImageLayerId.value = -1
+    selectedImageIndex.value = -1
+    imageCollisionTool.value = 'none'
+  }
+
+  function setImageCollisionTool(tool: ImageCollisionTool) {
+    imageCollisionTool.value = tool
+  }
+
+  function toggleShowCollision() {
+    showCollision.value = !showCollision.value
+  }
+
+  // 默认碰撞形状：整张图片
+  function defaultImageCollisionPoints(): number[][] {
+    return [[0, 0], [1, 0], [1, 1], [0, 1]]
+  }
+
+  /** 设置选中图像实例的碰撞多边形（归一化 0~1 图片本地坐标）；传 null 清除 */
+  function setImageCollisionPoints(points: number[][] | null) {
+    const img = selectedImage.value
+    if (!img) return
+    if (!points || points.length < 3) {
+      delete img.collisionShape
+      img.collisionEnabled = false
+    } else {
+      img.collisionShape = { points }
+      img.collisionEnabled = true
+      if (!img.collisionType || img.collisionType === '图像') img.collisionType = '墙体'
+    }
+    collisionRevision.value++
+  }
+
+  function setImageCollisionType(type: string) {
+    const img = selectedImage.value
+    if (!img) return
+    img.collisionType = type
+    if (type === '图像') {
+      img.collisionEnabled = false
+    } else {
+      img.collisionEnabled = true
+      if (!img.collisionShape?.points?.length) {
+        img.collisionShape = { points: defaultImageCollisionPoints() }
+      }
+    }
+    collisionRevision.value++
+  }
+
+  function setImageCollisionEnabled(enabled: boolean) {
+    const img = selectedImage.value
+    if (!img) return
+    img.collisionEnabled = enabled
+    if (enabled) {
+      if (!img.collisionType || img.collisionType === '图像') img.collisionType = '墙体'
+      if (!img.collisionShape?.points?.length) {
+        img.collisionShape = { points: defaultImageCollisionPoints() }
+      }
+    }
+    collisionRevision.value++
+  }
+
+  function clearImageCollision() {
+    const img = selectedImage.value
+    if (!img) return
+    delete img.collisionShape
+    img.collisionEnabled = false
+    collisionRevision.value++
   }
 
   function setTileCollision(tileSetIndex: number, tileIndex: number, collision: boolean) {
@@ -501,8 +598,22 @@ export const useMapStore = defineStore('map', () => {
     setCollisionTool,
     toggleSnapToPixel,
     setCursorPos,
+    selectedImageLayerId,
+    selectedImageIndex,
+    selectedImage,
+    imageCollisionTool,
+    showCollision,
+    selectImage,
+    clearImageSelection,
+    setImageCollisionTool,
+    toggleShowCollision,
+    setImageCollisionPoints,
+    setImageCollisionType,
+    setImageCollisionEnabled,
+    clearImageCollision,
     tileRevision,
     imageRevision,
+    collisionRevision,
     mapLoadCount,
   }
 })

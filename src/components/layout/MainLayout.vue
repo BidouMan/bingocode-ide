@@ -64,6 +64,7 @@ import iconCodeFormat from '../../assets/icons/code_fomat.svg'
 import iconAddOne from '../../assets/icons/add-one.svg'
 import iconReduceOne from '../../assets/icons/reduce-one.svg'
 import { useThemeStore } from '../../stores/theme'
+import { normalizeSpriteThumb } from '../../utils/spriteThumb'
 
 const editorStore = useEditorStore()
 const resourceStore = useResourceStore()
@@ -131,7 +132,7 @@ const ideActivePanel = ref<'files' | 'search' | 'outline' | 'snippets' | 'learn'
 const sidePanelWidth = ref(240)
 const isResizingSidePanel = ref(false)
 
-// 角色缩略图缓存
+// 角色缩略图缓存（缩略图已按固定画布烤好，列表里再按格子尺寸缩小显示，走平滑即可）
 const spriteThumbnails = ref<Record<string, string>>({})
 // 地图缩略图缓存
 const mapThumbnails = ref<Record<string, string>>({})
@@ -1160,7 +1161,7 @@ async function loadSpriteThumbnail(item: { id: string; path: string }) {
     // .bsf 文件或含 manifest.json 的 sheet 目录 → 前端从 sheet 裁第一帧
     if (/\.bsf$/i.test(item.path)) {
       const { getBsfThumbnail } = await import('../../composables/useSpriteData')
-      spriteThumbnails.value[item.id] = await getBsfThumbnail(item.path)
+      spriteThumbnails.value[item.id] = await normalizeSpriteThumb(await getBsfThumbnail(item.path))
       return
     }
     const isImage = /\.(png|jpe?g|gif|bmp|webp)$/i.test(item.path)
@@ -1170,14 +1171,15 @@ async function loadSpriteThumbnail(item: { id: string; path: string }) {
       }).catch(() => false)
       if (hasManifest) {
         const { getBsfThumbnail } = await import('../../composables/useSpriteData')
-        spriteThumbnails.value[item.id] = await getBsfThumbnail(item.path)
+        spriteThumbnails.value[item.id] = await normalizeSpriteThumb(await getBsfThumbnail(item.path))
         return
       }
     }
     const dataUrl = await invoke<string>('get_sprite_thumbnail', {
       path: item.path,
     })
-    spriteThumbnails.value[item.id] = dataUrl
+    // 裁到内容框：不同尺寸/留白的素材在列表里视觉大小一致
+    spriteThumbnails.value[item.id] = await normalizeSpriteThumb(dataUrl)
   } catch (e) {
     console.warn('Failed to load sprite thumbnail:', e)
   }
@@ -1863,6 +1865,9 @@ function spriteDisplayName(name: string) {
               <span class="settings-arrow">›</span>
             </div>
             <div v-show="settingsSubmenu === 'renderMode'" class="settings-submenu">
+              <button class="file-menu-item" :class="{ 'settings-item-active': editorStore.renderMode === 'auto' }" @click="editorStore.setRenderMode('auto'); closeSettingsMenu()">
+                Auto
+              </button>
               <button class="file-menu-item" :class="{ 'settings-item-active': editorStore.renderMode === 'smooth' }" @click="editorStore.setRenderMode('smooth'); closeSettingsMenu()">
                 Smooth
               </button>
@@ -2020,7 +2025,7 @@ function spriteDisplayName(name: string) {
                     @contextmenu="onSpriteContextMenu($event, item)"
                   >
                     <div class="resource-thumb">
-                      <img v-if="spriteThumbnails[item.id]" :src="spriteThumbnails[item.id]" class="resource-thumb-img" :style="{ imageRendering: editorStore.renderMode === 'pixelated' ? 'pixelated' : 'auto' }" />
+                      <img v-if="spriteThumbnails[item.id]" :src="spriteThumbnails[item.id]" class="resource-thumb-img" />
                       <span v-else>{{ item.name.charAt(0) }}</span>
                     </div>
                     <template v-if="spriteRenameId === item.id">

@@ -18,6 +18,9 @@ export interface SpriteData {
   voy: number
   /** .bsf 精灵：帧在 sheet 贴图中的 UV 区域 [x, y, w, h]；null = 整张贴图 */
   frameRect: number[] | null
+  /** 当前帧内容的自然尺寸（引擎 raw_cw/raw_ch）：自动渲染模式据此判定最近邻还是平滑 */
+  frameW?: number
+  frameH?: number
   /** 需要一并预载的贴图路径（.bgs 目录角色的全部帧文件），用于真实、一次性的加载进度 */
   preloadPaths?: string[]
 }
@@ -127,6 +130,8 @@ export const useRenderStore = defineStore('render', () => {
       vox: data.vox ?? 0,
       voy: data.voy ?? 0,
       frameRect: data.frameRect ?? null,
+      frameW: data.frameW,
+      frameH: data.frameH,
       preloadPaths: data.preloadPaths,
     })
   }

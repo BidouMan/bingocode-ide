@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
+import { normalizeSpriteThumb } from '../utils/spriteThumb'
 
 export type SpriteLibType = 'bgs' | 'bsf' | 'image'
 
@@ -117,16 +118,11 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
             continue
           }
           // .bsf：前端从 sheet 裁第一帧（Rust 侧不解析 sheet 图集）
-          if (item.type === 'bsf') {
-            const { getBsfThumbnail } = await import('../composables/useSpriteData')
-            item.thumbUrl = await getBsfThumbnail(item.filePath)
-            item.loaded = true
-            continue
-          }
-          const dataUrl = await invoke<string>('get_sprite_thumbnail', {
-            path: item.filePath,
-          })
-          item.thumbUrl = dataUrl
+          const dataUrl = item.type === 'bsf'
+            ? await (await import('../composables/useSpriteData')).getBsfThumbnail(item.filePath)
+            : await invoke<string>('get_sprite_thumbnail', { path: item.filePath })
+          // 裁到内容框：不同尺寸/留白的素材在库里视觉大小一致
+          item.thumbUrl = await normalizeSpriteThumb(dataUrl)
           item.loaded = true
         } catch (e) {
           console.error(`[SpriteLib] ${item.name}: 加载缩略图失败 (path=${item.filePath})`, e)
