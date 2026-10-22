@@ -53,7 +53,7 @@ function onMapChange(value: string) {
 
 <template>
   <div class="map-toolbar">
-    <button class="toolbar-btn" v-tooltip="'新建地图'" @click="emit('new-map')">
+    <button class="toolbar-btn" v-tooltip="'绘制地图'" @click="emit('new-map')">
       <img :src="iconNewMap" class="toolbar-icon" />
     </button>
     <button class="toolbar-btn" v-tooltip="'导入 .bgm'" @click="emit('import-map')">
@@ -65,7 +65,7 @@ function onMapChange(value: string) {
 
     <div class="toolbar-separator" />
 
-    <!-- 图像模式工具 / 绘制模式工具 -->
+    <!-- 图像模式工具 / 图块模式工具 -->
     <ImageLayerTools
       v-if="isImageLayer"
       :disabled="disabled"

@@ -278,7 +278,7 @@ defineExpose({ switchToMap })
         </svg>
         <p class="empty-text">请先创建或导入地图</p>
         <div class="empty-actions">
-          <button class="empty-btn" @click="onNewMap">创建地图</button>
+          <button class="empty-btn" @click="onNewMap">绘制地图</button>
           <button class="empty-btn empty-btn-secondary" @click="onImportMap">导入地图</button>
         </div>
       </div>

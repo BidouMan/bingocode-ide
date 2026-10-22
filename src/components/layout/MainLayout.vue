@@ -876,24 +876,25 @@ async function onCreateMap() {
   const mapDir = `${projectRoot}/assets/maps/${name}`
   await invoke('create_dir', { path: mapDir })
 
-  // 保存空地图数据
+  // 保存空地图数据：默认图像模式（图像图层）
   const mapData = {
     name,
     version: 5,
     width: 40,
     height: 30,
     tileSize: 16,
-    offsetX: 0,
-    offsetY: 0,
     gravity: false,
+    collisionType: '图像',
+    collisionEnabled: false,
+    resources: [],
     layers: [
       {
         id: 0,
-        name: '绘制图层',
-        type: 'tilelayer',
+        name: '图像图层',
+        type: 'imagelayer',
         visible: true,
         locked: false,
-        data: '',
+        images: [],
       },
     ],
     tilesets: [],

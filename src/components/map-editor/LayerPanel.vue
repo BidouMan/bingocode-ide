@@ -87,7 +87,7 @@ function cancelRename() {
       <button class="layer-tool-btn" v-tooltip="'新建图像图层'" :disabled="disabled" @click="mapStore.addLayer('图像图层', 'image')">
         <img :src="iconLibrary" class="layer-tool-icon" />
       </button>
-      <button class="layer-tool-btn" v-tooltip="'新建绘制图层'" :disabled="disabled" @click="mapStore.addLayer('绘制图层', 'drawing')">
+      <button class="layer-tool-btn" v-tooltip="'新建图块图层'" :disabled="disabled" @click="mapStore.addLayer('图块图层', 'drawing')">
         <img :src="iconAdd" class="layer-tool-icon" />
       </button>
       <button class="layer-tool-btn" v-tooltip="'删除图层'" :disabled="disabled" @click="mapStore.removeLayer(mapStore.activeLayerIndex)">
@@ -102,7 +102,7 @@ function cancelRename() {
     </div>
 
     <div class="layer-info-bar">
-      <span class="layer-info-text">模式{{ mapStore.activeLayer?.type === 'image' ? '图像' : mapStore.activeLayer?.type === 'drawing' ? '绘制' : '--' }}</span>
+      <span class="layer-info-text">模式{{ mapStore.activeLayer?.type === 'image' ? '图像' : mapStore.activeLayer?.type === 'drawing' ? '图块' : '--' }}</span>
     </div>
   </div>
 </template>
