@@ -18,6 +18,9 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
   const showCollision = ref(false)
   // 图片模式画布内绘制工具（select = 地图选取，不绘制）
   const imageTool = ref<'select' | 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse'>('select')
+  // 像素浮动选区是否存在 / 选区剪贴板是否有内容（工具条按钮可用性）
+  const hasPixelSelection = ref(false)
+  const hasPaintClipboard = ref(false)
 
   function setTool(tool: MapTool) {
     currentTool.value = tool
@@ -67,6 +70,8 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
     imageCollisionTool,
     showCollision,
     imageTool,
+    hasPixelSelection,
+    hasPaintClipboard,
     setImageTool,
     setTool,
     toggleGrid,

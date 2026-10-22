@@ -15,9 +15,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'switch-map': [itemId: string]
-  'delete-image': []
-  'paint-undo': []
-  'paint-redo': []
+  'delete-selection': []
+  'copy-selection': []
+  'paste-selection': []
+  'flip-h': []
+  'flip-v': []
   'create-paint-layer': [tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse']
 }>()
 
@@ -52,9 +54,11 @@ function onMapChange(value: string) {
     <ImageLayerTools
       v-if="isImageLayer"
       :disabled="disabled"
-      @delete-image="emit('delete-image')"
-      @paint-undo="emit('paint-undo')"
-      @paint-redo="emit('paint-redo')"
+      @delete-selection="emit('delete-selection')"
+      @copy-selection="emit('copy-selection')"
+      @paste-selection="emit('paste-selection')"
+      @flip-h="emit('flip-h')"
+      @flip-v="emit('flip-v')"
       @create-layer="(tool) => emit('create-paint-layer', tool)"
     />
     <DrawingLayerTools v-else :disabled="disabled" />

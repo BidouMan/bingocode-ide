@@ -286,7 +286,6 @@ const boxHandleDot = computed(() => 6.5 / Math.max(0.1, store.zoom))
  * 用 SVG 双圆而非 div+box-shadow：阴影环在 translate 亚像素定位下会断裂成细小黑线段。
  */
 const brushCursorStyle = computed(() => {
-  if (store.mode !== 'vector') return null
   const t = store.activeTool
   if (t !== 'eraser' && t !== 'brush') return null
   const c = store.cursorPos
@@ -979,8 +978,8 @@ defineExpose({
           :style="brushCursorStyle"
           overflow="visible"
         >
-          <circle :r="store.brushSize / 2" fill="none" stroke="rgba(0, 0, 0, 0.55)" stroke-width="3" />
-          <circle :r="store.brushSize / 2" fill="none" stroke="rgba(255, 255, 255, 0.95)" stroke-width="1.5" />
+          <circle :r="store.brushSize / 2" fill="none" stroke="rgba(0, 0, 0, 0.55)" :stroke-width="3 / Math.max(0.1, store.zoom)" />
+          <circle :r="store.brushSize / 2" fill="none" stroke="rgba(255, 255, 255, 0.95)" :stroke-width="1.5 / Math.max(0.1, store.zoom)" />
         </svg>
         <!-- 文字编辑 textarea（Scratch 同款透明覆盖层）：与 PointText/栅格化文字逐字对齐，
              虚线外框示意编辑范围；pointer-events: auto 接收键鼠（父层 none 不穿透） -->

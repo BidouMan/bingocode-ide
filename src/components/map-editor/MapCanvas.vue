@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { useMapStore, type MapResource } from '../../stores/map'
 import { useMapEditorStore } from '../../stores/mapEditor'
@@ -437,6 +437,18 @@ let paintUndo: ImageData[] = []
 let paintRedo: ImageData[] = []
 let paintSaveTimer: ReturnType<typeof setTimeout> | null = null
 const PAINT_UNDO_LIMIT = 8
+// 撤销/重做可用性供悬浮工具条读取（栈本身不是响应式的，用版本号驱动）
+const paintHistoryTick = ref(0)
+function bumpPaintHistory() {
+  paintHistoryTick.value++
+}
+const canUndoPaint = computed(() => paintHistoryTick.value >= 0 && !!paintSession && paintUndo.length > 0)
+const canRedoPaint = computed(() => paintHistoryTick.value >= 0 && !!paintSession && paintRedo.length > 0)
+
+// 选区内复制/粘贴剪贴板（画布会话内有效）
+let paintClipboard: HTMLCanvasElement | null = null
+let clipboardCenter = { x: 0, y: 0 }
+let pasteCount = 0
 
 // 图片像素框选（归一化本地坐标）
 let pixelSelection: { x0: number; y0: number; x1: number; y1: number } | null = null
@@ -478,6 +490,7 @@ function resetFloatingSelection() {
   floatOrigin = null
   floatOp = 'none'
   floatStartXf = null
+  mapEditorStore.hasPixelSelection = false
   selectionGraphics?.clear()
 }
 
@@ -664,6 +677,7 @@ function cutSelectionToFloat() {
   pixelSelection = null
   floatOp = 'none'
   floatStartXf = null
+  mapEditorStore.hasPixelSelection = true
   // 整层变换框与像素选区变换框会互相抢手柄，进入选区编辑时先收起整层框
   transform.removeTransformBox()
   compositeFloat()
@@ -681,6 +695,7 @@ function bakeFloatingSelection() {
   floatOrigin = null
   floatOp = 'none'
   floatStartXf = null
+  mapEditorStore.hasPixelSelection = false
   selectionGraphics?.clear()
   if (s) {
     s.dirty = true
@@ -695,11 +710,13 @@ function cancelFloatingSelection() {
   if (!s || !ctx || !floatCanvas) return
   if (floatOrigin) ctx.putImageData(floatOrigin, 0, 0)
   paintUndo.pop()
+  bumpPaintHistory()
   floatCanvas = null
   floatBaseCanvas = null
   floatOrigin = null
   floatOp = 'none'
   floatStartXf = null
+  mapEditorStore.hasPixelSelection = false
   s.texture.source.update()
   selectionGraphics?.clear()
   s.dirty = true
@@ -721,8 +738,87 @@ function deleteFloatingPixels() {
   floatOrigin = null
   floatOp = 'none'
   floatStartXf = null
+  mapEditorStore.hasPixelSelection = false
   s.texture.source.update()
   selectionGraphics?.clear()
+  s.dirty = true
+  schedulePaintSave()
+}
+
+// 工具栏删除：只删除浮动选区内容，不影响图层本身
+function deleteSelection() {
+  if (floatCanvas) deleteFloatingPixels()
+}
+
+// 复制浮动选区内容（保留原始像素，粘贴后可重新变换）
+function copyFloatingSelection() {
+  if (!floatCanvas) return
+  const c = makeOffscreenCanvas(floatCanvas.width, floatCanvas.height)
+  c.getContext('2d')!.drawImage(floatCanvas, 0, 0)
+  paintClipboard = c
+  clipboardCenter = { x: floatXf.cx, y: floatXf.cy }
+  pasteCount = 0
+  mapEditorStore.hasPaintClipboard = true
+}
+
+// 粘贴为新浮动选区（带递增偏移，避免与原内容完全重叠）
+function pasteFloatingSelection() {
+  if (!paintClipboard || !paintSession) return
+  const s = paintSession
+  const ctx = paintCtx()
+  if (!ctx) return
+  if (floatCanvas) bakeFloatingSelection()
+  // 粘贴后需要立即能拖动，切回选取工具
+  mapEditorStore.setImageTool('select')
+  paintStore.setTool('select')
+  pushPaintUndo()
+  floatOrigin = ctx.getImageData(0, 0, s.canvas.width, s.canvas.height)
+  const base = makeOffscreenCanvas(s.canvas.width, s.canvas.height)
+  base.getContext('2d')!.drawImage(s.canvas, 0, 0)
+  const fc = makeOffscreenCanvas(paintClipboard.width, paintClipboard.height)
+  fc.getContext('2d')!.drawImage(paintClipboard, 0, 0)
+  floatBaseCanvas = base
+  floatCanvas = fc
+  pasteCount++
+  const w = fc.width
+  const h = fc.height
+  const cx = Math.min(s.canvas.width - w / 2, Math.max(w / 2, clipboardCenter.x + 16 * pasteCount))
+  const cy = Math.min(s.canvas.height - h / 2, Math.max(h / 2, clipboardCenter.y + 16 * pasteCount))
+  floatXf = { cx, cy, sx: 1, sy: 1, angle: 0 }
+  pixelSelection = null
+  floatOp = 'none'
+  floatStartXf = null
+  mapEditorStore.hasPixelSelection = true
+  transform.removeTransformBox()
+  compositeFloat()
+  s.dirty = true
+  schedulePaintSave()
+}
+
+// 镜像翻转：有浮动选区翻转选区，无选区翻转整层像素
+function flipSelection(axis: 'h' | 'v') {
+  const s = paintSession
+  const ctx = paintCtx()
+  if (!s || !ctx) return
+  if (floatCanvas) {
+    if (axis === 'h') floatXf.sx *= -1
+    else floatXf.sy *= -1
+    compositeFloat()
+    s.dirty = true
+    schedulePaintSave()
+    return
+  }
+  pushPaintUndo()
+  const tmp = makeOffscreenCanvas(s.canvas.width, s.canvas.height)
+  tmp.getContext('2d')!.drawImage(s.canvas, 0, 0)
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.clearRect(0, 0, s.canvas.width, s.canvas.height)
+  ctx.translate(axis === 'h' ? s.canvas.width : 0, axis === 'v' ? s.canvas.height : 0)
+  ctx.scale(axis === 'h' ? -1 : 1, axis === 'v' ? -1 : 1)
+  ctx.drawImage(tmp, 0, 0)
+  ctx.restore()
+  s.texture.source.update()
   s.dirty = true
   schedulePaintSave()
 }
@@ -744,6 +840,77 @@ function isImagePaintTool(): boolean {
   return mapStore.activeMode === 'image'
     && mapEditorStore.imageTool !== 'select'
     && !!mapStore.selectedImage
+}
+
+// ─── 画笔/橡皮光标：用 Pixi 图形绘制圆圈，避免 dataURL 光标的锯齿 ───
+let brushCursorGraphics: any = null
+let brushCursorClient: { clientX: number; clientY: number } | null = null
+
+function isBrushCursorActive(): boolean {
+  const tool = mapEditorStore.imageTool
+  return mapStore.activeMode === 'image' && (tool === 'brush' || tool === 'eraser')
+}
+
+// 绘制画布 1px 对应的世界坐标尺寸（含图片实例缩放）
+function paintPixelWorldRatio(): number {
+  const s = paintSession
+  const img = mapStore.selectedImage
+  if (!s || !img) return 1
+  const scaleX = Math.abs(img.scaleX ?? img.scale ?? 1)
+  return ((img.width || s.canvas.width) * scaleX) / Math.max(1, s.canvas.width)
+}
+
+function ensureBrushCursorGraphics(): any {
+  if (!app || !PIXI) return null
+  if (!brushCursorGraphics) {
+    brushCursorGraphics = new PIXI.Graphics()
+    app.stage.addChild(brushCursorGraphics)
+  }
+  return brushCursorGraphics
+}
+
+function redrawBrushCursor() {
+  if (!isBrushCursorActive() || !brushCursorClient) {
+    brushCursorGraphics?.clear()
+    return
+  }
+  const g = ensureBrushCursorGraphics()
+  if (!g) return
+  const world = viewport.screenToWorld({
+    clientX: brushCursorClient.clientX,
+    clientY: brushCursorClient.clientY,
+  } as PointerEvent)
+  if (!world) return
+  const scale = Math.max(0.1, viewport.currentScale.value)
+  const radius = Math.max(0.5, (paintStore.brushSize / 2) * paintPixelWorldRatio())
+  g.clear()
+  // 双环（深/浅底都可见），线宽按视口缩放反比保持屏幕恒定
+  g.circle(world.x, world.y, radius)
+  g.stroke({ width: 3 / scale, color: 0x000000, alpha: 0.55 })
+  g.circle(world.x, world.y, radius)
+  g.stroke({ width: 1.5 / scale, color: 0xffffff, alpha: 0.95 })
+}
+
+function drawBrushCursorAt(clientX: number, clientY: number) {
+  brushCursorClient = { clientX, clientY }
+  if (app?.canvas) app.canvas.style.cursor = 'none'
+  redrawBrushCursor()
+}
+
+function hideBrushCursor() {
+  brushCursorClient = null
+  brushCursorGraphics?.clear()
+}
+
+function updatePaintCursor() {
+  if (!app?.canvas) return
+  if (isBrushCursorActive()) {
+    // 圆圈由 overlay 接管，隐藏原生指针（未移动前先保留十字）
+    app.canvas.style.cursor = brushCursorClient ? 'none' : 'crosshair'
+    if (brushCursorClient) redrawBrushCursor()
+  } else {
+    hideBrushCursor()
+  }
 }
 
 function pickPaintSavePath(path: string): string {
@@ -1019,7 +1186,7 @@ async function startPaintSession(): Promise<boolean> {
     if (sprite) bindPaintTexture(sprite, img)
     paintUndo = []
     paintRedo = []
-    // 精灵已存在则已直接绑定纹理；不存在时触发一次渲染补建
+    bumpPaintHistory()
     if (!sprite) scheduleRender()
     return true
   } catch (e) {
@@ -1178,6 +1345,7 @@ function pushPaintUndo() {
   paintUndo.push(ctx.getImageData(0, 0, paintSession.canvas.width, paintSession.canvas.height))
   if (paintUndo.length > PAINT_UNDO_LIMIT) paintUndo.shift()
   paintRedo = []
+  bumpPaintHistory()
 }
 
 function toCanvasPoint(world: { x: number; y: number }): { x: number; y: number } | null {
@@ -1241,12 +1409,14 @@ function paintEnd(world?: { x: number; y: number }, shift = false) {
     restorePaintSnapshot()
     if (!p) {
       paintUndo.pop()
+      bumpPaintHistory()
     } else {
       const end = constrainPoint(p, start, shift)
       const isClick = Math.abs(end.x - start.x) < 0.5 && Math.abs(end.y - start.y) < 0.5
       if (isClick) {
         // 零尺寸空点击：丢弃本次撤销记录，不产生可见变更
         paintUndo.pop()
+        bumpPaintHistory()
       } else {
         drawShapePreview(p.x, p.y, shift)
         s.dirty = true
@@ -1306,6 +1476,7 @@ async function commitPaintSession(finalize = true) {
   await flushPaintSave(session, finalize)
   paintUndo = []
   paintRedo = []
+  bumpPaintHistory()
   resetFloatingSelection()
 }
 
@@ -1316,6 +1487,7 @@ function undoPaint() {
   resetFloatingSelection()
   paintRedo.push(ctx.getImageData(0, 0, s.canvas.width, s.canvas.height))
   ctx.putImageData(paintUndo.pop()!, 0, 0)
+  bumpPaintHistory()
   s.texture.source.update()
   s.dirty = true
   schedulePaintSave()
@@ -1328,6 +1500,7 @@ function redoPaint() {
   resetFloatingSelection()
   paintUndo.push(ctx.getImageData(0, 0, s.canvas.width, s.canvas.height))
   ctx.putImageData(paintRedo.pop()!, 0, 0)
+  bumpPaintHistory()
   s.texture.source.update()
   s.dirty = true
   schedulePaintSave()
@@ -1342,6 +1515,8 @@ const viewport = useMapViewport({
     collision.drawCollisionOverlay()
     // 选区手柄按屏幕尺寸恒定，缩放后重绘
     drawSelectionOverlay()
+    // 画笔圆圈光标随缩放变化
+    redrawBrushCursor()
   },
 })
 
@@ -1451,7 +1626,9 @@ function onPointerMove(e: PointerEvent) {
     return
   }
 
+  // 图片模式绘制工具：圆圈光标跟随鼠标并绘制
   if (isImagePaintTool()) {
+    if (isBrushCursorActive()) drawBrushCursorAt(e.clientX, e.clientY)
     if (e.buttons === 1 && paintSession) {
       const worldPos = viewport.screenToWorld(e)
       if (worldPos) paintMove(worldPos, e.shiftKey)
@@ -1503,6 +1680,7 @@ function onPointerLeave() {
   painter.resetPaintKey()
   cursorGridPos.value = null
   painter.hidePreview()
+  hideBrushCursor()
   // 绘制中离开画布：结束当前笔画
   if (isImagePaintTool() && paintSession) paintEnd()
   // 框选中离开画布：按当前尺寸收口，避免选框悬空
@@ -1604,6 +1782,22 @@ function onKeyDown(e: KeyboardEvent) {
       return
     }
   }
+  // 图片模式：Ctrl/Cmd+C/V 复制粘贴选区（任意绘制工具下均可用）
+  if (mapStore.activeMode === 'image' && (e.metaKey || e.ctrlKey)) {
+    const tag = (e.target as HTMLElement).tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return
+    const key = e.key.toLowerCase()
+    if (key === 'c' && floatCanvas) {
+      e.preventDefault()
+      copyFloatingSelection()
+      return
+    }
+    if (key === 'v' && paintClipboard) {
+      e.preventDefault()
+      pasteFloatingSelection()
+      return
+    }
+  }
   // 绘制模式下不响应地图快捷键（避免误删图层/切工具）
   if (isImagePaintTool()) return
   // Tool shortcuts (only when not typing in an input)
@@ -1611,13 +1805,6 @@ function onKeyDown(e: KeyboardEvent) {
 
   // 碰撞编辑快捷键：Esc 取消/退出，Enter 闭合多边形，Delete 删除顶点
   if (collision.handleKeyDown(e)) return
-
-  // Delete/Backspace 删除选中图像（图像图层时）
-  if ((e.key === 'Delete' || e.key === 'Backspace') && mapStore.activeLayer?.type === 'image') {
-    e.preventDefault()
-    deleteSelectedImage()
-    return
-  }
 
   switch (e.key.toLowerCase()) {
     case 'b': mapEditorStore.setTool('draw'); break
@@ -1637,6 +1824,46 @@ function onKeyUp(e: KeyboardEvent) {
 
 function redraw() {
   viewport.redraw()
+}
+
+// ─── 画布缩放（悬浮工具条）───
+const zoomPercent = computed(() => Math.round(viewport.currentScale.value * 100))
+
+function setZoomAtCenter(next: number) {
+  const target = Math.max(0.5, Math.min(4, Math.round(next * 10) / 10))
+  const a = app
+  const scale = viewport.currentScale.value
+  if (!a) {
+    viewport.currentScale.value = target
+    return
+  }
+  // 以画布中心为锚点缩放，避免视图跳动
+  const cx = a.screen.width / 2
+  const cy = a.screen.height / 2
+  const wx = (cx - a.stage.x) / scale
+  const wy = (cy - a.stage.y) / scale
+  viewport.currentScale.value = target
+  a.stage.scale.set(target, target)
+  a.stage.x = cx - wx * target
+  a.stage.y = cy - wy * target
+  viewport.drawGrid()
+  collision.drawCollisionOverlay()
+  drawSelectionOverlay()
+  redrawBrushCursor()
+}
+
+function zoomIn() {
+  setZoomAtCenter(viewport.currentScale.value + 0.1)
+}
+
+function zoomOut() {
+  setZoomAtCenter(viewport.currentScale.value - 0.1)
+}
+
+function resetZoom() {
+  viewport.centerView()
+  collision.drawCollisionOverlay()
+  drawSelectionOverlay()
 }
 
 function onMouseDown(e: MouseEvent) {
@@ -1712,9 +1939,16 @@ watch(
       clearPixelSelection()
       transform.removeTransformBox()
       viewport.setCursor('crosshair')
-      void startPaintSession()
+      void startPaintSession().then(() => updatePaintCursor())
+      updatePaintCursor()
     }
   }
+)
+
+// 笔刷粗细变化 → 圆圈光标直径同步
+watch(
+  () => paintStore.brushSize,
+  () => redrawBrushCursor()
 )
 
 watch(
@@ -1928,20 +2162,28 @@ function getThumbnailDataUrl(): string | null {
   }
 }
 
-function deleteSelectedImage() {
-  // 碰撞编辑时变换框已被移除，优先用 store 里的选中状态
-  const layerId = mapStore.selectedImageLayerId >= 0 ? mapStore.selectedImageLayerId : transform.getSelectedImageLayerId()
-  if (layerId < 0) return
-  const index = mapStore.mapData.layers.findIndex(l => l.id === layerId)
-  if (index < 0) return
-  transform.removeTransformBox()
-  collision.cancelCollisionDraft()
-  mapStore.removeLayer(index)
-  collision.drawCollisionOverlay()
-  scheduleRender()
-}
-
-defineExpose({ redraw, cursorGridPos, renderAllLayers, showTransformBox: transform.showTransformBox, removeTransformBox: transform.removeTransformBox, resetCanvasState, getThumbnailDataUrl, deleteSelectedImage, placeImageFromPath, undoPaint, redoPaint })
+defineExpose({
+  redraw,
+  cursorGridPos,
+  renderAllLayers,
+  showTransformBox: transform.showTransformBox,
+  removeTransformBox: transform.removeTransformBox,
+  resetCanvasState,
+  getThumbnailDataUrl,
+  deleteSelection,
+  placeImageFromPath,
+  undoPaint,
+  redoPaint,
+  canUndoPaint,
+  canRedoPaint,
+  zoomPercent,
+  zoomIn,
+  zoomOut,
+  resetZoom,
+  copySelection: copyFloatingSelection,
+  pasteSelection: pasteFloatingSelection,
+  flipSelection,
+})
 </script>
 
 <template>

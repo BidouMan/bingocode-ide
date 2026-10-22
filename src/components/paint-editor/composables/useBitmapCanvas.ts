@@ -1253,6 +1253,7 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     e.preventDefault()
 
     const point = clientToArtboard(e)
+    store.cursorPos = point
     if (store.activeTool === 'select') {
       startSelectionOp(point)
     } else if (FREE_TOOLS.has(store.activeTool)) {
@@ -1272,6 +1273,7 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
   }
 
   function onPointerMove(e: PointerEvent) {
+    if (store.mode === 'bitmap') store.cursorPos = clientToArtboard(e)
     if (selOp !== 'none') {
       continueSelectionOp(clientToArtboard(e), e.shiftKey)
       return
@@ -1286,6 +1288,7 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
   }
 
   function onPointerUp(e: PointerEvent) {
+    if (store.mode === 'bitmap') store.cursorPos = clientToArtboard(e)
     if (selOp !== 'none') {
       endSelectionOp(clientToArtboard(e))
       return
@@ -1299,40 +1302,26 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     }
   }
 
-  // ─── 工具光标 ───
-
-  /** 画笔/橡皮：双环保证深浅底都可见的圆圈光标，直径随缩放变化 */
-  function makeCircleCursor(screenSize: number): string {
-    const d = Math.max(4, Math.round(screenSize))
-    const c = document.createElement('canvas')
-    c.width = d
-    c.height = d
-    const cc = c.getContext('2d')!
-    cc.beginPath()
-    cc.arc(d / 2, d / 2, d / 2 - 1, 0, Math.PI * 2)
-    cc.strokeStyle = 'rgba(255, 255, 255, 0.9)'
-    cc.lineWidth = 1.5
-    cc.stroke()
-    cc.beginPath()
-    cc.arc(d / 2, d / 2, d / 2 - 1, 0, Math.PI * 2)
-    cc.strokeStyle = 'rgba(0, 0, 0, 0.8)'
-    cc.lineWidth = 1
-    cc.stroke()
-    return `url(${c.toDataURL()}) ${d / 2} ${d / 2}, crosshair`
-  }
+  // ─── 工具光标：圆圈由 SVG overlay 绘制（位图/矢量共用，避免 dataURL 锯齿）───
 
   function updateCursor() {
     const canvas = canvasRef.value
     if (!canvas) return
     const tool = store.activeTool
     if (tool === 'brush' || tool === 'eraser') {
-      // 上限防 dataURL 光标在大 zoom 下超浏览器尺寸上限而失效（矢量模式已改自绘圈）
-      canvas.style.cursor = makeCircleCursor(Math.min(store.brushSize * store.zoom, 128))
-    } else if (tool === 'line' || tool === 'rect' || tool === 'ellipse' || tool === 'fill' || tool === 'text') {
-      canvas.style.cursor = 'crosshair'
+      canvas.style.cursor = 'none'
     } else {
-      canvas.style.cursor = 'default'
+      store.cursorPos = null
+      if (tool === 'line' || tool === 'rect' || tool === 'ellipse' || tool === 'fill' || tool === 'text') {
+        canvas.style.cursor = 'crosshair'
+      } else {
+        canvas.style.cursor = 'default'
+      }
     }
+  }
+
+  function onPointerLeave() {
+    if (store.mode === 'bitmap') store.cursorPos = null
   }
 
   // ─── 生命周期 ───
@@ -1346,6 +1335,7 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     canvas.addEventListener('pointermove', onPointerMove)
     canvas.addEventListener('pointerup', onPointerUp)
     canvas.addEventListener('pointercancel', onPointerUp)
+    canvas.addEventListener('pointerleave', onPointerLeave)
   }
 
   function detach() {
@@ -1355,6 +1345,7 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     canvas.removeEventListener('pointermove', onPointerMove)
     canvas.removeEventListener('pointerup', onPointerUp)
     canvas.removeEventListener('pointercancel', onPointerUp)
+    canvas.removeEventListener('pointerleave', onPointerLeave)
   }
 
   // canvas 元素在模板中必然存在（棋盘格内），挂载后绑定

@@ -9,15 +9,19 @@ import iconFill from '../../assets/icons/填充_fill.svg'
 import iconLine from '../../assets/icons/直线工具.svg'
 import iconRect from '../../assets/icons/矩形_rectangle.svg'
 import iconEllipse from '../../assets/icons/圆形_round.svg'
-import iconUndo from '../../assets/icons/undo.svg'
-import iconRedo from '../../assets/icons/redo.svg'
+import iconCopy from '../../assets/icons/copy.svg'
+import iconPaste from '../../assets/icons/粘贴.svg'
+import iconFlipH from '../../assets/icons/水平翻转.svg'
+import iconFlipV from '../../assets/icons/垂直翻转.svg'
 import iconDelete from '../../assets/icons/选中删除.svg'
 
 defineProps<{ disabled?: boolean }>()
 const emit = defineEmits<{
-  'delete-image': []
-  'paint-undo': []
-  'paint-redo': []
+  'delete-selection': []
+  'copy-selection': []
+  'paste-selection': []
+  'flip-h': []
+  'flip-v': []
   'create-layer': [tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse']
 }>()
 
@@ -70,8 +74,6 @@ function setTool(tool: typeof mapEditorStore.imageTool) {
     <img :src="iconSelect" class="toolbar-icon" />
   </button>
 
-  <div class="toolbar-separator" />
-
   <button
     v-for="tool in paintTools"
     :key="tool.id"
@@ -84,27 +86,37 @@ function setTool(tool: typeof mapEditorStore.imageTool) {
     <img :src="tool.icon" class="toolbar-icon" />
   </button>
 
-  <button
-    class="toolbar-btn"
-    :disabled="disabled || mapEditorStore.imageTool === 'select'"
-    v-tooltip="'撤销绘制'"
-    @click="emit('paint-undo')"
-  >
-    <img :src="iconUndo" class="toolbar-icon" />
-  </button>
-  <button
-    class="toolbar-btn"
-    :disabled="disabled || mapEditorStore.imageTool === 'select'"
-    v-tooltip="'重做绘制'"
-    @click="emit('paint-redo')"
-  >
-    <img :src="iconRedo" class="toolbar-icon" />
-  </button>
-
   <div class="toolbar-separator" />
 
-  <button class="toolbar-btn" :disabled="disabled" v-tooltip="'删除选中图像'" @click="emit('delete-image')">
+  <button
+    class="toolbar-btn"
+    :disabled="disabled || !mapEditorStore.hasPixelSelection"
+    v-tooltip="'复制选区 (Ctrl+C)'"
+    @click="emit('copy-selection')"
+  >
+    <img :src="iconCopy" class="toolbar-icon" />
+  </button>
+  <button
+    class="toolbar-btn"
+    :disabled="disabled || !mapEditorStore.hasPaintClipboard"
+    v-tooltip="'粘贴 (Ctrl+V)'"
+    @click="emit('paste-selection')"
+  >
+    <img :src="iconPaste" class="toolbar-icon" />
+  </button>
+  <button
+    class="toolbar-btn"
+    :disabled="disabled || !mapEditorStore.hasPixelSelection"
+    v-tooltip="'删除选区 (Delete)'"
+    @click="emit('delete-selection')"
+  >
     <img :src="iconDelete" class="toolbar-icon" />
+  </button>
+  <button class="toolbar-btn" :disabled="disabled" v-tooltip="'水平翻转（有选区翻转选区）'" @click="emit('flip-h')">
+    <img :src="iconFlipH" class="toolbar-icon" />
+  </button>
+  <button class="toolbar-btn" :disabled="disabled" v-tooltip="'垂直翻转（有选区翻转选区）'" @click="emit('flip-v')">
+    <img :src="iconFlipV" class="toolbar-icon" />
   </button>
 </template>
 

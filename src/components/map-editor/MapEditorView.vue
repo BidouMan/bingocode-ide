@@ -3,6 +3,10 @@ import { ref, watch, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import MapToolbar from './MapToolbar.vue'
 import MapCanvas from './MapCanvas.vue'
+import iconZoomOut from '../../assets/icons/reduce-one.svg'
+import iconZoomIn from '../../assets/icons/add-one.svg'
+import iconUndo from '../../assets/icons/undo.svg'
+import iconRedo from '../../assets/icons/redo.svg'
 import TileResourceBar from './TileResourceBar.vue'
 import PropertyPanel from './PropertyPanel.vue'
 import LayerPanel from './LayerPanel.vue'
@@ -235,10 +239,6 @@ function onCursorMove(x: number, y: number) {
   mapEditorStore.setCursorPos(x, y)
 }
 
-function onDeleteImage() {
-  mapCanvasRef.value?.deleteSelectedImage()
-}
-
 defineExpose({ switchToMap, placeImageResource })
 </script>
 
@@ -258,12 +258,45 @@ defineExpose({ switchToMap, placeImageResource })
           <MapToolbar
             :disabled="!hasMaps"
             @switch-map="switchToMap"
-            @delete-image="onDeleteImage"
-            @paint-undo="mapCanvasRef?.undoPaint()"
-            @paint-redo="mapCanvasRef?.redoPaint()"
+            @delete-selection="mapCanvasRef?.deleteSelection()"
+            @copy-selection="mapCanvasRef?.copySelection()"
+            @paste-selection="mapCanvasRef?.pasteSelection()"
+            @flip-h="mapCanvasRef?.flipSelection('h')"
+            @flip-v="mapCanvasRef?.flipSelection('v')"
             @create-paint-layer="startImagePaint"
           />
-          <MapCanvas ref="mapCanvasRef" class="map-canvas-area" :class="{ disabled: !hasMaps }" @cursor-move="onCursorMove" />
+          <div class="canvas-stage">
+            <MapCanvas ref="mapCanvasRef" class="map-canvas-area" :class="{ disabled: !hasMaps }" @cursor-move="onCursorMove" />
+            <!-- 浮动视图工具条：撤销/重做/缩放（与角色绘制页一致） -->
+            <div v-if="hasMaps" class="view-float-bar" @dblclick.stop>
+              <button class="view-float-btn" v-tooltip="'缩小'" @click="mapCanvasRef?.zoomOut()">
+                <img :src="iconZoomOut" width="16" height="16" draggable="false" />
+              </button>
+              <button class="view-float-zoom" v-tooltip="'重置缩放'" @click="mapCanvasRef?.resetZoom()">
+                {{ mapCanvasRef?.zoomPercent ?? 100 }}%
+              </button>
+              <button class="view-float-btn" v-tooltip="'放大'" @click="mapCanvasRef?.zoomIn()">
+                <img :src="iconZoomIn" width="16" height="16" draggable="false" />
+              </button>
+              <div class="view-float-divider"></div>
+              <button
+                class="view-float-btn"
+                :disabled="!mapCanvasRef?.canUndoPaint"
+                v-tooltip="'撤销绘制'"
+                @click="mapCanvasRef?.undoPaint()"
+              >
+                <img :src="iconUndo" width="14" height="14" draggable="false" />
+              </button>
+              <button
+                class="view-float-btn"
+                :disabled="!mapCanvasRef?.canRedoPaint"
+                v-tooltip="'重做绘制'"
+                @click="mapCanvasRef?.redoPaint()"
+              >
+                <img :src="iconRedo" width="14" height="14" draggable="false" />
+              </button>
+            </div>
+          </div>
           <!-- 图块模式：素材面板从画布下方展开 -->
           <TileResourceBar
             v-if="mapStore.activeMode === 'tile'"
@@ -395,9 +428,87 @@ defineExpose({ switchToMap, placeImageResource })
   flex-direction: column;
 }
 
+.canvas-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
 .map-canvas-area {
   flex: 1;
   min-height: 0;
+}
+
+/* ─── 浮动视图工具条（画布右下；与角色绘制页 / 代码编辑器胶囊风格一致）─── */
+.view-float-bar {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: rgba(30, 32, 40, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 4px;
+  z-index: 30;
+}
+
+.view-float-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 26px;
+  padding: 0 6px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.view-float-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.view-float-btn:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.view-float-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.view-float-zoom {
+  min-width: 44px;
+  height: 26px;
+  padding: 0 4px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, background 0.15s;
+}
+
+.view-float-zoom:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.view-float-divider {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 4px;
 }
 
 .map-info-bar {
