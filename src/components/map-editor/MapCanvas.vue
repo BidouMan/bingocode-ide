@@ -6,6 +6,10 @@ import { useMapEditorStore } from '../../stores/mapEditor'
 import { useProjectStore } from '../../stores/project'
 import { useEditorStore } from '../../stores/editor'
 import { isSvgSource, rasterizeSvgImage, SVG_RASTER_SCALE } from '../../utils/svgRasterize'
+import { useMapViewport } from '../../composables/useMapViewport'
+import { useImageTransform } from '../../composables/useImageTransform'
+import { useImageCollisionEditor } from '../../composables/useImageCollisionEditor'
+import { useTilePainter } from '../../composables/useTilePainter'
 
 const emit = defineEmits<{
   'tile-painted': [x: number, y: number, tileId: number]
@@ -18,27 +22,7 @@ const cursorGridPos = ref<{ x: number; y: number } | null>(null)
 const canvasRef = ref<HTMLDivElement>()
 let PIXI: any = null
 let app: any = null
-let gridGraphics: any = null
-let axisX: any = null
-let axisY: any = null
-let mapBorderRect: any = null
-let previewTile: any = null
-let isPanning = false
-let isSpaceHeld = false
-let lastPointer = { x: 0, y: 0 }
-let currentScale = 1.6
-let lastPaintedKey = ''
-
-// Move tool state
-let moveStartPos: { x: number; y: number } | null = null
-let moveTileId = 0
-let moveStartSprite: any = null
-let moveDragSprite: any = null
-
-// Image drag state
-let isDraggingImage = false
-let imageDragStartWorld = { x: 0, y: 0 }
-let imageDragStartPos = [0, 0]
+let tileContainer: any = null
 
 const mapStore = useMapStore()
 const mapEditorStore = useMapEditorStore()
@@ -84,7 +68,6 @@ let layerContainers: Map<number, any> = new Map()
 let tileSprites: Map<string, any> = new Map() // "layerId:x,y" -> Sprite
 let tileTextures: Map<string, any> = new Map() // "resourcePath:tileIndex" -> Texture
 let sourceImageCache: Map<string, any> = new Map() // "resourcePath" -> HTMLImageElement
-let tileContainer: any = null
 
 async function initPixi() {
   if (!canvasRef.value) return
@@ -107,12 +90,12 @@ async function initPixi() {
   tileContainer.sortableChildren = true
   app.stage.addChild(tileContainer)
 
-  drawGrid()
-  drawAxes()
-  drawGameWindow()
+  viewport.drawGrid()
+  viewport.drawAxes()
+  viewport.drawGameWindow()
   setupInteraction()
-  applyScale()
-  centerView()
+  viewport.applyScale()
+  viewport.centerView()
   await renderAllLayers()
 }
 
@@ -180,15 +163,6 @@ async function getTileTexture(resource: MapResource, tileIndex: number): Promise
   } catch {
     return null
   }
-}
-
-// 编码 tileId: 使用Tiled标准，GID = firstgid + tileIndex
-// firstgid 由 tileSets 数组中的瓦片集确定
-function encodeTileId(_layerId: number, localRIdx: number, tileIndex: number): number {
-  // 直接用素材自己的 firstgid，不再依赖图层顺序偏移
-  const resource = mapStore.activeLayerResources[localRIdx]
-  if (resource) return resource.firstgid + tileIndex
-  return tileIndex + 1
 }
 
 // 获取或创建图层容器
@@ -336,7 +310,7 @@ async function renderAllLayers() {
   }
 
   // 图像精灵重建后重绘碰撞叠加层
-  drawCollisionOverlay()
+  collision.drawCollisionOverlay()
 }
 
 async function renderImageLayer(container: any, imgData: any) {
@@ -368,9 +342,7 @@ async function renderImageLayer(container: any, imgData: any) {
     sprite.rotation = rotation
     sprite.alpha = imgData.opacity ?? 1
     container.addChild(sprite)
-    if (selectedImageData && imgData === selectedImageData) {
-      selectedImageSprite = sprite
-    }
+    transform.noteRenderedImage(imgData, sprite)
   } catch (err) {
     console.error('[MapCanvas] renderImageLayer error:', err)
   }
@@ -414,387 +386,90 @@ async function placeImage(layer: any, resource: any, x: number, y: number) {
   // renderAllLayers() 会导致竞态条件
 
   // 放置后选中该图像并显示变换框，切换到移动模式
-  selectedImageData = imgData
-  selectedImageLayerId = layer.id
-  selectedImageIndex = layer.images.length - 1
-  mapStore.selectImage(layer.id, selectedImageIndex)
-  showTransformBox(imgData)
+  const index = layer.images.length - 1
+  transform.setSelection(layer.id, index, imgData)
+  mapStore.selectImage(layer.id, index)
+  transform.showTransformBox(imgData)
   mapEditorStore.setTool('select')
 }
 
-async function updateTileAt(layerIndex: number, x: number, y: number) {
-  const layer = mapStore.mapData.layers[layerIndex]
-  if (!layer || layer.type !== 'drawing') return
-  const tileId = layer.tiles[`${x},${y}`] ?? 0
-  await renderTile(layer.id, x, y, tileId)
-}
+// --- 交互 composables ---
+const viewport = useMapViewport({
+  canvasRef,
+  getApp: () => app,
+  getPIXI: () => PIXI,
+  onZoom: () => collision.drawCollisionOverlay(),
+})
 
-// --- Grid / Axes ---
+const transform = useImageTransform({
+  getApp: () => app,
+  getPIXI: () => PIXI,
+  getLayerContainers: () => layerContainers,
+  screenToWorld: viewport.screenToWorld,
+  onCollisionRedraw: () => collision.drawCollisionOverlay(),
+  onRenderRequest: () => scheduleRender(),
+})
 
-function drawGrid() {
-  if (!app || !PIXI) {
-    return
-  }
-  if (gridGraphics) {
-    app.stage.removeChild(gridGraphics)
-    gridGraphics.destroy()
-  }
-  gridGraphics = new PIXI.Graphics()
+const collision = useImageCollisionEditor({
+  getApp: () => app,
+  getPIXI: () => PIXI,
+  getScale: () => viewport.currentScale.value,
+})
 
-  const { tileSize } = mapStore.mapData
-  const extent = 200
-  const totalW = extent * 2 * tileSize
-  const totalH = extent * 2 * tileSize
-  const offsetX = -extent * tileSize
-  const offsetY = -extent * tileSize
-
-  for (let x = -extent; x <= extent; x++) {
-    gridGraphics.moveTo(x * tileSize, offsetY)
-    gridGraphics.lineTo(x * tileSize, offsetY + totalH)
-  }
-  for (let y = -extent; y <= extent; y++) {
-    gridGraphics.moveTo(offsetX, y * tileSize)
-    gridGraphics.lineTo(offsetX + totalW, y * tileSize)
-  }
-  gridGraphics.stroke({ width: 0.5, color: 0x333333 })
-
-  gridGraphics.visible = mapEditorStore.showGrid
-  app.stage.addChildAt(gridGraphics, 0)
-}
-
-function drawAxes() {
-  if (!app || !PIXI) return
-  if (axisX) { app.stage.removeChild(axisX); axisX.destroy() }
-  if (axisY) { app.stage.removeChild(axisY); axisY.destroy() }
-
-  axisX = new PIXI.Graphics()
-  axisX.moveTo(-100000, 0)
-  axisX.lineTo(100000, 0)
-  axisX.stroke({ width: 1, color: 0xC83232 })
-  app.stage.addChild(axisX)
-
-  axisY = new PIXI.Graphics()
-  axisY.moveTo(0, -100000)
-  axisY.lineTo(0, 100000)
-  axisY.stroke({ width: 1, color: 0x32C832 })
-  app.stage.addChild(axisY)
-}
-
-function drawGameWindow() {
-  if (!app || !PIXI) return
-  if (mapBorderRect) { app.stage.removeChild(mapBorderRect); mapBorderRect.destroy() }
-
-  const mapW = mapStore.mapData.width * mapStore.mapData.tileSize
-  const mapH = mapStore.mapData.height * mapStore.mapData.tileSize
-  if (mapW <= 0 || mapH <= 0) return
-
-  mapBorderRect = new PIXI.Graphics()
-  mapBorderRect.rect(0, 0, mapW, mapH)
-  mapBorderRect.stroke({ width: 1, color: 0x4A90D9, alpha: 0.6 })
-  app.stage.addChild(mapBorderRect)
-}
-
-function applyScale() {
-  if (!app) return
-  app.stage.scale.set(currentScale, currentScale)
-}
-
-function centerView() {
-  if (!app || !canvasRef.value) return
-  // 重置为 1.0 缩放，让用户看到坐标原点 (0,0) 和游戏窗口 (640x480)
-  currentScale = 1.0
-  applyScale()
-  // 留 30px 边距，原点在左上，游戏窗口完整可见
-  app.stage.x = 30
-  app.stage.y = 30
-}
+const painter = useTilePainter({
+  getApp: () => app,
+  getPIXI: () => PIXI,
+  renderTile,
+  getTileSprite: (key: string) => tileSprites.get(key),
+  getTileTexture,
+  onTilePainted: (x, y, tileId) => emit('tile-painted', x, y, tileId),
+  onTileErased: (x, y) => emit('tile-erased', x, y),
+  onRenderRequest: () => scheduleRender(),
+})
 
 // --- Interaction ---
 
-function onWheel(e: WheelEvent) {
-  e.preventDefault()
-
-  // Zoom canvas
-  const rect = canvasRef.value?.getBoundingClientRect()
-  if (!rect) return
-  const mouseX = e.clientX - rect.left
-  const mouseY = e.clientY - rect.top
-  const worldX = (mouseX - app.stage.x) / currentScale
-  const worldY = (mouseY - app.stage.y) / currentScale
-  const delta = e.deltaY > 0 ? 0.9 : 1.1
-  currentScale = Math.max(0.5, Math.min(4, currentScale * delta))
-  app.stage.x = mouseX - worldX * currentScale
-  app.stage.y = mouseY - worldY * currentScale
-  applyScale()
-  // 手柄尺寸随缩放变化，重绘碰撞叠加层
-  drawCollisionOverlay()
-}
-
 function onPointerDown(e: PointerEvent) {
-  if (e.button === 1 || (e.button === 0 && isSpaceHeld) || (e.button === 0 && e.altKey)) {
-    isPanning = true
-    lastPointer = { x: e.clientX, y: e.clientY }
-    ;(app.canvas as HTMLCanvasElement).style.cursor = 'grabbing'
+  if (e.button === 1 || (e.button === 0 && viewport.isSpacePressed()) || (e.button === 0 && e.altKey)) {
+    viewport.startPan(e.clientX, e.clientY)
+    viewport.setCursor('grabbing')
     e.preventDefault()
     return
   }
 
   // 碰撞编辑模式下，指针事件全部交给碰撞工具，避免拖动/缩放图像
   if (mapStore.activeLayer?.type === 'image' && mapEditorStore.imageCollisionTool !== 'none' && mapStore.selectedImage) {
-    const worldPos = screenToWorld(e)
-    if (worldPos) handleCollisionPointerDown(mapStore.selectedImage, worldPos, e.button)
+    const worldPos = viewport.screenToWorld(e)
+    if (worldPos) collision.handleCollisionPointerDown(mapStore.selectedImage, worldPos, e.button)
     return
   }
 
   // If transform handle or rotation handle was clicked, don't process further
-  if (transformDragging || isRotating) return
+  if (transform.isTransformBusy()) return
 
-  if (e.button === 0 && !e.altKey && !isSpaceHeld) {
+  if (e.button === 0 && !e.altKey && !viewport.isSpacePressed()) {
     const layer = mapStore.activeLayer
 
-    if (mapEditorStore.currentTool === 'select' && layer && layer.type === 'image') {
-      const worldPos = screenToWorld(e)
-      if (worldPos) {
-        const hit = hitTestImage(worldPos.x, worldPos.y)
-        if (hit) {
-          if (selectedImageData !== hit.imageData) {
-            // New image selected — build transform box
-            selectedImageData = hit.imageData
-            selectedImageLayerId = hit.layerId
-            selectedImageIndex = hit.imageIndex
-            mapStore.selectImage(hit.layerId, hit.imageIndex)
-            showTransformBox(hit.imageData)
-            cacheSelectedImageSprite()
-          }
-          imageDragStartWorld = { x: worldPos.x, y: worldPos.y }
-          imageDragStartPos = [...hit.imageData.position]
-          // Defer drag start so PixiJS handles can set their flags first
-          nextTick(() => {
-            if (!transformDragging && !isRotating) {
-              isDraggingImage = true
-              isImageDragging = true
-            }
-          })
-          return
-        } else {
-          removeTransformBox()
-          mapStore.clearImageSelection()
-        }
-      }
-      return
-    }
+    if (transform.handleSelectPointerDown(e, layer)) return
 
-    const pos = screenToGrid(e)
-    if (pos) {
-      // 绘制工具：左键绘制，右键擦除
-      if (mapEditorStore.currentTool === 'draw' && mapStore.activeLayer && mapStore.activeLayer.type === 'drawing') {
-        if (e.button === 0 && mapStore.selectedTileIndex >= 0) {
-          const tileId = encodeTileId(mapStore.activeLayer.id, mapStore.selectedResourceIndex, mapStore.selectedTileIndex)
-          mapStore.setTile(pos.x, pos.y, tileId)
-          lastPaintedKey = `${pos.x},${pos.y}`
-          updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
-          emit('tile-painted', pos.x, pos.y, tileId)
-        } else if ((e.button as number) === 2) {
-          mapStore.setTile(pos.x, pos.y, 0)
-          lastPaintedKey = `${pos.x},${pos.y}`
-          updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
-          emit('tile-erased', pos.x, pos.y)
-        }
-      } else if (mapEditorStore.currentTool === 'erase') {
-        mapStore.setTile(pos.x, pos.y, 0)
-        lastPaintedKey = `${pos.x},${pos.y}`
-        updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
-        emit('tile-erased', pos.x, pos.y)
-      } else if (mapEditorStore.currentTool === 'fill' && mapStore.selectedTileIndex >= 0 && mapStore.activeLayer) {
-        const tileId = encodeTileId(mapStore.activeLayer.id, mapStore.selectedResourceIndex, mapStore.selectedTileIndex)
-        floodFill(pos.x, pos.y, tileId)
-      } else if (mapEditorStore.currentTool === 'move') {
-        const layer = mapStore.activeLayer
-        if (layer && layer.type === 'drawing') {
-          const tileId = layer.tiles[`${pos.x},${pos.y}`] ?? 0
-          if (tileId !== 0) {
-            moveStartPos = pos
-            moveTileId = tileId
-            const spriteKey = `${layer.id}:${pos.x},${pos.y}`
-            moveStartSprite = tileSprites.get(spriteKey) ?? null
-            if (moveStartSprite) moveStartSprite.visible = false
-            // 异步加载纹理创建拖拽 sprite
-            const tileSize = mapStore.mapData.tileSize
-            const tileSets = mapStore.mapData.tileSets
-            let matchedTs: any = null
-            for (let i = tileSets.length - 1; i >= 0; i--) {
-              if (tileId >= tileSets[i].firstgid) { matchedTs = tileSets[i]; break }
-            }
-            const tIdx = matchedTs ? tileId - matchedTs.firstgid : 0
-            const texRes = matchedTs
-              ? mapStore.mapData.resources.find((r: MapResource) => r.firstgid === matchedTs.firstgid)
-                ?? mapStore.mapData.resources.find((r: MapResource) => r.path === matchedTs.imagePath)
-              : null
-            if (texRes) {
-              getTileTexture(texRes, tIdx).then(texture => {
-                if (!texture || !moveTileId) return
-                moveDragSprite = new PIXI.Sprite(texture)
-                moveDragSprite.width = tileSize
-                moveDragSprite.height = tileSize
-                moveDragSprite.x = pos.x * tileSize
-                moveDragSprite.y = pos.y * tileSize
-                app.stage.addChild(moveDragSprite)
-              }).catch(() => {})
-            }
-          }
-        }
-      }
-    }
+    const pos = viewport.screenToGrid(e)
+    if (pos) painter.handlePaintPointerDown(e, pos)
   }
 }
 
 function onPointerMove(e: PointerEvent) {
-  if (isPanning) {
-    const dx = e.clientX - lastPointer.x
-    const dy = e.clientY - lastPointer.y
-    app.stage.x += dx
-    app.stage.y += dy
-    lastPointer = { x: e.clientX, y: e.clientY }
-    return
-  }
+  if (viewport.handlePanMove(e.clientX, e.clientY)) return
 
   // 碰撞编辑：拖动顶点 / 拉矩形 / 钢笔预览
   if (mapEditorStore.imageCollisionTool !== 'none' && mapStore.selectedImage) {
-    const worldPos = screenToWorld(e)
-    if (worldPos) handleCollisionPointerMove(mapStore.selectedImage, worldPos)
+    const worldPos = viewport.screenToWorld(e)
+    if (worldPos) collision.handleCollisionPointerMove(mapStore.selectedImage, worldPos)
     return
   }
 
-  // Rotation via handle
-  if (isRotating && selectedImageData) {
-    const pos = selectedImageData.position || [0, 0]
-    const w = (selectedImageData.width || 64) * (selectedImageData.scaleX ?? selectedImageData.scale ?? 1)
-    const h = (selectedImageData.height || 64) * (selectedImageData.scaleY ?? selectedImageData.scale ?? 1)
-    const cx = pos[0] + w / 2
-    const cy = pos[1] + h / 2
-    const worldPos = screenToWorld(e)
-    if (worldPos) {
-      const angle = Math.atan2(worldPos.y - cy, worldPos.x - cx)
-      selectedImageData.rotation = ((angle - rotationStartAngle) * 180 / Math.PI)
-      updateTransformBox()
-      updateSelectedImageSprite()
-    }
-    return
-  }
+  if (transform.handleTransformPointerMove(e)) return
 
-  // Transform handle drag
-  if (transformDragging && selectedImageData && transformHandleIndex >= 0) {
-    const worldPos = screenToWorld(e)
-    if (!worldPos) return
-    const idx = transformHandleIndex
-    let mx = worldPos.x
-    let my = worldPos.y
-    // 吸附网格：缩放手柄拖动的边对齐到最近网格线（与图像拖动吸附同一开关）
-    if (mapEditorStore.snapToGrid) {
-      const ts = mapStore.mapData.tileSize
-      mx = Math.round(mx / ts) * ts
-      my = Math.round(my / ts) * ts
-    }
-
-    // Each handle controls specific edges: [left, top, right, bottom]
-    // Uncontrolled edges stay fixed at their initial position
-    const handleEdges = [
-      [true,  true,  false, false], // 0 top-left
-      [false, true,  false, false], // 1 top-center
-      [false, true,  true,  false], // 2 top-right
-      [false, false, true,  false], // 3 right-center
-      [false, false, true,  true ], // 4 bottom-right
-      [false, false, false, true ], // 5 bottom-center
-      [true,  false, false, true ], // 6 bottom-left
-      [true,  false, false, false], // 7 left-center
-    ]
-    const edges = handleEdges[idx]
-
-    let newLeft   = edges[0] ? mx : transformStartBox.left
-    let newTop    = edges[1] ? my : transformStartBox.top
-    let newRight  = edges[2] ? mx : transformStartBox.right
-    let newBottom = edges[3] ? my : transformStartBox.bottom
-
-    const minPx = 10
-
-    // Corner handles (0,2,4,6): maintain aspect ratio
-    const isCorner = idx % 2 === 0
-    if (isCorner) {
-      const origPW = transformStartBox.right - transformStartBox.left
-      const origPH = transformStartBox.bottom - transformStartBox.top
-      const ratio = origPW / origPH
-      // Anchor is the opposite corner (fixed)
-      let rawW: number, rawH: number
-      if (idx === 0) { // top-left → anchor is bottom-right
-        rawW = transformStartBox.right - mx
-        rawH = transformStartBox.bottom - my
-      } else if (idx === 2) { // top-right → anchor is bottom-left
-        rawW = mx - transformStartBox.left
-        rawH = transformStartBox.bottom - my
-      } else if (idx === 4) { // bottom-right → anchor is top-left
-        rawW = mx - transformStartBox.left
-        rawH = my - transformStartBox.top
-      } else { // idx === 6, bottom-left → anchor is top-right
-        rawW = transformStartBox.right - mx
-        rawH = my - transformStartBox.top
-      }
-      // Constrain to ratio using the dominant axis
-      rawW = Math.max(rawW, minPx)
-      rawH = Math.max(rawH, minPx)
-      if (rawW / rawH > ratio) {
-        rawH = rawW / ratio
-      } else {
-        rawW = rawH * ratio
-      }
-      // Recompute edges from anchor + constrained size
-      if (idx === 0) { newLeft = transformStartBox.right - rawW; newTop = transformStartBox.bottom - rawH }
-      else if (idx === 2) { newTop = transformStartBox.bottom - rawH; newRight = transformStartBox.left + rawW }
-      else if (idx === 4) { newRight = transformStartBox.left + rawW; newBottom = transformStartBox.top + rawH }
-      else { newLeft = transformStartBox.right - rawW; newBottom = transformStartBox.top + rawH }
-    }
-
-    let pixelW = Math.abs(newRight - newLeft)
-    let pixelH = Math.abs(newBottom - newTop)
-    if (pixelW < minPx) pixelW = minPx
-    if (pixelH < minPx) pixelH = minPx
-
-    selectedImageData.position = [
-      Math.min(newLeft, newRight),
-      Math.min(newTop, newBottom),
-    ]
-    // Update scale to match new pixel size, keeping natural width/height constant
-    const origW = selectedImageData.width || 64
-    const origH = selectedImageData.height || 64
-    selectedImageData.scaleX = pixelW / origW
-    selectedImageData.scaleY = pixelH / origH
-    selectedImageData.scale = selectedImageData.scaleX
-    updateTransformBox()
-    updateSelectedImageSprite()
-    return
-  }
-
-  // Image body drag
-  if (isDraggingImage && selectedImageData) {
-    const worldPos = screenToWorld(e)
-    if (worldPos) {
-      const dx = worldPos.x - imageDragStartWorld.x
-      const dy = worldPos.y - imageDragStartWorld.y
-      let nx = imageDragStartPos[0] + dx
-      let ny = imageDragStartPos[1] + dy
-      // 吸附网格：图像左上角对齐到最近的网格点
-      if (mapEditorStore.snapToGrid) {
-        const ts = mapStore.mapData.tileSize
-        nx = Math.round(nx / ts) * ts
-        ny = Math.round(ny / ts) * ts
-      }
-      selectedImageData.position = [nx, ny]
-      updateTransformBox()
-      updateSelectedImageSprite()
-    }
-    return
-  }
-
-  const gridPos = screenToGrid(e)
+  const gridPos = viewport.screenToGrid(e)
   if (gridPos) {
     cursorGridPos.value = gridPos
     emit('cursor-move', gridPos.x, gridPos.y)
@@ -802,128 +477,30 @@ function onPointerMove(e: PointerEvent) {
     cursorGridPos.value = null
   }
 
-  // Move tool preview
-  if (moveStartPos && moveTileId && moveDragSprite) {
-    const pos = screenToGrid(e)
-    if (pos) {
-      const tileSize = mapStore.mapData.tileSize
-      moveDragSprite.x = pos.x * tileSize
-      moveDragSprite.y = pos.y * tileSize
-    }
-  }
-
-  if (mapEditorStore.currentTool === 'draw' || mapEditorStore.currentTool === 'erase' || mapEditorStore.currentTool === 'fill') {
-    const pos = screenToGrid(e)
-    updatePreview(pos)
-
-    if (pos && (e.buttons === 1 || e.buttons === 2)) {
-      const key = `${pos.x},${pos.y}`
-      if (key !== lastPaintedKey) {
-        // 绘制工具：左键绘制，右键擦除
-        if (mapEditorStore.currentTool === 'draw' && mapStore.activeLayer && mapStore.activeLayer.type === 'drawing') {
-          if (e.buttons === 2) {
-            mapStore.setTile(pos.x, pos.y, 0)
-            updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
-          } else if (mapStore.selectedTileIndex >= 0) {
-            const tileId = encodeTileId(mapStore.activeLayer.id, mapStore.selectedResourceIndex, mapStore.selectedTileIndex)
-            mapStore.setTile(pos.x, pos.y, tileId)
-            updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
-            emit('tile-painted', pos.x, pos.y, tileId)
-          }
-        } else if (mapEditorStore.currentTool === 'erase') {
-          mapStore.setTile(pos.x, pos.y, 0)
-          updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
-          emit('tile-erased', pos.x, pos.y)
-        }
-        lastPaintedKey = key
-      }
-    }
-  }
+  painter.handlePaintPointerMove(e, gridPos)
 }
 
 function onPointerUp() {
-  // 碰撞编辑：矩形收尾 / 顶点结束拖拽
-  if (mapEditorStore.imageCollisionTool === 'rect' && collisionRectStart) {
-    finishCollisionRect()
-    return
-  }
-  if (draggingVertexIndex >= 0) {
-    draggingVertexIndex = -1
-    drawCollisionOverlay()
-    return
-  }
+  if (collision.handlePointerUp()) return
 
-  if (transformDragging) {
-    transformDragging = false
-    transformHandleIndex = -1
-    isImageDragging = false
-    updateSelectedImageSprite()
-    scheduleRender()
-    return
-  }
-
-  if (isRotating) {
-    isRotating = false
-    isImageDragging = false
-    updateSelectedImageSprite()
-    scheduleRender()
-    return
-  }
-
-  if (isDraggingImage) {
-    isDraggingImage = false
-    isImageDragging = false
-    updateSelectedImageSprite()
-    scheduleRender()
-    return
-  }
+  if (transform.handleTransformPointerUp()) return
 
   // Move tool: drop tile at new position
-  if (moveStartPos && moveTileId) {
-    const pos = cursorGridPos.value
-    if (pos && (pos.x !== moveStartPos.x || pos.y !== moveStartPos.y)) {
-      const layer = mapStore.activeLayer
-      if (layer && layer.type === 'drawing') {
-        mapStore.setTile(moveStartPos.x, moveStartPos.y, 0)
-        mapStore.setTile(pos.x, pos.y, moveTileId)
-        updateTileAt(mapStore.activeLayerIndex, moveStartPos.x, moveStartPos.y)
-        updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
-      }
-    } else if (moveStartSprite) {
-      // 未移动，恢复原始 sprite 可见
-      moveStartSprite.visible = true
-    }
-    moveStartPos = null
-    moveTileId = 0
-    moveStartSprite = null
-    if (moveDragSprite) {
-      app.stage.removeChild(moveDragSprite)
-      moveDragSprite.destroy()
-      moveDragSprite = null
-    }
-  }
+  painter.handlePointerUp(cursorGridPos.value)
 
-  isPanning = false
-  lastPaintedKey = ''
-  if (app?.canvas) (app.canvas as HTMLCanvasElement).style.cursor = 'default'
+  viewport.endPan()
+  painter.resetPaintKey()
+  viewport.setCursor('default')
 }
 
 function onPointerLeave() {
-  isPanning = false
-  lastPaintedKey = ''
+  viewport.endPan()
+  painter.resetPaintKey()
   cursorGridPos.value = null
-  if (previewTile) {
-    previewTile.visible = false
-  }
+  painter.hidePreview()
   // 离开画布时取消未完成的碰撞草稿，避免残留预览
   if (mapEditorStore.imageCollisionTool !== 'none') {
-    if (collisionRectStart) {
-      collisionRectStart = null
-      collisionRectCurrent = null
-    }
-    collisionPreviewLocal = null
-    draggingVertexIndex = -1
-    drawCollisionOverlay()
+    collision.resetDraftOnLeave()
   }
 }
 
@@ -939,6 +516,10 @@ function setupInteraction() {
   canvas.addEventListener('contextmenu', onContextMenu)
   // Scratch 风格拖拽：监听自定义事件
   canvas.addEventListener('scratch-drop', onScratchDrop as EventListener)
+}
+
+function onWheel(e: WheelEvent) {
+  viewport.onWheel(e)
 }
 
 function onScratchDrop(e: CustomEvent) {
@@ -970,7 +551,7 @@ function onDrop(e: DragEvent) {
     try {
       const { resourceIndex } = JSON.parse(imageData)
       const resource = mapStore.activeLayerResources[resourceIndex]
-      const worldPos = screenToWorld(e)
+      const worldPos = viewport.screenToWorld(e)
       if (resource && worldPos) {
         placeImage(layer, resource, worldPos.x, worldPos.y)
       }
@@ -986,52 +567,29 @@ function onDrop(e: DragEvent) {
     return
   }
 
-  const pos = screenToGrid(e as any)
+  const pos = viewport.screenToGrid(e as any)
   if (!pos) return
 
   try {
     const { resourceIndex, tileIndex } = JSON.parse(tileData)
     if (mapStore.activeLayer) {
-      const tileId = encodeTileId(mapStore.activeLayer.id, resourceIndex, tileIndex)
+      const tileId = painter.encodeTileId(mapStore.activeLayer.id, resourceIndex, tileIndex)
       mapStore.setTile(pos.x, pos.y, tileId)
-      updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
+      painter.updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
     }
   } catch {}
 }
 
 function onKeyDown(e: KeyboardEvent) {
   if (e.code === 'Space' && !e.repeat) {
-    isSpaceHeld = true
-    if (app?.canvas) (app.canvas as HTMLCanvasElement).style.cursor = 'grab'
+    viewport.onSpaceDown()
     return
   }
   // Tool shortcuts (only when not typing in an input)
   if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return
 
   // 碰撞编辑快捷键：Esc 取消/退出，Enter 闭合多边形，Delete 删除顶点
-  if (mapEditorStore.imageCollisionTool !== 'none') {
-    if (e.key === 'Escape') {
-      if (collisionDraftActive || collisionRectStart) {
-        cancelCollisionDraft()
-      } else {
-        mapEditorStore.setImageCollisionTool('none')
-      }
-      drawCollisionOverlay()
-      return
-    }
-    if (e.key === 'Enter' && mapEditorStore.imageCollisionTool === 'polygon' && collisionDraftActive) {
-      e.preventDefault()
-      closeCollisionDraft()
-      return
-    }
-    if ((e.key === 'Delete' || e.key === 'Backspace') && mapEditorStore.imageCollisionTool === 'vertex') {
-      e.preventDefault()
-      deleteSelectedVertex()
-      return
-    }
-    // 碰撞编辑期间不响应工具切换快捷键
-    return
-  }
+  if (collision.handleKeyDown(e)) return
 
   // Delete/Backspace 删除选中图像（图像图层时）
   if ((e.key === 'Delete' || e.key === 'Backspace') && mapStore.activeLayer?.type === 'image') {
@@ -1052,75 +610,12 @@ function onKeyDown(e: KeyboardEvent) {
 
 function onKeyUp(e: KeyboardEvent) {
   if (e.code === 'Space') {
-    isSpaceHeld = false
-    if (!isPanning && app?.canvas) (app.canvas as HTMLCanvasElement).style.cursor = 'default'
+    viewport.onSpaceUp()
   }
-}
-
-function screenToGrid(e: PointerEvent): { x: number; y: number } | null {
-  if (!canvasRef.value || !app) return null
-  const rect = canvasRef.value.getBoundingClientRect()
-  const sx = (e.clientX - rect.left - app.stage.x) / currentScale
-  const sy = (e.clientY - rect.top - app.stage.y) / currentScale
-  const tileSize = mapStore.mapData.tileSize
-  return {
-    x: Math.floor(sx / tileSize),
-    y: Math.floor(sy / tileSize),
-  }
-}
-
-function screenToWorld(e: PointerEvent | DragEvent): { x: number; y: number } | null {
-  if (!canvasRef.value || !app) return null
-  const rect = canvasRef.value.getBoundingClientRect()
-  const clientX = 'clientX' in e ? e.clientX : 0
-  const clientY = 'clientY' in e ? e.clientY : 0
-  return {
-    x: (clientX - rect.left - app.stage.x) / currentScale,
-    y: (clientY - rect.top - app.stage.y) / currentScale,
-  }
-}
-
-function hitTestImage(worldX: number, worldY: number): { layerId: number; imageIndex: number; imageData: any } | null {
-  const layer = mapStore.activeLayer
-  if (!layer || layer.type !== 'image') return null
-
-  // Check images in reverse order (top-most first)
-  for (let i = layer.images.length - 1; i >= 0; i--) {
-    const img = layer.images[i]
-    // 转到图片本地坐标判定，支持缩放与旋转
-    const local = imageWorldToLocal(img, worldX, worldY)
-    if (local.x >= 0 && local.x <= 1 && local.y >= 0 && local.y <= 1) {
-      return { layerId: layer.id, imageIndex: i, imageData: img }
-    }
-  }
-  return null
-}
-
-function updatePreview(pos: { x: number; y: number } | null) {
-  if (!app || !PIXI) return
-
-  if (!pos) {
-    if (previewTile) previewTile.visible = false
-    return
-  }
-
-  const tileSize = mapStore.mapData.tileSize
-
-  if (!previewTile) {
-    previewTile = new PIXI.Graphics()
-    app.stage.addChild(previewTile)
-  }
-  previewTile.clear()
-  previewTile.rect(pos.x * tileSize, pos.y * tileSize, tileSize, tileSize)
-  previewTile.stroke({ width: 1, color: 0x5BFB84, alpha: 0.8 })
-  previewTile.fill({ color: 0x5BFB84, alpha: 0.15 })
-  previewTile.visible = true
 }
 
 function redraw() {
-  drawGrid()
-  drawAxes()
-  drawGameWindow()
+  viewport.redraw()
 }
 
 function onMouseDown(e: MouseEvent) {
@@ -1132,645 +627,12 @@ function onContextMenu(e: MouseEvent) {
   e.preventDefault()
 }
 
-// --- Flood Fill ---
-
-function floodFill(startX: number, startY: number, fillTileId: number) {
-  const layer = mapStore.activeLayer
-  if (!layer || layer.type !== 'drawing') return
-
-  const targetTileId = layer.tiles[`${startX},${startY}`] ?? 0
-  if (targetTileId === fillTileId) return
-
-  const { width, height } = mapStore.mapData
-  const stack: [number, number][] = [[startX, startY]]
-  const visited = new Set<string>()
-
-  while (stack.length > 0) {
-    const [x, y] = stack.pop()!
-    const key = `${x},${y}`
-    if (visited.has(key)) continue
-    visited.add(key)
-
-    if (x < 0 || x >= width || y < 0 || y >= height) continue
-
-    const currentId = layer.tiles[key] ?? 0
-    if (currentId !== targetTileId) continue
-
-    mapStore.setTile(x, y, fillTileId)
-
-    stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1])
-  }
-
-  scheduleRender()
-}
-// --- Transform Tool ---
-
-let transformBox: any = null
-let transformHandles: any[] = []
-let rotationHandle: any = null
-let rotationLine: any = null
-let selectedImageSprite: any = null
-let selectedImageData: any = null
-let selectedImageLayerId: number = -1
-let selectedImageIndex: number = -1
-let transformDragging = false
-let transformHandleIndex = -1
-let transformStartBox = { left: 0, top: 0, right: 0, bottom: 0 }
-let isRotating = false
-let rotationStartAngle = 0
-let isImageDragging = false
-
-// --- 图像实例碰撞编辑 ---
-let collisionGraphics: any = null
-let collisionDraft: { x: number; y: number }[] = []      // 钢笔草稿（图片本地归一化坐标）
-let collisionDraftActive = false
-let collisionPreviewLocal: { x: number; y: number } | null = null
-let collisionRectStart: { x: number; y: number } | null = null
-let collisionRectCurrent: { x: number; y: number } | null = null
-let draggingVertexIndex = -1
-let selectedVertexIndex = -1
-let lastPolygonClickAt = 0
-
-const clamp01 = (v: number) => Math.max(0, Math.min(1, v))
-
-function getImageRectInfo(img: any) {
-  const pos = img.position || [0, 0]
-  const sx = img.scaleX ?? img.scale ?? 1
-  const sy = img.scaleY ?? img.scale ?? 1
-  const w = Math.max(1, (img.width || 64) * Math.abs(sx))
-  const h = Math.max(1, (img.height || 64) * Math.abs(sy))
-  return {
-    x: pos[0],
-    y: pos[1],
-    w,
-    h,
-    cx: pos[0] + w / 2,
-    cy: pos[1] + h / 2,
-    rot: (img.rotation ?? 0) * Math.PI / 180,
-  }
-}
-
-// 归一化本地坐标 → 世界坐标（与 MapCanvas 渲染的 anchor=0.5 + 旋转保持一致）
-function imageLocalToWorld(img: any, p: { x: number; y: number }) {
-  const r = getImageRectInfo(img)
-  const lx = (p.x - 0.5) * r.w
-  const ly = (p.y - 0.5) * r.h
-  const cos = Math.cos(r.rot)
-  const sin = Math.sin(r.rot)
-  return { x: r.cx + lx * cos - ly * sin, y: r.cy + lx * sin + ly * cos }
-}
-
-function imageWorldToLocal(img: any, x: number, y: number) {
-  const r = getImageRectInfo(img)
-  const dx = x - r.cx
-  const dy = y - r.cy
-  const cos = Math.cos(r.rot)
-  const sin = Math.sin(r.rot)
-  return { x: (dx * cos + dy * sin) / r.w + 0.5, y: (-dx * sin + dy * cos) / r.h + 0.5 }
-}
-
-// 吸附到图片像素，保证碰撞边缘清晰
-function snapImageLocal(img: any, p: { x: number; y: number }) {
-  const iw = Math.max(1, img.width || 64)
-  const ih = Math.max(1, img.height || 64)
-  return {
-    x: clamp01(Math.round(p.x * iw) / iw),
-    y: clamp01(Math.round(p.y * ih) / ih),
-  }
-}
-
-function pointToSegmentDistance(p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }): number {
-  const dx = b.x - a.x
-  const dy = b.y - a.y
-  const lenSq = dx * dx + dy * dy
-  if (lenSq === 0) return Math.hypot(p.x - a.x, p.y - a.y)
-  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq))
-  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
-}
-
-function findNearestVertex(img: any, world: { x: number; y: number }, threshold: number): number {
-  const pts = img.collisionShape?.points || []
-  let best = -1
-  let bestDist = threshold
-  pts.forEach((p: number[], i: number) => {
-    const wp = imageLocalToWorld(img, { x: p[0], y: p[1] })
-    const d = Math.hypot(wp.x - world.x, wp.y - world.y)
-    if (d < bestDist) {
-      bestDist = d
-      best = i
-    }
-  })
-  return best
-}
-
-// 查找最近的边，返回边起点顶点下标（用于插点）
-function findNearestEdge(img: any, world: { x: number; y: number }, threshold: number): number {
-  const pts = img.collisionShape?.points || []
-  if (pts.length < 2) return -1
-  let best = -1
-  let bestDist = threshold
-  for (let i = 0; i < pts.length; i++) {
-    const a = imageLocalToWorld(img, { x: pts[i][0], y: pts[i][1] })
-    const b = imageLocalToWorld(img, { x: pts[(i + 1) % pts.length][0], y: pts[(i + 1) % pts.length][1] })
-    const d = pointToSegmentDistance(world, a, b)
-    if (d < bestDist) {
-      bestDist = d
-      best = i
-    }
-  }
-  return best
-}
-
-function drawCollisionPolygon(
-  g: any,
-  img: any,
-  localPoints: { x: number; y: number }[],
-  color: number,
-  fillAlpha: number,
-  lineWidth: number,
-  withHandles: boolean,
-) {
-  if (localPoints.length < 2) return
-  const world = localPoints.map(p => imageLocalToWorld(img, p))
-  g.moveTo(world[0].x, world[0].y)
-  for (let i = 1; i < world.length; i++) g.lineTo(world[i].x, world[i].y)
-  g.closePath()
-  g.fill({ color, alpha: fillAlpha })
-  g.stroke({ width: lineWidth, color, alpha: 0.9 })
-
-  if (!withHandles) return
-  const radius = 4 / currentScale
-  world.forEach((p, i) => {
-    if (i === selectedVertexIndex) {
-      g.circle(p.x, p.y, radius * 1.6)
-      g.fill({ color: 0x528bff, alpha: 0.9 })
-    }
-    g.circle(p.x, p.y, radius)
-    g.fill({ color: i === 0 ? 0x5BFB84 : 0xffffff })
-    g.stroke({ width: 1 / currentScale, color: 0xff5050 })
-  })
-}
-
-function drawCollisionOverlay() {
-  if (!app || !PIXI) return
-  if (!collisionGraphics) {
-    collisionGraphics = new PIXI.Graphics()
-    collisionGraphics.eventMode = 'none'
-  }
-  // 始终保持在舞台最上层
-  if (collisionGraphics.parent) collisionGraphics.parent.removeChild(collisionGraphics)
-  app.stage.addChild(collisionGraphics)
-
-  const g = collisionGraphics
-  g.clear()
-  const lineWidth = 1.5 / currentScale
-
-  const img = mapStore.selectedImage
-
-  // 全局碰撞可视化（所有图像图层）
-  if (mapEditorStore.showCollision) {
-    for (const layer of mapStore.mapData.layers) {
-      if (layer.type !== 'image' || !layer.visible) continue
-      for (const layerImg of layer.images) {
-        const pts = layerImg.collisionShape?.points
-        if (!layerImg.collisionEnabled || !pts || pts.length < 3 || layerImg === img) continue
-        drawCollisionPolygon(
-          g, layerImg,
-          pts.map((p: number[]) => ({ x: p[0], y: p[1] })),
-          0xff5050, 0.12, lineWidth, false,
-        )
-      }
-    }
-  }
-
-  if (!img) return
-
-  // 已保存的碰撞形状
-  const pts = img.collisionShape?.points
-  if (pts && pts.length >= 3) {
-    const editing = mapEditorStore.imageCollisionTool !== 'none'
-    drawCollisionPolygon(
-      g, img,
-      pts.map((p: number[]) => ({ x: p[0], y: p[1] })),
-      img.collisionEnabled ? 0xff5050 : 0x888888,
-      img.collisionEnabled ? 0.2 : 0.1,
-      lineWidth,
-      editing,
-    )
-  }
-
-  // 矩形拖拽预览
-  if (collisionRectStart && collisionRectCurrent) {
-    const x0 = Math.min(collisionRectStart.x, collisionRectCurrent.x)
-    const x1 = Math.max(collisionRectStart.x, collisionRectCurrent.x)
-    const y0 = Math.min(collisionRectStart.y, collisionRectCurrent.y)
-    const y1 = Math.max(collisionRectStart.y, collisionRectCurrent.y)
-    drawCollisionPolygon(
-      g, img,
-      [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }],
-      0x5BFB84, 0.15, lineWidth, false,
-    )
-  }
-
-  // 钢笔草稿
-  if (collisionDraftActive && collisionDraft.length > 0) {
-    const world = collisionDraft.map(p => imageLocalToWorld(img, p))
-    g.moveTo(world[0].x, world[0].y)
-    for (let i = 1; i < world.length; i++) g.lineTo(world[i].x, world[i].y)
-    if (collisionPreviewLocal) {
-      const preview = imageLocalToWorld(img, collisionPreviewLocal)
-      g.lineTo(preview.x, preview.y)
-    }
-    g.stroke({ width: lineWidth, color: 0x5BFB84, alpha: 0.9 })
-
-    const radius = 4 / currentScale
-    world.forEach((p, i) => {
-      g.circle(p.x, p.y, radius)
-      g.fill({ color: i === 0 ? 0x5BFB84 : 0xffffff })
-      g.stroke({ width: 1 / currentScale, color: 0xff5050 })
-    })
-  }
-}
-
-function cancelCollisionDraft() {
-  collisionDraftActive = false
-  collisionDraft = []
-  collisionPreviewLocal = null
-  collisionRectStart = null
-  collisionRectCurrent = null
-  draggingVertexIndex = -1
-}
-
-function closeCollisionDraft() {
-  if (collisionDraft.length >= 3) {
-    mapStore.setImageCollisionPoints(collisionDraft.map(p => [p.x, p.y]))
-  }
-  collisionDraftActive = false
-  collisionDraft = []
-  collisionPreviewLocal = null
-  drawCollisionOverlay()
-}
-
-function deleteSelectedVertex() {
-  const img = mapStore.selectedImage
-  if (!img) return
-  const pts = img.collisionShape?.points
-  if (!pts || pts.length <= 3 || selectedVertexIndex < 0) return
-  const next = pts.map((p: number[]) => [p[0], p[1]])
-  next.splice(selectedVertexIndex, 1)
-  selectedVertexIndex = -1
-  mapStore.setImageCollisionPoints(next)
-  drawCollisionOverlay()
-}
-
-function handleCollisionPointerDown(img: any, world: { x: number; y: number }, button: number) {
-  const raw = imageWorldToLocal(img, world.x, world.y)
-  const tool = mapEditorStore.imageCollisionTool
-  // 点击图片范围外：只用于取消顶点选中，不在图片外生成锚点
-  if (raw.x < -0.02 || raw.x > 1.02 || raw.y < -0.02 || raw.y > 1.02) {
-    if (tool === 'vertex') {
-      selectedVertexIndex = -1
-      drawCollisionOverlay()
-    }
-    return
-  }
-  const local = snapImageLocal(img, raw)
-
-  // 右键：钢笔撤销上一点 / 删除顶点
-  if (button === 2) {
-    if (tool === 'polygon' && collisionDraftActive && collisionDraft.length > 0) {
-      collisionDraft.pop()
-      if (collisionDraft.length === 0) collisionDraftActive = false
-    } else if (tool === 'vertex') {
-      const idx = findNearestVertex(img, world, 10 / currentScale)
-      if (idx >= 0) {
-        selectedVertexIndex = idx
-        deleteSelectedVertex()
-      }
-    }
-    drawCollisionOverlay()
-    return
-  }
-  if (button !== 0) return
-
-  if (tool === 'rect') {
-    collisionRectStart = local
-    collisionRectCurrent = local
-  } else if (tool === 'polygon') {
-    if (collisionDraftActive && collisionDraft.length >= 3) {
-      const firstWorld = imageLocalToWorld(img, collisionDraft[0])
-      // 点首点闭合
-      if (Math.hypot(firstWorld.x - world.x, firstWorld.y - world.y) < 10 / currentScale) {
-        closeCollisionDraft()
-        return
-      }
-      // 双击闭合
-      const now = Date.now()
-      const lastWorld = imageLocalToWorld(img, collisionDraft[collisionDraft.length - 1])
-      if (now - lastPolygonClickAt < 350 &&
-          Math.hypot(lastWorld.x - world.x, lastWorld.y - world.y) < 10 / currentScale) {
-        closeCollisionDraft()
-        return
-      }
-    }
-    if (!collisionDraftActive) {
-      collisionDraftActive = true
-      collisionDraft = []
-    }
-    const last = collisionDraft[collisionDraft.length - 1]
-    if (!last || Math.hypot(last.x - local.x, last.y - local.y) > 1e-5) {
-      collisionDraft.push(local)
-    }
-    lastPolygonClickAt = Date.now()
-  } else if (tool === 'vertex') {
-    const idx = findNearestVertex(img, world, 10 / currentScale)
-    if (idx >= 0) {
-      draggingVertexIndex = idx
-      selectedVertexIndex = idx
-    } else {
-      const edge = findNearestEdge(img, world, 8 / currentScale)
-      if (edge >= 0) {
-        const next = (img.collisionShape?.points || []).map((p: number[]) => [p[0], p[1]])
-        next.splice(edge + 1, 0, [local.x, local.y])
-        mapStore.setImageCollisionPoints(next)
-        draggingVertexIndex = edge + 1
-        selectedVertexIndex = edge + 1
-      }
-    }
-  }
-  drawCollisionOverlay()
-}
-
-function handleCollisionPointerMove(img: any, world: { x: number; y: number }) {
-  const local = snapImageLocal(img, imageWorldToLocal(img, world.x, world.y))
-  const tool = mapEditorStore.imageCollisionTool
-
-  if (tool === 'rect' && collisionRectStart) {
-    collisionRectCurrent = local
-    drawCollisionOverlay()
-  } else if (tool === 'polygon' && collisionDraftActive) {
-    collisionPreviewLocal = local
-    drawCollisionOverlay()
-  } else if (tool === 'vertex' && draggingVertexIndex >= 0) {
-    const next = (img.collisionShape?.points || []).map((p: number[]) => [p[0], p[1]])
-    next[draggingVertexIndex] = [local.x, local.y]
-    mapStore.setImageCollisionPoints(next)
-    drawCollisionOverlay()
-  }
-}
-
-function finishCollisionRect() {
-  if (!collisionRectStart || !collisionRectCurrent) return
-  const img = mapStore.selectedImage
-  if (img) {
-    const x0 = Math.min(collisionRectStart.x, collisionRectCurrent.x)
-    const x1 = Math.max(collisionRectStart.x, collisionRectCurrent.x)
-    const y0 = Math.min(collisionRectStart.y, collisionRectCurrent.y)
-    const y1 = Math.max(collisionRectStart.y, collisionRectCurrent.y)
-    if (x1 - x0 > 0.005 && y1 - y0 > 0.005) {
-      mapStore.setImageCollisionPoints([
-        [x0, y0], [x1, y0], [x1, y1], [x0, y1],
-      ])
-    }
-  }
-  collisionRectStart = null
-  collisionRectCurrent = null
-  drawCollisionOverlay()
-}
-
-// 退出碰撞编辑时恢复选中图像的变换框
-function restoreSelectedImageUI() {
-  const img = mapStore.selectedImage
-  if (!img) return
-  selectedImageData = img
-  selectedImageLayerId = mapStore.selectedImageLayerId
-  selectedImageIndex = mapStore.selectedImageIndex
-  showTransformBox(img)
-  cacheSelectedImageSprite()
-}
-
-function showTransformBox(imgData: any) {
-  removeTransformBox()
-  if (!app || !PIXI) return
-
-  selectedImageData = imgData
-  const pos = imgData.position || [0, 0]
-  const w = (imgData.width || 64) * (imgData.scaleX ?? imgData.scale ?? 1)
-  const h = (imgData.height || 64) * (imgData.scaleY ?? imgData.scale ?? 1)
-  const cx = pos[0] + w / 2
-  const cy = pos[1] + h / 2
-
-  // Bounding box
-  transformBox = new PIXI.Graphics()
-  transformBox.rect(pos[0], pos[1], w, h)
-  transformBox.stroke({ width: 1, color: 0x528bff, alpha: 0.8 })
-  transformBox.fill({ color: 0x528bff, alpha: 0.05 })
-  app.stage.addChild(transformBox)
-
-  // 8 handles: 4 corners + 4 edge midpoints
-  const handlePositions = [
-    [pos[0], pos[1]], [pos[0] + w / 2, pos[1]], [pos[0] + w, pos[1]],
-    [pos[0] + w, pos[1] + h / 2],
-    [pos[0] + w, pos[1] + h], [pos[0] + w / 2, pos[1] + h], [pos[0], pos[1] + h],
-    [pos[0], pos[1] + h / 2],
-  ]
-
-  transformHandles = handlePositions.map((hp, i) => {
-    const handle = new PIXI.Graphics()
-    handle.rect(hp[0] - 4, hp[1] - 4, 8, 8)
-    handle.fill({ color: 0xffffff })
-    handle.stroke({ width: 1, color: 0x528bff })
-    handle.cursor = ['nw-resize', 'n-resize', 'ne-resize', 'e-resize', 'se-resize', 's-resize', 'sw-resize', 'w-resize'][i]
-    handle.eventMode = 'static'
-    handle.on('pointerdown', (e: any) => {
-      e.stopPropagation()
-      transformDragging = true
-      transformHandleIndex = i
-      isImageDragging = true
-      // Read current data at click time — not closure vars that may be stale
-      const p = selectedImageData.position || [0, 0]
-      const s = selectedImageData.scaleX ?? selectedImageData.scale ?? 1
-      const sy = selectedImageData.scaleY ?? selectedImageData.scale ?? 1
-      transformStartBox = {
-        left: p[0], top: p[1],
-        right: p[0] + (selectedImageData.width || 64) * s,
-        bottom: p[1] + (selectedImageData.height || 64) * sy,
-      }
-    })
-    app.stage.addChild(handle)
-    return handle
-  })
-
-  // Rotation handle: circle above top-center, connected by a line
-  const rotX = cx
-  const rotY = pos[1] - 30
-
-  rotationLine = new PIXI.Graphics()
-  rotationLine.moveTo(cx, pos[1])
-  rotationLine.lineTo(rotX, rotY)
-  rotationLine.stroke({ width: 1, color: 0x528bff, alpha: 0.8 })
-  app.stage.addChild(rotationLine)
-
-  rotationHandle = new PIXI.Graphics()
-  rotationHandle.circle(rotX, rotY, 6)
-  rotationHandle.fill({ color: 0xffffff })
-  rotationHandle.stroke({ width: 1.5, color: 0x528bff })
-  rotationHandle.cursor = 'crosshair'
-  rotationHandle.eventMode = 'static'
-  rotationHandle.on('pointerdown', (e: any) => {
-    e.stopPropagation()
-    isRotating = true
-    isImageDragging = true
-    const angle = Math.atan2(e.globalY - cy, e.globalX - cx)
-    rotationStartAngle = angle - (selectedImageData.rotation ?? 0) * Math.PI / 180
-  })
-  app.stage.addChild(rotationHandle)
-}
-
-function updateSelectedImageSprite() {
-  if (!selectedImageSprite || !selectedImageData) return
-  const pos = selectedImageData.position || [0, 0]
-  const scaleX = selectedImageData.scaleX ?? selectedImageData.scale ?? 1
-  const scaleY = selectedImageData.scaleY ?? selectedImageData.scale ?? 1
-  const logicalW = selectedImageData.width || 64
-  const logicalH = selectedImageData.height || 64
-  const w = logicalW * scaleX
-  const h = logicalH * scaleY
-  selectedImageSprite.x = pos[0] + w / 2
-  selectedImageSprite.y = pos[1] + h / 2
-  selectedImageSprite.rotation = (selectedImageData.rotation ?? 0) * Math.PI / 180
-  // SVG 等超采样纹理的像素尺寸 ≠ 逻辑尺寸，按 renderImageLayer 同款换算，
-  // 直接 scale.set(scaleX) 会让 2x 纹理瞬间放大一倍
-  const tw = selectedImageSprite.texture?.width || logicalW
-  const th = selectedImageSprite.texture?.height || logicalH
-  selectedImageSprite.scale.set(
-    (logicalW * scaleX) / (tw || logicalW),
-    (logicalH * scaleY) / (th || logicalH)
-  )
-  selectedImageSprite.alpha = selectedImageData.opacity ?? 1
-  selectedImageSprite.visible = true
-  // 图像移动/缩放/旋转时碰撞叠加层跟随（在更新位置之后重绘）
-  if (mapEditorStore.showCollision) drawCollisionOverlay()
-}
-
-function cacheSelectedImageSprite() {
-  selectedImageSprite = null
-  if (selectedImageLayerId < 0) return
-  const container = layerContainers.get(selectedImageLayerId)
-  if (!container) return
-  // Image sprites are added in order as children of the layer container
-  const children = container.children
-  let imgIdx = 0
-  for (const child of children) {
-    if (child instanceof PIXI.Sprite) {
-      if (imgIdx === selectedImageIndex) {
-        selectedImageSprite = child
-        return
-      }
-      imgIdx++
-    }
-  }
-}
-
-function removeTransformBox() {
-  if (transformBox) {
-    app?.stage.removeChild(transformBox)
-    transformBox.destroy()
-    transformBox = null
-  }
-  for (const h of transformHandles) {
-    app?.stage.removeChild(h)
-    h.destroy()
-  }
-  transformHandles = []
-  if (rotationHandle) {
-    app?.stage.removeChild(rotationHandle)
-    rotationHandle.destroy()
-    rotationHandle = null
-  }
-  if (rotationLine) {
-    app?.stage.removeChild(rotationLine)
-    rotationLine.destroy()
-    rotationLine = null
-  }
-  selectedImageData = null
-  selectedImageSprite = null
-}
-
-function updateTransformBox() {
-  if (!selectedImageData || !transformBox) return
-  const pos = selectedImageData.position || [0, 0]
-  const w = (selectedImageData.width || 64) * (selectedImageData.scaleX ?? selectedImageData.scale ?? 1)
-  const h = (selectedImageData.height || 64) * (selectedImageData.scaleY ?? selectedImageData.scale ?? 1)
-
-  transformBox.clear()
-  transformBox.rect(pos[0], pos[1], w, h)
-  transformBox.stroke({ width: 1, color: 0x528bff, alpha: 0.8 })
-  transformBox.fill({ color: 0x528bff, alpha: 0.05 })
-
-  const handlePositions = [
-    [pos[0], pos[1]], [pos[0] + w / 2, pos[1]], [pos[0] + w, pos[1]],
-    [pos[0] + w, pos[1] + h / 2],
-    [pos[0] + w, pos[1] + h], [pos[0] + w / 2, pos[1] + h], [pos[0], pos[1] + h],
-    [pos[0], pos[1] + h / 2],
-  ]
-
-  transformHandles.forEach((h, i) => {
-    h.clear()
-    h.rect(handlePositions[i][0] - 4, handlePositions[i][1] - 4, 8, 8)
-    h.fill({ color: 0xffffff })
-    h.stroke({ width: 1, color: 0x528bff })
-  })
-
-  // Update rotation handle position
-  const cx = pos[0] + w / 2
-  const rotX = cx
-  const rotY = pos[1] - 30
-
-  if (rotationLine) {
-    rotationLine.clear()
-    rotationLine.moveTo(cx, pos[1])
-    rotationLine.lineTo(rotX, rotY)
-    rotationLine.stroke({ width: 1, color: 0x528bff, alpha: 0.8 })
-  }
-
-  if (rotationHandle) {
-    rotationHandle.clear()
-    rotationHandle.circle(rotX, rotY, 6)
-    rotationHandle.fill({ color: 0xffffff })
-    rotationHandle.stroke({ width: 1.5, color: 0x528bff })
-  }
-}
-
-// --- Keyboard Shortcuts ---
-
-// 切换地图时清理所有选中状态、变换框、拖拽状态
-function resetCanvasState() {
-  removeTransformBox()
-  mapStore.clearImageSelection()
-  cancelCollisionDraft()
-  selectedImageData = null
-  selectedImageLayerId = -1
-  selectedImageIndex = -1
-  selectedImageSprite = null
-  moveStartPos = null
-  moveTileId = 0
-  isDraggingImage = false
-  isImageDragging = false
-  isRotating = false
-  if (moveDragSprite) { app?.stage.removeChild(moveDragSprite); moveDragSprite.destroy(); moveDragSprite = null }
-}
-
 // --- Watchers ---
-
-watch(() => mapEditorStore.showGrid, () => {
-  if (gridGraphics) gridGraphics.visible = mapEditorStore.showGrid
-})
 
 watch(
   () => [mapStore.mapData.width, mapStore.mapData.height, mapStore.mapData.tileSize],
   () => {
-    redraw()
+    viewport.redraw()
     // tileSize 变化时需要重新渲染所有瓦片（sprite 尺寸依赖 tileSize）
     if (app) {
       tileTextures.clear()
@@ -1794,7 +656,7 @@ watch(
   () => mapEditorStore.currentTool,
   (tool) => {
     if (tool !== 'draw' && tool !== 'erase' && tool !== 'fill') {
-      if (previewTile) previewTile.visible = false
+      painter.hidePreview()
     }
   }
 )
@@ -1805,7 +667,7 @@ watch(
   () => {
     resetCanvasState()
     nextTick(() => {
-      centerView()
+      viewport.centerView()
       scheduleRender()
     })
   }
@@ -1815,7 +677,7 @@ watch(
 watch(
   () => mapStore.activeLayerIndex,
   () => {
-    removeTransformBox()
+    transform.removeTransformBox()
     mapStore.clearImageSelection()
   }
 )
@@ -1847,29 +709,25 @@ watch(
 watch(
   () => mapStore.imageRevision,
   () => {
-    if (isImageDragging) return
+    if (transform.isImageDraggingNow()) return
     scheduleRender()
   }
 )
 
-// 碰撞数据 / 显示开关 / 选中实例变化 → 只重绘叠加层
-watch(() => mapStore.collisionRevision, () => drawCollisionOverlay())
-watch(() => mapEditorStore.showCollision, () => drawCollisionOverlay())
+// 选中实例变化 → 同步本地变换框 + 重绘叠加层
 watch(
   () => [mapStore.selectedImageLayerId, mapStore.selectedImageIndex],
   () => {
-    cancelCollisionDraft()
-    selectedVertexIndex = -1
+    collision.cancelCollisionDraft()
+    collision.clearVertexSelection()
     // 外部设置的选中实例（例如绘制页保存返回）需要同步本地变换框
     const img = mapStore.selectedImage
-    if (img && mapEditorStore.imageCollisionTool === 'none' && selectedImageData !== img) {
-      selectedImageData = img
-      selectedImageLayerId = mapStore.selectedImageLayerId
-      selectedImageIndex = mapStore.selectedImageIndex
-      showTransformBox(img)
-      cacheSelectedImageSprite()
+    if (img && mapEditorStore.imageCollisionTool === 'none' && !transform.isSelectedImage(img)) {
+      transform.setSelection(mapStore.selectedImageLayerId, mapStore.selectedImageIndex, img)
+      transform.showTransformBox(img)
+      transform.cacheSelectedImageSprite()
     }
-    drawCollisionOverlay()
+    collision.drawCollisionOverlay()
   }
 )
 
@@ -1877,16 +735,16 @@ watch(
 watch(
   () => mapEditorStore.imageCollisionTool,
   (tool, prev) => {
-    cancelCollisionDraft()
-    selectedVertexIndex = -1
+    collision.cancelCollisionDraft()
+    collision.clearVertexSelection()
     if (tool !== 'none') {
-      removeTransformBox()
-      if (app?.canvas) (app.canvas as HTMLCanvasElement).style.cursor = 'crosshair'
+      transform.removeTransformBox()
+      viewport.setCursor('crosshair')
     } else if (prev !== 'none') {
-      restoreSelectedImageUI()
-      if (app?.canvas) (app.canvas as HTMLCanvasElement).style.cursor = 'default'
+      transform.restoreSelectedImageUI()
+      viewport.setCursor('default')
     }
-    drawCollisionOverlay()
+    collision.drawCollisionOverlay()
   }
 )
 
@@ -1929,6 +787,14 @@ watch(
   }
 )
 
+// 切换地图时清理所有选中状态、变换框、拖拽状态
+function resetCanvasState() {
+  transform.resetTransformState()
+  mapStore.clearImageSelection()
+  collision.cancelCollisionDraft()
+  painter.resetMoveState()
+}
+
 onMounted(() => {
   nextTick(initPixi)
   window.addEventListener('keydown', onKeyDown)
@@ -1958,7 +824,7 @@ onBeforeUnmount(() => {
     app = null
   }
   PIXI = null
-  collisionGraphics = null
+  collision.dispose()
 })
 
 function getThumbnailDataUrl(): string | null {
@@ -1983,21 +849,21 @@ function getThumbnailDataUrl(): string | null {
 
 function deleteSelectedImage() {
   // 碰撞编辑时变换框已被移除，优先用 store 里的选中状态
-  const layerId = mapStore.selectedImageLayerId >= 0 ? mapStore.selectedImageLayerId : selectedImageLayerId
-  const index = mapStore.selectedImageIndex >= 0 ? mapStore.selectedImageIndex : selectedImageIndex
+  const layerId = mapStore.selectedImageLayerId >= 0 ? mapStore.selectedImageLayerId : transform.getSelectedImageLayerId()
+  const index = mapStore.selectedImageIndex >= 0 ? mapStore.selectedImageIndex : transform.getSelectedImageIndex()
   if (index < 0) return
   const layer = mapStore.mapData.layers.find(l => l.id === layerId)
   if (!layer || layer.type !== 'image') return
   layer.images.splice(index, 1)
-  removeTransformBox()
+  transform.removeTransformBox()
   mapStore.clearImageSelection()
-  cancelCollisionDraft()
-  drawCollisionOverlay()
+  collision.cancelCollisionDraft()
+  collision.drawCollisionOverlay()
   mapStore.imageRevision++
   scheduleRender()
 }
 
-defineExpose({ redraw, cursorGridPos, renderAllLayers, showTransformBox, removeTransformBox, resetCanvasState, getThumbnailDataUrl, deleteSelectedImage })
+defineExpose({ redraw, cursorGridPos, renderAllLayers, showTransformBox: transform.showTransformBox, removeTransformBox: transform.removeTransformBox, resetCanvasState, getThumbnailDataUrl, deleteSelectedImage })
 </script>
 
 <template>
