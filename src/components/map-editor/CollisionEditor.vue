@@ -2,10 +2,12 @@
 import { ref, watch, computed, onMounted, nextTick } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { useMapStore, type MapResource } from '../../stores/map'
+import { useMapEditorStore } from '../../stores/mapEditor'
 import { useProjectStore } from '../../stores/project'
 import { useEditorStore } from '../../stores/editor'
 
 const mapStore = useMapStore()
+const mapEditorStore = useMapEditorStore()
 const projectStore = useProjectStore()
 const editorStore = useEditorStore()
 
@@ -274,7 +276,7 @@ function loadCollision() {
 
 const snapGrid = 8
 function snapToGrid(val: number): number {
-  return mapStore.snapToPixel ? Math.round(val / snapGrid) * snapGrid : val
+  return mapEditorStore.snapToPixel ? Math.round(val / snapGrid) * snapGrid : val
 }
 
 function getCanvasPos(e: MouseEvent): { x: number; y: number } {
@@ -301,7 +303,7 @@ function pointToSegmentDistance(p: { x: number; y: number }, a: { x: number; y: 
 
 function onMouseDown(e: MouseEvent) {
   const pos = getCanvasPos(e)
-  if (mapStore.collisionTool === 'add') {
+  if (mapEditorStore.collisionTool === 'add') {
     if (collisionPoints.value.length >= 3) {
       const first = collisionPoints.value[0]
       if (Math.abs(first.x - pos.x) < 8 && Math.abs(first.y - pos.y) < 8) {
@@ -323,10 +325,10 @@ function onMouseDown(e: MouseEvent) {
     }
     collisionPoints.value.push({ x: snapToGrid(pos.x), y: snapToGrid(pos.y) })
     saveCollision(); render()
-  } else if (mapStore.collisionTool === 'delete') {
+  } else if (mapEditorStore.collisionTool === 'delete') {
     const idx = findAnchor(pos)
     if (idx >= 0) { collisionPoints.value.splice(idx, 1); saveCollision(); render() }
-  } else if (mapStore.collisionTool === 'move') {
+  } else if (mapEditorStore.collisionTool === 'move') {
     const idx = findAnchor(pos)
     if (idx >= 0) draggingIndex.value = idx
   }

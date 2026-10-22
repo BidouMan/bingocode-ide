@@ -12,6 +12,7 @@ import { useRenderStore } from '../../stores/render'
 import { useTerminalStore } from '../../stores/terminal'
 import { useEngine } from '../../composables/useEngine'
 import { useFileDialog } from '../../composables/useFileDialog'
+import { useMapPaint } from '../../composables/useMapPaint'
 import GameCanvas from '../canvas/GameCanvas.vue'
 import CodeEditor from '../editor/CodeEditor.vue'
 import SpriteEditorView from '../sprite-editor/SpriteEditorView.vue'
@@ -76,6 +77,7 @@ const themeStore = useThemeStore()
 const fileExplorerStore = useFileExplorerStore()
 const engine = useEngine()
 const fileDialog = useFileDialog()
+const mapPaint = useMapPaint()
 
 // loading进度
 const loadingProgress = computed(() => {
@@ -97,6 +99,11 @@ const paintTarget = ref<{ id: string; name: string; path: string } | null>(null)
 /** 绘制页打开方式：edit = 双击帧（选中该帧）；newFrame = 抽屉（自动新建空白帧） */
 const paintOpenMode = ref<'edit' | 'newFrame'>('newFrame')
 const paintInitialFrameIndex = ref(0)
+/** 绘制页模式：角色造型 / 地图背景图像 */
+const paintMode = ref<'sprite' | 'mapImage'>('sprite')
+const paintMapImageSize = ref({ w: 640, h: 480 })
+/** 地图绘制返回时放置实例的目标图像图层 */
+const paintMapLayerId = ref(-1)
 /** 角色编辑器实例：追加帧后强制重载帧列表 */
 const spriteEditorRef = ref<{ reload: () => Promise<void> } | null>(null)
 watch(currentPage, (page) => {
@@ -767,9 +774,35 @@ function onOpenLibrary(type: string) {
 
 function onOpenPaint() {
   // 资源抽屉「绘制角色」= 新建角色
+  paintMode.value = 'sprite'
   paintTarget.value = null
   paintOpenMode.value = 'newFrame'
   currentPage.value = 6  // paint editor page
+}
+
+/** 地图编辑器「绘制背景」：单画板，保存后写回地图图像素材 */
+function onOpenMapPaint() {
+  const layer = mapStore.activeLayer
+  if (!layer || layer.type !== 'image') return
+  paintMode.value = 'mapImage'
+  paintTarget.value = null
+  paintMapLayerId.value = layer.id
+  paintMapImageSize.value = {
+    w: Math.max(1, mapStore.mapData.width * mapStore.mapData.tileSize),
+    h: Math.max(1, mapStore.mapData.height * mapStore.mapData.tileSize),
+  }
+  currentPage.value = 6
+}
+
+/** 绘制页保存地图背景：写 PNG 到地图目录，注册素材并在目标图层放置实例 */
+async function onPaintMapSaved(blob: Blob, width: number, height: number) {
+  try {
+    await mapPaint.saveMapImage(blob, width, height, paintMapLayerId.value)
+    switchPage(0)
+  } catch (e) {
+    // 保存失败时留在绘制页，避免用户丢失未落盘的内容
+    console.error('[MapPaint] 保存地图背景失败:', e)
+  }
 }
 
 /** 造型列表抽屉「绘制新帧」：载入当前角色全部帧 + 自动新建空白帧 */
@@ -777,6 +810,7 @@ function onOpenPaintAppend() {
   const id = resourceStore.selectedSpriteId
   const item = id ? resourceStore.getItem(id, 'sprite') : null
   if (!item) return
+  paintMode.value = 'sprite'
   paintTarget.value = { id: item.id, name: item.name, path: item.path }
   paintOpenMode.value = 'newFrame'
   currentPage.value = 6
@@ -787,6 +821,7 @@ function onOpenPaintEdit(index: number) {
   const id = resourceStore.selectedSpriteId
   const item = id ? resourceStore.getItem(id, 'sprite') : null
   if (!item) return
+  paintMode.value = 'sprite'
   paintTarget.value = { id: item.id, name: item.name, path: item.path }
   paintOpenMode.value = 'edit'
   paintInitialFrameIndex.value = index
@@ -1975,7 +2010,11 @@ function spriteDisplayName(name: string) {
 
         <!-- ═══ Page 0: 游戏模式 — 地图编辑器 (v-show 保持 PixiJS 实例存活) ═══ -->
         <div v-show="editorStore.isGameMode && editorStore.activeEditorMode === 'map'" class="editor-page-full">
-          <MapEditorView @open-resource-lib="currentPage = 4" @map-thumbnail-updated="onMapThumbnailUpdated" />
+          <MapEditorView
+            @open-resource-lib="currentPage = 4"
+            @open-paint="onOpenMapPaint"
+            @map-thumbnail-updated="onMapThumbnailUpdated"
+          />
         </div>
 
         <!-- ═══ Page 0: 游戏模式 — 代码编辑 (侧边栏 + 标签 + 代码编辑 + 控制台) ═══ -->
@@ -2320,8 +2359,11 @@ function spriteDisplayName(name: string) {
           :target-sprite="paintTarget"
           :open-mode="paintOpenMode"
           :initial-frame-index="paintInitialFrameIndex"
+          :mode="paintMode"
+          :map-image-size="paintMapImageSize"
           @close="switchPage(0)"
           @saved="onPaintSaved"
+          @saved-map-image="onPaintMapSaved"
         />
       </div>
 

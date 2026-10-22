@@ -2,6 +2,7 @@
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { useMapStore, type MapResource } from '../../stores/map'
+import { useMapEditorStore } from '../../stores/mapEditor'
 import { useProjectStore } from '../../stores/project'
 import { useEditorStore } from '../../stores/editor'
 import { isSvgSource, rasterizeSvgImage, SVG_RASTER_SCALE } from '../../utils/svgRasterize'
@@ -40,6 +41,7 @@ let imageDragStartWorld = { x: 0, y: 0 }
 let imageDragStartPos = [0, 0]
 
 const mapStore = useMapStore()
+const mapEditorStore = useMapEditorStore()
 const projectStore = useProjectStore()
 const editorStore = useEditorStore()
 
@@ -417,12 +419,12 @@ async function placeImage(layer: any, resource: any, x: number, y: number) {
   selectedImageIndex = layer.images.length - 1
   mapStore.selectImage(layer.id, selectedImageIndex)
   showTransformBox(imgData)
-  mapStore.setTool('select')
+  mapEditorStore.setTool('select')
 }
 
 async function updateTileAt(layerIndex: number, x: number, y: number) {
   const layer = mapStore.mapData.layers[layerIndex]
-  if (!layer) return
+  if (!layer || layer.type !== 'drawing') return
   const tileId = layer.tiles[`${x},${y}`] ?? 0
   await renderTile(layer.id, x, y, tileId)
 }
@@ -456,7 +458,7 @@ function drawGrid() {
   }
   gridGraphics.stroke({ width: 0.5, color: 0x333333 })
 
-  gridGraphics.visible = mapStore.showGrid
+  gridGraphics.visible = mapEditorStore.showGrid
   app.stage.addChildAt(gridGraphics, 0)
 }
 
@@ -538,7 +540,7 @@ function onPointerDown(e: PointerEvent) {
   }
 
   // 碰撞编辑模式下，指针事件全部交给碰撞工具，避免拖动/缩放图像
-  if (mapStore.activeLayer?.type === 'image' && mapStore.imageCollisionTool !== 'none' && mapStore.selectedImage) {
+  if (mapStore.activeLayer?.type === 'image' && mapEditorStore.imageCollisionTool !== 'none' && mapStore.selectedImage) {
     const worldPos = screenToWorld(e)
     if (worldPos) handleCollisionPointerDown(mapStore.selectedImage, worldPos, e.button)
     return
@@ -550,7 +552,7 @@ function onPointerDown(e: PointerEvent) {
   if (e.button === 0 && !e.altKey && !isSpaceHeld) {
     const layer = mapStore.activeLayer
 
-    if (mapStore.currentTool === 'select' && layer && layer.type === 'image') {
+    if (mapEditorStore.currentTool === 'select' && layer && layer.type === 'image') {
       const worldPos = screenToWorld(e)
       if (worldPos) {
         const hit = hitTestImage(worldPos.x, worldPos.y)
@@ -585,7 +587,7 @@ function onPointerDown(e: PointerEvent) {
     const pos = screenToGrid(e)
     if (pos) {
       // 绘制工具：左键绘制，右键擦除
-      if (mapStore.currentTool === 'draw' && mapStore.activeLayer && mapStore.activeLayer.type === 'drawing') {
+      if (mapEditorStore.currentTool === 'draw' && mapStore.activeLayer && mapStore.activeLayer.type === 'drawing') {
         if (e.button === 0 && mapStore.selectedTileIndex >= 0) {
           const tileId = encodeTileId(mapStore.activeLayer.id, mapStore.selectedResourceIndex, mapStore.selectedTileIndex)
           mapStore.setTile(pos.x, pos.y, tileId)
@@ -598,15 +600,15 @@ function onPointerDown(e: PointerEvent) {
           updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
           emit('tile-erased', pos.x, pos.y)
         }
-      } else if (mapStore.currentTool === 'erase') {
+      } else if (mapEditorStore.currentTool === 'erase') {
         mapStore.setTile(pos.x, pos.y, 0)
         lastPaintedKey = `${pos.x},${pos.y}`
         updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
         emit('tile-erased', pos.x, pos.y)
-      } else if (mapStore.currentTool === 'fill' && mapStore.selectedTileIndex >= 0 && mapStore.activeLayer) {
+      } else if (mapEditorStore.currentTool === 'fill' && mapStore.selectedTileIndex >= 0 && mapStore.activeLayer) {
         const tileId = encodeTileId(mapStore.activeLayer.id, mapStore.selectedResourceIndex, mapStore.selectedTileIndex)
         floodFill(pos.x, pos.y, tileId)
-      } else if (mapStore.currentTool === 'move') {
+      } else if (mapEditorStore.currentTool === 'move') {
         const layer = mapStore.activeLayer
         if (layer && layer.type === 'drawing') {
           const tileId = layer.tiles[`${pos.x},${pos.y}`] ?? 0
@@ -657,7 +659,7 @@ function onPointerMove(e: PointerEvent) {
   }
 
   // 碰撞编辑：拖动顶点 / 拉矩形 / 钢笔预览
-  if (mapStore.imageCollisionTool !== 'none' && mapStore.selectedImage) {
+  if (mapEditorStore.imageCollisionTool !== 'none' && mapStore.selectedImage) {
     const worldPos = screenToWorld(e)
     if (worldPos) handleCollisionPointerMove(mapStore.selectedImage, worldPos)
     return
@@ -688,7 +690,7 @@ function onPointerMove(e: PointerEvent) {
     let mx = worldPos.x
     let my = worldPos.y
     // 吸附网格：缩放手柄拖动的边对齐到最近网格线（与图像拖动吸附同一开关）
-    if (mapStore.snapToGrid) {
+    if (mapEditorStore.snapToGrid) {
       const ts = mapStore.mapData.tileSize
       mx = Math.round(mx / ts) * ts
       my = Math.round(my / ts) * ts
@@ -780,7 +782,7 @@ function onPointerMove(e: PointerEvent) {
       let nx = imageDragStartPos[0] + dx
       let ny = imageDragStartPos[1] + dy
       // 吸附网格：图像左上角对齐到最近的网格点
-      if (mapStore.snapToGrid) {
+      if (mapEditorStore.snapToGrid) {
         const ts = mapStore.mapData.tileSize
         nx = Math.round(nx / ts) * ts
         ny = Math.round(ny / ts) * ts
@@ -810,7 +812,7 @@ function onPointerMove(e: PointerEvent) {
     }
   }
 
-  if (mapStore.currentTool === 'draw' || mapStore.currentTool === 'erase' || mapStore.currentTool === 'fill') {
+  if (mapEditorStore.currentTool === 'draw' || mapEditorStore.currentTool === 'erase' || mapEditorStore.currentTool === 'fill') {
     const pos = screenToGrid(e)
     updatePreview(pos)
 
@@ -818,7 +820,7 @@ function onPointerMove(e: PointerEvent) {
       const key = `${pos.x},${pos.y}`
       if (key !== lastPaintedKey) {
         // 绘制工具：左键绘制，右键擦除
-        if (mapStore.currentTool === 'draw' && mapStore.activeLayer && mapStore.activeLayer.type === 'drawing') {
+        if (mapEditorStore.currentTool === 'draw' && mapStore.activeLayer && mapStore.activeLayer.type === 'drawing') {
           if (e.buttons === 2) {
             mapStore.setTile(pos.x, pos.y, 0)
             updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
@@ -828,7 +830,7 @@ function onPointerMove(e: PointerEvent) {
             updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
             emit('tile-painted', pos.x, pos.y, tileId)
           }
-        } else if (mapStore.currentTool === 'erase') {
+        } else if (mapEditorStore.currentTool === 'erase') {
           mapStore.setTile(pos.x, pos.y, 0)
           updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
           emit('tile-erased', pos.x, pos.y)
@@ -841,7 +843,7 @@ function onPointerMove(e: PointerEvent) {
 
 function onPointerUp() {
   // 碰撞编辑：矩形收尾 / 顶点结束拖拽
-  if (mapStore.imageCollisionTool === 'rect' && collisionRectStart) {
+  if (mapEditorStore.imageCollisionTool === 'rect' && collisionRectStart) {
     finishCollisionRect()
     return
   }
@@ -914,7 +916,7 @@ function onPointerLeave() {
     previewTile.visible = false
   }
   // 离开画布时取消未完成的碰撞草稿，避免残留预览
-  if (mapStore.imageCollisionTool !== 'none') {
+  if (mapEditorStore.imageCollisionTool !== 'none') {
     if (collisionRectStart) {
       collisionRectStart = null
       collisionRectCurrent = null
@@ -1007,22 +1009,22 @@ function onKeyDown(e: KeyboardEvent) {
   if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return
 
   // 碰撞编辑快捷键：Esc 取消/退出，Enter 闭合多边形，Delete 删除顶点
-  if (mapStore.imageCollisionTool !== 'none') {
+  if (mapEditorStore.imageCollisionTool !== 'none') {
     if (e.key === 'Escape') {
       if (collisionDraftActive || collisionRectStart) {
         cancelCollisionDraft()
       } else {
-        mapStore.setImageCollisionTool('none')
+        mapEditorStore.setImageCollisionTool('none')
       }
       drawCollisionOverlay()
       return
     }
-    if (e.key === 'Enter' && mapStore.imageCollisionTool === 'polygon' && collisionDraftActive) {
+    if (e.key === 'Enter' && mapEditorStore.imageCollisionTool === 'polygon' && collisionDraftActive) {
       e.preventDefault()
       closeCollisionDraft()
       return
     }
-    if ((e.key === 'Delete' || e.key === 'Backspace') && mapStore.imageCollisionTool === 'vertex') {
+    if ((e.key === 'Delete' || e.key === 'Backspace') && mapEditorStore.imageCollisionTool === 'vertex') {
       e.preventDefault()
       deleteSelectedVertex()
       return
@@ -1039,12 +1041,12 @@ function onKeyDown(e: KeyboardEvent) {
   }
 
   switch (e.key.toLowerCase()) {
-    case 'b': mapStore.setTool('draw'); break
-    case 'e': mapStore.setTool('erase'); break
-    case 'g': mapStore.toggleGrid(); break
-    case 'm': mapStore.setTool('move'); break
-    case 'v': mapStore.setTool('select'); break
-    case 'f': mapStore.setTool('fill'); break
+    case 'b': mapEditorStore.setTool('draw'); break
+    case 'e': mapEditorStore.setTool('erase'); break
+    case 'g': mapEditorStore.toggleGrid(); break
+    case 'm': mapEditorStore.setTool('move'); break
+    case 'v': mapEditorStore.setTool('select'); break
+    case 'f': mapEditorStore.setTool('fill'); break
   }
 }
 
@@ -1326,7 +1328,7 @@ function drawCollisionOverlay() {
   const img = mapStore.selectedImage
 
   // 全局碰撞可视化（所有图像图层）
-  if (mapStore.showCollision) {
+  if (mapEditorStore.showCollision) {
     for (const layer of mapStore.mapData.layers) {
       if (layer.type !== 'image' || !layer.visible) continue
       for (const layerImg of layer.images) {
@@ -1346,7 +1348,7 @@ function drawCollisionOverlay() {
   // 已保存的碰撞形状
   const pts = img.collisionShape?.points
   if (pts && pts.length >= 3) {
-    const editing = mapStore.imageCollisionTool !== 'none'
+    const editing = mapEditorStore.imageCollisionTool !== 'none'
     drawCollisionPolygon(
       g, img,
       pts.map((p: number[]) => ({ x: p[0], y: p[1] })),
@@ -1423,7 +1425,7 @@ function deleteSelectedVertex() {
 
 function handleCollisionPointerDown(img: any, world: { x: number; y: number }, button: number) {
   const raw = imageWorldToLocal(img, world.x, world.y)
-  const tool = mapStore.imageCollisionTool
+  const tool = mapEditorStore.imageCollisionTool
   // 点击图片范围外：只用于取消顶点选中，不在图片外生成锚点
   if (raw.x < -0.02 || raw.x > 1.02 || raw.y < -0.02 || raw.y > 1.02) {
     if (tool === 'vertex') {
@@ -1501,7 +1503,7 @@ function handleCollisionPointerDown(img: any, world: { x: number; y: number }, b
 
 function handleCollisionPointerMove(img: any, world: { x: number; y: number }) {
   const local = snapImageLocal(img, imageWorldToLocal(img, world.x, world.y))
-  const tool = mapStore.imageCollisionTool
+  const tool = mapEditorStore.imageCollisionTool
 
   if (tool === 'rect' && collisionRectStart) {
     collisionRectCurrent = local
@@ -1648,7 +1650,7 @@ function updateSelectedImageSprite() {
   selectedImageSprite.alpha = selectedImageData.opacity ?? 1
   selectedImageSprite.visible = true
   // 图像移动/缩放/旋转时碰撞叠加层跟随（在更新位置之后重绘）
-  if (mapStore.showCollision) drawCollisionOverlay()
+  if (mapEditorStore.showCollision) drawCollisionOverlay()
 }
 
 function cacheSelectedImageSprite() {
@@ -1761,8 +1763,8 @@ function resetCanvasState() {
 
 // --- Watchers ---
 
-watch(() => mapStore.showGrid, () => {
-  if (gridGraphics) gridGraphics.visible = mapStore.showGrid
+watch(() => mapEditorStore.showGrid, () => {
+  if (gridGraphics) gridGraphics.visible = mapEditorStore.showGrid
 })
 
 watch(
@@ -1789,7 +1791,7 @@ watch(
 )
 
 watch(
-  () => mapStore.currentTool,
+  () => mapEditorStore.currentTool,
   (tool) => {
     if (tool !== 'draw' && tool !== 'erase' && tool !== 'fill') {
       if (previewTile) previewTile.visible = false
@@ -1852,19 +1854,28 @@ watch(
 
 // 碰撞数据 / 显示开关 / 选中实例变化 → 只重绘叠加层
 watch(() => mapStore.collisionRevision, () => drawCollisionOverlay())
-watch(() => mapStore.showCollision, () => drawCollisionOverlay())
+watch(() => mapEditorStore.showCollision, () => drawCollisionOverlay())
 watch(
   () => [mapStore.selectedImageLayerId, mapStore.selectedImageIndex],
   () => {
     cancelCollisionDraft()
     selectedVertexIndex = -1
+    // 外部设置的选中实例（例如绘制页保存返回）需要同步本地变换框
+    const img = mapStore.selectedImage
+    if (img && mapEditorStore.imageCollisionTool === 'none' && selectedImageData !== img) {
+      selectedImageData = img
+      selectedImageLayerId = mapStore.selectedImageLayerId
+      selectedImageIndex = mapStore.selectedImageIndex
+      showTransformBox(img)
+      cacheSelectedImageSprite()
+    }
     drawCollisionOverlay()
   }
 )
 
 // 进入碰撞编辑时隐藏变换框（避免手柄抢事件），退出时恢复
 watch(
-  () => mapStore.imageCollisionTool,
+  () => mapEditorStore.imageCollisionTool,
   (tool, prev) => {
     cancelCollisionDraft()
     selectedVertexIndex = -1
@@ -1976,7 +1987,7 @@ function deleteSelectedImage() {
   const index = mapStore.selectedImageIndex >= 0 ? mapStore.selectedImageIndex : selectedImageIndex
   if (index < 0) return
   const layer = mapStore.mapData.layers.find(l => l.id === layerId)
-  if (!layer) return
+  if (!layer || layer.type !== 'image') return
   layer.images.splice(index, 1)
   removeTransformBox()
   mapStore.clearImageSelection()

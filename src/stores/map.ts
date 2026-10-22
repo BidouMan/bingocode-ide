@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { useMapEditorStore } from './mapEditor'
 
 export interface TileData {
   collision: boolean
@@ -21,15 +22,24 @@ export interface TileSet {
   tiles: TileData[]
 }
 
-export interface MapLayer {
+interface MapLayerBase {
   id: number
   name: string
-  type: 'drawing' | 'image'
   visible: boolean
   locked: boolean
+}
+
+export interface DrawingLayer extends MapLayerBase {
+  type: 'drawing'
   tiles: Record<string, number>
+}
+
+export interface ImageLayer extends MapLayerBase {
+  type: 'image'
   images: ImageData[]
 }
+
+export type MapLayer = DrawingLayer | ImageLayer
 
 export interface ImageData {
   imagePath: string
@@ -103,30 +113,20 @@ export const useMapStore = defineStore('map', () => {
         type: 'image',
         visible: true,
         locked: false,
-        tiles: {},
         images: [],
       },
     ],
     tileSets: [],
   })
 
+  const mapEditor = useMapEditorStore()
   const activeLayerIndex = ref(0)
-  const showGrid = ref(true)
-  const snapToGrid = ref(true)
-  const currentTool = ref<MapTool>('select')
   const selectedResourceIndex = ref(-1)
   const selectedTileIndex = ref(-1)
-  const collisionTool = ref<CollisionTool>('move')
-  const snapToPixel = ref(true)
-  const cursorX = ref<number | null>(null)
-  const cursorY = ref<number | null>(null)
 
   // 图像实例选中状态（画布选中图像后，属性面板/工具栏共用）
   const selectedImageLayerId = ref(-1)
   const selectedImageIndex = ref(-1)
-  const imageCollisionTool = ref<ImageCollisionTool>('none')
-  // 全局显示所有图像碰撞形状（调试用）
-  const showCollision = ref(false)
 
   // Revision counters for cheap watcher dependency tracking (avoid expensive JSON.stringify in watcher getters)
   const tileRevision = ref(0)
@@ -152,7 +152,8 @@ export const useMapStore = defineStore('map', () => {
   const selectedImage = computed<ImageData | null>(() => {
     if (selectedImageLayerId.value < 0 || selectedImageIndex.value < 0) return null
     const layer = mapData.value.layers.find(l => l.id === selectedImageLayerId.value)
-    return layer?.images[selectedImageIndex.value] ?? null
+    if (!layer || layer.type !== 'image') return null
+    return layer.images[selectedImageIndex.value] ?? null
   })
 
   // 素材与 tileset 通过稳定 id / firstgid 绑定，不再依赖图层顺序或全局偏移
@@ -213,7 +214,6 @@ export const useMapStore = defineStore('map', () => {
           type: 'image',
           visible: true,
           locked: false,
-          tiles: {},
           images: [],
         },
       ],
@@ -224,10 +224,6 @@ export const useMapStore = defineStore('map', () => {
     selectedTileIndex.value = -1
     clearImageSelection()
     currentMapPath.value = ''
-  }
-
-  function setTool(tool: MapTool) {
-    currentTool.value = tool
   }
 
   function setTile(x: number, y: number, tileId: number) {
@@ -259,15 +255,9 @@ export const useMapStore = defineStore('map', () => {
     const id = mapData.value.layers.length > 0
       ? Math.max(...mapData.value.layers.map(l => l.id)) + 1
       : 0
-    const newLayer = {
-      id,
-      name,
-      type,
-      visible: true,
-      locked: false,
-      tiles: {},
-      images: [],
-    }
+    const newLayer: MapLayer = type === 'drawing'
+      ? { id, name, type, visible: true, locked: false, tiles: {} }
+      : { id, name, type, visible: true, locked: false, images: [] }
     mapData.value.layers.push(newLayer)
     activeLayerIndex.value = mapData.value.layers.length - 1
     syncToolWithLayer()
@@ -331,11 +321,11 @@ export const useMapStore = defineStore('map', () => {
     const layer = mapData.value.layers[idx]
     if (!layer) return
     if (layer.type === 'image') {
-      currentTool.value = 'select'
+      mapEditor.setTool('select')
       selectedResourceIndex.value = -1
       selectedTileIndex.value = -1
     } else {
-      currentTool.value = 'draw'
+      mapEditor.setTool('draw')
       if (activeLayerResources.value.length > 0) {
         selectedResourceIndex.value = 0
         selectedTileIndex.value = 0
@@ -352,14 +342,6 @@ export const useMapStore = defineStore('map', () => {
     selectedTileIndex.value = -1
     clearImageSelection()
     syncToolWithLayer()
-  }
-
-  function toggleGrid() {
-    showGrid.value = !showGrid.value
-  }
-
-  function toggleSnapToGrid() {
-    snapToGrid.value = !snapToGrid.value
   }
 
   function selectTile(resourceIndex: number, tileIndex: number) {
@@ -417,6 +399,7 @@ export const useMapStore = defineStore('map', () => {
     let tilesChanged = false
     if (removedTileSet) {
       for (const l of mapData.value.layers) {
+        if (l.type !== 'drawing') continue
         for (const key of Object.keys(l.tiles)) {
           const gid = l.tiles[key]
           if (gid >= removedTileSet.firstgid && gid < nextFirstgid) {
@@ -475,19 +458,6 @@ export const useMapStore = defineStore('map', () => {
     }
   }
 
-  function setCollisionTool(tool: CollisionTool) {
-    collisionTool.value = tool
-  }
-
-  function toggleSnapToPixel() {
-    snapToPixel.value = !snapToPixel.value
-  }
-
-  function setCursorPos(x: number | null, y: number | null) {
-    cursorX.value = x
-    cursorY.value = y
-  }
-
   // ====== 图像实例碰撞（图像模式） ======
 
   function selectImage(layerId: number, index: number) {
@@ -498,15 +468,7 @@ export const useMapStore = defineStore('map', () => {
   function clearImageSelection() {
     selectedImageLayerId.value = -1
     selectedImageIndex.value = -1
-    imageCollisionTool.value = 'none'
-  }
-
-  function setImageCollisionTool(tool: ImageCollisionTool) {
-    imageCollisionTool.value = tool
-  }
-
-  function toggleShowCollision() {
-    showCollision.value = !showCollision.value
+    mapEditor.setImageCollisionTool('none')
   }
 
   // 默认碰撞形状：整张图片
@@ -565,6 +527,18 @@ export const useMapStore = defineStore('map', () => {
     collisionRevision.value++
   }
 
+  /** 在指定图像图层放置图像实例并选中（绘制页保存返回时使用） */
+  function addImageInstance(layerId: number, img: ImageData): number {
+    const layer = mapData.value.layers.find(l => l.id === layerId)
+    if (!layer || layer.type !== 'image') return -1
+    layer.images.push(img)
+    const index = layer.images.length - 1
+    selectedImageLayerId.value = layerId
+    selectedImageIndex.value = index
+    imageRevision.value++
+    return index
+  }
+
   function setTileCollision(tileSetIndex: number, tileIndex: number, collision: boolean) {
     const tileSet = mapData.value.tileSets[tileSetIndex]
     if (!tileSet) return
@@ -596,16 +570,9 @@ export const useMapStore = defineStore('map', () => {
     currentMapPath,
     mapData,
     activeLayerIndex,
-    showGrid,
-    snapToGrid,
-    currentTool,
     selectedResourceIndex,
     selectedTileIndex,
     activeLayerResources,
-    collisionTool,
-    snapToPixel,
-    cursorX,
-    cursorY,
     activeLayer,
     selectedResource,
     getTileSetForResource,
@@ -613,7 +580,6 @@ export const useMapStore = defineStore('map', () => {
     setMapPath,
     loadMap,
     newMap,
-    setTool,
     setTile,
     getTile,
     addLayer,
@@ -624,8 +590,6 @@ export const useMapStore = defineStore('map', () => {
     toggleLayerLock,
     renameLayer,
     setActiveLayer,
-    toggleGrid,
-    toggleSnapToGrid,
     selectTile,
     addResource,
     removeResource,
@@ -634,22 +598,16 @@ export const useMapStore = defineStore('map', () => {
     updateTileSize,
     setTileCollision,
     setTileCollisionType,
-    setCollisionTool,
-    toggleSnapToPixel,
-    setCursorPos,
     selectedImageLayerId,
     selectedImageIndex,
     selectedImage,
-    imageCollisionTool,
-    showCollision,
     selectImage,
     clearImageSelection,
-    setImageCollisionTool,
-    toggleShowCollision,
     setImageCollisionPoints,
     setImageCollisionType,
     setImageCollisionEnabled,
     clearImageCollision,
+    addImageInstance,
     tileRevision,
     imageRevision,
     collisionRevision,

@@ -2,7 +2,7 @@
 import { ref, onMounted, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { ask } from '@tauri-apps/plugin-dialog'
-import { usePaintStore } from '../../stores/paint'
+import { usePaintStore, ARTBOARD_MAX } from '../../stores/paint'
 import { useResourceStore } from '../../stores/resource'
 import { useProjectStore } from '../../stores/project'
 import {
@@ -11,7 +11,7 @@ import {
   revokeSpriteUrls,
 } from '../../composables/useSpriteData'
 import { rewriteSpriteFrames, normalizeFrameToCanvas } from '../../composables/appendSpriteFrames'
-import { exportCanvasPngBlob } from './utils/artboardExport'
+import { exportCanvasPngBlob, exportArtboardPngBlob } from './utils/artboardExport'
 import { packDrawnFrames, buildDrawnBsfManifest } from '../../utils/bsfPacker'
 import PaintTopBar from './PaintTopBar.vue'
 import PaintToolbar from './PaintToolbar.vue'
@@ -33,12 +33,18 @@ const props = defineProps<{
   openMode?: 'edit' | 'newFrame'
   /** edit 模式初始选中帧 */
   initialFrameIndex?: number
+  /** sprite = 角色造型；mapImage = 地图背景图像（单画板，保存为 PNG 素材） */
+  mode?: 'sprite' | 'mapImage'
+  /** mapImage 模式的画板尺寸（通常等于地图像素尺寸） */
+  mapImageSize?: { w: number; h: number }
 }>()
 
 const emit = defineEmits<{
   close: []
   /** 保存完成：新建返回新角色 id；编辑返回原角色 id */
   saved: [id: string, name: string]
+  /** 地图图像保存：输出单帧 PNG，由外层写入地图目录并注册素材 */
+  'saved-map-image': [blob: Blob, width: number, height: number]
 }>()
 
 const store = usePaintStore()
@@ -62,6 +68,19 @@ async function frameBlobToCanvas(blob: Blob, w: number, h: number): Promise<HTML
 // MainLayout 用 :key 递增保证每次打开全新实例；store 是全局的，挂载时重置
 onMounted(async () => {
   store.reset()
+  // 地图背景：单画板，尺寸锁定为地图像素尺寸
+  if (props.mode === 'mapImage') {
+    const size = props.mapImageSize
+    if (size) {
+      const clamp = (v: number) => Math.min(ARTBOARD_MAX, Math.max(1, Math.round(v)))
+      store.artboardWidth = clamp(size.w)
+      store.artboardHeight = clamp(size.h)
+    }
+    store.sizeForced = true
+    store.resetView()
+    return
+  }
+
   const target = props.targetSprite
   if (!target || !artboardRef.value) return
 
@@ -114,7 +133,7 @@ onMounted(async () => {
 async function onClose() {
   if (store.dirty) {
     const shouldClose = await ask('画板有未保存的修改，关闭后将丢失。确定关闭吗？', {
-      title: '角色绘制',
+      title: props.mode === 'mapImage' ? '地图绘制' : '角色绘制',
       kind: 'warning',
     })
     if (!shouldClose) return
@@ -129,6 +148,15 @@ async function onSave() {
   if (!canvases || !names || canvases.length === 0) return
 
   try {
+    // ─── 地图背景：只导出当前画板为 PNG，由外层写入地图目录 ───
+    if (props.mode === 'mapImage') {
+      const canvas = canvases[Math.min(Math.max(0, store.activeFrameIndex), canvases.length - 1)]
+      if (!canvas) return
+      const blob = await exportArtboardPngBlob(canvas, store.artboardWidth, store.artboardHeight)
+      emit('saved-map-image', blob, store.artboardWidth, store.artboardHeight)
+      return
+    }
+
     const target = props.targetSprite
 
     // ─── 编辑模式：当前帧列表整体回写原角色 ───
@@ -176,7 +204,7 @@ async function onSave() {
 <template>
   <div class="paint-page">
     <PaintTopBar
-      :save-title="targetSprite ? '保存回角色' : undefined"
+      :save-title="mode === 'mapImage' ? '保存为地图图像' : (targetSprite ? '保存回角色' : undefined)"
       @close="onClose"
       @save="onSave"
       @crop="artboardRef?.cropToContent()"
@@ -197,6 +225,7 @@ async function onSave() {
       <div class="paint-center">
         <PaintArtboard ref="artboardRef" />
         <PaintFrameStrip
+          v-if="mode !== 'mapImage'"
           @add="artboardRef?.addFrame(false)"
           @duplicate="artboardRef?.addFrame(true)"
           @remove="artboardRef?.removeFrame($event)"

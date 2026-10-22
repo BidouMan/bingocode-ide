@@ -2,6 +2,7 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { useMapStore, type MapResource } from '../../stores/map'
+import { useMapEditorStore } from '../../stores/mapEditor'
 import { useProjectStore } from '../../stores/project'
 import { useEditorStore } from '../../stores/editor'
 import CollisionEditor from './CollisionEditor.vue'
@@ -26,6 +27,7 @@ const emit = defineEmits<{
 }>()
 
 const mapStore = useMapStore()
+const mapEditorStore = useMapEditorStore()
 const projectStore = useProjectStore()
 const editorStore = useEditorStore()
 const showImportDialog = ref(false)
@@ -432,25 +434,25 @@ function onResourceClick(rIdx: number) {
     <div class="res-col-toolbar">
       <button
         class="col-tool-btn"
-        :class="{ 'col-tool-active': mapStore.collisionTool === 'move' }"
+        :class="{ 'col-tool-active': mapEditorStore.collisionTool === 'move' }"
         v-tooltip="'移动锚点'"
-        @click="mapStore.setCollisionTool('move')"
+        @click="mapEditorStore.setCollisionTool('move')"
       >
         <img :src="iconMoveAnchor" class="col-tool-icon" />
       </button>
       <button
         class="col-tool-btn"
-        :class="{ 'col-tool-active': mapStore.collisionTool === 'add' }"
+        :class="{ 'col-tool-active': mapEditorStore.collisionTool === 'add' }"
         v-tooltip="'添加锚点'"
-        @click="mapStore.setCollisionTool('add')"
+        @click="mapEditorStore.setCollisionTool('add')"
       >
         <img :src="iconAddAnchor" class="col-tool-icon" />
       </button>
       <button
         class="col-tool-btn"
-        :class="{ 'col-tool-active': mapStore.collisionTool === 'delete' }"
+        :class="{ 'col-tool-active': mapEditorStore.collisionTool === 'delete' }"
         v-tooltip="'删除锚点'"
-        @click="mapStore.setCollisionTool('delete')"
+        @click="mapEditorStore.setCollisionTool('delete')"
       >
         <img :src="iconDelAnchor" class="col-tool-icon" />
       </button>
@@ -463,9 +465,9 @@ function onResourceClick(rIdx: number) {
       </button>
       <button
         class="col-tool-btn"
-        :class="{ 'col-tool-active': mapStore.snapToPixel }"
+        :class="{ 'col-tool-active': mapEditorStore.snapToPixel }"
         v-tooltip="'吸附锚点'"
-        @click="mapStore.toggleSnapToPixel()"
+        @click="mapEditorStore.toggleSnapToPixel()"
       >
         <img :src="iconSnapAnchor" class="col-tool-icon" />
       </button>

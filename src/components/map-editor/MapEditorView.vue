@@ -7,12 +7,15 @@ import ResourceListPanel from './ResourceListPanel.vue'
 import PropertyPanel from './PropertyPanel.vue'
 import LayerPanel from './LayerPanel.vue'
 import { useMapStore } from '../../stores/map'
+import { useMapEditorStore } from '../../stores/mapEditor'
 import { useResourceStore } from '../../stores/resource'
 import { useProjectStore } from '../../stores/project'
+import { useMapPersistence } from '../../composables/useMapPersistence'
 import JSZip from 'jszip'
 import { serializeMap, deserializeMap } from '../../utils/mapSerializer'
 
 const mapStore = useMapStore()
+const mapEditorStore = useMapEditorStore()
 const resourceStore = useResourceStore()
 const projectStore = useProjectStore()
 
@@ -22,180 +25,21 @@ const mapCanvasRef = ref<InstanceType<typeof MapCanvas>>()
 
 const emit = defineEmits<{
   'open-resource-lib': []
+  'open-paint': []
   'map-thumbnail-updated': [itemId: string, dataUrl: string]
 }>()
 
-// ====== 统一数据源：项目目录 maps/<地图名>/map.json ======
-
-// 获取某个地图对应的目录和文件路径（使用地图名，直观可读）
-function mapDirPath(mapName: string): string {
-  return `${projectStore.root}/assets/maps/${mapName}`
-}
-function mapJsonPath(mapName: string): string {
-  return `${mapDirPath(mapName)}/map.json`
-}
-
-// 保存当前地图到项目目录
-async function saveMapToProject(mapName?: string): Promise<void> {
-  const name = mapName ?? mapStore.mapData.name
-  if (!name) {
-    console.warn('[MapEditor] saveMapToProject: 地图名为空，跳过保存')
-    return
-  }
-  if (!projectStore.root) {
-    await projectStore.initProject()
-  }
-  if (!projectStore.root) {
-    console.warn('[MapEditor] saveMapToProject: 项目目录未就绪，无法保存')
-    return
-  }
-  const dirPath = mapDirPath(name)
-  const savePath = mapJsonPath(name)
-  try {
-    const saveData = serializeMap(mapStore.mapData)
-    const json = JSON.stringify(saveData)
-    await invoke('write_file', { path: savePath, content: json })
-
-    // 同时生成 thumbnail.png 快照
-    const thumbDataUrl = mapCanvasRef.value?.getThumbnailDataUrl()
-    if (thumbDataUrl && thumbDataUrl.startsWith('data:image/')) {
-      const base64 = thumbDataUrl.split(',')[1]
-      const raw = Uint8Array.from(atob(base64), c => c.charCodeAt(0))
-      await invoke('write_binary', { path: `${dirPath}/thumbnail.png`, data: Array.from(raw) })
-
-      // 直接把刚生成的快照写进资源列表缩略图缓存（经 MainLayout），
-      // 编辑后无需切 tab 重读文件即可第一时间看到最新缩略图
-      const savedItem = resourceStore.maps.find(m => m.name === name)
-      if (savedItem) emit('map-thumbnail-updated', savedItem.id, thumbDataUrl)
-    }
-
-    // 更新 resource store 中该 map 的 path，供左侧缩略图加载
-    const item = resourceStore.maps.find(m => m.name === name)
-    if (item) item.path = dirPath
-  } catch (e) {
-    console.error('[MapEditor] 保存地图到项目目录失败:', e)
-  }
-}
-
-// 从项目目录加载地图数据
-async function loadMapFromProject(itemId: string): Promise<boolean> {
-  if (!projectStore.root) {
-    await projectStore.initProject()
-  }
-  if (!projectStore.root) return false
-
-  // 优先从预解析缓存读取
-  const cached = resourceStore.getCachedMapData(itemId)
-  if (cached) {
-    mapStore.loadMap(cached)
-    return true
-  }
-
-  // 缓存未命中，从磁盘读取
-  const item = resourceStore.maps.find(m => m.id === itemId)
-  const mapName = item?.name ?? mapStore.mapData.name
-  if (!mapName) return false
-  const filePath = mapJsonPath(mapName)
-  try {
-    const exists = await invoke<boolean>('path_exists', { path: filePath })
-    if (!exists) return false
-    const json = await invoke<string>('read_file', { path: filePath })
-    const saveData = JSON.parse(json)
-
-    // Rust zip 0.6 解压 .bgm 时 map.json 可能丢失数据（tilesets/layers 被清空）
-    // 检测并从原始 .bgm zip 重新读取。
-    // 注意：必须 tilesets 和 layers 双双为空才判定为解压损坏——
-    // 新建空地图 tilesets 天然为空，若只判 tilesets 会误用引擎内置同名 .bgm 覆盖用户地图
-    if ((!saveData.tilesets || saveData.tilesets.length === 0)
-      && (!saveData.layers || saveData.layers.length === 0)) {
-      const fixed = await tryReadMapFromBgm(mapName)
-      if (fixed) {
-        // 用正确的数据覆盖损坏的 map.json
-        await invoke('write_file', { path: filePath, content: JSON.stringify(fixed, null, 2) })
-        Object.assign(saveData, fixed)
-      }
-    }
-
-    const mapData = deserializeMap(saveData)
-
-    // 将相对路径解析为绝对路径（.bgm 解压后的 map.json 使用相对路径）
-    const dir = mapDirPath(mapName)
-    resolveRelativePaths(mapData, dir)
-
-    mapStore.loadMap(mapData)
-    return true
-  } catch (e) {
-    console.error(`[MapEditor] loadMapFromProject: 失败 path=${filePath}`, e)
-    return false
-  }
-}
-
-// 尝试从原始 .bgm zip 文件读取 map.json（修复 Rust zip 解压 bug）
-async function tryReadMapFromBgm(mapName: string): Promise<any | null> {
-  try {
-    const engineDir = await invoke<string>('get_engine_assets_dir')
-    const bgmPath = `${engineDir}/maps/packages/${mapName}.bgm`
-    const bgmExists = await invoke<boolean>('path_exists', { path: bgmPath })
-    if (!bgmExists) return null
-    const data = await invoke<number[]>('read_binary', { path: bgmPath })
-    const zip = await JSZip.loadAsync(new Uint8Array(data))
-    const entry = zip.file('map.json')
-    if (!entry) return null
-    return JSON.parse(await entry.async('text'))
-  } catch {
-    return null
-  }
-}
-
-// 将相对路径解析为绝对路径
-function resolveRelativePaths(mapData: any, dir: string) {
-  for (const ts of mapData.tileSets) {
-    if (ts.imagePath && !ts.imagePath.startsWith('/') && !ts.imagePath.startsWith('assets/') && !ts.imagePath.startsWith('/maps/')) {
-      ts.imagePath = `${dir}/${ts.imagePath}`
-    }
-  }
-  for (const res of mapData.resources || []) {
-    if (res.path && !res.path.startsWith('/') && !res.path.startsWith('assets/') && !res.path.startsWith('/maps/')) {
-      res.path = `${dir}/${res.path}`
-    }
-  }
-  for (const layer of mapData.layers) {
-    if (layer.images) {
-      for (const img of layer.images) {
-        if (img.imagePath && !img.imagePath.startsWith('/') && !img.imagePath.startsWith('assets/') && !img.imagePath.startsWith('/maps/')) {
-          img.imagePath = `${dir}/${img.imagePath}`
-        }
-      }
-    }
-  }
-}
-
-// 创建空地图数据（资源项刚创建时使用）
-function createEmptyMapData(name: string): import('../../stores/map').MapData {
-  return {
-    name,
-    version: 5,
-    width: 40,
-    height: 30,
-    tileSize: 16,
-    gravity: false,
-    collisionType: '图像',
-    collisionEnabled: false,
-    resources: [],
-    layers: [
-      {
-        id: 0,
-        name: '图像图层',
-        type: 'image' as const,
-        visible: true,
-        locked: false,
-        tiles: {} as Record<string, number>,
-        images: [],
-      },
-    ],
-    tileSets: [],
-  }
-}
+// ====== 持久化：map.json 读写、.bgm 修复、路径解析 ======
+const {
+  mapDirPath,
+  saveMapToProject,
+  loadMapFromProject,
+  resolveRelativePaths,
+  createEmptyMapData,
+} = useMapPersistence({
+  getThumbnailDataUrl: () => mapCanvasRef.value?.getThumbnailDataUrl() ?? null,
+  onThumbnailUpdated: (itemId, dataUrl) => emit('map-thumbnail-updated', itemId, dataUrl),
+})
 
 // ====== 统一入口：currentMapPath 变化时自动保存当前 + 加载目标 ======
 // 新建地图时设此标志跳过 watcher 的加载流程
@@ -383,7 +227,7 @@ function onOpenLibrary() {
 }
 
 function onCursorMove(x: number, y: number) {
-  mapStore.setCursorPos(x, y)
+  mapEditorStore.setCursorPos(x, y)
 }
 
 function onDeleteImage() {
@@ -409,13 +253,14 @@ defineExpose({ switchToMap })
           @export-map="onExportMap"
           @switch-map="switchToMap"
           @delete-image="onDeleteImage"
+          @paint="emit('open-paint')"
         />
         <MapCanvas ref="mapCanvasRef" class="map-canvas-area" :class="{ disabled: !hasMaps }" @cursor-move="onCursorMove" />
         <div class="map-info-bar">
           <span class="info-spacer" />
           <span class="info-label">ID:{{ mapStore.currentMapPath ? mapStore.currentMapPath.split('/').pop()?.split('.')[0] ?? '--' : '--' }}</span>
           <span class="info-label">场景大小:{{ mapStore.mapData.width * mapStore.mapData.tileSize }}×{{ mapStore.mapData.height * mapStore.mapData.tileSize }}</span>
-          <span class="info-label">坐标:{{ mapStore.cursorX !== null ? mapStore.cursorX * mapStore.mapData.tileSize : '--' }},{{ mapStore.cursorY !== null ? mapStore.cursorY * mapStore.mapData.tileSize : '--' }}</span>
+          <span class="info-label">坐标:{{ mapEditorStore.cursorX !== null ? mapEditorStore.cursorX * mapStore.mapData.tileSize : '--' }},{{ mapEditorStore.cursorY !== null ? mapEditorStore.cursorY * mapStore.mapData.tileSize : '--' }}</span>
           <span class="info-label">资源尺寸:{{ mapStore.selectedResource?.tileWidth ?? '--' }}×{{ mapStore.selectedResource?.tileHeight ?? '--' }}</span>
           <span class="info-spacer" />
         </div>
