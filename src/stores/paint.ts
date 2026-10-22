@@ -59,6 +59,8 @@ export const usePaintStore = defineStore('paint', () => {
   const eyedropperTarget = ref<'fill' | 'stroke'>('fill')
   const fillEnabled = ref(true)
   const strokeEnabled = ref(false)
+  // 位图形状样式：实心 / 轮廓（互斥，Scratch 风格）
+  const shapeStyle = ref<'fill' | 'outline'>('fill')
   /** 形状/直线工具的描边线宽（默认 0=无描边；画线时引擎保底 1 保证可见） */
   const strokeWidth = ref(0)
   /**
@@ -312,6 +314,7 @@ export const usePaintStore = defineStore('paint', () => {
     eyedropperTarget,
     fillEnabled,
     strokeEnabled,
+    shapeStyle,
     strokeWidth,
     lineWidth,
     brushSize,

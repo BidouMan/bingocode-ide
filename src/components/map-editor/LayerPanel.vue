@@ -78,6 +78,8 @@ async function resolveThumbUrl(path: string): Promise<string> {
 }
 
 async function refreshThumbs() {
+  // 图片可能被内联绘制原地覆盖，清空 URL 缓存以拿到最新内容
+  urlCache.clear()
   const next = new Map<number, string>()
   for (const layer of mapStore.mapData.layers) {
     if (layer.type === 'image' && layer.image?.imagePath) {
@@ -296,7 +298,7 @@ function applyReorder(from: number, insertDisplayIndex: number) {
 .layer-toolbar {
   display: flex;
   align-items: center;
-  height: 30px;
+  height: 44px;
   padding: 0 8px;
   gap: 4px;
   flex-shrink: 0;
@@ -308,7 +310,7 @@ function applyReorder(from: number, insertDisplayIndex: number) {
   align-items: center;
   justify-content: center;
   flex: 1;
-  height: 24px;
+  height: 28px;
   background: rgb(40, 43, 52);
   border: none;
   border-radius: 4px;

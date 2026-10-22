@@ -5,7 +5,6 @@ import { useMapStore, type MapResource } from '../../stores/map'
 import { useProjectStore } from '../../stores/project'
 import { useEditorStore } from '../../stores/editor'
 import MapResourceImportDialog from '../resource-panel/MapResourceImportDialog.vue'
-import DrawingLayerTools from './DrawingLayerTools.vue'
 import iconLibrary from '../../assets/icons/图片库.svg'
 import iconUpload from '../../assets/icons/上传本地图片资源.svg'
 import iconDelete from '../../assets/icons/选中删除.svg'
@@ -245,8 +244,6 @@ async function onResourceImported(options: { path: string; mode: 'image' | 'tile
 <template>
   <div class="tile-resource-bar" :class="{ collapsed }">
     <div class="bar-toolbar">
-      <DrawingLayerTools :disabled="disabled" />
-      <div class="bar-separator" />
       <button class="bar-tool-btn" v-tooltip="'打开资源库'" @click="emit('open-library')">
         <img :src="iconLibrary" class="bar-tool-icon" />
       </button>
@@ -330,14 +327,6 @@ async function onResourceImported(options: { path: string; mode: 'image' | 'tile
   height: 30px;
   padding: 0 8px;
   gap: 4px;
-  flex-shrink: 0;
-}
-
-.bar-separator {
-  width: 1px;
-  height: 18px;
-  background: var(--border-light);
-  margin: 0 4px;
   flex-shrink: 0;
 }
 

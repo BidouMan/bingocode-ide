@@ -3,8 +3,8 @@ import { useMapStore } from '../stores/map'
 import { useProjectStore } from '../stores/project'
 
 /**
- * 地图绘制业务逻辑：绘制页输出 PNG → 地图目录 + 地图级图像素材 + 图层实例。
- * 页面切换等 UI 逻辑仍留在 MainLayout。
+ * 地图绘制业务逻辑：绘制结果输出 PNG → 地图目录 + 地图级图像素材 + 图片图层。
+ * 界面编排（打开绘制面板等）留在页面组件。
  */
 export function useMapPaint() {
   const mapStore = useMapStore()
@@ -64,6 +64,7 @@ export function useMapPaint() {
       height,
       collisionType: '图像',
       collisionEnabled: false,
+      background: true,
     }, name)
   }
 

@@ -55,6 +55,8 @@ export interface ImageData {
   collisionType: string
   collisionEnabled: boolean
   collisionShape?: { points: number[][] }
+  // 整张画布背景图：随地图尺寸变化自动扩展绘制范围
+  background?: boolean
 }
 
 export interface MapResource {

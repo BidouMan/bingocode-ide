@@ -5,9 +5,7 @@ import { useMapEditorStore } from '../../stores/mapEditor'
 import { useResourceStore } from '../../stores/resource'
 import CustomSelect from '../common/CustomSelect.vue'
 import ImageLayerTools from './ImageLayerTools.vue'
-import iconNewMap from '../../assets/icons/新建地图.svg'
-import iconImportMap from '../../assets/icons/导入地图.svg'
-import iconExportMap from '../../assets/icons/导出地图.svg'
+import DrawingLayerTools from './DrawingLayerTools.vue'
 import iconGrid from '../../assets/icons/显示网格.svg'
 import iconSnapGrid from '../../assets/icons/吸附锚点.svg'
 
@@ -16,12 +14,11 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'new-map': []
-  'import-map': []
-  'export-map': []
   'switch-map': [itemId: string]
   'delete-image': []
-  'paint': []
+  'paint-undo': []
+  'paint-redo': []
+  'create-paint-layer': [tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse']
 }>()
 
 const mapStore = useMapStore()
@@ -51,24 +48,16 @@ function onMapChange(value: string) {
 
 <template>
   <div class="map-toolbar">
-    <button class="toolbar-btn" v-tooltip="'绘制地图'" @click="emit('new-map')">
-      <img :src="iconNewMap" class="toolbar-icon" />
-    </button>
-    <button class="toolbar-btn" v-tooltip="'导入 .bgm'" @click="emit('import-map')">
-      <img :src="iconImportMap" class="toolbar-icon" />
-    </button>
-    <button class="toolbar-btn" v-tooltip="'导出 .bgm'" @click="emit('export-map')">
-      <img :src="iconExportMap" class="toolbar-icon" />
-    </button>
-
-    <div class="toolbar-separator" />
-
-    <!-- 图像工具始终占位（图块模式下禁用），保证工具栏不随图层类型变化 -->
+    <!-- 工具跟着当前图层类型切换：图片图层=图像工具，图块图层=绘制工具 -->
     <ImageLayerTools
-      :disabled="disabled || !isImageLayer"
+      v-if="isImageLayer"
+      :disabled="disabled"
       @delete-image="emit('delete-image')"
-      @paint="emit('paint')"
+      @paint-undo="emit('paint-undo')"
+      @paint-redo="emit('paint-redo')"
+      @create-layer="(tool) => emit('create-paint-layer', tool)"
     />
+    <DrawingLayerTools v-else :disabled="disabled" />
 
     <div class="toolbar-separator" />
 
@@ -101,7 +90,7 @@ function onMapChange(value: string) {
 .map-toolbar {
   display: flex;
   align-items: center;
-  height: 30px;
+  height: 44px;
   padding: 0 8px;
   gap: 4px;
   background: var(--bg-root);
@@ -113,8 +102,8 @@ function onMapChange(value: string) {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   background: transparent;
   border: none;
   border-radius: 4px;

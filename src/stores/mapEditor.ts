@@ -16,6 +16,8 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
   const cursorY = ref<number | null>(null)
   const imageCollisionTool = ref<ImageCollisionTool>('none')
   const showCollision = ref(false)
+  // 图片模式画布内绘制工具（select = 地图选取，不绘制）
+  const imageTool = ref<'select' | 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse'>('select')
 
   function setTool(tool: MapTool) {
     currentTool.value = tool
@@ -50,6 +52,10 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
     showCollision.value = !showCollision.value
   }
 
+  function setImageTool(tool: 'select' | 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse') {
+    imageTool.value = tool
+  }
+
   return {
     showGrid,
     snapToGrid,
@@ -60,6 +66,8 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
     cursorY,
     imageCollisionTool,
     showCollision,
+    imageTool,
+    setImageTool,
     setTool,
     toggleGrid,
     toggleSnapToGrid,

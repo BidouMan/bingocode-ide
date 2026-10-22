@@ -7,13 +7,15 @@ import TileResourceBar from './TileResourceBar.vue'
 import PropertyPanel from './PropertyPanel.vue'
 import LayerPanel from './LayerPanel.vue'
 import TileCollisionPanel from './TileCollisionPanel.vue'
+import PaintColorPanel from '../paint-editor/PaintColorPanel.vue'
 import { useMapStore } from '../../stores/map'
 import { useMapEditorStore } from '../../stores/mapEditor'
 import { useResourceStore } from '../../stores/resource'
 import { useProjectStore } from '../../stores/project'
 import { useMapPersistence } from '../../composables/useMapPersistence'
+import { useMapPaint } from '../../composables/useMapPaint'
 import JSZip from 'jszip'
-import { serializeMap, deserializeMap } from '../../utils/mapSerializer'
+import { deserializeMap } from '../../utils/mapSerializer'
 
 const mapStore = useMapStore()
 const mapEditorStore = useMapEditorStore()
@@ -25,9 +27,31 @@ const hasMaps = computed(() => resourceStore.maps.length > 0)
 const mapCanvasRef = ref<InstanceType<typeof MapCanvas>>()
 const tileResourceBarRef = ref<{ openImport: () => void } | null>(null)
 
+// ====== 图片模式：直接在画布上绘制，颜色面板复用绘制页 ======
+const mapPaint = useMapPaint()
+const paintRightTab = ref<'paint' | 'props'>('paint')
+// 选中绘制工具即进入绘制模式（画布本身不切换）
+const isPainting = computed(() => mapStore.activeMode === 'image' && mapEditorStore.imageTool !== 'select')
+
+// 绘制按钮/画笔工具：新建一张空白图片图层并启用指定工具
+async function startImagePaint(tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse' = 'brush') {
+  const w = Math.max(1, mapStore.mapData.width * mapStore.mapData.tileSize)
+  const h = Math.max(1, mapStore.mapData.height * mapStore.mapData.tileSize)
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
+  if (!blob) return
+  try {
+    await mapPaint.saveMapImage(blob, w, h, mapStore.activeLayer?.id ?? -1)
+    mapEditorStore.setImageTool(tool)
+  } catch (e) {
+    console.error('[MapEditor] 创建绘制图层失败:', e)
+  }
+}
+
 const emit = defineEmits<{
   'open-resource-lib': []
-  'open-paint': []
   'map-thumbnail-updated': [itemId: string, dataUrl: string]
 }>()
 
@@ -203,67 +227,6 @@ async function onImportMap() {
   input.click()
 }
 
-async function onExportMap() {
-  try {
-    const zip = new JSZip()
-    const data = mapStore.mapData
-
-    const saveData = serializeMap(data)
-    zip.file('map.json', JSON.stringify(saveData, null, 2))
-
-    const thumbDataUrl = mapCanvasRef.value?.getThumbnailDataUrl()
-    if (thumbDataUrl && thumbDataUrl.startsWith('data:')) {
-      const base64 = thumbDataUrl.split(',')[1]
-      zip.file('thumbnail.png', base64, { base64: true })
-    }
-
-    // 打包 images 目录中的图片
-    if (projectStore.root && data.name) {
-      const imagesDir = mapDirPath(data.name) + '/images'
-      try {
-        const entries = await invoke<string[]>('list_dir', { path: imagesDir })
-        for (const entry of entries) {
-          if (!entry.endsWith('/')) {
-            const filePath = `${imagesDir}/${entry}`
-            const content = await invoke<number[]>('read_binary', { path: filePath })
-            zip.file(`images/${entry}`, new Uint8Array(content))
-          }
-        }
-      } catch (e) {
-        // images 目录可能不存在，忽略
-      }
-    }
-
-    const blob = await zip.generateAsync({ type: 'blob' })
-
-    // 尝试用 File System API（现代浏览器）
-    if ('showSaveFilePicker' in window) {
-      const handle = await (window as any).showSaveFilePicker({
-        suggestedName: `${data.name}.bgm`,
-        types: [{ description: '地图文件', accept: { 'application/zip': ['.bgm'] } }],
-      })
-      const writable = await handle.createWritable()
-      await writable.write(blob)
-      await writable.close()
-    } else {
-      // 回退到 blob URL 下载
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.style.display = 'none'
-      link.href = url
-      link.download = `${data.name}.bgm`
-      document.body.appendChild(link)
-      link.click()
-      setTimeout(() => {
-        document.body.removeChild(link)
-        URL.revokeObjectURL(url)
-      }, 100)
-    }
-  } catch (e) {
-    console.error('导出地图失败:', e)
-  }
-}
-
 function onOpenLibrary() {
   emit('open-resource-lib')
 }
@@ -285,43 +248,56 @@ defineExpose({ switchToMap, placeImageResource })
       <div class="map-editor-left">
         <LayerPanel
           :disabled="!hasMaps"
-          @paint="emit('open-paint')"
+          @paint="startImagePaint"
           @open-library="emit('open-resource-lib')"
           @upload-image="onUploadLocal"
         />
       </div>
       <div class="map-editor-center">
-        <MapToolbar
-          :disabled="!hasMaps"
-          @new-map="onNewMap"
-          @import-map="onImportMap"
-          @export-map="onExportMap"
-          @switch-map="switchToMap"
-          @delete-image="onDeleteImage"
-          @paint="emit('open-paint')"
-        />
-        <MapCanvas ref="mapCanvasRef" class="map-canvas-area" :class="{ disabled: !hasMaps }" @cursor-move="onCursorMove" />
-        <!-- 图块模式：素材面板从画布下方展开 -->
-        <TileResourceBar
-          v-if="mapStore.activeMode === 'tile'"
-          ref="tileResourceBarRef"
-          :disabled="!hasMaps"
-          @open-library="onOpenLibrary"
-          @select-tile="(rIdx, tIdx) => mapStore.selectTile(rIdx, tIdx)"
-        />
-        <div class="map-info-bar">
-          <span class="info-spacer" />
-          <span class="info-label">ID:{{ mapStore.currentMapPath ? mapStore.currentMapPath.split('/').pop()?.split('.')[0] ?? '--' : '--' }}</span>
-          <span class="info-label">场景大小:{{ mapStore.mapData.width * mapStore.mapData.tileSize }}×{{ mapStore.mapData.height * mapStore.mapData.tileSize }}</span>
-          <span class="info-label">坐标:{{ mapEditorStore.cursorX !== null ? mapEditorStore.cursorX * mapStore.mapData.tileSize : '--' }},{{ mapEditorStore.cursorY !== null ? mapEditorStore.cursorY * mapStore.mapData.tileSize : '--' }}</span>
-          <span class="info-label">资源尺寸:{{ mapStore.selectedResource?.tileWidth ?? '--' }}×{{ mapStore.selectedResource?.tileHeight ?? '--' }}</span>
-          <span class="info-spacer" />
+        <div class="map-view">
+          <MapToolbar
+            :disabled="!hasMaps"
+            @switch-map="switchToMap"
+            @delete-image="onDeleteImage"
+            @paint-undo="mapCanvasRef?.undoPaint()"
+            @paint-redo="mapCanvasRef?.redoPaint()"
+            @create-paint-layer="startImagePaint"
+          />
+          <MapCanvas ref="mapCanvasRef" class="map-canvas-area" :class="{ disabled: !hasMaps }" @cursor-move="onCursorMove" />
+          <!-- 图块模式：素材面板从画布下方展开 -->
+          <TileResourceBar
+            v-if="mapStore.activeMode === 'tile'"
+            ref="tileResourceBarRef"
+            :disabled="!hasMaps"
+            @open-library="onOpenLibrary"
+            @select-tile="(rIdx, tIdx) => mapStore.selectTile(rIdx, tIdx)"
+          />
+          <div class="map-info-bar">
+            <span class="info-spacer" />
+            <span class="info-label">ID:{{ mapStore.currentMapPath ? mapStore.currentMapPath.split('/').pop()?.split('.')[0] ?? '--' : '--' }}</span>
+            <span class="info-label">场景大小:{{ mapStore.mapData.width * mapStore.mapData.tileSize }}×{{ mapStore.mapData.height * mapStore.mapData.tileSize }}</span>
+            <span class="info-label">坐标:{{ mapEditorStore.cursorX !== null ? mapEditorStore.cursorX * mapStore.mapData.tileSize : '--' }},{{ mapEditorStore.cursorY !== null ? mapEditorStore.cursorY * mapStore.mapData.tileSize : '--' }}</span>
+            <span class="info-label">资源尺寸:{{ mapStore.selectedResource?.tileWidth ?? '--' }}×{{ mapStore.selectedResource?.tileHeight ?? '--' }}</span>
+            <span class="info-spacer" />
+          </div>
         </div>
       </div>
       <div class="map-editor-right">
-        <PropertyPanel :disabled="!hasMaps" />
-        <!-- 碰撞编辑器仅图块模式使用；图像模式在画布上按实例编辑 -->
-        <TileCollisionPanel v-if="mapStore.activeMode === 'tile'" />
+        <template v-if="isPainting">
+          <div class="right-tabs">
+            <button class="right-tab" :class="{ 'right-tab-active': paintRightTab === 'paint' }" @click="paintRightTab = 'paint'">绘制</button>
+            <button class="right-tab" :class="{ 'right-tab-active': paintRightTab === 'props' }" @click="paintRightTab = 'props'">属性</button>
+          </div>
+          <div class="paint-right-body">
+            <PaintColorPanel v-show="paintRightTab === 'paint'" bitmap-only />
+            <PropertyPanel v-show="paintRightTab === 'props'" :disabled="!hasMaps" />
+          </div>
+        </template>
+        <template v-else>
+          <PropertyPanel :disabled="!hasMaps" />
+          <!-- 碰撞编辑器仅图块模式使用；图像模式在画布上按实例编辑 -->
+          <TileCollisionPanel v-if="mapStore.activeMode === 'tile'" />
+        </template>
       </div>
     </div>
     <div v-if="!hasMaps" class="map-empty-banner">
@@ -348,6 +324,52 @@ defineExpose({ switchToMap, placeImageResource })
   flex-direction: column;
   background: rgb(30, 30, 30);
   position: relative;
+}
+
+.map-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.right-tabs {
+  display: flex;
+  height: 30px;
+  flex-shrink: 0;
+  border-bottom: 1px solid rgb(45, 45, 45);
+}
+
+.right-tab {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #9ca0a4;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.right-tab-active {
+  color: #fff;
+  background: rgb(46, 49, 58);
+}
+
+.paint-right-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.paint-right-body :deep(.color-panel) {
+  width: 100%;
+  height: 100%;
+  border-left: none;
+}
+
+.paint-right-body :deep(.property-panel) {
+  flex: 1;
+  overflow-y: auto;
 }
 
 .map-editor-body {

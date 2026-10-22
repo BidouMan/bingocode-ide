@@ -284,9 +284,10 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
 
   function drawShapePreview(c: CanvasRenderingContext2D, start: { x: number; y: number }, end: { x: number; y: number }) {
     // 统一使用绘制色（fillColor）：直线/形状描边与填充同色，切换工具颜色不变
-    // 填充/描边开关：两者都关时回退为填充（保证可见）；直线只有描边
-    const fillOn = store.activeTool !== 'line' && (store.fillEnabled || !store.strokeEnabled)
-    const strokeOn = store.activeTool === 'line' || store.strokeEnabled
+    // 矩形/椭圆：实心 / 轮廓 二选一（Scratch 位图模式，默认实心）；直线只有描边
+    const isShape = store.activeTool === 'rect' || store.activeTool === 'ellipse'
+    const fillOn = store.activeTool !== 'line' && (!isShape || store.shapeStyle === 'fill')
+    const strokeOn = store.activeTool === 'line' || (isShape && store.shapeStyle === 'outline')
 
     // 直线本体粗细走独立 lineWidth（默认 8）；形状描边走 strokeWidth（0=未设→默认 4）
     c.lineWidth =

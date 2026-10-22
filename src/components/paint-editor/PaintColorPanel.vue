@@ -5,6 +5,10 @@ import iconPick from '../../assets/icons/取色器.svg'
 
 const store = usePaintStore()
 
+// 地图画布绘制固定使用位图面板（共享 store 的 mode 可能被绘制页重置）
+const props = defineProps<{ bitmapOnly?: boolean }>()
+const vectorMode = () => !props.bitmapOnly && store.mode === 'vector'
+
 // ─── 编辑手势跟踪：面板内按下 → 编辑中；window 松手（含捕获元素上的释放）→ 结束。
 // 引擎据此把一次拖动的连续改色合并为一步撤销、缩略图只在结束时刷新 ───
 function onPanelPointerDown() {
@@ -95,20 +99,20 @@ const showStrokeSection = () => {
   if (store.activeTool === 'brush' || store.activeTool === 'eraser' || store.activeTool === 'line') {
     return false
   }
-  if (store.activeTool === 'rect' || store.activeTool === 'ellipse') return true
+  if (store.activeTool === 'rect' || store.activeTool === 'ellipse') return vectorMode()
   // 选择/塑形等：有选中矢量图形时可编辑其描边
-  return store.mode === 'vector' && store.vectorSelectedCount > 0
+  return vectorMode() && store.vectorSelectedCount > 0
 }
 const strokeChecked = () => {
-  if (store.mode === 'vector' && store.vectorSelectedCount > 0) return store.selectionHasStroke
+  if (vectorMode() && store.vectorSelectedCount > 0) return store.selectionHasStroke
   return store.strokeEnabled
 }
 // 选中图形全部为"本体描边"（直线/描边轮廓）：本体不可去描边 → 勾选框禁用
 const strokeToggleDisabled = () =>
-  store.mode === 'vector' && store.vectorSelectedCount > 0 && store.selectionBodyOnly
+  vectorMode() && store.vectorSelectedCount > 0 && store.selectionBodyOnly
 // 粗细下限：选中含本体描边对象时抬到 1（拖到 0 会删本体致整条线消失）
 const strokeMin = () =>
-  store.mode === 'vector' && store.vectorSelectedCount > 0 && store.selectionHasBodyStroke ? 1 : 0
+  vectorMode() && store.vectorSelectedCount > 0 && store.selectionHasBodyStroke ? 1 : 0
 
 function onStrokeToggle(e: Event) {
   store.strokeEnabled = (e.target as HTMLInputElement).checked
@@ -347,6 +351,49 @@ const showLineWidth = () => store.activeTool === 'line'
       <span class="slider-value">{{ store.lineWidth }}</span>
     </div>
 
+    <!-- 位图形状：实心 / 轮廓（单选） -->
+    <div
+      v-if="!vectorMode() && (store.activeTool === 'rect' || store.activeTool === 'ellipse')"
+      class="shape-style-row"
+    >
+      <label class="shape-radio-label">
+        <input
+          type="radio"
+          class="shape-radio"
+          :checked="store.shapeStyle === 'fill'"
+          @change="store.shapeStyle = 'fill'"
+        />
+        实心
+      </label>
+      <label class="shape-radio-label">
+        <input
+          type="radio"
+          class="shape-radio"
+          :checked="store.shapeStyle === 'outline'"
+          @change="store.shapeStyle = 'outline'"
+        />
+        轮廓
+      </label>
+    </div>
+
+    <!-- 轮廓粗细（仅轮廓模式显示，默认 4） -->
+    <div
+      v-if="!vectorMode() && (store.activeTool === 'rect' || store.activeTool === 'ellipse') && store.shapeStyle === 'outline'"
+      class="slider-row"
+    >
+      <label class="slider-label">粗细</label>
+      <input
+        class="paint-slider"
+        type="range"
+        min="1"
+        max="40"
+        step="1"
+        :value="store.strokeWidth || 4"
+        @input="store.strokeWidth = Number(($event.target as HTMLInputElement).value)"
+      />
+      <span class="slider-value">{{ store.strokeWidth || 4 }}</span>
+    </div>
+
     <!-- 描边（Scratch 模型：仅形状预设与选中图形编辑；勾选后展开颜色与粗细） -->
     <div v-if="showStrokeSection()" class="stroke-section">
       <label class="stroke-toggle-label">
@@ -361,7 +408,7 @@ const showLineWidth = () => store.activeTool === 'line'
       </label>
       <!-- 勾选后展开：吸管 + 描边色块（与主色行按钮成列对齐）+ 描边粗细 -->
       <template v-if="strokeChecked()">
-        <div v-if="store.mode === 'vector'" class="stroke-color-row">
+        <div v-if="vectorMode()" class="stroke-color-row">
           <button
             class="pick-btn"
             :class="{ 'pick-btn-active': store.eyedropperActive && store.eyedropperTarget === 'stroke' }"
@@ -441,6 +488,30 @@ const showLineWidth = () => store.activeTool === 'line'
 .panel-label {
   font-size: 11px;
   color: var(--text-muted);
+}
+
+/* 位图形状单选：实心 / 轮廓 */
+.shape-style-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.shape-radio-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.shape-radio {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 /* 描边勾选区 */

@@ -6,6 +6,9 @@ import { useMapEditorStore } from '../../stores/mapEditor'
 import { useProjectStore } from '../../stores/project'
 import { useEditorStore } from '../../stores/editor'
 import { isSvgSource, rasterizeSvgImage, SVG_RASTER_SCALE } from '../../utils/svgRasterize'
+import { imageWorldToLocal, imageLocalToWorld } from '../../utils/mapImageGeometry'
+import { usePaintStore } from '../../stores/paint'
+import { rgbaCss, hexToRgba } from '../paint-editor/utils/artboardExport'
 import { useMapViewport } from '../../composables/useMapViewport'
 import { useImageTransform } from '../../composables/useImageTransform'
 import { useImageCollisionEditor } from '../../composables/useImageCollisionEditor'
@@ -31,6 +34,7 @@ const mapStore = useMapStore()
 const mapEditorStore = useMapEditorStore()
 const projectStore = useProjectStore()
 const editorStore = useEditorStore()
+const paintStore = usePaintStore()
 
 // 解析资源路径为浏览器可加载的 URL
 const resolvedPathCache = new Map<string, string>()
@@ -312,7 +316,7 @@ async function renderAllLayers() {
       }
     } else if (layer.type === 'image') {
       const container = getOrCreateLayerContainer(layer.id)
-      await renderImageLayer(container, layer.image)
+      await renderImageLayer(container, layer.image, layer.id)
     }
   }
 
@@ -328,7 +332,7 @@ async function renderAllLayers() {
   collision.drawCollisionOverlay()
 }
 
-async function renderImageLayer(container: any, imgData: any) {
+async function renderImageLayer(container: any, imgData: any, layerId: number) {
   if (!imgData?.imagePath) return
   try {
     const img = await loadImage(imgData.imagePath)
@@ -357,6 +361,10 @@ async function renderImageLayer(container: any, imgData: any) {
     sprite.rotation = rotation
     sprite.alpha = imgData.opacity ?? 1
     container.addChild(sprite)
+    // 正在绘制的图层：显示绘制画布纹理，并按画布尺寸重算变换
+    if (paintSession && paintSession.layerId === layerId) {
+      bindPaintTexture(sprite, imgData)
+    }
     transform.noteRenderedImage(imgData, sprite)
   } catch (err) {
     console.error('[MapCanvas] renderImageLayer error:', err)
@@ -410,12 +418,931 @@ async function placeImageFromPath(path: string, x = 0, y = 0) {
   await placeImage({ name, path }, x, y)
 }
 
+// ====== 图片模式：直接在画布上绘制（位图工具） ======
+interface ImagePaintSession {
+  layerId: number
+  mapName: string
+  canvas: HTMLCanvasElement
+  texture: any
+  sprite: any
+  lastPoint: { x: number; y: number } | null
+  startPoint: { x: number; y: number } | null
+  snapshot: ImageData | null
+  dirty: boolean
+  savePath: string
+}
+
+let paintSession: ImagePaintSession | null = null
+let paintUndo: ImageData[] = []
+let paintRedo: ImageData[] = []
+let paintSaveTimer: ReturnType<typeof setTimeout> | null = null
+const PAINT_UNDO_LIMIT = 8
+
+// 图片像素框选（归一化本地坐标）
+let pixelSelection: { x0: number; y0: number; x1: number; y1: number } | null = null
+let selectionGraphics: any = null
+
+// 浮动选区：框选完成后像素被切成浮动层，出现变换框（8 缩放锚点 + 旋转锚点）
+// 坐标统一使用绘制画布的像素空间，合成进 paintSession.canvas 后再交给纹理
+let floatCanvas: HTMLCanvasElement | null = null
+let floatBaseCanvas: HTMLCanvasElement | null = null
+let floatOrigin: ImageData | null = null
+let floatXf = { cx: 0, cy: 0, sx: 1, sy: 1, angle: 0 }
+let floatOp: 'none' | 'create' | 'move' | 'scale' | 'rotate' = 'none'
+let floatStartXf: { cx: number; cy: number; sx: number; sy: number; angle: number } | null = null
+let floatGrab = { x: 0, y: 0 }
+let scaleAnchorPx = { x: 0, y: 0 }
+let scalePointer0 = { x: 0, y: 0 }
+let scaleDir = { x: 1, y: 1 }
+let scaleAxes = { x: true, y: true }
+let scaleHalf0 = { x: 0, y: 0 }
+
+function ensureSelectionGraphics() {
+  if (!app || !PIXI) return
+  if (!selectionGraphics) {
+    selectionGraphics = new PIXI.Graphics()
+    app.stage.addChild(selectionGraphics)
+  }
+}
+
+function clearPixelSelection() {
+  pixelSelection = null
+  if (floatOp === 'create') floatOp = 'none'
+  selectionGraphics?.clear()
+}
+
+function resetFloatingSelection() {
+  pixelSelection = null
+  floatCanvas = null
+  floatBaseCanvas = null
+  floatOrigin = null
+  floatOp = 'none'
+  floatStartXf = null
+  selectionGraphics?.clear()
+}
+
+function makeOffscreenCanvas(w: number, h: number): HTMLCanvasElement {
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  return c
+}
+
+// 归一化框选 → 画布像素整数矩形
+function selectionRectPx() {
+  const s = paintSession
+  if (!s || !pixelSelection) return null
+  const { x0, y0, x1, y1 } = pixelSelection
+  const cw = s.canvas.width
+  const ch = s.canvas.height
+  const x = Math.max(0, Math.min(cw, Math.floor(Math.min(x0, x1) * cw)))
+  const y = Math.max(0, Math.min(ch, Math.floor(Math.min(y0, y1) * ch)))
+  const w = Math.max(0, Math.min(cw, Math.ceil(Math.max(x0, x1) * cw)) - x)
+  const h = Math.max(0, Math.min(ch, Math.ceil(Math.max(y0, y1) * ch)) - y)
+  return { x, y, w, h }
+}
+
+function floatCornersPx(): { x: number; y: number }[] {
+  if (!floatCanvas) return []
+  const hw = (floatCanvas.width * floatXf.sx) / 2
+  const hh = (floatCanvas.height * floatXf.sy) / 2
+  const cos = Math.cos(floatXf.angle)
+  const sin = Math.sin(floatXf.angle)
+  return [
+    { x: -hw, y: -hh },
+    { x: hw, y: -hh },
+    { x: hw, y: hh },
+    { x: -hw, y: hh },
+  ].map(l => ({
+    x: floatXf.cx + l.x * cos - l.y * sin,
+    y: floatXf.cy + l.x * sin + l.y * cos,
+  }))
+}
+
+function floatCornersWorld(): { x: number; y: number }[] {
+  const s = paintSession
+  const img = mapStore.selectedImage
+  if (!s || !img) return []
+  return floatCornersPx().map(p =>
+    imageLocalToWorld(img, { x: p.x / s.canvas.width, y: p.y / s.canvas.height })
+  )
+}
+
+function pointInPolygon(p: { x: number; y: number }, poly: { x: number; y: number }[]): boolean {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i]
+    const b = poly[j]
+    if ((a.y > p.y) !== (b.y > p.y) &&
+        p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) {
+      inside = !inside
+    }
+  }
+  return inside
+}
+
+// 浮动选区变换框几何（世界坐标）：角点、边中点、旋转锚点
+function floatBoxWorld() {
+  const cs = floatCornersWorld()
+  if (cs.length !== 4) return null
+  const [tl, tr, br, bl] = cs
+  const mid = (a: { x: number; y: number }, b: { x: number; y: number }) => ({
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2,
+  })
+  const top = mid(tl, tr)
+  const right = mid(tr, br)
+  const bottom = mid(br, bl)
+  const left = mid(bl, tl)
+  const center = mid(tl, br)
+  let nx = top.x - center.x
+  let ny = top.y - center.y
+  const nl = Math.hypot(nx, ny) || 1
+  nx /= nl
+  ny /= nl
+  const scale = Math.max(0.1, viewport.currentScale.value)
+  // 旋转锚点在顶边中点外法线 16 屏幕像素处
+  const rotOff = 16 / scale
+  return {
+    tl, tr, br, bl, top, right, bottom, left, center,
+    // 手柄顺序与 scaleHandleDef 索引一致：TL TR BR BL T B L R
+    handles: [tl, tr, br, bl, top, bottom, left, right],
+    rot: { x: top.x + nx * rotOff, y: top.y + ny * rotOff },
+  }
+}
+
+function drawSelectionOverlay() {
+  ensureSelectionGraphics()
+  if (!selectionGraphics) return
+  const g = selectionGraphics
+  g.clear()
+  const s = paintSession
+  const img = mapStore.selectedImage
+  if (!s || !img) return
+
+  const scale = Math.max(0.1, viewport.currentScale.value)
+  const hs = 8 / scale
+
+  if (floatCanvas) {
+    const box = floatBoxWorld()
+    if (!box) return
+    const pts = [box.tl, box.tr, box.br, box.bl].flatMap(p => [p.x, p.y])
+    g.poly(pts)
+    g.fill({ color: 0x5bfb84, alpha: 0.06 })
+    g.poly(pts)
+    g.stroke({ width: 1, color: 0x5bfb84 })
+    // 旋转锚点连线
+    g.moveTo(box.top.x, box.top.y)
+    g.lineTo(box.rot.x, box.rot.y)
+    g.stroke({ width: 1, color: 0x5bfb84 })
+    // 缩放锚点（白底绿边）
+    for (const h of box.handles) {
+      g.rect(h.x - hs / 2, h.y - hs / 2, hs, hs)
+      g.fill({ color: 0xffffff })
+      g.stroke({ width: 1, color: 0x5bfb84 })
+    }
+    // 旋转锚点
+    g.circle(box.rot.x, box.rot.y, hs * 0.6)
+    g.fill({ color: 0xffffff })
+    g.stroke({ width: 1, color: 0x5bfb84 })
+    return
+  }
+
+  if (pixelSelection) {
+    const { x0, y0, x1, y1 } = pixelSelection
+    const pts = [
+      imageLocalToWorld(img, { x: Math.min(x0, x1), y: Math.min(y0, y1) }),
+      imageLocalToWorld(img, { x: Math.max(x0, x1), y: Math.min(y0, y1) }),
+      imageLocalToWorld(img, { x: Math.max(x0, x1), y: Math.max(y0, y1) }),
+      imageLocalToWorld(img, { x: Math.min(x0, x1), y: Math.max(y0, y1) }),
+    ].flatMap(p => [p.x, p.y])
+    g.poly(pts)
+    g.fill({ color: 0x5bfb84, alpha: 0.08 })
+    g.poly(pts)
+    g.stroke({ width: 1, color: 0x5bfb84 })
+  }
+}
+
+// 以当前变换把浮动选区合成进绘制画布（基础层保留被挖空的原图）
+function compositeFloat() {
+  const s = paintSession
+  const ctx = paintCtx()
+  if (!s || !ctx || !floatCanvas || !floatBaseCanvas) return
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.clearRect(0, 0, s.canvas.width, s.canvas.height)
+  ctx.drawImage(floatBaseCanvas, 0, 0)
+  ctx.translate(floatXf.cx, floatXf.cy)
+  ctx.rotate(floatXf.angle)
+  ctx.scale(floatXf.sx, floatXf.sy)
+  ctx.drawImage(floatCanvas, -floatCanvas.width / 2, -floatCanvas.height / 2)
+  ctx.restore()
+  s.texture.source.update()
+  drawSelectionOverlay()
+}
+
+// 框选完成：把选区像素切成浮动层，立即进入变换框状态
+function cutSelectionToFloat() {
+  const s = paintSession
+  const ctx = paintCtx()
+  const r = selectionRectPx()
+  if (!s || !ctx || !r || r.w < 2 || r.h < 2) {
+    clearPixelSelection()
+    return
+  }
+  pushPaintUndo()
+  floatOrigin = ctx.getImageData(0, 0, s.canvas.width, s.canvas.height)
+  const base = makeOffscreenCanvas(s.canvas.width, s.canvas.height)
+  const bctx = base.getContext('2d')!
+  bctx.drawImage(s.canvas, 0, 0)
+  bctx.clearRect(r.x, r.y, r.w, r.h)
+  const fc = makeOffscreenCanvas(r.w, r.h)
+  fc.getContext('2d')!.drawImage(s.canvas, r.x, r.y, r.w, r.h, 0, 0, r.w, r.h)
+  floatBaseCanvas = base
+  floatCanvas = fc
+  floatXf = { cx: r.x + r.w / 2, cy: r.y + r.h / 2, sx: 1, sy: 1, angle: 0 }
+  pixelSelection = null
+  floatOp = 'none'
+  floatStartXf = null
+  // 整层变换框与像素选区变换框会互相抢手柄，进入选区编辑时先收起整层框
+  transform.removeTransformBox()
+  compositeFloat()
+  s.dirty = true
+  schedulePaintSave()
+}
+
+// 提交浮动选区：当前合成结果即最终像素（画布已含浮动内容）
+function bakeFloatingSelection() {
+  if (!floatCanvas) return
+  compositeFloat()
+  const s = paintSession
+  floatCanvas = null
+  floatBaseCanvas = null
+  floatOrigin = null
+  floatOp = 'none'
+  floatStartXf = null
+  selectionGraphics?.clear()
+  if (s) {
+    s.dirty = true
+    schedulePaintSave()
+  }
+}
+
+// Esc 取消：恢复框选前的像素
+function cancelFloatingSelection() {
+  const s = paintSession
+  const ctx = paintCtx()
+  if (!s || !ctx || !floatCanvas) return
+  if (floatOrigin) ctx.putImageData(floatOrigin, 0, 0)
+  paintUndo.pop()
+  floatCanvas = null
+  floatBaseCanvas = null
+  floatOrigin = null
+  floatOp = 'none'
+  floatStartXf = null
+  s.texture.source.update()
+  selectionGraphics?.clear()
+  s.dirty = true
+  schedulePaintSave()
+}
+
+// 删除浮动选区内容：只保留基础层（挖空后的原图）
+function deleteFloatingPixels() {
+  const s = paintSession
+  const ctx = paintCtx()
+  if (!s || !ctx || !floatCanvas || !floatBaseCanvas) return
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.clearRect(0, 0, s.canvas.width, s.canvas.height)
+  ctx.drawImage(floatBaseCanvas, 0, 0)
+  ctx.restore()
+  floatCanvas = null
+  floatBaseCanvas = null
+  floatOrigin = null
+  floatOp = 'none'
+  floatStartXf = null
+  s.texture.source.update()
+  selectionGraphics?.clear()
+  s.dirty = true
+  schedulePaintSave()
+}
+
+function clipToSelection(ctx: CanvasRenderingContext2D) {
+  if (!pixelSelection || !paintSession) return
+  const { x0, y0, x1, y1 } = pixelSelection
+  ctx.beginPath()
+  ctx.rect(
+    Math.min(x0, x1) * paintSession.canvas.width,
+    Math.min(y0, y1) * paintSession.canvas.height,
+    Math.abs(x1 - x0) * paintSession.canvas.width,
+    Math.abs(y1 - y0) * paintSession.canvas.height,
+  )
+  ctx.clip()
+}
+
+function isImagePaintTool(): boolean {
+  return mapStore.activeMode === 'image'
+    && mapEditorStore.imageTool !== 'select'
+    && !!mapStore.selectedImage
+}
+
+function pickPaintSavePath(path: string): string {
+  const base = (path.split('/').pop() || '图像').replace(/\.[^.]+$/, '')
+  return `assets/maps/${mapStore.mapData.name}/images/${base}-draw-${Date.now().toString(36)}.png`
+}
+
+// 浮动选区手柄：0-3 角点，4-7 边中点（T B L R）
+function scaleHandleDef(index: number) {
+  if (!floatCanvas) return null
+  const hw = Math.abs((floatCanvas.width * floatXf.sx) / 2)
+  const hh = Math.abs((floatCanvas.height * floatXf.sy) / 2)
+  const defs = [
+    { dir: { x: -1, y: -1 }, axes: { x: true, y: true }, aLocal: { x: hw, y: hh } },
+    { dir: { x: 1, y: -1 }, axes: { x: true, y: true }, aLocal: { x: -hw, y: hh } },
+    { dir: { x: 1, y: 1 }, axes: { x: true, y: true }, aLocal: { x: -hw, y: -hh } },
+    { dir: { x: -1, y: 1 }, axes: { x: true, y: true }, aLocal: { x: hw, y: -hh } },
+    { dir: { x: 0, y: -1 }, axes: { x: false, y: true }, aLocal: { x: 0, y: hh } },
+    { dir: { x: 0, y: 1 }, axes: { x: false, y: true }, aLocal: { x: 0, y: -hh } },
+    { dir: { x: -1, y: 0 }, axes: { x: true, y: false }, aLocal: { x: hw, y: 0 } },
+    { dir: { x: 1, y: 0 }, axes: { x: true, y: false }, aLocal: { x: -hw, y: 0 } },
+  ]
+  return defs[index] ?? null
+}
+
+type FloatHit = { kind: 'rotate' | 'move' | 'outside' } | { kind: 'scale'; index: number }
+
+function hitTestFloat(world: { x: number; y: number }): FloatHit {
+  const box = floatBoxWorld()
+  if (!box) return { kind: 'outside' }
+  const scale = Math.max(0.1, viewport.currentScale.value)
+  // 命中区按屏幕像素恒定：8px 手柄 → 世界尺寸
+  const tol = Math.max(6, 10 / scale)
+  if (Math.hypot(world.x - box.rot.x, world.y - box.rot.y) <= tol * 0.8) {
+    return { kind: 'rotate' }
+  }
+  for (let i = 0; i < box.handles.length; i++) {
+    const h = box.handles[i]
+    if (Math.abs(world.x - h.x) <= tol / 2 && Math.abs(world.y - h.y) <= tol / 2) {
+      return { kind: 'scale', index: i }
+    }
+  }
+  if (pointInPolygon(world, [box.tl, box.tr, box.br, box.bl])) return { kind: 'move' }
+  return { kind: 'outside' }
+}
+
+// 选取工具按下：优先命中浮动选区手柄，否则在图片内开始新的框选
+function handleSelectPointerDown(world: { x: number; y: number }) {
+  const s = paintSession
+  const img = mapStore.selectedImage
+  if (!s || !img) return
+  const local = imageWorldToLocal(img, world.x, world.y)
+  const p = { x: local.x * s.canvas.width, y: local.y * s.canvas.height }
+
+  if (floatCanvas) {
+    const hit = hitTestFloat(world)
+    if (hit.kind === 'rotate') {
+      floatStartXf = { ...floatXf }
+      floatOp = 'rotate'
+      return
+    }
+    if (hit.kind === 'scale') {
+      const def = scaleHandleDef(hit.index)
+      if (!def) return
+      floatStartXf = { ...floatXf }
+      floatOp = 'scale'
+      scaleDir = { ...def.dir }
+      scaleAxes = { ...def.axes }
+      scaleHalf0 = {
+        x: Math.abs((floatCanvas.width * floatXf.sx) / 2),
+        y: Math.abs((floatCanvas.height * floatXf.sy) / 2),
+      }
+      const cos = Math.cos(floatXf.angle)
+      const sin = Math.sin(floatXf.angle)
+      scaleAnchorPx = {
+        x: floatXf.cx + def.aLocal.x * cos - def.aLocal.y * sin,
+        y: floatXf.cy + def.aLocal.x * sin + def.aLocal.y * cos,
+      }
+      const dx = p.x - scaleAnchorPx.x
+      const dy = p.y - scaleAnchorPx.y
+      scalePointer0 = { x: dx * cos + dy * sin, y: -dx * sin + dy * cos }
+      return
+    }
+    if (hit.kind === 'move') {
+      floatStartXf = { ...floatXf }
+      floatOp = 'move'
+      floatGrab = { x: p.x - floatXf.cx, y: p.y - floatXf.cy }
+      return
+    }
+    // 点击框外：先提交浮动选区，再按点击位置开始新框选
+    bakeFloatingSelection()
+  }
+
+  if (local.x < 0 || local.x > 1 || local.y < 0 || local.y > 1) {
+    clearPixelSelection()
+    return
+  }
+  floatOp = 'create'
+  pixelSelection = { x0: local.x, y0: local.y, x1: local.x, y1: local.y }
+  drawSelectionOverlay()
+}
+
+function handleSelectPointerMove(world: { x: number; y: number }, shift: boolean): boolean {
+  const s = paintSession
+  const img = mapStore.selectedImage
+  if (!s || !img) return false
+
+  if (floatOp === 'create') {
+    if (pixelSelection) {
+      const local = imageWorldToLocal(img, world.x, world.y)
+      pixelSelection.x1 = Math.max(0, Math.min(1, local.x))
+      pixelSelection.y1 = Math.max(0, Math.min(1, local.y))
+      drawSelectionOverlay()
+    }
+    return true
+  }
+
+  if (!floatCanvas || !floatStartXf) return false
+  const local = imageWorldToLocal(img, world.x, world.y)
+  const p = { x: local.x * s.canvas.width, y: local.y * s.canvas.height }
+
+  if (floatOp === 'move') {
+    floatXf.cx = p.x - floatGrab.x
+    floatXf.cy = p.y - floatGrab.y
+    compositeFloat()
+    return true
+  }
+
+  if (floatOp === 'rotate') {
+    let angle = Math.atan2(p.y - floatXf.cy, p.x - floatXf.cx) + Math.PI / 2
+    if (shift) {
+      const step = Math.PI / 12
+      angle = Math.round(angle / step) * step
+    }
+    floatXf.angle = angle
+    compositeFloat()
+    return true
+  }
+
+  if (floatOp === 'scale') {
+    const cos = Math.cos(floatStartXf.angle)
+    const sin = Math.sin(floatStartXf.angle)
+    const dx = p.x - scaleAnchorPx.x
+    const dy = p.y - scaleAnchorPx.y
+    const p1Local = { x: dx * cos + dy * sin, y: -dx * sin + dy * cos }
+    const dL = { x: p1Local.x - scalePointer0.x, y: p1Local.y - scalePointer0.y }
+    // 锚定缩放：对侧边固定，中心移动 Δ/2、半尺寸增加 Δ·dir/2
+    const ratioX = (scaleHalf0.x + (dL.x * scaleDir.x) / 2) / Math.max(0.001, scaleHalf0.x)
+    const ratioY = (scaleHalf0.y + (dL.y * scaleDir.y) / 2) / Math.max(0.001, scaleHalf0.y)
+    const signedScale = (absBase: number, ratio: number) => {
+      const raw = absBase * ratio
+      return (raw < 0 ? -1 : 1) * Math.max(0.02, Math.abs(raw))
+    }
+    if (shift) {
+      // Shift 等比：两轴取同一比例，中心沿 down 时相对向量同步缩放
+      const r = scaleAxes.x && scaleAxes.y
+        ? (Math.abs(ratioX) > Math.abs(ratioY) ? ratioX : ratioY)
+        : (scaleAxes.x ? ratioX : ratioY)
+      floatXf.sx = signedScale(Math.abs(floatStartXf.sx), r)
+      floatXf.sy = signedScale(Math.abs(floatStartXf.sy), r)
+      const relX = floatStartXf.cx - scaleAnchorPx.x
+      const relY = floatStartXf.cy - scaleAnchorPx.y
+      floatXf.cx = scaleAnchorPx.x + relX * r
+      floatXf.cy = scaleAnchorPx.y + relY * r
+    } else {
+      if (scaleAxes.x) floatXf.sx = signedScale(Math.abs(floatStartXf.sx), ratioX)
+      if (scaleAxes.y) floatXf.sy = signedScale(Math.abs(floatStartXf.sy), ratioY)
+      const cdx = scaleAxes.x ? dL.x / 2 : 0
+      const cdy = scaleAxes.y ? dL.y / 2 : 0
+      floatXf.cx = floatStartXf.cx + cdx * cos - cdy * sin
+      floatXf.cy = floatStartXf.cy + cdx * sin + cdy * cos
+    }
+    compositeFloat()
+    return true
+  }
+
+  return false
+}
+
+function handleSelectPointerUp() {
+  if (floatOp === 'create') {
+    const r = selectionRectPx()
+    floatOp = 'none'
+    if (!r || r.w < 2 || r.h < 2) {
+      clearPixelSelection()
+    } else {
+      cutSelectionToFloat()
+    }
+    return
+  }
+  if (floatOp !== 'none') {
+    floatOp = 'none'
+    floatStartXf = null
+    if (paintSession) {
+      paintSession.dirty = true
+      schedulePaintSave()
+    }
+    drawSelectionOverlay()
+  }
+}
+
+function bindPaintTexture(sprite: any, imgData: any) {
+  if (!paintSession) return
+  const cw = paintSession.canvas.width
+  const ch = paintSession.canvas.height
+  const scaleX = (imgData.scaleX ?? imgData.scale ?? 1)
+  const scaleY = (imgData.scaleY ?? imgData.scale ?? 1)
+  const logicalW = imgData.width || cw
+  const logicalH = imgData.height || ch
+  sprite.texture = paintSession.texture
+  sprite.anchor.set(0.5, 0.5)
+  sprite.scale.set((logicalW * scaleX) / cw, (logicalH * scaleY) / ch)
+  sprite.x = (imgData.position?.[0] ?? 0) + (logicalW * scaleX) / 2
+  sprite.y = (imgData.position?.[1] ?? 0) + (logicalH * scaleY) / 2
+  sprite.rotation = (imgData.rotation ?? 0) * Math.PI / 180
+  sprite.alpha = imgData.opacity ?? 1
+  paintSession.sprite = sprite
+}
+
+async function startPaintSession(): Promise<boolean> {
+  // 选取工具也需要会话：框选/浮动选区都要读写图片像素
+  if (mapStore.activeMode !== 'image' || !mapStore.selectedImage) return false
+  const img = mapStore.selectedImage
+  const layerId = mapStore.selectedImageLayerId
+  if (!img || layerId < 0) return false
+  if (paintSession && paintSession.layerId === layerId) return true
+  await commitPaintSession(false)
+
+  const PIXI_ = PIXI
+  if (!PIXI_) return false
+  try {
+    const source = await loadImage(img.imagePath)
+    const srcW = source.naturalWidth || source.width
+    const srcH = source.naturalHeight || source.height
+    // 背景图层的绘制范围跟随当前地图尺寸（地图改大后可继续在新区域绘制）
+    const isBackground = !!img.background
+    const mapW = Math.max(1, mapStore.mapData.width * mapStore.mapData.tileSize)
+    const mapH = Math.max(1, mapStore.mapData.height * mapStore.mapData.tileSize)
+    const canvasW = isBackground ? Math.max(srcW, mapW) : srcW
+    const canvasH = isBackground ? Math.max(srcH, mapH) : srcH
+    const canvas = document.createElement('canvas')
+    canvas.width = canvasW
+    canvas.height = canvasH
+    if (canvas.width <= 0 || canvas.height <= 0) return false
+    canvas.getContext('2d')!.drawImage(source, 0, 0)
+    if (isBackground && (canvasW !== srcW || canvasH !== srcH)) {
+      img.width = canvasW
+      img.height = canvasH
+      img.position = [0, 0]
+      img.scaleX = 1
+      img.scaleY = 1
+      img.scale = 1
+    }
+    const texture = PIXI_.Texture.from(canvas)
+    texture.source.scaleMode = currentScaleMode
+    let sprite: any = null
+    const container = layerContainers.get(layerId)
+    for (const child of container?.children ?? []) {
+      if (child instanceof PIXI_.Sprite) { sprite = child; break }
+    }
+    paintSession = {
+      layerId,
+      mapName: mapStore.mapData.name,
+      canvas,
+      texture,
+      sprite,
+      lastPoint: null,
+      startPoint: null,
+      snapshot: null,
+      dirty: false,
+      savePath: pickPaintSavePath(img.imagePath),
+    }
+    if (sprite) bindPaintTexture(sprite, img)
+    paintUndo = []
+    paintRedo = []
+    // 精灵已存在则已直接绑定纹理；不存在时触发一次渲染补建
+    if (!sprite) scheduleRender()
+    return true
+  } catch (e) {
+    console.error('[MapCanvas] 启动绘制失败:', e)
+    return false
+  }
+}
+
+function paintCtx(): CanvasRenderingContext2D | null {
+  return paintSession?.canvas.getContext('2d') ?? null
+}
+
+function paintBrushAt(px: number, py: number, from: { x: number; y: number } | null) {
+  const s = paintSession
+  const ctx = paintCtx()
+  if (!s || !ctx) return
+  ctx.save()
+  clipToSelection(ctx)
+  if (mapEditorStore.imageTool === 'eraser') {
+    ctx.globalCompositeOperation = 'destination-out'
+    ctx.strokeStyle = 'rgba(0, 0, 0, 1)'
+  } else {
+    ctx.strokeStyle = rgbaCss(paintStore.fillColor, paintStore.opacity)
+  }
+  ctx.lineWidth = paintStore.brushSize
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  // 单击无移动也要留下一个圆点（与角色绘制一致）
+  ctx.beginPath()
+  if (from) {
+    ctx.moveTo(from.x, from.y)
+    ctx.lineTo(px, py)
+  } else {
+    ctx.moveTo(px, py)
+    ctx.lineTo(px + 0.01, py + 0.01)
+  }
+  ctx.stroke()
+  ctx.restore()
+}
+
+// Shift 约束：直线 45° 步进，矩形/椭圆等宽高（与角色绘制一致）
+function constrainPoint(p: { x: number; y: number }, start: { x: number; y: number }, shift: boolean) {
+  if (!shift) return p
+  const dx = p.x - start.x
+  const dy = p.y - start.y
+  if (mapEditorStore.imageTool === 'line') {
+    const angle = Math.atan2(dy, dx)
+    const step = Math.PI / 4
+    const snapped = Math.round(angle / step) * step
+    const len = Math.hypot(dx, dy)
+    return {
+      x: start.x + Math.cos(snapped) * len,
+      y: start.y + Math.sin(snapped) * len,
+    }
+  }
+  const s = Math.max(Math.abs(dx), Math.abs(dy))
+  return {
+    x: start.x + (dx < 0 ? -s : s),
+    y: start.y + (dy < 0 ? -s : s),
+  }
+}
+
+function restorePaintSnapshot() {
+  const s = paintSession
+  const ctx = paintCtx()
+  if (s?.snapshot && ctx) ctx.putImageData(s.snapshot, 0, 0)
+}
+
+function drawShapePreview(px: number, py: number, shift = false) {
+  const s = paintSession
+  const ctx = paintCtx()
+  if (!s || !ctx || !s.startPoint) return
+  restorePaintSnapshot()
+  const end = constrainPoint({ x: px, y: py }, s.startPoint, shift)
+  const start = s.startPoint
+  const tool = mapEditorStore.imageTool
+  // 位图形状：实心 / 轮廓 二选一（直线始终是描边）
+  const fillOn = tool !== 'line' && paintStore.shapeStyle === 'fill'
+  const strokeOn = tool === 'line' || paintStore.shapeStyle === 'outline'
+  ctx.save()
+  clipToSelection(ctx)
+  ctx.lineWidth = tool === 'line'
+    ? Math.max(1, paintStore.lineWidth)
+    : paintStore.strokeWidth > 0 ? paintStore.strokeWidth : 4
+  ctx.lineJoin = 'round'
+  ctx.lineCap = 'round'
+  ctx.beginPath()
+  if (tool === 'line') {
+    ctx.moveTo(start.x, start.y)
+    ctx.lineTo(end.x, end.y)
+  } else if (tool === 'rect') {
+    ctx.rect(
+      Math.min(start.x, end.x), Math.min(start.y, end.y),
+      Math.abs(end.x - start.x), Math.abs(end.y - start.y),
+    )
+  } else if (tool === 'ellipse') {
+    ctx.ellipse(
+      (start.x + end.x) / 2, (start.y + end.y) / 2,
+      Math.abs(end.x - start.x) / 2, Math.abs(end.y - start.y) / 2,
+      0, 0, Math.PI * 2,
+    )
+  }
+  if (fillOn) {
+    ctx.fillStyle = rgbaCss(paintStore.fillColor, paintStore.opacity)
+    ctx.fill()
+  }
+  if (strokeOn) {
+    // 轮廓与实心共用绘制色（位图模式只暴露一个颜色）
+    ctx.strokeStyle = rgbaCss(paintStore.fillColor, paintStore.opacity)
+    ctx.stroke()
+  }
+  ctx.restore()
+}
+
+function floodFillAt(px: number, py: number) {
+  const s = paintSession
+  const ctx = paintCtx()
+  if (!s || !ctx) return
+  const w = s.canvas.width
+  const h = s.canvas.height
+  const x0 = Math.floor(px)
+  const y0 = Math.floor(py)
+  if (x0 < 0 || y0 < 0 || x0 >= w || y0 >= h) return
+  // 有框选时只在选区内填充
+  let minX = 0, minY = 0, maxX = w - 1, maxY = h - 1
+  if (pixelSelection) {
+    minX = Math.floor(Math.min(pixelSelection.x0, pixelSelection.x1) * w)
+    maxX = Math.ceil(Math.max(pixelSelection.x0, pixelSelection.x1) * w) - 1
+    minY = Math.floor(Math.min(pixelSelection.y0, pixelSelection.y1) * h)
+    maxY = Math.ceil(Math.max(pixelSelection.y0, pixelSelection.y1) * h) - 1
+  }
+  const image = ctx.getImageData(0, 0, w, h)
+  const d = image.data
+  const startIdx = (y0 * w + x0) * 4
+  const target = [d[startIdx], d[startIdx + 1], d[startIdx + 2], d[startIdx + 3]]
+  const fill = hexToRgba(paintStore.fillColor, paintStore.opacity)
+  const fa = Math.round(fill.a * 255)
+  if (target[0] === fill.r && target[1] === fill.g && target[2] === fill.b && target[3] === fa) return
+
+  const stack: [number, number][] = [[x0, y0]]
+  while (stack.length > 0) {
+    const [x, y] = stack.pop()!
+    if (x < 0 || y < 0 || x >= w || y >= h) continue
+    if (x < minX || x > maxX || y < minY || y > maxY) continue
+    const i = (y * w + x) * 4
+    if (d[i] !== target[0] || d[i + 1] !== target[1] || d[i + 2] !== target[2] || d[i + 3] !== target[3]) continue
+    d[i] = fill.r; d[i + 1] = fill.g; d[i + 2] = fill.b; d[i + 3] = fa
+    stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1])
+  }
+  ctx.putImageData(image, 0, 0)
+}
+
+function pushPaintUndo() {
+  const ctx = paintCtx()
+  if (!paintSession || !ctx) return
+  paintUndo.push(ctx.getImageData(0, 0, paintSession.canvas.width, paintSession.canvas.height))
+  if (paintUndo.length > PAINT_UNDO_LIMIT) paintUndo.shift()
+  paintRedo = []
+}
+
+function toCanvasPoint(world: { x: number; y: number }): { x: number; y: number } | null {
+  const s = paintSession
+  const img = mapStore.selectedImage
+  if (!s || !img) return null
+  const local = imageWorldToLocal(img, world.x, world.y)
+  return { x: local.x * s.canvas.width, y: local.y * s.canvas.height }
+}
+
+function paintBegin(world: { x: number; y: number }) {
+  // 有浮动选区先落定，避免笔画与浮动内容叠加混乱
+  if (floatCanvas) bakeFloatingSelection()
+  const s = paintSession
+  const ctx = paintCtx()
+  const p = toCanvasPoint(world)
+  if (!s || !ctx || !p) return
+  pushPaintUndo()
+  const tool = mapEditorStore.imageTool
+  if (tool === 'fill') {
+    floodFillAt(p.x, p.y)
+    s.dirty = true
+    s.texture.source.update()
+    schedulePaintSave()
+    return
+  }
+  if (tool === 'brush' || tool === 'eraser') {
+    paintBrushAt(p.x, p.y, null)
+    s.lastPoint = p
+  } else {
+    s.snapshot = ctx.getImageData(0, 0, s.canvas.width, s.canvas.height)
+    s.startPoint = p
+    s.lastPoint = p
+  }
+  s.dirty = true
+  s.texture.source.update()
+}
+
+function paintMove(world: { x: number; y: number }, shift = false) {
+  const s = paintSession
+  const p = toCanvasPoint(world)
+  if (!s || !p) return
+  const tool = mapEditorStore.imageTool
+  if (tool === 'brush' || tool === 'eraser') {
+    paintBrushAt(p.x, p.y, s.lastPoint)
+    s.lastPoint = p
+  } else {
+    drawShapePreview(p.x, p.y, shift)
+    s.lastPoint = p
+  }
+  s.dirty = true
+  s.texture.source.update()
+}
+
+function paintEnd(world?: { x: number; y: number }, shift = false) {
+  const s = paintSession
+  if (!s) return
+  if (s.startPoint) {
+    const start = s.startPoint
+    const p = world ? toCanvasPoint(world) : s.lastPoint
+    restorePaintSnapshot()
+    if (!p) {
+      paintUndo.pop()
+    } else {
+      const end = constrainPoint(p, start, shift)
+      const isClick = Math.abs(end.x - start.x) < 0.5 && Math.abs(end.y - start.y) < 0.5
+      if (isClick) {
+        // 零尺寸空点击：丢弃本次撤销记录，不产生可见变更
+        paintUndo.pop()
+      } else {
+        drawShapePreview(p.x, p.y, shift)
+        s.dirty = true
+        s.texture.source.update()
+      }
+    }
+  }
+  s.lastPoint = null
+  s.startPoint = null
+  s.snapshot = null
+  schedulePaintSave()
+}
+
+function schedulePaintSave() {
+  if (paintSaveTimer) clearTimeout(paintSaveTimer)
+  paintSaveTimer = setTimeout(() => {
+    paintSaveTimer = null
+    if (paintSession) void flushPaintSave(paintSession, false)
+  }, 400)
+}
+
+async function flushPaintSave(session: ImagePaintSession, finalize: boolean) {
+  if (!session.dirty) return
+  session.dirty = false
+  const root = projectStore.root
+  if (!root) return
+  try {
+    const blob: Blob | null = await new Promise(r => session.canvas.toBlob(r, 'image/png'))
+    if (!blob) return
+    await invoke('create_dir', { path: `${root}/assets/maps/${session.mapName}/images` })
+    await invoke('write_binary', {
+      path: `${root}/${session.savePath}`,
+      data: Array.from(new Uint8Array(await blob.arrayBuffer())),
+    })
+    if (mapStore.mapData.name === session.mapName) {
+      const layer = mapStore.mapData.layers.find(l => l.id === session.layerId)
+      if (layer && layer.type === 'image') layer.image.imagePath = session.savePath
+    }
+    resolvedPathCache.delete(session.savePath)
+    if (finalize) mapStore.imageRevision++
+  } catch (e) {
+    session.dirty = true
+    console.error('[MapCanvas] 保存绘制结果失败:', e)
+  }
+}
+
+async function commitPaintSession(finalize = true) {
+  if (paintSaveTimer) {
+    clearTimeout(paintSaveTimer)
+    paintSaveTimer = null
+  }
+  // 浮动选区先合成落定，保证落盘内容与画面一致
+  if (floatCanvas) bakeFloatingSelection()
+  const session = paintSession
+  if (!session) return
+  paintSession = null
+  await flushPaintSave(session, finalize)
+  paintUndo = []
+  paintRedo = []
+  resetFloatingSelection()
+}
+
+function undoPaint() {
+  const s = paintSession
+  const ctx = paintCtx()
+  if (!s || !ctx || paintUndo.length === 0) return
+  resetFloatingSelection()
+  paintRedo.push(ctx.getImageData(0, 0, s.canvas.width, s.canvas.height))
+  ctx.putImageData(paintUndo.pop()!, 0, 0)
+  s.texture.source.update()
+  s.dirty = true
+  schedulePaintSave()
+}
+
+function redoPaint() {
+  const s = paintSession
+  const ctx = paintCtx()
+  if (!s || !ctx || paintRedo.length === 0) return
+  resetFloatingSelection()
+  paintUndo.push(ctx.getImageData(0, 0, s.canvas.width, s.canvas.height))
+  ctx.putImageData(paintRedo.pop()!, 0, 0)
+  s.texture.source.update()
+  s.dirty = true
+  schedulePaintSave()
+}
+
 // --- 交互 composables ---
 const viewport = useMapViewport({
   canvasRef,
   getApp: () => app,
   getPIXI: () => PIXI,
-  onZoom: () => collision.drawCollisionOverlay(),
+  onZoom: () => {
+    collision.drawCollisionOverlay()
+    // 选区手柄按屏幕尺寸恒定，缩放后重绘
+    drawSelectionOverlay()
+  },
 })
 
 const transform = useImageTransform({
@@ -461,10 +1388,41 @@ function onPointerDown(e: PointerEvent) {
     return
   }
 
+  // 图片模式的选择工具：框选像素 → 浮动选区（整层选择走左侧图层列表）
+  if (mapStore.activeMode === 'image' && mapEditorStore.imageTool === 'select' && mapStore.selectedImage) {
+    if (e.button !== 0) return
+    const worldPos = viewport.screenToWorld(e)
+    if (worldPos) {
+      if (paintSession) {
+        handleSelectPointerDown(worldPos)
+      } else {
+        void startPaintSession().then(ok => {
+          if (ok) handleSelectPointerDown(worldPos)
+        })
+      }
+    }
+    return
+  }
+
   // If transform handle or rotation handle was clicked, don't process further
   if (transform.isTransformBusy()) return
 
   if (e.button === 0 && !e.altKey && !viewport.isSpacePressed()) {
+    // 图片模式：直接在画布上绘制
+    if (isImagePaintTool()) {
+      const worldPos = viewport.screenToWorld(e)
+      if (worldPos) {
+        if (paintSession) {
+          paintBegin(worldPos)
+        } else {
+          void startPaintSession().then(ok => {
+            if (ok) paintBegin(worldPos)
+          })
+        }
+        return
+      }
+    }
+
     const layer = mapStore.activeLayer
 
     if (transform.handleSelectPointerDown(e, layer)) return
@@ -484,6 +1442,23 @@ function onPointerMove(e: PointerEvent) {
     return
   }
 
+  // 图片模式选取工具：更新框选矩形 / 拖动浮动选区（移动、缩放、旋转）
+  if (mapStore.activeMode === 'image' && mapEditorStore.imageTool === 'select' && mapStore.selectedImage) {
+    if (floatOp !== 'none') {
+      const worldPos = viewport.screenToWorld(e)
+      if (worldPos) handleSelectPointerMove(worldPos, e.shiftKey)
+    }
+    return
+  }
+
+  if (isImagePaintTool()) {
+    if (e.buttons === 1 && paintSession) {
+      const worldPos = viewport.screenToWorld(e)
+      if (worldPos) paintMove(worldPos, e.shiftKey)
+    }
+    return
+  }
+
   if (transform.handleTransformPointerMove(e)) return
 
   const gridPos = viewport.screenToGrid(e)
@@ -497,8 +1472,21 @@ function onPointerMove(e: PointerEvent) {
   painter.handlePaintPointerMove(e, gridPos)
 }
 
-function onPointerUp() {
+function onPointerUp(e: PointerEvent) {
+  // 图片模式选取工具：结束框选 / 结束移动缩放旋转
+  if (mapStore.activeMode === 'image' && mapEditorStore.imageTool === 'select' && mapStore.selectedImage) {
+    if (e.button === 0) handleSelectPointerUp()
+    viewport.endPan()
+    return
+  }
+
   if (collision.handlePointerUp()) return
+
+  if (isImagePaintTool() && paintSession) {
+    paintEnd(viewport.screenToWorld(e) ?? undefined, e.shiftKey)
+    viewport.endPan()
+    return
+  }
 
   if (transform.handleTransformPointerUp()) return
 
@@ -515,6 +1503,12 @@ function onPointerLeave() {
   painter.resetPaintKey()
   cursorGridPos.value = null
   painter.hidePreview()
+  // 绘制中离开画布：结束当前笔画
+  if (isImagePaintTool() && paintSession) paintEnd()
+  // 框选中离开画布：按当前尺寸收口，避免选框悬空
+  if (mapStore.activeMode === 'image' && mapEditorStore.imageTool === 'select' && floatOp === 'create') {
+    handleSelectPointerUp()
+  }
   // 离开画布时取消未完成的碰撞草稿，避免残留预览
   if (mapEditorStore.imageCollisionTool !== 'none') {
     collision.resetDraftOnLeave()
@@ -597,6 +1591,21 @@ function onKeyDown(e: KeyboardEvent) {
     viewport.onSpaceDown()
     return
   }
+  // 图片模式选取工具：Esc 取消浮动选区，Delete 删除选区内容
+  if (mapStore.activeMode === 'image' && mapEditorStore.imageTool === 'select') {
+    if (e.key === 'Escape' && floatCanvas) {
+      e.preventDefault()
+      cancelFloatingSelection()
+      return
+    }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && floatCanvas) {
+      e.preventDefault()
+      deleteFloatingPixels()
+      return
+    }
+  }
+  // 绘制模式下不响应地图快捷键（避免误删图层/切工具）
+  if (isImagePaintTool()) return
   // Tool shortcuts (only when not typing in an input)
   if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return
 
@@ -660,6 +1669,50 @@ watch(
     if (app) {
       applyRenderMode()
       scheduleRender()
+    }
+  }
+)
+
+watch(
+  () => [mapStore.mapData.width, mapStore.mapData.height],
+  ([w, h], prev) => {
+    const ts = mapStore.mapData.tileSize
+    const oldW = (prev?.[0] ?? w) * ts
+    const oldH = (prev?.[1] ?? h) * ts
+    // 兼容旧数据：曾经铺满整张画布的图片图层，在尺寸变化时标记为背景
+    for (const layer of mapStore.mapData.layers) {
+      if (layer.type !== 'image') continue
+      const img = layer.image
+      const atOrigin = (img.position?.[0] ?? 0) === 0 && (img.position?.[1] ?? 0) === 0
+      const unitScale = Math.abs(img.scaleX ?? 1) === 1 && Math.abs(img.scaleY ?? 1) === 1
+      if (!img.background && atOrigin && unitScale
+        && Math.abs((img.width || 0) - oldW) < 0.5
+        && Math.abs((img.height || 0) - oldH) < 0.5) {
+        img.background = true
+      }
+    }
+    // 地图尺寸变化：正在绘制的背景图层按新尺寸重建画板
+    if (paintSession && mapStore.selectedImage?.background) {
+      void commitPaintSession(false).then(() => startPaintSession())
+    }
+  }
+)
+
+watch(
+  () => mapEditorStore.imageTool,
+  (tool) => {
+    if (mapStore.activeMode !== 'image') return
+    if (tool === 'select') {
+      viewport.setCursor('default')
+      // 选取工具需要绘制会话才能读写图片像素
+      void startPaintSession()
+    } else {
+      // 切换绘制工具前先落定浮动选区
+      bakeFloatingSelection()
+      clearPixelSelection()
+      transform.removeTransformBox()
+      viewport.setCursor('crosshair')
+      void startPaintSession()
     }
   }
 )
@@ -735,14 +1788,22 @@ watch(
   () => {
     collision.cancelCollisionDraft()
     collision.clearVertexSelection()
+    resetFloatingSelection()
     // 外部设置的选中实例（例如绘制页保存返回）需要同步本地变换框
     const img = mapStore.selectedImage
-    if (img && mapEditorStore.imageCollisionTool === 'none' && !transform.isSelectedImage(img)) {
+    if (img && mapEditorStore.imageCollisionTool === 'none' && mapEditorStore.imageTool === 'select' && !transform.isSelectedImage(img)) {
       transform.setSelection(mapStore.selectedImageLayerId, img)
       transform.showTransformBox(img)
       transform.cacheSelectedImageSprite()
     }
     collision.drawCollisionOverlay()
+    // 切换图片图层：先落盘旧图层，再为新图层建会话
+    if (paintSession && paintSession.layerId !== mapStore.selectedImageLayerId) {
+      void commitPaintSession(false).then(() => startPaintSession())
+    } else if (mapStore.activeMode === 'image' && !paintSession && mapStore.selectedImage) {
+      // 图片模式下选中图层即预建会话，保证首次框选/绘制立即可用
+      void startPaintSession()
+    }
   }
 )
 
@@ -804,6 +1865,8 @@ watch(
 
 // 切换地图时清理所有选中状态、变换框、拖拽状态
 function resetCanvasState() {
+  void commitPaintSession()
+  resetFloatingSelection()
   transform.resetTransformState()
   mapStore.clearImageSelection()
   collision.cancelCollisionDraft()
@@ -820,6 +1883,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  void commitPaintSession()
   resizeObserver?.disconnect()
   resizeObserver = null
   window.removeEventListener('keydown', onKeyDown)
@@ -877,7 +1941,7 @@ function deleteSelectedImage() {
   scheduleRender()
 }
 
-defineExpose({ redraw, cursorGridPos, renderAllLayers, showTransformBox: transform.showTransformBox, removeTransformBox: transform.removeTransformBox, resetCanvasState, getThumbnailDataUrl, deleteSelectedImage, placeImageFromPath })
+defineExpose({ redraw, cursorGridPos, renderAllLayers, showTransformBox: transform.showTransformBox, removeTransformBox: transform.removeTransformBox, resetCanvasState, getThumbnailDataUrl, deleteSelectedImage, placeImageFromPath, undoPaint, redoPaint })
 </script>
 
 <template>
