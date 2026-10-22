@@ -119,19 +119,18 @@ export function useImageCollisionEditor(options: ImageCollisionOptions) {
 
     const img = mapStore.selectedImage
 
-    // 全局碰撞可视化（所有图像图层）
+    // 全局碰撞可视化（所有图片图层）
     if (mapEditorStore.showCollision) {
       for (const layer of mapStore.mapData.layers) {
         if (layer.type !== 'image' || !layer.visible) continue
-        for (const layerImg of layer.images) {
-          const pts = layerImg.collisionShape?.points
-          if (!layerImg.collisionEnabled || !pts || pts.length < 3 || layerImg === img) continue
-          drawCollisionPolygon(
-            g, layerImg,
-            pts.map((p: number[]) => ({ x: p[0], y: p[1] })),
-            0xff5050, 0.12, lineWidth, false,
-          )
-        }
+        const layerImg = layer.image
+        const pts = layerImg.collisionShape?.points
+        if (!layerImg.collisionEnabled || !pts || pts.length < 3 || layerImg === img) continue
+        drawCollisionPolygon(
+          g, layerImg,
+          pts.map((p: number[]) => ({ x: p[0], y: p[1] })),
+          0xff5050, 0.12, lineWidth, false,
+        )
       }
     }
 

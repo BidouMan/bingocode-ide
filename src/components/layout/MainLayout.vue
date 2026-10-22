@@ -106,6 +106,8 @@ const paintMapImageSize = ref({ w: 640, h: 480 })
 const paintMapLayerId = ref(-1)
 /** 角色编辑器实例：追加帧后强制重载帧列表 */
 const spriteEditorRef = ref<{ reload: () => Promise<void> } | null>(null)
+/** 地图编辑器实例：内置资源库选图后直接放置为图片图层 */
+const mapEditorRef = ref<{ placeImageResource: (path: string) => Promise<void> } | null>(null)
 watch(currentPage, (page) => {
   if (page === 2) mapLibPageKey.value++
   else if (page === 4) mapResLibPageKey.value++
@@ -783,10 +785,9 @@ function onOpenPaint() {
 /** 地图编辑器「绘制背景」：单画板，保存后写回地图图像素材 */
 function onOpenMapPaint() {
   const layer = mapStore.activeLayer
-  if (!layer || layer.type !== 'image') return
   paintMode.value = 'mapImage'
   paintTarget.value = null
-  paintMapLayerId.value = layer.id
+  paintMapLayerId.value = layer?.id ?? -1
   paintMapImageSize.value = {
     w: Math.max(1, mapStore.mapData.width * mapStore.mapData.tileSize),
     h: Math.max(1, mapStore.mapData.height * mapStore.mapData.tileSize),
@@ -876,7 +877,7 @@ async function onCreateMap() {
   const mapDir = `${projectRoot}/assets/maps/${name}`
   await invoke('create_dir', { path: mapDir })
 
-  // 保存空地图数据：默认图像模式（图像图层）
+  // 保存空地图数据：扁平图层模型，空地图默认图像模式，无图层
   const mapData = {
     name,
     version: 5,
@@ -887,16 +888,7 @@ async function onCreateMap() {
     collisionType: '图像',
     collisionEnabled: false,
     resources: [],
-    layers: [
-      {
-        id: 0,
-        name: '图像图层',
-        type: 'imagelayer',
-        visible: true,
-        locked: false,
-        images: [],
-      },
-    ],
+    layers: [],
     tilesets: [],
   }
   await invoke('write_file', {
@@ -904,9 +896,13 @@ async function onCreateMap() {
     content: JSON.stringify(mapData, null, 2),
   })
 
-  // 添加到资源管理器
+  // 添加到资源管理器并直接进入地图编辑页
   const id = resourceStore.addItem({ name, type: 'map', path: mapDir })
+  editorStore.setGameMode(true)
+  editorStore.setActiveEditorMode('map')
   editorStore.setResourceTab('map')
+  currentPage.value = 0
+  mapStore.setMapPath(id)
 }
 
 function onSpriteLibImported(id: string, name: string, bgsUrl: string) {
@@ -1028,7 +1024,7 @@ async function createImageMapProject(fileName: string, opts: { bytes?: number[];
     layers: [
       {
         id: 0,
-        name: '图像图层',
+        name: mapName,
         type: 'imagelayer',
         visible: true,
         locked: false,
@@ -1122,7 +1118,7 @@ async function onMapLibImportedImage(engineRelPath: string) {
 async function onResLibImported(path: string) {
   const name = path.split('/').pop()?.split('.')[0] || '资源'
   const tileSize = mapStore.mapData.tileSize
-  const isImageLayer = mapStore.activeLayer?.type === 'image'
+  const isImageLayer = mapStore.activeMode === 'image'
 
   // 复制资源文件到项目地图目录
   let relativePath = path
@@ -1154,6 +1150,10 @@ async function onResLibImported(path: string) {
   editorStore.setActiveEditorMode('map')
   editorStore.setResourceTab('map')
   currentPage.value = 0
+  // 图像模式：内置资源选图后直接生成一个图片图层
+  if (isImageLayer) {
+    await mapEditorRef.value?.placeImageResource(relativePath)
+  }
 }
 
 function renameResource(item: { id: string; name: string; type: string }) {
@@ -2012,6 +2012,7 @@ function spriteDisplayName(name: string) {
         <!-- ═══ Page 0: 游戏模式 — 地图编辑器 (v-show 保持 PixiJS 实例存活) ═══ -->
         <div v-show="editorStore.isGameMode && editorStore.activeEditorMode === 'map'" class="editor-page-full">
           <MapEditorView
+            ref="mapEditorRef"
             @open-resource-lib="currentPage = 4"
             @open-paint="onOpenMapPaint"
             @map-thumbnail-updated="onMapThumbnailUpdated"

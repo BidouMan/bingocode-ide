@@ -3,9 +3,10 @@ import { ref, watch, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import MapToolbar from './MapToolbar.vue'
 import MapCanvas from './MapCanvas.vue'
-import ResourceListPanel from './ResourceListPanel.vue'
+import TileResourceBar from './TileResourceBar.vue'
 import PropertyPanel from './PropertyPanel.vue'
 import LayerPanel from './LayerPanel.vue'
+import TileCollisionPanel from './TileCollisionPanel.vue'
 import { useMapStore } from '../../stores/map'
 import { useMapEditorStore } from '../../stores/mapEditor'
 import { useResourceStore } from '../../stores/resource'
@@ -22,6 +23,7 @@ const projectStore = useProjectStore()
 const hasMaps = computed(() => resourceStore.maps.length > 0)
 
 const mapCanvasRef = ref<InstanceType<typeof MapCanvas>>()
+const tileResourceBarRef = ref<{ openImport: () => void } | null>(null)
 
 const emit = defineEmits<{
   'open-resource-lib': []
@@ -101,6 +103,46 @@ async function onNewMap() {
   skipNextPathWatch = true
   mapStore.setMapPath(id)
   mapStore.loadMap(createEmptyMapData(name))
+}
+
+async function onUploadLocal() {
+  // 图块模式的本地上传交给下方素材面板的导入弹窗（需要选择图块尺寸）
+  if (mapStore.activeMode === 'tile') {
+    tileResourceBarRef.value?.openImport()
+    return
+  }
+  await onUploadImage()
+}
+
+async function onUploadImage() {
+  const path = await invoke<string | null>('pick_image_file')
+  if (!path) return
+  const projectRoot = projectStore.root
+  const mapName = mapStore.mapData.name
+  if (!projectRoot || !mapName) return
+  const fileName = path.split('/').pop() || 'resource.png'
+  const relativePath = `assets/maps/${mapName}/images/${fileName}`
+  try {
+    await invoke('copy_file_to_project', { src: path, projectRoot, relativePath })
+  } catch (e) {
+    console.error('[MapEditor] 复制资源到项目目录失败:', e)
+    return
+  }
+  mapStore.addResource({
+    name: fileName.split('.')[0] || '资源',
+    path: relativePath,
+    resourceType: 'image',
+    tileWidth: 64,
+    tileHeight: 64,
+    collisionType: '图像',
+    collisionEnabled: false,
+  })
+  await placeImageResource(relativePath)
+}
+
+// 供外部（内置资源库）按路径直接放置一张图片并建层
+async function placeImageResource(path: string) {
+  await mapCanvasRef.value?.placeImageFromPath(path, 0, 0)
 }
 
 async function onImportMap() {
@@ -234,17 +276,20 @@ function onDeleteImage() {
   mapCanvasRef.value?.deleteSelectedImage()
 }
 
-defineExpose({ switchToMap })
+defineExpose({ switchToMap, placeImageResource })
 </script>
 
 <template>
   <div class="map-editor-view">
     <div class="map-editor-body" :class="{ disabled: !hasMaps }">
-      <ResourceListPanel
-        :disabled="!hasMaps"
-        @open-library="onOpenLibrary"
-        @select-tile="(rIdx, tIdx) => mapStore.selectTile(rIdx, tIdx)"
-      />
+      <div class="map-editor-left">
+        <LayerPanel
+          :disabled="!hasMaps"
+          @paint="emit('open-paint')"
+          @open-library="emit('open-resource-lib')"
+          @upload-image="onUploadLocal"
+        />
+      </div>
       <div class="map-editor-center">
         <MapToolbar
           :disabled="!hasMaps"
@@ -256,6 +301,14 @@ defineExpose({ switchToMap })
           @paint="emit('open-paint')"
         />
         <MapCanvas ref="mapCanvasRef" class="map-canvas-area" :class="{ disabled: !hasMaps }" @cursor-move="onCursorMove" />
+        <!-- 图块模式：素材面板从画布下方展开 -->
+        <TileResourceBar
+          v-if="mapStore.activeMode === 'tile'"
+          ref="tileResourceBarRef"
+          :disabled="!hasMaps"
+          @open-library="onOpenLibrary"
+          @select-tile="(rIdx, tIdx) => mapStore.selectTile(rIdx, tIdx)"
+        />
         <div class="map-info-bar">
           <span class="info-spacer" />
           <span class="info-label">ID:{{ mapStore.currentMapPath ? mapStore.currentMapPath.split('/').pop()?.split('.')[0] ?? '--' : '--' }}</span>
@@ -267,7 +320,8 @@ defineExpose({ switchToMap })
       </div>
       <div class="map-editor-right">
         <PropertyPanel :disabled="!hasMaps" />
-        <LayerPanel :disabled="!hasMaps" />
+        <!-- 碰撞编辑器仅图块模式使用；图像模式在画布上按实例编辑 -->
+        <TileCollisionPanel v-if="mapStore.activeMode === 'tile'" />
       </div>
     </div>
     <div v-if="!hasMaps" class="map-empty-banner">
@@ -300,6 +354,16 @@ defineExpose({ switchToMap })
   flex: 1;
   min-height: 0;
   display: flex;
+}
+
+.map-editor-left {
+  display: flex;
+  flex-direction: column;
+  width: 272px;
+  min-width: 272px;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-root);
 }
 
 .map-editor-center {
@@ -339,6 +403,8 @@ defineExpose({ switchToMap })
   flex-direction: column;
   width: 272px;
   min-width: 272px;
+  min-height: 0;
+  overflow-y: auto;
   border-left: 1px solid var(--border);
   background: var(--bg-root);
 }

@@ -50,7 +50,9 @@ export function useMapPaint() {
       collisionType: '图像',
       collisionEnabled: false,
     })
-    mapStore.addImageInstance(layerId, {
+    // 扁平模型：保存的背景图作为新的图片图层，插在当前图层上方
+    const layerIndex = mapStore.mapData.layers.findIndex(l => l.id === layerId)
+    mapStore.addImageAt(layerIndex >= 0 ? layerIndex : mapStore.mapData.layers.length - 1, {
       imagePath: relativePath,
       position: [0, 0],
       rotation: 0,
@@ -62,7 +64,7 @@ export function useMapPaint() {
       height,
       collisionType: '图像',
       collisionEnabled: false,
-    })
+    }, name)
   }
 
   return { saveMapImage }

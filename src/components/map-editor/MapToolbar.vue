@@ -5,7 +5,6 @@ import { useMapEditorStore } from '../../stores/mapEditor'
 import { useResourceStore } from '../../stores/resource'
 import CustomSelect from '../common/CustomSelect.vue'
 import ImageLayerTools from './ImageLayerTools.vue'
-import DrawingLayerTools from './DrawingLayerTools.vue'
 import iconNewMap from '../../assets/icons/新建地图.svg'
 import iconImportMap from '../../assets/icons/导入地图.svg'
 import iconExportMap from '../../assets/icons/导出地图.svg'
@@ -29,8 +28,7 @@ const mapStore = useMapStore()
 const mapEditorStore = useMapEditorStore()
 const resourceStore = useResourceStore()
 
-const isImageLayer = computed(() => mapStore.activeLayer?.type === 'image')
-
+const isImageLayer = computed(() => mapStore.activeMode === 'image')
 const selectedMap = ref('')
 
 const mapOptions = computed(() => {
@@ -65,14 +63,12 @@ function onMapChange(value: string) {
 
     <div class="toolbar-separator" />
 
-    <!-- 图像模式工具 / 图块模式工具 -->
+    <!-- 图像工具始终占位（图块模式下禁用），保证工具栏不随图层类型变化 -->
     <ImageLayerTools
-      v-if="isImageLayer"
-      :disabled="disabled"
+      :disabled="disabled || !isImageLayer"
       @delete-image="emit('delete-image')"
       @paint="emit('paint')"
     />
-    <DrawingLayerTools v-else :disabled="disabled" />
 
     <div class="toolbar-separator" />
 

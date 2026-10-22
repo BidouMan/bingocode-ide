@@ -36,7 +36,8 @@ export interface DrawingLayer extends MapLayerBase {
 
 export interface ImageLayer extends MapLayerBase {
   type: 'image'
-  images: ImageData[]
+  // 扁平模型：一张图片就是一个图层，不再有"图像图层"容器
+  image: ImageData
 }
 
 export type MapLayer = DrawingLayer | ImageLayer
@@ -106,54 +107,44 @@ export const useMapStore = defineStore('map', () => {
     collisionType: '图像',
     collisionEnabled: false,
     resources: [],
-    layers: [
-      {
-        id: 0,
-        name: '图像图层',
-        type: 'image',
-        visible: true,
-        locked: false,
-        images: [],
-      },
-    ],
+    layers: [],
     tileSets: [],
   })
 
   const mapEditor = useMapEditorStore()
-  const activeLayerIndex = ref(0)
+  const activeLayerIndex = ref(-1)
   const selectedResourceIndex = ref(-1)
   const selectedTileIndex = ref(-1)
 
   // 图像实例选中状态（画布选中图像后，属性面板/工具栏共用）
   const selectedImageLayerId = ref(-1)
-  const selectedImageIndex = ref(-1)
 
   // Revision counters for cheap watcher dependency tracking (avoid expensive JSON.stringify in watcher getters)
   const tileRevision = ref(0)
   const imageRevision = ref(0)
   // 碰撞数据变更计数器（只触发叠加层重绘，不触发整图重渲染）
   const collisionRevision = ref(0)
-  // 完整地图加载计数器（loadMap 时递增，用于 ResourceListPanel 刷新缩略图）
+  // 完整地图加载计数器（loadMap 时递增，用于素材面板/图层缩略图刷新）
   const mapLoadCount = ref(0)
 
   const activeLayer = computed(() => {
     const layer = mapData.value.layers[activeLayerIndex.value] ?? null
     return layer
   })
-  // 当前图层可用的素材：图像图层只看图像素材，绘制图层看瓦片素材
+  // 当前工作模式：由选中图层类型决定；空地图默认图像模式
+  const activeMode = computed<'image' | 'tile'>(() => activeLayer.value?.type === 'drawing' ? 'tile' : 'image')
+  // 当前模式可用的素材：图像模式只看图像素材，图块模式看瓦片素材
   const activeLayerResources = computed(() => {
-    const layer = activeLayer.value
-    if (!layer) return []
-    const wantImage = layer.type === 'image'
+    const wantImage = activeMode.value === 'image'
     return mapData.value.resources.filter(r => (r.resourceType === 'image') === wantImage)
   })
   const selectedResource = computed(() => activeLayerResources.value[selectedResourceIndex.value] ?? null)
-  // 画布上选中的图像实例
+  // 画布上选中的图像实例（扁平模型下一层即一张图）
   const selectedImage = computed<ImageData | null>(() => {
-    if (selectedImageLayerId.value < 0 || selectedImageIndex.value < 0) return null
+    if (selectedImageLayerId.value < 0) return null
     const layer = mapData.value.layers.find(l => l.id === selectedImageLayerId.value)
     if (!layer || layer.type !== 'image') return null
-    return layer.images[selectedImageIndex.value] ?? null
+    return layer.image
   })
 
   // 素材与 tileset 通过稳定 id / firstgid 绑定，不再依赖图层顺序或全局偏移
@@ -185,11 +176,12 @@ export const useMapStore = defineStore('map', () => {
   function loadMap(data: MapData) {
     mapData.value = data
     // 默认选中最上方的图层（数组最后一个）
-    activeLayerIndex.value = Math.max(0, data.layers.length - 1)
+    activeLayerIndex.value = data.layers.length > 0 ? data.layers.length - 1 : -1
     selectedResourceIndex.value = -1
     selectedTileIndex.value = -1
-    clearImageSelection()
     syncToolWithLayer()
+    // 打开地图时不自动建立图片变换框，点击图片/图层后再选中
+    clearImageSelection()
     // 强制触发 canvas 重新渲染（mapData 完全替换后所有瓦片和图像都变了）
     tileRevision.value++
     imageRevision.value++
@@ -207,19 +199,10 @@ export const useMapStore = defineStore('map', () => {
       collisionType: '图像',
       collisionEnabled: false,
       resources: [],
-      layers: [
-        {
-          id: 0,
-          name: '图像图层',
-          type: 'image',
-          visible: true,
-          locked: false,
-          images: [],
-        },
-      ],
+      layers: [],
       tileSets: [],
     }
-    activeLayerIndex.value = 0
+    activeLayerIndex.value = -1
     selectedResourceIndex.value = -1
     selectedTileIndex.value = -1
     clearImageSelection()
@@ -251,32 +234,55 @@ export const useMapStore = defineStore('map', () => {
     return layer.tiles[`${x},${y}`] ?? 0
   }
 
-  function addLayer(name: string, type: 'drawing' | 'image' = 'image') {
+  function addLayer(name: string): number {
     const id = mapData.value.layers.length > 0
       ? Math.max(...mapData.value.layers.map(l => l.id)) + 1
       : 0
-    const newLayer: MapLayer = type === 'drawing'
-      ? { id, name, type, visible: true, locked: false, tiles: {} }
-      : { id, name, type, visible: true, locked: false, images: [] }
+    const newLayer: MapLayer = { id, name, type: 'drawing', visible: true, locked: false, tiles: {} }
     mapData.value.layers.push(newLayer)
     activeLayerIndex.value = mapData.value.layers.length - 1
     syncToolWithLayer()
     return id
   }
 
-  function removeLayer(index: number) {
-    if (index >= 0 && index < mapData.value.layers.length && mapData.value.layers.length > 1) {
-      const removed = mapData.value.layers[index]
-      if (removed && removed.id === selectedImageLayerId.value) clearImageSelection()
-      mapData.value.layers.splice(index, 1)
-      if (activeLayerIndex.value >= mapData.value.layers.length) {
-        activeLayerIndex.value = mapData.value.layers.length - 1
-      }
-      syncToolWithLayer()
+  // 新建图片图层（扁平模型：一张图一层），默认放在最上层并选中
+  function addImageLayer(name: string, image: ImageData): number {
+    const id = mapData.value.layers.length > 0
+      ? Math.max(...mapData.value.layers.map(l => l.id)) + 1
+      : 0
+    const usedNames = new Set(mapData.value.layers.map(l => l.name))
+    let finalName = name || '图片'
+    let seq = 2
+    while (usedNames.has(finalName)) finalName = `${name || '图片'} ${seq++}`
+    const newLayer: ImageLayer = {
+      id, name: finalName, type: 'image', visible: true, locked: false, image,
     }
+    mapData.value.layers.push(newLayer)
+    activeLayerIndex.value = mapData.value.layers.length - 1
+    selectedImageLayerId.value = id
+    selectedResourceIndex.value = -1
+    selectedTileIndex.value = -1
+    imageRevision.value++
+    syncToolWithLayer()
+    return id
+  }
+
+  function removeLayer(index: number) {
+    if (index < 0 || index >= mapData.value.layers.length) return
+    const removed = mapData.value.layers[index]
+    if (removed && removed.id === selectedImageLayerId.value) clearImageSelection()
+    mapData.value.layers.splice(index, 1)
+    if (mapData.value.layers.length === 0) {
+      activeLayerIndex.value = -1
+    } else if (activeLayerIndex.value >= mapData.value.layers.length) {
+      activeLayerIndex.value = mapData.value.layers.length - 1
+    }
+    syncToolWithLayer()
+    imageRevision.value++
   }
 
   function moveLayerUp(index: number) {
+    if (index < 0) return
     if (index < mapData.value.layers.length - 1) {
       const layers = mapData.value.layers
       const temp = layers[index]
@@ -284,11 +290,14 @@ export const useMapStore = defineStore('map', () => {
       layers[index + 1] = temp
       activeLayerIndex.value = index + 1
       mapData.value.layers = [...layers]
+      tileRevision.value++
+      imageRevision.value++
       syncToolWithLayer()
     }
   }
 
   function moveLayerDown(index: number) {
+    if (index < 0) return
     if (index > 0) {
       const layers = mapData.value.layers
       const temp = layers[index]
@@ -296,8 +305,27 @@ export const useMapStore = defineStore('map', () => {
       layers[index - 1] = temp
       activeLayerIndex.value = index - 1
       mapData.value.layers = [...layers]
+      tileRevision.value++
+      imageRevision.value++
       syncToolWithLayer()
     }
+  }
+
+  // 拖拽排序：把 from 位置的图层移动到 to 位置
+  function moveLayerTo(from: number, to: number) {
+    const layers = [...mapData.value.layers]
+    if (from < 0 || from >= layers.length || to < 0 || to >= layers.length || from === to) return
+    const activeId = layers[activeLayerIndex.value]?.id
+    const [moved] = layers.splice(from, 1)
+    layers.splice(to, 0, moved)
+    mapData.value.layers = layers
+    if (activeId !== undefined) {
+      const newIdx = layers.findIndex(l => l.id === activeId)
+      if (newIdx >= 0) activeLayerIndex.value = newIdx
+    }
+    tileRevision.value++
+    imageRevision.value++
+    syncToolWithLayer()
   }
 
   function toggleLayerVisibility(index: number) {
@@ -319,9 +347,15 @@ export const useMapStore = defineStore('map', () => {
   function syncToolWithLayer() {
     const idx = activeLayerIndex.value
     const layer = mapData.value.layers[idx]
-    if (!layer) return
+    if (!layer) {
+      selectedResourceIndex.value = -1
+      selectedTileIndex.value = -1
+      return
+    }
     if (layer.type === 'image') {
       mapEditor.setTool('select')
+      // 扁平模型：选中图片图层即选中该张图片
+      selectedImageLayerId.value = layer.id
       selectedResourceIndex.value = -1
       selectedTileIndex.value = -1
     } else {
@@ -460,14 +494,12 @@ export const useMapStore = defineStore('map', () => {
 
   // ====== 图像实例碰撞（图像模式） ======
 
-  function selectImage(layerId: number, index: number) {
+  function selectImage(layerId: number) {
     selectedImageLayerId.value = layerId
-    selectedImageIndex.value = index
   }
 
   function clearImageSelection() {
     selectedImageLayerId.value = -1
-    selectedImageIndex.value = -1
     mapEditor.setImageCollisionTool('none')
   }
 
@@ -527,16 +559,23 @@ export const useMapStore = defineStore('map', () => {
     collisionRevision.value++
   }
 
-  /** 在指定图像图层放置图像实例并选中（绘制页保存返回时使用） */
-  function addImageInstance(layerId: number, img: ImageData): number {
-    const layer = mapData.value.layers.find(l => l.id === layerId)
-    if (!layer || layer.type !== 'image') return -1
-    layer.images.push(img)
-    const index = layer.images.length - 1
-    selectedImageLayerId.value = layerId
-    selectedImageIndex.value = index
+  /** 在指定图层位置放置图片（绘制页保存返回时使用）：扁平模型下一张图一层 */
+  function addImageAt(layerIndex: number, img: ImageData, name = '图片'): number {
+    const layers = [...mapData.value.layers]
+    const id = layers.length > 0 ? Math.max(...layers.map(l => l.id)) + 1 : 0
+    const newLayer: ImageLayer = {
+      id, name, type: 'image', visible: true, locked: false, image: img,
+    }
+    const insertAt = layerIndex >= 0
+      ? Math.min(layerIndex + 1, layers.length)
+      : layers.length
+    layers.splice(insertAt, 0, newLayer)
+    mapData.value.layers = layers
+    activeLayerIndex.value = insertAt
+    selectedImageLayerId.value = id
     imageRevision.value++
-    return index
+    syncToolWithLayer()
+    return id
   }
 
   function setTileCollision(tileSetIndex: number, tileIndex: number, collision: boolean) {
@@ -574,6 +613,7 @@ export const useMapStore = defineStore('map', () => {
     selectedTileIndex,
     activeLayerResources,
     activeLayer,
+    activeMode,
     selectedResource,
     getTileSetForResource,
     tileSetIndexOfResource,
@@ -583,9 +623,12 @@ export const useMapStore = defineStore('map', () => {
     setTile,
     getTile,
     addLayer,
+    addImageLayer,
+    addImageAt,
     removeLayer,
     moveLayerUp,
     moveLayerDown,
+    moveLayerTo,
     toggleLayerVisibility,
     toggleLayerLock,
     renameLayer,
@@ -599,7 +642,6 @@ export const useMapStore = defineStore('map', () => {
     setTileCollision,
     setTileCollisionType,
     selectedImageLayerId,
-    selectedImageIndex,
     selectedImage,
     selectImage,
     clearImageSelection,
@@ -607,7 +649,6 @@ export const useMapStore = defineStore('map', () => {
     setImageCollisionType,
     setImageCollisionEnabled,
     clearImageCollision,
-    addImageInstance,
     tileRevision,
     imageRevision,
     collisionRevision,

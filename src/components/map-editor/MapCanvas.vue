@@ -95,6 +95,8 @@ async function initPixi() {
     if (app.screen.width === w && app.screen.height === h) return
     app.renderer.resize(w, h)
     viewport.redraw()
+    // resize 会清空画布，立即补一帧避免出现黑屏闪烁
+    app.render()
   })
   resizeObserver.observe(canvasRef.value)
 
@@ -310,9 +312,7 @@ async function renderAllLayers() {
       }
     } else if (layer.type === 'image') {
       const container = getOrCreateLayerContainer(layer.id)
-      for (const imgData of layer.images) {
-        await renderImageLayer(container, imgData)
-      }
+      await renderImageLayer(container, layer.image)
     }
   }
 
@@ -363,7 +363,7 @@ async function renderImageLayer(container: any, imgData: any) {
   }
 }
 
-async function placeImage(layer: any, resource: any, x: number, y: number) {
+async function placeImage(resource: any, x: number, y: number) {
   let imgData: any
   try {
     const img = await loadImage(resource.path)
@@ -395,17 +395,19 @@ async function placeImage(layer: any, resource: any, x: number, y: number) {
       collisionEnabled: false,
     }
   }
-  layer.images.push(imgData)
-  mapStore.imageRevision++
-  // 不要在这里调用 renderAllLayers，让 watcher 处理
-  // renderAllLayers() 会导致竞态条件
+  // 扁平模型：放置一张图片就新建一个图片图层（在最上层）
+  const layerId = mapStore.addImageLayer(resource.name || '图片', imgData)
 
-  // 放置后选中该图像并显示变换框，切换到移动模式
-  const index = layer.images.length - 1
-  transform.setSelection(layer.id, index, imgData)
-  mapStore.selectImage(layer.id, index)
+  // 放置后选中该图片并显示变换框，切换到选取工具
+  transform.setSelection(layerId, imgData)
   transform.showTransformBox(imgData)
   mapEditorStore.setTool('select')
+}
+
+// 供外部（图层工具栏/内置资源库）直接按路径放置一张图片并建层
+async function placeImageFromPath(path: string, x = 0, y = 0) {
+  const name = path.split('/').pop()?.split('.')[0] || '图片'
+  await placeImage({ name, path }, x, y)
 }
 
 // --- 交互 composables ---
@@ -539,14 +541,11 @@ function onWheel(e: WheelEvent) {
 
 function onScratchDrop(e: CustomEvent) {
   const { resourceIndex } = e.detail
-  const layer = mapStore.activeLayer
-
-  if (!layer || layer.type !== 'image') return
   const resource = mapStore.activeLayerResources[resourceIndex]
   if (!resource) return
 
   // 拖入的图片左上角自动对齐到坐标原点
-  placeImage(layer, resource, 0, 0)
+  placeImage(resource, 0, 0)
 }
 
 function onDragOver(e: DragEvent) {
@@ -558,17 +557,15 @@ function onDrop(e: DragEvent) {
   e.preventDefault()
   e.stopPropagation()
 
-  const layer = mapStore.activeLayer
-
   const imageData = e.dataTransfer?.getData('application/x-bingo-image')
 
-  if (imageData && layer && layer.type === 'image') {
+  if (imageData) {
     try {
       const { resourceIndex } = JSON.parse(imageData)
       const resource = mapStore.activeLayerResources[resourceIndex]
       const worldPos = viewport.screenToWorld(e)
       if (resource && worldPos) {
-        placeImage(layer, resource, worldPos.x, worldPos.y)
+        placeImage(resource, worldPos.x, worldPos.y)
       }
     } catch (err) {
       console.error('[MapCanvas] drop error:', err)
@@ -688,12 +685,15 @@ watch(
   }
 )
 
-// 切换图层时清除图像变换框（防止绘制图层上残留图像的选择框）
+// 切到图块图层时清除图片变换框；切到图片图层由选中逻辑负责建立变换框
 watch(
   () => mapStore.activeLayerIndex,
-  () => {
-    transform.removeTransformBox()
-    mapStore.clearImageSelection()
+  (idx) => {
+    const layer = mapStore.mapData.layers[idx]
+    if (!layer || layer.type !== 'image') {
+      transform.removeTransformBox()
+      mapStore.clearImageSelection()
+    }
   }
 )
 
@@ -731,14 +731,14 @@ watch(
 
 // 选中实例变化 → 同步本地变换框 + 重绘叠加层
 watch(
-  () => [mapStore.selectedImageLayerId, mapStore.selectedImageIndex],
+  () => mapStore.selectedImageLayerId,
   () => {
     collision.cancelCollisionDraft()
     collision.clearVertexSelection()
     // 外部设置的选中实例（例如绘制页保存返回）需要同步本地变换框
     const img = mapStore.selectedImage
     if (img && mapEditorStore.imageCollisionTool === 'none' && !transform.isSelectedImage(img)) {
-      transform.setSelection(mapStore.selectedImageLayerId, mapStore.selectedImageIndex, img)
+      transform.setSelection(mapStore.selectedImageLayerId, img)
       transform.showTransformBox(img)
       transform.cacheSelectedImageSprite()
     }
@@ -867,20 +867,17 @@ function getThumbnailDataUrl(): string | null {
 function deleteSelectedImage() {
   // 碰撞编辑时变换框已被移除，优先用 store 里的选中状态
   const layerId = mapStore.selectedImageLayerId >= 0 ? mapStore.selectedImageLayerId : transform.getSelectedImageLayerId()
-  const index = mapStore.selectedImageIndex >= 0 ? mapStore.selectedImageIndex : transform.getSelectedImageIndex()
+  if (layerId < 0) return
+  const index = mapStore.mapData.layers.findIndex(l => l.id === layerId)
   if (index < 0) return
-  const layer = mapStore.mapData.layers.find(l => l.id === layerId)
-  if (!layer || layer.type !== 'image') return
-  layer.images.splice(index, 1)
   transform.removeTransformBox()
-  mapStore.clearImageSelection()
   collision.cancelCollisionDraft()
+  mapStore.removeLayer(index)
   collision.drawCollisionOverlay()
-  mapStore.imageRevision++
   scheduleRender()
 }
 
-defineExpose({ redraw, cursorGridPos, renderAllLayers, showTransformBox: transform.showTransformBox, removeTransformBox: transform.removeTransformBox, resetCanvasState, getThumbnailDataUrl, deleteSelectedImage })
+defineExpose({ redraw, cursorGridPos, renderAllLayers, showTransformBox: transform.showTransformBox, removeTransformBox: transform.removeTransformBox, resetCanvasState, getThumbnailDataUrl, deleteSelectedImage, placeImageFromPath })
 </script>
 
 <template>

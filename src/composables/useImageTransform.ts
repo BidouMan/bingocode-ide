@@ -29,7 +29,6 @@ export function useImageTransform(options: ImageTransformOptions) {
   let selectedImageSprite: any = null
   let selectedImageData: any = null
   let selectedImageLayerId: number = -1
-  let selectedImageIndex: number = -1
   let transformDragging = false
   let transformHandleIndex = -1
   let transformStartBox = { left: 0, top: 0, right: 0, bottom: 0 }
@@ -54,18 +53,13 @@ export function useImageTransform(options: ImageTransformOptions) {
     return selectedImageLayerId
   }
 
-  function getSelectedImageIndex(): number {
-    return selectedImageIndex
-  }
-
   function isSelectedImage(img: any): boolean {
     return !!img && selectedImageData === img
   }
 
-  function setSelection(layerId: number, index: number, imgData: any) {
+  function setSelection(layerId: number, imgData: any) {
     selectedImageData = imgData
     selectedImageLayerId = layerId
-    selectedImageIndex = index
   }
 
   // 渲染出新精灵时，如果它正是当前选中实例就缓存下来
@@ -75,23 +69,23 @@ export function useImageTransform(options: ImageTransformOptions) {
     }
   }
 
-  function hitTestImage(worldX: number, worldY: number): { layerId: number; imageIndex: number; imageData: any } | null {
-    const layer = mapStore.activeLayer
-    if (!layer || layer.type !== 'image') return null
-
-    // Check images in reverse order (top-most first)
-    for (let i = layer.images.length - 1; i >= 0; i--) {
-      const img = layer.images[i]
+  // 自顶向下命中测试：扁平模型下一层一张图
+  function hitTestImage(worldX: number, worldY: number): { layerId: number; layerIndex: number; imageData: any } | null {
+    const layers = mapStore.mapData.layers
+    for (let i = layers.length - 1; i >= 0; i--) {
+      const layer = layers[i]
+      if (layer.type !== 'image' || !layer.visible) continue
+      const img = layer.image
       // 转到图片本地坐标判定，支持缩放与旋转
       const local = imageWorldToLocal(img, worldX, worldY)
       if (local.x >= 0 && local.x <= 1 && local.y >= 0 && local.y <= 1) {
-        return { layerId: layer.id, imageIndex: i, imageData: img }
+        return { layerId: layer.id, layerIndex: i, imageData: img }
       }
     }
     return null
   }
 
-  // 选择工具在图像图层上的按下处理，返回 true 表示事件已消费
+  // 选择工具在图像模式下的按下处理，返回 true 表示事件已消费
   function handleSelectPointerDown(e: PointerEvent, layer: any): boolean {
     if (mapEditorStore.currentTool !== 'select' || !layer || layer.type !== 'image') return false
     const worldPos = screenToWorld(e)
@@ -102,8 +96,8 @@ export function useImageTransform(options: ImageTransformOptions) {
           // New image selected — build transform box
           selectedImageData = hit.imageData
           selectedImageLayerId = hit.layerId
-          selectedImageIndex = hit.imageIndex
-          mapStore.selectImage(hit.layerId, hit.imageIndex)
+          mapStore.setActiveLayer(hit.layerIndex)
+          mapStore.selectImage(hit.layerId)
           showTransformBox(hit.imageData)
           cacheSelectedImageSprite()
         }
@@ -295,7 +289,6 @@ export function useImageTransform(options: ImageTransformOptions) {
     if (!img) return
     selectedImageData = img
     selectedImageLayerId = mapStore.selectedImageLayerId
-    selectedImageIndex = mapStore.selectedImageIndex
     showTransformBox(img)
     cacheSelectedImageSprite()
   }
@@ -412,16 +405,11 @@ export function useImageTransform(options: ImageTransformOptions) {
     if (selectedImageLayerId < 0 || !PIXI) return
     const container = getLayerContainers().get(selectedImageLayerId)
     if (!container) return
-    // Image sprites are added in order as children of the layer container
-    const children = container.children
-    let imgIdx = 0
-    for (const child of children) {
+    // 扁平模型：一个图片图层只有一个图片精灵
+    for (const child of container.children) {
       if (child instanceof PIXI.Sprite) {
-        if (imgIdx === selectedImageIndex) {
-          selectedImageSprite = child
-          return
-        }
-        imgIdx++
+        selectedImageSprite = child
+        return
       }
     }
   }
@@ -502,7 +490,6 @@ export function useImageTransform(options: ImageTransformOptions) {
     removeTransformBox()
     selectedImageData = null
     selectedImageLayerId = -1
-    selectedImageIndex = -1
     selectedImageSprite = null
     isDraggingImage = false
     isImageDragging = false
@@ -513,7 +500,6 @@ export function useImageTransform(options: ImageTransformOptions) {
     isTransformBusy,
     isImageDraggingNow,
     getSelectedImageLayerId,
-    getSelectedImageIndex,
     isSelectedImage,
     setSelection,
     noteRenderedImage,

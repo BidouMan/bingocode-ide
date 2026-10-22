@@ -144,12 +144,9 @@ export function useMapPersistence(options: MapPersistenceOptions) {
       }
     }
     for (const layer of mapData.layers) {
-      if (layer.images) {
-        for (const img of layer.images) {
-          if (img.imagePath && !img.imagePath.startsWith('/') && !img.imagePath.startsWith('assets/') && !img.imagePath.startsWith('/maps/')) {
-            img.imagePath = `${dir}/${img.imagePath}`
-          }
-        }
+      if (layer.type === 'image' && layer.image?.imagePath
+        && !layer.image.imagePath.startsWith('/') && !layer.image.imagePath.startsWith('assets/') && !layer.image.imagePath.startsWith('/maps/')) {
+        layer.image.imagePath = `${dir}/${layer.image.imagePath}`
       }
     }
   }
@@ -165,16 +162,7 @@ export function useMapPersistence(options: MapPersistenceOptions) {
       collisionType: '图像',
       collisionEnabled: false,
       resources: [],
-      layers: [
-        {
-          id: 0,
-          name: '图像图层',
-          type: 'image' as const,
-          visible: true,
-          locked: false,
-          images: [],
-        },
-      ],
+      layers: [],
       tileSets: [],
     }
   }

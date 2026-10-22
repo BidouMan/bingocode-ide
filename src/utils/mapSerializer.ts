@@ -171,6 +171,21 @@ export function serializeMap(mapData: any): MapSaveData {
     }
   })
 
+  const serializeImage = (img: any): ImageSaveData => ({
+    imagePath: img.imagePath,
+    position: img.position,
+    rotation: img.rotation,
+    scale: img.scale,
+    scaleX: img.scaleX,
+    scaleY: img.scaleY,
+    opacity: img.opacity,
+    width: img.width,
+    height: img.height,
+    collisionType: img.collisionType || 'none',
+    collisionEnabled: img.collisionEnabled || false,
+    collisionShape: img.collisionShape,
+  })
+
   const layers: LayerSaveData[] = mapData.layers.map((layer: any) => {
     const base: LayerSaveData = {
       id: layer.id,
@@ -184,21 +199,9 @@ export function serializeMap(mapData: any): MapSaveData {
       base.data = compressTileData(layer.tiles, mapData.width, mapData.height)
     }
 
-    if (layer.images?.length) {
-      base.images = layer.images.map((img: any) => ({
-        imagePath: img.imagePath,
-        position: img.position,
-        rotation: img.rotation,
-        scale: img.scale,
-        scaleX: img.scaleX,
-        scaleY: img.scaleY,
-        opacity: img.opacity,
-        width: img.width,
-        height: img.height,
-        collisionType: img.collisionType || 'none',
-        collisionEnabled: img.collisionEnabled || false,
-        collisionShape: img.collisionShape,
-      }))
+    // 扁平模型：一个图片图层只对应一张图片，仍然写成标准 imagelayer
+    if (layer.image) {
+      base.images = [serializeImage(layer.image)]
     }
 
     // 层内镜像只用于兼容旧版本与引擎的 tileset 碰撞回填；
@@ -343,24 +346,35 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
     return true
   })
 
-  const layers = data.layers.map(layer => {
-    const base: any = {
+  // 扁平模型：旧存档一个 imagelayer 里的多张图片，拆成多个独立图片图层
+  const layers: any[] = []
+  for (const layer of data.layers) {
+    if (layer.type === 'imagelayer') {
+      const images: any[] = layer.images || []
+      images.forEach((img, i) => {
+        layers.push({
+          id: layer.id,
+          name: images.length > 1 ? `${layer.name || '图片'}${i > 0 ? ` ${i + 1}` : ''}` : (layer.name || '图片'),
+          type: 'image',
+          visible: layer.visible,
+          locked: layer.locked,
+          image: img,
+        })
+      })
+      continue
+    }
+
+    layers.push({
       id: layer.id,
       name: layer.name,
-      type: layer.type === 'imagelayer' ? 'image' : 'drawing',
+      type: 'drawing',
       visible: layer.visible,
       locked: layer.locked,
-      images: layer.images || [],
-    }
-
-    if (layer.type !== 'imagelayer' && layer.data) {
-      base.tiles = decompressTileData(layer.data, data.width, data.height)
-    } else {
-      base.tiles = {}
-    }
-
-    return base
-  })
+      tiles: layer.data ? decompressTileData(layer.data, data.width, data.height) : {},
+    })
+  }
+  // 拆分后 id 可能重复，按最终顺序统一重排
+  layers.forEach((l, i) => { l.id = i })
 
   return {
     name: data.name,

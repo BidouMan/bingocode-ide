@@ -12,10 +12,9 @@ const store = useMapResourceLibStore()
 const mapStore = useMapStore()
 const searchQuery = ref('')
 
-// 按当前图层模式过滤分类：图像模式只显示图像；绘制模式只显示图块/集合。
-// 页面用 v-show 常驻挂载，分类必须用 watch 跟随图层模式，不能用 ref 初始化一次
-const layerType = computed(() => mapStore.activeLayer?.type ?? 'drawing')
-const isImageMode = computed(() => layerType.value === 'image')
+// 按当前工作模式过滤分类：图像模式只显示图像；图块模式只显示图块/集合。
+// 页面用 v-show 常驻挂载，分类必须用 watch 跟随模式，不能用 ref 初始化一次
+const isImageMode = computed(() => mapStore.activeMode === 'image')
 
 const activeCategory = ref<'images' | 'tiles' | 'tilesets'>('tiles')
 
