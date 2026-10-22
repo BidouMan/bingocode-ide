@@ -41,31 +41,38 @@ export function useMapViewport(options: MapViewportOptions) {
     if (!app || !PIXI) {
       return
     }
-    if (gridGraphics) {
-      app.stage.removeChild(gridGraphics)
-      gridGraphics.destroy()
+    // 复用同一个 Graphics，平移/缩放时只重建路径，避免每帧销毁重建
+    if (!gridGraphics) {
+      gridGraphics = new PIXI.Graphics()
+      app.stage.addChildAt(gridGraphics, 0)
     }
-    gridGraphics = new PIXI.Graphics()
+    const g = gridGraphics
+    g.clear()
 
-    const { tileSize } = mapStore.mapData
-    const extent = 200
-    const totalW = extent * 2 * tileSize
-    const totalH = extent * 2 * tileSize
-    const offsetX = -extent * tileSize
-    const offsetY = -extent * tileSize
+    const tileSize = mapStore.mapData.tileSize
+    const scale = currentScale.value
+    // 按当前视口计算可见世界范围，保证网格始终铺满整个画布区域
+    const left = -app.stage.x / scale
+    const top = -app.stage.y / scale
+    const right = left + app.screen.width / scale
+    const bottom = top + app.screen.height / scale
+    // 对齐到瓦片网格并多画一圈，避免边缘出现空白
+    const startX = Math.floor(left / tileSize) * tileSize
+    const startY = Math.floor(top / tileSize) * tileSize
+    const endX = Math.ceil(right / tileSize) * tileSize
+    const endY = Math.ceil(bottom / tileSize) * tileSize
 
-    for (let x = -extent; x <= extent; x++) {
-      gridGraphics.moveTo(x * tileSize, offsetY)
-      gridGraphics.lineTo(x * tileSize, offsetY + totalH)
+    for (let x = startX; x <= endX; x += tileSize) {
+      g.moveTo(x, startY)
+      g.lineTo(x, endY)
     }
-    for (let y = -extent; y <= extent; y++) {
-      gridGraphics.moveTo(offsetX, y * tileSize)
-      gridGraphics.lineTo(offsetX + totalW, y * tileSize)
+    for (let y = startY; y <= endY; y += tileSize) {
+      g.moveTo(startX, y)
+      g.lineTo(endX, y)
     }
-    gridGraphics.stroke({ width: 0.5, color: 0x333333 })
+    g.stroke({ width: 0.5, color: 0x333333 })
 
-    gridGraphics.visible = mapEditorStore.showGrid
-    app.stage.addChildAt(gridGraphics, 0)
+    g.visible = mapEditorStore.showGrid
   }
 
   function drawAxes() {
@@ -116,9 +123,13 @@ export function useMapViewport(options: MapViewportOptions) {
     // 重置为 1.0 缩放，让用户看到坐标原点 (0,0) 和游戏窗口 (640x480)
     currentScale.value = 1.0
     applyScale()
-    // 留 30px 边距，原点在左上，游戏窗口完整可见
-    app.stage.x = 30
-    app.stage.y = 30
+    // 留边距，原点在左上，游戏窗口完整可见；
+    // 偏移对齐到瓦片尺寸，网格线从画布左/上边缘开始，不出现半格空白
+    const tileSize = mapStore.mapData.tileSize
+    const offset = Math.max(tileSize, Math.ceil(30 / tileSize) * tileSize)
+    app.stage.x = offset
+    app.stage.y = offset
+    drawGrid()
   }
 
   function redraw() {
@@ -146,6 +157,8 @@ export function useMapViewport(options: MapViewportOptions) {
     app.stage.x = mouseX - worldX * currentScale.value
     app.stage.y = mouseY - worldY * currentScale.value
     applyScale()
+    // 视口变化后重绘网格，保证始终铺满整块画布
+    drawGrid()
     // 手柄尺寸随缩放变化，重绘碰撞叠加层
     options.onZoom?.()
   }
@@ -164,6 +177,8 @@ export function useMapViewport(options: MapViewportOptions) {
       const dy = clientY - lastPointer.y
       app.stage.x += dx
       app.stage.y += dy
+      // 平移后按新视口重绘网格，避免画布边缘出现空白
+      drawGrid()
     }
     lastPointer = { x: clientX, y: clientY }
     return true

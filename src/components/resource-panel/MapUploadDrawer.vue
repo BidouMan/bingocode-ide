@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import iconFileUpload from '../../assets/icons/icon--file-upload.svg'
-import iconEdit from '../../assets/icons/编辑.svg'
+import iconPaint from '../../assets/icons/icon--paint.svg'
 import iconSelectSprite from '../../assets/icons/icon--select--sprite.svg'
 import iconMapUpload from '../../assets/icons/map_upload.svg'
 
@@ -38,8 +38,8 @@ function onAction(action: string) {
         <button class="drawer-btn" @click="onAction('import')" v-tooltip="'从文件导入'">
           <img :src="iconFileUpload" class="drawer-icon" />
         </button>
-        <button class="drawer-btn" @click="onAction('create')" v-tooltip="'创建地图'">
-          <img :src="iconEdit" class="drawer-icon" />
+        <button class="drawer-btn" @click="onAction('create')" v-tooltip="'绘制地图'">
+          <img :src="iconPaint" class="drawer-icon" />
         </button>
         <button class="drawer-btn" @click="onAction('library')" v-tooltip="'选择库文件'">
           <img :src="iconSelectSprite" class="drawer-icon" />

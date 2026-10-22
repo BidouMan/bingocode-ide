@@ -15,7 +15,6 @@ import iconSpriteUpload from '../../assets/icons/sprite_upload.svg'
 import iconMapUpload from '../../assets/icons/map_upload.svg'
 import iconAddSound from '../../assets/icons/add_sound.svg'
 import iconPythonFile from '../../assets/icons/python_file_1.svg'
-import iconEdit from '../../assets/icons/编辑.svg'
 
 const props = defineProps<{
   type: 'sprite' | 'map' | 'sound' | 'code'
@@ -54,7 +53,7 @@ const menuConfig: Record<string, { items: { key: string; icon: string }[]; uploa
   map: {
     items: [
       { key: 'import', icon: iconFileUpload },
-      { key: 'create', icon: iconEdit },
+      { key: 'create', icon: iconPaint },
       { key: 'library', icon: iconSelectSprite },
     ],
     uploadIcon: iconMapUpload,
@@ -80,7 +79,7 @@ const config = computed(() => menuConfig[props.type])
 // 抽屉按钮功能提示文案（Scratch 风格 tooltip，悬停时显示在按钮左侧）
 const tipTextMap: Record<string, Record<string, string>> = {
   sprite: { import: '上传角色', paint: '绘制角色', library: '选择角色' },
-  map: { import: '上传地图', create: '创建地图', library: '选择地图' },
+  map: { import: '上传地图', create: '绘制地图', library: '选择地图' },
   sound: { import: '上传声音', library: '选择声音' },
   code: { import: '上传代码文件', new: '新建代码文件' },
 }

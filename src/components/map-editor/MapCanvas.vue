@@ -23,6 +23,9 @@ const canvasRef = ref<HTMLDivElement>()
 let PIXI: any = null
 let app: any = null
 let tileContainer: any = null
+// Pixi v8 的 resizeTo 只监听 window resize，页面从隐藏切到显示时不会重新量尺寸，
+// 这里自行监听容器尺寸变化，避免画布小于容器导致网格显示不全
+let resizeObserver: ResizeObserver | null = null
 
 const mapStore = useMapStore()
 const mapEditorStore = useMapEditorStore()
@@ -82,6 +85,18 @@ async function initPixi() {
     autoDensity: true,
   })
   canvasRef.value.appendChild(app.canvas)
+
+  // 容器尺寸变化时同步渲染器尺寸并重绘网格
+  resizeObserver = new ResizeObserver(() => {
+    if (!canvasRef.value || !app) return
+    const w = canvasRef.value.clientWidth
+    const h = canvasRef.value.clientHeight
+    if (w <= 0 || h <= 0) return
+    if (app.screen.width === w && app.screen.height === h) return
+    app.renderer.resize(w, h)
+    viewport.redraw()
+  })
+  resizeObserver.observe(canvasRef.value)
 
   // 应用初始渲染模式
   applyRenderMode()
@@ -805,6 +820,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  resizeObserver = null
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
   document.removeEventListener('dragover', onDragOver)
