@@ -394,38 +394,53 @@ function onResourceClick(rIdx: number) {
     </div>
 
     <div class="resource-list">
-      <div
-        v-for="(resource, rIdx) in currentResources"
-        :key="rIdx"
-        class="resource-group"
-      >
-        <div class="resource-name">{{ resource.name }}</div>
-        <!-- 图像图层：显示完整图片 -->
-        <div
-          v-if="mapStore.activeLayer?.type === 'image'"
-          class="image-resource-card"
-          :class="{ 'image-selected': mapStore.selectedResourceIndex === rIdx }"
-          @mousedown.prevent="onResourceMouseDown($event, rIdx)"
-          @click="onResourceClick(rIdx)"
-        >
-          <img :src="getResolvedUrl(resource.path)" class="image-preview" draggable="false" :style="{ imageRendering: imageRenderingStyle }" />
-        </div>
-        <!-- 绘制图层：显示瓦片网格 -->
-        <div v-else class="tile-grid">
+      <!-- 图像模式：卡片网格，每行 2~3 个 -->
+      <template v-if="mapStore.activeLayer?.type === 'image'">
+        <div class="resource-cards">
           <div
-            v-for="tIdx in getTileCount(resource)"
-            :key="tIdx"
-            class="tile-cell"
-            :class="{
-              'tile-selected': mapStore.selectedResourceIndex === rIdx && mapStore.selectedTileIndex === tIdx - 1
-            }"
-            :style="getTileThumbnail(rIdx, tIdx - 1) ? { backgroundImage: `url(${getTileThumbnail(rIdx, tIdx - 1)})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', imageRendering: imageRenderingStyle } : {}"
-            draggable="true"
-            @dragstart="onDragStart($event, rIdx, tIdx - 1)"
-            @click="emit('select-tile', rIdx, tIdx - 1)"
-          />
+            v-for="(resource, rIdx) in currentResources"
+            :key="resource.id"
+            class="resource-card"
+            :class="{ 'resource-card-selected': mapStore.selectedResourceIndex === rIdx }"
+            @mousedown.prevent="onResourceMouseDown($event, rIdx)"
+            @click="onResourceClick(rIdx)"
+          >
+            <div class="resource-card-thumb">
+              <img
+                :src="getResolvedUrl(resource.path)"
+                class="resource-card-img"
+                draggable="false"
+                :style="{ imageRendering: imageRenderingStyle }"
+              />
+            </div>
+            <div class="resource-card-name" :title="resource.name">{{ resource.name }}</div>
+          </div>
         </div>
-      </div>
+      </template>
+      <!-- 图块模式：按素材显示瓦片网格 -->
+      <template v-else>
+        <div
+          v-for="(resource, rIdx) in currentResources"
+          :key="rIdx"
+          class="resource-group"
+        >
+          <div class="resource-name">{{ resource.name }}</div>
+          <div class="tile-grid">
+            <div
+              v-for="tIdx in getTileCount(resource)"
+              :key="tIdx"
+              class="tile-cell"
+              :class="{
+                'tile-selected': mapStore.selectedResourceIndex === rIdx && mapStore.selectedTileIndex === tIdx - 1
+              }"
+              :style="getTileThumbnail(rIdx, tIdx - 1) ? { backgroundImage: `url(${getTileThumbnail(rIdx, tIdx - 1)})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center', imageRendering: imageRenderingStyle } : {}"
+              draggable="true"
+              @dragstart="onDragStart($event, rIdx, tIdx - 1)"
+              @click="emit('select-tile', rIdx, tIdx - 1)"
+            />
+          </div>
+        </div>
+      </template>
       <div v-if="currentResources.length === 0" class="resource-empty">
         暂无资源
       </div>
@@ -578,32 +593,61 @@ function onResourceClick(rIdx: number) {
   background: rgb(60, 65, 75);
 }
 
-.image-resource-card {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px;
-  margin: 2px;
-  background: rgb(50, 53, 62);
-  border: 2px solid transparent;
-  border-radius: 4px;
-  cursor: grab;
-  transition: all 0.15s;
+/* 图像模式：卡片网格（272px 面板内自动排 3 列，窄时 2 列） */
+.resource-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(74px, 1fr));
+  gap: 6px;
+  padding: 2px 0;
+  align-content: start;
 }
 
-.image-resource-card:hover {
+.resource-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: rgb(50, 53, 62);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: grab;
+  overflow: hidden;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.resource-card:hover {
   border-color: rgb(91, 199, 114);
 }
 
-.image-selected {
+.resource-card-selected {
   border-color: var(--accent) !important;
   background: rgb(60, 65, 75);
 }
 
-.image-preview {
+.resource-card-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  padding: 6px;
+  overflow: hidden;
+}
+
+.resource-card-img {
   max-width: 100%;
-  max-height: 80px;
+  max-height: 100%;
   object-fit: contain;
+  pointer-events: none;
+}
+
+.resource-card-name {
+  padding: 0 6px 5px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: rgb(196, 200, 206);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .resource-empty {
