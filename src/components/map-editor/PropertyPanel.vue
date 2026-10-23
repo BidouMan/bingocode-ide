@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useMapStore } from '../../stores/map'
 import CustomSelect from '../common/CustomSelect.vue'
 
-const props = defineProps<{
+defineProps<{
   disabled?: boolean
 }>()
 
@@ -20,9 +20,7 @@ const collisionTypeOptions = [
   { label: '图像', value: '图像' },
   { label: '自定义', value: '自定义' },
 ]
-
-// 选中画布图像实例时，物理属性/碰撞作用于该实例
-const selectedImage = computed(() => mapStore.selectedImage)
+const isTileMode = computed(() => mapStore.activeMode === 'tile')
 
 const tileSizeValue = computed(() => `${mapStore.mapData.tileSize}x${mapStore.mapData.tileSize}`)
 function onTileSizeChange(val: string) {
@@ -30,7 +28,7 @@ function onTileSizeChange(val: string) {
   mapStore.updateTileSize(newSize)
 }
 
-// 选中的瓦片数据（仅绘制图层 + 选中瓦片时有值）
+// ====== 图块模式：选中瓦片/资源的碰撞属性 ======
 const selectedTileData = computed(() => {
   if (mapStore.selectedTileIndex < 0) return null
   const layer = mapStore.activeLayer
@@ -41,24 +39,14 @@ const selectedTileData = computed(() => {
 })
 
 const collisionTypeValue = computed(() => {
-  // 优先显示选中图像实例的碰撞类型
-  const image = selectedImage.value
-  if (image) return image.collisionType || '图像'
-  // 其次显示选中瓦片的碰撞类型
   const tileData = selectedTileData.value
   if (tileData) return tileData.collisionType || '图像'
-  // 其次显示选中资源的碰撞类型
   const resource = mapStore.selectedResource
   if (resource) return resource.collisionType || '图像'
   return mapStore.mapData.collisionType || '图像'
 })
 
-// 碰撞checkbox：直接根据物理属性类型决定勾选状态
 const collisionEnabledValue = computed(() => {
-  // 选中图像实例时，使用该实例的碰撞状态
-  const image = selectedImage.value
-  if (image) return image.collisionEnabled ?? false
-  // 选中瓦片时，使用该瓦片的碰撞状态
   if (mapStore.selectedTileIndex >= 0) {
     const layer = mapStore.activeLayer
     if (layer?.type === 'drawing') {
@@ -68,23 +56,16 @@ const collisionEnabledValue = computed(() => {
       }
     }
   }
-  // 选中资源时，优先资源的collisionEnabled，其次看物理属性类型
   const resource = mapStore.selectedResource
   if (resource) {
     if (resource.collisionType === '图像') return false
     return resource.collisionEnabled
   }
-  // 地图级别
   if (mapStore.mapData.collisionType === '图像') return false
   return mapStore.mapData.collisionEnabled
 })
 
 function onCollisionTypeChange(val: string) {
-  // 选中图像实例时，直接更新该实例
-  if (selectedImage.value) {
-    mapStore.setImageCollisionType(val)
-    return
-  }
   // 如果选中了单个瓦片，只更新该瓦片的碰撞类型
   if (selectedTileData.value && mapStore.selectedTileIndex >= 0) {
     const layer = mapStore.activeLayer
@@ -107,7 +88,6 @@ function onCollisionTypeChange(val: string) {
     if (ts) {
       ts.collisionType = val
       ts.collisionEnabled = val !== '图像'
-      // 设为"图像"时清除该图块集中所有瓦片的碰撞标记
       if (val === '图像') {
         for (const tile of ts.tiles) {
           tile.collision = false
@@ -118,31 +98,15 @@ function onCollisionTypeChange(val: string) {
       resource.collisionShape = undefined
     }
   }
-  if (val === '图像') {
-    mapStore.updateMapProperty('collisionEnabled', false)
-  } else {
-    mapStore.updateMapProperty('collisionEnabled', true)
-  }
+  mapStore.updateMapProperty('collisionEnabled', val !== '图像')
 }
 
-const customCollisionType = computed(() => {
-  if (selectedImage.value) return selectedImage.value.collisionType || ''
-  return mapStore.mapData.collisionType || ''
-})
+const customCollisionType = computed(() => mapStore.mapData.collisionType || '')
 function onCustomCollisionTypeChange(val: string) {
-  if (selectedImage.value) {
-    mapStore.setImageCollisionType(val)
-    return
-  }
   mapStore.updateMapProperty('collisionType', val)
 }
 
 function onCollisionEnabledChange(enabled: boolean) {
-  // 选中图像实例时，直接更新该实例
-  if (selectedImage.value) {
-    mapStore.setImageCollisionEnabled(enabled)
-    return
-  }
   // 如果选中了单个瓦片，更新该瓦片的碰撞状态
   if (selectedTileData.value && mapStore.selectedTileIndex >= 0) {
     const layer = mapStore.activeLayer
@@ -163,12 +127,14 @@ function onCollisionEnabledChange(enabled: boolean) {
     if (ts) ts.collisionEnabled = enabled
   }
 }
+
 </script>
 
 <template>
   <div class="property-panel">
     <div class="att-tag-name">属性</div>
 
+    <!-- 常规地图属性（碰撞层与图像/图块层一致，碰撞编辑全部在画布与工具栏完成） -->
     <div class="att-frame">
       <div class="att-row">
         <span class="att-label">地图名称</span>
@@ -226,28 +192,31 @@ function onCollisionEnabledChange(enabled: boolean) {
         <CustomSelect :model-value="tileSizeValue" :options="tileSizeOptions" :disabled="disabled" @update:model-value="onTileSizeChange" />
       </div>
 
-      <div class="att-row">
-        <span class="att-label">物理属性</span>
-        <CustomSelect :model-value="collisionTypeValue" :options="collisionTypeOptions" :disabled="disabled" @update:model-value="onCollisionTypeChange" />
-      </div>
+      <!-- 图块模式的瓦片/资源碰撞属性（图像模式不再挂实例碰撞） -->
+      <template v-if="isTileMode">
+        <div class="att-row">
+          <span class="att-label">物理属性</span>
+          <CustomSelect :model-value="collisionTypeValue" :options="collisionTypeOptions" :disabled="disabled" @update:model-value="onCollisionTypeChange" />
+        </div>
 
-      <div v-if="collisionTypeValue === '自定义'" class="att-row">
-        <span class="att-label"></span>
-        <input class="att-input" :value="customCollisionType" :disabled="disabled" @input="onCustomCollisionTypeChange(($event.target as HTMLInputElement).value)" placeholder="输入自定义类型" />
-      </div>
+        <div v-if="collisionTypeValue === '自定义'" class="att-row">
+          <span class="att-label"></span>
+          <input class="att-input" :value="customCollisionType" :disabled="disabled" @input="onCustomCollisionTypeChange(($event.target as HTMLInputElement).value)" placeholder="输入自定义类型" />
+        </div>
 
-      <div class="att-row">
-        <span class="att-label">碰撞</span>
-        <label class="att-checkbox">
-          <input
-            type="checkbox"
-            :checked="collisionEnabledValue"
-            :disabled="disabled"
-            @change="onCollisionEnabledChange(($event.target as HTMLInputElement).checked)"
-          />
-          <span class="att-checkbox-text">启用</span>
-        </label>
-      </div>
+        <div class="att-row">
+          <span class="att-label">碰撞</span>
+          <label class="att-checkbox">
+            <input
+              type="checkbox"
+              :checked="collisionEnabledValue"
+              :disabled="disabled"
+              @change="onCollisionEnabledChange(($event.target as HTMLInputElement).checked)"
+            />
+            <span class="att-checkbox-text">启用</span>
+          </label>
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -263,8 +232,8 @@ function onCollisionEnabledChange(enabled: boolean) {
   text-align: center;
   color: #9ca0a4;
   font-size: 12px;
-  height: 30px;
-  line-height: 30px;
+  height: 44px;
+  line-height: 44px;
   border-bottom: 1px solid rgb(45, 45, 45);
   flex-shrink: 0;
 }

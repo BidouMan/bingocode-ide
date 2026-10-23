@@ -9,11 +9,11 @@ import iconAdd from '../../assets/icons/新建图块图层.svg'
 import iconDelete from '../../assets/icons/icon--delete.svg'
 import iconUp from '../../assets/icons/上移图层.svg'
 import iconDown from '../../assets/icons/下移图层.svg'
-import iconPaint from '../../assets/icons/icon--paint.svg'
+import iconPaint from '../../assets/icons/创建绘制图层.svg'
+import iconImageLayer from '../../assets/icons/图像图层.svg'
 import iconLibrary from '../../assets/icons/图片库.svg'
 import iconUpload from '../../assets/icons/上传本地图片资源.svg'
-import iconImageType from '../../assets/icons/图像.svg'
-import iconTileType from '../../assets/icons/图块.svg'
+import iconCollisionType from '../../assets/icons/hitbox.svg'
 import iconUnlock from '../../assets/icons/解锁.svg'
 import iconLock from '../../assets/icons/锁定.svg'
 
@@ -248,6 +248,9 @@ function applyReorder(from: number, insertDisplayIndex: number) {
       <button class="layer-tool-btn" v-tooltip="'新建图块图层'" :disabled="disabled" @click="mapStore.addLayer('图块图层')">
         <img :src="iconAdd" class="layer-tool-icon" />
       </button>
+      <button class="layer-tool-btn" v-tooltip="'新建碰撞层'" :disabled="disabled" @click="mapStore.addCollisionLayer()">
+        <img :src="iconCollisionType" class="layer-tool-icon" />
+      </button>
       <button class="layer-tool-btn" v-tooltip="'本地上传'" :disabled="disabled" @click="emit('upload-image')">
         <img :src="iconUpload" class="layer-tool-icon" />
       </button>
@@ -286,9 +289,11 @@ function applyReorder(from: number, insertDisplayIndex: number) {
           />
         </div>
 
-        <!-- 图层类型图标：图像 / 图块 -->
+        <!-- 图层类型图标：绘制层=绘制图像按钮图标；上传/内置图片=图像图层图标；图块/碰撞=对应按钮图标 -->
         <img
-          :src="item.layer.type === 'image' ? iconImageType : iconTileType"
+          :src="item.layer.type === 'image'
+            ? (item.layer.image?.background ? iconPaint : iconImageLayer)
+            : item.layer.type === 'collision' ? iconCollisionType : iconAdd"
           class="layer-type-icon"
           draggable="false"
         />
@@ -331,7 +336,7 @@ function applyReorder(from: number, insertDisplayIndex: number) {
     </div>
 
     <div class="layer-info-bar">
-      <span class="layer-info-text">模式{{ mapStore.activeMode === 'image' ? '图像' : '图块' }}</span>
+      <span class="layer-info-text">模式{{ mapStore.activeMode === 'image' ? '图像' : mapStore.activeMode === 'collision' ? '碰撞' : '图块' }}</span>
     </div>
   </div>
 </template>
@@ -453,12 +458,12 @@ function applyReorder(from: number, insertDisplayIndex: number) {
   pointer-events: none;
 }
 
-/* 图层类型图标（图像 / 图块） */
+/* 图层类型图标（与对应创建按钮图标一致） */
 .layer-type-icon {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
-  opacity: 0.8;
+  opacity: 0.85;
   pointer-events: none;
 }
 

@@ -2903,6 +2903,47 @@ export function usePaperScope(
     }
   }
 
+  /**
+   * 框选命中：按图形几何精确判断，而不是包围盒。
+   * 包围盒会把“框外的大笔画”误带进来（例如框选空心笔画内部的一小块，整条大笔画被选中）。
+   */
+  function itemHitsRect(item: paper.Item, rect: paper.Rectangle, rectPath: paper.PathItem): boolean {
+    // 组：任一子元素命中即视为整组命中（Group 整体选中，对齐 Scratch 对象语义）
+    if (item.children && item.children.length > 0) {
+      return item.children.some((child: paper.Item) => itemHitsRect(child, rect, rectPath))
+    }
+    const p = item as any
+    // 文本等没有曲线的对象：退回包围盒
+    if (typeof p.getCurves !== 'function') return rect.intersects(item.strokeBounds)
+    const curves: paper.Curve[] = p.getCurves()
+    if (curves.length === 0) return rect.intersects(item.strokeBounds)
+    // 1) 图形穿过选框边界（真实交点）
+    if (p.getIntersections(rectPath).length > 0) return true
+    // 2) 图形整体落在选框内
+    if (curves.some((c) => rect.contains(c.point1))) return true
+    // 3) 选框整体落在填充图形内
+    if (p.hasFill() && p.contains(rect.center)) return true
+    // 4) 描边宽度压到选框（中心线在框外，但笔画很粗）
+    if (p.hasStroke()) {
+      const half = (p.getStrokeWidth() ?? 0) / 2
+      if (half > 0) {
+        const cx = rect.x + rect.width / 2
+        const cy = rect.y + rect.height / 2
+        const samples = [
+          rect.topLeft, rect.topRight, rect.bottomLeft, rect.bottomRight,
+          { x: cx, y: rect.y }, { x: cx, y: rect.y + rect.height },
+          { x: rect.x, y: cy }, { x: rect.x + rect.width, y: cy },
+          { x: cx, y: cy },
+        ]
+        for (const pt of samples) {
+          const near = p.getNearestPoint(pt)
+          if (near && Math.hypot(near.x - pt.x, near.y - pt.y) <= half) return true
+        }
+      }
+    }
+    return false
+  }
+
   function endSelect() {
     if (selOp === 'move' || selOp === 'scale' || selOp === 'rotate') {
       if (opMoved && opSnapshot) {
@@ -2923,10 +2964,11 @@ export function usePaperScope(
       store.selection = null
       if (r && r.w >= 2 && r.h >= 2 && scope) {
         const rect = new scope.Rectangle(r.x, r.y, r.w, r.h)
+        const rectPath = new scope.Path.Rectangle({ rectangle: rect, insert: false })
         const layer = activeLayer()
         if (layer) {
           // 框选只圈矢量对象：位图代理是整帧，纳入会让每次框选都撑满全画板
-          const hits = layer.children.filter((c) => c !== bitmapRaster && rect.intersects(c.strokeBounds))
+          const hits = layer.children.filter((c) => c !== bitmapRaster && itemHitsRect(c, rect, rectPath))
           setSelection(hits)
         }
       }

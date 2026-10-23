@@ -125,9 +125,8 @@ function setTool(tool: typeof mapEditorStore.imageTool) {
       return
     }
   }
-  mapEditorStore.setImageCollisionTool('none')
-  paintStore.setTool(tool)
   mapEditorStore.setImageTool(tool)
+  paintStore.setTool(tool)
 }
 </script>
 

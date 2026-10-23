@@ -845,7 +845,7 @@ async function onCreateMap() {
   const mapDir = `${projectRoot}/assets/maps/${name}`
   await invoke('create_dir', { path: mapDir })
 
-  // 保存空地图数据：扁平图层模型，空地图默认图像模式，无图层
+  // 保存空地图数据：扁平图层模型，进入编辑页后自动创建默认图像图层
   const mapData = {
     name,
     version: 5,

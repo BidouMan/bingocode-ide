@@ -1,4 +1,5 @@
 import * as pako from 'pako'
+import { imageLocalToWorld } from './mapImageGeometry'
 
 export interface MapSaveData {
   name: string
@@ -20,12 +21,22 @@ export interface MapSaveData {
 export interface LayerSaveData {
   id: number
   name: string
-  type: 'tilelayer' | 'imagelayer'
+  type: 'tilelayer' | 'imagelayer' | 'collisionlayer'
   visible: boolean
   locked: boolean
   data?: string
   images?: ImageSaveData[]
   resources?: ResourceSaveData[]
+  // 碰撞层：世界坐标碰撞多边形
+  polygons?: CollisionPolygonSaveData[]
+}
+
+export interface CollisionPolygonSaveData {
+  id: string
+  shape: 'rect' | 'circle' | 'capsule' | 'polygon'
+  points: number[][]
+  collisionType: string
+  disabled?: boolean
 }
 
 export interface ResourceSaveData {
@@ -54,6 +65,8 @@ export interface ImageSaveData {
   height: number
   collisionType: string
   collisionEnabled: boolean
+  // 多个碰撞体；旧字段 collisionShape 仅用于兼容读取
+  collisions?: { id: string; shape: 'rect' | 'polygon'; points: number[][] }[]
   collisionShape?: { points: number[][] }
   background?: boolean
   vectorData?: string
@@ -189,8 +202,7 @@ export function serializeMap(mapData: any): MapSaveData {
     width: img.width,
     height: img.height,
     collisionType: img.collisionType || 'none',
-    collisionEnabled: img.collisionEnabled || false,
-    collisionShape: img.collisionShape,
+    collisionEnabled: false,
     background: img.background || false,
     vectorData: img.vectorData,
     vectorBasePath: img.vectorBasePath,
@@ -201,12 +213,23 @@ export function serializeMap(mapData: any): MapSaveData {
     const base: LayerSaveData = {
       id: layer.id,
       name: layer.name,
-      type: layer.type === 'image' ? 'imagelayer' : 'tilelayer',
+      type: layer.type === 'image' ? 'imagelayer' : layer.type === 'collision' ? 'collisionlayer' : 'tilelayer',
       visible: layer.visible,
       locked: layer.locked,
     }
 
-    if (layer.type !== 'image') {
+    if (layer.type === 'collision') {
+      base.polygons = (layer.polygons || []).map((poly: any) => ({
+        id: poly.id,
+        shape: poly.shape,
+        points: poly.points,
+        collisionType: poly.collisionType || '墙体',
+        disabled: poly.disabled === true,
+      }))
+      return base
+    }
+
+    if (layer.type === 'drawing') {
       base.data = compressTileData(layer.tiles, mapData.width, mapData.height)
     }
 
@@ -376,6 +399,26 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
       continue
     }
 
+    if (layer.type === 'collisionlayer') {
+      layers.push({
+        id: layer.id,
+        name: layer.name || '碰撞',
+        type: 'collision',
+        visible: layer.visible,
+        locked: layer.locked,
+        polygons: (layer.polygons || [])
+          .filter(p => Array.isArray(p.points) && p.points.length >= 3)
+          .map(p => ({
+            id: p.id || `col_${Math.random().toString(36).slice(2, 8)}`,
+            shape: p.shape === 'rect' || p.shape === 'circle' || p.shape === 'capsule' ? p.shape : 'polygon',
+            points: p.points.map(pt => [Number(pt[0]) || 0, Number(pt[1]) || 0]),
+            collisionType: p.collisionType || '墙体',
+            disabled: p.disabled === true,
+          })),
+      })
+      continue
+    }
+
     layers.push({
       id: layer.id,
       name: layer.name,
@@ -385,6 +428,55 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
       tiles: layer.data ? decompressTileData(layer.data, data.width, data.height) : {},
     })
   }
+
+  // ====== 旧存档迁移：图片实例碰撞 → 碰撞层（世界坐标） ======
+  const migratedPolygons: any[] = []
+  let migratedSeq = 0
+  for (const l of layers) {
+    if (l.type !== 'image') continue
+    const img = l.image
+    if (!img) continue
+    const rawList: any[] = Array.isArray(img.collisions) && img.collisions.length > 0
+      ? img.collisions
+      : (img.collisionShape?.points ? [{ shape: 'polygon', points: img.collisionShape.points }] : [])
+    if (img.collisionEnabled && rawList.length > 0) {
+      const iw = Math.max(1, Number(img.width) || 1)
+      const ih = Math.max(1, Number(img.height) || 1)
+      for (const raw of rawList) {
+        const pts = (raw.points || []).filter((p: any) => Array.isArray(p) && p.length >= 2)
+        if (pts.length < 3) continue
+        // 兼容历史像素坐标
+        const pixelLegacy = pts.some((p: number[]) => Math.abs(p[0]) > 1.5 || Math.abs(p[1]) > 1.5)
+        const normalized = pixelLegacy
+          ? pts.map((p: number[]) => [p[0] / iw, p[1] / ih])
+          : pts
+        const world = normalized.map((p: number[]) =>
+          imageLocalToWorld(img, { x: p[0], y: p[1] })
+        )
+        migratedPolygons.push({
+          id: `col_mig_${migratedSeq++}`,
+          shape: raw.shape === 'rect' ? 'rect' : 'polygon',
+          points: world.map((w: any) => [w.x, w.y]),
+          collisionType: img.collisionType && img.collisionType !== '图像' ? img.collisionType : '墙体',
+        })
+      }
+    }
+    // 迁移后清除旧字段，避免重复迁移与引擎重复判定
+    delete img.collisions
+    delete img.collisionShape
+    img.collisionEnabled = false
+  }
+  if (migratedPolygons.length > 0) {
+    layers.push({
+      id: layers.length,
+      name: '碰撞',
+      type: 'collision',
+      visible: true,
+      locked: false,
+      polygons: migratedPolygons,
+    })
+  }
+
   // 拆分后 id 可能重复，按最终顺序统一重排
   layers.forEach((l, i) => { l.id = i })
 

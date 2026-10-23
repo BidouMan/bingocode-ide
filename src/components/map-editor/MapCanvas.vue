@@ -11,7 +11,7 @@ import { usePaintStore } from '../../stores/paint'
 import { rgbaCss, hexToRgba } from '../paint-editor/utils/artboardExport'
 import { useMapViewport } from '../../composables/useMapViewport'
 import { useImageTransform } from '../../composables/useImageTransform'
-import { useImageCollisionEditor } from '../../composables/useImageCollisionEditor'
+import { useCollisionLayerEditor } from '../../composables/useCollisionLayerEditor'
 import { useTilePainter } from '../../composables/useTilePainter'
 import { usePaperScope } from '../paint-editor/composables/usePaperScope'
 import { ensurePaintFont } from '../paint-editor/utils/paintFont'
@@ -31,6 +31,8 @@ const emit = defineEmits<{
 const cursorGridPos = ref<{ x: number; y: number } | null>(null)
 
 const canvasRef = ref<HTMLDivElement>()
+// 碰撞叠加层：屏幕坐标 canvas（位于矢量画布之上）
+const collisionOverlayRef = ref<HTMLCanvasElement>()
 let PIXI: any = null
 let app: any = null
 let tileContainer: any = null
@@ -109,8 +111,11 @@ async function initPixi() {
     viewport.redraw()
     // resize 会清空画布，立即补一帧避免出现黑屏闪烁
     app.render()
+    // 碰撞叠加层随容器尺寸同步
+    resizeCollisionOverlay()
   })
   resizeObserver.observe(canvasRef.value)
+  resizeCollisionOverlay()
 
   // 应用初始渲染模式
   applyRenderMode()
@@ -342,7 +347,7 @@ async function renderAllLayers() {
   }
 
   // 图像精灵重建后重绘碰撞叠加层
-  collision.drawCollisionOverlay()
+  collision.drawOverlay()
 }
 
 async function renderImageLayer(container: any, imgData: any, layerId: number) {
@@ -419,8 +424,8 @@ async function placeImage(resource: any, x: number, y: number) {
       paintMode: 'bitmap',
     }
   }
-  // 扁平模型：放置一张图片就新建一个图片图层（在最上层）
-  mapStore.addImageLayer(resource.name || '图片', imgData)
+  // 扁平模型：放置一张图片就新建一个图片图层（在最上层），名称统一为「图像图层」
+  mapStore.addImageLayer('图像图层', imgData)
 
   // 放置后切换到选取工具；整图选中框不再自动显示
   mapEditorStore.setTool('select')
@@ -428,8 +433,7 @@ async function placeImage(resource: any, x: number, y: number) {
 
 // 供外部（图层工具栏/内置资源库）直接按路径放置一张图片并建层
 async function placeImageFromPath(path: string, x = 0, y = 0) {
-  const name = path.split('/').pop()?.split('.')[0] || '图片'
-  await placeImage({ name, path }, x, y)
+  await placeImage({ path }, x, y)
 }
 
 // ====== 图片模式：直接在画布上绘制（位图工具） ======
@@ -1008,6 +1012,51 @@ function syncSelectCursor() {
   if (vectorCanvasRef.value) vectorCanvasRef.value.style.cursor = 'default'
 }
 
+/** 碰撞编辑光标：矢量画布覆盖在 Pixi 之上，两个画布必须同步 */
+function setCollisionCursor(cursor: string) {
+  viewport.setCursor(cursor)
+  if (vectorCanvasRef.value) vectorCanvasRef.value.style.cursor = cursor
+}
+
+/** 碰撞层悬停反馈：锚点=正常指针、框内=移动、其他=十字；矩形/钢笔=十字 */
+function updateCollisionCursor(world: { x: number; y: number }) {
+  if (mapStore.activeMode !== 'collision') return
+  if (mapEditorStore.collisionLayerTool !== 'select') {
+    setCollisionCursor('crosshair')
+    return
+  }
+  const kind = collision.hoverKindAt(world)
+  setCollisionCursor(kind === 'vertex' ? 'default' : kind === 'inside' ? 'move' : 'crosshair')
+}
+
+/** 指针捕获：拖拽锚点/画碰撞时可以移出画布，事件仍回到画布，不会半路卡住 */
+function capturePointer(canvas: HTMLCanvasElement | null | undefined, pointerId: number) {
+  try {
+    canvas?.setPointerCapture(pointerId)
+  } catch { /* 部分 WebView 不支持捕获时保持原行为 */ }
+}
+
+function releasePointer(canvas: HTMLCanvasElement | null | undefined, pointerId: number) {
+  try {
+    if (canvas?.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId)
+  } catch { /* ignore */ }
+}
+
+/** 碰撞叠加层尺寸与 DPR 同步（世界坐标绘制，需要与 Pixi 视口一致） */
+function resizeCollisionOverlay() {
+  const el = collisionOverlayRef.value
+  const root = canvasRef.value
+  if (!el || !root) return
+  const dpr = window.devicePixelRatio || 1
+  const w = Math.max(1, Math.round(root.clientWidth * dpr))
+  const h = Math.max(1, Math.round(root.clientHeight * dpr))
+  if (el.width !== w || el.height !== h) {
+    el.width = w
+    el.height = h
+  }
+  collision.drawOverlay()
+}
+
 function pickPaintSavePath(path: string, layerId: number): string {
   const base = (path.split('/').pop() || '图像').replace(/\.[^.]+$/, '')
   // 文件名带图层 id：不同图层即使同名/同一毫秒开始绘制也不会写到同一个文件
@@ -1251,21 +1300,37 @@ async function startPaintSession(): Promise<boolean> {
     if (mapStore.selectedImageLayerId !== layerId) return false
     const srcW = source.naturalWidth || source.width
     const srcH = source.naturalHeight || source.height
-    // 背景图层的绘制范围跟随当前地图尺寸（地图改大后可继续在新区域绘制）
+    // 绘制图层：可绘制范围 = 地图尺寸 + 四周出血（各半个地图），允许内容画到地图边界之外
     const isBackground = !!img.background
     const mapW = Math.max(1, mapStore.mapData.width * mapStore.mapData.tileSize)
     const mapH = Math.max(1, mapStore.mapData.height * mapStore.mapData.tileSize)
-    const canvasW = isBackground ? Math.max(srcW, mapW) : srcW
-    const canvasH = isBackground ? Math.max(srcH, mapH) : srcH
+    // 已有矢量内容（底稿/矢量坐标以画布像素为准）时保持原画布原点，避免内容错位
+    const hasVectorContent = !!img.vectorData || !!img.vectorBasePath || vectorLayerCache.has(layerId)
+    const canRepad = isBackground && !hasVectorContent
+    const offsetX = img.position?.[0] ?? 0
+    const offsetY = img.position?.[1] ?? 0
+    // 出血区 = 半个地图，上限 512px（避免大尺寸地图导致画布过大、内存暴涨）
+    const basePadX = Math.min(Math.round(mapW / 2), 512)
+    const basePadY = Math.min(Math.round(mapH / 2), 512)
+    // 左/上出血只增不减，避免地图缩小时内容被裁掉
+    const padX = canRepad ? Math.max(basePadX, Math.round(-offsetX)) : 0
+    const padY = canRepad ? Math.max(basePadY, Math.round(-offsetY)) : 0
+    // 已有内容平移到新画布：世界坐标保持不变（世界原点落在画布 padX/padY 处）
+    // 矢量图层不做平移，直接沿用原画布原点
+    const drawX = canRepad ? padX + offsetX : 0
+    const drawY = canRepad ? padY + offsetY : 0
+    const canvasW = isBackground ? Math.max(srcW + Math.max(0, drawX), mapW + padX * 2) : srcW
+    const canvasH = isBackground ? Math.max(srcH + Math.max(0, drawY), mapH + padY * 2) : srcH
     const canvas = document.createElement('canvas')
     canvas.width = canvasW
     canvas.height = canvasH
     if (canvas.width <= 0 || canvas.height <= 0) return false
-    canvas.getContext('2d')!.drawImage(source, 0, 0)
-    if (isBackground && (canvasW !== srcW || canvasH !== srcH)) {
+    canvas.getContext('2d')!.drawImage(source, drawX, drawY)
+    if (isBackground && (canvasW !== srcW || canvasH !== srcH || drawX !== 0 || drawY !== 0)) {
       img.width = canvasW
       img.height = canvasH
-      img.position = [0, 0]
+      // 只有重新排版时才移动原点；矢量图层沿用原原点，防止底稿与矢量路径错位
+      if (canRepad) img.position = [-padX, -padY]
       img.scaleX = 1
       img.scaleY = 1
       img.scale = 1
@@ -1277,6 +1342,7 @@ async function startPaintSession(): Promise<boolean> {
     for (const child of container?.children ?? []) {
       if (child instanceof PIXI_.Sprite) { sprite = child; break }
     }
+    const geometryChanged = isBackground && (canvasW !== srcW || canvasH !== srcH || drawX !== 0 || drawY !== 0)
     paintSession = {
       layerId,
       mapName: mapStore.mapData.name,
@@ -1286,10 +1352,12 @@ async function startPaintSession(): Promise<boolean> {
       lastPoint: null,
       startPoint: null,
       snapshot: null,
-      dirty: false,
+      // 画布几何变化（加了出血区）时必须立刻落盘，否则存盘里的尺寸/位置与 PNG 不一致
+      dirty: geometryChanged,
       savePath: pickPaintSavePath(img.imagePath, layerId),
     }
     if (sprite) bindPaintTexture(sprite, img)
+    if (geometryChanged) schedulePaintSave()
     paintUndo = []
     paintRedo = []
     bumpPaintHistory()
@@ -1626,7 +1694,7 @@ const viewport = useMapViewport({
   getApp: () => app,
   getPIXI: () => PIXI,
   onZoom: () => {
-    collision.drawCollisionOverlay()
+    collision.drawOverlay()
     // 选区手柄按屏幕尺寸恒定，缩放后重绘
     drawSelectionOverlay()
     // 画笔圆圈光标随缩放变化
@@ -1641,14 +1709,13 @@ const transform = useImageTransform({
   getPIXI: () => PIXI,
   getLayerContainers: () => layerContainers,
   screenToWorld: viewport.screenToWorld,
-  onCollisionRedraw: () => collision.drawCollisionOverlay(),
   onRenderRequest: () => scheduleRender(),
 })
 
-const collision = useImageCollisionEditor({
+const collision = useCollisionLayerEditor({
   getApp: () => app,
-  getPIXI: () => PIXI,
   getScale: () => viewport.currentScale.value,
+  getOverlayCanvas: () => collisionOverlayRef.value ?? null,
 })
 
 const painter = useTilePainter({
@@ -2165,20 +2232,23 @@ function onVectorPointerDownCapture(e: PointerEvent) {
     return
   }
   const pan = e.button === 1 || (e.button === 0 && (viewport.isSpacePressed() || e.altKey))
-  if (!pan) return
-  e.preventDefault()
-  e.stopImmediatePropagation()
-  vectorPanning = true
-  viewport.startPan(e.clientX, e.clientY)
-  viewport.setCursor('grabbing')
+  if (pan) {
+    e.preventDefault()
+    e.stopImmediatePropagation()
+    vectorPanning = true
+    viewport.startPan(e.clientX, e.clientY)
+    viewport.setCursor('grabbing')
+  }
 }
 
 function onVectorPointerMoveCapture(e: PointerEvent) {
   updateVectorCursorScreen(e)
-  if (!vectorPanning) return
-  e.stopImmediatePropagation()
-  viewport.handlePanMove(e.clientX, e.clientY)
-  syncVectorGeometry()
+  if (vectorPanning) {
+    e.stopImmediatePropagation()
+    viewport.handlePanMove(e.clientX, e.clientY)
+    syncVectorGeometry()
+    collision.drawOverlay()
+  }
 }
 
 function onVectorPointerUpCapture(e: PointerEvent) {
@@ -2275,22 +2345,30 @@ function onPointerDown(e: PointerEvent) {
     }
   }
 
-  // 碰撞编辑模式下，指针事件全部交给碰撞工具，避免拖动/缩放图像
-  if (mapStore.activeLayer?.type === 'image' && mapEditorStore.imageCollisionTool !== 'none' && mapStore.selectedImage) {
+  // 碰撞层：指针事件全部交给碰撞层编辑器
+  if (mapStore.activeMode === 'collision') {
+    // 清掉可能残留的平移状态，避免普通拖动带动整块画布
+    viewport.endPan()
     const worldPos = viewport.screenToWorld(e)
-    if (worldPos) collision.handleCollisionPointerDown(mapStore.selectedImage, worldPos, e.button)
+    if (worldPos) {
+      // 捕获指针：拖出画布/移出地图范围后仍能继续拖动，不会卡住
+      capturePointer(app?.canvas as HTMLCanvasElement | undefined, e.pointerId)
+      collision.pointerDown(worldPos, e.button)
+      updateCollisionCursor(worldPos)
+    }
     return
   }
 
   // 点击变换手柄时交给变换逻辑，避免与选区框选冲突
   if (transform.isTransformBusy()) return
 
-  // 图片模式的选择工具：框选像素 → 浮动选区（位图模式无整图点选）
-  if (mapStore.activeMode === 'image' && mapEditorStore.imageTool === 'select' && mapStore.selectedImage) {
+  // 图片模式的选择工具：像素/矢量选取
+  if (mapStore.activeMode === 'image' && mapEditorStore.imageTool === 'select') {
     if (e.button !== 0) return
+    const worldPos = viewport.screenToWorld(e)
+    if (!mapStore.selectedImage) return
     // 开始框选时收起整图变换框，避免两个框同时出现
     transform.removeTransformBox()
-    const worldPos = viewport.screenToWorld(e)
     if (worldPos) {
       if (sessionMatchesSelection()) {
         handleSelectPointerDown(worldPos)
@@ -2326,15 +2404,22 @@ function onPointerDown(e: PointerEvent) {
 }
 
 function onPointerMove(e: PointerEvent) {
+  // 碰撞层：未按键时确保平移状态已结束，不会出现"鼠标一动整块画布跟着走"
+  if (mapStore.activeMode === 'collision' && e.buttons === 0) viewport.endPan()
   if (viewport.handlePanMove(e.clientX, e.clientY)) {
     syncVectorGeometry()
+    // 叠加层在屏幕坐标绘制，平移后需要重绘
+    collision.drawOverlay()
     return
   }
 
-  // 碰撞编辑：拖动顶点 / 拉矩形 / 钢笔预览
-  if (mapEditorStore.imageCollisionTool !== 'none' && mapStore.selectedImage) {
+  // 碰撞层：拖动顶点 / 整框移动 / 矩形 / 钢笔预览
+  if (mapStore.activeMode === 'collision') {
     const worldPos = viewport.screenToWorld(e)
-    if (worldPos) collision.handleCollisionPointerMove(mapStore.selectedImage, worldPos)
+    if (worldPos) {
+      collision.pointerMove(worldPos)
+      updateCollisionCursor(worldPos)
+    }
     return
   }
 
@@ -2372,6 +2457,15 @@ function onPointerMove(e: PointerEvent) {
 }
 
 function onPointerUp(e: PointerEvent) {
+  // 碰撞层：收尾矩形/顶点/整框拖拽
+  if (mapStore.activeMode === 'collision') {
+    // 空格/中键平移的收尾也必须执行，否则平移状态会残留，之后鼠标移动一直拖动画布
+    viewport.endPan()
+    releasePointer(app?.canvas as HTMLCanvasElement | undefined, e.pointerId)
+    collision.pointerUp()
+    return
+  }
+
   // 整图变换框拖动结束优先处理，避免被选区逻辑吞掉
   if (transform.handleTransformPointerUp()) return
 
@@ -2381,8 +2475,6 @@ function onPointerUp(e: PointerEvent) {
     viewport.endPan()
     return
   }
-
-  if (collision.handlePointerUp()) return
 
   if (isImagePaintTool() && sessionMatchesSelection()) {
     paintEnd(viewport.screenToWorld(e) ?? undefined, e.shiftKey)
@@ -2398,7 +2490,7 @@ function onPointerUp(e: PointerEvent) {
   viewport.setCursor('default')
 }
 
-function onPointerLeave() {
+function onPointerLeave(e: PointerEvent) {
   viewport.endPan()
   painter.resetPaintKey()
   cursorGridPos.value = null
@@ -2410,9 +2502,9 @@ function onPointerLeave() {
   if (mapStore.activeMode === 'image' && mapEditorStore.imageTool === 'select' && floatOp === 'create') {
     handleSelectPointerUp()
   }
-  // 离开画布时取消未完成的碰撞草稿，避免残留预览
-  if (mapEditorStore.imageCollisionTool !== 'none') {
-    collision.resetDraftOnLeave()
+  // 松手状态下离开画布才取消未完成的碰撞草稿；拖拽中（按钮仍按下）继续由指针捕获接管
+  if (mapStore.activeMode === 'collision' && e.buttons === 0) {
+    collision.resetOnLeave()
   }
 }
 
@@ -2575,8 +2667,8 @@ function onKeyDown(e: KeyboardEvent) {
   // Tool shortcuts (only when not typing in an input)
   if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return
 
-  // 碰撞编辑快捷键：Esc 取消/退出，Enter 闭合多边形，Delete 删除顶点
-  if (collision.handleKeyDown(e)) return
+  // 碰撞层快捷键：Esc 取消/退出，Enter 闭合多边形，Delete 删除锚点/碰撞体
+  if (mapStore.activeMode === 'collision' && collision.handleKeyDown(e)) return
 
   switch (e.key.toLowerCase()) {
     case 'b': mapEditorStore.setTool('draw'); break
@@ -2619,7 +2711,7 @@ function setZoomAtCenter(next: number) {
   a.stage.x = cx - wx * target
   a.stage.y = cy - wy * target
   viewport.drawGrid()
-  collision.drawCollisionOverlay()
+  collision.drawOverlay()
   drawSelectionOverlay()
   redrawBrushCursor()
   syncVectorGeometry()
@@ -2635,7 +2727,7 @@ function zoomOut() {
 
 function resetZoom() {
   viewport.centerView()
-  collision.drawCollisionOverlay()
+  collision.drawOverlay()
   drawSelectionOverlay()
 }
 
@@ -2797,11 +2889,12 @@ watch(
     nextTick(() => {
       viewport.centerView()
       scheduleRender()
+      collision.drawOverlay()
     })
   }
 )
 
-// 切到图块图层时清除图片变换框；切到图片图层由选中逻辑负责建立变换框
+// 切到非图片图层时清除图片变换框；切到碰撞层时清理碰撞会话并刷新叠加层
 watch(
   () => mapStore.activeLayerIndex,
   (idx) => {
@@ -2810,13 +2903,22 @@ watch(
       transform.removeTransformBox()
       mapStore.clearImageSelection()
     }
+    if (layer?.type === 'collision') {
+      setCollisionCursor(mapEditorStore.collisionLayerTool === 'select' ? 'default' : 'crosshair')
+    }
+    collision.cancelDraft()
+    collision.drawOverlay()
   }
 )
 
 // 监听图层可见性变化
 watch(
   () => mapStore.mapData.layers.map(l => `${l.id}:${l.visible}`),
-  () => { ensureLayerOrder() }
+  () => {
+    ensureLayerOrder()
+    // 碰撞层显隐同步叠加层
+    collision.drawOverlay()
+  }
 )
 
 // Watch for layer add/remove -> re-render all
@@ -2856,9 +2958,10 @@ watch(
   }
 )
 
-// 选中实例变化 → 同步本地变换框 + 重绘叠加层
+// 选中实例变化（切图层 / 打开新地图）→ 同步本地变换框 + 重绘叠加层。
+// mapLoadCount 参与依赖：不同地图的图层 id 都从 0 开始，仅看 id 无法区分换图
 watch(
-  () => mapStore.selectedImageLayerId,
+  () => [mapStore.selectedImageLayerId, mapStore.mapLoadCount] as const,
   async () => {
     const selImg = mapStore.selectedImage
     // 同步清空选区：此时 selectedImage 已指向新图层，
@@ -2883,9 +2986,7 @@ watch(
     }
     // 切换图层前只暂存矢量内容（不烘焙）：每个图层保留自己的矢量数据，切回仍可编辑
     if (vectorActive.value) await exitVectorMode(false)
-    collision.cancelCollisionDraft()
-    collision.clearVertexSelection()
-    collision.drawCollisionOverlay()
+    collision.cancelDraft()
     // 切换图片图层：先落盘旧图层，再为新图层建会话 / 重新进入矢量模式
     const proceed = () => {
       if (mapStore.activeMode !== 'image' || !mapStore.selectedImage) return
@@ -2908,19 +3009,14 @@ watch(
   }
 )
 
-// 进入碰撞编辑时隐藏变换框（避免手柄抢事件）；退出不再恢复整图选框
+// 碰撞层工具切换：清理未完成草稿并重置光标
 watch(
-  () => mapEditorStore.imageCollisionTool,
-  (tool, prev) => {
-    collision.cancelCollisionDraft()
-    collision.clearVertexSelection()
-    if (tool !== 'none') {
-      transform.removeTransformBox()
-      viewport.setCursor('crosshair')
-    } else if (prev !== 'none') {
-      viewport.setCursor('default')
-    }
-    collision.drawCollisionOverlay()
+  () => mapEditorStore.collisionLayerTool,
+  () => {
+    if (mapStore.activeMode !== 'collision') return
+    collision.cancelDraft()
+    setCollisionCursor(mapEditorStore.collisionLayerTool === 'select' ? 'default' : 'crosshair')
+    collision.drawOverlay()
   }
 )
 
@@ -2978,7 +3074,7 @@ async function resetCanvasState() {
   mapEditorStore.hasPaintClipboard = false
   transform.resetTransformState()
   mapStore.clearImageSelection()
-  collision.cancelCollisionDraft()
+  collision.cancelDraft()
   painter.resetMoveState()
   // 切换地图后图层 id 会被重新分配，旧缓存必须整体丢弃，避免串到新地图的图层
   vectorLayerCache.clear()
@@ -3282,6 +3378,8 @@ defineExpose({
       class="map-vector-brush-cursor"
       :style="vectorCursorStyle"
     ></div>
+    <!-- 碰撞叠加层：屏幕坐标 canvas，置于矢量画布之上，避免被图像层遮挡 -->
+    <canvas ref="collisionOverlayRef" class="map-collision-overlay"></canvas>
   </div>
 </template>
 
@@ -3302,6 +3400,16 @@ defineExpose({
   height: 100%;
   z-index: 10;
   touch-action: none;
+}
+
+/* 碰撞叠加层：屏幕坐标 canvas，位于矢量画布（z=10）与矢量投影层（z=11）之上 */
+.map-collision-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 12;
 }
 
 .map-vector-overlay {

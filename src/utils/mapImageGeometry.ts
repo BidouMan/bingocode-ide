@@ -48,3 +48,76 @@ export function snapImageLocal(img: any, p: { x: number; y: number }) {
     y: clamp01(Math.round(p.y * ih) / ih),
   }
 }
+
+/** 吸附到图片像素但不限制在画面范围内（碰撞体允许超出图片边界） */
+export function snapImageLocalFree(img: any, p: { x: number; y: number }) {
+  const iw = Math.max(1, img.width || 64)
+  const ih = Math.max(1, img.height || 64)
+  return {
+    x: Math.round(p.x * iw) / iw,
+    y: Math.round(p.y * ih) / ih,
+  }
+}
+
+// ====== 碰撞体命中测试（世界坐标） ======
+
+export interface PointLike { x: number; y: number }
+
+/** 射线法判断点是否在多边形内 */
+export function pointInPolygon(p: PointLike, poly: PointLike[]): boolean {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i]
+    const b = poly[j]
+    if ((a.y > p.y) !== (b.y > p.y)
+      && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) {
+      inside = !inside
+    }
+  }
+  return inside
+}
+
+function pointToSegmentDistance(p: PointLike, a: PointLike, b: PointLike): number {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const lenSq = dx * dx + dy * dy
+  if (lenSq === 0) return Math.hypot(p.x - a.x, p.y - a.y)
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq))
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
+}
+
+/** 点到多边形边界的最近距离 */
+export function distanceToPolygon(p: PointLike, poly: PointLike[]): number {
+  let best = Infinity
+  for (let i = 0; i < poly.length; i++) {
+    const d = pointToSegmentDistance(p, poly[i], poly[(i + 1) % poly.length])
+    if (d < best) best = d
+  }
+  return best
+}
+
+function segmentsIntersect(a: PointLike, b: PointLike, c: PointLike, d: PointLike): boolean {
+  const cross = (o: PointLike, p: PointLike, q: PointLike) =>
+    (p.x - o.x) * (q.y - o.y) - (p.y - o.y) * (q.x - o.x)
+  const d1 = cross(a, b, c)
+  const d2 = cross(a, b, d)
+  const d3 = cross(c, d, a)
+  const d4 = cross(c, d, b)
+  return ((d1 > 0) !== (d2 > 0) || d1 === 0 || d2 === 0)
+    && ((d3 > 0) !== (d4 > 0) || d3 === 0 || d4 === 0)
+}
+
+/** 两个多边形是否相交（含包含关系） */
+export function polygonsIntersect(a: PointLike[], b: PointLike[]): boolean {
+  if (a.length < 3 || b.length < 3) return false
+  if (a.some(p => pointInPolygon(p, b))) return true
+  if (b.some(p => pointInPolygon(p, a))) return true
+  for (let i = 0; i < a.length; i++) {
+    const a1 = a[i]
+    const a2 = a[(i + 1) % a.length]
+    for (let j = 0; j < b.length; j++) {
+      if (segmentsIntersect(a1, a2, b[j], b[(j + 1) % b.length])) return true
+    }
+  }
+  return false
+}

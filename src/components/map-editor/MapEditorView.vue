@@ -115,6 +115,14 @@ let skipNextPathWatch = false
 async function flushVectorPaint() {
   await mapCanvasRef.value?.exitVectorPaint()
 }
+
+/** 空地图（无任何图层）默认创建一张空白图像图层，进入后可直接绘制 */
+async function ensureDefaultLayer() {
+  if (mapStore.mapData.layers.length > 0) return
+  await startImagePaint('brush')
+  await saveMapToProject()
+}
+
 watch(() => mapStore.currentMapPath, async (newPath, oldPath) => {
   if (!newPath || newPath === oldPath) return
   if (skipNextPathWatch) { skipNextPathWatch = false; return }
@@ -132,12 +140,15 @@ watch(() => mapStore.currentMapPath, async (newPath, oldPath) => {
   if (mapItem && projectStore.root) {
     mapItem.path = mapDirPath(mapItem.name)
   }
+  let mapReady = loaded
   if (!loaded) {
     const item = resourceStore.maps.find(m => m.id === newPath)
     if (item) {
       mapStore.loadMap(createEmptyMapData(item.name))
+      mapReady = true
     }
   }
+  if (mapReady) await ensureDefaultLayer()
 })
 
 // ====== 自动保存（编辑时防抖保存到项目目录） ======
@@ -175,6 +186,7 @@ async function onNewMap() {
   skipNextPathWatch = true
   mapStore.setMapPath(id)
   mapStore.loadMap(createEmptyMapData(name))
+  await ensureDefaultLayer()
 }
 
 async function onUploadLocal() {
@@ -442,7 +454,7 @@ defineExpose({ switchToMap, placeImageResource })
 
 .right-tabs {
   display: flex;
-  height: 30px;
+  height: 44px;
   flex-shrink: 0;
   border-bottom: 1px solid rgb(45, 45, 45);
 }

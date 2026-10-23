@@ -8,8 +8,6 @@ interface ImageTransformOptions {
   getPIXI: () => any
   getLayerContainers: () => Map<number, any>
   screenToWorld: (e: PointerEvent | DragEvent) => { x: number; y: number } | null
-  // 图像移动/缩放/旋转后，碰撞叠加层需要跟随重绘
-  onCollisionRedraw?: () => void
   // 交互结束后请求整体重渲染（与原逻辑一致，确保最终状态落盘到精灵）
   onRenderRequest?: () => void
 }
@@ -395,8 +393,6 @@ export function useImageTransform(options: ImageTransformOptions) {
     )
     selectedImageSprite.alpha = selectedImageData.opacity ?? 1
     selectedImageSprite.visible = true
-    // 图像移动/缩放/旋转时碰撞叠加层跟随（在更新位置之后重绘）
-    if (mapEditorStore.showCollision) options.onCollisionRedraw?.()
   }
 
   function cacheSelectedImageSprite() {

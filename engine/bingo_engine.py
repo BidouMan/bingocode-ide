@@ -145,45 +145,75 @@ def _triangulate_polygon(points):
     return tris
 
 
-def _image_collision_local_polygons(image):
-    """图像实例碰撞形状 → 图片本地归一化凸多边形列表（缓存到运行时字典）"""
-    cached = image.get("_collision_local_polys")
-    if cached is not None:
-        return cached
+def _normalize_image_collision_points(raw_points, img_w, img_h, allow_pixel_coords=True):
+    """单组碰撞点 → 去重、可选兼容历史像素坐标后的归一化点列
 
-    shape = image.get("collisionShape") or image.get("collision_shape")
-    raw_points = []
-    if isinstance(shape, dict):
-        for p in shape.get("points") or []:
-            if isinstance(p, (list, tuple)) and len(p) >= 2:
-                try:
-                    raw_points.append([float(p[0]), float(p[1])])
-                except (TypeError, ValueError):
-                    continue
-
-    img_w = float(image.get("width") or 0) or 1.0
-    img_h = float(image.get("height") or 0) or 1.0
-    # 兼容历史像素坐标（绝对值 > 1.5 视为像素）
-    if raw_points and any(abs(x) > 1.5 or abs(y) > 1.5 for x, y in raw_points):
-        raw_points = [[x / img_w, y / img_h] for x, y in raw_points]
-
-    # 去掉相邻重复点与首尾重合点
+    新格式 collisions 的坐标恒为归一化值（允许超出 0~1，表示碰撞体在画面外），
+    因此只有旧 collisionShape 才启用像素坐标启发式。
+    """
     points = []
-    for p in raw_points:
-        if not points or abs(p[0] - points[-1][0]) > 1e-6 or abs(p[1] - points[-1][1]) > 1e-6:
-            points.append(p)
+    for p in raw_points or []:
+        if not isinstance(p, (list, tuple)) or len(p) < 2:
+            continue
+        try:
+            x, y = float(p[0]), float(p[1])
+        except (TypeError, ValueError):
+            continue
+        if not points or abs(x - points[-1][0]) > 1e-6 or abs(y - points[-1][1]) > 1e-6:
+            points.append([x, y])
     if len(points) >= 2:
         if abs(points[0][0] - points[-1][0]) < 1e-6 and abs(points[0][1] - points[-1][1]) < 1e-6:
             points.pop()
 
-    if len(points) < 3 or abs(_polygon_signed_area(points)) < 1e-8:
-        # 没有有效形状时按整张图片处理
-        polys = [[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]]
-    elif _is_convex_polygon(points):
-        polys = [points]
+    # 兼容历史像素坐标（绝对值 > 1.5 视为像素）
+    if allow_pixel_coords and points and any(abs(x) > 1.5 or abs(y) > 1.5 for x, y in points):
+        points = [[x / img_w, y / img_h] for x, y in points]
+    return points
+
+
+def _image_collision_local_polygons(image):
+    """图像实例碰撞形状 → 图片本地归一化凸多边形列表（缓存到运行时字典）
+
+    新格式支持一张图多个碰撞体（collisions 数组，坐标允许超出 0~1）；
+    旧存档仅有单个 collisionShape，按单碰撞体读取。
+    """
+    cached = image.get("_collision_local_polys")
+    if cached is not None:
+        return cached
+
+    img_w = float(image.get("width") or 0) or 1.0
+    img_h = float(image.get("height") or 0) or 1.0
+
+    raw_sets = []
+    collisions = image.get("collisions")
+    has_collisions_field = isinstance(collisions, (list, tuple))
+    if has_collisions_field:
+        for col in collisions:
+            if isinstance(col, dict):
+                raw_sets.append((col.get("points") or [], False))
     else:
-        tris = _triangulate_polygon(points)
-        polys = tris if tris else [points]
+        shape = image.get("collisionShape") or image.get("collision_shape")
+        if isinstance(shape, dict):
+            raw_sets.append((shape.get("points") or [], True))
+
+    polys = []
+    for raw_points, allow_pixel in raw_sets:
+        points = _normalize_image_collision_points(raw_points, img_w, img_h, allow_pixel)
+        if len(points) < 3 or abs(_polygon_signed_area(points)) < 1e-8:
+            continue
+        if _is_convex_polygon(points):
+            polys.append(points)
+        else:
+            tris = _triangulate_polygon(points)
+            polys.extend(tris if tris else [points])
+
+    if not polys:
+        if has_collisions_field:
+            # 新格式已明确给出碰撞体集合：空/无有效项 = 没有碰撞，不回退整图
+            polys = []
+        else:
+            # 旧存档没有碰撞形状时按整张图片处理
+            polys = [[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]]
 
     image["_collision_local_polys"] = polys
     return polys
@@ -575,6 +605,45 @@ class Sprite:
         self._get_hitbox_rect()
 
     # ---------- 运动模块 ----------
+    def _collision_layer_correction(self, layer, axis):
+        """碰撞层（世界坐标多边形）对当前精灵的轴分离位移量；没有碰撞返回 None"""
+        sprite_rect = self._get_hitbox_rect()
+        if not sprite_rect:
+            return None
+
+        best = None
+        for poly in layer.get("polygons", []):
+            if poly.get("disabled"):
+                continue
+            points = poly.get("points") or []
+            if len(points) < 3:
+                continue
+
+            col_type = poly.get("collisionType", "墙体")
+            is_one_way = col_type == "跳板"
+            if is_one_way and axis == "x":
+                continue
+            if is_one_way and self._drop_through:
+                continue
+
+            if is_one_way:
+                poly_top = min(p[1] for p in points)
+                if self._prev_bottom_y > poly_top:
+                    continue
+
+            mtv = _aabb_polygon_mtv(sprite_rect, points)
+            if not mtv:
+                continue
+            correction = mtv[0] if axis == "x" else mtv[1]
+            if is_one_way and axis == "y" and correction >= 0:
+                continue
+            if abs(correction) < 1e-6:
+                continue
+            if best is None or abs(correction) > abs(best):
+                best = correction
+
+        return best
+
     def _image_collision_correction(self, layer, axis):
         """计算图像图层对当前精灵的轴分离位移量；没有碰撞返回 None
 
@@ -643,6 +712,22 @@ class Sprite:
 
         # 检测所有图层中的实心图块
         for layer in _CURRENT_MAP.get("layers", []):
+            # --- 碰撞层（世界坐标多边形） ---
+            if layer.get("type") == "collision":
+                correction = self._collision_layer_correction(layer, axis)
+                if correction is not None:
+                    margin = 0.05 if correction > 0 else -0.05
+                    if axis == "x":
+                        self._x += correction + margin
+                    else:
+                        self._y += correction + margin
+                        # 向上推出 = 落到平台/地面
+                        if correction < 0:
+                            self.on_ground = True
+                            self.vy = 0
+                    return
+                continue
+
             # --- 图像图层碰撞检测（优先级高于瓦片碰撞） ---
             # 图像实例使用真实多边形碰撞：SAT 求最小穿透，再按移动轴取分量
             if layer.get("type") == "image" and "images" in layer:
@@ -1467,6 +1552,20 @@ class Sprite:
 
         # 遍历所有图层
         for layer in _CURRENT_MAP.get("layers", []):
+            # --- 碰撞层地面检测（世界坐标多边形） ---
+            if layer.get("type") == "collision":
+                for poly in layer.get("polygons", []):
+                    if poly.get("disabled"):
+                        continue
+                    pts = poly.get("points") or []
+                    if len(pts) < 3:
+                        continue
+                    if poly.get("collisionType") == "跳板" and self._drop_through:
+                        continue
+                    if _polygon_hits_horizontal(pts, rect[0] - 2, rect[2] + 2, check_y):
+                        return True
+                continue
+
             # --- 图像图层地面检测（按真实多边形采样） ---
             if layer.get("type") == "image" and "images" in layer:
                 for image in layer["images"]:
@@ -2555,6 +2654,32 @@ def load_map(map_name):
                     "tiles": {},
                     "images": images,
                 })
+            elif layer_type == "collisionlayer":
+                # 碰撞层：世界坐标多边形，与图像/图块解耦
+                polygons = []
+                for poly_raw in layer_raw.get("polygons", []):
+                    pts = []
+                    for p in poly_raw.get("points") or []:
+                        if isinstance(p, (list, tuple)) and len(p) >= 2:
+                            try:
+                                pts.append((float(p[0]), float(p[1])))
+                            except (TypeError, ValueError):
+                                continue
+                    if len(pts) >= 3:
+                        polygons.append({
+                            "points": pts,
+                            "collisionType": poly_raw.get("collisionType", "墙体"),
+                            "disabled": bool(poly_raw.get("disabled", False)),
+                        })
+                layers.append({
+                    "name": layer_raw.get("name", "碰撞"),
+                    "type": "collision",
+                    "visible": layer_raw.get("visible", True),
+                    "locked": layer_raw.get("locked", False),
+                    "tiles": {},
+                    "images": [],
+                    "polygons": polygons,
+                })
 
         # 用素材的碰撞信息补全 tileset（用户可能在 PropertyPanel 中设置了 tileset 级的碰撞）
         resource_collision_map = {}
@@ -2798,6 +2923,10 @@ def _render_map():
     # 遍历所有图层
     for layer_idx, layer in enumerate(_CURRENT_MAP["layers"]):
         if not layer["visible"]:
+            continue
+
+        # 碰撞层只参与物理判定，不参与渲染
+        if layer.get("type") == "collision":
             continue
 
         # 处理图像图层

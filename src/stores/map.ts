@@ -40,7 +40,25 @@ export interface ImageLayer extends MapLayerBase {
   image: ImageData
 }
 
-export type MapLayer = DrawingLayer | ImageLayer
+/** 碰撞层里的一个世界坐标碰撞体 */
+export interface CollisionPolygon {
+  id: string
+  shape: 'rect' | 'circle' | 'capsule' | 'polygon'
+  // 地图世界坐标（像素）
+  points: number[][]
+  // 物理属性：墙体 / 跳板 / 自定义
+  collisionType: string
+  // 禁用：勾选后该碰撞体不参与物理判定
+  disabled?: boolean
+}
+
+/** 碰撞层：整层共享一组世界坐标碰撞多边形，与图像/图块解耦 */
+export interface CollisionLayer extends MapLayerBase {
+  type: 'collision'
+  polygons: CollisionPolygon[]
+}
+
+export type MapLayer = DrawingLayer | ImageLayer | CollisionLayer
 
 export interface ImageData {
   imagePath: string
@@ -54,6 +72,8 @@ export interface ImageData {
   height: number
   collisionType: string
   collisionEnabled: boolean
+  // 旧存档兼容：图片实例碰撞，加载时会自动迁移为碰撞层
+  collisions?: { id?: string; shape?: 'rect' | 'polygon'; points: number[][] }[]
   collisionShape?: { points: number[][] }
   // 整张画布背景图：随地图尺寸变化自动扩展绘制范围
   background?: boolean
@@ -107,8 +127,8 @@ export interface TilePaletteEntry {
 
 export type MapTool = 'move' | 'select' | 'draw' | 'erase' | 'fill'
 export type CollisionTool = 'move' | 'add' | 'delete' | 'reset'
-// 图像模式碰撞编辑工具（none = 未进入碰撞编辑）
-export type ImageCollisionTool = 'none' | 'rect' | 'polygon' | 'vertex'
+// 碰撞层编辑工具：select=选择/拖动，rect/circle/capsule/polygon=形状，addPoint/deletePoint=锚点增删
+export type CollisionLayerTool = 'select' | 'rect' | 'circle' | 'capsule' | 'polygon' | 'addPoint' | 'deletePoint'
 
 export const useMapStore = defineStore('map', () => {
   const currentMapPath = ref('')
@@ -147,9 +167,13 @@ export const useMapStore = defineStore('map', () => {
     return layer
   })
   // 当前工作模式：由选中图层类型决定；空地图默认图像模式
-  const activeMode = computed<'image' | 'tile'>(() => activeLayer.value?.type === 'drawing' ? 'tile' : 'image')
-  // 当前模式可用的素材：图像模式只看图像素材，图块模式看瓦片素材
+  const activeMode = computed<'image' | 'tile' | 'collision'>(() => {
+    const type = activeLayer.value?.type
+    return type === 'drawing' ? 'tile' : type === 'collision' ? 'collision' : 'image'
+  })
+  // 当前模式可用的素材：图像模式只看图像素材，图块模式看瓦片素材，碰撞层不需要素材
   const activeLayerResources = computed(() => {
+    if (activeMode.value === 'collision') return []
     const wantImage = activeMode.value === 'image'
     return mapData.value.resources.filter(r => (r.resourceType === 'image') === wantImage)
   })
@@ -160,6 +184,19 @@ export const useMapStore = defineStore('map', () => {
     const layer = mapData.value.layers.find(l => l.id === selectedImageLayerId.value)
     if (!layer || layer.type !== 'image') return null
     return layer.image
+  })
+
+  // 当前激活的碰撞层及其碰撞体
+  const activeCollisionLayer = computed<CollisionLayer | null>(() =>
+    activeLayer.value?.type === 'collision' ? activeLayer.value : null
+  )
+  const activeCollisionPolygons = computed<CollisionPolygon[]>(() =>
+    activeCollisionLayer.value?.polygons ?? []
+  )
+  const activeCollisionPolygon = computed<CollisionPolygon | null>(() => {
+    const list = activeCollisionPolygons.value
+    const id = mapEditor.activeCollisionPolygonId
+    return list.find(p => p.id === id) ?? null
   })
 
   /**
@@ -208,8 +245,12 @@ export const useMapStore = defineStore('map', () => {
     selectedResourceIndex.value = -1
     selectedTileIndex.value = -1
     syncToolWithLayer()
-    // 打开地图时不自动建立图片变换框，点击图片/图层后再选中
-    clearImageSelection()
+    // 图片图层保留选中实例：打开地图后属性/碰撞可直接生效（变换框仍需用户主动点选才出现）；
+    // 图块/碰撞图层则清空图片选中态
+    if (data.layers[activeLayerIndex.value]?.type !== 'image') {
+      clearImageSelection()
+    }
+    mapEditor.setActiveCollisionPolygonId(null)
     // 强制触发 canvas 重新渲染（mapData 完全替换后所有瓦片和图像都变了）
     tileRevision.value++
     imageRevision.value++
@@ -278,12 +319,8 @@ export const useMapStore = defineStore('map', () => {
     const id = mapData.value.layers.length > 0
       ? Math.max(...mapData.value.layers.map(l => l.id)) + 1
       : 0
-    const usedNames = new Set(mapData.value.layers.map(l => l.name))
-    let finalName = name || '图片'
-    let seq = 2
-    while (usedNames.has(finalName)) finalName = `${name || '图片'} ${seq++}`
     const newLayer: ImageLayer = {
-      id, name: finalName, type: 'image', visible: true, locked: false, image,
+      id, name: name || '图像图层', type: 'image', visible: true, locked: false, image,
     }
     mapData.value.layers.push(newLayer)
     activeLayerIndex.value = mapData.value.layers.length - 1
@@ -378,8 +415,21 @@ export const useMapStore = defineStore('map', () => {
     if (!layer) {
       selectedResourceIndex.value = -1
       selectedTileIndex.value = -1
+      selectedImageLayerId.value = -1
+      mapEditor.setActiveCollisionPolygonId(null)
       return
     }
+    if (layer.type === 'collision') {
+      // 碰撞层：默认激活选择移动（形状按钮独立记忆，默认矩形常亮）
+      mapEditor.setTool('select')
+      mapEditor.setCollisionLayerTool('select')
+      mapEditor.setActiveCollisionPolygonId(null)
+      selectedImageLayerId.value = -1
+      selectedResourceIndex.value = -1
+      selectedTileIndex.value = -1
+      return
+    }
+    mapEditor.setActiveCollisionPolygonId(null)
     if (layer.type === 'image') {
       mapEditor.setTool('select')
       // 扁平模型：选中图片图层即选中该张图片
@@ -388,6 +438,7 @@ export const useMapStore = defineStore('map', () => {
       selectedTileIndex.value = -1
     } else {
       mapEditor.setTool('draw')
+      selectedImageLayerId.value = -1
       const palette = mapData.value.tilePalette
       const first = palette?.find(e =>
         activeLayerResources.value.some(r => r.id === e.resourceId)
@@ -578,7 +629,7 @@ export const useMapStore = defineStore('map', () => {
     }
   }
 
-  // ====== 图像实例碰撞（图像模式） ======
+  // ====== 图层 / 图像选中 ======
 
   function selectImage(layerId: number) {
     selectedImageLayerId.value = layerId
@@ -586,62 +637,93 @@ export const useMapStore = defineStore('map', () => {
 
   function clearImageSelection() {
     selectedImageLayerId.value = -1
-    mapEditor.setImageCollisionTool('none')
   }
 
-  // 默认碰撞形状：整张图片
-  function defaultImageCollisionPoints(): number[][] {
-    return [[0, 0], [1, 0], [1, 1], [0, 1]]
+  // ====== 碰撞层（世界坐标） ======
+
+  function createCollisionId(): string {
+    return `col_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
   }
 
-  /** 设置选中图像实例的碰撞多边形（归一化 0~1 图片本地坐标）；传 null 清除 */
-  function setImageCollisionPoints(points: number[][] | null) {
-    const img = selectedImage.value
-    if (!img) return
+  /** 新建碰撞层并选中 */
+  function addCollisionLayer(name = '碰撞'): number {
+    const layers = mapData.value.layers
+    const id = layers.length > 0 ? Math.max(...layers.map(l => l.id)) + 1 : 0
+    const used = new Set(layers.map(l => l.name))
+    let finalName = name
+    let seq = 2
+    while (used.has(finalName)) finalName = `${name} ${seq++}`
+    const layer: CollisionLayer = {
+      id, name: finalName, type: 'collision', visible: true, locked: false, polygons: [],
+    }
+    layers.push(layer)
+    activeLayerIndex.value = layers.length - 1
+    selectedResourceIndex.value = -1
+    selectedTileIndex.value = -1
+    syncToolWithLayer()
+    imageRevision.value++
+    return id
+  }
+
+  /** 在当前碰撞层新增一个碰撞体并选中 */
+  function addCollisionPolygon(shape: CollisionPolygon['shape'], points: number[][], collisionType = '墙体'): string | null {
+    const layer = activeCollisionLayer.value
+    if (!layer) return null
+    const polygon: CollisionPolygon = {
+      id: createCollisionId(),
+      shape,
+      points: points.map(p => [p[0], p[1]]),
+      collisionType: collisionType || '墙体',
+    }
+    layer.polygons.push(polygon)
+    mapEditor.setActiveCollisionPolygonId(polygon.id)
+    collisionRevision.value++
+    return polygon.id
+  }
+
+  function removeCollisionPolygon(id: string) {
+    const layer = activeCollisionLayer.value
+    if (!layer) return
+    const idx = layer.polygons.findIndex(p => p.id === id)
+    if (idx < 0) return
+    layer.polygons.splice(idx, 1)
+    if (mapEditor.activeCollisionPolygonId === id) {
+      const next = layer.polygons[Math.min(idx, layer.polygons.length - 1)] ?? null
+      mapEditor.setActiveCollisionPolygonId(next?.id ?? null)
+    }
+    collisionRevision.value++
+  }
+
+  /** 更新碰撞体顶点；不足 3 点视为删除 */
+  function updateCollisionPolygonPoints(id: string, points: number[][] | null) {
+    const layer = activeCollisionLayer.value
+    if (!layer) return
+    const polygon = layer.polygons.find(p => p.id === id)
+    if (!polygon) return
     if (!points || points.length < 3) {
-      delete img.collisionShape
-      img.collisionEnabled = false
-    } else {
-      img.collisionShape = { points }
-      img.collisionEnabled = true
-      if (!img.collisionType || img.collisionType === '图像') img.collisionType = '墙体'
+      removeCollisionPolygon(id)
+      return
     }
+    polygon.points = points.map(p => [p[0], p[1]])
     collisionRevision.value++
   }
 
-  function setImageCollisionType(type: string) {
-    const img = selectedImage.value
-    if (!img) return
-    img.collisionType = type
-    if (type === '图像') {
-      img.collisionEnabled = false
-    } else {
-      img.collisionEnabled = true
-      if (!img.collisionShape?.points?.length) {
-        img.collisionShape = { points: defaultImageCollisionPoints() }
-      }
-    }
+  function setCollisionPolygonType(id: string, collisionType: string) {
+    const layer = activeCollisionLayer.value
+    if (!layer) return
+    const polygon = layer.polygons.find(p => p.id === id)
+    if (!polygon) return
+    polygon.collisionType = collisionType
     collisionRevision.value++
   }
 
-  function setImageCollisionEnabled(enabled: boolean) {
-    const img = selectedImage.value
-    if (!img) return
-    img.collisionEnabled = enabled
-    if (enabled) {
-      if (!img.collisionType || img.collisionType === '图像') img.collisionType = '墙体'
-      if (!img.collisionShape?.points?.length) {
-        img.collisionShape = { points: defaultImageCollisionPoints() }
-      }
-    }
-    collisionRevision.value++
-  }
-
-  function clearImageCollision() {
-    const img = selectedImage.value
-    if (!img) return
-    delete img.collisionShape
-    img.collisionEnabled = false
+  /** 禁用/启用单个碰撞体（禁用后不参与物理判定） */
+  function setCollisionPolygonDisabled(id: string, disabled: boolean) {
+    const layer = activeCollisionLayer.value
+    if (!layer) return
+    const polygon = layer.polygons.find(p => p.id === id)
+    if (!polygon) return
+    polygon.disabled = disabled
     collisionRevision.value++
   }
 
@@ -733,13 +815,18 @@ export const useMapStore = defineStore('map', () => {
     setTileCollisionType,
     selectedImageLayerId,
     selectedImage,
+    activeCollisionLayer,
+    activeCollisionPolygons,
+    activeCollisionPolygon,
     sceneRenderMode,
     selectImage,
     clearImageSelection,
-    setImageCollisionPoints,
-    setImageCollisionType,
-    setImageCollisionEnabled,
-    clearImageCollision,
+    addCollisionLayer,
+    addCollisionPolygon,
+    removeCollisionPolygon,
+    updateCollisionPolygonPoints,
+    setCollisionPolygonType,
+    setCollisionPolygonDisabled,
     tileRevision,
     imageRevision,
     collisionRevision,
