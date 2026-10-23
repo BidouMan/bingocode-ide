@@ -91,7 +91,8 @@ async function startImagePaint(tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rec
 }
 
 const emit = defineEmits<{
-  'open-resource-lib': []
+  // scope 决定内置资源库只显示图像还是图块：图层面板固定图像，图块面板固定图块
+  'open-resource-lib': [scope: 'image' | 'tile']
   'map-thumbnail-updated': [itemId: string, dataUrl: string]
 }>()
 
@@ -290,7 +291,7 @@ async function onImportMap() {
 }
 
 function onOpenLibrary() {
-  emit('open-resource-lib')
+  emit('open-resource-lib', 'tile')
 }
 
 function onCursorMove(x: number, y: number) {
@@ -317,7 +318,7 @@ defineExpose({ switchToMap, placeImageResource })
           :disabled="!hasMaps"
           :get-layer-thumbnail="getLayerThumbnail"
           @paint="startImagePaint"
-          @open-library="emit('open-resource-lib')"
+          @open-library="emit('open-resource-lib', 'image')"
           @upload-image="onUploadLocal"
         />
       </div>

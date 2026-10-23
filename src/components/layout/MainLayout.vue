@@ -89,6 +89,8 @@ const currentPage = ref(0)
 // 重置默认 tab/分类，并让 onMounted 的目录重扫真正生效
 const mapLibPageKey = ref(0)
 const mapResLibPageKey = ref(0)
+/** 内置资源库打开范围：图层面板只给图像资源，图块面板只给图块资源 */
+const mapResLibScope = ref<'image' | 'tile'>('image')
 const spriteLibPageKey = ref(0)
 const paintPageKey = ref(0)
 const framePickerKey = ref(0)
@@ -1084,7 +1086,8 @@ async function onMapLibImportedImage(engineRelPath: string) {
 async function onResLibImported(path: string) {
   const name = path.split('/').pop()?.split('.')[0] || '资源'
   const tileSize = mapStore.mapData.tileSize
-  const isImageLayer = mapStore.activeMode === 'image'
+  // 图层面板打开的资源库固定按图像导入；图块面板打开时才作为图块集
+  const isImageLayer = mapResLibScope.value === 'image'
 
   // 复制资源文件到项目地图目录
   let relativePath = path
@@ -1979,7 +1982,7 @@ function spriteDisplayName(name: string) {
         <div v-show="editorStore.isGameMode && editorStore.activeEditorMode === 'map'" class="editor-page-full">
           <MapEditorView
             ref="mapEditorRef"
-            @open-resource-lib="currentPage = 4"
+            @open-resource-lib="(scope) => { mapResLibScope = scope; currentPage = 4 }"
             @map-thumbnail-updated="onMapThumbnailUpdated"
           />
         </div>
@@ -2311,7 +2314,7 @@ function spriteDisplayName(name: string) {
 
       <!-- ─── page 4: 素材库 ─── -->
       <div v-show="currentPage === 4" class="lib-page">
-        <MapResourceLibPage :key="mapResLibPageKey" @close="switchPage(0)" @imported="onResLibImported" />
+        <MapResourceLibPage :key="mapResLibPageKey" :scope="mapResLibScope" @close="switchPage(0)" @imported="onResLibImported" />
       </div>
 
       <!-- ─── page 5: 声音库 ─── -->

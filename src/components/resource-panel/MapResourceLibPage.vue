@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { onMounted, ref, computed, watch } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { useMapResourceLibStore } from '../../stores/mapResourceLib'
-import { useMapStore } from '../../stores/map'
+
+const props = defineProps<{
+  /** 打开范围：图层面板=图像，图块面板=图块（不跟随当前图层类型） */
+  scope?: 'image' | 'tile'
+}>()
 
 const emit = defineEmits<{
   'close': []
@@ -9,18 +13,12 @@ const emit = defineEmits<{
 }>()
 
 const store = useMapResourceLibStore()
-const mapStore = useMapStore()
 const searchQuery = ref('')
 
-// 按当前工作模式过滤分类：图像模式只显示图像；图块模式只显示图块/集合。
-// 页面用 v-show 常驻挂载，分类必须用 watch 跟随模式，不能用 ref 初始化一次
-const isImageMode = computed(() => mapStore.activeMode === 'image')
+// 只按打开来源过滤分类：图层面板打开时只显示图像，图块面板打开时只显示图块/集合
+const isImageMode = computed(() => props.scope === 'image')
 
-const activeCategory = ref<'images' | 'tiles' | 'tilesets'>('tiles')
-
-watch(isImageMode, (img) => {
-  activeCategory.value = img ? 'images' : 'tiles'
-}, { immediate: true })
+const activeCategory = ref<'images' | 'tiles' | 'tilesets'>(isImageMode.value ? 'images' : 'tiles')
 
 const categories = computed(() =>
   isImageMode.value

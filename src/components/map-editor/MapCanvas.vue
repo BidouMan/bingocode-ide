@@ -466,6 +466,17 @@ const vectorCanvasRef = ref<HTMLCanvasElement>()
 const textAreaRef = ref<HTMLTextAreaElement>()
 const vectorActive = ref(false)
 const vectorMatrix = ref<MapVectorMatrix | null>(null)
+/**
+ * 矢量模式下选中「选取」工具、且当前图层还没有任何矢量对象时，
+ * 让矢量画布不拦截指针：刚放置/创建的图片可以直接用选择工具点选整图并拖动/缩放，
+ * 避免空矢量层把地图画布的所有交互挡住。
+ */
+const vectorCanvasPassThrough = computed(() =>
+  vectorActive.value
+  && paintStore.mode === 'vector'
+  && mapEditorStore.imageTool === 'select'
+  && !paintStore.vectorContent
+)
 // 矢量画笔/橡皮光标：屏幕坐标（相对地图画布容器），用 DOM 圆圈保证任意缩放下清晰
 const vectorCursorPos = ref<{ x: number; y: number } | null>(null)
 let vectorPanning = false
@@ -2207,6 +2218,12 @@ function onPointerDown(e: PointerEvent) {
   // 点击变换手柄时交给变换逻辑，避免与选区框选冲突
   if (transform.isTransformBusy()) return
 
+  // 矢量模式下还没有矢量对象时：选择工具直接选中整张图片（可拖动/缩放/旋转）
+  if (vectorCanvasPassThrough.value && mapStore.activeLayer?.type === 'image') {
+    if (e.button === 0) transform.handleSelectPointerDown(e, mapStore.activeLayer)
+    return
+  }
+
   // 图片模式的选择工具：框选像素 → 浮动选区（切换图层不再选中整张图）
   if (mapStore.activeMode === 'image' && mapEditorStore.imageTool === 'select' && mapStore.selectedImage) {
     if (e.button !== 0) return
@@ -2263,6 +2280,9 @@ function onPointerMove(e: PointerEvent) {
     return
   }
 
+  // 整图变换框拖动（拖动图片本体 / 缩放 / 旋转）优先于选区逻辑
+  if (transform.handleTransformPointerMove(e)) return
+
   // 图片模式选取工具：更新框选矩形 / 拖动浮动选区（移动、缩放、旋转）
   if (mapStore.activeMode === 'image' && mapEditorStore.imageTool === 'select' && mapStore.selectedImage) {
     if (floatOp !== 'none') {
@@ -2282,8 +2302,6 @@ function onPointerMove(e: PointerEvent) {
     return
   }
 
-  if (transform.handleTransformPointerMove(e)) return
-
   const gridPos = viewport.screenToGrid(e)
   if (gridPos) {
     cursorGridPos.value = gridPos
@@ -2296,6 +2314,9 @@ function onPointerMove(e: PointerEvent) {
 }
 
 function onPointerUp(e: PointerEvent) {
+  // 整图变换框拖动结束优先处理，避免被选区逻辑吞掉
+  if (transform.handleTransformPointerUp()) return
+
   // 图片模式选取工具：结束框选 / 结束移动缩放旋转
   if (mapStore.activeMode === 'image' && mapEditorStore.imageTool === 'select' && mapStore.selectedImage) {
     if (e.button === 0) handleSelectPointerUp()
@@ -2310,8 +2331,6 @@ function onPointerUp(e: PointerEvent) {
     viewport.endPan()
     return
   }
-
-  if (transform.handleTransformPointerUp()) return
 
   // Move tool: drop tile at new position
   painter.handlePointerUp(cursorGridPos.value)
@@ -2770,8 +2789,8 @@ watch(
     collision.cancelCollisionDraft()
     collision.clearVertexSelection()
     resetFloatingSelection()
-    // 切换图层只切换绘制目标：不显示整图变换框（选中整张图的功能已取消）
-    transform.removeTransformBox()
+    // 切换图层只切换绘制目标：整图变换框仅在用户主动点选图片时保留
+    if (!transform.isSelectedImage(mapStore.selectedImage)) transform.removeTransformBox()
     collision.drawCollisionOverlay()
     // 切换图片图层：先落盘旧图层，再为新图层建会话 / 重新进入矢量模式
     const proceed = () => {
@@ -3030,6 +3049,7 @@ defineExpose({
       v-if="vectorActive"
       ref="vectorCanvasRef"
       class="map-vector-canvas"
+      :style="{ pointerEvents: vectorCanvasPassThrough ? 'none' : 'auto' }"
       @wheel="onVectorWheel"
       @pointerdown.capture="onVectorPointerDownCapture"
       @pointermove.capture="onVectorPointerMoveCapture"
