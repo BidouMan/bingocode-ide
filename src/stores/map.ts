@@ -61,6 +61,8 @@ export interface ImageData {
   vectorData?: string
   // 矢量图层的位图底稿（不含矢量内容，重新编辑时作为 base）
   vectorBasePath?: string
+  // 该图层当前的编辑模式：切换图层时按此恢复（缺省时由是否有矢量数据推导）
+  paintMode?: 'bitmap' | 'vector'
 }
 
 export interface MapResource {

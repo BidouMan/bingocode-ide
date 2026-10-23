@@ -388,6 +388,7 @@ async function placeImage(resource: any, x: number, y: number) {
   let imgData: any
   try {
     const img = await loadImage(resource.path)
+    // 上传/内置资源放置的图片是位图素材，默认按位图模式编辑
     imgData = {
       imagePath: resource.path,
       position: [x, y],
@@ -400,6 +401,7 @@ async function placeImage(resource: any, x: number, y: number) {
       height: img.naturalHeight || 64,
       collisionType: '图像',
       collisionEnabled: false,
+      paintMode: 'bitmap',
     }
   } catch {
     imgData = {
@@ -414,6 +416,7 @@ async function placeImage(resource: any, x: number, y: number) {
       height: 64,
       collisionType: '图像',
       collisionEnabled: false,
+      paintMode: 'bitmap',
     }
   }
   // 扁平模型：放置一张图片就新建一个图片图层（在最上层）
@@ -466,22 +469,13 @@ const vectorCanvasRef = ref<HTMLCanvasElement>()
 const textAreaRef = ref<HTMLTextAreaElement>()
 const vectorActive = ref(false)
 const vectorMatrix = ref<MapVectorMatrix | null>(null)
-/**
- * 矢量模式下选中「选取」工具、且当前图层还没有任何矢量对象时，
- * 让矢量画布不拦截指针：刚放置/创建的图片可以直接用选择工具点选整图并拖动/缩放，
- * 避免空矢量层把地图画布的所有交互挡住。
- */
-const vectorCanvasPassThrough = computed(() =>
-  vectorActive.value
-  && paintStore.mode === 'vector'
-  && mapEditorStore.imageTool === 'select'
-  && !paintStore.vectorContent
-)
 // 矢量画笔/橡皮光标：屏幕坐标（相对地图画布容器），用 DOM 圆圈保证任意缩放下清晰
 const vectorCursorPos = ref<{ x: number; y: number } | null>(null)
 let vectorPanning = false
 let vectorExiting = false
 let enteringVector = false
+// 切换图层时同步工具栏模式会触发 paintMode watcher，用该标记跳过（避免把"切层"误当成"用户切到位图"）
+let suppressPaintModeWatch = false
 // 矢量图层会话缓存：切换图层时保留 Paper JSON 与不含矢量的位图底稿，
 // 切回来可继续编辑；保存时会把 JSON/底稿路径写入地图数据。
 // image 记录归属的图像对象：图层 id 会被复用，必须校验归属，避免旧缓存串到新图层。
@@ -539,6 +533,7 @@ function clearPixelSelection() {
 }
 
 function resetFloatingSelection() {
+  const hadFloat = !!floatCanvas
   pixelSelection = null
   floatCanvas = null
   floatBaseCanvas = null
@@ -547,6 +542,16 @@ function resetFloatingSelection() {
   floatStartXf = null
   mapEditorStore.hasPixelSelection = false
   selectionGraphics?.clear()
+  // 浮选内容已合成到画布：标记脏，切图层提交时才会落盘
+  if (hadFloat && paintSession) {
+    paintSession.dirty = true
+    schedulePaintSave()
+  }
+}
+
+/** 绘制会话必须属于当前选中的图片图层，避免异步切换期间读写到别的图层（串内容） */
+function sessionMatchesSelection(): boolean {
+  return !!paintSession && paintSession.layerId === mapStore.selectedImageLayerId
 }
 
 function makeOffscreenCanvas(w: number, h: number): HTMLCanvasElement {
@@ -568,6 +573,22 @@ function selectionRectPx() {
   const w = Math.max(0, Math.min(cw, Math.ceil(Math.max(x0, x1) * cw)) - x)
   const h = Math.max(0, Math.min(ch, Math.ceil(Math.max(y0, y1) * ch)) - y)
   return { x, y, w, h }
+}
+
+/** 选区内是否存在非透明像素（全透明 = 没框到内容） */
+function selectionHasContent(r: { x: number; y: number; w: number; h: number }): boolean {
+  const ctx = paintCtx()
+  if (!ctx || r.w <= 0 || r.h <= 0) return false
+  try {
+    const data = ctx.getImageData(r.x, r.y, r.w, r.h).data
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] > 8) return true
+    }
+  } catch {
+    // 读取失败时按"有内容"处理，避免直接吞掉选区
+    return true
+  }
+  return false
 }
 
 function floatCornersPx(): { x: number; y: number }[] {
@@ -650,29 +671,33 @@ function drawSelectionOverlay() {
 
   const scale = Math.max(0.1, viewport.currentScale.value)
   const hs = 8 / scale
+  // 与矢量模式同一套选区样式：靛蓝描边 + 屏幕恒定线宽
+  const SEL = 0x818cf8
+  const SEL_DEEP = 0x6366f1
+  const strokeW = 1.4 / scale
 
   if (floatCanvas) {
     const box = floatBoxWorld()
     if (!box) return
     const pts = [box.tl, box.tr, box.br, box.bl].flatMap(p => [p.x, p.y])
     g.poly(pts)
-    g.fill({ color: 0x5bfb84, alpha: 0.06 })
+    g.fill({ color: SEL, alpha: 0.06 })
     g.poly(pts)
-    g.stroke({ width: 1, color: 0x5bfb84 })
+    g.stroke({ width: strokeW, color: SEL })
     // 旋转锚点连线
     g.moveTo(box.top.x, box.top.y)
     g.lineTo(box.rot.x, box.rot.y)
-    g.stroke({ width: 1, color: 0x5bfb84 })
-    // 缩放锚点（白底绿边）
+    g.stroke({ width: strokeW, color: SEL })
+    // 缩放锚点（白底深靛边，与矢量一致）
     for (const h of box.handles) {
       g.rect(h.x - hs / 2, h.y - hs / 2, hs, hs)
       g.fill({ color: 0xffffff })
-      g.stroke({ width: 1, color: 0x5bfb84 })
+      g.stroke({ width: strokeW * 0.85, color: SEL_DEEP })
     }
     // 旋转锚点
     g.circle(box.rot.x, box.rot.y, hs * 0.6)
     g.fill({ color: 0xffffff })
-    g.stroke({ width: 1, color: 0x5bfb84 })
+    g.stroke({ width: strokeW * 0.85, color: SEL_DEEP })
     return
   }
 
@@ -685,9 +710,9 @@ function drawSelectionOverlay() {
       imageLocalToWorld(img, { x: Math.min(x0, x1), y: Math.max(y0, y1) }),
     ].flatMap(p => [p.x, p.y])
     g.poly(pts)
-    g.fill({ color: 0x5bfb84, alpha: 0.08 })
+    g.fill({ color: SEL, alpha: 0.10 })
     g.poly(pts)
-    g.stroke({ width: 1, color: 0x5bfb84 })
+    g.stroke({ width: strokeW, color: SEL })
   }
 }
 
@@ -714,7 +739,12 @@ function cutSelectionToFloat() {
   const s = paintSession
   const ctx = paintCtx()
   const r = selectionRectPx()
-  if (!s || !ctx || !r || r.w < 2 || r.h < 2) {
+  if (!s || !ctx || !sessionMatchesSelection() || !r || r.w < 2 || r.h < 2) {
+    clearPixelSelection()
+    return
+  }
+  // 选区全是透明像素 = 没框到内容（与矢量模式一致：不建立空选区）
+  if (!selectionHasContent(r)) {
     clearPixelSelection()
     return
   }
@@ -818,7 +848,7 @@ function copyFloatingSelection() {
 
 // 粘贴为新浮动选区（带递增偏移，避免与原内容完全重叠）
 function pasteFloatingSelection() {
-  if (!paintClipboard || !paintSession) return
+  if (!paintClipboard || !paintSession || !sessionMatchesSelection()) return
   const s = paintSession
   const ctx = paintCtx()
   if (!ctx) return
@@ -879,7 +909,7 @@ function flipSelection(axis: 'h' | 'v') {
 }
 
 function clipToSelection(ctx: CanvasRenderingContext2D) {
-  if (!pixelSelection || !paintSession) return
+  if (!pixelSelection || !paintSession || !sessionMatchesSelection()) return
   const { x0, y0, x1, y1 } = pixelSelection
   ctx.beginPath()
   ctx.rect(
@@ -970,9 +1000,18 @@ function updatePaintCursor() {
   }
 }
 
-function pickPaintSavePath(path: string): string {
+/** 选取工具统一光标：位图/矢量模式下保持一致（原生箭头，隐藏画笔圆圈） */
+function syncSelectCursor() {
+  hideBrushCursor()
+  vectorCursorPos.value = null
+  viewport.setCursor('default')
+  if (vectorCanvasRef.value) vectorCanvasRef.value.style.cursor = 'default'
+}
+
+function pickPaintSavePath(path: string, layerId: number): string {
   const base = (path.split('/').pop() || '图像').replace(/\.[^.]+$/, '')
-  return `assets/maps/${mapStore.mapData.name}/images/${base}-draw-${Date.now().toString(36)}.png`
+  // 文件名带图层 id：不同图层即使同名/同一毫秒开始绘制也不会写到同一个文件
+  return `assets/maps/${mapStore.mapData.name}/images/${base}-L${layerId}-draw-${Date.now().toString(36)}.png`
 }
 
 // 浮动选区手柄：0-3 角点，4-7 边中点（T B L R）
@@ -1018,7 +1057,7 @@ function hitTestFloat(world: { x: number; y: number }): FloatHit {
 function handleSelectPointerDown(world: { x: number; y: number }) {
   const s = paintSession
   const img = sessionImage()
-  if (!s || !img) return
+  if (!s || !img || !sessionMatchesSelection()) return
   const local = imageWorldToLocal(img, world.x, world.y)
   const p = { x: local.x * s.canvas.width, y: local.y * s.canvas.height }
 
@@ -1073,7 +1112,7 @@ function handleSelectPointerDown(world: { x: number; y: number }) {
 function handleSelectPointerMove(world: { x: number; y: number }, shift: boolean): boolean {
   const s = paintSession
   const img = sessionImage()
-  if (!s || !img) return false
+  if (!s || !img || !sessionMatchesSelection()) return false
 
   if (floatOp === 'create') {
     if (pixelSelection) {
@@ -1148,6 +1187,11 @@ function handleSelectPointerMove(world: { x: number; y: number }, shift: boolean
 }
 
 function handleSelectPointerUp() {
+  // 会话已切到别的图层：放弃本次手势并清掉选框，避免落到错误图层
+  if (!sessionMatchesSelection()) {
+    resetFloatingSelection()
+    return
+  }
   if (floatOp === 'create') {
     const r = selectionRectPx()
     floatOp = 'none'
@@ -1171,6 +1215,8 @@ function handleSelectPointerUp() {
 
 function bindPaintTexture(sprite: any, imgData: any) {
   if (!paintSession) return
+  // 精灵可能已被切层渲染销毁：绑定到销毁对象会导致画布更新不可见
+  if (!sprite || sprite.destroyed) return
   const cw = paintSession.canvas.width
   const ch = paintSession.canvas.height
   const scaleX = (imgData.scaleX ?? imgData.scale ?? 1)
@@ -1241,13 +1287,15 @@ async function startPaintSession(): Promise<boolean> {
       startPoint: null,
       snapshot: null,
       dirty: false,
-      savePath: pickPaintSavePath(img.imagePath),
+      savePath: pickPaintSavePath(img.imagePath, layerId),
     }
     if (sprite) bindPaintTexture(sprite, img)
     paintUndo = []
     paintRedo = []
     bumpPaintHistory()
-    if (!sprite) scheduleRender()
+    // 无条件重建该图层精灵：切层时渲染与会话创建存在竞态，
+    // 若屏幕精灵绑定的是文件纹理，后续框选/绘制更新就不会显示（看起来像"残影"）
+    scheduleRender()
     return true
   } catch (e) {
     console.error('[MapCanvas] 启动绘制失败:', e)
@@ -1411,7 +1459,7 @@ function pushPaintUndo() {
 function toCanvasPoint(world: { x: number; y: number }): { x: number; y: number } | null {
   const s = paintSession
   const img = sessionImage()
-  if (!s || !img) return null
+  if (!s || !img || !sessionMatchesSelection()) return null
   const local = imageWorldToLocal(img, world.x, world.y)
   return { x: local.x * s.canvas.width, y: local.y * s.canvas.height }
 }
@@ -1513,7 +1561,11 @@ async function flushPaintSave(session: ImagePaintSession, finalize: boolean) {
     })
     if (mapStore.mapData.name === session.mapName) {
       const layer = mapStore.mapData.layers.find(l => l.id === session.layerId)
-      if (layer && layer.type === 'image') layer.image.imagePath = session.savePath
+      if (layer && layer.type === 'image') {
+        // 图层改指向新的绘制文件，旧路径的解析缓存要丢弃，避免切回时读到旧图
+        resolvedPathCache.delete(layer.image.imagePath)
+        layer.image.imagePath = session.savePath
+      }
     }
     resolvedPathCache.delete(session.savePath)
     if (finalize) mapStore.imageRevision++
@@ -1534,6 +1586,8 @@ async function commitPaintSession(finalize = true) {
   if (!session) return
   paintSession = null
   await flushPaintSave(session, finalize)
+  // 切层时强制刷新一次渲染：让上一图层的精灵从磁盘重新加载，避免残留会话纹理
+  if (!finalize) mapStore.imageRevision++
   paintUndo = []
   paintRedo = []
   bumpPaintHistory()
@@ -1684,7 +1738,10 @@ function syncVectorGeometry() {
 async function enterVectorMode(): Promise<boolean> {
   // 只有已处于"目标图层的矢量模式"时才能直接复用；
   // 否则必须先退出旧图层，避免新图层沿用上一图层的矢量内容
-  if (vectorActive.value && paintSession?.layerId === mapStore.selectedImageLayerId) return true
+  if (vectorActive.value && paintSession?.layerId === mapStore.selectedImageLayerId) {
+    paintStore.mode = 'vector'
+    return true
+  }
   if (enteringVector) return false
   if (vectorActive.value) await exitVectorMode(false)
   enteringVector = true
@@ -1697,6 +1754,8 @@ async function enterVectorMode(): Promise<boolean> {
 
 async function enterVectorModeInner(): Promise<boolean> {
   if (mapStore.activeMode !== 'image') return false
+  // 先切到矢量模式：此时矢量画布可能已经挂载，Paper 的指针处理依赖 mode==='vector'
+  paintStore.mode = 'vector'
   if (!mapStore.selectedImage && mapStore.activeLayer?.type === 'image') {
     mapStore.selectImage(mapStore.activeLayer.id)
   }
@@ -1711,6 +1770,8 @@ async function enterVectorModeInner(): Promise<boolean> {
   if (s.layerId !== mapStore.selectedImageLayerId) return false
   const img = imageByLayerId(s.layerId)
   if (!img) return false
+  // 记录该图层的编辑模式，切走再切回仍进入矢量
+  img.paintMode = 'vector'
   // 恢复矢量图层：优先用内存缓存底稿，其次用存档里的 vectorBasePath
   const cached = cachedVectorEntry(s.layerId, img)
   if (cached) {
@@ -1755,6 +1816,8 @@ async function enterVectorModeInner(): Promise<boolean> {
   if ((mapEditorStore.imageTool === 'brush' || mapEditorStore.imageTool === 'eraser')
     && !vectorCursorPos.value && vectorCanvasRef.value) {
     vectorCanvasRef.value.style.cursor = 'crosshair'
+  } else if (mapEditorStore.imageTool === 'select') {
+    syncSelectCursor()
   }
   return true
 }
@@ -1826,7 +1889,8 @@ async function stashVectorLayer() {
   base.getContext('2d')!.drawImage(s.canvas, 0, 0)
   vectorLayerCache.set(s.layerId, { json, base, image: img })
   img.vectorData = json
-  const baseName = `${(img.imagePath.split('/').pop() || '图像').replace(/\.[^.]+$/, '')}-vecbase-${Date.now().toString(36)}.png`
+  img.paintMode = 'vector'
+  const baseName = `${(img.imagePath.split('/').pop() || '图像').replace(/\.[^.]+$/, '')}-L${s.layerId}-vecbase-${Date.now().toString(36)}.png`
   const basePath = await writeVectorBaseFile(base, baseName)
   if (basePath) img.vectorBasePath = basePath
   // 预览 PNG（底稿 + 矢量）供其他图层编辑时显示
@@ -1853,6 +1917,7 @@ async function convertVectorToBitmap() {
   if (img) {
     img.vectorData = undefined
     img.vectorBasePath = undefined
+    img.paintMode = 'bitmap'
   }
   if (layerId !== undefined) vectorLayerCache.delete(layerId)
 }
@@ -1869,6 +1934,8 @@ async function exitVectorMode(switchUiToBitmap = true) {
     paintStore.vectorSelBox = null
     paintStore.vectorSelectedCount = 0
     paintStore.vectorContent = false
+    // 框选矩形也一并收起，避免切模式/切层后残留
+    paintStore.selection = null
     paintStore.textEdit = null
     vectorMatrix.value = null
     vectorCursorPos.value = null
@@ -2218,20 +2285,14 @@ function onPointerDown(e: PointerEvent) {
   // 点击变换手柄时交给变换逻辑，避免与选区框选冲突
   if (transform.isTransformBusy()) return
 
-  // 矢量模式下还没有矢量对象时：选择工具直接选中整张图片（可拖动/缩放/旋转）
-  if (vectorCanvasPassThrough.value && mapStore.activeLayer?.type === 'image') {
-    if (e.button === 0) transform.handleSelectPointerDown(e, mapStore.activeLayer)
-    return
-  }
-
-  // 图片模式的选择工具：框选像素 → 浮动选区（切换图层不再选中整张图）
+  // 图片模式的选择工具：框选像素 → 浮动选区（位图模式无整图点选）
   if (mapStore.activeMode === 'image' && mapEditorStore.imageTool === 'select' && mapStore.selectedImage) {
     if (e.button !== 0) return
     // 开始框选时收起整图变换框，避免两个框同时出现
     transform.removeTransformBox()
     const worldPos = viewport.screenToWorld(e)
     if (worldPos) {
-      if (paintSession) {
+      if (sessionMatchesSelection()) {
         handleSelectPointerDown(worldPos)
       } else {
         void startPaintSession().then(ok => {
@@ -2247,7 +2308,7 @@ function onPointerDown(e: PointerEvent) {
     if (isImagePaintTool()) {
       const worldPos = viewport.screenToWorld(e)
       if (worldPos) {
-        if (paintSession) {
+        if (sessionMatchesSelection()) {
           paintBegin(worldPos)
         } else {
           void startPaintSession().then(ok => {
@@ -2258,10 +2319,7 @@ function onPointerDown(e: PointerEvent) {
       }
     }
 
-    const layer = mapStore.activeLayer
-
-    if (transform.handleSelectPointerDown(e, layer)) return
-
+    // 图片模式选择工具只做像素框选，不再做整图点选（位图/矢量模式行为一致）
     const pos = viewport.screenToGrid(e)
     if (pos) painter.handlePaintPointerDown(e, pos)
   }
@@ -2295,7 +2353,7 @@ function onPointerMove(e: PointerEvent) {
   // 图片模式绘制工具：圆圈光标跟随鼠标并绘制
   if (isImagePaintTool()) {
     if (isBrushCursorActive()) drawBrushCursorAt(e.clientX, e.clientY)
-    if (e.buttons === 1 && paintSession) {
+    if (e.buttons === 1 && sessionMatchesSelection()) {
       const worldPos = viewport.screenToWorld(e)
       if (worldPos) paintMove(worldPos, e.shiftKey)
     }
@@ -2326,7 +2384,7 @@ function onPointerUp(e: PointerEvent) {
 
   if (collision.handlePointerUp()) return
 
-  if (isImagePaintTool() && paintSession) {
+  if (isImagePaintTool() && sessionMatchesSelection()) {
     paintEnd(viewport.screenToWorld(e) ?? undefined, e.shiftKey)
     viewport.endPan()
     return
@@ -2347,7 +2405,7 @@ function onPointerLeave() {
   painter.hidePreview()
   hideBrushCursor()
   // 绘制中离开画布：结束当前笔画
-  if (isImagePaintTool() && paintSession) paintEnd()
+  if (isImagePaintTool() && sessionMatchesSelection()) paintEnd()
   // 框选中离开画布：按当前尺寸收口，避免选框悬空
   if (mapStore.activeMode === 'image' && mapEditorStore.imageTool === 'select' && floatOp === 'create') {
     handleSelectPointerUp()
@@ -2446,6 +2504,8 @@ function onKeyDown(e: KeyboardEvent) {
     }
     if (e.key === 'Escape') {
       if (!vectorEngine.reshapeEscape()) vectorEngine.deselect()
+      // 整图变换框也一并清除，避免选框残留无法取消
+      transform.removeTransformBox()
       e.preventDefault()
       return
     }
@@ -2479,11 +2539,13 @@ function onKeyDown(e: KeyboardEvent) {
     }
     return
   }
-  // 图片模式选取工具：Esc 取消浮动选区，Delete 删除选区内容
+  // 图片模式选取工具：Esc 取消浮动选区 / 框选 / 整图选框，Delete 删除选区内容
   if (mapStore.activeMode === 'image' && mapEditorStore.imageTool === 'select') {
-    if (e.key === 'Escape' && floatCanvas) {
+    if (e.key === 'Escape') {
       e.preventDefault()
-      cancelFloatingSelection()
+      if (floatCanvas) cancelFloatingSelection()
+      else if (pixelSelection) clearPixelSelection()
+      else transform.removeTransformBox()
       return
     }
     if ((e.key === 'Delete' || e.key === 'Backspace') && floatCanvas) {
@@ -2643,12 +2705,12 @@ watch(
   }
 )
 
-// 离开地图编辑器（切代码/角色/IDE 模式）时烘焙矢量内容，避免只在内存里
+// 离开地图编辑器（切代码/角色/IDE 模式）时暂存矢量内容，切回仍可继续矢量编辑
 watch(
   () => [editorStore.isGameMode, editorStore.activeEditorMode],
   () => {
     if (vectorActive.value && (!editorStore.isGameMode || editorStore.activeEditorMode !== 'map')) {
-      void exitVectorMode()
+      void exitVectorMode(false)
     }
   }
 )
@@ -2657,12 +2719,22 @@ watch(
 watch(
   () => mapEditorStore.paintMode,
   async (mode) => {
+    // 切换图层时同步模式不算用户操作：跳过，避免把矢量图层烘焙成位图
+    if (suppressPaintModeWatch) {
+      suppressPaintModeWatch = false
+      return
+    }
+    // 用户主动切换：记录到当前图层，切走后仍按各自模式恢复
+    const img = mapStore.selectedImage
+    if (img) img.paintMode = mode
     if (mode === 'vector') {
       const ok = await enterVectorMode()
       if (ok) transform.removeTransformBox()
     } else {
       await exitVectorMode()
     }
+    // 模式切换后统一选取工具光标（避免位图侧遗留十字/圆圈）
+    if (mapEditorStore.imageTool === 'select') syncSelectCursor()
   }
 )
 
@@ -2670,6 +2742,15 @@ watch(
   () => mapEditorStore.imageTool,
   (tool) => {
     if (mapStore.activeMode !== 'image') return
+    // 选取工具：两种模式统一光标，避免从画笔切过来遗留圆圈/十字
+    if (tool === 'select') {
+      syncSelectCursor()
+      if (!(vectorActive.value && paintStore.mode === 'vector')) {
+        // 位图模式选取工具需要绘制会话才能读写图片像素
+        void startPaintSession()
+      }
+      return
+    }
     if (vectorActive.value && paintStore.mode === 'vector') {
       // 切到画笔/橡皮但还没移动鼠标时先给十字，避免原生指针被隐藏后完全看不到
       if ((tool === 'brush' || tool === 'eraser') && !vectorCursorPos.value && vectorCanvasRef.value) {
@@ -2677,21 +2758,21 @@ watch(
       }
       return
     }
-    if (tool === 'select') {
-      viewport.setCursor('default')
-      // 选取工具需要绘制会话才能读写图片像素
-      void startPaintSession()
-    } else {
-      // 切换绘制工具前先落定浮动选区
-      bakeFloatingSelection()
-      clearPixelSelection()
-      transform.removeTransformBox()
-      viewport.setCursor('crosshair')
-      void startPaintSession().then(() => updatePaintCursor())
-      updatePaintCursor()
-    }
+    // 切换绘制工具前先落定浮动选区
+    bakeFloatingSelection()
+    clearPixelSelection()
+    transform.removeTransformBox()
+    viewport.setCursor('crosshair')
+    void startPaintSession().then(() => updatePaintCursor())
+    updatePaintCursor()
   }
 )
+
+// 矢量画布挂载期间始终保证 paintStore.mode 为 vector：
+// Paper 的指针处理依赖该状态，任何异步时序导致 mode 落后都会让选取/框选"失效"
+watch(vectorActive, (active) => {
+  if (active) paintStore.mode = 'vector'
+})
 
 // 笔刷粗细变化 → 圆圈光标直径同步
 watch(
@@ -2780,27 +2861,43 @@ watch(
   () => mapStore.selectedImageLayerId,
   async () => {
     const selImg = mapStore.selectedImage
-    // 矢量图层标记：当前模式为矢量，或该图层本身保存过矢量数据
-    const keepVector = mapEditorStore.paintMode === 'vector'
-      || !!selImg?.vectorData
-      || !!cachedVectorEntry(mapStore.selectedImageLayerId, selImg)
-    // 切换图片图层前先把矢量内容烘进位图，避免内容串层
-    if (vectorActive.value) await exitVectorMode(!keepVector)
+    // 同步清空选区：此时 selectedImage 已指向新图层，
+    // 若等到 await 之后再清，旧图层的浮动选区会短暂挂到新图层上（串层）
+    resetFloatingSelection()
+    paintClipboard = null
+    pasteCount = 0
+    mapEditorStore.hasPaintClipboard = false
+    // 切换图层只切换绘制目标：整图变换框仅在用户主动点选图片时保留
+    if (!transform.isSelectedImage(selImg)) transform.removeTransformBox()
+    // 图层自身的编辑模式：显式记录优先，旧存档按是否有矢量数据推导
+    const cached = cachedVectorEntry(mapStore.selectedImageLayerId, selImg)
+    const layerMode: 'bitmap' | 'vector' = selImg
+      ? (selImg.paintMode ?? ((selImg.vectorData || cached) ? 'vector' : 'bitmap'))
+      : 'bitmap'
+    const keepVector = layerMode === 'vector'
+    // 工具栏模式跟随图层自身模式（立即同步 UI）；抑制 watcher，避免把切层误判成用户切位图而烘焙
+    // 选中图块图层时（selImg 为空）不改变全局模式，避免影响后续新建绘制图层的默认模式
+    if (selImg && mapEditorStore.paintMode !== layerMode) {
+      suppressPaintModeWatch = true
+      mapEditorStore.setPaintMode(layerMode)
+    }
+    // 切换图层前只暂存矢量内容（不烘焙）：每个图层保留自己的矢量数据，切回仍可编辑
+    if (vectorActive.value) await exitVectorMode(false)
     collision.cancelCollisionDraft()
     collision.clearVertexSelection()
-    resetFloatingSelection()
-    // 切换图层只切换绘制目标：整图变换框仅在用户主动点选图片时保留
-    if (!transform.isSelectedImage(mapStore.selectedImage)) transform.removeTransformBox()
     collision.drawCollisionOverlay()
     // 切换图片图层：先落盘旧图层，再为新图层建会话 / 重新进入矢量模式
     const proceed = () => {
       if (mapStore.activeMode !== 'image' || !mapStore.selectedImage) return
+      // 会话/画布启动前就锁定该图层的编辑模式，避免异步过程中沿用上一图层的模式
+      paintStore.mode = layerMode
       if (keepVector) {
-        if (mapEditorStore.paintMode !== 'vector') mapEditorStore.setPaintMode('vector')
         void enterVectorMode()
       } else {
         void startPaintSession()
       }
+      // 切层后按新模式统一选取工具光标（位图/矢量保持一致）
+      if (mapEditorStore.imageTool === 'select') syncSelectCursor()
     }
     if (paintSession && paintSession.layerId !== mapStore.selectedImageLayerId) {
       void commitPaintSession(false).then(proceed)
@@ -2876,6 +2973,9 @@ async function resetCanvasState() {
   }
   void commitPaintSession()
   resetFloatingSelection()
+  paintClipboard = null
+  pasteCount = 0
+  mapEditorStore.hasPaintClipboard = false
   transform.resetTransformState()
   mapStore.clearImageSelection()
   collision.cancelCollisionDraft()
@@ -3049,7 +3149,6 @@ defineExpose({
       v-if="vectorActive"
       ref="vectorCanvasRef"
       class="map-vector-canvas"
-      :style="{ pointerEvents: vectorCanvasPassThrough ? 'none' : 'auto' }"
       @wheel="onVectorWheel"
       @pointerdown.capture="onVectorPointerDownCapture"
       @pointermove.capture="onVectorPointerMoveCapture"
@@ -3068,6 +3167,18 @@ defineExpose({
         :viewBox="`0 0 ${paintStore.artboardWidth} ${paintStore.artboardHeight}`"
         preserveAspectRatio="none"
       >
+        <!-- 框选矩形：矢量模式下拖拽框选对象时显示 -->
+        <rect
+          v-if="paintStore.selection"
+          :x="paintStore.selection.x"
+          :y="paintStore.selection.y"
+          :width="paintStore.selection.w"
+          :height="paintStore.selection.h"
+          fill="rgba(129, 140, 248, 0.10)"
+          :stroke="VEC_SEL"
+          :stroke-width="vectorBoxStroke"
+          stroke-linejoin="round"
+        />
         <!-- 选中变换框 -->
         <template v-if="paintStore.vectorSelBox">
           <polygon

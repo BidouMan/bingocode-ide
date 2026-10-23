@@ -27,6 +27,7 @@ export function useMapPaint() {
     width: number,
     height: number,
     layerId: number,
+    mode: 'bitmap' | 'vector' = 'vector',
   ): Promise<void> {
     const root = projectStore.root
     const mapName = mapStore.mapData.name
@@ -51,6 +52,7 @@ export function useMapPaint() {
       collisionEnabled: false,
     })
     // 扁平模型：保存的背景图作为新的图片图层，插在当前图层上方
+    // 编辑模式沿用当前工具栏选择（默认矢量，与角色编辑器一致），切层时按图层恢复
     const layerIndex = mapStore.mapData.layers.findIndex(l => l.id === layerId)
     mapStore.addImageAt(layerIndex >= 0 ? layerIndex : mapStore.mapData.layers.length - 1, {
       imagePath: relativePath,
@@ -65,6 +67,7 @@ export function useMapPaint() {
       collisionType: '图像',
       collisionEnabled: false,
       background: true,
+      paintMode: mode,
     }, name)
   }
 

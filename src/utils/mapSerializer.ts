@@ -58,6 +58,7 @@ export interface ImageSaveData {
   background?: boolean
   vectorData?: string
   vectorBasePath?: string
+  paintMode?: 'bitmap' | 'vector'
 }
 
 export interface TilesetSaveData {
@@ -193,6 +194,7 @@ export function serializeMap(mapData: any): MapSaveData {
     background: img.background || false,
     vectorData: img.vectorData,
     vectorBasePath: img.vectorBasePath,
+    paintMode: img.paintMode,
   })
 
   const layers: LayerSaveData[] = mapData.layers.map((layer: any) => {

@@ -79,7 +79,7 @@ async function startImagePaint(tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rec
   const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
   if (!blob) return
   try {
-    await mapPaint.saveMapImage(blob, w, h, mapStore.activeLayer?.id ?? -1)
+    await mapPaint.saveMapImage(blob, w, h, mapStore.activeLayer?.id ?? -1, mapEditorStore.paintMode)
     mapEditorStore.setImageTool(tool)
     // 矢量专属工具需要矢量模式（新建图层后进入）
     if (tool === 'text' || tool === 'reshape' || tool === 'eyedropper') {
