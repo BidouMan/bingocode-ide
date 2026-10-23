@@ -2859,6 +2859,31 @@ onBeforeUnmount(() => {
   collision.dispose()
 })
 
+/** 单个图层的缩略图（图块图层专用：只渲染该图层容器，避免串层污染） */
+function getLayerThumbnailDataUrl(layerId: number): string | null {
+  if (!app || !PIXI || !app.renderer) return null
+  const container = layerContainers.get(layerId)
+  if (!container || container.children.length === 0) return null
+  const tileSize = mapStore.mapData.tileSize
+  const mapW = mapStore.mapData.width * tileSize
+  const mapH = mapStore.mapData.height * tileSize
+  if (mapW <= 0 || mapH <= 0) return null
+  const wasVisible = container.visible
+  try {
+    container.visible = true
+    const rt = PIXI.RenderTexture.create({ width: Math.ceil(mapW), height: Math.ceil(mapH) })
+    app.renderer.render(container, { renderTexture: rt })
+    const canvas = app.renderer.extract.canvas(rt)
+    const dataUrl = canvas.toDataURL('image/png')
+    rt.destroy(true)
+    return dataUrl
+  } catch {
+    return null
+  } finally {
+    container.visible = wasVisible
+  }
+}
+
 function getThumbnailDataUrl(): string | null {
   if (!app || !PIXI || !app.renderer) return null
   try {
@@ -2887,6 +2912,7 @@ defineExpose({
   removeTransformBox: transform.removeTransformBox,
   resetCanvasState,
   getThumbnailDataUrl,
+  getLayerThumbnailDataUrl,
   placeImageFromPath,
   undoActive,
   redoActive,

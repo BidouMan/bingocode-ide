@@ -6,17 +6,22 @@ import { useProjectStore } from '../../stores/project'
 import { useEditorStore } from '../../stores/editor'
 import iconShow from '../../assets/icons/icon_show.svg'
 import iconHide from '../../assets/icons/icon_hide.svg'
-import iconAdd from '../../assets/icons/btn_preview_add.svg'
+import iconAdd from '../../assets/icons/新建图块图层.svg'
 import iconDelete from '../../assets/icons/icon--delete.svg'
 import iconUp from '../../assets/icons/上移图层.svg'
 import iconDown from '../../assets/icons/下移图层.svg'
-import iconGrid from '../../assets/icons/显示网格.svg'
 import iconPaint from '../../assets/icons/icon--paint.svg'
 import iconLibrary from '../../assets/icons/图片库.svg'
 import iconUpload from '../../assets/icons/上传本地图片资源.svg'
+import iconImageType from '../../assets/icons/图像.svg'
+import iconTileType from '../../assets/icons/图块.svg'
+import iconUnlock from '../../assets/icons/解锁.svg'
+import iconLock from '../../assets/icons/锁定.svg'
 
 const props = defineProps<{
   disabled?: boolean
+  /** 图块图层缩略图提供者（只渲染该图层自身，避免串层） */
+  getLayerThumbnail?: (layerId: number) => string | null
 }>()
 
 const emit = defineEmits<{
@@ -84,14 +89,55 @@ async function refreshThumbs() {
   for (const layer of mapStore.mapData.layers) {
     if (layer.type === 'image' && layer.image?.imagePath) {
       next.set(layer.id, await resolveThumbUrl(layer.image.imagePath))
+    } else if (layer.type === 'drawing' && props.getLayerThumbnail) {
+      // 图块图层：只取该图层自身渲染结果；未绘制图块时为空（不显示占位图）
+      const url = props.getLayerThumbnail(layer.id)
+      if (url) next.set(layer.id, url)
     }
   }
   thumbUrls.value = next
 }
 
+/** 只刷新图块图层缩略图（绘制时高频调用，避免重复读取图片资源） */
+function refreshTileThumbs() {
+  if (!props.getLayerThumbnail) return
+  const next = new Map(thumbUrls.value)
+  for (const layer of mapStore.mapData.layers) {
+    if (layer.type !== 'drawing') continue
+    const url = props.getLayerThumbnail(layer.id)
+    if (url) next.set(layer.id, url)
+    else next.delete(layer.id)
+  }
+  thumbUrls.value = next
+}
+
 watch(() => mapStore.imageRevision, refreshThumbs)
-watch(() => mapStore.mapLoadCount, refreshThumbs)
+// 地图载入后 Pixi 渲染有延迟，稍后再补一次图块缩略图
+let loadThumbTimer: ReturnType<typeof setTimeout> | null = null
+watch(() => mapStore.mapLoadCount, () => {
+  refreshThumbs()
+  if (loadThumbTimer) clearTimeout(loadThumbTimer)
+  loadThumbTimer = setTimeout(() => {
+    loadThumbTimer = null
+    refreshThumbs()
+  }, 300)
+})
+// 图层增删后补齐缩略图
+watch(() => mapStore.mapData.layers.length, () => refreshThumbs())
+// 图块绘制后等 Pixi 渲染完成再取该图层缩略图
+let tileThumbTimer: ReturnType<typeof setTimeout> | null = null
+watch(() => mapStore.tileRevision, () => {
+  if (tileThumbTimer) clearTimeout(tileThumbTimer)
+  tileThumbTimer = setTimeout(() => {
+    tileThumbTimer = null
+    refreshTileThumbs()
+  }, 120)
+})
 onMounted(refreshThumbs)
+onBeforeUnmount(() => {
+  if (tileThumbTimer) clearTimeout(tileThumbTimer)
+  if (loadThumbTimer) clearTimeout(loadThumbTimer)
+})
 
 // ====== 选中 / 重命名 ======
 function selectLayer(index: number) {
@@ -234,14 +280,20 @@ function applyReorder(from: number, insertDisplayIndex: number) {
       >
         <div class="layer-thumb">
           <img
-            v-if="item.layer.type === 'image'"
-            :src="thumbUrls.get(item.layer.id) || ''"
+            v-if="thumbUrls.get(item.layer.id)"
+            :src="thumbUrls.get(item.layer.id)"
             class="layer-thumb-img"
             :style="{ imageRendering: imageRenderingStyle }"
             draggable="false"
           />
-          <img v-else :src="iconGrid" class="layer-thumb-icon" draggable="false" />
         </div>
+
+        <!-- 图层类型图标：图像 / 图块 -->
+        <img
+          :src="item.layer.type === 'image' ? iconImageType : iconTileType"
+          class="layer-type-icon"
+          draggable="false"
+        />
 
         <template v-if="editingLayerIndex === item.index">
           <input
@@ -273,7 +325,7 @@ function applyReorder(from: number, insertDisplayIndex: number) {
           v-tooltip="item.layer.locked ? '解锁' : '锁定'"
           @click.stop="mapStore.toggleLayerLock(item.index)"
         >
-          {{ item.layer.locked ? '🔒' : '🔓' }}
+          <img :src="item.layer.locked ? iconLock : iconUnlock" class="lock-icon" />
         </button>
       </div>
 
@@ -343,9 +395,9 @@ function applyReorder(from: number, insertDisplayIndex: number) {
 .layer-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: 38px;
-  padding: 0 4px 0 6px;
+  gap: 8px;
+  height: 54px;
+  padding: 0 6px;
   border-radius: 4px;
   cursor: grab;
   transition: background 0.12s;
@@ -388,32 +440,34 @@ function applyReorder(from: number, insertDisplayIndex: number) {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 42px;
+  height: 42px;
   flex-shrink: 0;
   background: rgb(50, 53, 62);
-  border-radius: 4px;
+  border-radius: 5px;
   overflow: hidden;
 }
 
 .layer-thumb-img {
-  max-width: 100%;
-  max-height: 100%;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
   pointer-events: none;
 }
 
-.layer-thumb-icon {
-  width: 18px;
-  height: 18px;
-  opacity: 0.75;
+/* 图层类型图标（图像 / 图块） */
+.layer-type-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  opacity: 0.8;
   pointer-events: none;
 }
 
 .layer-name {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: 13px;
   color: rgb(196, 200, 206);
   white-space: nowrap;
   overflow: hidden;
@@ -439,8 +493,8 @@ function applyReorder(from: number, insertDisplayIndex: number) {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   flex-shrink: 0;
   padding: 0;
   background: transparent;
@@ -457,12 +511,18 @@ function applyReorder(from: number, insertDisplayIndex: number) {
 }
 
 .vis-icon {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   opacity: 0.85;
 }
 
-.layer-locked {
+.lock-icon {
+  width: 16px;
+  height: 16px;
+  opacity: 0.8;
+}
+
+.layer-locked .lock-icon {
   opacity: 1;
 }
 

@@ -287,6 +287,11 @@ function onSwitchPaintMode(mode: 'bitmap' | 'vector') {
   mapEditorStore.setPaintMode(mode)
 }
 
+/** 图块图层缩略图：只渲染该图层自身容器 */
+function getLayerThumbnail(layerId: number): string | null {
+  return mapCanvasRef.value?.getLayerThumbnailDataUrl(layerId) ?? null
+}
+
 defineExpose({ switchToMap, placeImageResource })
 </script>
 
@@ -296,6 +301,7 @@ defineExpose({ switchToMap, placeImageResource })
       <div class="map-editor-left">
         <LayerPanel
           :disabled="!hasMaps"
+          :get-layer-thumbnail="getLayerThumbnail"
           @paint="startImagePaint"
           @open-library="emit('open-resource-lib')"
           @upload-image="onUploadLocal"
