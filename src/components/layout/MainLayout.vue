@@ -103,6 +103,8 @@ const paintInitialFrameIndex = ref(0)
 const spriteEditorRef = ref<{ reload: () => Promise<void> } | null>(null)
 /** 地图编辑器实例：内置资源库选图后直接放置为图片图层 */
 const mapEditorRef = ref<{ placeImageResource: (path: string) => Promise<void> } | null>(null)
+/** 绘制页实例：顶部菜单切页前先自动保存 */
+const paintPageRef = ref<{ saveBeforeLeave: () => Promise<boolean> } | null>(null)
 watch(currentPage, (page) => {
   if (page === 2) mapLibPageKey.value++
   else if (page === 4) mapResLibPageKey.value++
@@ -1187,6 +1189,16 @@ function switchPage(page: number) {
   currentPage.value = page
 }
 
+/** 顶部菜单切换编辑页：绘制角色页有未保存内容时先自动保存，再完成切换 */
+async function switchEditorMode(mode: 'code' | 'sprite' | 'map') {
+  if (currentPage.value === 6 && paintPageRef.value) {
+    const ok = await paintPageRef.value.saveBeforeLeave()
+    if (!ok) return
+  }
+  switchPage(0)
+  editorStore.setActiveEditorMode(mode)
+}
+
 // 双击角色跳转到角色编辑页面
 function openSpriteEditor(item: { id: string; name: string; path: string }) {
   resourceStore.selectedSpriteId = item.id
@@ -1853,19 +1865,19 @@ function spriteDisplayName(name: string) {
         </div>
 
         <!-- 代码 (图标+文字) -->
-        <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.activeEditorMode === 'code' }" @click="editorStore.setActiveEditorMode('code')">
+        <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.activeEditorMode === 'code' }" @click="switchEditorMode('code')">
           <img :src="iconCodeEdit" class="menu-icon" />
           <span>代码</span>
         </button>
 
         <!-- 角色 (图标+文字) -->
-        <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.activeEditorMode === 'sprite' }" @click="editorStore.setActiveEditorMode('sprite')">
+        <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.activeEditorMode === 'sprite' }" @click="switchEditorMode('sprite')">
           <img :src="iconSprite" class="menu-icon" />
           <span>角色</span>
         </button>
 
         <!-- 地图 (图标+文字) -->
-        <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.activeEditorMode === 'map' }" @click="editorStore.setActiveEditorMode('map')">
+        <button class="menu-btn" :class="{ 'menu-btn-active': editorStore.activeEditorMode === 'map' }" @click="switchEditorMode('map')">
           <img :src="iconMap" class="menu-icon" />
           <span>地图</span>
         </button>
@@ -2364,6 +2376,7 @@ function spriteDisplayName(name: string) {
       <div v-show="currentPage === 6" class="lib-page">
         <PaintEditorPage
           :key="paintPageKey"
+          ref="paintPageRef"
           :target-sprite="paintTarget"
           :open-mode="paintOpenMode"
           :initial-frame-index="paintInitialFrameIndex"

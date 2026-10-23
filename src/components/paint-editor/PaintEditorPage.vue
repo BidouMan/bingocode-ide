@@ -146,20 +146,21 @@ async function onClose() {
   emit('close')
 }
 
-async function onSave() {
-  if (store.dirty === false) return
+/** 保存当前编辑；返回是否成功（失败时调用方不应离开页面） */
+async function saveArtwork(): Promise<boolean> {
+  if (store.dirty === false) return true
   const canvases = artboardRef.value?.getFrameCanvases()
   const names = artboardRef.value?.getFrameNames()
-  if (!canvases || !names || canvases.length === 0) return
+  if (!canvases || !names || canvases.length === 0) return false
 
   try {
     // ─── 地图背景：只导出当前画板为 PNG，由外层写入地图目录 ───
     if (props.mode === 'mapImage') {
       const canvas = canvases[Math.min(Math.max(0, store.activeFrameIndex), canvases.length - 1)]
-      if (!canvas) return
+      if (!canvas) return false
       const blob = await exportArtboardPngBlob(canvas, store.artboardWidth, store.artboardHeight)
       emit('saved-map-image', blob, store.artboardWidth, store.artboardHeight)
-      return
+      return true
     }
 
     const target = props.targetSprite
@@ -172,14 +173,14 @@ async function onSave() {
       }
       resourceStore.bumpSpriteThumb(target.id)
       emit('saved', target.id, target.name)
-      return
+      return true
     }
 
     // ─── 新建模式：打包输出 .bsf 目录角色 ───
     const projectRoot = projectStore.root
     if (!projectRoot) {
       console.warn('[PaintEditor] 项目目录未就绪，无法保存角色')
-      return
+      return false
     }
 
     const spriteName = resourceStore.nextSequentialName('sprite', '角色')
@@ -200,10 +201,23 @@ async function onSave() {
 
     const id = resourceStore.addItem({ name: spriteName, type: 'sprite', path: dirPath })
     emit('saved', id, spriteName)
+    return true
   } catch (e) {
     console.error('[PaintEditor] 保存角色失败:', e)
+    return false
   }
 }
+
+function onSave() {
+  saveArtwork()
+}
+
+/** 顶部菜单切换页面时调用：自动保存当前编辑，成功后才允许离开 */
+function saveBeforeLeave(): Promise<boolean> {
+  return saveArtwork()
+}
+
+defineExpose({ saveBeforeLeave })
 </script>
 
 <template>
