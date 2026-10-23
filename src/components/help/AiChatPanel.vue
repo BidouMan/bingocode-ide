@@ -79,8 +79,9 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 
 ## 画面基本信息
 - 画面尺寸：640 x 480 像素
-- 坐标原点在左上角：(0,0) 是左上角，(640,480) 是右下角
-- 角度：0=朝右，90=朝下，180=朝左，270=朝上（顺时针）
+- 坐标原点在左下角：(0,0) 是左下角，(640,480) 是右上角，画面中心是 (320,240)
+- y 轴向上增大（向上移动 y 变大），x 轴向右增大
+- 角度：0=朝右，90=朝上，180=朝左，270=朝下（逆时针）
 - while True 循环约每秒执行 60 次（60FPS）
 
 ## 引擎 API 详细参考
@@ -93,15 +94,15 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 - hero.angle — 朝向角度（可直接赋值）
 - hero.layer — 层级数字，越大越在前面，默认1000
 - hero.on_ground — 布尔属性，角色脚底是否踩在有碰撞的地形上。每帧自动更新
-- hero.vy — 垂直速度属性，正数=下落，负数=上升，静止=0
+- hero.vy — 垂直速度属性，正数=上升，负数=下落，静止=0
 
 ### 运动
 - hero.goto(x, y) — 瞬间传送到(x,y)，自动检测碰撞。也接受标记引用（hero.goto(player.get_marker())）或另一个 Sprite（hero.goto(enemy)），对准目标的注册点
 - hero.move(步数) — 朝当前 angle 方向移动指定像素，自动检测碰撞，会拆分成小步避免穿墙
-- hero.jump(power=10) — 施加向上的力，vy 设为 -power。不判断地面！必须配合 on_ground 使用。用法：if hero.on_ground: hero.jump(10)
-- hero.cut_jump() — 截断跳跃。只在 vy<0（正在上升）时生效，将 _jump_cut 标记为 True，下一帧重力从 0.5 变为 2.8，角色快速下落。用于控制跳跃高度：按住跳得高，轻点跳得矮
+- hero.jump(power=10) — 施加向上的力（角色 vy 变为正数）。不判断地面！必须配合 on_ground 使用。用法：if hero.on_ground: hero.jump(10)
+- hero.cut_jump() — 截断跳跃。只在角色正在上升时生效，将 _jump_cut 标记为 True，下一帧重力从 0.5 变为 2.8，角色快速下落。用于控制跳跃高度：按住跳得高，轻点跳得矮
 - hero.drop_through() — 穿过脚下跳板。必须在地面上调用，角色会短暂下穿跳板
-- hero.add_x(n) / hero.add_y(n) — 直接修改坐标（不检测碰撞），正数向右/下，负数向左/上
+- hero.add_x(n) / hero.add_y(n) — 直接修改坐标（不检测碰撞），正数向右/上，负数向左/下
 - hero.set_x(x) / hero.set_y(y) — 设置坐标（检测碰撞），比 add_x/add_y 安全
 - hero.set_angle(度数) — 设置朝向角度
 - hero.look_at(target) — 自动转向面向 target（另一个 Sprite 或 mouse 对象）
@@ -112,7 +113,7 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 ### 标记与挂载（仅 .bsf 角色有标记）
 - 标记是角色身上预先画好的锚点（在角色编辑器「标记」图层添加，默认名「标记」，新增自动编号「标记1」「标记2」…），用于把武器/道具挂到角色身上
 - m = hero.get_marker() — 获取第一个标记（名「标记」）的引用；hero.get_marker("标记1") 取指定名字的标记
-- m.x / m.y — 读取该标记此刻在画面上的世界坐标（已算上角色的位置、旋转、缩放和左右翻转；动画换帧时标记位置也会跟着变）
+- m.x / m.y — 读取该标记此刻在画面上的坐标（已算上角色的位置、旋转、缩放和左右翻转；动画换帧时标记位置也会跟着变）
 - sword.follow(m) — 让 sword 每帧贴在标记 m 上。只同步位置和左右翻转，**不改变朝向**，所以仍可 sword.look_at(mouse) 单独瞄准
 - sword.follow(m, flip=False) — 同上但不继承角色的左右翻转（鼠标瞄准类武器用这个）
 - sword.unfollow() — 解除跟随，恢复自由移动

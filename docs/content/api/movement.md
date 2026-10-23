@@ -33,11 +33,11 @@ hero.move(5)
 ```python
 hero.add_x(5)   # 向右移动 5 像素
 hero.add_x(-5)  # 向左移动 5 像素
-hero.add_y(5)   # 向下移动 5 像素
-hero.add_y(-5)  # 向上移动 5 像素
+hero.add_y(5)   # 向上移动 5 像素
+hero.add_y(-5)  # 向下移动 5 像素
 ```
 
-直接修改坐标，不检测碰撞。正数向右/下，负数向左/上。
+直接修改坐标，不检测碰撞。正数向右/上，负数向左/下。
 
 ### set_x / set_y — 设置坐标
 
@@ -53,7 +53,7 @@ hero.set_y(200)  # 设置 y 坐标
 ### set_angle — 设置朝向
 
 ```python
-hero.set_angle(90)  # 朝下
+hero.set_angle(90)  # 朝上
 ```
 
 ### look_at — 看向目标

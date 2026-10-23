@@ -1,6 +1,7 @@
 import { ref, watch, type Ref } from 'vue'
 import { useMapStore } from '../stores/map'
 import { useMapEditorStore } from '../stores/mapEditor'
+import { USER_ORIGIN_Y } from '../utils/coords'
 
 interface MapViewportOptions {
   canvasRef: Ref<HTMLDivElement | undefined>
@@ -82,9 +83,10 @@ export function useMapViewport(options: MapViewportOptions) {
     if (axisX) { app.stage.removeChild(axisX); axisX.destroy() }
     if (axisY) { app.stage.removeChild(axisY); axisY.destroy() }
 
+    // 坐标轴按用户坐标画：x 轴在用户 y=0 处（世界 y=480，画面左下角），y 轴在 x=0 处
     axisX = new PIXI.Graphics()
-    axisX.moveTo(-100000, 0)
-    axisX.lineTo(100000, 0)
+    axisX.moveTo(-100000, USER_ORIGIN_Y)
+    axisX.lineTo(100000, USER_ORIGIN_Y)
     axisX.stroke({ width: 1, color: 0xC83232 })
     app.stage.addChild(axisX)
 
@@ -120,10 +122,10 @@ export function useMapViewport(options: MapViewportOptions) {
   function centerView() {
     const app = getApp()
     if (!app || !canvasRef.value) return
-    // 重置为 1.0 缩放，让用户看到坐标原点 (0,0) 和游戏窗口 (640x480)
+    // 重置为 1.0 缩放，让用户看到地图左上角与完整游戏窗口 (640x480)
     currentScale.value = 1.0
     applyScale()
-    // 留边距，原点在左上，游戏窗口完整可见；
+    // 留边距，地图左上角在画布左上方，游戏窗口完整可见；
     // 偏移对齐到瓦片尺寸，网格线从画布左/上边缘开始，不出现半格空白
     const tileSize = mapStore.mapData.tileSize
     const offset = Math.max(tileSize, Math.ceil(30 / tileSize) * tileSize)

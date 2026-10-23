@@ -29,9 +29,9 @@ const spriteMethods: EngineCompletionItem[] = [
   { label: 'goto', kind: CompletionItemKind.Method, insertText: 'goto', documentation: '移到指定坐标；也接受标记引用或另一个角色\n\ngoto(320, 240)\ngoto(player.get_marker())  # 武器对准角色的「标记」\ngoto(enemy)  # 对齐另一个角色的注册点', detail: 'goto(x, y)' },
   { label: 'set_xy', kind: CompletionItemKind.Method, insertText: 'set_xy', documentation: '设置坐标（带碰撞检测）\n\nset_xy(x, y)', detail: 'set_xy(x, y)' },
   { label: 'set_x', kind: CompletionItemKind.Method, insertText: 'set_x', documentation: '设置水平位置\n\nset_x(x)', detail: 'set_x(x)' },
-  { label: 'set_y', kind: CompletionItemKind.Method, insertText: 'set_y', documentation: '设置垂直位置\n\nset_y(y)', detail: 'set_y(y)' },
+  { label: 'set_y', kind: CompletionItemKind.Method, insertText: 'set_y', documentation: '设置垂直位置（y 向上为正，画面左下角为 0）\n\nset_y(y)', detail: 'set_y(y)' },
   { label: 'add_x', kind: CompletionItemKind.Method, insertText: 'add_x', documentation: '将 x 坐标增加（或减少）一定数值\n\nadd_x(delta_x)', detail: 'add_x(delta_x)' },
-  { label: 'add_y', kind: CompletionItemKind.Method, insertText: 'add_y', documentation: '将 y 坐标增加（或减少）一定数值\n\nadd_y(delta_y)', detail: 'add_y(delta_y)' },
+  { label: 'add_y', kind: CompletionItemKind.Method, insertText: 'add_y', documentation: '将 y 坐标增加（或减少）一定数值（正数向上）\n\nadd_y(delta_y)', detail: 'add_y(delta_y)' },
   { label: 'move', kind: CompletionItemKind.Method, insertText: 'move', documentation: '朝着当前 angle 方向移动 distance 像素\n\nmove(distance)', detail: 'move(distance)' },
   { label: 'goto_rand', kind: CompletionItemKind.Method, insertText: 'goto_rand', documentation: '移到随机位置（0-640, 0-480）', detail: 'goto_rand()' },
   { label: 'set_speed', kind: CompletionItemKind.Method, insertText: 'set_speed', documentation: '设置持续速度，引擎每帧自动沿当前方向移动\n\nset_speed(speed)', detail: 'set_speed(speed)' },
@@ -49,7 +49,7 @@ const spriteMethods: EngineCompletionItem[] = [
   { label: 'hide', kind: CompletionItemKind.Method, insertText: 'hide', documentation: '隐藏角色（仅仅是看不见，物体还在内存里）', detail: 'hide()' },
   { label: 'say', kind: CompletionItemKind.Method, insertText: 'say', documentation: '让角色说话。新话会替换旧话\n\nsay("你好") → 永久显示\nsay("得分+1", 2) → 2秒后自动消失', detail: 'say(text, seconds=0)' },
   { label: 'play', kind: CompletionItemKind.Method, insertText: 'play', documentation: '播放指定名称的动画\n\nplay("idle")\nplay("walk", 0.2) → 0.2秒过渡', detail: 'play(animation_name, transition_time=0.1)' },
-  { label: 'set_angle', kind: CompletionItemKind.Method, insertText: 'set_angle', documentation: '设置旋转角度\n\nset_angle(angle)', detail: 'set_angle(angle)' },
+  { label: 'set_angle', kind: CompletionItemKind.Method, insertText: 'set_angle', documentation: '设置朝向角度（0=右 90=上 180=左 270=下，逆时针为正）\n\nset_angle(angle)', detail: 'set_angle(angle)' },
 
   // 朝向
   { label: 'look_at', kind: CompletionItemKind.Method, insertText: 'look_at', documentation: '让当前角色看向另一个角色或鼠标（自动旋转角度）\n\ntarget 可以是另一个 Sprite 或 mouse 对象', detail: 'look_at(target)' },
@@ -81,9 +81,9 @@ const spriteMethods: EngineCompletionItem[] = [
 
 /** Sprite 属性（通过 . 触发时显示） */
 const spriteProperties: EngineCompletionItem[] = [
-  { label: 'x', kind: CompletionItemKind.Property, insertText: 'x', documentation: '水平位置（默认 320）', detail: 'float' },
-  { label: 'y', kind: CompletionItemKind.Property, insertText: 'y', documentation: '垂直位置（默认 240）', detail: 'float' },
-  { label: 'angle', kind: CompletionItemKind.Property, insertText: 'angle', documentation: '旋转角度（度）', detail: 'float' },
+  { label: 'x', kind: CompletionItemKind.Property, insertText: 'x', documentation: '水平位置（默认 320，正数向右）', detail: 'float' },
+  { label: 'y', kind: CompletionItemKind.Property, insertText: 'y', documentation: '垂直位置（默认 240，正数向上，画面左下角为 0）', detail: 'float' },
+  { label: 'angle', kind: CompletionItemKind.Property, insertText: 'angle', documentation: '朝向角度（度，逆时针为正：0=右 90=上 180=左 270=下）', detail: 'float' },
   { label: 'scale', kind: CompletionItemKind.Property, insertText: 'scale', documentation: '缩放比例（百分比，默认 100）', detail: 'float' },
   { label: 'layer', kind: CompletionItemKind.Property, insertText: 'layer', documentation: '图层顺序（越大越靠前）', detail: 'int' },
   { label: 'on_ground', kind: CompletionItemKind.Property, insertText: 'on_ground', documentation: '是否在地面上', detail: 'bool' },
@@ -156,7 +156,7 @@ const globalObjects: EngineCompletionItem[] = [
 /** mouse 对象属性（通过 . 触发时显示） */
 const mouseProperties: EngineCompletionItem[] = [
   { label: 'x', kind: CompletionItemKind.Property, insertText: 'x', documentation: '鼠标水平位置（游戏坐标）', detail: 'float' },
-  { label: 'y', kind: CompletionItemKind.Property, insertText: 'y', documentation: '鼠标垂直位置（游戏坐标）', detail: 'float' },
+  { label: 'y', kind: CompletionItemKind.Property, insertText: 'y', documentation: '鼠标垂直位置（画面左下角为 0，正数向上）', detail: 'float' },
 ]
 
 // ─── 汇总导出 ───

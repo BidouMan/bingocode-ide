@@ -22,6 +22,7 @@ import { useMapPersistence } from '../../composables/useMapPersistence'
 import { useMapPaint } from '../../composables/useMapPaint'
 import JSZip from 'jszip'
 import { deserializeMap } from '../../utils/mapSerializer'
+import { toUserX, toUserY } from '../../utils/coords'
 
 const mapStore = useMapStore()
 const mapEditorStore = useMapEditorStore()
@@ -30,6 +31,15 @@ const resourceStore = useResourceStore()
 const projectStore = useProjectStore()
 
 const hasMaps = computed(() => resourceStore.maps.length > 0)
+
+/** 光标所在格子的左下角坐标（用户坐标：原点在画面左下角，y 向上为正） */
+const cursorCoordText = computed(() => {
+  const cx = mapEditorStore.cursorX
+  const cy = mapEditorStore.cursorY
+  if (cx === null || cy === null) return '--'
+  const ts = mapStore.mapData.tileSize
+  return `${toUserX(cx * ts)},${toUserY((cy + 1) * ts)}`
+})
 
 const mapCanvasRef = ref<InstanceType<typeof MapCanvas>>()
 const tileResourceBarRef = ref<{ uploadLocalTiles: () => void } | null>(null)
@@ -433,7 +443,7 @@ defineExpose({ switchToMap, placeImageResource })
             <span class="info-spacer" />
             <span class="info-label">ID:{{ mapStore.currentMapPath ? mapStore.currentMapPath.split('/').pop()?.split('.')[0] ?? '--' : '--' }}</span>
             <span class="info-label">场景大小:{{ mapStore.mapData.width * mapStore.mapData.tileSize }}×{{ mapStore.mapData.height * mapStore.mapData.tileSize }}</span>
-            <span class="info-label">坐标:{{ mapEditorStore.cursorX !== null ? mapEditorStore.cursorX * mapStore.mapData.tileSize : '--' }},{{ mapEditorStore.cursorY !== null ? mapEditorStore.cursorY * mapStore.mapData.tileSize : '--' }}</span>
+            <span class="info-label">坐标:{{ cursorCoordText }}</span>
             <span class="info-label">资源尺寸:{{ mapStore.selectedResource?.tileWidth ?? '--' }}×{{ mapStore.selectedResource?.tileHeight ?? '--' }}</span>
             <span class="info-spacer" />
           </div>

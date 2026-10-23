@@ -67,7 +67,7 @@ if mouse_pressed():
 
 ```python
 print(mouse.x)  # 鼠标 x 坐标 (0~640)
-print(mouse.y)  # 鼠标 y 坐标 (0~480)
+print(mouse.y)  # 鼠标 y 坐标 (0~480，画面下边为 0，向上增大)
 
 # 让角色看向鼠标
 hero.look_at(mouse)

@@ -4,6 +4,7 @@ import { useMapStore, DEFAULT_CAMERA_SETTINGS } from '../../stores/map'
 import { useEditorStore } from '../../stores/editor'
 import { useResourceStore } from '../../stores/resource'
 import CustomSelect from '../common/CustomSelect.vue'
+import { toUserX, toWorldX, toUserY, toWorldY, toUserAngle, toWorldAngle } from '../../utils/coords'
 
 defineProps<{
   disabled?: boolean
@@ -49,10 +50,14 @@ const imageOpacityPercent = computed(() =>
 )
 
 // ====== 图像变换（位置 / 旋转 / 缩放 / 不透明度） ======
+// 位置与旋转按用户坐标显示：原点在画面左下角、y 向上为正、角度逆时针为正；
+// 内部仍以世界坐标（左上原点、y 向下）存储，只在显示/输入时换算。
 const selectedImage = computed(() => mapStore.selectedImage)
-const imagePosX = computed(() => Math.round(selectedImage.value?.position?.[0] ?? 0))
-const imagePosY = computed(() => Math.round(selectedImage.value?.position?.[1] ?? 0))
-const imageRotation = computed(() => Math.round((selectedImage.value?.rotation ?? 0) * 10) / 10)
+const imagePosX = computed(() => Math.round(toUserX(selectedImage.value?.position?.[0] ?? 0)))
+const imagePosY = computed(() => Math.round(toUserY(selectedImage.value?.position?.[1] ?? 0)))
+const imageRotation = computed(() =>
+  Math.round(toUserAngle(selectedImage.value?.rotation ?? 0) * 10) / 10,
+)
 const imageScaleX = computed(() =>
   Math.round((selectedImage.value?.scaleX ?? selectedImage.value?.scale ?? 1) * 100) / 100,
 )
@@ -69,7 +74,8 @@ function setImagePosition(axis: 0 | 1, e: Event) {
   const value = Number((e.target as HTMLInputElement).value)
   if (!img || !Number.isFinite(value)) return
   const pos = [img.position?.[0] ?? 0, img.position?.[1] ?? 0]
-  pos[axis] = value
+  // 输入的是用户坐标，写回前换算成世界坐标
+  pos[axis] = axis === 0 ? toWorldX(value) : toWorldY(value)
   img.position = [pos[0], pos[1]]
   emit('transform-changed')
 }
@@ -78,7 +84,8 @@ function setImageRotation(e: Event) {
   const img = selectedImage.value
   const value = Number((e.target as HTMLInputElement).value)
   if (!img || !Number.isFinite(value)) return
-  img.rotation = value
+  // 输入的是用户角度（逆时针为正），写回前换算成世界角度（顺时针为正）
+  img.rotation = toWorldAngle(value)
   emit('transform-changed')
 }
 

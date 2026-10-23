@@ -8,6 +8,17 @@ import threading
 import queue
 from PIL import Image
 from models.map_model import MapModel
+from models.coords import (
+    to_world_x,
+    to_world_y,
+    to_user_x,
+    to_user_y,
+    to_world_dx,
+    to_world_dy,
+    to_user_dy,
+    to_world_angle,
+    to_user_angle,
+)
 
 # 添加项目根目录到Python路径（确保在任何目录运行都能找到models模块）
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -369,11 +380,12 @@ def _polygon_hits_horizontal(polygon, x0, x1, y):
 class _MouseType:
     @property
     def x(self):
-        return _MOUSE_STATE["x"]
+        return to_user_x(_MOUSE_STATE["x"])
 
     @property
     def y(self):
-        return _MOUSE_STATE["y"]
+        # 用户空间：y 向上为正
+        return to_user_y(_MOUSE_STATE["y"])
 
     def __repr__(self):
         return "mouse"
@@ -396,12 +408,13 @@ class _MarkerRef:
     @property
     def x(self):
         pos = self._sprite._marker_world_xy(self.name)
-        return pos[0] if pos else 0.0
+        return to_user_x(pos[0]) if pos else 0.0
 
     @property
     def y(self):
         pos = self._sprite._marker_world_xy(self.name)
-        return pos[1] if pos else 0.0
+        # 用户空间：y 向上为正
+        return to_user_y(pos[1]) if pos else 0.0
 
     def __repr__(self):
         return "marker('%s')" % self.name
@@ -414,7 +427,8 @@ def _resolve_target_xy(target):
     if isinstance(target, Sprite):
         if target._is_deleted:
             return None
-        return (target.x, target.y)
+        # 必须读世界坐标：target.x/y 是用户空间，会翻转 y
+        return (target._x, target._y)
     return None
 
 __all__ = [
@@ -496,7 +510,7 @@ class Sprite:
         self._current_scale_x = 1.0
         self.hitbox_scale = 1.0
         self.on_ground = False
-        self.vy = 0
+        self._vy = 0
         self._prev_bottom_y = 0
         self._jump_cut = False
         self._drop_through = False
@@ -727,7 +741,7 @@ class Sprite:
                         # 向上推出 = 落到平台/地面
                         if correction < 0:
                             self.on_ground = True
-                            self.vy = 0
+                            self._vy = 0
                     return
                 continue
 
@@ -744,7 +758,7 @@ class Sprite:
                         # 向上推出 = 落到平台/地面
                         if correction < 0:
                             self.on_ground = True
-                            self.vy = 0
+                            self._vy = 0
                     return
                 continue
 
@@ -847,7 +861,7 @@ class Sprite:
                                                         - 0.05
                                                     )
                                                     self.on_ground = True
-                                                    self.vy = 0
+                                                    self._vy = 0
                                                 return
                                             continue
 
@@ -875,7 +889,7 @@ class Sprite:
                                             else:
                                                 self._y = tile_top - (rect[3] - self._y) - 0.05
                                                 self.on_ground = True
-                                                self.vy = 0
+                                                self._vy = 0
                                             return
 
         # 地图边界碰撞检测
@@ -915,7 +929,7 @@ class Sprite:
     def goto(self, x, y=None):
         """移到指定坐标；也接受标记引用或另一个角色（注册点对齐）
 
-        w.goto(320, 240)
+        w.goto(320, 240)                   # 用户坐标：左下角原点，y 向上为正
         w.goto(player.get_marker())        # 对准角色的「标记」
         w.goto(enemy)
         """
@@ -924,14 +938,15 @@ class Sprite:
             if pos is None:
                 print("[警告] goto 参数无效：需要 (x, y)、标记或角色")
                 return
-            self.set_xy(pos[0], pos[1])
+            # 标记/角色解析出来的是世界坐标，直接写入，避免二次翻转
+            self._set_xy_world(pos[0], pos[1])
             return
         self.set_xy(x, y)
 
     def get_marker(self, name="标记"):
         """获取标记引用（.bsf 角色在编辑器「标记」图层标注的锚点）
 
-        返回值可直接给 goto()/follow() 用，也可读 .x/.y 世界坐标：
+        返回值可直接给 goto()/follow() 用，也可读 .x/.y（用户坐标：左下角原点，y 向上）：
             w.goto(player.get_marker())        # 第一个标记「标记」
             w.follow(player.get_marker('标记2'))
         """
@@ -970,8 +985,13 @@ class Sprite:
             self._follow_flip = 1.0
             self._update_transform()
 
+    # ---------- 坐标（用户空间：原点在画面左下角，y 向上为正） ----------
     def set_xy(self, x, y):
-        """设置坐标"""
+        """设置坐标（用户坐标：画面左下角为 (0,0)，y 向上为正）"""
+        self._set_xy_world(to_world_x(x), to_world_y(y))
+
+    def _set_xy_world(self, x, y):
+        """按世界坐标设置位置（引擎内部用，不做任何转换）"""
         hitbox = self._get_hitbox_rect()
         if hitbox:
             self._prev_bottom_y = hitbox[3]
@@ -982,30 +1002,32 @@ class Sprite:
         self._update_transform()
 
     def set_x(self, x):
-        self._x = x
+        """设置 x 坐标（用户坐标：正数向右）"""
+        self._x = to_world_x(x)
         self._resolve_collision("x")
         self._update_transform()
 
     def set_y(self, y):
+        """设置 y 坐标（用户坐标：正数向上）"""
         hitbox = self._get_hitbox_rect()
         if hitbox:
             self._prev_bottom_y = hitbox[3]
-        self._y = y
+        self._y = to_world_y(y)
         self._resolve_collision("y")
         self._update_transform()
 
     def add_x(self, delta_x):
-        """将 x 坐标增加（或减少）一定数值"""
-        self._x += delta_x
+        """将 x 坐标增加（或减少）一定数值（用户坐标：正数向右）"""
+        self._x += to_world_dx(delta_x)
         self._resolve_collision("x")
         self._update_transform()
 
     def add_y(self, delta_y):
-        """将 y 坐标增加（或减少）一定数值"""
+        """将 y 坐标增加（或减少）一定数值（用户坐标：正数向上）"""
         hitbox = self._get_hitbox_rect()
         if hitbox:
             self._prev_bottom_y = hitbox[3]
-        self._y += delta_y
+        self._y += to_world_dy(delta_y)
         self._resolve_collision("y")
         self._update_transform()
 
@@ -1034,13 +1056,13 @@ class Sprite:
         Args:
             power: 跳跃力度（默认10，越大跳得越高）
         """
-        self.vy = -power
+        self._vy = -power
         self.on_ground = False
         self._jump_cut = False
 
     def cut_jump(self):
         """截断跳跃（松开跳跃键时调用），使角色提前下落"""
-        if self.vy < 0:
+        if self._vy < 0:
             self._jump_cut = True
         self._jump_buffered = False
 
@@ -1050,7 +1072,7 @@ class Sprite:
             self._drop_through = True
             self._drop_through_timer = 10
             self.on_ground = False
-            self.vy = 2
+            self._vy = 2
 
     def set_speed(self, speed):
         """设置持续速度，引擎每帧自动沿当前方向移动"""
@@ -1102,8 +1124,8 @@ class Sprite:
         self._update_transform()
 
     def set_angle(self, angle):
-        """设置旋转角度"""
-        self._angle = angle
+        """设置旋转角度（用户坐标：逆时针为正，0=右 90=上 180=左 270=下）"""
+        self._angle = to_world_angle(angle)
         self._update_transform()
 
     def look_at(self, target):
@@ -1139,8 +1161,9 @@ class Sprite:
         radians = math.atan2(dy, dx)
         angle = math.degrees(radians)
 
-        # 4. 应用角度
-        self.set_angle(angle % 360)
+        # 4. 应用角度（atan2 在世界空间算出，已是世界角度，直接写入避免二次翻转）
+        self._angle = angle % 360
+        self._update_transform()
 
     def edge_bounce(self):
         """基于 Hitbox 的精准反弹，自动识别世界边界"""
@@ -1398,8 +1421,8 @@ class Sprite:
         # 🚀 3. 如果目标是字符串，进行标签碰撞检测
         if isinstance(target, str):
             tag = target
-            # 获取精灵的位置
-            sprite_x, sprite_y = self.x, self.y
+            # 获取精灵的位置（世界坐标：内部逻辑不经过用户空间）
+            sprite_x, sprite_y = self._x, self._y
 
             # 获取地图数据
             if _CURRENT_MAP:
@@ -1672,7 +1695,8 @@ class Sprite:
     # ----------- 属性赋值 ----------
     @property
     def x(self):
-        return self._x
+        """水平位置（用户坐标：正数向右）"""
+        return to_user_x(self._x)
 
     @x.setter
     def x(self, value):
@@ -1680,15 +1704,26 @@ class Sprite:
 
     @property
     def y(self):
-        return self._y
+        """垂直位置（用户坐标：正数向上）"""
+        return to_user_y(self._y)
 
     @y.setter
     def y(self, value):
         self.set_y(value)
 
     @property
+    def vy(self):
+        """垂直速度（用户坐标：正数向上，负数向下）"""
+        return to_user_dy(self._vy)
+
+    @vy.setter
+    def vy(self, value):
+        self._vy = to_world_dy(value)
+
+    @property
     def angle(self):
-        return self._angle
+        """朝向角度（用户坐标：逆时针为正）"""
+        return to_user_angle(self._angle)
 
     @angle.setter
     def angle(self, value):
@@ -2576,8 +2611,9 @@ def _update_camera_follow():
     old_camera_x = _CAMERA_X
     old_camera_y = _CAMERA_Y
 
-    tx = _FOLLOW_TARGET.x + offset_x
-    ty = _FOLLOW_TARGET.y + offset_y
+    # 摄像机是世界空间的量，必须读世界坐标；_FOLLOW_TARGET.x/y 是用户空间会翻转 y
+    tx = _FOLLOW_TARGET._x + offset_x
+    ty = _FOLLOW_TARGET._y + offset_y
     if limit:
         view_w, view_h = 640, 480
         tx = max(bounds["left"] + view_w / 2, min(tx, bounds["right"] - view_w / 2))
@@ -3001,22 +3037,22 @@ def _handle_physics_collision():
             sprite._prev_bottom_y = hitbox[3]
 
         if _CURRENT_MAP.get("gravity", False):
-            if sprite.vy < 0:
+            if sprite._vy < 0:
                 if sprite._jump_cut:
                     gravity = 2.8
                 else:
                     gravity = 0.5
             else:
                 gravity = 1.1
-            sprite.vy = min(sprite.vy + gravity, 10)
+            sprite._vy = min(sprite._vy + gravity, 10)
         else:
             gravity = 0
 
-        sprite._y += sprite.vy
+        sprite._y += sprite._vy
         sprite._resolve_collision("y")
         sprite._resolve_collision("x")
         if sprite.on_ground:
-            sprite.vy = 0
+            sprite._vy = 0
             sprite._jump_cut = False
 
         sprite._update_transform()
