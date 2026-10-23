@@ -3,7 +3,7 @@ import { ref, onMounted, watch, computed } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { useMapStore, type MapResource } from '../../stores/map'
 import { useProjectStore } from '../../stores/project'
-import MapResourceImportDialog from '../resource-panel/MapResourceImportDialog.vue'
+import CustomSelect from '../common/CustomSelect.vue'
 import iconLibrary from '../../assets/icons/图片库.svg'
 import iconUpload from '../../assets/icons/上传本地图片资源.svg'
 import iconDelete from '../../assets/icons/选中删除.svg'
@@ -13,7 +13,7 @@ import iconChevron from '../../assets/icons/right_arrow.svg'
 /**
  * 图块模式专用：画布下方的图块笔刷面板。
  * 每个图块都是独立“笔刷”，按调色板顺序从左到右、从上到下排列；
- * 支持拖拽重排、单独移除，图块集导入时可选择部分导入。
+ * 支持拖拽重排、单独移除；本地上传的文件全部按图块素材（图块集）处理。
  */
 const props = defineProps<{
   disabled?: boolean
@@ -26,15 +26,75 @@ const emit = defineEmits<{
 
 const mapStore = useMapStore()
 const projectStore = useProjectStore()
-const showImportDialog = ref(false)
 const collapsed = ref(false)
 
-// 供图层工具栏的「本地上传」在图块模式下打开素材导入弹窗
-function openImport() {
-  showImportDialog.value = true
+// 图块尺寸（原属性面板的功能，移到资源工具栏）
+const tileSizeOptions = [
+  { label: '16x16', value: '16x16' },
+  { label: '32x32', value: '32x32' },
+  { label: '64x64', value: '64x64' },
+]
+const tileSizeValue = computed(() => `${mapStore.mapData.tileSize}x${mapStore.mapData.tileSize}`)
+function onTileSizeChange(val: string) {
+  const newSize = Number(val.split('x')[0])
+  if (Number.isFinite(newSize) && newSize > 0) mapStore.updateTileSize(newSize)
 }
 
-defineExpose({ openImport })
+/** 打开系统窗口多选图片，全部按当前图块尺寸切块导入调色板 */
+async function uploadLocalTiles() {
+  if (props.disabled) return
+  let paths: string[] = []
+  try {
+    paths = await invoke<string[]>('pick_image_files')
+  } catch {
+    return // 用户取消
+  }
+  if (!paths.length) return
+
+  // 旧地图没有调色板时，先把已有素材展开，避免只导入新素材的图块
+  if (mapStore.mapData.tilePalette === undefined) {
+    await generateTileThumbnails()
+  }
+
+  const tw = Math.max(1, mapStore.mapData.tileSize)
+  for (const src of paths) {
+    let relativePath: string
+    try {
+      relativePath = await copyResourceToMapDir(src)
+    } catch (e) {
+      console.error('复制资源到项目目录失败:', e)
+      continue
+    }
+    const resourceId = mapStore.addResource({
+      name: src.split('/').pop()?.split('.')[0] || '图块',
+      path: relativePath,
+      resourceType: 'tileset',
+      tileWidth: tw,
+      tileHeight: tw,
+      collisionType: '图像',
+      collisionEnabled: false,
+    })
+    expandedResources.add(resourceId)
+    // 按图块尺寸切块并全部加入调色板（全透明块会在刷新时自动剔除）
+    try {
+      const img = await loadImage(await getResourceUrl(relativePath))
+      const cols = Math.floor(img.width / tw)
+      const rows = Math.floor(img.height / tw)
+      const entries: { resourceId: string; tileIndex: number }[] = []
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          entries.push({ resourceId, tileIndex: r * cols + c })
+        }
+      }
+      mapStore.addPaletteEntries(entries)
+    } catch {
+      // 加载失败时由 refreshAll 重试
+    }
+  }
+  await refreshAll()
+}
+
+defineExpose({ uploadLocalTiles })
 
 const currentResources = computed(() => mapStore.activeLayerResources)
 const tileResources = computed(() => currentResources.value.filter(r => r.resourceType !== 'image'))
@@ -324,44 +384,6 @@ async function copyResourceToMapDir(srcPath: string): Promise<string> {
   })
   return relativePath
 }
-
-async function onResourceImported(options: {
-  path: string
-  mode: 'image' | 'tileset'
-  size: string
-  tileIndices?: number[]
-}) {
-  // 旧地图没有调色板时，先把已有素材展开，避免只导入新素材的图块
-  if (mapStore.mapData.tilePalette === undefined) {
-    await generateTileThumbnails()
-  }
-
-  let relativePath: string
-  try {
-    relativePath = await copyResourceToMapDir(options.path)
-  } catch (e) {
-    console.error('复制资源到项目目录失败:', e)
-    relativePath = options.path
-  }
-  const [tw, th] = options.size.split('x').map(Number)
-  const resourceId = mapStore.addResource({
-    name: options.path.split('/').pop()?.split('.')[0] || '资源',
-    path: relativePath,
-    resourceType: options.mode === 'image' ? 'image' : 'tileset',
-    tileWidth: tw,
-    tileHeight: th,
-    collisionType: '图像',
-    collisionEnabled: false,
-  })
-  // 图块集：按用户勾选的图块展开（全部导入时即全部图块）
-  if (options.mode === 'tileset') {
-    expandedResources.add(resourceId)
-    const indices = options.tileIndices ?? []
-    mapStore.addPaletteEntries(indices.map(t => ({ resourceId, tileIndex: t })))
-  }
-  showImportDialog.value = false
-  refreshAll()
-}
 </script>
 
 <template>
@@ -370,7 +392,7 @@ async function onResourceImported(options: {
       <button class="bar-tool-btn" v-tooltip="'打开资源库'" @click="emit('open-library')">
         <img :src="iconLibrary" class="bar-tool-icon" />
       </button>
-      <button class="bar-tool-btn" v-tooltip="'上传本地资源'" :disabled="disabled" @click="openImport">
+      <button class="bar-tool-btn" v-tooltip="'上传本地图块'" :disabled="disabled" @click="uploadLocalTiles">
         <img :src="iconUpload" class="bar-tool-icon" />
       </button>
       <button
@@ -385,6 +407,19 @@ async function onResourceImported(options: {
         <img :src="iconReset" class="bar-tool-icon" />
       </button>
       <div class="bar-spacer" />
+      <!-- 图块尺寸：影响上传切块与地图瓦片网格 -->
+      <div class="bar-size-field">
+        <span class="bar-size-label">图块尺寸</span>
+        <div class="bar-size-select">
+          <CustomSelect
+            :model-value="tileSizeValue"
+            :options="tileSizeOptions"
+            :disabled="disabled"
+            placement="up"
+            @update:model-value="onTileSizeChange"
+          />
+        </div>
+      </div>
       <button
         class="bar-tool-btn collapse-btn"
         :class="{ 'collapse-rotated': !collapsed }"
@@ -418,13 +453,6 @@ async function onResourceImported(options: {
         暂无可用的图块笔刷
       </div>
     </div>
-
-    <MapResourceImportDialog
-      v-if="showImportDialog"
-      layer-type="drawing"
-      @close="showImportDialog = false"
-      @imported="onResourceImported"
-    />
   </div>
 </template>
 
@@ -485,6 +513,25 @@ async function onResourceImported(options: {
 
 .bar-spacer {
   flex: 1;
+}
+
+/* 图块尺寸（工具栏右侧）：标签 + 下拉 */
+.bar-size-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.bar-size-label {
+  color: #9ca0a4;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.bar-size-select {
+  width: 88px;
+  flex-shrink: 0;
 }
 
 .collapse-btn img {

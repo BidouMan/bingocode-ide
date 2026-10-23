@@ -968,6 +968,26 @@ async fn pick_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     Ok(paths.map(|ps| ps.iter().map(|p| p.to_string()).collect()).unwrap_or_default())
 }
 
+/// 多选图片（图块上传：一次选多张，全部按图块素材处理）
+#[tauri::command]
+async fn pick_image_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    use std::sync::mpsc;
+
+    let (tx, rx) = mpsc::channel();
+    app.dialog()
+        .file()
+        .add_filter("图片", &["png", "jpg", "jpeg", "bmp", "gif", "svg"])
+        .pick_files(move |paths| {
+            let _ = tx.send(paths);
+        });
+
+    let paths = rx.recv()
+        .map_err(|_| "选择文件取消".to_string())?;
+
+    Ok(paths.map(|ps| ps.iter().map(|p| p.to_string()).collect()).unwrap_or_default())
+}
+
 #[tauri::command]
 fn read_image_as_data_url(path: String) -> Result<String, String> {
     use base64::Engine;
@@ -1288,6 +1308,7 @@ pub fn run() {
             get_sprite_thumbnail,
             pick_image_file,
             pick_files,
+            pick_image_files,
             read_image_as_data_url,
             read_images_as_data_urls,
             rename_path,

@@ -471,6 +471,11 @@ let pasteCount = 0
 
 // ====== 矢量绘制覆盖层（Paper.js，几何由 mapVectorViewport 适配） ======
 const vectorCanvasRef = ref<HTMLCanvasElement>()
+// 矢量内容绘制在独立 canvas 上，图层透明度需要单独应用（位图精灵走 sprite.alpha）
+const vectorCanvasOpacity = computed(() => {
+  const o = mapStore.selectedImage?.opacity ?? 1
+  return String(Math.max(0, Math.min(1, o)))
+})
 const textAreaRef = ref<HTMLTextAreaElement>()
 const vectorActive = ref(false)
 const vectorMatrix = ref<MapVectorMatrix | null>(null)
@@ -3327,6 +3332,7 @@ defineExpose({
       v-if="vectorActive"
       ref="vectorCanvasRef"
       class="map-vector-canvas"
+      :style="{ opacity: vectorCanvasOpacity }"
       @wheel="onVectorWheel"
       @pointerdown.capture="onVectorPointerDownCapture"
       @pointermove.capture="onVectorPointerMoveCapture"

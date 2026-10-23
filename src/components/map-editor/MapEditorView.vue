@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import MapToolbar from './MapToolbar.vue'
 import MapCanvas from './MapCanvas.vue'
@@ -31,7 +31,26 @@ const projectStore = useProjectStore()
 const hasMaps = computed(() => resourceStore.maps.length > 0)
 
 const mapCanvasRef = ref<InstanceType<typeof MapCanvas>>()
-const tileResourceBarRef = ref<{ openImport: () => void } | null>(null)
+const tileResourceBarRef = ref<{ uploadLocalTiles: () => void } | null>(null)
+const propertyPanelRef = ref<InstanceType<typeof PropertyPanel>>()
+
+// 切换图层 / 地图后把属性面板滚回顶部：否则会停留在上一层的滚动位置，看起来像空白
+watch(
+  () => [mapStore.activeLayerIndex, mapStore.activeMode, mapStore.mapLoadCount],
+  () => {
+    nextTick(() => {
+      const el = propertyPanelRef.value?.$el as HTMLElement | undefined
+      if (el) el.scrollTop = 0
+    })
+  },
+)
+
+/** 属性面板改写图像变换后：刷新画面并让变换框跟随新几何 */
+function onImageTransformChanged() {
+  mapStore.imageRevision++
+  const img = mapStore.selectedImage
+  if (img) mapCanvasRef.value?.showTransformBox(img)
+}
 
 // ====== 图片模式：直接在画布上绘制，颜色面板复用绘制页 ======
 const mapPaint = useMapPaint()
@@ -190,9 +209,9 @@ async function onNewMap() {
 }
 
 async function onUploadLocal() {
-  // 图块模式的本地上传交给下方素材面板的导入弹窗（需要选择图块尺寸）
+  // 图块模式的本地上传直接打开系统窗口，选中的图片全部按图块处理
   if (mapStore.activeMode === 'tile') {
-    tileResourceBarRef.value?.openImport()
+    tileResourceBarRef.value?.uploadLocalTiles()
     return
   }
   await onUploadImage()
@@ -409,13 +428,30 @@ defineExpose({ switchToMap, placeImageResource })
           </div>
           <div class="paint-right-body">
             <PaintColorPanel v-show="paintRightTab === 'paint'" />
-            <PropertyPanel v-show="paintRightTab === 'props'" :disabled="!hasMaps" />
+            <PropertyPanel
+              v-show="paintRightTab === 'props'"
+              :disabled="!hasMaps"
+              :show-header="false"
+              @transform-changed="onImageTransformChanged"
+            />
           </div>
         </template>
         <template v-else>
-          <PropertyPanel :disabled="!hasMaps" />
-          <!-- 碰撞编辑器仅图块模式使用；图像模式在画布上按实例编辑 -->
-          <TileCollisionPanel v-if="mapStore.activeMode === 'tile'" />
+          <PropertyPanel
+            ref="propertyPanelRef"
+            class="right-props"
+            :disabled="!hasMaps"
+            @transform-changed="onImageTransformChanged"
+          />
+          <!-- 图块模式的碰撞编辑器上移，底部保留与画布/图层一致的信息栏 -->
+          <TileCollisionPanel
+            v-if="mapStore.activeMode === 'tile'"
+            :key="`${mapStore.currentMapPath}-${mapStore.activeLayer?.id ?? -1}`"
+            class="right-collision"
+          />
+          <div v-if="mapStore.activeMode === 'tile'" class="right-info-bar">
+            <span class="right-info-text">碰撞编辑</span>
+          </div>
         </template>
       </div>
     </div>
@@ -623,11 +659,37 @@ defineExpose({ switchToMap, placeImageResource })
   width: 272px;
   min-width: 272px;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
   border-left: 1px solid var(--border);
   background: var(--bg-root);
   position: relative;
   z-index: 20;
+}
+
+/* 属性区占满剩余高度并自行滚动，碰撞编辑区因此贴在右栏底部 */
+.right-props {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.right-collision {
+  flex-shrink: 0;
+}
+
+/* 右栏底部信息栏：与画布 / 图层区域的信息栏同款 */
+.right-info-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  flex-shrink: 0;
+  background: var(--bg-root);
+}
+
+.right-info-text {
+  font-size: 12px;
+  color: rgb(156, 160, 164);
 }
 
 .map-empty-banner {

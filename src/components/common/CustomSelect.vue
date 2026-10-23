@@ -10,6 +10,8 @@ const props = defineProps<{
   modelValue: string
   options: Option[]
   disabled?: boolean
+  /** 下拉展开方向：默认向下；底部工具栏等场景用向上避免超出窗口 */
+  placement?: 'down' | 'up'
 }>()
 
 const emit = defineEmits<{
@@ -58,7 +60,7 @@ onBeforeUnmount(() => {
       </svg>
     </span>
     <Transition name="dropdown">
-      <div v-if="isOpen" class="custom-select-dropdown" @click.stop>
+      <div v-if="isOpen" class="custom-select-dropdown" :class="{ 'dropdown-up': placement === 'up' }" @click.stop>
         <div
           v-for="opt in options"
           :key="opt.value"
@@ -135,6 +137,12 @@ onBeforeUnmount(() => {
   border-radius: 4px;
   z-index: 1000;
   overflow: hidden;
+}
+
+/* 向上展开（底部工具栏用） */
+.custom-select-dropdown.dropdown-up {
+  top: auto;
+  bottom: calc(100% + 2px);
 }
 
 .custom-select-option {

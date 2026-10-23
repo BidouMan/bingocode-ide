@@ -14,8 +14,6 @@ import iconImageLayer from '../../assets/icons/图像图层.svg'
 import iconLibrary from '../../assets/icons/图片库.svg'
 import iconUpload from '../../assets/icons/上传本地图片资源.svg'
 import iconCollisionType from '../../assets/icons/hitbox.svg'
-import iconUnlock from '../../assets/icons/解锁.svg'
-import iconLock from '../../assets/icons/锁定.svg'
 
 const props = defineProps<{
   disabled?: boolean
@@ -322,21 +320,13 @@ function applyReorder(from: number, insertDisplayIndex: number) {
         >
           <img :src="item.layer.visible ? iconShow : iconHide" class="vis-icon" />
         </button>
-        <button
-          class="layer-lock-btn"
-          :class="{ 'layer-locked': item.layer.locked }"
-          v-tooltip="item.layer.locked ? '解锁' : '锁定'"
-          @click.stop="mapStore.toggleLayerLock(item.index)"
-        >
-          <img :src="item.layer.locked ? iconLock : iconUnlock" class="lock-icon" />
-        </button>
       </div>
 
       <div v-if="displayLayers.length === 0" class="layer-empty">暂无图层</div>
     </div>
 
     <div class="layer-info-bar">
-      <span class="layer-info-text">模式{{ mapStore.activeMode === 'image' ? '图像' : mapStore.activeMode === 'collision' ? '碰撞' : '图块' }}</span>
+      <span class="layer-info-text">图层管理</span>
     </div>
   </div>
 </template>
@@ -491,8 +481,7 @@ function applyReorder(from: number, insertDisplayIndex: number) {
   outline: none;
 }
 
-.layer-vis-btn,
-.layer-lock-btn {
+.layer-vis-btn {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -508,25 +497,14 @@ function applyReorder(from: number, insertDisplayIndex: number) {
   line-height: 1;
 }
 
-.layer-vis-btn:hover,
-.layer-lock-btn:hover {
+.layer-vis-btn:hover {
   background: rgb(70, 74, 84);
 }
 
 .vis-icon {
-  width: 18px;
-  height: 18px;
-  opacity: 0.85;
-}
-
-.lock-icon {
   width: 16px;
   height: 16px;
-  opacity: 0.8;
-}
-
-.layer-locked .lock-icon {
-  opacity: 1;
+  opacity: 0.85;
 }
 
 .layer-empty {
