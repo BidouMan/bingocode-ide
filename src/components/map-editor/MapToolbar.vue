@@ -20,7 +20,12 @@ const emit = defineEmits<{
   'paste-selection': []
   'flip-h': []
   'flip-v': []
-  'create-paint-layer': [tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse']
+  'group': []
+  'ungroup': []
+  'layer-up': []
+  'layer-down': []
+  'switch-paint-mode': [mode: 'bitmap' | 'vector']
+  'create-paint-layer': [tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse' | 'text' | 'reshape' | 'eyedropper']
 }>()
 
 const mapStore = useMapStore()
@@ -46,22 +51,39 @@ function onMapChange(value: string) {
   // 直接在 emit 前设置会导致竞态：async switchToMap 的 await 期间 watcher 会覆盖它
   emit('switch-map', value)
 }
+
+/** 工具区超宽时，鼠标滚轮转横向滚动（小屏也能访问全部工具） */
+function onToolAreaWheel(e: WheelEvent) {
+  const el = e.currentTarget as HTMLElement
+  if (!el || el.scrollWidth <= el.clientWidth) return
+  if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return
+  el.scrollLeft += e.deltaY
+  e.preventDefault()
+}
 </script>
 
 <template>
   <div class="map-toolbar">
-    <!-- 工具跟着当前图层类型切换：图片图层=图像工具，图块图层=绘制工具 -->
-    <ImageLayerTools
-      v-if="isImageLayer"
-      :disabled="disabled"
-      @delete-selection="emit('delete-selection')"
-      @copy-selection="emit('copy-selection')"
-      @paste-selection="emit('paste-selection')"
-      @flip-h="emit('flip-h')"
-      @flip-v="emit('flip-v')"
-      @create-layer="(tool) => emit('create-paint-layer', tool)"
-    />
-    <DrawingLayerTools v-else :disabled="disabled" />
+    <!-- 工具跟着当前图层类型切换：图片图层=图像工具，图块图层=绘制工具。
+         工具区可横向滚动，避免小屏/小尺寸笔记本上按钮溢出 -->
+    <div class="tool-area" @wheel="onToolAreaWheel">
+      <ImageLayerTools
+        v-if="isImageLayer"
+        :disabled="disabled"
+        @delete-selection="emit('delete-selection')"
+        @copy-selection="emit('copy-selection')"
+        @paste-selection="emit('paste-selection')"
+        @flip-h="emit('flip-h')"
+        @flip-v="emit('flip-v')"
+        @group="emit('group')"
+        @ungroup="emit('ungroup')"
+        @layer-up="emit('layer-up')"
+        @layer-down="emit('layer-down')"
+        @switch-paint-mode="(mode) => emit('switch-paint-mode', mode)"
+        @create-layer="(tool) => emit('create-paint-layer', tool)"
+      />
+      <DrawingLayerTools v-else :disabled="disabled" />
+    </div>
 
     <div class="toolbar-separator" />
 
@@ -158,6 +180,23 @@ function onMapChange(value: string) {
 
 .toolbar-spacer {
   flex: 1;
+}
+
+/* 工具区：内容可横向滚动，滚动条隐藏（滚轮可横向滚动） */
+.tool-area {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.tool-area::-webkit-scrollbar {
+  display: none;
 }
 
 .toolbar-select-wrapper {

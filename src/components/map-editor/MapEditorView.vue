@@ -14,6 +14,7 @@ import TileCollisionPanel from './TileCollisionPanel.vue'
 import PaintColorPanel from '../paint-editor/PaintColorPanel.vue'
 import { useMapStore } from '../../stores/map'
 import { useMapEditorStore } from '../../stores/mapEditor'
+import { usePaintStore } from '../../stores/paint'
 import { useResourceStore } from '../../stores/resource'
 import { useProjectStore } from '../../stores/project'
 import { useMapPersistence } from '../../composables/useMapPersistence'
@@ -23,6 +24,7 @@ import { deserializeMap } from '../../utils/mapSerializer'
 
 const mapStore = useMapStore()
 const mapEditorStore = useMapEditorStore()
+const paintStore = usePaintStore()
 const resourceStore = useResourceStore()
 const projectStore = useProjectStore()
 
@@ -35,10 +37,40 @@ const tileResourceBarRef = ref<{ openImport: () => void } | null>(null)
 const mapPaint = useMapPaint()
 const paintRightTab = ref<'paint' | 'props'>('paint')
 // 选中绘制工具即进入绘制模式（画布本身不切换）
-const isPainting = computed(() => mapStore.activeMode === 'image' && mapEditorStore.imageTool !== 'select')
+const isPainting = computed(() =>
+  mapStore.activeMode === 'image' &&
+  (mapEditorStore.paintMode === 'vector' || mapEditorStore.imageTool !== 'select')
+)
+
+// 浮动画布工具条：撤销/重做按当前绘制模式取可用性
+const canUndo = computed(() =>
+  mapEditorStore.paintMode === 'vector'
+    ? paintStore.vectorCanUndo
+    : (mapCanvasRef.value?.canUndoPaint ?? false)
+)
+const canRedo = computed(() =>
+  mapEditorStore.paintMode === 'vector'
+    ? paintStore.vectorCanRedo
+    : (mapCanvasRef.value?.canRedoPaint ?? false)
+)
+
+// 位图模式与全局绘制 store 对齐；矢量专属工具名切回位图时回退画笔
+watch(
+  () => mapEditorStore.paintMode,
+  (mode) => {
+    if (mode !== 'bitmap') return
+    paintStore.setMode('bitmap')
+    const t = mapEditorStore.imageTool
+    if (t === 'reshape' || t === 'text' || t === 'eyedropper') {
+      mapEditorStore.setImageTool('brush')
+      paintStore.setTool('brush')
+    }
+  },
+  { immediate: true }
+)
 
 // 绘制按钮/画笔工具：新建一张空白图片图层并启用指定工具
-async function startImagePaint(tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse' = 'brush') {
+async function startImagePaint(tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse' | 'text' | 'reshape' | 'eyedropper' = 'brush') {
   const w = Math.max(1, mapStore.mapData.width * mapStore.mapData.tileSize)
   const h = Math.max(1, mapStore.mapData.height * mapStore.mapData.tileSize)
   const canvas = document.createElement('canvas')
@@ -49,6 +81,10 @@ async function startImagePaint(tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rec
   try {
     await mapPaint.saveMapImage(blob, w, h, mapStore.activeLayer?.id ?? -1)
     mapEditorStore.setImageTool(tool)
+    // 矢量专属工具需要矢量模式（新建图层后进入）
+    if (tool === 'text' || tool === 'reshape' || tool === 'eyedropper') {
+      mapEditorStore.setPaintMode('vector')
+    }
   } catch (e) {
     console.error('[MapEditor] 创建绘制图层失败:', e)
   }
@@ -74,6 +110,10 @@ const {
 // ====== 统一入口：currentMapPath 变化时自动保存当前 + 加载目标 ======
 // 新建地图时设此标志跳过 watcher 的加载流程
 let skipNextPathWatch = false
+// 保存前先把矢量内容烘进当前图片像素，避免存档丢内容
+async function flushVectorPaint() {
+  await mapCanvasRef.value?.exitVectorPaint()
+}
 watch(() => mapStore.currentMapPath, async (newPath, oldPath) => {
   if (!newPath || newPath === oldPath) return
   if (skipNextPathWatch) { skipNextPathWatch = false; return }
@@ -82,6 +122,7 @@ watch(() => mapStore.currentMapPath, async (newPath, oldPath) => {
   if (oldPath) {
     // 根据 UUID 找到旧地图的名称，用名称路径保存（名称可能已被重命名）
     const oldItem = resourceStore.maps.find(m => m.id === oldPath)
+    await flushVectorPaint()
     if (oldItem) await saveMapToProject(oldItem.name)
   }
   const loaded = await loadMapFromProject(newPath)
@@ -106,7 +147,7 @@ watch(() => JSON.stringify(mapStore.mapData), () => {
   savingItemId = mapStore.currentMapPath
   autoSaveTimer = setTimeout(() => {
     if (mapStore.currentMapPath && mapStore.currentMapPath === savingItemId) {
-      saveMapToProject()
+      void flushVectorPaint().then(() => saveMapToProject())
     }
   }, 2000)
 })
@@ -120,6 +161,7 @@ function switchToMap(itemId: string) {
 
 async function onNewMap() {
   if (mapStore.currentMapPath) {
+    await flushVectorPaint()
     await saveMapToProject()
   }
 
@@ -219,6 +261,7 @@ async function onImportMap() {
         // 先设 path 让 saveMapToProject 能找到资源项
         const importItem = resourceStore.maps.find(m => m.id === id)
         if (importItem && projectStore.root) importItem.path = mapDirPath(name)
+        await flushVectorPaint()
         await saveMapToProject()
         return
       }
@@ -237,6 +280,10 @@ function onOpenLibrary() {
 
 function onCursorMove(x: number, y: number) {
   mapEditorStore.setCursorPos(x, y)
+}
+
+function onSwitchPaintMode(mode: 'bitmap' | 'vector') {
+  mapEditorStore.setPaintMode(mode)
 }
 
 defineExpose({ switchToMap, placeImageResource })
@@ -258,11 +305,16 @@ defineExpose({ switchToMap, placeImageResource })
           <MapToolbar
             :disabled="!hasMaps"
             @switch-map="switchToMap"
-            @delete-selection="mapCanvasRef?.deleteSelection()"
-            @copy-selection="mapCanvasRef?.copySelection()"
-            @paste-selection="mapCanvasRef?.pasteSelection()"
-            @flip-h="mapCanvasRef?.flipSelection('h')"
-            @flip-v="mapCanvasRef?.flipSelection('v')"
+            @delete-selection="mapCanvasRef?.deleteActive()"
+            @copy-selection="mapCanvasRef?.copyActive()"
+            @paste-selection="mapCanvasRef?.pasteActive()"
+            @flip-h="mapCanvasRef?.flipActive('h')"
+            @flip-v="mapCanvasRef?.flipActive('v')"
+            @group="mapCanvasRef?.groupActive()"
+            @ungroup="mapCanvasRef?.ungroupActive()"
+            @layer-up="mapCanvasRef?.layerUpActive()"
+            @layer-down="mapCanvasRef?.layerDownActive()"
+            @switch-paint-mode="onSwitchPaintMode"
             @create-paint-layer="startImagePaint"
           />
           <div class="canvas-stage">
@@ -281,17 +333,17 @@ defineExpose({ switchToMap, placeImageResource })
               <div class="view-float-divider"></div>
               <button
                 class="view-float-btn"
-                :disabled="!mapCanvasRef?.canUndoPaint"
+                :disabled="!canUndo"
                 v-tooltip="'撤销绘制'"
-                @click="mapCanvasRef?.undoPaint()"
+                @click="mapCanvasRef?.undoActive()"
               >
                 <img :src="iconUndo" width="14" height="14" draggable="false" />
               </button>
               <button
                 class="view-float-btn"
-                :disabled="!mapCanvasRef?.canRedoPaint"
+                :disabled="!canRedo"
                 v-tooltip="'重做绘制'"
-                @click="mapCanvasRef?.redoPaint()"
+                @click="mapCanvasRef?.redoActive()"
               >
                 <img :src="iconRedo" width="14" height="14" draggable="false" />
               </button>
@@ -322,7 +374,7 @@ defineExpose({ switchToMap, placeImageResource })
             <button class="right-tab" :class="{ 'right-tab-active': paintRightTab === 'props' }" @click="paintRightTab = 'props'">属性</button>
           </div>
           <div class="paint-right-body">
-            <PaintColorPanel v-show="paintRightTab === 'paint'" bitmap-only />
+            <PaintColorPanel v-show="paintRightTab === 'paint'" />
             <PropertyPanel v-show="paintRightTab === 'props'" :disabled="!hasMaps" />
           </div>
         </template>
@@ -540,6 +592,8 @@ defineExpose({ switchToMap, placeImageResource })
   overflow-y: auto;
   border-left: 1px solid var(--border);
   background: var(--bg-root);
+  position: relative;
+  z-index: 20;
 }
 
 .map-empty-banner {

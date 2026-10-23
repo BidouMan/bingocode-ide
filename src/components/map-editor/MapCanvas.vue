@@ -13,6 +13,14 @@ import { useMapViewport } from '../../composables/useMapViewport'
 import { useImageTransform } from '../../composables/useImageTransform'
 import { useImageCollisionEditor } from '../../composables/useImageCollisionEditor'
 import { useTilePainter } from '../../composables/useTilePainter'
+import { usePaperScope } from '../paint-editor/composables/usePaperScope'
+import { ensurePaintFont } from '../paint-editor/utils/paintFont'
+import {
+  createMapVectorViewport,
+  computeMapVectorMatrix,
+  type MapVectorFrame,
+  type MapVectorMatrix,
+} from './mapVectorViewport'
 
 const emit = defineEmits<{
   'tile-painted': [x: number, y: number, tileId: number]
@@ -450,6 +458,23 @@ let paintClipboard: HTMLCanvasElement | null = null
 let clipboardCenter = { x: 0, y: 0 }
 let pasteCount = 0
 
+// ====== 矢量绘制覆盖层（Paper.js，几何由 mapVectorViewport 适配） ======
+const vectorCanvasRef = ref<HTMLCanvasElement>()
+const textAreaRef = ref<HTMLTextAreaElement>()
+const vectorActive = ref(false)
+const vectorMatrix = ref<MapVectorMatrix | null>(null)
+// 矢量画笔/橡皮光标：屏幕坐标（相对地图画布容器），用 DOM 圆圈保证任意缩放下清晰
+const vectorCursorPos = ref<{ x: number; y: number } | null>(null)
+let vectorPanning = false
+let vectorExiting = false
+let vectorStoreSnapshot: {
+  artboardWidth: number
+  artboardHeight: number
+  zoom: number
+  panX: number
+  panY: number
+} | null = null
+
 // 图片像素框选（归一化本地坐标）
 let pixelSelection: { x0: number; y0: number; x1: number; y1: number } | null = null
 let selectionGraphics: any = null
@@ -848,7 +873,9 @@ let brushCursorClient: { clientX: number; clientY: number } | null = null
 
 function isBrushCursorActive(): boolean {
   const tool = mapEditorStore.imageTool
-  return mapStore.activeMode === 'image' && (tool === 'brush' || tool === 'eraser')
+  return mapStore.activeMode === 'image'
+    && mapEditorStore.paintMode !== 'vector'
+    && (tool === 'brush' || tool === 'eraser')
 }
 
 // 绘制画布 1px 对应的世界坐标尺寸（含图片实例缩放）
@@ -1517,6 +1544,8 @@ const viewport = useMapViewport({
     drawSelectionOverlay()
     // 画笔圆圈光标随缩放变化
     redrawBrushCursor()
+    // 矢量覆盖层随视口缩放
+    syncVectorGeometry()
   },
 })
 
@@ -1546,6 +1575,452 @@ const painter = useTilePainter({
   onRenderRequest: () => scheduleRender(),
 })
 
+// ====== 矢量绘制（覆盖层 + Paper.js 引擎） ======
+
+/** 当前图片图层的绘制画布几何（图片像素坐标系） */
+function vectorFrame(): MapVectorFrame | null {
+  const img = mapStore.selectedImage
+  const s = paintSession
+  if (!img || !s || !app || !canvasRef.value) return null
+  const rect = canvasRef.value.getBoundingClientRect()
+  return {
+    image: img,
+    canvas: s.canvas,
+    stageX: app.stage.x,
+    stageY: app.stage.y,
+    scale: viewport.currentScale.value,
+    rootRect: { left: rect.left, top: rect.top },
+  }
+}
+
+// 卸载早于 usePaperScope 的 detach 收口：先把矢量内容烘进像素，避免 scope 销毁后丢内容
+onBeforeUnmount(() => {
+  if (!vectorActive.value) return
+  bakeVectorRasterSync()
+  vectorActive.value = false
+  mapEditorStore.setPaintMode('bitmap')
+})
+
+const mapVectorViewport = createMapVectorViewport(vectorFrame)
+
+const vectorEngine = usePaperScope(
+  vectorCanvasRef,
+  vectorCanvasRef,
+  {
+    onFrameSwitched: () => {},
+    onContentChanged: () => {},
+    bitmapLayer: {
+      getFrame: () => null,
+      transformFrame: () => {},
+      clearFrame: () => {},
+    },
+  },
+  { viewport: mapVectorViewport, singleFrame: true, proxy: false }
+)
+
+/** 同步矢量视口矩阵 / 裁剪 / 叠加层投影；并让 handle 尺寸按屏幕恒定 */
+function syncVectorGeometry() {
+  if (!vectorActive.value) return
+  const s = paintSession
+  if (s) {
+    // 画板尺寸随绘制画布（背景图可能随地图扩大）
+    if (paintStore.artboardWidth !== s.canvas.width) paintStore.artboardWidth = s.canvas.width
+    if (paintStore.artboardHeight !== s.canvas.height) paintStore.artboardHeight = s.canvas.height
+  }
+  const m = computeMapVectorMatrix(vectorFrame())
+  vectorMatrix.value = m
+  if (m) {
+    const det = Math.abs(m.a * m.d - m.b * m.c)
+    paintStore.zoom = Math.max(0.1, Math.sqrt(Math.max(det, 0.0001)))
+  }
+  vectorEngine.refreshView()
+}
+
+async function enterVectorMode(): Promise<boolean> {
+  if (mapStore.activeMode !== 'image') return false
+  if (!mapStore.selectedImage && mapStore.activeLayer?.type === 'image') {
+    mapStore.selectImage(mapStore.activeLayer.id)
+  }
+  if (!mapStore.selectedImage) return false
+  if (!paintSession) {
+    const ok = await startPaintSession()
+    if (!ok) return false
+  }
+  const s = paintSession
+  if (!s) return false
+  if (!vectorStoreSnapshot) {
+    vectorStoreSnapshot = {
+      artboardWidth: paintStore.artboardWidth,
+      artboardHeight: paintStore.artboardHeight,
+      zoom: paintStore.zoom,
+      panX: paintStore.panX,
+      panY: paintStore.panY,
+    }
+  }
+  paintStore.mode = 'vector'
+  paintStore.artboardWidth = s.canvas.width
+  paintStore.artboardHeight = s.canvas.height
+  // 工具状态与地图工具栏对齐（避免沿用角色绘制页上次的工具）
+  paintStore.setTool(mapEditorStore.imageTool)
+  ensurePaintFont()
+  hideBrushCursor()
+  vectorCursorPos.value = null
+  vectorActive.value = true
+  await nextTick()
+  syncVectorGeometry()
+  if ((mapEditorStore.imageTool === 'brush' || mapEditorStore.imageTool === 'eraser')
+    && !vectorCursorPos.value && vectorCanvasRef.value) {
+    vectorCanvasRef.value.style.cursor = 'crosshair'
+  }
+  return true
+}
+
+/** 把矢量 project 栅格化并叠加进图片像素（同步部分；落盘由调用方 flush） */
+function bakeVectorRasterSync(): ImagePaintSession | null {
+  const s = paintSession
+  if (!vectorActive.value || !s) return null
+  const raster = vectorEngine.getFrameRaster(0)
+  if (raster) {
+    pushPaintUndo()
+    const ctx = paintCtx()
+    if (ctx) {
+      ctx.save()
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.drawImage(raster, 0, 0, s.canvas.width, s.canvas.height)
+      ctx.restore()
+      s.texture.source.update()
+      s.dirty = true
+    }
+  }
+  vectorEngine.clearAllForBake()
+  return s
+}
+
+async function commitVectorToPixels() {
+  const s = bakeVectorRasterSync()
+  if (s) await flushPaintSave(s, true)
+}
+
+async function exitVectorMode() {
+  if (!vectorActive.value || vectorExiting) return
+  vectorExiting = true
+  try {
+    await commitVectorToPixels()
+    vectorActive.value = false
+    paintStore.mode = 'bitmap'
+    mapEditorStore.setPaintMode('bitmap')
+    paintStore.vectorSelBox = null
+    paintStore.vectorSelectedCount = 0
+    paintStore.vectorContent = false
+    paintStore.textEdit = null
+    vectorMatrix.value = null
+    vectorCursorPos.value = null
+    // 矢量专属工具回退到位图可用工具
+    const tool = mapEditorStore.imageTool
+    if (tool === 'reshape' || tool === 'text' || tool === 'eyedropper') {
+      mapEditorStore.setImageTool('brush')
+      paintStore.setTool('brush')
+    } else {
+      paintStore.setTool(mapEditorStore.imageTool)
+    }
+    if (vectorStoreSnapshot) {
+      paintStore.artboardWidth = vectorStoreSnapshot.artboardWidth
+      paintStore.artboardHeight = vectorStoreSnapshot.artboardHeight
+      paintStore.zoom = vectorStoreSnapshot.zoom
+      paintStore.panX = vectorStoreSnapshot.panX
+      paintStore.panY = vectorStoreSnapshot.panY
+      vectorStoreSnapshot = null
+    }
+  } finally {
+    vectorExiting = false
+  }
+}
+
+// ─── 覆盖层投影（SVG 变换框 / 塑形锚点 / 光标 / 文字框）───
+
+const VEC_SEL = '#818cf8'
+const VEC_SEL_DEEP = '#6366f1'
+
+const vectorOverlayStyle = computed(() => {
+  const m = vectorMatrix.value
+  if (!m) return null
+  return {
+    width: `${paintStore.artboardWidth}px`,
+    height: `${paintStore.artboardHeight}px`,
+    transform: `matrix(${m.a}, ${m.b}, ${m.c}, ${m.d}, ${m.tx}, ${m.ty})`,
+    transformOrigin: '0 0',
+  }
+})
+
+const vectorScreenScale = computed(() => {
+  const m = vectorMatrix.value
+  if (!m) return 1
+  return Math.max(0.1, Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)))
+})
+const vectorBoxStroke = computed(() => 1.4 / vectorScreenScale.value)
+const vectorHandleSize = computed(() => 8 / vectorScreenScale.value)
+const vectorRotateRadius = computed(() => 4 / vectorScreenScale.value)
+const vectorPointSize = computed(() => 8 / vectorScreenScale.value)
+
+const vectorBoxPoints = computed(() => {
+  const box = paintStore.vectorSelBox
+  if (!box) return ''
+  return box.corners.map(c => `${c.x},${c.y}`).join(' ')
+})
+
+const vectorCursorStyle = computed(() => {
+  if (!vectorActive.value || paintStore.mode !== 'vector') return null
+  const t = paintStore.activeTool
+  if (t !== 'brush' && t !== 'eraser') return null
+  const p = vectorCursorPos.value
+  if (!p) return null
+  const d = Math.max(4, paintStore.brushSize * vectorScreenScale.value)
+  return {
+    left: `${p.x - d / 2}px`,
+    top: `${p.y - d / 2}px`,
+    width: `${d}px`,
+    height: `${d}px`,
+  }
+})
+
+function updateVectorCursorScreen(e: PointerEvent) {
+  if (!vectorActive.value || paintStore.mode !== 'vector') return
+  const root = canvasRef.value
+  if (!root) return
+  const rect = root.getBoundingClientRect()
+  vectorCursorPos.value = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+  // 圆圈由 DOM 接管后隐藏原生指针
+  const t = paintStore.activeTool
+  if (vectorCanvasRef.value && (t === 'brush' || t === 'eraser')) {
+    vectorCanvasRef.value.style.cursor = 'none'
+  }
+}
+
+function onVectorPointerLeave() {
+  vectorCursorPos.value = null
+  vectorPanning = false
+}
+
+// ─── 文字编辑（复用角色页 textEdit 投影）───
+const vectorTextComposing = ref(false)
+let vectorMeasureCtx: CanvasRenderingContext2D | null = null
+
+function measureVectorText(value: string, fontSize: number, lineHeightRatio: number) {
+  if (!vectorMeasureCtx) vectorMeasureCtx = document.createElement('canvas').getContext('2d')
+  const lh = fontSize * lineHeightRatio
+  const lines = value.split('\n')
+  if (!vectorMeasureCtx || !value) return { w: fontSize * 0.5, h: lh }
+  vectorMeasureCtx.font = `500 ${fontSize}px "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif`
+  let maxW = 0
+  for (const line of lines) {
+    maxW = Math.max(maxW, vectorMeasureCtx.measureText(line || ' ').width)
+  }
+  return { w: Math.max(maxW, 1), h: Math.max(lines.length, 1) * lh }
+}
+
+function refreshVectorTextSize() {
+  const te = paintStore.textEdit
+  const el = textAreaRef.value
+  if (!te || !el) return
+  const size = measureVectorText(el.value, te.fontSize, te.lineHeight)
+  if (Math.abs(te.width - size.w) > 0.5 || Math.abs(te.height - size.h) > 0.5) {
+    te.width = size.w
+    te.height = size.h
+  }
+}
+
+const vectorTextEditStyle = computed(() => {
+  const te = paintStore.textEdit
+  if (!te) return null
+  const base: Record<string, string> = {
+    fontSize: `${te.fontSize}px`,
+    lineHeight: String(te.lineHeight),
+    color: te.color,
+    left: `${te.x}px`,
+    top: `${te.y}px`,
+    width: `${Math.max(te.width, 1) + 1}px`,
+    height: `${Math.max(te.height, 1)}px`,
+  }
+  if (te.matrix) {
+    base.transform = te.matrix
+    base.transformOrigin = te.transformOrigin
+  }
+  return base
+})
+
+function commitVectorTextEdit() {
+  if (paintStore.textEdit) vectorEngine.textEditCommit()
+}
+
+function onVectorTextInput(e: Event) {
+  const el = e.target as HTMLTextAreaElement
+  refreshVectorTextSize()
+  if (vectorTextComposing.value) return
+  vectorEngine.textEditInput(el.value)
+}
+
+function onVectorTextCompositionStart() {
+  vectorTextComposing.value = true
+}
+
+function onVectorTextCompositionEnd(e: CompositionEvent) {
+  vectorTextComposing.value = false
+  refreshVectorTextSize()
+  vectorEngine.textEditInput((e.target as HTMLTextAreaElement).value)
+}
+
+function onVectorTextKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    commitVectorTextEdit()
+  }
+  e.stopPropagation()
+}
+
+watch(
+  () => paintStore.textEdit,
+  (te) => {
+    if (te) {
+      vectorTextComposing.value = false
+      const focusTa = () => {
+        const el = textAreaRef.value
+        if (!el) return
+        if (!el.value) el.value = te.value
+        el.focus({ preventScroll: true })
+        const len = el.value.length
+        el.setSelectionRange(len, len)
+      }
+      nextTick(() => {
+        focusTa()
+        requestAnimationFrame(focusTa)
+      })
+    } else {
+      vectorTextComposing.value = false
+    }
+  }
+)
+
+// ─── 矢量覆盖层上的平移/缩放转发 ───
+
+/** 取色：位图 + 矢量合成后读取点击点像素色（与角色页一致） */
+function pickVectorColor(e: PointerEvent): boolean {
+  if (!paintStore.eyedropperActive) return false
+  const frame = vectorFrame()
+  const p = mapVectorViewport.clientToArtboard(e)
+  if (!frame?.canvas || !p) return false
+  const cw = frame.canvas.width
+  const ch = frame.canvas.height
+  const x = Math.floor(p.x)
+  const y = Math.floor(p.y)
+  if (x < 0 || y < 0 || x >= cw || y >= ch) {
+    paintStore.endEyedropper()
+    return true
+  }
+  const comp = makeOffscreenCanvas(cw, ch)
+  const cctx = comp.getContext('2d')!
+  cctx.drawImage(frame.canvas, 0, 0)
+  const raster = vectorEngine.getFrameRaster(0)
+  if (raster) cctx.drawImage(raster, 0, 0, cw, ch)
+  const d = cctx.getImageData(x, y, 1, 1).data
+  paintStore.endEyedropper()
+  if (d[3] >= 16) {
+    const hex = '#' + [d[0], d[1], d[2]].map(v => v.toString(16).padStart(2, '0')).join('')
+    if (paintStore.eyedropperTarget === 'stroke') paintStore.strokeColor = hex
+    else paintStore.fillColor = hex
+  }
+  return true
+}
+
+function onVectorPointerDownCapture(e: PointerEvent) {
+  updateVectorCursorScreen(e)
+  // 取色优先：点击画布取色并结束会话（不进入 paper 工具）
+  if (e.button === 0 && paintStore.eyedropperActive) {
+    e.preventDefault()
+    e.stopImmediatePropagation()
+    pickVectorColor(e)
+    return
+  }
+  const pan = e.button === 1 || (e.button === 0 && (viewport.isSpacePressed() || e.altKey))
+  if (!pan) return
+  e.preventDefault()
+  e.stopImmediatePropagation()
+  vectorPanning = true
+  viewport.startPan(e.clientX, e.clientY)
+  viewport.setCursor('grabbing')
+}
+
+function onVectorPointerMoveCapture(e: PointerEvent) {
+  updateVectorCursorScreen(e)
+  if (!vectorPanning) return
+  e.stopImmediatePropagation()
+  viewport.handlePanMove(e.clientX, e.clientY)
+  syncVectorGeometry()
+}
+
+function onVectorPointerUpCapture(e: PointerEvent) {
+  if (!vectorPanning) return
+  e.stopImmediatePropagation()
+  vectorPanning = false
+  viewport.endPan()
+  viewport.setCursor('crosshair')
+}
+
+function onVectorWheel(e: WheelEvent) {
+  e.preventDefault()
+  viewport.onWheel(e)
+}
+
+// ─── 工具栏统一入口（按当前模式路由到位图/矢量）───
+
+function undoActive() {
+  if (vectorActive.value && paintStore.mode === 'vector') vectorEngine.undo()
+  else undoPaint()
+}
+
+function redoActive() {
+  if (vectorActive.value && paintStore.mode === 'vector') vectorEngine.redo()
+  else redoPaint()
+}
+
+function copyActive() {
+  if (vectorActive.value && paintStore.mode === 'vector') vectorEngine.copySelection()
+  else copyFloatingSelection()
+}
+
+function pasteActive() {
+  if (vectorActive.value && paintStore.mode === 'vector') {
+    if (paintStore.hasVectorClipboard) vectorEngine.pasteClipboard()
+  } else {
+    pasteFloatingSelection()
+  }
+}
+
+function deleteActive() {
+  if (vectorActive.value && paintStore.mode === 'vector') vectorEngine.deleteSelection()
+  else deleteSelection()
+}
+
+function flipActive(axis: 'h' | 'v') {
+  if (vectorActive.value && paintStore.mode === 'vector') vectorEngine.flipSelection(axis)
+  else flipSelection(axis)
+}
+
+function groupActive() {
+  if (vectorActive.value && paintStore.mode === 'vector') vectorEngine.groupSelection()
+}
+
+function ungroupActive() {
+  if (vectorActive.value && paintStore.mode === 'vector') vectorEngine.ungroupSelection()
+}
+
+function layerUpActive() {
+  if (vectorActive.value && paintStore.mode === 'vector') vectorEngine.layerMove('up')
+}
+
+function layerDownActive() {
+  if (vectorActive.value && paintStore.mode === 'vector') vectorEngine.layerMove('down')
+}
+
 // --- Interaction ---
 
 function onPointerDown(e: PointerEvent) {
@@ -1554,6 +2029,26 @@ function onPointerDown(e: PointerEvent) {
     viewport.setCursor('grabbing')
     e.preventDefault()
     return
+  }
+
+  // 位图取色：点击画布读取像素色并结束会话
+  if (mapStore.activeMode === 'image' && paintStore.eyedropperActive) {
+    const worldPos = viewport.screenToWorld(e)
+    const p = worldPos ? toCanvasPoint(worldPos) : null
+    const s = paintSession
+    const ctx = paintCtx()
+    if (p && s && ctx) {
+      const x = Math.max(0, Math.min(s.canvas.width - 1, Math.floor(p.x)))
+      const y = Math.max(0, Math.min(s.canvas.height - 1, Math.floor(p.y)))
+      const d = ctx.getImageData(x, y, 1, 1).data
+      paintStore.endEyedropper()
+      if (d[3] >= 16) {
+        const hex = '#' + [d[0], d[1], d[2]].map(v => v.toString(16).padStart(2, '0')).join('')
+        if (paintStore.eyedropperTarget === 'stroke') paintStore.strokeColor = hex
+        else paintStore.fillColor = hex
+      }
+      return
+    }
   }
 
   // 碰撞编辑模式下，指针事件全部交给碰撞工具，避免拖动/缩放图像
@@ -1608,7 +2103,10 @@ function onPointerDown(e: PointerEvent) {
 }
 
 function onPointerMove(e: PointerEvent) {
-  if (viewport.handlePanMove(e.clientX, e.clientY)) return
+  if (viewport.handlePanMove(e.clientX, e.clientY)) {
+    syncVectorGeometry()
+    return
+  }
 
   // 碰撞编辑：拖动顶点 / 拉矩形 / 钢笔预览
   if (mapEditorStore.imageCollisionTool !== 'none' && mapStore.selectedImage) {
@@ -1769,6 +2267,51 @@ function onKeyDown(e: KeyboardEvent) {
     viewport.onSpaceDown()
     return
   }
+  // 矢量模式快捷键：与角色绘制页一致（对象操作优先，屏蔽地图快捷键）
+  if (vectorActive.value && paintStore.mode === 'vector') {
+    const tag = (e.target as HTMLElement).tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return
+    const mod = e.ctrlKey || e.metaKey
+    if (paintStore.eyedropperActive) {
+      paintStore.endEyedropper()
+      e.preventDefault()
+      return
+    }
+    if (e.key === 'Escape') {
+      if (!vectorEngine.reshapeEscape()) vectorEngine.deselect()
+      e.preventDefault()
+      return
+    }
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (vectorEngine.reshapeDeletePoints()) {
+        e.preventDefault()
+      } else if (paintStore.vectorSelectedCount > 0) {
+        vectorEngine.deleteSelection()
+        e.preventDefault()
+      }
+      return
+    }
+    if (e.key.startsWith('Arrow')) {
+      if (vectorEngine.reshapeNudge(e.key, e.repeat)) e.preventDefault()
+      return
+    }
+    if (mod && (e.key === 'c' || e.key === 'C')) {
+      vectorEngine.copySelection()
+      e.preventDefault()
+      return
+    }
+    if (mod && (e.key === 'x' || e.key === 'X')) {
+      vectorEngine.cutSelection()
+      e.preventDefault()
+      return
+    }
+    if (mod && (e.key === 'v' || e.key === 'V')) {
+      if (paintStore.hasVectorClipboard) vectorEngine.pasteClipboard()
+      e.preventDefault()
+      return
+    }
+    return
+  }
   // 图片模式选取工具：Esc 取消浮动选区，Delete 删除选区内容
   if (mapStore.activeMode === 'image' && mapEditorStore.imageTool === 'select') {
     if (e.key === 'Escape' && floatCanvas) {
@@ -1850,6 +2393,7 @@ function setZoomAtCenter(next: number) {
   collision.drawCollisionOverlay()
   drawSelectionOverlay()
   redrawBrushCursor()
+  syncVectorGeometry()
 }
 
 function zoomIn() {
@@ -1920,7 +2464,38 @@ watch(
     }
     // 地图尺寸变化：正在绘制的背景图层按新尺寸重建画板
     if (paintSession && mapStore.selectedImage?.background) {
+      // 矢量内容先同步烘焙，避免重建画板时丢失
+      if (vectorActive.value) {
+        bakeVectorRasterSync()
+        vectorActive.value = false
+        paintStore.mode = 'bitmap'
+        mapEditorStore.setPaintMode('bitmap')
+      }
       void commitPaintSession(false).then(() => startPaintSession())
+    }
+  }
+)
+
+// 离开地图编辑器（切代码/角色/IDE 模式）时烘焙矢量内容，避免只在内存里
+watch(
+  () => [editorStore.isGameMode, editorStore.activeEditorMode],
+  () => {
+    if (vectorActive.value && (!editorStore.isGameMode || editorStore.activeEditorMode !== 'map')) {
+      void exitVectorMode()
+    }
+  }
+)
+
+// 矢量/位图模式切换：进入矢量需先有绘制会话，失败则回退位图
+watch(
+  () => mapEditorStore.paintMode,
+  async (mode) => {
+    if (mode === 'vector') {
+      const ok = await enterVectorMode()
+      if (!ok) mapEditorStore.setPaintMode('bitmap')
+      else transform.removeTransformBox()
+    } else {
+      await exitVectorMode()
     }
   }
 )
@@ -1929,6 +2504,13 @@ watch(
   () => mapEditorStore.imageTool,
   (tool) => {
     if (mapStore.activeMode !== 'image') return
+    if (vectorActive.value && paintStore.mode === 'vector') {
+      // 切到画笔/橡皮但还没移动鼠标时先给十字，避免原生指针被隐藏后完全看不到
+      if ((tool === 'brush' || tool === 'eraser') && !vectorCursorPos.value && vectorCanvasRef.value) {
+        vectorCanvasRef.value.style.cursor = 'crosshair'
+      }
+      return
+    }
     if (tool === 'select') {
       viewport.setCursor('default')
       // 选取工具需要绘制会话才能读写图片像素
@@ -2020,6 +2602,11 @@ watch(
 watch(
   () => mapStore.selectedImageLayerId,
   () => {
+    // 切换图片图层前先把矢量内容烘进位图，避免内容串层
+    if (vectorActive.value) {
+      void exitVectorMode()
+      mapEditorStore.setPaintMode('bitmap')
+    }
     collision.cancelCollisionDraft()
     collision.clearVertexSelection()
     resetFloatingSelection()
@@ -2072,6 +2659,8 @@ function scheduleRender() {
           await new Promise(r => requestAnimationFrame(r))
         }
         await renderAllLayers()
+        // 图片变换 / 图层重渲染后同步矢量覆盖层矩阵
+        syncVectorGeometry()
       }
     })
   }
@@ -2098,7 +2687,12 @@ watch(
 )
 
 // 切换地图时清理所有选中状态、变换框、拖拽状态
-function resetCanvasState() {
+async function resetCanvasState() {
+  // 先烘焙旧图层的矢量内容，再提交位图会话
+  if (vectorActive.value) {
+    await exitVectorMode()
+    mapEditorStore.setPaintMode('bitmap')
+  }
   void commitPaintSession()
   resetFloatingSelection()
   transform.resetTransformState()
@@ -2108,6 +2702,8 @@ function resetCanvasState() {
 }
 
 onMounted(() => {
+  // 页面重新挂载时回到位图模式（矢量内容已在离开时烘焙）
+  if (mapEditorStore.paintMode !== 'bitmap') mapEditorStore.setPaintMode('bitmap')
   nextTick(initPixi)
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
@@ -2117,6 +2713,12 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  // 卸载无法 await：同步烘焙矢量内容后的像素，再交给 commitPaintSession 落盘
+  if (vectorActive.value) {
+    bakeVectorRasterSync()
+    vectorActive.value = false
+    paintStore.mode = 'bitmap'
+  }
   void commitPaintSession()
   resizeObserver?.disconnect()
   resizeObserver = null
@@ -2170,36 +2772,232 @@ defineExpose({
   removeTransformBox: transform.removeTransformBox,
   resetCanvasState,
   getThumbnailDataUrl,
-  deleteSelection,
   placeImageFromPath,
-  undoPaint,
-  redoPaint,
+  undoActive,
+  redoActive,
+  copyActive,
+  pasteActive,
+  deleteActive,
+  flipActive,
+  groupActive,
+  ungroupActive,
+  layerUpActive,
+  layerDownActive,
   canUndoPaint,
   canRedoPaint,
   zoomPercent,
   zoomIn,
   zoomOut,
   resetZoom,
-  copySelection: copyFloatingSelection,
-  pasteSelection: pasteFloatingSelection,
-  flipSelection,
+  /** 地图保存/切换前：把矢量内容烘进位图并退出矢量模式 */
+  exitVectorPaint: exitVectorMode,
 })
 </script>
 
 <template>
-  <div
-    ref="canvasRef"
-    class="map-canvas"
-    @mousedown="onMouseDown"
-  />
+  <div ref="canvasRef" class="map-canvas" @mousedown="onMouseDown">
+    <!-- 矢量绘制画布：铺满地图画布、无 CSS transform，缩放/旋转由 paper view.matrix 处理 -->
+    <canvas
+      v-if="vectorActive"
+      ref="vectorCanvasRef"
+      class="map-vector-canvas"
+      @wheel="onVectorWheel"
+      @pointerdown.capture="onVectorPointerDownCapture"
+      @pointermove.capture="onVectorPointerMoveCapture"
+      @pointerup.capture="onVectorPointerUpCapture"
+      @pointercancel.capture="onVectorPointerUpCapture"
+      @pointerleave="onVectorPointerLeave"
+    ></canvas>
+    <!-- 矢量投影层：与图片像素坐标一致，整体套用仿射矩阵 -->
+    <div
+      v-if="vectorActive && paintStore.mode === 'vector' && vectorOverlayStyle"
+      class="map-vector-overlay"
+      :style="vectorOverlayStyle"
+    >
+      <svg
+        class="map-vector-svg"
+        :viewBox="`0 0 ${paintStore.artboardWidth} ${paintStore.artboardHeight}`"
+        preserveAspectRatio="none"
+      >
+        <!-- 选中变换框 -->
+        <template v-if="paintStore.vectorSelBox">
+          <polygon
+            :points="vectorBoxPoints"
+            fill="none"
+            stroke="rgba(18, 20, 38, 0.85)"
+            :stroke-width="vectorBoxStroke * 1.8"
+            stroke-linejoin="round"
+          />
+          <polygon
+            :points="vectorBoxPoints"
+            fill="none"
+            :stroke="VEC_SEL"
+            :stroke-width="vectorBoxStroke"
+            stroke-linejoin="round"
+          />
+          <rect
+            v-for="(h, i) in paintStore.vectorSelBox.handles"
+            :key="i"
+            :x="h.x - vectorHandleSize / 2"
+            :y="h.y - vectorHandleSize / 2"
+            :width="vectorHandleSize"
+            :height="vectorHandleSize"
+            fill="#ffffff"
+            :stroke="VEC_SEL_DEEP"
+            :stroke-width="vectorBoxStroke * 0.85"
+          />
+          <line
+            :x1="paintStore.vectorSelBox.rotateTop.x"
+            :y1="paintStore.vectorSelBox.rotateTop.y"
+            :x2="paintStore.vectorSelBox.rotateAt.x"
+            :y2="paintStore.vectorSelBox.rotateAt.y"
+            :stroke="VEC_SEL"
+            :stroke-width="vectorBoxStroke"
+          />
+          <circle
+            :cx="paintStore.vectorSelBox.rotateAt.x"
+            :cy="paintStore.vectorSelBox.rotateAt.y"
+            :r="vectorRotateRadius"
+            :fill="VEC_SEL"
+            :stroke="VEC_SEL_DEEP"
+            :stroke-width="vectorBoxStroke * 0.85"
+          />
+        </template>
+        <!-- 塑形锚点 -->
+        <template v-if="paintStore.reshapePts">
+          <path
+            v-for="(d, i) in paintStore.reshapeOutline || []"
+            :key="'o' + i"
+            :d="d"
+            fill="none"
+            :stroke="VEC_SEL"
+            :stroke-width="vectorBoxStroke"
+            stroke-linejoin="round"
+          />
+          <g v-for="(pt, i) in paintStore.reshapePts" :key="i">
+            <template v-if="pt.handleIn">
+              <line
+                :x1="pt.x" :y1="pt.y" :x2="pt.handleIn.x" :y2="pt.handleIn.y"
+                stroke="rgba(18, 20, 38, 0.7)" :stroke-width="vectorBoxStroke * 1.2"
+              />
+              <circle
+                :cx="pt.handleIn.x" :cy="pt.handleIn.y" :r="vectorPointSize * 0.38"
+                fill="#ffffff" :stroke="VEC_SEL_DEEP" :stroke-width="vectorBoxStroke * 0.85"
+              />
+            </template>
+            <template v-if="pt.handleOut">
+              <line
+                :x1="pt.x" :y1="pt.y" :x2="pt.handleOut.x" :y2="pt.handleOut.y"
+                stroke="rgba(18, 20, 38, 0.7)" :stroke-width="vectorBoxStroke * 1.2"
+              />
+              <circle
+                :cx="pt.handleOut.x" :cy="pt.handleOut.y" :r="vectorPointSize * 0.38"
+                fill="#ffffff" :stroke="VEC_SEL_DEEP" :stroke-width="vectorBoxStroke * 0.85"
+              />
+            </template>
+            <circle
+              :cx="pt.x" :cy="pt.y" :r="vectorPointSize / 2"
+              :fill="pt.selected ? VEC_SEL : '#ffffff'"
+              :stroke="VEC_SEL_DEEP" :stroke-width="vectorBoxStroke * 0.85"
+            />
+          </g>
+        </template>
+      </svg>
+      <textarea
+        v-if="paintStore.textEdit"
+        ref="textAreaRef"
+        class="map-vector-text"
+        :style="vectorTextEditStyle"
+        spellcheck="false"
+        autocomplete="off"
+        @input="onVectorTextInput"
+        @compositionstart="onVectorTextCompositionStart"
+        @compositionend="onVectorTextCompositionEnd"
+        @keydown="onVectorTextKeydown"
+      ></textarea>
+    </div>
+    <!-- 矢量画笔/橡皮光标（屏幕坐标，DOM 圆圈抗锯齿） -->
+    <div
+      v-if="vectorCursorStyle"
+      class="map-vector-brush-cursor"
+      :style="vectorCursorStyle"
+    ></div>
+  </div>
 </template>
 
 <style scoped>
 .map-canvas {
+  position: relative;
   width: 100%;
   height: 100%;
   background: rgb(30, 30, 30);
   overflow: hidden;
   outline: none;
+}
+
+.map-vector-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 10;
+  touch-action: none;
+}
+
+.map-vector-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  z-index: 11;
+}
+
+.map-vector-svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+/* 文字编辑框：与 paper PointText 对齐（无 padding/border，尺寸由引擎写入） */
+.map-vector-text {
+  position: absolute;
+  pointer-events: auto;
+  margin: 0;
+  padding: 0;
+  border: none;
+  outline: 1px dashed rgba(24, 27, 50, 0.7);
+  outline-offset: 2px;
+  background: transparent;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  font-family: 'HarmonyOS Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-weight: 500;
+  caret-color: currentColor;
+  box-sizing: content-box;
+  transform-origin: 0 0;
+}
+
+.map-vector-cursor {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+/* 矢量画笔圆圈：屏幕坐标 DOM 圆环，任意缩放无锯齿 */
+.map-vector-brush-cursor {
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.95);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  z-index: 12;
 }
 </style>

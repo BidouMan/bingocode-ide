@@ -126,6 +126,8 @@ watch(strokeChecked, (v) => {
 
 // ─── 描边色弹层（迷你 SV+色相条，编辑 store.strokeColor）───
 const strokePop = ref(false)
+// fixed 定位：避免被颜色面板/右侧栏的 overflow 裁剪（地图编辑器尤其明显）
+const strokePopStyle = ref<Record<string, string>>({})
 const sHue = ref(0)
 const sSat = ref(0)
 const sVal = ref(1)
@@ -154,6 +156,24 @@ function onWindowPointerDown(e: PointerEvent) {
   if (!strokePop.value) return
   const t = e.target as HTMLElement | null
   if (!t || !t.closest('.stroke-color-wrap')) strokePop.value = false
+}
+
+/** 打开弹层：按按钮位置计算 fixed 坐标（优先左侧展开，超出则右侧/上移） */
+function toggleStrokePop(e: MouseEvent) {
+  if (strokePop.value) {
+    strokePop.value = false
+    return
+  }
+  const btn = e.currentTarget as HTMLElement
+  const r = btn.getBoundingClientRect()
+  const width = 170
+  const height = 230
+  let left = r.left - width - 6
+  if (left < 8) left = Math.min(window.innerWidth - width - 8, r.right + 6)
+  let top = r.top
+  if (top + height > window.innerHeight - 8) top = Math.max(8, window.innerHeight - height - 8)
+  strokePopStyle.value = { left: `${left}px`, top: `${top}px` }
+  strokePop.value = true
 }
 
 // ─── 拾色（吸管）：开启后点击画板取该点像素色写入目标通道（引擎在画板点击时消费）───
@@ -422,9 +442,9 @@ const showLineWidth = () => store.activeTool === 'line'
               class="stroke-color-btn"
               :style="{ background: store.strokeColor }"
               title="描边颜色"
-              @click.stop="strokePop = !strokePop"
+              @click.stop="toggleStrokePop($event)"
             ></button>
-            <div v-if="strokePop" class="stroke-pop">
+            <div v-if="strokePop" class="stroke-pop" :style="strokePopStyle">
               <div
                 ref="sSvRef"
                 class="sv-square"
@@ -569,10 +589,8 @@ const showLineWidth = () => store.activeTool === 'line'
 }
 
 .stroke-pop {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
-  z-index: 30;
+  position: fixed;
+  z-index: 1000;
   width: 170px;
   padding: 10px;
   display: flex;

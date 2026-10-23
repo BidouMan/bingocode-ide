@@ -13,6 +13,35 @@ import {
 const HISTORY_LIMIT = 25
 
 /**
+ * 可选视口适配器：让矢量引擎脱离角色绘制页的固定居中画板，
+ * 挂到任意画布（如地图画布）上。逻辑坐标始终为“绘制画布像素”。
+ */
+export interface PaperViewportAdapter {
+  /** 屏幕坐标 → 逻辑坐标（null 表示无法换算） */
+  clientToArtboard: (e: { clientX: number; clientY: number }) => { x: number; y: number } | null
+  /** 逻辑坐标 → 画布像素的仿射矩阵（paper.Matrix 的 a~ty） */
+  getViewMatrix: (sw: number, sh: number) => {
+    a: number
+    b: number
+    c: number
+    d: number
+    tx: number
+    ty: number
+  }
+  /** 画布裁剪路径（CSS clip-path），返回 undefined 表示不裁剪 */
+  getClipPath: (sw: number, sh: number) => string | undefined
+}
+
+export interface PaperScopeOptions {
+  /** 自定义视口；不传时保持角色绘制页原有算法 */
+  viewport?: PaperViewportAdapter
+  /** 单帧模式：跳过角色帧切换/导入导出逻辑（地图图片图层用） */
+  singleFrame?: boolean
+  /** 是否创建位图代理 Raster；地图侧传 false，避免与 Pixi 底图重影 */
+  proxy?: boolean
+}
+
+/**
  * 矢量绘制引擎（paper 接入）。
  *
  * 架构约束：
@@ -50,7 +79,8 @@ export function usePaperScope(
       /** 清空当前帧位图像素（矢量模式 Delete 命中代理时，对齐 Scratch 删 image） */
       clearFrame: () => void
     }
-  }
+  },
+  options: PaperScopeOptions = {}
 ) {
   const store = usePaintStore()
 
@@ -187,6 +217,7 @@ export function usePaperScope(
   function syncBitmapRaster() {
     if (!scope) return
     removeBitmapRaster()
+    if (options.proxy === false) return
     if (store.mode !== 'vector') return
     const src = hooks.bitmapLayer.getFrame()
     if (!src || src.width === 0 || src.height === 0) return
@@ -252,6 +283,10 @@ export function usePaperScope(
 
   /** 屏幕坐标 → 画板逻辑坐标（用位图画布 rect 实测除法：其位于 artboard transform 内，恒准） */
   function clientToArtboard(e: { clientX: number; clientY: number }) {
+    if (options.viewport) {
+      const mapped = options.viewport.clientToArtboard(e)
+      if (mapped) return mapped
+    }
     const el = coordRef.value ?? canvasRef.value!
     const rect = el.getBoundingClientRect()
     return {
@@ -563,10 +598,12 @@ export function usePaperScope(
     hooks.onFrameSwitched(old, target)
   }
 
-  watch(() => store.activeFrameIndex, () => {
-    forceEndTextEdit() // 切帧前收口编辑（编辑态引用不能跨帧）
-    syncActiveFrame()
-  })
+  if (!options.singleFrame) {
+    watch(() => store.activeFrameIndex, () => {
+      forceEndTextEdit() // 切帧前收口编辑（编辑态引用不能跨帧）
+      syncActiveFrame()
+    })
+  }
 
   /** 帧数组增删同步（由 PaintArtboard 编排，须与位图像素数组保持下标对齐） */
   function onFrameAdded(duplicate: boolean, newIndex: number) {
@@ -3219,6 +3256,16 @@ export function usePaperScope(
     const ctx = canvas.getContext('2d')
     if (ctx) ctx.setTransform(pr, 0, 0, pr, 0, 0) // 归正基础 transform（含 pr===1 残留修复）
 
+    // 自定义视口（地图画布）：矩阵与裁剪由适配器提供，逻辑坐标=图片绘制画布像素
+    if (options.viewport) {
+      const m = options.viewport.getViewMatrix(sw, sh)
+      view.matrix = new scope.Matrix(m.a, m.b, m.c, m.d, m.tx, m.ty)
+      canvas.style.clipPath = options.viewport.getClipPath(sw, sh) ?? ''
+      priv._needsUpdate = true
+      view.update()
+      return
+    }
+
     // 逻辑 → 舞台：与 artboard「flex 居中 + translate(pan) scale(zoom)（origin center）」等价
     const z = store.zoom
     const tx = sw / 2 + store.panX - (aw * z) / 2
@@ -3379,6 +3426,8 @@ export function usePaperScope(
     undo,
     redo,
     clearLayer,
+    /** 视口/图片变换变化后强制重同步（地图适配器用） */
+    refreshView: syncVectorView,
     deleteSelection,
     copySelection,
     cutSelection,
