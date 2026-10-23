@@ -19,7 +19,7 @@ const vectorCanvas = ref<HTMLCanvasElement>()
 // 帧操作函数取别名：下方包装器编排双引擎（矢量槽位与位图像素数组保持下标对齐）
 const {
   undo: bitmapUndo, redo: bitmapRedo, clear: bitmapClear, cropToContent,
-  addFrame: bitmapAddFrame, removeFrame: bitmapRemoveFrame,
+  addFrame: bitmapAddFrame, removeFrame: bitmapRemoveFrame, moveFrame: bitmapMoveFrame,
   loadFrames: bitmapLoadFrames, getFrameCanvases: bitmapGetFrameCanvases, getFrameNames,
   copySelection, pasteClipboard, deleteSelection, flipSelection, commitAndDeselect,
   replacePixelsForBake: bitmapBakeReplacePixels,
@@ -460,6 +460,20 @@ function removeFrame(index: number): boolean {
   return ok
 }
 
+/**
+ * 拖拽排序：双引擎帧槽同步换位，落点帧成为当前编辑帧。
+ * 先收口文字编辑与位图浮动选区，避免像素/变换框滞留在旧下标。
+ */
+function moveFrame(from: number, to: number) {
+  if (store.frames.length <= 1 || from === to) return
+  if (from < 0 || to < 0 || from >= store.frames.length || to >= store.frames.length) return
+  commitTextEdit()
+  commitAndDeselect()
+  vectorEngine.moveFrame(from, to)
+  bitmapMoveFrame(from, to)
+  store.selectFrame(to)
+}
+
 /** 整体载入（编辑既有角色）：既有帧均为纯位图，矢量槽重置 */
 function loadFrames(
   canvases: HTMLCanvasElement[],
@@ -716,6 +730,7 @@ defineExpose({
   cropToContent,
   addFrame,
   removeFrame,
+  moveFrame,
   loadFrames,
   getFrameCanvases: getFrameCanvasesComposed,
   getFrameNames,

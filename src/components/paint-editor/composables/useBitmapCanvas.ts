@@ -507,6 +507,36 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
   }
 
   /**
+   * 移动帧：像素、帧名、帧元数据同步换位。
+   * 活动帧内容没有变化，只把 currentIdx 同步到帧的新下标，
+   * 避免 activeFrameIndex watcher 误把 DOM 内容 flush 到错位的像素槽。
+   */
+  function moveFrame(from: number, to: number) {
+    const count = store.frames.length
+    if (from === to || from < 0 || to < 0 || from >= count || to >= count) return
+    flushActiveToPixels()
+
+    const moveItem = <T,>(arr: T[]) => {
+      const [item] = arr.splice(from, 1)
+      arr.splice(to, 0, item)
+    }
+    moveItem(pixels)
+    moveItem(frameNames)
+    moveItem(store.frames)
+
+    // 活动帧跟随帧身份（同一 id）走，当前 DOM 画面无需重载
+    const follow = (i: number) => {
+      if (i === from) return to
+      if (from < to && i > from && i <= to) return i - 1
+      if (from > to && i >= to && i < from) return i + 1
+      return i
+    }
+    currentIdx = currentIdx >= 0 ? follow(currentIdx) : currentIdx
+    store.activeFrameIndex = follow(store.activeFrameIndex)
+    markDirty()
+  }
+
+  /**
    * 整体载入一组帧（编辑既有角色）：替换全部离屏像素与帧名，切到指定帧。
    * 载入帧为全画布尺寸；names[i] 为原帧名（新建帧传 null，保存时生成）。
    */
@@ -1398,6 +1428,7 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     cropToContent,
     addFrame,
     removeFrame,
+    moveFrame,
     loadFrames,
     replacePixelsForBake,
     transformWholeFrame,

@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { ask } from '@tauri-apps/plugin-dialog'
 import { usePaintStore } from '../../stores/paint'
+import { useFrameReorder } from '../../composables/useFrameReorder'
 
 import iconAdd from '../../assets/icons/add-one.svg'
 import iconCopy from '../../assets/icons/copy.svg'
@@ -12,7 +14,29 @@ const emit = defineEmits<{
   add: []
   duplicate: []
   remove: [index: number]
+  reorder: [from: number, to: number]
 }>()
+
+const frameListEl = ref<HTMLElement | null>(null)
+
+const {
+  draggingIndex: dragIndex,
+  ghost: dragGhost,
+  indicator: dropIndicator,
+  onItemMouseDown,
+  shouldSuppressClick,
+} = useFrameReorder({
+  orientation: 'horizontal',
+  count: () => store.frames.length,
+  getItemEls: () => Array.from(frameListEl.value?.querySelectorAll<HTMLElement>('.frame-card') ?? []),
+  getScrollEl: () => frameListEl.value,
+  onReorder: (from, to) => emit('reorder', from, to),
+})
+
+function onSelect(index: number) {
+  if (shouldSuppressClick()) return
+  store.selectFrame(index)
+}
 
 async function onRemove() {
   if (store.frames.length <= 1) return
@@ -27,14 +51,18 @@ async function onRemove() {
 
 <template>
   <div class="frame-strip">
-    <div class="frame-list">
+    <div ref="frameListEl" class="frame-list" :class="{ 'frame-list-dragging': dragIndex !== null }">
       <button
         v-for="(f, i) in store.frames"
         :key="f.id"
         class="frame-card"
-        :class="{ 'frame-card-active': i === store.activeFrameIndex }"
-        :title="`第 ${i + 1} 帧`"
-        @click="store.selectFrame(i)"
+        :class="{
+          'frame-card-active': i === store.activeFrameIndex,
+          'frame-card-source': dragIndex === i,
+        }"
+        :title="`第 ${i + 1} 帧（拖拽可调整顺序）`"
+        @click="onSelect(i)"
+        @mousedown="onItemMouseDown(i, $event)"
       >
         <img v-if="f.thumb" :src="f.thumb" class="frame-thumb" draggable="false" />
         <div v-else class="frame-thumb frame-thumb-empty"></div>
@@ -58,6 +86,32 @@ async function onRemove() {
         <img :src="iconDelete" draggable="false" />
       </button>
     </div>
+
+    <!-- 拖拽插入线（PS 图层面板式：目标位置一条高亮线） -->
+    <Teleport to="body">
+      <div
+        v-if="dropIndicator"
+        class="frame-drop-line"
+        :style="{
+          left: dropIndicator.x + 'px',
+          top: dropIndicator.y + 'px',
+          height: dropIndicator.length + 'px',
+        }"
+      ></div>
+      <div
+        v-if="dragGhost"
+        class="frame-drag-ghost"
+        :style="{ left: dragGhost.x + 'px', top: dragGhost.y + 'px' }"
+      >
+        <img
+          v-if="store.frames[dragGhost.index]?.thumb"
+          :src="store.frames[dragGhost.index]?.thumb"
+          class="frame-ghost-thumb"
+          draggable="false"
+        />
+        <span class="frame-ghost-label">{{ dragGhost.index + 1 }}</span>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -85,6 +139,12 @@ async function onRemove() {
   height: 100%;
   padding: 8px 2px;
 }
+.frame-list-dragging {
+  cursor: grabbing;
+}
+.frame-list-dragging .frame-card {
+  cursor: grabbing;
+}
 
 .frame-card {
   display: flex;
@@ -99,7 +159,7 @@ async function onRemove() {
   border: 1px solid var(--border-light);
   border-radius: 6px;
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition: border-color 0.15s, background 0.15s, opacity 0.15s;
   flex-shrink: 0;
 }
 .frame-card:hover {
@@ -108,6 +168,11 @@ async function onRemove() {
 .frame-card-active {
   border-color: var(--accent);
   background: var(--bg-hover);
+}
+/* 拖拽源卡片压暗，明确"正在被搬走" */
+.frame-card-source {
+  opacity: 0.35;
+  cursor: grabbing;
 }
 
 .frame-thumb {
@@ -162,5 +227,49 @@ async function onRemove() {
   width: 18px;
   height: 18px;
   pointer-events: none;
+}
+
+/* ─── 拖拽快照 / 插入线（Teleport 到 body，fixed 定位不被容器裁剪） ─── */
+.frame-drop-line {
+  position: fixed;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px rgba(34, 37, 43, 0.85), 0 0 10px rgba(91, 251, 132, 0.6);
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 99999;
+}
+
+.frame-drag-ghost {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 78px;
+  height: 64px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5);
+  opacity: 0.85;
+  transform: translate(-50%, -50%) scale(1.03);
+  pointer-events: none;
+  z-index: 100000;
+}
+.frame-ghost-thumb {
+  height: 36px;
+  max-width: 60px;
+  object-fit: contain;
+  background: repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 50% / 8px 8px;
+  border-radius: 3px;
+}
+.frame-ghost-label {
+  font-size: 10px;
+  line-height: 1;
+  color: var(--accent);
 }
 </style>

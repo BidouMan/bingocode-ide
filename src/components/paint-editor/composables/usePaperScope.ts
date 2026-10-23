@@ -633,6 +633,31 @@ export function usePaperScope(
     }
   }
 
+  /**
+   * 移动帧槽：矢量快照与栅格缓存同步换位。
+   * 当前场景内容属于活动帧，只把 currentIdx 同步到新下标，不重新导入场景。
+   */
+  function moveFrame(from: number, to: number) {
+    const count = frameJson.length
+    if (from === to || from < 0 || to < 0 || from >= count || to >= count) return
+    exportActiveFrame()
+
+    const moveItem = <T,>(arr: T[]) => {
+      const [item] = arr.splice(from, 1)
+      arr.splice(to, 0, item)
+    }
+    moveItem(frameJson)
+    moveItem(frameRaster)
+
+    const follow = (i: number) => {
+      if (i === from) return to
+      if (from < to && i > from && i <= to) return i - 1
+      if (from > to && i >= to && i < from) return i + 1
+      return i
+    }
+    if (currentIdx >= 0) currentIdx = follow(currentIdx)
+  }
+
   /** 整体载入（编辑既有角色）：既有帧均为纯位图，矢量槽全部清空 */
   function onLoadFrames(count: number) {
     frameJson = Array.from({ length: count }, () => null)
@@ -3555,6 +3580,7 @@ export function usePaperScope(
     syncActiveFrame,
     onFrameAdded,
     onFrameRemoved,
+    moveFrame,
     onLoadFrames,
     beforeExport,
     clearAllForBake,

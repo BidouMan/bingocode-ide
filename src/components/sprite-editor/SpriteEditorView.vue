@@ -6,6 +6,7 @@ import type { SpriteData, SpriteAnimation } from '../../composables/useSpriteDat
 import { readSpriteFromPath, revokeSpriteUrls, saveSpriteConfig, saveBsfManifest, isImageSpritePath, buildSingleFrameBsfMeta, imageSpriteToBsfDir, loadImage } from '../../composables/useSpriteData'
 import type { SpriteCollisionShape } from '../../composables/useSpriteData'
 import { appendFramesToSprite } from '../../composables/appendSpriteFrames'
+import { useFrameReorder } from '../../composables/useFrameReorder'
 import { cssImageRendering } from '../../utils/renderMode'
 import { drawImageCrisp } from '../../utils/pixelCanvas'
 import FrameUploadDrawer from './FrameUploadDrawer.vue'
@@ -198,6 +199,22 @@ const renamingAnim = ref<string | null>(null)
 const renameInputRef = ref<HTMLInputElement | null>(null)
 let playTimer: ReturnType<typeof setInterval> | null = null
 
+// ─── 造型列表拖拽排序（PS 图层面板观感：快照跟手 + 插入线） ───
+const costumeListEl = ref<HTMLElement | null>(null)
+const {
+  draggingIndex: frameDragIndex,
+  ghost: frameDragGhost,
+  indicator: frameDropIndicator,
+  onItemMouseDown: onCostumeMouseDown,
+  shouldSuppressClick: shouldSuppressCostumeClick,
+} = useFrameReorder({
+  orientation: 'vertical',
+  count: () => currentSprite.value?.frames.length ?? 0,
+  getItemEls: () => Array.from(costumeListEl.value?.querySelectorAll<HTMLElement>('.costume-item') ?? []),
+  getScrollEl: () => costumeListEl.value,
+  onReorder: (from, to) => moveCostume(from, to),
+})
+
 watch(
   () => resourceStore.selectedSpriteId,
   (id) => {
@@ -335,6 +352,37 @@ function selectFrame(index: number) {
   costumeHighlightIndex.value = index
   canvasDisplayIndex.value = index
   markDefaultFrame(index)
+}
+
+/** 点击/双击前检查拖拽尾随 click，防止排序后误选旧下标的帧 */
+function onCostumeClick(index: number) {
+  if (shouldSuppressCostumeClick()) return
+  selectFrame(index)
+}
+
+function onCostumeDblClick(index: number) {
+  if (shouldSuppressCostumeClick()) return
+  emit('openPaintEdit', index)
+}
+
+/** 拖拽排序造型帧：帧列表与 .bsf 帧元数据同步换位，动画段继续按位置区间生效 */
+function moveCostume(from: number, to: number) {
+  const sprite = currentSprite.value
+  const count = sprite?.frames.length ?? 0
+  if (!sprite || from === to || from < 0 || to < 0 || from >= count || to >= count) return
+  const moveItem = <T,>(arr: T[]) => {
+    const [item] = arr.splice(from, 1)
+    arr.splice(to, 0, item)
+  }
+  moveItem(sprite.frames)
+  // 帧级中心/碰撞/标记覆盖挂在 bsf.frames 上，必须与可见帧同步换位
+  if (sprite.bsf) moveItem(sprite.bsf.frames)
+  // 动画段是位置区间：区间编号不动；显式 clip 序列保存时按区间重建
+  for (const anim of sprite.animations) anim.frameNames = undefined
+  // 拖拽的帧成为当前造型（与点击选中一致，默认渲染帧/缩略图同步）
+  defaultFrameDirty = true
+  selectFrame(to)
+  scheduleSave()
 }
 
 /** 从磁盘强制重载当前角色（追加帧后刷新帧列表；绕过 loadSprite 防重复守卫） */
@@ -1103,18 +1151,26 @@ onBeforeUnmount(() => {
     </div>
     <!-- 左: 造型列表 (100px) + 追加抽屉 -->
     <div class="costume-list-wrap">
-      <div class="costume-list">
+      <div
+        ref="costumeListEl"
+        class="costume-list"
+        :class="{ 'costume-list-dragging': frameDragIndex !== null }"
+      >
         <div
           v-for="(frame, idx) in (currentSprite?.frames || [])"
           :key="idx"
           class="costume-item"
-          :class="{ 'costume-item-active': costumeHighlightIndex === idx }"
-          title="双击进入绘制编辑"
-          @click="selectFrame(idx)"
-          @dblclick.stop="emit('openPaintEdit', idx)"
+          :class="{
+            'costume-item-active': costumeHighlightIndex === idx,
+            'costume-item-dragging': frameDragIndex === idx,
+          }"
+          title="拖拽可调整顺序，双击进入绘制编辑"
+          @click="onCostumeClick(idx)"
+          @dblclick.stop="onCostumeDblClick(idx)"
           @contextmenu="onCostumeContextMenu($event, idx)"
+          @mousedown="onCostumeMouseDown(idx, $event)"
         >
-          <img :src="frame.url" class="costume-thumb" :style="{ imageRendering: imageRenderingStyle }" />
+          <img :src="frame.url" class="costume-thumb" :style="{ imageRendering: imageRenderingStyle }" draggable="false" />
           <span class="costume-frame-num">帧 {{ idx + 1 }}</span>
           <!-- 中心点单帧覆盖标记 -->
           <span
@@ -1561,6 +1617,33 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </Teleport>
+
+    <!-- 拖拽排序：插入线 + 跟随光标的造型快照（PS 图层面板观感） -->
+    <Teleport to="body">
+      <div
+        v-if="frameDropIndicator"
+        class="frame-drop-line"
+        :style="{
+          left: frameDropIndicator.x + 'px',
+          top: frameDropIndicator.y + 'px',
+          width: frameDropIndicator.length + 'px',
+        }"
+      ></div>
+      <div
+        v-if="frameDragGhost"
+        class="costume-drag-ghost"
+        :style="{ left: frameDragGhost.x + 'px', top: frameDragGhost.y + 'px' }"
+      >
+        <img
+          v-if="currentSprite?.frames[frameDragGhost.index]"
+          :src="currentSprite.frames[frameDragGhost.index].url"
+          class="costume-ghost-thumb"
+          :style="{ imageRendering: imageRenderingStyle }"
+          draggable="false"
+        />
+        <span class="costume-ghost-label">帧 {{ frameDragGhost.index + 1 }}</span>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1641,6 +1724,53 @@ onBeforeUnmount(() => {
 .costume-frame-num {
   font-size: 10px;
   color: #abb2bf;
+  margin-top: 2px;
+}
+/* 拖拽源：压暗但保留原位置（PS 图层面板观感） */
+.costume-item.costume-item-dragging {
+  opacity: 0.35;
+  cursor: grabbing;
+}
+.costume-list-dragging .costume-item {
+  cursor: grabbing;
+}
+
+/* ─── 拖拽快照 / 插入线（fixed，不被列表容器裁剪） ─── */
+.frame-drop-line {
+  position: fixed;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px rgba(34, 37, 43, 0.85), 0 0 10px rgba(91, 251, 132, 0.6);
+  transform: translateY(-50%);
+  pointer-events: none;
+  z-index: 99999;
+}
+.costume-drag-ghost {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  background: var(--bg-darker);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5);
+  opacity: 0.85;
+  transform: translate(-50%, -50%) scale(1.03);
+  pointer-events: none;
+  z-index: 100000;
+}
+.costume-ghost-thumb {
+  width: 78px;
+  height: 60px;
+  object-fit: contain;
+}
+.costume-ghost-label {
+  font-size: 10px;
+  line-height: 1;
+  color: var(--accent);
   margin-top: 2px;
 }
 

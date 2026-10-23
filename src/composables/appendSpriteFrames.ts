@@ -304,10 +304,20 @@ async function rewriteBsfDir(
 
   // clips：帧序列过滤已删帧名；空 clip 移除（readSpriteFromPath 读取的 clips 带 frameNames）
   const nameSet = new Set(names)
+  // 绘制页拖拽过帧顺序：动画段按位置区间重新取帧，确保播放顺序跟随新序列
+  const oldNames = sprite.frames.map((f) => f.name)
+  const reordered =
+    oldNames.length === names.length &&
+    oldNames.every((n) => nameSet.has(n)) &&
+    oldNames.some((n, i) => n !== names[i])
   const clips = sprite.animations
     .map((a) => {
       let frameList: string[]
-      if (a.frameNames && a.frameNames.length > 0) {
+      if (reordered) {
+        const start = Math.min(Math.max(1, a.start), names.length)
+        const end = Math.min(Math.max(start, a.end), names.length)
+        frameList = names.slice(start - 1, end)
+      } else if (a.frameNames && a.frameNames.length > 0) {
         frameList = a.frameNames.filter((n) => nameSet.has(n))
       } else {
         // 无原始序列信息时回退为全部帧

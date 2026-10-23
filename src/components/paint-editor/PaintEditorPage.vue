@@ -130,6 +130,11 @@ onMounted(async () => {
   }
 })
 
+/** 底部帧带拖拽排序：双引擎帧槽同步换位 */
+function onReorderFrames(from: number, to: number) {
+  artboardRef.value?.moveFrame(from, to)
+}
+
 async function onClose() {
   if (store.dirty) {
     const shouldClose = await ask('画板有未保存的修改，关闭后将丢失。确定关闭吗？', {
@@ -229,6 +234,7 @@ async function onSave() {
           @add="artboardRef?.addFrame(false)"
           @duplicate="artboardRef?.addFrame(true)"
           @remove="artboardRef?.removeFrame($event)"
+          @reorder="onReorderFrames"
         />
       </div>
       <PaintColorPanel />
