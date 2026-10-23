@@ -13,6 +13,8 @@ export interface MapSaveData {
   resources?: ResourceSaveData[]
   layers: LayerSaveData[]
   tilesets: TilesetSaveData[]
+  // 图块笔刷调色板（顺序=界面显示顺序）
+  tilePalette?: { resourceId: string; tileIndex: number }[]
 }
 
 export interface LayerSaveData {
@@ -83,6 +85,7 @@ export interface MapLoadData {
   resources: any[]
   layers: any[]
   tileSets: any[]
+  tilePalette?: { resourceId: string; tileIndex: number }[]
 }
 
 /**
@@ -231,6 +234,7 @@ export function serializeMap(mapData: any): MapSaveData {
     resources: mapResources,
     layers,
     tilesets,
+    tilePalette: mapData.tilePalette,
   }
 }
 
@@ -394,5 +398,6 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
     resources,
     layers,
     tileSets,
+    tilePalette: data.tilePalette,
   }
 }

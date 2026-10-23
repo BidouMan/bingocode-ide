@@ -94,6 +94,13 @@ export interface MapData {
   resources: MapResource[]
   layers: MapLayer[]
   tileSets: TileSet[]
+  // 图块笔刷调色板：每个图块一个独立条目（顺序=界面显示顺序），缺省时由资源自动生成
+  tilePalette?: TilePaletteEntry[]
+}
+
+export interface TilePaletteEntry {
+  resourceId: string
+  tileIndex: number
 }
 
 export type MapTool = 'move' | 'select' | 'draw' | 'erase' | 'fill'
@@ -151,6 +158,19 @@ export const useMapStore = defineStore('map', () => {
     const layer = mapData.value.layers.find(l => l.id === selectedImageLayerId.value)
     if (!layer || layer.type !== 'image') return null
     return layer.image
+  })
+
+  /**
+   * 场景级渲染模式（自动判定，忽略全局渲染设置）：
+   * - 存在图块图层 → pixelated：图块是像素素材，整张画布必须最近邻
+   * - 存在位图图片图层 → pixelated：整张画布按位图模式渲染
+   * - 全部为矢量图层 → smooth：按矢量渲染
+   */
+  const sceneRenderMode = computed<'smooth' | 'pixelated'>(() => {
+    const layers = mapData.value.layers
+    if (layers.some(l => l.type === 'drawing')) return 'pixelated'
+    const hasBitmapImage = layers.some(l => l.type === 'image' && !l.image.vectorData)
+    return hasBitmapImage ? 'pixelated' : 'smooth'
   })
 
   // 素材与 tileset 通过稳定 id / firstgid 绑定，不再依赖图层顺序或全局偏移
@@ -366,7 +386,15 @@ export const useMapStore = defineStore('map', () => {
       selectedTileIndex.value = -1
     } else {
       mapEditor.setTool('draw')
-      if (activeLayerResources.value.length > 0) {
+      const palette = mapData.value.tilePalette
+      const first = palette?.find(e =>
+        activeLayerResources.value.some(r => r.id === e.resourceId)
+      )
+      if (first) {
+        const rIdx = activeLayerResources.value.findIndex(r => r.id === first.resourceId)
+        selectedResourceIndex.value = rIdx
+        selectedTileIndex.value = first.tileIndex
+      } else if (!palette && activeLayerResources.value.length > 0) {
         selectedResourceIndex.value = 0
         selectedTileIndex.value = 0
       } else {
@@ -389,7 +417,7 @@ export const useMapStore = defineStore('map', () => {
     selectedTileIndex.value = tileIndex
   }
 
-  function addResource(input: MapResourceInput) {
+  function addResource(input: MapResourceInput): string {
     // firstgid 只在创建时分配一次，之后不再随图层/素材顺序变化
     const nextFirstgid = mapData.value.tileSets.length > 0
       ? Math.max(...mapData.value.tileSets.map(ts => ts.firstgid)) + 10000
@@ -412,6 +440,50 @@ export const useMapStore = defineStore('map', () => {
       collisionEnabled: resource.collisionEnabled,
       tiles: [],
     })
+    return resource.id
+  }
+
+  // ====== 图块笔刷调色板 ======
+  function addPaletteEntries(entries: TilePaletteEntry[]) {
+    if (entries.length === 0) return
+    const existing = mapData.value.tilePalette ?? []
+    const seen = new Set(existing.map(e => `${e.resourceId}:${e.tileIndex}`))
+    const merged = [...existing]
+    for (const e of entries) {
+      const key = `${e.resourceId}:${e.tileIndex}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      merged.push({ resourceId: e.resourceId, tileIndex: e.tileIndex })
+    }
+    mapData.value.tilePalette = merged
+  }
+
+  function setTilePalette(entries: TilePaletteEntry[]) {
+    mapData.value.tilePalette = entries.map(e => ({ resourceId: e.resourceId, tileIndex: e.tileIndex }))
+  }
+
+  function movePaletteEntry(from: number, to: number) {
+    const arr = [...(mapData.value.tilePalette ?? [])]
+    if (from < 0 || from >= arr.length) return
+    const clamped = Math.max(0, Math.min(to, arr.length - 1))
+    if (clamped === from) return
+    const [item] = arr.splice(from, 1)
+    arr.splice(clamped, 0, item)
+    mapData.value.tilePalette = arr
+  }
+
+  function removePaletteEntry(index: number) {
+    const arr = [...(mapData.value.tilePalette ?? [])]
+    if (index < 0 || index >= arr.length) return
+    const removed = arr[index]
+    arr.splice(index, 1)
+    mapData.value.tilePalette = arr
+    // 当前选中的笔刷被移除时清空选择
+    const rIdx = activeLayerResources.value.findIndex(r => r.id === removed.resourceId)
+    if (rIdx === selectedResourceIndex.value && removed.tileIndex === selectedTileIndex.value) {
+      selectedResourceIndex.value = -1
+      selectedTileIndex.value = -1
+    }
   }
 
   function removeResource(index: number) {
@@ -430,6 +502,9 @@ export const useMapStore = defineStore('map', () => {
     const nextFirstgid = higherGids.length > 0 ? Math.min(...higherGids) : Infinity
 
     mapData.value.resources.splice(resourceIndex, 1)
+    // 移除该素材对应的图块笔刷
+    mapData.value.tilePalette = (mapData.value.tilePalette ?? [])
+      .filter(e => e.resourceId !== removedResource.id)
     if (removedTileSet) {
       const tileSetIndex = mapData.value.tileSets.indexOf(removedTileSet)
       if (tileSetIndex >= 0) mapData.value.tileSets.splice(tileSetIndex, 1)
@@ -469,6 +544,9 @@ export const useMapStore = defineStore('map', () => {
     const removedFirstgids = new Set(removed.map(r => r.firstgid))
     // 从地图级素材库移除当前图层可见的素材
     mapData.value.resources = mapData.value.resources.filter(r => !removedIds.has(r.id))
+    // 移除对应图块笔刷
+    mapData.value.tilePalette = (mapData.value.tilePalette ?? [])
+      .filter(e => !removedIds.has(e.resourceId))
     // 按素材自身的 id/firstgid 精确移除对应 tileset
     mapData.value.tileSets = mapData.value.tileSets.filter(
       ts => !removedIds.has(ts.id) && !removedFirstgids.has(ts.firstgid),
@@ -641,6 +719,10 @@ export const useMapStore = defineStore('map', () => {
     setActiveLayer,
     selectTile,
     addResource,
+    addPaletteEntries,
+    setTilePalette,
+    movePaletteEntry,
+    removePaletteEntry,
     removeResource,
     clearResources,
     updateMapProperty,
@@ -649,6 +731,7 @@ export const useMapStore = defineStore('map', () => {
     setTileCollisionType,
     selectedImageLayerId,
     selectedImage,
+    sceneRenderMode,
     selectImage,
     clearImageSelection,
     setImageCollisionPoints,

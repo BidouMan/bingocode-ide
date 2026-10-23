@@ -185,13 +185,27 @@ async function onUploadLocal() {
   await onUploadImage()
 }
 
+/** 图片文件名去重：同名文件重复上传时不能覆盖地图已有素材（否则两层会串图） */
+function uniqueImageFileName(fileName: string): string {
+  const dot = fileName.lastIndexOf('.')
+  const base = dot > 0 ? fileName.slice(0, dot) : fileName
+  const ext = dot > 0 ? fileName.slice(dot) : ''
+  const used = new Set(
+    mapStore.mapData.resources.map(r => r.path.split('/').pop() || ''),
+  )
+  let name = fileName
+  let seq = 2
+  while (used.has(name)) name = `${base}-${seq++}${ext}`
+  return name
+}
+
 async function onUploadImage() {
   const path = await invoke<string | null>('pick_image_file')
   if (!path) return
   const projectRoot = projectStore.root
   const mapName = mapStore.mapData.name
   if (!projectRoot || !mapName) return
-  const fileName = path.split('/').pop() || 'resource.png'
+  const fileName = uniqueImageFileName(path.split('/').pop() || 'resource.png')
   const relativePath = `assets/maps/${mapName}/images/${fileName}`
   try {
     await invoke('copy_file_to_project', { src: path, projectRoot, relativePath })
@@ -287,8 +301,8 @@ function onSwitchPaintMode(mode: 'bitmap' | 'vector') {
   mapEditorStore.setPaintMode(mode)
 }
 
-/** 图块图层缩略图：只渲染该图层自身容器 */
-function getLayerThumbnail(layerId: number): string | null {
+/** 图块图层缩略图：只按该图层自身的瓦片数据合成 */
+function getLayerThumbnail(layerId: number): string | null | Promise<string | null> {
   return mapCanvasRef.value?.getLayerThumbnailDataUrl(layerId) ?? null
 }
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
-import { useMapStore, type MapResource } from '../../stores/map'
+import { useMapStore, type MapResource, type ImageData as MapImageData } from '../../stores/map'
 import { useMapEditorStore } from '../../stores/mapEditor'
 import { useProjectStore } from '../../stores/project'
 import { useEditorStore } from '../../stores/editor'
@@ -133,10 +133,15 @@ async function initPixi() {
 // 当前渲染模式的 scaleMode
 let currentScaleMode: 'nearest' | 'linear' = 'linear'
 
+/**
+ * 场景级渲染模式（自动判定，忽略全局渲染设置，规则见 mapStore.sceneRenderMode）：
+ * - 存在图块图层 → pixelated（整张画布最近邻）
+ * - 存在位图图片图层 → pixelated（整张画布按位图模式）
+ * - 全部为矢量图层 → smooth（按矢量渲染）
+ */
 function applyRenderMode() {
   if (!PIXI) return
-  const mode = editorStore.renderMode
-  currentScaleMode = mode === 'pixelated' ? 'nearest' : 'linear'
+  currentScaleMode = mapStore.sceneRenderMode === 'pixelated' ? 'nearest' : 'linear'
   // 清空纹理缓存，强制使用新的 scaleMode 重新创建
   tileTextures.clear()
 }
@@ -412,11 +417,9 @@ async function placeImage(resource: any, x: number, y: number) {
     }
   }
   // 扁平模型：放置一张图片就新建一个图片图层（在最上层）
-  const layerId = mapStore.addImageLayer(resource.name || '图片', imgData)
+  mapStore.addImageLayer(resource.name || '图片', imgData)
 
-  // 放置后选中该图片并显示变换框，切换到选取工具
-  transform.setSelection(layerId, imgData)
-  transform.showTransformBox(imgData)
+  // 放置后切换到选取工具；整图选中框不再自动显示
   mapEditorStore.setTool('select')
 }
 
@@ -470,7 +473,19 @@ let vectorExiting = false
 let enteringVector = false
 // 矢量图层会话缓存：切换图层时保留 Paper JSON 与不含矢量的位图底稿，
 // 切回来可继续编辑；保存时会把 JSON/底稿路径写入地图数据。
-const vectorLayerCache = new Map<number, { json: string; base: HTMLCanvasElement }>()
+// image 记录归属的图像对象：图层 id 会被复用，必须校验归属，避免旧缓存串到新图层。
+const vectorLayerCache = new Map<number, { json: string; base: HTMLCanvasElement; image: MapImageData }>()
+
+/** 取图层对应的矢量缓存；归属不符（图层已删除/id 被复用）时直接丢弃 */
+function cachedVectorEntry(layerId: number, img: MapImageData | null | undefined) {
+  const entry = vectorLayerCache.get(layerId)
+  if (!entry) return null
+  if (!img || entry.image !== img) {
+    vectorLayerCache.delete(layerId)
+    return null
+  }
+  return entry
+}
 let vectorStoreSnapshot: {
   artboardWidth: number
   artboardHeight: number
@@ -563,7 +578,7 @@ function floatCornersPx(): { x: number; y: number }[] {
 
 function floatCornersWorld(): { x: number; y: number }[] {
   const s = paintSession
-  const img = mapStore.selectedImage
+  const img = sessionImage()
   if (!s || !img) return []
   return floatCornersPx().map(p =>
     imageLocalToWorld(img, { x: p.x / s.canvas.width, y: p.y / s.canvas.height })
@@ -619,7 +634,7 @@ function drawSelectionOverlay() {
   const g = selectionGraphics
   g.clear()
   const s = paintSession
-  const img = mapStore.selectedImage
+  const img = sessionImage()
   if (!s || !img) return
 
   const scale = Math.max(0.1, viewport.currentScale.value)
@@ -885,7 +900,7 @@ function isBrushCursorActive(): boolean {
 // 绘制画布 1px 对应的世界坐标尺寸（含图片实例缩放）
 function paintPixelWorldRatio(): number {
   const s = paintSession
-  const img = mapStore.selectedImage
+  const img = sessionImage()
   if (!s || !img) return 1
   const scaleX = Math.abs(img.scaleX ?? img.scale ?? 1)
   return ((img.width || s.canvas.width) * scaleX) / Math.max(1, s.canvas.width)
@@ -991,7 +1006,7 @@ function hitTestFloat(world: { x: number; y: number }): FloatHit {
 // 选取工具按下：优先命中浮动选区手柄，否则在图片内开始新的框选
 function handleSelectPointerDown(world: { x: number; y: number }) {
   const s = paintSession
-  const img = mapStore.selectedImage
+  const img = sessionImage()
   if (!s || !img) return
   const local = imageWorldToLocal(img, world.x, world.y)
   const p = { x: local.x * s.canvas.width, y: local.y * s.canvas.height }
@@ -1046,7 +1061,7 @@ function handleSelectPointerDown(world: { x: number; y: number }) {
 
 function handleSelectPointerMove(world: { x: number; y: number }, shift: boolean): boolean {
   const s = paintSession
-  const img = mapStore.selectedImage
+  const img = sessionImage()
   if (!s || !img) return false
 
   if (floatOp === 'create') {
@@ -1169,11 +1184,14 @@ async function startPaintSession(): Promise<boolean> {
   if (!img || layerId < 0) return false
   if (paintSession && paintSession.layerId === layerId) return true
   await commitPaintSession(false)
+  // 等待期间图层可能已切换：过期的调用直接放弃，避免旧会话覆盖新图层
+  if (mapStore.selectedImageLayerId !== layerId) return false
 
   const PIXI_ = PIXI
   if (!PIXI_) return false
   try {
     const source = await loadImage(img.imagePath)
+    if (mapStore.selectedImageLayerId !== layerId) return false
     const srcW = source.naturalWidth || source.width
     const srcH = source.naturalHeight || source.height
     // 背景图层的绘制范围跟随当前地图尺寸（地图改大后可继续在新区域绘制）
@@ -1381,7 +1399,7 @@ function pushPaintUndo() {
 
 function toCanvasPoint(world: { x: number; y: number }): { x: number; y: number } | null {
   const s = paintSession
-  const img = mapStore.selectedImage
+  const img = sessionImage()
   if (!s || !img) return null
   const local = imageWorldToLocal(img, world.x, world.y)
   return { x: local.x * s.canvas.width, y: local.y * s.canvas.height }
@@ -1581,10 +1599,23 @@ const painter = useTilePainter({
 
 // ====== 矢量绘制（覆盖层 + Paper.js 引擎） ======
 
+/** 按图层 id 取图像数据：切换图层的瞬间 selectedImage 已指向新层，必须按会话所属图层取 */
+function imageByLayerId(layerId: number): MapImageData | null {
+  const layer = mapStore.mapData.layers.find(l => l.id === layerId)
+  return layer && layer.type === 'image' ? layer.image : null
+}
+
+/** 当前绘制会话所属图层的图像数据（没有会话时退回选中图层） */
+function sessionImage(): MapImageData | null {
+  const s = paintSession
+  return s ? imageByLayerId(s.layerId) : mapStore.selectedImage
+}
+
 /** 当前图片图层的绘制画布几何（图片像素坐标系） */
 function vectorFrame(): MapVectorFrame | null {
-  const img = mapStore.selectedImage
   const s = paintSession
+  // 会话所属图层优先：切图层时矢量内容仍属于旧图层，避免错位到新图层
+  const img = s ? imageByLayerId(s.layerId) : mapStore.selectedImage
   if (!img || !s || !app || !canvasRef.value) return null
   const rect = canvasRef.value.getBoundingClientRect()
   return {
@@ -1640,7 +1671,11 @@ function syncVectorGeometry() {
 }
 
 async function enterVectorMode(): Promise<boolean> {
-  if (vectorActive.value || enteringVector) return true
+  // 只有已处于"目标图层的矢量模式"时才能直接复用；
+  // 否则必须先退出旧图层，避免新图层沿用上一图层的矢量内容
+  if (vectorActive.value && paintSession?.layerId === mapStore.selectedImageLayerId) return true
+  if (enteringVector) return false
+  if (vectorActive.value) await exitVectorMode(false)
   enteringVector = true
   try {
     return await enterVectorModeInner()
@@ -1654,16 +1689,19 @@ async function enterVectorModeInner(): Promise<boolean> {
   if (!mapStore.selectedImage && mapStore.activeLayer?.type === 'image') {
     mapStore.selectImage(mapStore.activeLayer.id)
   }
-  const img = mapStore.selectedImage
-  if (!img) return false
+  if (!mapStore.selectedImage) return false
   if (!paintSession) {
     const ok = await startPaintSession()
     if (!ok) return false
   }
   const s = paintSession
   if (!s) return false
+  // 会话必须属于当前选中图层，否则说明切换尚未完成，放弃以免串层
+  if (s.layerId !== mapStore.selectedImageLayerId) return false
+  const img = imageByLayerId(s.layerId)
+  if (!img) return false
   // 恢复矢量图层：优先用内存缓存底稿，其次用存档里的 vectorBasePath
-  const cached = vectorLayerCache.get(s.layerId)
+  const cached = cachedVectorEntry(s.layerId, img)
   if (cached) {
     const ctx = s.canvas.getContext('2d')!
     ctx.clearRect(0, 0, s.canvas.width, s.canvas.height)
@@ -1764,7 +1802,9 @@ async function writeVectorBaseFile(canvas: HTMLCanvasElement, fileName: string):
  */
 async function stashVectorLayer() {
   const s = paintSession
-  const img = mapStore.selectedImage
+  // 关键：切换图层的瞬间 selectedImage 已指向新图层，
+  // 必须按会话所属图层写回，否则会把旧图层的矢量内容写进新图层（图层串内容）
+  const img = s ? imageByLayerId(s.layerId) : null
   if (!vectorActive.value || !s || !img) return
   const json = vectorEngine.getProjectJson()
   if (!json) {
@@ -1773,7 +1813,7 @@ async function stashVectorLayer() {
   }
   const base = makeOffscreenCanvas(s.canvas.width, s.canvas.height)
   base.getContext('2d')!.drawImage(s.canvas, 0, 0)
-  vectorLayerCache.set(s.layerId, { json, base })
+  vectorLayerCache.set(s.layerId, { json, base, image: img })
   img.vectorData = json
   const baseName = `${(img.imagePath.split('/').pop() || '图像').replace(/\.[^.]+$/, '')}-vecbase-${Date.now().toString(36)}.png`
   const basePath = await writeVectorBaseFile(base, baseName)
@@ -1795,13 +1835,15 @@ async function stashVectorLayer() {
 
 /** 明确切到位图：矢量内容永久烘焙，移除可再编辑的矢量数据 */
 async function convertVectorToBitmap() {
+  // 先记住会话所属图层：烘焙过程中选中图层可能已经切走
+  const layerId = paintSession?.layerId
   await commitVectorToPixels()
-  const img = mapStore.selectedImage
+  const img = layerId !== undefined ? imageByLayerId(layerId) : null
   if (img) {
     img.vectorData = undefined
     img.vectorBasePath = undefined
   }
-  if (paintSession) vectorLayerCache.delete(paintSession.layerId)
+  if (layerId !== undefined) vectorLayerCache.delete(layerId)
 }
 
 async function exitVectorMode(switchUiToBitmap = true) {
@@ -2162,9 +2204,14 @@ function onPointerDown(e: PointerEvent) {
     return
   }
 
-  // 图片模式的选择工具：框选像素 → 浮动选区（整层选择走左侧图层列表）
+  // 点击变换手柄时交给变换逻辑，避免与选区框选冲突
+  if (transform.isTransformBusy()) return
+
+  // 图片模式的选择工具：框选像素 → 浮动选区（切换图层不再选中整张图）
   if (mapStore.activeMode === 'image' && mapEditorStore.imageTool === 'select' && mapStore.selectedImage) {
     if (e.button !== 0) return
+    // 开始框选时收起整图变换框，避免两个框同时出现
+    transform.removeTransformBox()
     const worldPos = viewport.screenToWorld(e)
     if (worldPos) {
       if (paintSession) {
@@ -2177,9 +2224,6 @@ function onPointerDown(e: PointerEvent) {
     }
     return
   }
-
-  // If transform handle or rotation handle was clicked, don't process further
-  if (transform.isTransformBusy()) return
 
   if (e.button === 0 && !e.altKey && !viewport.isSpacePressed()) {
     // 图片模式：直接在画布上绘制
@@ -2537,9 +2581,9 @@ watch(
   }
 )
 
-// 监听渲染模式变化
+// 场景渲染模式变化（图层增删、位图↔矢量转换）→ 重新应用纹理采样方式
 watch(
-  () => editorStore.renderMode,
+  () => mapStore.sceneRenderMode,
   () => {
     if (app) {
       applyRenderMode()
@@ -2681,6 +2725,17 @@ watch(
   () => { scheduleRender() }
 )
 
+// 图层删除后立即清理其矢量缓存（图层 id 可能被后续新建图层复用）
+watch(
+  () => mapStore.mapData.layers.map(l => l.id).join(','),
+  () => {
+    const ids = new Set(mapStore.mapData.layers.map(l => l.id))
+    for (const id of [...vectorLayerCache.keys()]) {
+      if (!ids.has(id)) vectorLayerCache.delete(id)
+    }
+  }
+)
+
 // Watch tile changes (using cheap revision counter)
 let renderQueued = false
 let pendingRender = false
@@ -2709,19 +2764,14 @@ watch(
     // 矢量图层标记：当前模式为矢量，或该图层本身保存过矢量数据
     const keepVector = mapEditorStore.paintMode === 'vector'
       || !!selImg?.vectorData
-      || vectorLayerCache.has(mapStore.selectedImageLayerId)
+      || !!cachedVectorEntry(mapStore.selectedImageLayerId, selImg)
     // 切换图片图层前先把矢量内容烘进位图，避免内容串层
     if (vectorActive.value) await exitVectorMode(!keepVector)
     collision.cancelCollisionDraft()
     collision.clearVertexSelection()
     resetFloatingSelection()
-    // 外部设置的选中实例（例如绘制页保存返回）需要同步本地变换框
-    const img = mapStore.selectedImage
-    if (img && mapEditorStore.imageCollisionTool === 'none' && mapEditorStore.imageTool === 'select' && !transform.isSelectedImage(img)) {
-      transform.setSelection(mapStore.selectedImageLayerId, img)
-      transform.showTransformBox(img)
-      transform.cacheSelectedImageSprite()
-    }
+    // 切换图层只切换绘制目标：不显示整图变换框（选中整张图的功能已取消）
+    transform.removeTransformBox()
     collision.drawCollisionOverlay()
     // 切换图片图层：先落盘旧图层，再为新图层建会话 / 重新进入矢量模式
     const proceed = () => {
@@ -2742,7 +2792,7 @@ watch(
   }
 )
 
-// 进入碰撞编辑时隐藏变换框（避免手柄抢事件），退出时恢复
+// 进入碰撞编辑时隐藏变换框（避免手柄抢事件）；退出不再恢复整图选框
 watch(
   () => mapEditorStore.imageCollisionTool,
   (tool, prev) => {
@@ -2752,7 +2802,6 @@ watch(
       transform.removeTransformBox()
       viewport.setCursor('crosshair')
     } else if (prev !== 'none') {
-      transform.restoreSelectedImageUI()
       viewport.setCursor('default')
     }
     collision.drawCollisionOverlay()
@@ -2812,6 +2861,8 @@ async function resetCanvasState() {
   mapStore.clearImageSelection()
   collision.cancelCollisionDraft()
   painter.resetMoveState()
+  // 切换地图后图层 id 会被重新分配，旧缓存必须整体丢弃，避免串到新地图的图层
+  vectorLayerCache.clear()
 }
 
 onMounted(() => {
@@ -2859,29 +2910,66 @@ onBeforeUnmount(() => {
   collision.dispose()
 })
 
-/** 单个图层的缩略图（图块图层专用：只渲染该图层容器，避免串层污染） */
-function getLayerThumbnailDataUrl(layerId: number): string | null {
-  if (!app || !PIXI || !app.renderer) return null
-  const container = layerContainers.get(layerId)
-  if (!container || container.children.length === 0) return null
-  const tileSize = mapStore.mapData.tileSize
-  const mapW = mapStore.mapData.width * tileSize
-  const mapH = mapStore.mapData.height * tileSize
+/**
+ * 图块图层缩略图：直接按该图层自身的瓦片数据合成到离屏 canvas，
+ * 不经过 Pixi 场景容器渲染，保证每个图层的缩略图只包含自己的内容。
+ */
+async function getLayerThumbnailDataUrl(layerId: number): Promise<string | null> {
+  const layer = mapStore.mapData.layers.find(l => l.id === layerId)
+  if (!layer || layer.type !== 'drawing') return null
+  const entries = Object.entries(layer.tiles)
+  if (entries.length === 0) return null
+
+  const ts = mapStore.mapData.tileSize
+  const mapW = mapStore.mapData.width * ts
+  const mapH = mapStore.mapData.height * ts
   if (mapW <= 0 || mapH <= 0) return null
-  const wasVisible = container.visible
-  try {
-    container.visible = true
-    const rt = PIXI.RenderTexture.create({ width: Math.ceil(mapW), height: Math.ceil(mapH) })
-    app.renderer.render(container, { renderTexture: rt })
-    const canvas = app.renderer.extract.canvas(rt)
-    const dataUrl = canvas.toDataURL('image/png')
-    rt.destroy(true)
-    return dataUrl
-  } catch {
-    return null
-  } finally {
-    container.visible = wasVisible
+
+  const tilesets = mapStore.mapData.tileSets
+  // GID → 图块集 → 素材（同一素材图片只加载一次）
+  const imageCache = new Map<string, HTMLImageElement | null>()
+  const resolveTile = (gid: number) => {
+    let matched: any = null
+    for (let i = tilesets.length - 1; i >= 0; i--) {
+      if (gid >= tilesets[i].firstgid) { matched = tilesets[i]; break }
+    }
+    if (!matched) return null
+    const resource = mapStore.mapData.resources.find(r => r.firstgid === matched.firstgid)
+      ?? mapStore.mapData.resources.find(r => r.path === matched.imagePath)
+    if (!resource) return null
+    return { resource, tileIndex: gid - matched.firstgid }
   }
+
+  const canvas = document.createElement('canvas')
+  canvas.width = mapW
+  canvas.height = mapH
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
+  ctx.imageSmoothingEnabled = false
+
+  for (const [posKey, gid] of entries) {
+    const [x, y] = posKey.split(',').map(Number)
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue
+    const hit = resolveTile(gid)
+    if (!hit) continue
+    let img = imageCache.get(hit.resource.path)
+    if (img === undefined) {
+      try { img = await loadImage(hit.resource.path) } catch { img = null }
+      imageCache.set(hit.resource.path, img)
+    }
+    if (!img) continue
+    const iw = img.naturalWidth || img.width
+    const cols = Math.max(1, Math.floor(iw / hit.resource.tileWidth))
+    const col = hit.tileIndex % cols
+    const row = Math.floor(hit.tileIndex / cols)
+    ctx.drawImage(
+      img,
+      col * hit.resource.tileWidth, row * hit.resource.tileHeight,
+      hit.resource.tileWidth, hit.resource.tileHeight,
+      x * ts, y * ts, ts, ts,
+    )
+  }
+  return canvas.toDataURL('image/png')
 }
 
 function getThumbnailDataUrl(): string | null {

@@ -3,7 +3,6 @@ import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { useMapStore } from '../../stores/map'
 import { useProjectStore } from '../../stores/project'
-import { useEditorStore } from '../../stores/editor'
 import iconShow from '../../assets/icons/icon_show.svg'
 import iconHide from '../../assets/icons/icon_hide.svg'
 import iconAdd from '../../assets/icons/新建图块图层.svg'
@@ -21,7 +20,7 @@ import iconLock from '../../assets/icons/锁定.svg'
 const props = defineProps<{
   disabled?: boolean
   /** 图块图层缩略图提供者（只渲染该图层自身，避免串层） */
-  getLayerThumbnail?: (layerId: number) => string | null
+  getLayerThumbnail?: (layerId: number) => string | null | Promise<string | null>
 }>()
 
 const emit = defineEmits<{
@@ -32,14 +31,14 @@ const emit = defineEmits<{
 
 const mapStore = useMapStore()
 const projectStore = useProjectStore()
-const editorStore = useEditorStore()
 
 const editingLayerIndex = ref<number | null>(null)
 const editingName = ref('')
 const listRef = ref<HTMLDivElement>()
 
+// 缩略图渲染：跟随场景渲染模式（图块/位图场景像素渲染，全矢量场景平滑）
 const imageRenderingStyle = computed(() => {
-  return editorStore.renderMode === 'pixelated' ? 'pixelated' : 'auto'
+  return mapStore.sceneRenderMode === 'pixelated' ? 'pixelated' : 'auto'
 })
 
 // 显示顺序：数组末尾是最上层，列表顶部也应是最上层
@@ -91,23 +90,22 @@ async function refreshThumbs() {
       next.set(layer.id, await resolveThumbUrl(layer.image.imagePath))
     } else if (layer.type === 'drawing' && props.getLayerThumbnail) {
       // 图块图层：只取该图层自身渲染结果；未绘制图块时为空（不显示占位图）
-      const url = props.getLayerThumbnail(layer.id)
+      const url = await props.getLayerThumbnail(layer.id)
       if (url) next.set(layer.id, url)
     }
   }
   thumbUrls.value = next
 }
 
-/** 只刷新图块图层缩略图（绘制时高频调用，避免重复读取图片资源） */
-function refreshTileThumbs() {
+/** 只刷新当前图块图层的缩略图（绘制时高频调用，其他图层内容没变无需重算） */
+async function refreshTileThumbs() {
   if (!props.getLayerThumbnail) return
+  const active = mapStore.activeLayer
+  if (!active || active.type !== 'drawing') return
+  const url = await props.getLayerThumbnail(active.id)
   const next = new Map(thumbUrls.value)
-  for (const layer of mapStore.mapData.layers) {
-    if (layer.type !== 'drawing') continue
-    const url = props.getLayerThumbnail(layer.id)
-    if (url) next.set(layer.id, url)
-    else next.delete(layer.id)
-  }
+  if (url) next.set(active.id, url)
+  else next.delete(active.id)
   thumbUrls.value = next
 }
 
