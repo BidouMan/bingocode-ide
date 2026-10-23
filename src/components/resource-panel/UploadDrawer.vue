@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import JSZip from 'jszip'
 import { useFileDialog } from '../../composables/useFileDialog'
+import { SPRITE_ACCEPT, importSpriteFile, isImageFile } from '../../composables/useSpriteImport'
 import { useResourceStore } from '../../stores/resource'
 import { useEditorStore } from '../../stores/editor'
 import { useProjectStore } from '../../stores/project'
-import { svgToPngBlob } from '../../utils/imageConvert'
 
 import iconFileUpload from '../../assets/icons/icon--file-upload.svg'
 import iconPaint from '../../assets/icons/icon--paint.svg'
@@ -35,7 +34,7 @@ const fileDialog = useFileDialog()
 const menuOpen = ref(false)
 
 const acceptMap: Record<string, string> = {
-  sprite: '.bgs,.bsf,.png,.jpg,.gif,.jpeg,.svg',
+  sprite: SPRITE_ACCEPT,
   map: '.bgm,.json,.info,.png,.jpg,.jpeg,.gif,.bmp,.webp,.svg',
   sound: '.wav,.mp3,.ogg,.flac',
   code: '.py',
@@ -99,12 +98,6 @@ watch(menuOpen, (open) => {
   if (!open) hideTip()
 })
 
-const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']
-function isImageFile(filename: string): boolean {
-  const lower = filename.toLowerCase()
-  return IMAGE_EXTS.some(ext => lower.endsWith(ext))
-}
-
 async function handleAction(key: string) {
   menuOpen.value = false
   switch (key) {
@@ -112,102 +105,12 @@ async function handleAction(key: string) {
       const result = await fileDialog.openFile(acceptMap[props.type])
       if (!result) return
 
-      if (props.type === 'sprite' && result.name.toLowerCase().endsWith('.svg')) {
-        // SVG 角色：引擎（Pillow）不支持 SVG，导入时栅格化为 PNG 再入库
-        try {
-          const pngBlob = await svgToPngBlob(result.file)
-          const projectRoot = projectStore.root
-          if (projectRoot) {
-            // 默认名字统一为「角色N」顺序名，磁盘文件名与 store 名字保持一致（引擎按名字查找）
-            const spriteName = resourceStore.nextSequentialName('sprite', '角色')
-            const projectPath = `${projectRoot}/assets/sprites/${spriteName}.png`
-            await invoke('write_binary', {
-              path: projectPath,
-              data: Array.from(new Uint8Array(await pngBlob.arrayBuffer())),
-            })
-            resourceStore.addItem({ name: spriteName, type: 'sprite', path: projectPath })
-            emit('uploaded', 'sprite', spriteName)
-          } else {
-            console.warn('[UploadDrawer] 项目目录未就绪，无法导入 SVG 角色')
-          }
-        } catch (e) {
-          console.error('[UploadDrawer] SVG 转 PNG 失败:', e)
-        }
-      } else if (
-        props.type === 'sprite' &&
-        (result.name.toLowerCase().endsWith('.bgs') || result.name.toLowerCase().endsWith('.bsf'))
-      ) {
-        // .bgs / .bsf 包文件：解压到项目目录（与精灵库选择流程一致）
-        // 引擎从 assets/sprites/<名字>/ 加载角色，缩略图也依赖磁盘路径
-        const lowerName = result.name.toLowerCase()
-        const isBsf = lowerName.endsWith('.bsf')
-        try {
-          const zip = await JSZip.loadAsync(result.file)
-          const metaEntry = isBsf ? zip.file('manifest.json') : zip.file('config.json')
-          if (!metaEntry) {
-            console.error(`[UploadDrawer] ${isBsf ? '.bsf 缺少 manifest.json' : '.bgs 缺少 config.json'}:`, result.name)
-            return
-          }
-          // 默认名字统一为「角色N」顺序名（磁盘目录名与 store 名字保持一致）
-          const spriteName = resourceStore.nextSequentialName('sprite', '角色')
-          const projectRoot = projectStore.root
-          if (!projectRoot) {
-            console.warn(`[UploadDrawer] 项目目录未就绪，无法导入 ${isBsf ? '.bsf' : '.bgs'} 角色`)
-            return
-          }
-          // 先把包文件写到项目目录，再用 Rust 命令解压，最后删除临时文件
-          const tmpPkgPath = `${projectRoot}/assets/sprites/${spriteName}${isBsf ? '.bsf' : '.bgs'}`
-          await invoke('write_binary', {
-            path: tmpPkgPath,
-            data: Array.from(new Uint8Array(await result.file.arrayBuffer())),
-          })
-          try {
-            await invoke('extract_bgs_to_project', {
-              bgsPath: tmpPkgPath,
-              projectRoot,
-              spriteName,
-            })
-          } finally {
-            // 临时包文件必须删除：项目重载时会把 assets/sprites 下所有条目当角色列出
-            await invoke('delete_path', { path: tmpPkgPath }).catch(() => {})
-          }
-          resourceStore.addItem({
-            name: spriteName,
-            type: 'sprite',
-            path: `${projectRoot}/assets/sprites/${spriteName}`,
-          })
-          emit('uploaded', 'sprite', spriteName)
-        } catch (e) {
-          console.error(`[UploadDrawer] 导入 ${isBsf ? '.bsf' : '.bgs'} 失败:`, e)
-        }
-      } else if (props.type === 'sprite' && isImageFile(result.name)) {
-        // 图片文件：复制到项目目录（磁盘文件名与 store 名字一致，保留原扩展名供引擎查找）
-        const projectRoot = projectStore.root
-        const spriteName = resourceStore.nextSequentialName('sprite', '角色')
-        const ext = result.name.match(/\.[^.]+$/)?.[0] || '.png'
-        if (projectRoot) {
-          try {
-            const arrayBuffer = await result.file.arrayBuffer()
-            const uint8Array = new Uint8Array(arrayBuffer)
-            const relativePath = `assets/sprites/${spriteName}${ext}`
-            // write_binary 返回 ()，路径需自行拼接
-            const projectPath = `${projectRoot}/${relativePath}`
-            await invoke('write_binary', {
-              path: projectPath,
-              data: Array.from(uint8Array),
-            })
-            resourceStore.addItem({ name: spriteName, type: 'sprite', path: projectPath })
-            emit('uploaded', 'sprite', spriteName)
-          } catch (e) {
-            console.error('[UploadDrawer] 复制图片文件失败:', e)
-            const objectUrl = URL.createObjectURL(result.file)
-            resourceStore.addItem({ name: spriteName, type: 'sprite', path: objectUrl })
-            emit('uploaded', 'sprite', spriteName)
-          }
-        } else {
-          const objectUrl = URL.createObjectURL(result.file)
-          resourceStore.addItem({ name: spriteName, type: 'sprite', path: objectUrl })
-          emit('uploaded', 'sprite', spriteName)
+      if (props.type === 'sprite') {
+        // 角色：.svg 栅格化、.bgs/.bsf 解包、图片复制，统一交给 useSpriteImport
+        const id = await importSpriteFile(result.file, result.name)
+        if (id) {
+          const item = resourceStore.getItem(id, 'sprite')
+          emit('uploaded', 'sprite', item?.name ?? '')
         }
       } else if (props.type === 'map' && (isImageFile(result.name) || result.name.toLowerCase().endsWith('.svg'))) {
         // 图片文件（含 SVG）：读取字节交给主布局创建图像模式地图（图片直接作为地图使用）

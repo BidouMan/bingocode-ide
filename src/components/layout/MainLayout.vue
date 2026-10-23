@@ -221,6 +221,23 @@ function isImageFileName(fileName: string): boolean {
   return IMAGE_FILE_EXTS.some(ext => lower.endsWith(ext))
 }
 
+/** 工作区切换计数：新建/打开项目时递增，用于中断上一次未完成的资源加载 */
+let workspaceEpoch = 0
+
+/**
+ * 新建/打开项目时清空编辑器内存状态（地图场景、缩略图缓存、选中项），
+ * 避免上一个项目的数据在新项目里残留或被读到。
+ * 调用前需保证 resourceStore 已清空。
+ */
+function resetEditorWorkspaces() {
+  workspaceEpoch++
+  mapStore.newMap()
+  selectedResource.value = null
+  mapThumbnails.value = {}
+  spriteThumbnails.value = {}
+  terminalStore.clear()
+}
+
 /**
  * 从工作目录预加载项目资源（代码/地图/精灵/声音）。
  * 供文件菜单"打开项目"成功后调用。
@@ -228,6 +245,9 @@ function isImageFileName(fileName: string): boolean {
  */
 async function loadProjectResources(root: string) {
   if (!root) return
+  // 加载期间工作区被切换（新建/再打开项目）时立即终止，避免旧项目资源混进新项目
+  const epoch = workspaceEpoch
+  const stale = () => epoch !== workspaceEpoch
   // 先切到代码模式再建标签，确保 createTab 把代码文件放进 codeTabs（与本函数结尾的最终状态一致）
   editorStore.setActiveEditorMode('code')
   editorStore.setResourceTab('sprite')
@@ -236,8 +256,10 @@ async function loadProjectResources(root: string) {
   try {
     const files = await invoke<string[]>('list_dir', { path: `${root}/code` })
     for (const file of files) {
+      if (stale()) return
       if (file.endsWith('.py')) {
         const content = await invoke<string>('read_file', { path: `${root}/code/${file}` })
+        if (stale()) return
         editorStore.createTab(file, `${root}/code/${file}`, content)
         resourceStore.addItem({ name: file, type: 'code', path: `${root}/code/${file}`, content })
       }
@@ -248,14 +270,18 @@ async function loadProjectResources(root: string) {
   try {
     const mapEntries = await invoke<string[]>('list_dir', { path: `${root}/assets/maps` })
     for (const entry of mapEntries) {
+      if (stale()) return
       const mapName = entry.replace(/\/$/, '')
       const jsonPath = `${root}/assets/maps/${mapName}/map.json`
       const exists = await invoke<boolean>('path_exists', { path: jsonPath })
+      if (stale()) return
       if (!exists) continue
       const json = await invoke<string>('read_file', { path: jsonPath })
+      if (stale()) return
       const saveData = JSON.parse(json)
       const { deserializeMap } = await import('../../utils/mapSerializer')
       const mapData = deserializeMap(saveData)
+      if (stale()) return
       const mapId = resourceStore.addItem({ name: mapName, type: 'map', path: `${root}/assets/maps/${mapName}` })
       resourceStore.setCachedMapData(mapId, mapData)
     }
@@ -265,6 +291,7 @@ async function loadProjectResources(root: string) {
   try {
     const spriteEntries = await invoke<string[]>('list_dir', { path: `${root}/assets/sprites` })
     for (const entry of spriteEntries) {
+      if (stale()) return
       const dirName = entry.replace(/\/$/, '')
       if (!dirName) continue
       const dirPath = `${root}/assets/sprites/${dirName}`
@@ -278,12 +305,15 @@ async function loadProjectResources(root: string) {
   try {
     const soundFiles = await invoke<string[]>('list_dir', { path: `${root}/assets/sounds` })
     for (const file of soundFiles) {
+      if (stale()) return
       if (file.endsWith('.wav') || file.endsWith('.mp3') || file.endsWith('.ogg')) {
         const name = file.replace(/\.\w+$/, '')
         resourceStore.addItem({ name, type: 'sound', path: `${root}/assets/sounds/${file}` })
       }
     }
   } catch { /* assets/sounds 可能不存在 */ }
+
+  if (stale()) return
 
   // 刷新缩略图（并行加载，不阻塞后续流程）
   Promise.all([loadAllSpriteThumbnails(), loadAllMapThumbnails()])
@@ -355,6 +385,7 @@ onMounted(async () => {
   // default 目录每次启动都会被 init_default_project 清空，
   // localStorage 里恢复的旧标签都是指向已删文件的幽灵，全部丢弃。
   resourceStore.clearAllResources()
+  resetEditorWorkspaces()
   renderStore.clearAll()
   editorStore.gameTabs.splice(0, editorStore.gameTabs.length)
   editorStore.codeTabs.splice(0, editorStore.codeTabs.length)
@@ -592,6 +623,7 @@ async function fileMenuAction(action: string) {
       if (!projectRoot) break
       // 清空所有旧数据（两套标签页都要清）
       resourceStore.clearAllResources()
+      resetEditorWorkspaces()
       renderStore.clearAll()
       editorStore.gameTabs.splice(0, editorStore.gameTabs.length)
       editorStore.codeTabs.splice(0, editorStore.codeTabs.length)
@@ -624,6 +656,7 @@ async function fileMenuAction(action: string) {
 
       // 清空全部旧数据（两套标签页都要清）
       resourceStore.clearAllResources()
+      resetEditorWorkspaces()
       renderStore.clearAll()
       editorStore.gameTabs.splice(0, editorStore.gameTabs.length)
       editorStore.codeTabs.splice(0, editorStore.codeTabs.length)
@@ -909,7 +942,7 @@ async function onMapLibImported(bgmUrl: string, name: string) {
   }
 
   const projectPath = `${projectRoot}/assets/maps/${mapName}`
-  resourceStore.addItem({ name: mapName, type: 'map', path: projectPath })
+  const id = resourceStore.addItem({ name: mapName, type: 'map', path: projectPath })
 
   // .bgm 内 map.json 的路径嵌入了原地图名（assets/maps/<原名>/...），且 Rust zip 解压
   // 可能损坏 map.json（layers/tilesets 被清空）——直接用 JSZip 从原始 .bgm 读 map.json，
@@ -928,6 +961,8 @@ async function onMapLibImported(bgmUrl: string, name: string) {
   }
 
   editorStore.setResourceTab('map')
+  // 在编辑器内选择地图时直接切到新导入的地图并进入编辑页
+  if (editorStore.activeEditorMode === 'map') mapStore.setMapPath(id)
   currentPage.value = 0
 }
 
@@ -1029,6 +1064,8 @@ async function createImageMapProject(fileName: string, opts: { bytes?: number[];
   const newItemId = resourceStore.addItem({ name: mapName, type: 'map', path: mapDir })
   editorStore.setResourceTab('map')
   currentPage.value = 0
+  // 从地图编辑器内选图时直接载入新地图，否则进入编辑页后图层为空
+  if (editorStore.activeEditorMode === 'map') mapStore.setMapPath(newItemId)
   // 等 watch（切 tab 清空 / maps.length 变化重载）执行完，再直接把已生成的
   // dataURL 写进缩略图缓存——不依赖二次文件读取，确保第一时间显示
   await nextTick()
@@ -1975,7 +2012,7 @@ function spriteDisplayName(name: string) {
 
         <!-- ═══ Page 0: 游戏模式 — 角色编辑器 ═══ -->
         <div v-if="editorStore.isGameMode && editorStore.activeEditorMode === 'sprite'" class="editor-page-full">
-          <SpriteEditorView ref="spriteEditorRef" @open-paint-append="onOpenPaintAppend" @open-paint-edit="onOpenPaintEdit" @open-frame-picker="onOpenFramePicker" />
+          <SpriteEditorView ref="spriteEditorRef" @open-paint-append="onOpenPaintAppend" @open-paint-edit="onOpenPaintEdit" @open-frame-picker="onOpenFramePicker" @open-sprite-library="currentPage = 3" @open-paint-new="onOpenPaint" />
         </div>
 
         <!-- ═══ Page 0: 游戏模式 — 地图编辑器 (v-show 保持 PixiJS 实例存活) ═══ -->
@@ -1983,6 +2020,7 @@ function spriteDisplayName(name: string) {
           <MapEditorView
             ref="mapEditorRef"
             @open-resource-lib="(scope) => { mapResLibScope = scope; currentPage = 4 }"
+            @open-map-library="currentPage = 2"
             @map-thumbnail-updated="onMapThumbnailUpdated"
           />
         </div>

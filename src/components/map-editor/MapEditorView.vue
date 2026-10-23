@@ -7,6 +7,7 @@ import iconZoomOut from '../../assets/icons/reduce-one.svg'
 import iconZoomIn from '../../assets/icons/add-one.svg'
 import iconUndo from '../../assets/icons/undo.svg'
 import iconRedo from '../../assets/icons/redo.svg'
+import iconMapLibrary from '../../assets/icons/图片库.svg'
 import TileResourceBar from './TileResourceBar.vue'
 import PropertyPanel from './PropertyPanel.vue'
 import LayerPanel from './LayerPanel.vue'
@@ -112,6 +113,7 @@ async function startImagePaint(tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rec
 const emit = defineEmits<{
   // scope 决定内置资源库只显示图像还是图块：图层面板固定图像，图块面板固定图块
   'open-resource-lib': [scope: 'image' | 'tile']
+  'open-map-library': []
   'map-thumbnail-updated': [itemId: string, dataUrl: string]
 }>()
 
@@ -183,6 +185,18 @@ watch(() => JSON.stringify(mapStore.mapData), () => {
     }
   }, 2000)
 })
+
+// 地图资源被清空（新建/打开项目、删除最后一张地图）时清掉编辑器内存残留：
+// 否则空状态横幅下方仍会渲染上一个项目的场景，旧的自动保存还会把旧地图写回新项目目录
+watch(hasMaps, (has) => {
+  if (has) return
+  if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer)
+    autoSaveTimer = null
+  }
+  savingItemId = ''
+  mapStore.newMap()
+}, { immediate: true })
 
 // ====== 公开方法（供 MapToolbar 调用） ======
 
@@ -325,6 +339,11 @@ function onOpenLibrary() {
   emit('open-resource-lib', 'tile')
 }
 
+/** 空地图横幅：打开内置地图库选择一张地图 */
+function onChooseMap() {
+  emit('open-map-library')
+}
+
 function onCursorMove(x: number, y: number) {
   mapEditorStore.setCursorPos(x, y)
 }
@@ -457,14 +476,12 @@ defineExpose({ switchToMap, placeImageResource })
     </div>
     <div v-if="!hasMaps" class="map-empty-banner">
       <div class="empty-content">
-        <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="3" width="18" height="18" rx="2" />
-          <path d="M3 9h18M9 21V9" />
-        </svg>
-        <p class="empty-text">请先创建或导入地图</p>
+        <img :src="iconMapLibrary" class="empty-icon" alt="" />
+        <p class="empty-text">请先选择、绘制或上传地图</p>
         <div class="empty-actions">
-          <button class="empty-btn" @click="onNewMap">绘制地图</button>
-          <button class="empty-btn empty-btn-secondary" @click="onImportMap">导入地图</button>
+          <button class="empty-btn" @click="onChooseMap">选择地图</button>
+          <button class="empty-btn empty-btn-secondary" @click="onNewMap">绘制地图</button>
+          <button class="empty-btn empty-btn-secondary" @click="onImportMap">上传地图</button>
         </div>
       </div>
     </div>

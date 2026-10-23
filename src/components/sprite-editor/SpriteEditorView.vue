@@ -18,7 +18,14 @@ const emit = defineEmits<{
   openPaintEdit: [index: number]
   /** 造型列表抽屉：打开内置素材选帧页 */
   openFramePicker: []
+  /** 空状态：打开内置角色库 */
+  openSpriteLibrary: []
+  /** 空状态：打开绘制页新建角色 */
+  openPaintNew: []
 }>()
+
+import { useFileDialog } from '../../composables/useFileDialog'
+import { SPRITE_ACCEPT, importSpriteFile } from '../../composables/useSpriteImport'
 
 import iconPrev from '../../assets/icons/btn_preview_prev.svg'
 import iconPlay from '../../assets/icons/btn_preview_play.svg'
@@ -33,9 +40,19 @@ import iconCenterPivot from '../../assets/icons/中心点.svg'
 import iconResetAnchor from '../../assets/icons/重置锚点.svg'
 import iconMarker from '../../assets/icons/标记.svg'
 import iconMarkerRaw from '../../assets/icons/标记.svg?raw'
+import iconSpriteEmpty from '../../assets/icons/角色精灵.svg'
 
 const resourceStore = useResourceStore()
 const editorStore = useEditorStore()
+const fileDialog = useFileDialog()
+
+/** 空状态「上传角色」：本地文件导入后自动选中（图片/ .bgs / .bsf / svg） */
+async function onEmptyUpload() {
+  const result = await fileDialog.openFile(SPRITE_ACCEPT)
+  if (!result) return
+  const id = await importSpriteFile(result.file, result.name)
+  if (id) resourceStore.selectedSpriteId = id
+}
 
 /** 当前角色素材的自然尺寸（.bsf 用 canvas，其余用首帧图片尺寸）：自动渲染模式的判定依据 */
 const spriteNaturalW = ref(0)
@@ -184,7 +201,14 @@ let playTimer: ReturnType<typeof setInterval> | null = null
 watch(
   () => resourceStore.selectedSpriteId,
   (id) => {
-    if (!id) return
+    if (!id) {
+      // 项目切换/资源清空后不得残留上一个项目的角色
+      revokeSpriteUrls(currentSprite.value)
+      currentSprite.value = null
+      currentSpritePath.value = ''
+      loadError.value = null
+      return
+    }
     const item = resourceStore.sprites.find(s => s.id === id)
     if (item && item.path) loadSprite(item)
   },
@@ -1492,6 +1516,19 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <!-- 空状态：项目里还没有任何角色 -->
+    <div v-if="resourceStore.sprites.length === 0" class="sprite-empty-banner">
+      <div class="empty-content">
+        <img :src="iconSpriteEmpty" class="empty-icon" alt="" />
+        <p class="empty-text">请先选择、绘制或上传角色</p>
+        <div class="empty-actions">
+          <button class="empty-btn" @click="emit('openSpriteLibrary')">选择角色</button>
+          <button class="empty-btn empty-btn-secondary" @click="emit('openPaintNew')">绘制角色</button>
+          <button class="empty-btn empty-btn-secondary" @click="onEmptyUpload">上传角色</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 右键菜单: 造型 -->
     <Teleport to="body">
       <div
@@ -1551,6 +1588,7 @@ onBeforeUnmount(() => {
   word-break: break-all;
 }
 .sprite-editor-page {
+  position: relative;
   display: flex;
   height: 100%;
   background: var(--bg-root);
@@ -2177,5 +2215,59 @@ onBeforeUnmount(() => {
 :global(.context-menu-item:hover) {
   background: var(--bg-hover);
   color: white;
+}
+
+/* ═══ 空状态横幅（与地图编辑器空状态保持一致） ═══ */
+.sprite-empty-banner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: rgba(41, 44, 52, 0.95);
+  z-index: 30;
+}
+.empty-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+.empty-icon {
+  width: 48px;
+  height: 48px;
+  color: #3D4048;
+}
+.empty-text {
+  color: #8B8FA3;
+  font-size: 14px;
+  margin: 0;
+}
+.empty-actions {
+  display: flex;
+  gap: 12px;
+}
+.empty-btn {
+  padding: 8px 24px;
+  border-radius: 6px;
+  border: 1px solid #3D4048;
+  background: #4B9B5C;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.empty-btn:hover {
+  background: #5bc772;
+  border-color: #5bc772;
+}
+.empty-btn-secondary {
+  background: #3D4048;
+}
+.empty-btn-secondary:hover {
+  background: #4D5058;
+  border-color: #4D5058;
 }
 </style>

@@ -103,6 +103,30 @@ export interface MapResource {
 export type MapResourceInput = Omit<MapResource, 'id' | 'firstgid'> &
   Partial<Pick<MapResource, 'id' | 'firstgid'>>
 
+/** 地图相机设置（运行时由引擎读取；参考 Godot/Unity 2D 相机的常用项，保持精简） */
+export interface CameraSettings {
+  /** 是否启用相机跟随（开启后自动跟随 1 号角色） */
+  enabled: boolean
+  /** 跟随目标：空=自动（1 号角色），否则为用户代码里的角色变量名 */
+  target: string
+  /** 相机相对目标的偏移（世界像素） */
+  offsetX: number
+  offsetY: number
+  /** 平滑跟随系数 0~1：0=立即对准，越大越"追不上" */
+  smoothing: number
+  /** 是否把相机限制在地图世界边界内 */
+  limitBounds: boolean
+}
+
+export const DEFAULT_CAMERA_SETTINGS: CameraSettings = {
+  enabled: false,
+  target: '',
+  offsetX: 0,
+  offsetY: 0,
+  smoothing: 0,
+  limitBounds: true,
+}
+
 export interface MapData {
   name: string
   version: number
@@ -118,6 +142,8 @@ export interface MapData {
   tileSets: TileSet[]
   // 图块笔刷调色板：每个图块一个独立条目（顺序=界面显示顺序），缺省时由资源自动生成
   tilePalette?: TilePaletteEntry[]
+  // 相机设置（缺省视为未启用）
+  camera?: CameraSettings
 }
 
 export interface TilePaletteEntry {
@@ -275,7 +301,12 @@ export const useMapStore = defineStore('map', () => {
     selectedResourceIndex.value = -1
     selectedTileIndex.value = -1
     clearImageSelection()
+    syncToolWithLayer()
     currentMapPath.value = ''
+    // 强制画布重建：否则清空后 Pixi 仍保留上一张地图的渲染结果
+    tileRevision.value++
+    imageRevision.value++
+    mapLoadCount.value++
   }
 
   function setTile(x: number, y: number, tileId: number) {
@@ -617,6 +648,11 @@ export const useMapStore = defineStore('map', () => {
     ;(mapData.value as any)[key] = value
   }
 
+  /** 更新相机设置（合并默认值，缺省字段补齐） */
+  function updateCameraSettings(patch: Partial<CameraSettings>) {
+    mapData.value.camera = { ...DEFAULT_CAMERA_SETTINGS, ...(mapData.value.camera ?? {}), ...patch }
+  }
+
   function updateTileSize(newSize: number) {
     mapData.value.tileSize = newSize
     for (const resource of mapData.value.resources) {
@@ -810,6 +846,7 @@ export const useMapStore = defineStore('map', () => {
     removeResource,
     clearResources,
     updateMapProperty,
+    updateCameraSettings,
     updateTileSize,
     setTileCollision,
     setTileCollisionType,

@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useMapStore } from '../../stores/map'
+import { computed, watch } from 'vue'
+import { useMapStore, DEFAULT_CAMERA_SETTINGS } from '../../stores/map'
+import { useEditorStore } from '../../stores/editor'
+import { useResourceStore } from '../../stores/resource'
 import CustomSelect from '../common/CustomSelect.vue'
 
 defineProps<{
@@ -15,6 +17,8 @@ const emit = defineEmits<{
 }>()
 
 const mapStore = useMapStore()
+const editorStore = useEditorStore()
+const resourceStore = useResourceStore()
 
 const collisionTypeOptions = [
   { label: '墙体', value: '墙体' },
@@ -101,6 +105,18 @@ function setImageOpacity(e: Event) {
   emit('transform-changed')
 }
 
+/** 地图尺寸提交：输入过程中不实时生效，失焦/回车时统一校验后调整，
+ *  避免逐字输入（如 40 → 450）触发多次画板重建与内容裁剪 */
+function commitMapSize(axis: 'width' | 'height', e: Event) {
+  const el = e.target as HTMLInputElement
+  const parsed = Number(el.value)
+  const current = axis === 'width' ? mapStore.mapData.width : mapStore.mapData.height
+  const value = Number.isFinite(parsed) && parsed >= 1 ? Math.round(parsed) : current
+  if (value !== current) mapStore.updateMapProperty(axis, value)
+  // 非法/空值回填当前合法值，避免输入框与实际地图尺寸不一致
+  el.value = String(value)
+}
+
 const collisionCount = computed(() => mapStore.activeCollisionPolygons.length)
 const collisionDisabledCount = computed(
   () => mapStore.activeCollisionPolygons.filter(p => p.disabled === true).length,
@@ -114,6 +130,69 @@ function onLayerLockChange(e: Event) {
   const locked = (e.target as HTMLInputElement).checked
   if (locked !== layerLocked.value) mapStore.toggleLayerLock(index)
 }
+
+// ====== 相机跟随（勾选后在下发展开设置；运行时由引擎读取） ======
+const camera = computed(() => ({ ...DEFAULT_CAMERA_SETTINGS, ...(mapStore.mapData.camera ?? {}) }))
+const cameraSmoothingPercent = computed(() => Math.round(camera.value.smoothing * 100))
+
+/**
+ * 从项目代码里静态收集可跟随的角色变量名（`变量 = Sprite(...)`，按出现顺序）。
+ * 只做正则扫描（面板打开/代码变更时），不执行代码，开销可忽略。
+ */
+const spriteTargetOptions = computed(() => {
+  const names = new Set<string>()
+  const scan = (text: string) => {
+    if (!text) return
+    const re = /^[ \t]*([^\s=#,()[\]{}]+)[ \t]*=[ \t]*Sprite[ \t]*\(/gm
+    let match: RegExpExecArray | null
+    while ((match = re.exec(text)) !== null) names.add(match[1])
+  }
+  for (const tab of [...editorStore.gameTabs, ...editorStore.codeTabs]) scan(tab.content)
+  for (const item of resourceStore.codes) if (item.content) scan(item.content)
+  return [...names].map(name => ({ label: name, value: name }))
+})
+
+/** 目标必须始终是存在的角色名：为空/失效时自动取第一个（= 第一个创建的角色） */
+watch(
+  spriteTargetOptions,
+  (options) => {
+    if (!camera.value.enabled) return
+    const names = options.map(o => o.value)
+    if (!names.includes(camera.value.target)) {
+      mapStore.updateCameraSettings({ target: names[0] ?? '' })
+    }
+  },
+  { immediate: true },
+)
+
+function onCameraEnabledChange(e: Event) {
+  const enabled = (e.target as HTMLInputElement).checked
+  mapStore.updateCameraSettings({ enabled })
+  // 勾选时把目标补成第一个角色；场景里没有任何角色时留空（引擎会安全跳过）
+  if (enabled) {
+    const names = spriteTargetOptions.value.map(o => o.value)
+    if (!names.includes(camera.value.target)) {
+      mapStore.updateCameraSettings({ target: names[0] ?? '' })
+    }
+  }
+}
+function onCameraTargetChange(val: string) {
+  mapStore.updateCameraSettings({ target: val })
+}
+function onCameraSmoothingChange(e: Event) {
+  const value = Number((e.target as HTMLInputElement).value)
+  if (!Number.isFinite(value)) return
+  mapStore.updateCameraSettings({ smoothing: Math.max(0, Math.min(0.95, value / 100)) })
+}
+function onCameraOffsetChange(axis: 'x' | 'y', e: Event) {
+  const value = Number((e.target as HTMLInputElement).value)
+  if (!Number.isFinite(value)) return
+  mapStore.updateCameraSettings(axis === 'x' ? { offsetX: value } : { offsetY: value })
+}
+function onCameraLimitChange(e: Event) {
+  mapStore.updateCameraSettings({ limitBounds: (e.target as HTMLInputElement).checked })
+}
+
 
 
 // ====== 图块模式：选中瓦片/资源的碰撞属性 ======
@@ -242,27 +321,100 @@ function onCollisionEnabledChange(enabled: boolean) {
             <input
               class="att-input att-input-no-spin"
               type="number"
+              min="1"
+              step="1"
               :value="mapStore.mapData.width"
               :disabled="disabled"
-              @input="mapStore.updateMapProperty('width', Number(($event.target as HTMLInputElement).value))"
+              @change="commitMapSize('width', $event)"
             />
             <span class="att-size-label">Y</span>
             <input
               class="att-input att-input-no-spin"
               type="number"
+              min="1"
+              step="1"
               :value="mapStore.mapData.height"
               :disabled="disabled"
-              @input="mapStore.updateMapProperty('height', Number(($event.target as HTMLInputElement).value))"
+              @change="commitMapSize('height', $event)"
             />
           </div>
         </div>
 
         <div class="att-row">
           <span class="att-label">相机跟随</span>
-          <label class="att-checkbox att-checkbox-disabled">
-            <input type="checkbox" disabled />
+          <label class="att-checkbox">
+            <input
+              type="checkbox"
+              :checked="camera.enabled"
+              :disabled="disabled"
+              @change="onCameraEnabledChange"
+            />
             <span class="att-checkbox-text">启用</span>
           </label>
+        </div>
+
+        <!-- 相机设置：勾选后展开为「相机跟随」的缩进子菜单，取消勾选即隐藏 -->
+        <div v-if="camera.enabled" class="att-subgroup">
+          <div class="att-row">
+            <span class="att-label">跟随角色</span>
+            <CustomSelect
+              class="att-select"
+              :model-value="camera.target"
+              :options="spriteTargetOptions"
+              :disabled="disabled || spriteTargetOptions.length === 0"
+              placeholder="暂无角色"
+              @update:model-value="onCameraTargetChange"
+            />
+          </div>
+
+          <div class="att-row">
+            <span class="att-label">平滑跟随</span>
+            <input
+              class="att-range"
+              type="range"
+              min="0"
+              max="95"
+              :value="cameraSmoothingPercent"
+              :disabled="disabled"
+              @input="onCameraSmoothingChange"
+            />
+            <span class="att-value">{{ cameraSmoothingPercent }}%</span>
+          </div>
+
+          <div class="att-row">
+            <span class="att-label">偏移</span>
+            <div class="att-size-group">
+              <span class="att-size-label">X</span>
+              <input
+                class="att-input att-input-no-spin"
+                type="number"
+                :value="camera.offsetX"
+                :disabled="disabled"
+                @change="onCameraOffsetChange('x', $event)"
+              />
+              <span class="att-size-label">Y</span>
+              <input
+                class="att-input att-input-no-spin"
+                type="number"
+                :value="camera.offsetY"
+                :disabled="disabled"
+                @change="onCameraOffsetChange('y', $event)"
+              />
+            </div>
+          </div>
+
+          <div class="att-row">
+            <span class="att-label">边界限制</span>
+            <label class="att-checkbox">
+              <input
+                type="checkbox"
+                :checked="camera.limitBounds"
+                :disabled="disabled"
+                @change="onCameraLimitChange"
+              />
+              <span class="att-checkbox-text">限制在地图内</span>
+            </label>
+          </div>
         </div>
 
         <div class="att-row">
@@ -297,7 +449,7 @@ function onCollisionEnabledChange(enabled: boolean) {
         <template v-if="isTileMode">
           <div class="att-row">
             <span class="att-label">物理属性</span>
-            <CustomSelect :model-value="collisionTypeValue" :options="collisionTypeOptions" :disabled="disabled" @update:model-value="onCollisionTypeChange" />
+            <CustomSelect class="att-select" :model-value="collisionTypeValue" :options="collisionTypeOptions" :disabled="disabled" @update:model-value="onCollisionTypeChange" />
           </div>
 
           <div v-if="collisionTypeValue === '自定义'" class="att-row">
@@ -472,6 +624,23 @@ function onCollisionEnabledChange(enabled: boolean) {
   gap: 16px;
 }
 
+/* 下拉框：固定占满标签右侧剩余宽度，右边缘对齐属性区 */
+.att-select {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+}
+
+/* 子菜单：相机跟随展开后的设置（缩进 + 左侧竖线，表明从属于上方开关） */
+.att-subgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-left: 2px;
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid rgb(58, 62, 72);
+}
+
 .att-label {
   color: #9ca0a4;
   font-size: 12px;
@@ -579,10 +748,5 @@ function onCollisionEnabledChange(enabled: boolean) {
 .att-range:disabled {
   opacity: 0.45;
   cursor: not-allowed;
-}
-
-.att-checkbox-disabled {
-  opacity: 0.5;
-  cursor: default;
 }
 </style>

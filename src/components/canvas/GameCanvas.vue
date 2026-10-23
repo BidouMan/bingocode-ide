@@ -491,15 +491,19 @@ async function syncTiles() {
         displayObj.zIndex = tileData.layer
       }
       // 视口裁剪：只渲染相机视口内的瓦片，减少 GPU 负担
-      const tileSize = tileData.tileSize || renderStore.tileGridSize
+      // 图块按格子大小判定；图像按贴图实际尺寸判定（大背景图左上角可能在视口外，但仍覆盖视口）
+      const cellSize = tileData.tileSize || renderStore.tileGridSize
+      const isImageTile = tileData.type === 'image'
+      const cullW = isImageTile ? (displayObj.width || 1) : cellSize
+      const cullH = isImageTile ? (displayObj.height || 1) : cellSize
       const cam = renderStore.camera
-      const viewLeft = cam.x - LOGIC_W / 2 - tileSize
-      const viewRight = cam.x + LOGIC_W / 2 + tileSize
-      const viewTop = cam.y - LOGIC_H / 2 - tileSize
-      const viewBottom = cam.y + LOGIC_H / 2 + tileSize
-      displayObj.visible = tileData.x + tileSize > viewLeft
+      const viewLeft = cam.x - LOGIC_W / 2 - cellSize
+      const viewRight = cam.x + LOGIC_W / 2 + cellSize
+      const viewTop = cam.y - LOGIC_H / 2 - cellSize
+      const viewBottom = cam.y + LOGIC_H / 2 + cellSize
+      displayObj.visible = tileData.x + cullW > viewLeft
         && tileData.x < viewRight
-        && tileData.y + tileSize > viewTop
+        && tileData.y + cullH > viewTop
         && tileData.y < viewBottom
     }
   }

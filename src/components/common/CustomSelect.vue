@@ -12,6 +12,8 @@ const props = defineProps<{
   disabled?: boolean
   /** 下拉展开方向：默认向下；底部工具栏等场景用向上避免超出窗口 */
   placement?: 'down' | 'up'
+  /** 无选中值时显示的占位文字（灰字） */
+  placeholder?: string
 }>()
 
 const emit = defineEmits<{
@@ -23,8 +25,15 @@ const selectRef = ref<HTMLDivElement>()
 
 const selectedLabel = computed(() => {
   const opt = props.options.find(o => o.value === props.modelValue)
-  return opt ? opt.label : props.modelValue
+  if (opt) return opt.label
+  if (!props.modelValue && props.placeholder) return props.placeholder
+  return props.modelValue
 })
+
+/** 当前是否显示占位文字（用于灰字样式） */
+const showingPlaceholder = computed(
+  () => !props.modelValue && !!props.placeholder && !props.options.some(o => o.value === props.modelValue),
+)
 
 function toggle() {
   if (props.disabled) return
@@ -53,7 +62,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="selectRef" class="custom-select" :class="{ open: isOpen, disabled }" @click="toggle">
-    <span class="custom-select-value">{{ selectedLabel }}</span>
+    <span class="custom-select-value" :class="{ placeholder: showingPlaceholder }">{{ selectedLabel }}</span>
     <span class="custom-select-arrow">
       <svg width="10" height="6" viewBox="0 0 10 6" fill="none">
         <path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -112,6 +121,10 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.custom-select-value.placeholder {
+  color: #6b7076;
 }
 
 .custom-select-arrow {

@@ -16,6 +16,15 @@ export interface MapSaveData {
   tilesets: TilesetSaveData[]
   // 图块笔刷调色板（顺序=界面显示顺序）
   tilePalette?: { resourceId: string; tileIndex: number }[]
+  // 相机设置（引擎运行时读取）
+  camera?: {
+    enabled: boolean
+    target?: string
+    offsetX: number
+    offsetY: number
+    smoothing: number
+    limitBounds: boolean
+  }
 }
 
 export interface LayerSaveData {
@@ -100,6 +109,14 @@ export interface MapLoadData {
   layers: any[]
   tileSets: any[]
   tilePalette?: { resourceId: string; tileIndex: number }[]
+  camera?: {
+    enabled: boolean
+    target?: string
+    offsetX: number
+    offsetY: number
+    smoothing: number
+    limitBounds: boolean
+  }
 }
 
 /**
@@ -260,6 +277,7 @@ export function serializeMap(mapData: any): MapSaveData {
     layers,
     tilesets,
     tilePalette: mapData.tilePalette,
+    camera: mapData.camera,
   }
 }
 
@@ -493,5 +511,15 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
     layers,
     tileSets,
     tilePalette: data.tilePalette,
+    camera: data.camera
+      ? {
+          enabled: data.camera.enabled === true,
+          target: typeof data.camera.target === 'string' ? data.camera.target : '',
+          offsetX: Number(data.camera.offsetX) || 0,
+          offsetY: Number(data.camera.offsetY) || 0,
+          smoothing: Math.max(0, Math.min(1, Number(data.camera.smoothing) || 0)),
+          limitBounds: data.camera.limitBounds !== false,
+        }
+      : undefined,
   }
 }

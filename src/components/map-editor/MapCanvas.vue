@@ -1360,17 +1360,26 @@ async function startPaintSession(): Promise<boolean> {
     const offsetX = img.position?.[0] ?? 0
     const offsetY = img.position?.[1] ?? 0
     // 出血区 = 半个地图，上限 512px（避免大尺寸地图导致画布过大、内存暴涨）
-    const basePadX = Math.min(Math.round(mapW / 2), 512)
-    const basePadY = Math.min(Math.round(mapH / 2), 512)
-    // 左/上出血只增不减，避免地图缩小时内容被裁掉
-    const padX = canRepad ? Math.max(basePadX, Math.round(-offsetX)) : 0
-    const padY = canRepad ? Math.max(basePadY, Math.round(-offsetY)) : 0
+    const padX = Math.min(Math.round(mapW / 2), 512)
+    const padY = Math.min(Math.round(mapH / 2), 512)
     // 已有内容平移到新画布：世界坐标保持不变（世界原点落在画布 padX/padY 处）
     // 矢量图层不做平移，直接沿用原画布原点
     const drawX = canRepad ? padX + offsetX : 0
     const drawY = canRepad ? padY + offsetY : 0
-    const canvasW = isBackground ? Math.max(srcW + Math.max(0, drawX), mapW + padX * 2) : srcW
-    const canvasH = isBackground ? Math.max(srcH + Math.max(0, drawY), mapH + padY * 2) : srcH
+    let canvasW = srcW
+    let canvasH = srcH
+    if (isBackground) {
+      if (canRepad) {
+        // 背景画板严格等于「地图尺寸 + 四周出血」：地图缩小时画板同步收缩，
+        // 超出新画板的内容被裁掉（与 Tiled 调整地图尺寸行为一致）
+        canvasW = mapW + padX * 2
+        canvasH = mapH + padY * 2
+      } else {
+        // 矢量内容以画板像素坐标为基准：画板只扩不缩，避免矢量路径错位
+        canvasW = Math.max(srcW, mapW)
+        canvasH = Math.max(srcH, mapH)
+      }
+    }
     const canvas = document.createElement('canvas')
     canvas.width = canvasW
     canvas.height = canvasH

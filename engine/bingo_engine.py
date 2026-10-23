@@ -44,6 +44,7 @@ _CAMERA_ZOOM = 1.0  # 相机缩放比例
 _SCREEN_WIDTH = 640  # 屏幕宽度
 _SCREEN_HEIGHT = 480  # 屏幕高度
 _FOLLOW_TARGET = None  # 摄像机跟随目标
+_AUTO_CAMERA_TARGET = None  # 由地图相机设置自动跟随的主玩家（区别于代码 follow()）
 
 # 渲染缓存
 _RENDERED_TILES = set()  # 已渲染的瓦片缓存
@@ -485,6 +486,8 @@ class Sprite:
     def __init__(self, filename):
         # 1. 基础属性初始化
         self.id = str(id(self))
+        # 角色素材名（Sprite("角色1") 里的名字），供相机跟随按名字查找
+        self.sprite_name = filename
         self._x = 320
         self._y = 240
         self._scale = 100
@@ -2495,6 +2498,107 @@ def _send_camera_update(x, y, world_bounds=None):
     print(json.dumps(camera_packet))
 
 
+def _camera_config():
+    """当前地图的相机设置（缺省为空字典 = 仅支持代码 follow()）"""
+    if not _CURRENT_MAP:
+        return {}
+    cfg = _CURRENT_MAP.get("camera") or {}
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def _resolve_camera_target(name):
+    """按角色变量名解析相机跟随目标。
+
+    依次尝试：用户脚本里的同名变量 → 角色素材名（Sprite("角色1")）→ 1 号角色。
+    找不到时回退主玩家，避免相机不跟随（课堂容错）。
+    """
+    name = str(name or "").strip()
+    if name:
+        main = sys.modules.get("__main__")
+        obj = getattr(main, name, None) if main else None
+        if isinstance(obj, Sprite) and not getattr(obj, "_is_deleted", False):
+            return obj
+        for sprite in _SPRITES.values():
+            if getattr(sprite, "sprite_name", "") == name and not getattr(sprite, "_is_deleted", False):
+                return sprite
+    return get_main_player()
+
+
+def _update_camera_follow():
+    """每帧更新相机。
+
+    支持两种来源：
+    - 地图属性里的相机设置（勾选「相机跟随」后自动跟随指定角色/1 号角色，可设偏移/平滑/边界限制）；
+    - 代码调用 follow() 手动跟随（优先级高于自动跟随）。
+    """
+    global _CAMERA_X, _CAMERA_Y, _FOLLOW_TARGET, _AUTO_CAMERA_TARGET
+    cfg = _camera_config()
+    enabled = bool(cfg.get("enabled"))
+
+    if enabled:
+        # 只在没有目标时解析一次（代码 follow() 或已解析的目标不会被覆盖）
+        if _FOLLOW_TARGET is None:
+            target = _resolve_camera_target(cfg.get("target", ""))
+            if target is not None:
+                _FOLLOW_TARGET = target
+                _AUTO_CAMERA_TARGET = target
+    elif _AUTO_CAMERA_TARGET is not None and _FOLLOW_TARGET is _AUTO_CAMERA_TARGET:
+        # 关闭相机跟随：撤销自动目标，不影响代码 follow()
+        _FOLLOW_TARGET = None
+        _AUTO_CAMERA_TARGET = None
+
+    if _FOLLOW_TARGET is None:
+        return
+    if getattr(_FOLLOW_TARGET, "_is_deleted", False):
+        # 目标被删除：停止跟随（地图开启自动跟随时下一帧会重新锁定主玩家）
+        _FOLLOW_TARGET = None
+        _AUTO_CAMERA_TARGET = None
+        return
+
+    offset_x = float(cfg.get("offsetX", 0) or 0)
+    offset_y = float(cfg.get("offsetY", 0) or 0)
+    smooth = max(0.0, min(0.95, float(cfg.get("smoothing", 0) or 0)))
+    limit = bool(cfg.get("limitBounds", True))
+
+    if _CURRENT_MAP:
+        # 相机活动范围 = 地图自身的像素矩形（不建议用 world_bounds：
+        # 它包含图片出血/超出地图的素材，会把相机带到地图/游戏窗口之外）
+        ts = _CURRENT_MAP.get("tile_size", 16)
+        bounds = {
+            "left": 0,
+            "top": 0,
+            "right": _CURRENT_MAP["width"] * ts,
+            "bottom": _CURRENT_MAP["height"] * ts,
+        }
+    else:
+        bounds = {"left": 0, "top": 0, "right": 640, "bottom": 480}
+
+    old_camera_x = _CAMERA_X
+    old_camera_y = _CAMERA_Y
+
+    tx = _FOLLOW_TARGET.x + offset_x
+    ty = _FOLLOW_TARGET.y + offset_y
+    if limit:
+        view_w, view_h = 640, 480
+        tx = max(bounds["left"] + view_w / 2, min(tx, bounds["right"] - view_w / 2))
+        ty = max(bounds["top"] + view_h / 2, min(ty, bounds["bottom"] - view_h / 2))
+
+    if smooth > 0.001:
+        factor = max(0.05, 1.0 - smooth)
+        _CAMERA_X += (tx - _CAMERA_X) * factor
+        _CAMERA_Y += (ty - _CAMERA_Y) * factor
+    else:
+        _CAMERA_X = tx
+        _CAMERA_Y = ty
+
+    _send_camera_update(_CAMERA_X, _CAMERA_Y, bounds if (_CURRENT_MAP and limit) else None)
+
+    if _CURRENT_MAP:
+        tile_size = _CURRENT_MAP.get("tile_size", 16)
+        if abs(_CAMERA_X - old_camera_x) >= tile_size / 2 or abs(_CAMERA_Y - old_camera_y) >= tile_size / 2:
+            _render_map()
+
+
 def _flush_frame_updates():
     """将帧缓冲中的精灵更新合并为一条 JSON 发送，大幅减少管道写入次数"""
     global _FRAME_UPDATES
@@ -2541,8 +2645,10 @@ def follow(sprite):
     Args:
         sprite: 要跟随的精灵对象
     """
-    global _FOLLOW_TARGET
+    global _FOLLOW_TARGET, _AUTO_CAMERA_TARGET
     _FOLLOW_TARGET = sprite
+    # 代码手动跟随优先于地图里的自动跟随
+    _AUTO_CAMERA_TARGET = None
 
 
 def load_map(map_name):
@@ -2712,6 +2818,8 @@ def load_map(map_name):
             "gravity": save_data.get("gravity", False),
             "layers": layers,
             "tile_sets": tilesets,
+            # 地图相机设置（属性面板里的相机跟随/偏移/平滑/边界限制）
+            "camera": save_data.get("camera") or {},
         }
 
         _CURRENT_MAP = map_data
@@ -2850,13 +2958,18 @@ def _try_extract_bgm(map_name):
 
 def _clear_map():
     """清理地图资源"""
-    global _CURRENT_MAP, _MAP_SPRITES, _RENDERED_TILES, _MAP_DIR
+    global _CURRENT_MAP, _MAP_SPRITES, _RENDERED_TILES, _MAP_DIR, _FOLLOW_TARGET, _AUTO_CAMERA_TARGET
 
     # 删除地图瓦片精灵
     for sprite_id in list(_MAP_SPRITES.keys()):
         packet = {"type": "DELETE", "id": sprite_id}
         print(json.dumps(packet))
         del _MAP_SPRITES[sprite_id]
+
+    # 地图卸载：撤销自动相机跟随目标（代码 follow() 的仍保留）
+    if _AUTO_CAMERA_TARGET is not None and _FOLLOW_TARGET is _AUTO_CAMERA_TARGET:
+        _FOLLOW_TARGET = None
+    _AUTO_CAMERA_TARGET = None
 
     _CURRENT_MAP = None
     _MAP_DIR = None
@@ -3223,37 +3336,8 @@ def run():
         if accumulator > _PHYSICS_DT * _MAX_PHYSICS_STEPS:
             accumulator = 0.0
 
-        if _FOLLOW_TARGET:
-            global _CAMERA_X, _CAMERA_Y
-            old_camera_x = _CAMERA_X
-            old_camera_y = _CAMERA_Y
-
-            if _CURRENT_MAP:
-                bounds = _CURRENT_MAP.get(
-                    "world_bounds", {"left": 0, "top": 0, "right": 640, "bottom": 480}
-                )
-            else:
-                bounds = {"left": 0, "top": 0, "right": 640, "bottom": 480}
-            view_w, view_h = 640, 480
-
-            _CAMERA_X = max(
-                bounds["left"] + view_w / 2,
-                min(_FOLLOW_TARGET.x, bounds["right"] - view_w / 2),
-            )
-            _CAMERA_Y = max(
-                bounds["top"] + view_h / 2,
-                min(_FOLLOW_TARGET.y, bounds["bottom"] - view_h / 2),
-            )
-
-            _send_camera_update(_CAMERA_X, _CAMERA_Y, bounds if _CURRENT_MAP else None)
-
-            if _CURRENT_MAP:
-                tile_size = _CURRENT_MAP.get("tile_size", 16)
-                if (
-                    abs(_CAMERA_X - old_camera_x) >= tile_size // 2
-                    or abs(_CAMERA_Y - old_camera_y) >= tile_size // 2
-                ):
-                    _render_map()
+        # 相机跟随（地图属性设置 / 代码 follow()）
+        _update_camera_follow()
 
         # 同步位置跟随（挂点/角色），再合并发送本帧所有精灵更新
         _update_follows()
@@ -3455,27 +3539,8 @@ def start_game(project_dir=None, target_file=None):
         if accumulator > _PHYSICS_DT * _MAX_PHYSICS_STEPS:
             accumulator = 0.0
 
-        # 相机跟随
-        if _FOLLOW_TARGET:
-            global _CAMERA_X, _CAMERA_Y
-            old_camera_x = _CAMERA_X
-            old_camera_y = _CAMERA_Y
-
-            if _CURRENT_MAP:
-                bounds = _CURRENT_MAP.get("world_bounds", {"left": 0, "top": 0, "right": 640, "bottom": 480})
-            else:
-                bounds = {"left": 0, "top": 0, "right": 640, "bottom": 480}
-            view_w, view_h = 640, 480
-
-            _CAMERA_X = max(bounds["left"] + view_w / 2, min(_FOLLOW_TARGET.x, bounds["right"] - view_w / 2))
-            _CAMERA_Y = max(bounds["top"] + view_h / 2, min(_FOLLOW_TARGET.y, bounds["bottom"] - view_h / 2))
-
-            _send_camera_update(_CAMERA_X, _CAMERA_Y, bounds if _CURRENT_MAP else None)
-
-            if _CURRENT_MAP:
-                tile_size = _CURRENT_MAP.get("tile_size", 16)
-                if abs(_CAMERA_X - old_camera_x) >= tile_size // 2 or abs(_CAMERA_Y - old_camera_y) >= tile_size // 2:
-                    _render_map()
+        # 相机跟随（地图属性设置 / 代码 follow()）
+        _update_camera_follow()
 
         # 同步位置跟随（挂点/角色），再帧合并发送
         _update_follows()
