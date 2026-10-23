@@ -2,6 +2,7 @@ import { watch, onBeforeUnmount, type Ref } from 'vue'
 import paper from 'paper'
 import { usePaintStore } from '../../../stores/paint'
 import { rgbaCss } from '../utils/artboardExport'
+import { snapRectOffset, type SnapLines } from '../../../utils/smartSnap'
 import {
   ensurePaintFont,
   PAINT_FONT_FAMILY,
@@ -39,6 +40,11 @@ export interface PaperScopeOptions {
   singleFrame?: boolean
   /** 是否创建位图代理 Raster；地图侧传 false，避免与 Pixi 底图重影 */
   proxy?: boolean
+  /**
+   * 智能吸附（画布像素坐标）：返回候选线/网格/阈值；
+   * 返回 null 表示当前不吸附（例如吸附开关关闭或图层旋转）。
+   */
+  smartSnap?: () => { lines: SnapLines; grid: number; threshold: number } | null
 }
 
 /**
@@ -2795,10 +2801,36 @@ export function usePaperScope(
     }
   }
 
+  /** 选中内容的包围盒（画布像素坐标；位图代理不参与，避免撑满整帧） */
+  function selectionBounds(): paper.Rectangle | null {
+    let box: paper.Rectangle | null = null
+    for (const item of selected) {
+      if (item === bitmapRaster) continue
+      const r = item.strokeBounds
+      box = box ? box.unite(r) : r.clone()
+    }
+    return box
+  }
+
   function continueSelect(p: { x: number; y: number }, shift: boolean) {
     if (selOp === 'move') {
-      const dx = p.x - lastPointer.x
-      const dy = p.y - lastPointer.y
+      let dx = p.x - lastPointer.x
+      let dy = p.y - lastPointer.y
+      // 智能吸附：让选中内容的包围盒边缘/中心就近对齐候选线（地图编辑器注入，关闭时返回 null）
+      const snap = (dx !== 0 || dy !== 0) ? options.smartSnap?.() ?? null : null
+      if (snap) {
+        const b = selectionBounds()
+        if (b) {
+          const off = snapRectOffset({
+            left: b.x + dx,
+            top: b.y + dy,
+            right: b.x + b.width + dx,
+            bottom: b.y + b.height + dy,
+          }, snap.lines, snap.grid, snap.threshold)
+          dx += off.dx
+          dy += off.dy
+        }
+      }
       if (dx !== 0 || dy !== 0) {
         for (const item of selected) item.translate(new scope!.Point(dx, dy))
         if (selFrame) {

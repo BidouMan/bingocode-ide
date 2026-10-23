@@ -2,6 +2,7 @@ import { watch } from 'vue'
 import { useMapStore, type CollisionLayer, type CollisionPolygon } from '../stores/map'
 import { useMapEditorStore } from '../stores/mapEditor'
 import { pointInPolygon } from '../utils/mapImageGeometry'
+import { collectSnapLines, snapAxisValue, snapRectOffset, snapThreshold } from '../utils/smartSnap'
 
 interface CollisionLayerEditorOptions {
   getApp: () => any
@@ -51,13 +52,18 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
     return polygon.points.map(p => ({ x: p[0], y: p[1] }))
   }
 
+  /** 智能吸附：像素 / 网格 / 图像边缘与中心；关闭时返回原始坐标（完全自由） */
   function snapPoint(world: Point): Point {
-    if (mapEditorStore.snapToGrid) {
-      const ts = Math.max(1, mapStore.mapData.tileSize)
-      return { x: Math.round(world.x / ts) * ts, y: Math.round(world.y / ts) * ts }
+    if (!mapEditorStore.smartSnap) return world
+    const ts = Math.max(1, mapStore.mapData.tileSize)
+    const mapW = mapStore.mapData.width * ts
+    const mapH = mapStore.mapData.height * ts
+    const lines = collectSnapLines(mapStore.mapData.layers, mapW, mapH)
+    const threshold = snapThreshold(getScale())
+    return {
+      x: snapAxisValue(world.x, lines.xs, ts, threshold),
+      y: snapAxisValue(world.y, lines.ys, ts, threshold),
     }
-    // 默认像素吸附：对齐到整数地图像素
-    return { x: Math.round(world.x), y: Math.round(world.y) }
   }
 
   function pointToSegmentDistance(p: Point, a: Point, b: Point): number {
@@ -139,8 +145,8 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
     if (shape === 'circle') points = circlePoints(x0, y0, x1, y1)
     else if (shape === 'capsule') points = capsulePoints(x0, y0, x1, y1)
     else points = rectPoints(x0, y0, x1, y1)
-    // 像素吸附模式：生成点也取整，避免出现小数锚点
-    if (!mapEditorStore.snapToGrid) {
+    // 智能吸附开启时生成点取整（像素吸附），关闭时保留自由小数坐标
+    if (mapEditorStore.smartSnap) {
       return points.map(p => [Math.round(p[0]), Math.round(p[1])])
     }
     return points
@@ -493,7 +499,8 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
       }
       draggingPolygon = true
       dragStartPoints = hit.points.map(p => [p[0], p[1]])
-      dragStartWorld = snapPoint(world)
+      // 整框拖动按原始指针位移计算，再由矩形吸附对齐边缘/中心（避免起点吸附造成跳动）
+      dragStartWorld = { x: world.x, y: world.y }
     } else {
       selectedVertexIndex = -1
       mapEditorStore.setActiveCollisionPolygonId(null)
@@ -528,9 +535,27 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
     if (!poly) return
 
     if (draggingPolygon && dragStartWorld) {
-      const current = snapPoint(world)
-      const dx = current.x - dragStartWorld.x
-      const dy = current.y - dragStartWorld.y
+      let dx = world.x - dragStartWorld.x
+      let dy = world.y - dragStartWorld.y
+      // 智能吸附：让碰撞框的左/中/右、上/中/下 就近对齐候选线
+      if (mapEditorStore.smartSnap) {
+        const xs = dragStartPoints.map(p => p[0])
+        const ys = dragStartPoints.map(p => p[1])
+        const ts = Math.max(1, mapStore.mapData.tileSize)
+        const lines = collectSnapLines(
+          mapStore.mapData.layers,
+          mapStore.mapData.width * ts,
+          mapStore.mapData.height * ts,
+        )
+        const offset = snapRectOffset({
+          left: Math.min(...xs) + dx,
+          top: Math.min(...ys) + dy,
+          right: Math.max(...xs) + dx,
+          bottom: Math.max(...ys) + dy,
+        }, lines, ts, snapThreshold(getScale()))
+        dx += offset.dx
+        dy += offset.dy
+      }
       const next = dragStartPoints.map(p => [p[0] + dx, p[1] + dy])
       mapStore.updateCollisionPolygonPoints(poly.id, next)
       drawOverlay()

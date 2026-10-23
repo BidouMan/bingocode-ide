@@ -5,6 +5,7 @@ import { useMapStore, type MapResource } from '../../stores/map'
 import { useMapEditorStore } from '../../stores/mapEditor'
 import { useProjectStore } from '../../stores/project'
 import { useEditorStore } from '../../stores/editor'
+import { snapAxisValue } from '../../utils/smartSnap'
 
 const mapStore = useMapStore()
 const mapEditorStore = useMapEditorStore()
@@ -275,8 +276,17 @@ function loadCollision() {
 }
 
 const snapGrid = 8
-function snapToGrid(val: number): number {
-  return mapEditorStore.snapToPixel ? Math.round(val / snapGrid) * snapGrid : val
+/** 智能吸附：像素 / 8px 网格 / 编辑区边界与中心；关闭后完全自由 */
+function snapValue(val: number): number {
+  if (!mapEditorStore.smartSnap) return val
+  const lines = [
+    0,
+    tileSize,
+    contentOffset,
+    contentOffset + contentSize / 2,
+    contentOffset + contentSize,
+  ]
+  return snapAxisValue(val, lines, snapGrid, 6)
 }
 
 function getCanvasPos(e: MouseEvent): { x: number; y: number } {
@@ -319,11 +329,11 @@ function onMouseDown(e: MouseEvent) {
         if (dist < closestDist && dist < 20) { closestDist = dist; closestEdgeIdx = i + 1 }
       }
       if (closestEdgeIdx >= 0) {
-        collisionPoints.value.splice(closestEdgeIdx, 0, { x: snapToGrid(pos.x), y: snapToGrid(pos.y) })
+        collisionPoints.value.splice(closestEdgeIdx, 0, { x: snapValue(pos.x), y: snapValue(pos.y) })
         saveCollision(); render(); return
       }
     }
-    collisionPoints.value.push({ x: snapToGrid(pos.x), y: snapToGrid(pos.y) })
+    collisionPoints.value.push({ x: snapValue(pos.x), y: snapValue(pos.y) })
     saveCollision(); render()
   } else if (mapEditorStore.collisionTool === 'delete') {
     const idx = findAnchor(pos)
@@ -337,7 +347,7 @@ function onMouseDown(e: MouseEvent) {
 function onMouseMove(e: MouseEvent) {
   if (draggingIndex.value >= 0) {
     const pos = getCanvasPos(e)
-    collisionPoints.value[draggingIndex.value] = { x: snapToGrid(pos.x), y: snapToGrid(pos.y) }
+    collisionPoints.value[draggingIndex.value] = { x: snapValue(pos.x), y: snapValue(pos.y) }
     render()
   }
 }

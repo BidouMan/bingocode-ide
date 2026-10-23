@@ -2,6 +2,7 @@ import { nextTick } from 'vue'
 import { useMapStore } from '../stores/map'
 import { useMapEditorStore } from '../stores/mapEditor'
 import { imageWorldToLocal } from '../utils/mapImageGeometry'
+import { collectSnapLines, imageWorldRect, snapAxisValue, snapRectOffset, snapThreshold } from '../utils/smartSnap'
 
 interface ImageTransformOptions {
   getApp: () => any
@@ -41,6 +42,23 @@ export function useImageTransform(options: ImageTransformOptions) {
 
   function isTransformBusy(): boolean {
     return transformDragging || isRotating
+  }
+
+  /** 当前画布缩放（用于把屏幕吸附阈值换算成世界坐标） */
+  function viewportScale(): number {
+    const app = getApp()
+    return Math.max(0.1, app?.stage?.scale?.x ?? 1)
+  }
+
+  /** 智能吸附候选线（排除正在移动的图层，避免吸附到自身） */
+  function snapLines(excludeLayerId: number) {
+    const ts = Math.max(1, mapStore.mapData.tileSize)
+    return collectSnapLines(
+      mapStore.mapData.layers,
+      mapStore.mapData.width * ts,
+      mapStore.mapData.height * ts,
+      excludeLayerId,
+    )
   }
 
   function isImageDraggingNow(): boolean {
@@ -143,11 +161,13 @@ export function useImageTransform(options: ImageTransformOptions) {
       const idx = transformHandleIndex
       let mx = worldPos.x
       let my = worldPos.y
-      // 吸附网格：缩放手柄拖动的边对齐到最近网格线（与图像拖动吸附同一开关）
-      if (mapEditorStore.snapToGrid) {
-        const ts = mapStore.mapData.tileSize
-        mx = Math.round(mx / ts) * ts
-        my = Math.round(my / ts) * ts
+      // 智能吸附：缩放手柄拖动的边就近对齐像素/网格/图像边缘与中心；关闭时不吸附
+      if (mapEditorStore.smartSnap) {
+        const ts = Math.max(1, mapStore.mapData.tileSize)
+        const lines = snapLines(selectedImageLayerId)
+        const threshold = snapThreshold(viewportScale())
+        mx = snapAxisValue(mx, lines.xs, ts, threshold)
+        my = snapAxisValue(my, lines.ys, ts, threshold)
       }
 
       // Each handle controls specific edges: [left, top, right, bottom]
@@ -235,11 +255,20 @@ export function useImageTransform(options: ImageTransformOptions) {
         const dy = worldPos.y - imageDragStartWorld.y
         let nx = imageDragStartPos[0] + dx
         let ny = imageDragStartPos[1] + dy
-        // 吸附网格：图像左上角对齐到最近的网格点
-        if (mapEditorStore.snapToGrid) {
-          const ts = mapStore.mapData.tileSize
-          nx = Math.round(nx / ts) * ts
-          ny = Math.round(ny / ts) * ts
+        // 智能吸附：图像左/中/右、上/中/下 就近对齐像素/网格/图像边缘与中心；关闭时不吸附
+        if (mapEditorStore.smartSnap) {
+          const rect = imageWorldRect({ ...selectedImageData, position: [nx, ny] })
+          if (rect) {
+            const ts = Math.max(1, mapStore.mapData.tileSize)
+            const offset = snapRectOffset(
+              rect,
+              snapLines(selectedImageLayerId),
+              ts,
+              snapThreshold(viewportScale()),
+            )
+            nx += offset.dx
+            ny += offset.dy
+          }
         }
         selectedImageData.position = [nx, ny]
         updateTransformBox()

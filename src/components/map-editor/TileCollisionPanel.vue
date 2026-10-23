@@ -6,7 +6,6 @@ import iconMoveAnchor from '../../assets/icons/移动锚点.svg'
 import iconAddAnchor from '../../assets/icons/添加锚点.svg'
 import iconDelAnchor from '../../assets/icons/删除锚点.svg'
 import iconResetAnchor from '../../assets/icons/重置锚点.svg'
-import iconSnapAnchor from '../../assets/icons/吸附锚点.svg'
 
 /**
  * 图块模式的素材碰撞编辑区：工具条 + 256×256 编辑画布。
@@ -45,14 +44,6 @@ const collisionEditorRef = ref<InstanceType<typeof CollisionEditor>>()
       </button>
       <button class="col-tool-btn" v-tooltip="'重置锚点'" @click="collisionEditorRef?.resetCollision()">
         <img :src="iconResetAnchor" class="col-tool-icon" />
-      </button>
-      <button
-        class="col-tool-btn"
-        :class="{ 'col-tool-active': mapEditorStore.snapToPixel }"
-        v-tooltip="'吸附锚点'"
-        @click="mapEditorStore.toggleSnapToPixel()"
-      >
-        <img :src="iconSnapAnchor" class="col-tool-icon" />
       </button>
     </div>
 

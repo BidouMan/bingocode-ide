@@ -15,6 +15,7 @@ import { useCollisionLayerEditor } from '../../composables/useCollisionLayerEdit
 import { useTilePainter } from '../../composables/useTilePainter'
 import { usePaperScope } from '../paint-editor/composables/usePaperScope'
 import { ensurePaintFont } from '../paint-editor/utils/paintFont'
+import { collectSnapLines, snapRectOffset, snapThreshold } from '../../utils/smartSnap'
 import {
   createMapVectorViewport,
   computeMapVectorMatrix,
@@ -1158,6 +1159,48 @@ function handleSelectPointerDown(world: { x: number; y: number }) {
   drawSelectionOverlay()
 }
 
+/** 浮动选区移动吸附：选区世界包围盒的左/中/右、上/中/下 就近对齐候选线 */
+function snapFloatingMove(img: MapImageData) {
+  const s = paintSession
+  if (!s || !floatCanvas) return
+  if (Math.abs(img.rotation ?? 0) > 1e-3) return
+  const sx = img.scaleX ?? img.scale ?? 1
+  const sy = img.scaleY ?? img.scale ?? 1
+  if (sx <= 0 || sy <= 0) return
+  const logicalW = Math.max(1e-6, (img.width || s.canvas.width) * sx)
+  const logicalH = Math.max(1e-6, (img.height || s.canvas.height) * sy)
+  // 浮动选区四角（画布像素）
+  const hw = (floatCanvas.width * Math.abs(floatXf.sx)) / 2
+  const hh = (floatCanvas.height * Math.abs(floatXf.sy)) / 2
+  const cos = Math.cos(floatXf.angle)
+  const sin = Math.sin(floatXf.angle)
+  const corners = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([lx, ly]) => ({
+    x: floatXf.cx + lx * cos - ly * sin,
+    y: floatXf.cy + lx * sin + ly * cos,
+  }))
+  // 画布像素 → 世界坐标
+  const ox = img.position?.[0] ?? 0
+  const oy = img.position?.[1] ?? 0
+  const xs = corners.map(c => ox + (c.x / s.canvas.width) * logicalW)
+  const ys = corners.map(c => oy + (c.y / s.canvas.height) * logicalH)
+  const ts = Math.max(1, mapStore.mapData.tileSize)
+  const offset = snapRectOffset(
+    { left: Math.min(...xs), top: Math.min(...ys), right: Math.max(...xs), bottom: Math.max(...ys) },
+    collectSnapLines(
+      mapStore.mapData.layers,
+      mapStore.mapData.width * ts,
+      mapStore.mapData.height * ts,
+      s.layerId,
+    ),
+    ts,
+    snapThreshold(viewport.currentScale.value),
+  )
+  if (offset.dx === 0 && offset.dy === 0) return
+  // 世界位移换回画布像素
+  floatXf.cx += (offset.dx * s.canvas.width) / logicalW
+  floatXf.cy += (offset.dy * s.canvas.height) / logicalH
+}
+
 function handleSelectPointerMove(world: { x: number; y: number }, shift: boolean): boolean {
   const s = paintSession
   const img = sessionImage()
@@ -1180,6 +1223,8 @@ function handleSelectPointerMove(world: { x: number; y: number }, shift: boolean
   if (floatOp === 'move') {
     floatXf.cx = p.x - floatGrab.x
     floatXf.cy = p.y - floatGrab.y
+    // 智能吸附：选区世界包围盒的边缘/中心就近对齐候选线
+    if (mapEditorStore.smartSnap) snapFloatingMove(img)
     compositeFloat()
     return true
   }
@@ -1769,6 +1814,43 @@ onBeforeUnmount(() => {
 
 const mapVectorViewport = createMapVectorViewport(vectorFrame)
 
+/**
+ * 矢量引擎的智能吸附配置：把世界坐标候选线换算到画布像素坐标。
+ * 图层旋转/镜像时不吸附（轴对齐候选线无法准确换算）。
+ */
+function vectorSmartSnap(): { lines: { xs: number[]; ys: number[] }; grid: number; threshold: number } | null {
+  if (!mapEditorStore.smartSnap) return null
+  const s = paintSession
+  if (!s) return null
+  const img = imageByLayerId(s.layerId)
+  if (!img) return null
+  if (Math.abs(img.rotation ?? 0) > 1e-3) return null
+  const sx = img.scaleX ?? img.scale ?? 1
+  const sy = img.scaleY ?? img.scale ?? 1
+  if (sx < 0 || sy < 0) return null
+  const logicalW = Math.max(1e-6, (img.width || s.canvas.width) * sx)
+  const logicalH = Math.max(1e-6, (img.height || s.canvas.height) * sy)
+  const pxPerWorldX = s.canvas.width / logicalW
+  const pxPerWorldY = s.canvas.height / logicalH
+  const ts = Math.max(1, mapStore.mapData.tileSize)
+  const world = collectSnapLines(
+    mapStore.mapData.layers,
+    mapStore.mapData.width * ts,
+    mapStore.mapData.height * ts,
+    s.layerId,
+  )
+  const ox = img.position?.[0] ?? 0
+  const oy = img.position?.[1] ?? 0
+  return {
+    lines: {
+      xs: world.xs.map(x => (x - ox) * pxPerWorldX),
+      ys: world.ys.map(y => (y - oy) * pxPerWorldY),
+    },
+    grid: ts * pxPerWorldX,
+    threshold: snapThreshold(viewport.currentScale.value) * pxPerWorldX,
+  }
+}
+
 const vectorEngine = usePaperScope(
   vectorCanvasRef,
   vectorCanvasRef,
@@ -1781,7 +1863,7 @@ const vectorEngine = usePaperScope(
       clearFrame: () => {},
     },
   },
-  { viewport: mapVectorViewport, singleFrame: true, proxy: false }
+  { viewport: mapVectorViewport, singleFrame: true, proxy: false, smartSnap: vectorSmartSnap }
 )
 
 /** 同步矢量视口矩阵 / 裁剪 / 叠加层投影；并让 handle 尺寸按屏幕恒定 */

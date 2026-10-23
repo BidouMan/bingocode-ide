@@ -8,11 +8,10 @@ import type { MapTool, CollisionTool, CollisionLayerTool } from './map'
  */
 export const useMapEditorStore = defineStore('mapEditor', () => {
   const showGrid = ref(true)
-  // 吸附模式开关：关闭=像素吸附（默认），开启=网格吸附
-  const snapToGrid = ref(false)
+  // 智能吸附开关：开启时吸附像素/网格/图像边缘与中心；关闭后完全自由（无任何吸附）
+  const smartSnap = ref(true)
   const currentTool = ref<MapTool>('select')
   const collisionTool = ref<CollisionTool>('move')
-  const snapToPixel = ref(true)
   const cursorX = ref<number | null>(null)
   const cursorY = ref<number | null>(null)
   const imageTool = ref<'select' | 'reshape' | 'brush' | 'eraser' | 'fill' | 'text' | 'line' | 'rect' | 'ellipse' | 'eyedropper'>('select')
@@ -36,16 +35,12 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
     showGrid.value = !showGrid.value
   }
 
-  function toggleSnapToGrid() {
-    snapToGrid.value = !snapToGrid.value
+  function toggleSmartSnap() {
+    smartSnap.value = !smartSnap.value
   }
 
   function setCollisionTool(tool: CollisionTool) {
     collisionTool.value = tool
-  }
-
-  function toggleSnapToPixel() {
-    snapToPixel.value = !snapToPixel.value
   }
 
   function setCursorPos(x: number | null, y: number | null) {
@@ -75,10 +70,9 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
 
   return {
     showGrid,
-    snapToGrid,
+    smartSnap,
     currentTool,
     collisionTool,
-    snapToPixel,
     cursorX,
     cursorY,
     imageTool,
@@ -94,9 +88,8 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
     setActiveCollisionPolygonId,
     setTool,
     toggleGrid,
-    toggleSnapToGrid,
+    toggleSmartSnap,
     setCollisionTool,
-    toggleSnapToPixel,
     setCursorPos,
   }
 })

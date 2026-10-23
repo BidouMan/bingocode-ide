@@ -149,9 +149,9 @@ function onToolAreaWheel(e: WheelEvent) {
     </button>
     <button
       class="toolbar-btn"
-      :class="{ 'toolbar-btn-active': mapEditorStore.snapToGrid }"
-      v-tooltip="'吸附网格（关闭时为像素吸附）'"
-      @click="mapEditorStore.toggleSnapToGrid()"
+      :class="{ 'toolbar-btn-active': mapEditorStore.smartSnap }"
+      v-tooltip="'智能吸附（像素 / 网格 / 图像边缘与中心）'"
+      @click="mapEditorStore.toggleSmartSnap()"
     >
       <img :src="iconSnapGrid" class="toolbar-icon" />
     </button>
