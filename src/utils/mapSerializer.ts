@@ -54,6 +54,8 @@ export interface ImageSaveData {
   collisionEnabled: boolean
   collisionShape?: { points: number[][] }
   background?: boolean
+  vectorData?: string
+  vectorBasePath?: string
 }
 
 export interface TilesetSaveData {
@@ -186,6 +188,8 @@ export function serializeMap(mapData: any): MapSaveData {
     collisionEnabled: img.collisionEnabled || false,
     collisionShape: img.collisionShape,
     background: img.background || false,
+    vectorData: img.vectorData,
+    vectorBasePath: img.vectorBasePath,
   })
 
   const layers: LayerSaveData[] = mapData.layers.map((layer: any) => {

@@ -3422,12 +3422,42 @@ export function usePaperScope(
     store.vectorContent = false
   })
 
+  /** 当前 project 的 JSON 快照（地图矢量图层保存/切换用） */
+  function getProjectJson(): string | null {
+    if (!scope) return null
+    const layer = scope.project.activeLayer
+    const live = layer ? layer.children.some(c => c !== bitmapRaster) : false
+    return live ? snapshotForGesture() : null
+  }
+
+  /** 载入 JSON 场景（清空撤销栈，用于切回矢量图层时恢复） */
+  function loadProjectJson(json: string | null) {
+    if (!scope) return
+    if (json) {
+      restoreFrom(json)
+    } else {
+      clearSelection()
+      scope.project.clear()
+      if (scope.project.layers.length === 0) new scope.Layer()
+      scope.project.activeLayer?.activate()
+      scope.view.update()
+      syncVectorContentFlag()
+    }
+    undoStack = []
+    redoStack = []
+    syncHistoryFlags()
+    hooks.onContentChanged()
+  }
+
   return {
     undo,
     redo,
     clearLayer,
     /** 视口/图片变换变化后强制重同步（地图适配器用） */
     refreshView: syncVectorView,
+    getProjectJson,
+    loadProjectJson,
+    isReady: () => !!scope,
     deleteSelection,
     copySelection,
     cutSelection,

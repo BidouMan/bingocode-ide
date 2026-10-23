@@ -57,6 +57,10 @@ export interface ImageData {
   collisionShape?: { points: number[][] }
   // 整张画布背景图：随地图尺寸变化自动扩展绘制范围
   background?: boolean
+  // 矢量图层：Paper.js project JSON（存在时可重新进入矢量编辑）
+  vectorData?: string
+  // 矢量图层的位图底稿（不含矢量内容，重新编辑时作为 base）
+  vectorBasePath?: string
 }
 
 export interface MapResource {

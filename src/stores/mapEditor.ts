@@ -18,8 +18,8 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
   const showCollision = ref(false)
   // 图片模式画布内绘制工具（select = 地图选取，不绘制）
   const imageTool = ref<'select' | 'reshape' | 'brush' | 'eraser' | 'fill' | 'text' | 'line' | 'rect' | 'ellipse' | 'eyedropper'>('select')
-  // 图片绘制模式：位图 / 矢量（矢量内容退出时烘焙为像素）
-  const paintMode = ref<'bitmap' | 'vector'>('bitmap')
+  // 图片绘制模式：位图 / 矢量（默认矢量，与角色编辑器一致）
+  const paintMode = ref<'bitmap' | 'vector'>('vector')
   // 像素浮动选区是否存在 / 选区剪贴板是否有内容（工具条按钮可用性）
   const hasPixelSelection = ref(false)
   const hasPaintClipboard = ref(false)

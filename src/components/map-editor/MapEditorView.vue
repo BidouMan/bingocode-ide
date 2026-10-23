@@ -147,7 +147,8 @@ watch(() => JSON.stringify(mapStore.mapData), () => {
   savingItemId = mapStore.currentMapPath
   autoSaveTimer = setTimeout(() => {
     if (mapStore.currentMapPath && mapStore.currentMapPath === savingItemId) {
-      void flushVectorPaint().then(() => saveMapToProject())
+      // 自动保存只写地图结构；矢量内容会在退出矢量模式/切图层时烘焙，避免打断编辑
+      saveMapToProject()
     }
   }, 2000)
 })

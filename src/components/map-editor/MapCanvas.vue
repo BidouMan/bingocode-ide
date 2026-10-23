@@ -467,6 +467,10 @@ const vectorMatrix = ref<MapVectorMatrix | null>(null)
 const vectorCursorPos = ref<{ x: number; y: number } | null>(null)
 let vectorPanning = false
 let vectorExiting = false
+let enteringVector = false
+// 矢量图层会话缓存：切换图层时保留 Paper JSON 与不含矢量的位图底稿，
+// 切回来可继续编辑；保存时会把 JSON/底稿路径写入地图数据。
+const vectorLayerCache = new Map<number, { json: string; base: HTMLCanvasElement }>()
 let vectorStoreSnapshot: {
   artboardWidth: number
   artboardHeight: number
@@ -1598,7 +1602,6 @@ onBeforeUnmount(() => {
   if (!vectorActive.value) return
   bakeVectorRasterSync()
   vectorActive.value = false
-  mapEditorStore.setPaintMode('bitmap')
 })
 
 const mapVectorViewport = createMapVectorViewport(vectorFrame)
@@ -1637,17 +1640,45 @@ function syncVectorGeometry() {
 }
 
 async function enterVectorMode(): Promise<boolean> {
+  if (vectorActive.value || enteringVector) return true
+  enteringVector = true
+  try {
+    return await enterVectorModeInner()
+  } finally {
+    enteringVector = false
+  }
+}
+
+async function enterVectorModeInner(): Promise<boolean> {
   if (mapStore.activeMode !== 'image') return false
   if (!mapStore.selectedImage && mapStore.activeLayer?.type === 'image') {
     mapStore.selectImage(mapStore.activeLayer.id)
   }
-  if (!mapStore.selectedImage) return false
+  const img = mapStore.selectedImage
+  if (!img) return false
   if (!paintSession) {
     const ok = await startPaintSession()
     if (!ok) return false
   }
   const s = paintSession
   if (!s) return false
+  // 恢复矢量图层：优先用内存缓存底稿，其次用存档里的 vectorBasePath
+  const cached = vectorLayerCache.get(s.layerId)
+  if (cached) {
+    const ctx = s.canvas.getContext('2d')!
+    ctx.clearRect(0, 0, s.canvas.width, s.canvas.height)
+    ctx.drawImage(cached.base, 0, 0)
+    s.texture.source.update()
+  } else if (img.vectorBasePath) {
+    try {
+      const baseImg = await loadImage(img.vectorBasePath)
+      const ctx = s.canvas.getContext('2d')!
+      ctx.clearRect(0, 0, s.canvas.width, s.canvas.height)
+      ctx.drawImage(baseImg, 0, 0, s.canvas.width, s.canvas.height)
+      s.texture.source.update()
+    } catch { /* 底稿丢失时退回当前预览图 */ }
+  }
+  const initialJson = cached?.json ?? img.vectorData ?? null
   if (!vectorStoreSnapshot) {
     vectorStoreSnapshot = {
       artboardWidth: paintStore.artboardWidth,
@@ -1668,6 +1699,10 @@ async function enterVectorMode(): Promise<boolean> {
   vectorActive.value = true
   await nextTick()
   syncVectorGeometry()
+  if (!vectorEngine.isReady()) {
+    await new Promise(r => requestAnimationFrame(r))
+  }
+  vectorEngine.loadProjectJson(initialJson)
   if ((mapEditorStore.imageTool === 'brush' || mapEditorStore.imageTool === 'eraser')
     && !vectorCursorPos.value && vectorCanvasRef.value) {
     vectorCanvasRef.value.style.cursor = 'crosshair'
@@ -1701,14 +1736,83 @@ async function commitVectorToPixels() {
   if (s) await flushPaintSave(s, true)
 }
 
-async function exitVectorMode() {
+/** 写一份 PNG 到地图图片目录，返回项目相对路径 */
+async function writeVectorBaseFile(canvas: HTMLCanvasElement, fileName: string): Promise<string | null> {
+  const root = projectStore.root
+  if (!root) return null
+  const mapName = mapStore.mapData.name
+  const blob: Blob | null = await new Promise(r => canvas.toBlob(r, 'image/png'))
+  if (!blob) return null
+  const path = `assets/maps/${mapName}/images/${fileName}`
+  try {
+    await invoke('create_dir', { path: `${root}/assets/maps/${mapName}/images` })
+    await invoke('write_binary', {
+      path: `${root}/${path}`,
+      data: Array.from(new Uint8Array(await blob.arrayBuffer())),
+    })
+    resolvedPathCache.delete(path)
+    return path
+  } catch (e) {
+    console.error('[MapCanvas] 保存矢量底稿失败:', e)
+    return null
+  }
+}
+
+/**
+ * 暂存矢量图层：保留 Paper JSON 与非矢量底稿，并把“底稿+矢量栅格”合成为预览 PNG。
+ * 切换图层/保存时调用，之后切回该图层仍可继续矢量编辑。
+ */
+async function stashVectorLayer() {
+  const s = paintSession
+  const img = mapStore.selectedImage
+  if (!vectorActive.value || !s || !img) return
+  const json = vectorEngine.getProjectJson()
+  if (!json) {
+    vectorEngine.clearAllForBake()
+    return
+  }
+  const base = makeOffscreenCanvas(s.canvas.width, s.canvas.height)
+  base.getContext('2d')!.drawImage(s.canvas, 0, 0)
+  vectorLayerCache.set(s.layerId, { json, base })
+  img.vectorData = json
+  const baseName = `${(img.imagePath.split('/').pop() || '图像').replace(/\.[^.]+$/, '')}-vecbase-${Date.now().toString(36)}.png`
+  const basePath = await writeVectorBaseFile(base, baseName)
+  if (basePath) img.vectorBasePath = basePath
+  // 预览 PNG（底稿 + 矢量）供其他图层编辑时显示
+  const raster = vectorEngine.getFrameRaster(0)
+  const ctx = paintCtx()
+  if (ctx && raster) {
+    ctx.save()
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.drawImage(raster, 0, 0, s.canvas.width, s.canvas.height)
+    ctx.restore()
+    s.texture.source.update()
+    s.dirty = true
+    await flushPaintSave(s, true)
+  }
+  vectorEngine.clearAllForBake()
+}
+
+/** 明确切到位图：矢量内容永久烘焙，移除可再编辑的矢量数据 */
+async function convertVectorToBitmap() {
+  await commitVectorToPixels()
+  const img = mapStore.selectedImage
+  if (img) {
+    img.vectorData = undefined
+    img.vectorBasePath = undefined
+  }
+  if (paintSession) vectorLayerCache.delete(paintSession.layerId)
+}
+
+async function exitVectorMode(switchUiToBitmap = true) {
   if (!vectorActive.value || vectorExiting) return
   vectorExiting = true
   try {
-    await commitVectorToPixels()
+    if (switchUiToBitmap) await convertVectorToBitmap()
+    else await stashVectorLayer()
     vectorActive.value = false
-    paintStore.mode = 'bitmap'
-    mapEditorStore.setPaintMode('bitmap')
+    paintStore.mode = switchUiToBitmap ? 'bitmap' : 'vector'
+    if (switchUiToBitmap) mapEditorStore.setPaintMode('bitmap')
     paintStore.vectorSelBox = null
     paintStore.vectorSelectedCount = 0
     paintStore.vectorContent = false
@@ -2486,14 +2590,13 @@ watch(
   }
 )
 
-// 矢量/位图模式切换：进入矢量需先有绘制会话，失败则回退位图
+// 矢量/位图模式切换：默认矢量；无选中图片时保持矢量 UI，选中图层后自动进入
 watch(
   () => mapEditorStore.paintMode,
   async (mode) => {
     if (mode === 'vector') {
       const ok = await enterVectorMode()
-      if (!ok) mapEditorStore.setPaintMode('bitmap')
-      else transform.removeTransformBox()
+      if (ok) transform.removeTransformBox()
     } else {
       await exitVectorMode()
     }
@@ -2601,12 +2704,14 @@ watch(
 // 选中实例变化 → 同步本地变换框 + 重绘叠加层
 watch(
   () => mapStore.selectedImageLayerId,
-  () => {
+  async () => {
+    const selImg = mapStore.selectedImage
+    // 矢量图层标记：当前模式为矢量，或该图层本身保存过矢量数据
+    const keepVector = mapEditorStore.paintMode === 'vector'
+      || !!selImg?.vectorData
+      || vectorLayerCache.has(mapStore.selectedImageLayerId)
     // 切换图片图层前先把矢量内容烘进位图，避免内容串层
-    if (vectorActive.value) {
-      void exitVectorMode()
-      mapEditorStore.setPaintMode('bitmap')
-    }
+    if (vectorActive.value) await exitVectorMode(!keepVector)
     collision.cancelCollisionDraft()
     collision.clearVertexSelection()
     resetFloatingSelection()
@@ -2618,12 +2723,21 @@ watch(
       transform.cacheSelectedImageSprite()
     }
     collision.drawCollisionOverlay()
-    // 切换图片图层：先落盘旧图层，再为新图层建会话
+    // 切换图片图层：先落盘旧图层，再为新图层建会话 / 重新进入矢量模式
+    const proceed = () => {
+      if (mapStore.activeMode !== 'image' || !mapStore.selectedImage) return
+      if (keepVector) {
+        if (mapEditorStore.paintMode !== 'vector') mapEditorStore.setPaintMode('vector')
+        void enterVectorMode()
+      } else {
+        void startPaintSession()
+      }
+    }
     if (paintSession && paintSession.layerId !== mapStore.selectedImageLayerId) {
-      void commitPaintSession(false).then(() => startPaintSession())
-    } else if (mapStore.activeMode === 'image' && !paintSession && mapStore.selectedImage) {
+      void commitPaintSession(false).then(proceed)
+    } else if (mapStore.activeMode === 'image' && mapStore.selectedImage) {
       // 图片模式下选中图层即预建会话，保证首次框选/绘制立即可用
-      void startPaintSession()
+      proceed()
     }
   }
 )
@@ -2690,8 +2804,7 @@ watch(
 async function resetCanvasState() {
   // 先烘焙旧图层的矢量内容，再提交位图会话
   if (vectorActive.value) {
-    await exitVectorMode()
-    mapEditorStore.setPaintMode('bitmap')
+    await exitVectorMode(false)
   }
   void commitPaintSession()
   resetFloatingSelection()
@@ -2702,9 +2815,11 @@ async function resetCanvasState() {
 }
 
 onMounted(() => {
-  // 页面重新挂载时回到位图模式（矢量内容已在离开时烘焙）
-  if (mapEditorStore.paintMode !== 'bitmap') mapEditorStore.setPaintMode('bitmap')
-  nextTick(initPixi)
+  // 默认矢量模式：Pixi 就绪后尝试进入（无图片图层时保持矢量 UI，选中图层后自动进入）
+  nextTick(async () => {
+    await initPixi()
+    if (mapEditorStore.paintMode === 'vector' && !vectorActive.value) void enterVectorMode()
+  })
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
   // 在 document 上注册 drop 事件，确保能接收拖放
@@ -2789,8 +2904,8 @@ defineExpose({
   zoomIn,
   zoomOut,
   resetZoom,
-  /** 地图保存/切换前：把矢量内容烘进位图并退出矢量模式 */
-  exitVectorPaint: exitVectorMode,
+  /** 地图保存/切换前：烘焙矢量内容但保留“矢量模式”选择，随后切图会自动重新进入 */
+  exitVectorPaint: () => exitVectorMode(false),
 })
 </script>
 
