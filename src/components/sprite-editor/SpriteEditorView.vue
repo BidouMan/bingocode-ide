@@ -1831,7 +1831,16 @@ onBeforeUnmount(() => {
   padding: 0 10px;
   background: var(--bg-root);
   border-bottom: 1px solid var(--border);
+  /* 窄窗口下工具条本身不换行、不压缩：按钮保持原尺寸，内容超出时横向滚动（滚动条隐藏） */
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
 }
+.anno-toolbar::-webkit-scrollbar { display: none; }
+/* 工具条内所有控件禁止收缩，避免图标/文字被挤成竖排 */
+.anno-toolbar > * { flex-shrink: 0; }
 .layer-chip {
   display: inline-flex;
   align-items: center;
@@ -1843,12 +1852,14 @@ onBeforeUnmount(() => {
   color: #8a8f98;
   cursor: pointer;
   font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .layer-chip:hover:not(:disabled) { background: var(--bg-hover); color: #fff; }
 .layer-chip.active { border-color: var(--accent); color: var(--accent); background: rgba(91, 251, 132, 0.08); }
 .layer-chip:disabled { opacity: 0.4; cursor: not-allowed; }
 .layer-chip .soon { font-size: 9px; opacity: 0.7; margin-left: 2px; }
-.layer-chip-icon { width: 14px; height: 14px; }
+.layer-chip-icon { width: 14px; height: 14px; flex-shrink: 0; }
 /* 工具条内的标注控件紧凑排布（36px 行高） */
 .anno-toolbar .coord-input { height: 20px; padding: 0 4px; }
 .anno-toolbar .scope-seg button { padding: 3px 8px; }

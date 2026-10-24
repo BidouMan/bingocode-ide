@@ -108,10 +108,21 @@ const tabs = [
   padding: 0 5px;
   gap: 0;
   flex-shrink: 0;
+  /* 窄窗口下按钮不压缩、不换行：内容超出横向滚动（滚动条隐藏） */
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.lib-toolbar::-webkit-scrollbar {
+  display: none;
 }
 
 .lib-search {
   width: 200px;
+  min-width: 200px;
   height: 28px;
   padding: 0 8px;
   background: var(--bg-panel);
@@ -120,6 +131,7 @@ const tabs = [
   color: var(--text-secondary);
   font-size: 12px;
   outline: none;
+  flex-shrink: 0;
 }
 
 .lib-search:focus {
@@ -138,6 +150,8 @@ const tabs = [
   color: #9ca0a4;
   font-size: 12px;
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
   transition: all 0.15s;
 }
 
@@ -159,12 +173,15 @@ const tabs = [
 
 .lib-return-btn {
   width: 80px;
+  min-width: 80px;
   height: 28px;
   background: var(--bg-panel);
   border: 1px solid var(--border-light);
   border-radius: 4px;
   color: var(--text-secondary);
   font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
   cursor: pointer;
   transition: all 0.15s;
 }

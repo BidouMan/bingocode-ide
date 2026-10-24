@@ -138,14 +138,23 @@ async function pickSprite(item: { filePath: string; type: string }) {
   height: 40px;
   padding: 0 5px;
   flex-shrink: 0;
+  /* 窄窗口下按钮不压缩、不换行：内容超出横向滚动（滚动条隐藏） */
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
 }
+.lib-toolbar::-webkit-scrollbar { display: none; }
 .picker-title {
   font-size: 12px;
   color: var(--text-secondary);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 .lib-search {
   width: 180px;
+  min-width: 180px;
   height: 28px;
   padding: 0 8px;
   background: var(--bg-panel);
@@ -154,6 +163,7 @@ async function pickSprite(item: { filePath: string; type: string }) {
   color: var(--text-secondary);
   font-size: 12px;
   outline: none;
+  flex-shrink: 0;
 }
 .lib-search:focus {
   border-color: var(--accent);
@@ -171,6 +181,8 @@ async function pickSprite(item: { filePath: string; type: string }) {
   color: #9ca0a4;
   font-size: 12px;
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
   transition: all 0.15s;
 }
 .lib-tab-btn:hover {
@@ -184,12 +196,15 @@ async function pickSprite(item: { filePath: string; type: string }) {
 }
 .lib-return-btn {
   width: 80px;
+  min-width: 80px;
   height: 28px;
   background: var(--bg-panel);
   border: 1px solid var(--border-light);
   border-radius: 4px;
   color: var(--text-secondary);
   font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
   cursor: pointer;
 }
 .lib-return-btn:hover {

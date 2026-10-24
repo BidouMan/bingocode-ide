@@ -494,6 +494,7 @@ async function copyResourceToMapDir(srcPath: string): Promise<string> {
   border-radius: 4px;
   cursor: pointer;
   padding: 3px;
+  flex-shrink: 0;
   transition: background 0.15s;
 }
 
@@ -509,6 +510,7 @@ async function copyResourceToMapDir(srcPath: string): Promise<string> {
 .bar-tool-icon {
   width: 20px;
   height: 20px;
+  flex-shrink: 0;
 }
 
 .bar-spacer {

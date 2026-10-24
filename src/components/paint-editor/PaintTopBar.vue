@@ -220,6 +220,9 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   flex-shrink: 0;
   user-select: none;
   position: relative;
+  /* 窄窗口下按钮不压缩、不换行：内容超出由窗口裁剪，图标保持原样 */
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 
 /* 纯白 SVG 图标在暗色主题下直接可见，无需滤镜 */
@@ -235,6 +238,7 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   border-radius: 6px;
   cursor: pointer;
   padding: 0;
+  flex-shrink: 0;
   transition: background 0.15s;
 }
 .icon-btn:hover:not(:disabled) {
@@ -300,6 +304,7 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   display: flex;
   align-items: center;
   gap: 4px;
+  flex-shrink: 0;
 }
 
 .size-input {
@@ -356,6 +361,7 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   padding-left: 8px;
   margin-left: 4px;
   border-left: 1px solid var(--border-light);
+  flex-shrink: 0;
 }
 
 .op-divider {
