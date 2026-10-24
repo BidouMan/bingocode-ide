@@ -77,7 +77,7 @@ while True:
     
     # 子弹击中敌人
     for bullet in _GROUPS.get("bullets", []):
-        hit = bullet.touch_group("enemies")
+        hit = bullet.is_touch_group("enemies")
         if hit:
             bullet.delete()
             hit.delete()
@@ -86,7 +86,7 @@ while True:
             shake(5, 0.2)
     
     # 敌人碰到玩家
-    if hero.touch_group("enemies"):
+    if hero.is_touch_group("enemies"):
         play_sound("gameover")
         stop()
 ```
@@ -136,7 +136,7 @@ while True:
         if bullet.is_out_side():
             bullet.delete()
             continue
-        hit = bullet.touch_group("enemies")
+        hit = bullet.is_touch_group("enemies")
         if hit:
             bullet.delete()
             hit.delete()
@@ -145,7 +145,7 @@ while True:
             shake(5, 0.2)
     
     # 敌人碰到玩家
-    if hero.touch_group("enemies"):
+    if hero.is_touch_group("enemies"):
         play_sound("gameover")
         stop()
     
@@ -188,7 +188,7 @@ while True:
         powerup.add_to_group("powerups")
     
     # 拾取道具
-    hit = hero.touch_group("powerups")
+    hit = hero.is_touch_group("powerups")
     if hit:
         hit.delete()
         # 获得双倍射击

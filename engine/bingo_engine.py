@@ -45,7 +45,8 @@ _PENDING_RESPONSES = []  # 监听线程→主线程的待发响应
 _USER_INPUT_QUEUE = queue.Queue()  # 用户 input() 输入队列
 _PERF_STATS = {"last_time": time.time(), "frame_count": 0}
 _GROUPS = {}
-_MOUSE_STATE = {"down": False, "last_down": False, "x": 0, "y": 0}  # 用字典包装鼠标状态
+# 用字典包装鼠标状态：released 由输入线程累积，released_frame 是每个物理步的快照（供 mouse_up）
+_MOUSE_STATE = {"down": False, "last_down": False, "released": False, "released_frame": False, "x": 0, "y": 0}
 _SPRITES = {}  # 存储所有精灵实例
 _SAY_TIMERS = {}  # say 定时消失计时器
 _CURRENT_MAP = None  # 当前加载的地图数据
@@ -468,6 +469,7 @@ __all__ = [
     "show_fps",
     "mouse_down",
     "mouse_pressed",
+    "mouse_up",
     "mouse",
     "load_map",
     "follow",
@@ -1575,7 +1577,7 @@ class Sprite:
         # AABB 碰撞公式保持不变
         return not (r1[2] < r2[0] or r1[0] > r2[2] or r1[3] < r2[1] or r1[1] > r2[3])
 
-    def touch_group(self, group_name):
+    def is_touch_group(self, group_name):
         """
         判断是否撞到了某个组里的任意成员。
         如果撞到了，返回那个成员；没撞到返回 None。
@@ -1591,6 +1593,10 @@ class Sprite:
             if self.is_touch(other):
                 return other
         return None
+
+    # 兼容旧项目代码，旧名不再出现在文档与补全中
+    def touch_group(self, group_name):
+        return self.is_touch_group(group_name)
 
     def add_to_group(self, group_name):
         """将角色归类，比如 'enemies', 'bullets'"""
@@ -2260,6 +2266,9 @@ def _input_sync_listener():
             elif clean_line.startswith("M_UP:"):
                 old_value = _MOUSE_STATE["down"]
                 _MOUSE_STATE["down"] = False
+                # 只有确实按下过的才算松开，避免启动前的多余松开事件触发 mouse_up
+                if old_value:
+                    _MOUSE_STATE["released"] = True
 
             elif clean_line.startswith("M_MOVE:"):
                 # 解析 M_MOVE:320.5,240.0
@@ -2329,6 +2338,11 @@ def mouse_pressed():
     return _MOUSE_STATE["down"] and not _MOUSE_STATE["last_down"]
 
 
+def mouse_up():
+    """单次检测：只有在松开鼠标左键的那一帧返回 True"""
+    return _MOUSE_STATE["released_frame"]
+
+
 def key_down(key):
     """供用户调用：if key_down('a')"""
     return str(key).lower() in _PRESSED_KEYS_FRAME
@@ -2358,6 +2372,10 @@ def _sync_input_frame():
     _RELEASED_FRAME.clear()
     _RELEASED_FRAME.update(_RELEASED_KEYS)
     _RELEASED_KEYS.clear()
+
+    # 鼠标松开同样用「事件累积 + 本步快照」，避免异步事件落在两步之间被漏掉
+    _MOUSE_STATE["released_frame"] = _MOUSE_STATE["released"]
+    _MOUSE_STATE["released"] = False
 
 
 def wait(seconds):
@@ -3273,6 +3291,8 @@ def _render_map():
 def run():
     global _PERF_STATS, _MOUSE_STATE, _SPRITES, _PENDING_RESPONSES
     _MOUSE_STATE["down"] = False
+    _MOUSE_STATE["released"] = False
+    _MOUSE_STATE["released_frame"] = False
     main_module = sys.modules["__main__"]
     if not hasattr(main_module, "loop"):
         return
@@ -3458,6 +3478,8 @@ def start_game(project_dir=None, target_file=None):
 
     _STOPPED = False
     _MOUSE_STATE["down"] = False
+    _MOUSE_STATE["released"] = False
+    _MOUSE_STATE["released_frame"] = False
 
     # 如果提供了项目目录，使用脚本发现模块
     if project_dir:
@@ -3483,6 +3505,7 @@ def start_game(project_dir=None, target_file=None):
             "mouse": mouse,
             "mouse_down": mouse_down,
             "mouse_pressed": mouse_pressed,
+            "mouse_up": mouse_up,
             "wait": wait,
             "load_map": load_map,
             "play_sound": play_sound,

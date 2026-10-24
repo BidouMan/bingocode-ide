@@ -374,10 +374,10 @@ print(f"距离：{dist} 像素")
 
 返回到目标的像素距离。
 
-### touch_group — 组碰撞检测
+### is_touch_group — 组碰撞检测
 
 ```python
-hit = bullet.touch_group("enemies")
+hit = bullet.is_touch_group("enemies")
 if hit:
     hit.delete()    # 删除被击中的敌人
     bullet.delete()  # 删除子弹

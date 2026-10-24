@@ -63,6 +63,15 @@ if mouse_pressed():
     print("鼠标左键刚刚被点击")
 ```
 
+### mouse_up — 鼠标是否刚刚松开
+
+```python
+if mouse_up():
+    print("鼠标左键刚刚松开")
+```
+
+单次检测：只在松开鼠标左键的那一瞬间返回 True。
+
 ### mouse.x / mouse.y — 鼠标位置
 
 ```python
@@ -115,11 +124,11 @@ if hero.is_out_side():
 
 只有整个角色都在画面外才返回 True。
 
-### touch_group — 组碰撞检测
+### is_touch_group — 组碰撞检测
 
 ```python
 # 检测子弹是否碰到 "enemies" 组
-hit = bullet.touch_group("enemies")
+hit = bullet.is_touch_group("enemies")
 if hit:
     # hit 是被碰到的那个精灵
     hit.delete()
@@ -208,8 +217,8 @@ while True:
         bullet = None
     
     # 碰撞检测
-    if bullet and bullet.touch_group("enemies"):
-        hit = bullet.touch_group("enemies")
+    if bullet and bullet.is_touch_group("enemies"):
+        hit = bullet.is_touch_group("enemies")
         hit.delete()
         bullet.delete()
         bullet = None

@@ -133,13 +133,14 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 - hero.is_touch_edge() — 是否碰到画面边缘(640x480)
 - hero.is_out_side() — 是否整个角色都在画面外
 - hero.distance_to(target) — 返回到另一个 Sprite 或 mouse 的像素距离
-- bullet.touch_group("组名") — 检测子弹是否碰到组内成员，碰到返回那个角色，没碰到返回 None
+- bullet.is_touch_group("组名") — 检测子弹是否碰到组内成员，碰到返回那个角色，没碰到返回 None
 - hero.is_on_ground() — 是否真正站在地面上（由物理落地接触决定，上升中/从下方穿过跳板时为 False）；跳跃前用它判断
 - key_down("键名") — 按键是否正在被按住，每帧检测。键名小写：space, up, down, left, right, a-z
 - key_pressed("键名") — 只在按下的那一帧返回 True（单次触发）。用于跳跃等一次性操作
 - key_up("键名") — 只在松开的那一帧返回 True（单次触发）。用于 stop_jump 等
 - mouse_down() — 鼠标左键是否按住
 - mouse_pressed() — 鼠标左键按下那一帧
+- mouse_up() — 鼠标左键松开那一帧
 - mouse.x, mouse.y — 鼠标在画面上的坐标
 
 ### 控制

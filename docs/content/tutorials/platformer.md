@@ -88,7 +88,7 @@ while True:
         coin.add_to_group("coins")
     
     # 收集金币
-    hit = hero.touch_group("coins")
+    hit = hero.is_touch_group("coins")
     if hit:
         hit.delete()
         score += 10
@@ -100,8 +100,8 @@ while True:
 
 ```python
 # 碰撞检测
-if hero.touch_group("enemies"):
-    hit = hero.touch_group("enemies")
+if hero.is_touch_group("enemies"):
+    hit = hero.is_touch_group("enemies")
     hit.delete()
     hero.say("被击中！", 1)
     shake(8, 0.3)
@@ -153,15 +153,15 @@ while True:
         coin.add_to_group("coins")
     
     # 收集金币
-    hit = hero.touch_group("coins")
+    hit = hero.is_touch_group("coins")
     if hit:
         hit.delete()
         score += 10
         play_sound("coin")
     
     # 碰撞检测
-    if hero.touch_group("enemies"):
-        hit = hero.touch_group("enemies")
+    if hero.is_touch_group("enemies"):
+        hit = hero.is_touch_group("enemies")
         hit.delete()
         shake(8, 0.3)
     

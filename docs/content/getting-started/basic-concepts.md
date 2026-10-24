@@ -186,7 +186,7 @@ enemy2.add_to_group("enemies")
 
 # 检测子弹是否碰到组内任意成员
 bullet = Sprite("子弹")
-hit = bullet.touch_group("enemies")
+hit = bullet.is_touch_group("enemies")
 if hit:
     print("打中了！")
     hit.delete()

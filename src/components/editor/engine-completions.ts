@@ -67,7 +67,7 @@ const spriteMethods: EngineCompletionItem[] = [
   { label: 'is_touch_edge', kind: CompletionItemKind.Method, insertText: 'is_touch_edge', documentation: '精准边界检测：判定角色的实际视觉边缘是否越过了舞台', detail: 'is_touch_edge() -> bool' },
   { label: 'is_out_side', kind: CompletionItemKind.Method, insertText: 'is_out_side', documentation: '完全出界检测：只有当角色整体（所有像素）都离开舞台时才返回 True', detail: 'is_out_side() -> bool' },
   { label: 'is_touch', kind: CompletionItemKind.Method, insertText: 'is_touch', documentation: '判断是否碰到另一个 Sprite、鼠标或带有指定标签的图块\n\nis_touch(target)\ntarget 可以是 Sprite、mouse 或字符串（图块标签）', detail: 'is_touch(target) -> bool' },
-  { label: 'touch_group', kind: CompletionItemKind.Method, insertText: 'touch_group', documentation: '判断是否撞到了某个组里的任意成员\n如果撞到了，返回那个成员；没撞到返回 None', detail: 'touch_group(group_name) -> Sprite or None' },
+  { label: 'is_touch_group', kind: CompletionItemKind.Method, insertText: 'is_touch_group', documentation: '判断是否撞到了某个组里的任意成员\n如果撞到了，返回那个成员；没撞到返回 None', detail: 'is_touch_group(group_name) -> Sprite or None' },
   { label: 'distance_to', kind: CompletionItemKind.Method, insertText: 'distance_to', documentation: '计算当前角色视觉中心点到目标（Sprite 或 mouse）的距离', detail: 'distance_to(target) -> float' },
   { label: 'is_on_ground', kind: CompletionItemKind.Method, insertText: 'is_on_ground', documentation: '是否真正站在地面上：由物理落地接触决定，站着为 True；跳起来、下落中、从下方穿过跳板都为 False\n跳跃前用它判断能否跳', detail: 'is_on_ground() -> bool' },
 
@@ -110,6 +110,7 @@ const globalFunctions: EngineCompletionItem[] = [
   { label: 'key_up', kind: CompletionItemKind.Function, insertText: 'key_up', documentation: '只有松开的那一帧返回 True\n\nkey_up("space")', detail: 'key_up(key) -> bool' },
   { label: 'mouse_down', kind: CompletionItemKind.Function, insertText: 'mouse_down', documentation: '判断鼠标是否按下（持续按住返回 True）', detail: 'mouse_down() -> bool' },
   { label: 'mouse_pressed', kind: CompletionItemKind.Function, insertText: 'mouse_pressed', documentation: '单次检测：只有在按下的那一帧返回 True', detail: 'mouse_pressed() -> bool' },
+  { label: 'mouse_up', kind: CompletionItemKind.Function, insertText: 'mouse_up', documentation: '单次检测：只有在松开鼠标左键的那一帧返回 True', detail: 'mouse_up() -> bool' },
 
   // 事件
   { label: 'wait', kind: CompletionItemKind.Function, insertText: 'wait', documentation: '每 N 秒返回一次 True\n\n用法：if wait(1): do_something()', detail: 'wait(seconds) -> bool' },

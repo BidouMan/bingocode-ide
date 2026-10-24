@@ -275,7 +275,7 @@ async function init(): Promise<typeof Monaco> {
   m.languages.setMonarchTokensProvider('python', {
     keywords: ['def', 'class', 'return', 'if', 'elif', 'else', 'for', 'while', 'import', 'from', 'as', 'try', 'except', 'finally', 'with', 'yield', 'lambda', 'pass', 'break', 'continue', 'raise', 'and', 'or', 'not', 'in', 'is', 'global', 'nonlocal', 'del', 'assert'],
     builtin: ['print', 'len', 'range', 'int', 'str', 'float', 'list', 'dict', 'tuple', 'set', 'type', 'input', 'open', 'True', 'False', 'None', 'self', 'cls'],
-    engine: ['Sprite', 'Timer', 'run', 'key_down', 'key_pressed', 'key_up', 'wait', 'broadcast', 'receive', 'pause', 'resume', 'is_paused', 'stop', 'show_fps', 'mouse_down', 'mouse_pressed', 'mouse', 'load_map', 'follow', 'play_sound', 'show_collision', 'random_int', 'random_float', 'draw_text', 'stop_sound', 'shake', 'start_game', 'register_generator', 'unregister_generator', 'GameStop', 'stop_game'],
+    engine: ['Sprite', 'Timer', 'run', 'key_down', 'key_pressed', 'key_up', 'wait', 'broadcast', 'receive', 'pause', 'resume', 'is_paused', 'stop', 'show_fps', 'mouse_down', 'mouse_pressed', 'mouse_up', 'mouse', 'load_map', 'follow', 'play_sound', 'show_collision', 'random_int', 'random_float', 'draw_text', 'stop_sound', 'shake', 'start_game', 'register_generator', 'unregister_generator', 'GameStop', 'stop_game'],
     tokenizer: {
       root: [
         [/"""/, 'string', '@multiString'],

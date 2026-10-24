@@ -192,27 +192,27 @@
           "badgeType": "object"
         },
         {
-          "label": "set_scale 改变大小",
+          "label": "set_scale 设置大小",
           "code": "hero.set_scale(150)",
           "desc": "把角色变大或变小。100 是正常大小，200 是两倍大，50 是一半大。",
           "badgeType": "object"
         },
         {
-          "label": "add_scale 加大/缩小",
+          "label": "add_scale 增大/缩小",
           "code": "hero.add_scale(20)",
-          "desc": "在当前大小基础上变大或缩小。写正数变大，写负数变小。比如 add_scale(20) 就在当前基础上再大 20%。",
+          "desc": "在当前大小基础上变大或缩小。写正数变大，写负数变小。\n比如 add_scale(20) 就在当前基础上再大 20%。",
           "badgeType": "object"
         },
         {
-          "label": "set_rotation_mode 旋转方式",
+          "label": "set_rotation_mode 设置旋转模式",
           "code": "hero.set_rotation_mode(\"left_right\")",
-          "desc": "改变角色的旋转方式。\"all\" = 任意旋转（默认），\"left_right\" = 只左右翻转不旋转图片，\"none\" = 完全不旋转。",
+          "desc": "改变角色的旋转方式。\n\"all\" = 任意旋转（默认），\n\"left_right\" = 左右翻转，\n\"none\" = 禁止旋转",
           "badgeType": "object"
         },
         {
           "label": "play 播放动画",
           "code": "hero.play(\"walk\")",
-          "desc": "让角色开始播放某个动画，比如走路、跑步、攻击等。需要角色资源里提前做好动画才行。",
+          "desc": "让角色开始播放某个动画，比如走路、跑步、攻击等。\n需要角色资源里提前做好动画才行。",
           "badgeType": "object"
         }
       ]
@@ -223,68 +223,74 @@
       "funcs": [
         {
           "label": "is_touch 碰到了吗",
-          "code": "hero.is_touch(enemy)\nhero.is_touch(mouse)\nhero.is_touch(\"地面\")",
-          "desc": "检查角色有没有碰到某个东西。可以碰另一个角色、碰鼠标，或者碰有标签的地形。碰到了返回 True。",
+          "code": "hero.is_touch(enemy)\nhero.is_touch(mouse)",
+          "desc": "检查角色有没有碰到某个东西，可以碰另一个角色、碰鼠标。",
           "badgeType": "object"
         },
         {
           "label": "is_touch_edge 碰到边框了吗",
           "code": "hero.is_touch_edge()",
-          "desc": "检查角色有没有碰到画面的边框（640×480）。只要有一边碰到就返回 True。",
+          "desc": "检查角色有没有碰到画面的边框。",
           "badgeType": "object"
         },
         {
           "label": "is_out_side 完全出去了吗",
           "code": "hero.is_out_side()",
-          "desc": "检查角色是不是整个都跑到画面外面去了。只有一点点出去不算，要整个都出去才返回 True。",
+          "desc": "检查角色是不是整个都跑到画面外面去了，只有一点点出去不算，要整个都出去才行。",
           "badgeType": "object"
         },
         {
           "label": "distance_to 距离多远",
           "code": "hero.distance_to(enemy)\nhero.distance_to(mouse)",
-          "desc": "算出角色到另一个角色（或者鼠标）有多远。数字越大距离越远。",
+          "desc": "计算一个角色到另一个角色（或者鼠标）的距离。",
           "badgeType": "object"
         },
         {
-          "label": "touch_group 碰到组了吗",
-          "code": "bullet.touch_group(\"enemies\")",
-          "desc": "检查子弹有没有碰到\"enemies\"组里的任何一个角色。碰到了就返回那个角色，没碰到返回 None。",
+          "label": "is_touch_group 碰到组了吗",
+          "code": "bullet.is_touch_group(\"enemies\")",
+          "desc": "将多个角色设为\"组\"，检查子弹是否碰撞其中任何一个角色。",
           "badgeType": "object"
         },
         {
           "label": "is_on_ground 脚下有地面吗",
           "code": "hero.is_on_ground()",
-          "desc": "角色是否真正站在地面上：落地时为 True，跳起来、下落中、从下方穿过跳板时为 False。跳跃前用它判断能不能跳。",
+          "desc": "判断角色是否真正站在地面上，一般用于跳跃判断。",
           "badgeType": "object"
         },
         {
           "label": "key_down 按键按住了吗",
           "code": "key_down(\"space\")\nkey_down(\"up\")\nkey_down(\"a\")",
-          "desc": "检查某个键是不是正在被按住。键名用小写英文字母，方向键写 \"up\" \"down\" \"left\" \"right\"。",
+          "desc": "检查某个键是不是正在被按住，判断持续按住。",
           "badgeType": "function"
         },
         {
           "label": "key_pressed 刚刚按下了吗",
           "code": "key_pressed(\"space\")",
-          "desc": "只在按下那一瞬间返回 True。适合做\"按一下就跳\"这种事。",
+          "desc": "检查某个键是否刚刚被按下，适合做\"按一下就触发一次的操作\"。",
           "badgeType": "function"
         },
         {
           "label": "key_up 刚刚松开了吗",
           "code": "key_up(\"space\")",
-          "desc": "只在松开那一瞬间返回 True。适合做\"松手就停止跳跃\"这类操作，配合 stop_jump 使用。",
+          "desc": "检查某个键是否刚刚被松开，适合做\"松手就停止跳跃\"这类操作。",
           "badgeType": "function"
         },
         {
           "label": "mouse_down 鼠标按住了吗",
           "code": "mouse_down()",
-          "desc": "检查鼠标左键是不是正在被按住。按住的时候一直返回 True。",
+          "desc": "检查鼠标左键是不是正在被\"按住\"。",
           "badgeType": "function"
         },
         {
           "label": "mouse_pressed 刚刚点了吗",
           "code": "mouse_pressed()",
-          "desc": "只在鼠标点击那一瞬间返回 True。适合做\"点一下就开枪\"这种事。",
+          "desc": "检查鼠标左键是否刚刚被点击，适合做\"点一下就触发一次的操作\"。",
+          "badgeType": "function"
+        },
+        {
+          "label": "mouse_up 刚刚松开了吗",
+          "code": "mouse_up()",
+          "desc": "检查鼠标左键是否刚刚被松开，适合做\"松手就触发一次的操作\"。",
           "badgeType": "function"
         },
         {
@@ -343,7 +349,7 @@
         },
         {
           "label": "add_to_group 加入组",
-          "code": "enemy.add_to_group(\"enemies\")",
+          "code": "zombie.add_to_group(\"enemies\")\nmonster.add_to_group(\"enemies\")",
           "desc": "把角色归到某个组里，方便批量管理。比如把所有敌人都放到 \"enemies\" 组。",
           "badgeType": "object"
         },

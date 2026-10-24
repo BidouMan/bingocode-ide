@@ -152,8 +152,8 @@ while True:
         hero.play("jump")
     
     # 吃道具变大
-    if hero.touch_group("powerups"):
-        hit = hero.touch_group("powerups")
+    if hero.is_touch_group("powerups"):
+        hit = hero.is_touch_group("powerups")
         hit.delete()
         hero.add_scale(20)
         hero.say("变大了！", 1)

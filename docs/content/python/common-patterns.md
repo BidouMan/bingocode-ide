@@ -11,8 +11,8 @@ score = 0
 
 while True:
     # 收集金币时加分
-    if hero.touch_group("coins"):
-        hit = hero.touch_group("coins")
+    if hero.is_touch_group("coins"):
+        hit = hero.is_touch_group("coins")
         hit.delete()
         score += 10
     
@@ -100,7 +100,7 @@ while True:
 ```python
 while True:
     # 碰撞检测
-    hit = hero.touch_group("enemies")
+    hit = hero.is_touch_group("enemies")
     if hit:
         hit.delete()
         shake(8, 0.3)

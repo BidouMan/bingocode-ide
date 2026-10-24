@@ -67,7 +67,7 @@ bullet.add_to_group("bullets")
 
 ```python
 # 批量碰撞检测
-hit = bullet.touch_group("enemies")
+hit = bullet.is_touch_group("enemies")
 
 # 批量操作（需要自己遍历）
 # 引擎没有提供遍历组的方法，需要自己管理

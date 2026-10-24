@@ -203,8 +203,8 @@ while True:
         draw_text(10, 10, "得分：", score)
     
     # 碰撞检测
-    if hero.touch_group("enemies"):
-        hit = hero.touch_group("enemies")
+    if hero.is_touch_group("enemies"):
+        hit = hero.is_touch_group("enemies")
         hit.delete()
         shake(8, 0.3)
         score -= 5
