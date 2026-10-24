@@ -31,6 +31,23 @@ html, body, #app {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', Roboto, sans-serif;
   background: rgb(34, 37, 43);
   color: white;
+  /* 桌面应用：默认禁止鼠标框选，避免拖拽时选中按钮图标和文字（出现深蓝高亮） */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 仅文本阅读/编辑区域恢复选择能力 */
+input,
+textarea,
+select,
+[contenteditable="true"],
+.monaco-editor,
+pre,
+code,
+.ai-msg-content,
+.help-content {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 ::-webkit-scrollbar {
