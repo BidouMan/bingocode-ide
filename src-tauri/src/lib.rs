@@ -776,7 +776,7 @@ fn pack_bingo(workspace_dir: String, output_path: String) -> Result<(), String> 
             let name = path.strip_prefix(base)
                 .map_err(|e| format!("路径错误: {}", e))?
                 .to_string_lossy()
-                .to_string();
+                .replace('\\', "/");
 
             if path.is_dir() {
                 // 跳过隐藏目录和 __pycache__

@@ -1302,6 +1302,64 @@ function deleteMapFromContext(id: string) {
   if (item?.path) invoke('delete_path', { path: item.path }).catch(() => {})
 }
 
+// 导出角色：.bgs/.bsf 目录 → 对应扩展名的精灵包；图片角色 → 原图片文件
+async function exportSpriteFromContext(id: string) {
+  const item = resourceStore.sprites.find(i => i.id === id)
+  spriteContextMenu.value.show = false
+  if (!item?.path) return
+
+  try {
+    const path = item.path
+    // 图片角色：直接导出原图（blob/data 等内存地址走 fetch 读取）
+    if (isImageFileName(path) || /^(blob:|data:|https?:)/.test(path)) {
+      const ext = path.match(/\.[^.]+$/)?.[0].toLowerCase() || '.png'
+      const dest = await save({
+        title: '导出角色',
+        defaultPath: `${item.name}${ext}`,
+        filters: [{ name: '图片', extensions: [ext.slice(1)] }],
+      })
+      if (!dest) return
+      const data = /^(blob:|data:|https?:)/.test(path)
+        ? Array.from(new Uint8Array(await (await fetch(path)).arrayBuffer()))
+        : await invoke<number[]>('read_binary', { path })
+      await invoke('write_binary', { path: dest, data })
+      return
+    }
+
+    // 目录角色：含 manifest.json 为 .bsf（sheet 图集），否则为 .bgs（逐帧）
+    const isBsf = await invoke<boolean>('path_exists', { path: `${path}/manifest.json` })
+    const ext = isBsf ? 'bsf' : 'bgs'
+    const dest = await save({
+      title: '导出角色',
+      defaultPath: `${item.name}.${ext}`,
+      filters: [{ name: isBsf ? 'BSF 精灵包' : 'BGS 精灵包', extensions: [ext] }],
+    })
+    if (!dest) return
+    await invoke('pack_bingo', { workspaceDir: path, outputPath: dest })
+  } catch (e) {
+    console.error('[MainLayout] 导出角色失败:', e)
+  }
+}
+
+// 导出地图：项目目录（map.json + 素材）打包为 .bgm
+async function exportMapFromContext(id: string) {
+  const item = resourceStore.maps.find(i => i.id === id)
+  mapContextMenu.value.show = false
+  if (!item?.path) return
+
+  try {
+    const dest = await save({
+      title: '导出地图',
+      defaultPath: `${item.name}.bgm`,
+      filters: [{ name: 'BGM 地图包', extensions: ['bgm'] }],
+    })
+    if (!dest) return
+    await invoke('pack_bingo', { workspaceDir: item.path, outputPath: dest })
+  } catch (e) {
+    console.error('[MainLayout] 导出地图失败:', e)
+  }
+}
+
 function startSpriteRename(id: string) {
   const item = resourceStore.sprites.find(i => i.id === id)
   if (!item) return
@@ -2402,6 +2460,7 @@ function spriteDisplayName(name: string) {
         :style="{ left: spriteContextMenu.x + 'px', top: spriteContextMenu.y + 'px' }"
         @click.stop
       >
+        <div class="sprite-ctx-item" @click="exportSpriteFromContext(spriteContextMenu.item!.id)">导出</div>
         <div class="sprite-ctx-item" @click="startSpriteRename(spriteContextMenu.item!.id)">重命名</div>
         <div class="sprite-ctx-item sprite-ctx-del" @click="deleteSpriteFromContext(spriteContextMenu.item!.id)">删除</div>
       </div>
@@ -2428,6 +2487,7 @@ function spriteDisplayName(name: string) {
         :style="{ left: mapContextMenu.x + 'px', top: mapContextMenu.y + 'px' }"
         @click.stop
       >
+        <div class="sprite-ctx-item" @click="exportMapFromContext(mapContextMenu.item!.id)">导出</div>
         <div class="sprite-ctx-item" @click="startMapRename(mapContextMenu.item!.id)">重命名</div>
         <div class="sprite-ctx-item sprite-ctx-del" @click="deleteMapFromContext(mapContextMenu.item!.id)">删除</div>
       </div>
