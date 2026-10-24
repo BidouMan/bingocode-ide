@@ -1,10 +1,62 @@
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import iconRightArrow from '../../assets/icons/right_arrow.svg'
 import iconDownArrow from '../../assets/icons/down_arrow.svg'
 
 defineProps<{ visible: boolean }>()
 const emit = defineEmits<{ close: [] }>()
+
+// ─── 面板宽度：可左右拖动调整，并记住上次宽度 ───
+const MIN_PANEL_WIDTH = 280
+const MAX_PANEL_WIDTH_RATIO = 0.9
+const PANEL_WIDTH_KEY = 'bingo-help-panel-width'
+const panelWidth = ref(340)
+let resizeStartX = 0
+let resizeStartWidth = 0
+let resizing = false
+
+function clampPanelWidth(w: number) {
+  const max = Math.max(MIN_PANEL_WIDTH, Math.floor(window.innerWidth * MAX_PANEL_WIDTH_RATIO))
+  return Math.min(Math.max(w, MIN_PANEL_WIDTH), max)
+}
+
+function startResize(e: MouseEvent) {
+  if (e.button !== 0) return
+  resizing = true
+  resizeStartX = e.clientX
+  resizeStartWidth = panelWidth.value
+  // 拖动期间禁止选中文字，避免出现蓝色选区
+  document.body.style.userSelect = 'none'
+  document.body.style.cursor = 'col-resize'
+  window.addEventListener('mousemove', onResizeMove)
+  window.addEventListener('mouseup', stopResize)
+  e.preventDefault()
+}
+
+function onResizeMove(e: MouseEvent) {
+  if (!resizing) return
+  // 向左拖动 = 变宽
+  panelWidth.value = clampPanelWidth(resizeStartWidth + (resizeStartX - e.clientX))
+}
+
+function stopResize() {
+  if (!resizing) return
+  resizing = false
+  document.body.style.userSelect = ''
+  document.body.style.cursor = ''
+  window.removeEventListener('mousemove', onResizeMove)
+  window.removeEventListener('mouseup', stopResize)
+  localStorage.setItem(PANEL_WIDTH_KEY, String(panelWidth.value))
+}
+
+onMounted(() => {
+  const saved = Number(localStorage.getItem(PANEL_WIDTH_KEY))
+  if (Number.isFinite(saved) && saved >= MIN_PANEL_WIDTH) {
+    panelWidth.value = clampPanelWidth(saved)
+  }
+})
+
+onBeforeUnmount(stopResize)
 
 const expandedCards = ref<Record<string, boolean>>({})
 const activeCategory = ref(0)
@@ -188,7 +240,9 @@ const filteredCategories = computed(() => {
   <Teleport to="body">
     <Transition name="help-slide">
       <div v-if="visible" class="help-overlay">
-        <div class="help-panel">
+        <div class="help-panel" :style="{ width: panelWidth + 'px' }">
+          <!-- 左侧拖拽把手：左右拖动调整面板宽度 -->
+          <div class="help-resize-handle" @mousedown="startResize"></div>
           <!-- 标题栏 -->
           <div class="help-header">
             <div class="help-title-row">
@@ -311,12 +365,30 @@ const filteredCategories = computed(() => {
 }
 
 .help-panel {
+  position: relative;
   width: 340px; max-width: 90vw; height: 100%;
   pointer-events: auto;
   display: flex; flex-direction: column;
   background: var(--bg-root);
   border-left: 1px solid var(--border);
   box-shadow: -4px 0 24px rgba(0, 0, 0, 0.4);
+}
+
+/* 左侧拖拽把手：6px 热区，悬停显示一条浅灰竖线 */
+.help-resize-handle {
+  position: absolute; left: -3px; top: 0; bottom: 0; width: 6px;
+  cursor: col-resize; z-index: 10;
+}
+.help-resize-handle:hover,
+.help-resize-handle:active {
+  background: linear-gradient(
+    to right,
+    transparent 0,
+    transparent 2px,
+    rgba(160, 160, 170, 0.45) 2px,
+    rgba(160, 160, 170, 0.45) 4px,
+    transparent 4px
+  );
 }
 
 /* ── 标题栏 ── */
