@@ -37,8 +37,9 @@ const spriteMethods: EngineCompletionItem[] = [
   { label: 'set_speed', kind: CompletionItemKind.Method, insertText: 'set_speed', documentation: '设置持续速度，引擎每帧自动沿当前方向移动\n\nset_speed(speed)', detail: 'set_speed(speed)' },
 
   // 物理 / 平台跳跃
-  { label: 'jump', kind: CompletionItemKind.Method, insertText: 'jump', documentation: '角色跳跃\n\njump(power=10)\npower: 跳跃力度（默认10，越大跳得越高）', detail: 'jump(power=10)' },
-  { label: 'cut_jump', kind: CompletionItemKind.Method, insertText: 'cut_jump', documentation: '截断跳跃（松开跳跃键时调用），使角色提前下落\n用于实现变高跳跃', detail: 'cut_jump()' },
+  { label: 'jump', kind: CompletionItemKind.Method, insertText: 'jump', documentation: '角色跳跃：给一个向上的起跳速度\n\njump(power=10)\npower: 起跳力度（默认10，约 95 像素高）\n不会自己判断能否跳，需配合 on_ground 使用；松手不会提前落下', detail: 'jump(power=10)' },
+  { label: 'smart_jump', kind: CompletionItemKind.Method, insertText: 'smart_jump', documentation: '大小跳：按下起跳，按住跳得高，松手就落下\n\nsmart_jump(power=10)\n必须写在 if key_down("up"): 里面，每帧调用一次，例如：\nif key_down("up"):\n    hero.smart_jump(12)\n松手时引擎会自动截断，不需要自己写 cut_jump', detail: 'smart_jump(power=10)' },
+  { label: 'cut_jump', kind: CompletionItemKind.Method, insertText: 'cut_jump', documentation: '截断跳跃：只让正在上升的角色提前落下，自己不会起跳，需配合 jump 使用\n松手判断写 if not key_down("space"):\n想一步到位直接用 smart_jump', detail: 'cut_jump()' },
   { label: 'drop_through', kind: CompletionItemKind.Method, insertText: 'drop_through', documentation: '从跳板下穿：角色站在跳板上时，按下键可穿过跳板下落', detail: 'drop_through()' },
 
   // 外观

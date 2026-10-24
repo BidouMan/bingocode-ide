@@ -513,6 +513,11 @@ class Sprite:
         self._vy = 0
         self._prev_bottom_y = 0
         self._jump_cut = False
+        # smart_jump：active=正在由 smart_jump 控制的跳跃；called=本帧是否被调用过
+        # 目标写法是 if key_down("w"): smart_jump()，按键松开后就不会再被调用，
+        # 引擎据此判断松手并自动截断跳跃
+        self._smart_jump_active = False
+        self._smart_jump_called = False
         self._drop_through = False
         self._drop_through_timer = 0
         self._groups = []
@@ -1065,6 +1070,27 @@ class Sprite:
         if self._vy < 0:
             self._jump_cut = True
         self._jump_buffered = False
+
+    def smart_jump(self, power=10):
+        """大小跳：按下起跳，按住跳得高，松手就落下
+
+        用法（必须写在 if key_down(...) 里面，每帧调用一次）：
+
+            while True:
+                if key_down("w"):
+                    hero.smart_jump(12)
+
+        引擎通过「本帧有没有被调用」判断按键状态：松开后这个函数不再被调用，
+        引擎会自动帮你截断跳跃，所以不需要自己写 cut_jump。
+
+        Args:
+            power: 最大跳跃力度（默认 10，越大跳得越高）
+        """
+        self._smart_jump_called = True
+        if not self._smart_jump_active and self.on_ground:
+            # 刚按下且站在地面上：起跳
+            self.jump(power)
+            self._smart_jump_active = True
 
     def drop_through(self):
         """从跳板下穿：角色站在跳板上时，按下键可穿过跳板下落"""
@@ -3030,6 +3056,13 @@ def _handle_physics_collision():
             if sprite._drop_through_timer <= 0:
                 sprite._drop_through = False
 
+        # smart_jump：本帧没有被调用（按键已松开）且角色还在上升 → 自动截断跳跃
+        if sprite._smart_jump_active and not sprite._smart_jump_called:
+            if sprite._vy < 0:
+                sprite.cut_jump()
+            sprite._smart_jump_active = False
+        sprite._smart_jump_called = False
+
         sprite.on_ground = False
 
         hitbox = sprite._get_hitbox_rect()
@@ -3451,7 +3484,11 @@ def start_game(project_dir=None, target_file=None):
     # 如果提供了项目目录，使用脚本发现模块
     if project_dir:
         from script_runner import discover_and_merge
-        script_content = discover_and_merge(project_dir, target_file)
+        try:
+            script_content = discover_and_merge(project_dir, target_file)
+        except SyntaxError as e:
+            print(f"[错误] {e}")
+            return
         if not script_content:
             print("[错误] 没有找到 Python 文件")
             return

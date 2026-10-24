@@ -86,41 +86,80 @@ hero.edge_bounce()
 
 ## 物理效果
 
-### 跳跃
+### smart_jump — 大小跳（推荐）
 
 ```python
-hero.jump(10)  # 施加向上的力
+while True:
+    if key_down("up"):
+        hero.smart_jump(12)
 ```
+
+按下起跳、按住跳得高、松手就落下。松手时引擎会自动让角色提前落下，不用自己写 `cut_jump`。
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `power` | 数字 | 10 | 跳跃力度，越大跳得越高 |
+| `power` | 数字 | 10 | 最大跳跃力度，越大跳得越高 |
 
-注意：`jump` 只是施加向上的力，需要自己用 `on_ground` 判断能否跳。
+- **必须写在 `if key_down(...)` 里面**：引擎靠「这个函数本帧被调用过没有」来判断松手
+- 按键不用重复写两遍，起跳键就是 `if key_down(...)` 里检查的那个键
+- 重复调用不会连续起跳；站在空中时按它不会起跳
+- 需要在地图属性里开启「重力」，角色才会自然落回地面
 
-### cut_jump — 截断跳跃
-
-```python
-hero.cut_jump()
-```
-
-松手时调用，让角色提前下落。用于实现按住跳得高、轻点跳得矮的效果。
+### jump — 跳跃（基础）
 
 ```python
 if key_pressed("space") and hero.on_ground:
-    hero.jump(12)
+    hero.jump(10)
+```
 
-if key_up("space"):
+给角色一个向上的起跳速度。力度 10 大约能跳 95 像素高（按 16 像素的图块算约 6 格）。
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `power` | 数字 | 10 | 起跳力度，越大跳得越高 |
+
+- 引擎不会替你判断能不能跳：在空中调用会变成二段跳，所以要自己用 `on_ground` 判断
+- `jump` 只管「跳起来」，松手不会提前落下；要做到大小跳请配合 `cut_jump`，或直接用 `smart_jump`
+
+### cut_jump — 截断跳跃（配合 jump 使用）
+
+```python
+if not key_down("space"):
     hero.cut_jump()
+```
+
+用来实现「按住跳得高、轻点跳得矮」。
+
+- **它自己不会让角色跳起来**：只有角色正在上升时才有效（把上升重力从 0.5 变成 2.8，让角色提前落下），所以必须先用 `jump`（或直接给 `vy` 一个正值）让角色上升
+- 单独在平地上或下落中调用：没有任何效果，也不会报错
+- 角色已经在下落时调用也没关系，所以松开键后每帧调用都可以
+- 引擎里没有 `key_up()`，松手用「没有按住」来判断
+- 觉得两步太麻烦，直接用上面的 `smart_jump` 即可
+
+```python
+while True:
+    if key_pressed("space") and hero.on_ground:
+        hero.jump(12)
+
+    # 松手就提前落下
+    if not key_down("space"):
+        hero.cut_jump()
 ```
 
 ### drop_through — 穿过跳板
 
 ```python
-hero.drop_through()
+# 站在跳板上时按下 ↓ 键，穿过去掉到下面
+if key_down("down"):
+    hero.drop_through()
 ```
 
 让角色穿过脚下的跳板掉下去。
+
+- 只有站在碰撞类型为「跳板」的地面上才生效（在地图编辑器里把该碰撞类型设为「跳板」）
+- 普通墙体不能穿过
+- 角色不在地面上时调用会被自动忽略，不会报错，不需要自己判断 `on_ground`
+- 穿过后约 0.16 秒内忽略跳板碰撞，之后恢复正常
 
 ## 速度属性
 
@@ -130,9 +169,9 @@ hero.drop_through()
 print(hero.vy)  # 当前垂直速度
 ```
 
-- 正数 = 下落中
-- 负数 = 上升中
-- 0 = 静止
+- 正数 = 向上运动（跳跃上升时）
+- 负数 = 向下运动（下落时）
+- 0 = 垂直方向静止
 
 ## 完整示例
 
@@ -152,7 +191,7 @@ while True:
     if key_pressed("space") and hero.on_ground:
         hero.jump(12)
     
-    if key_up("space"):
+    if not key_down("space"):
         hero.cut_jump()
     
     # 边界限制

@@ -100,6 +100,7 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 - hero.goto(x, y) — 瞬间传送到(x,y)，自动检测碰撞。也接受标记引用（hero.goto(player.get_marker())）或另一个 Sprite（hero.goto(enemy)），对准目标的注册点
 - hero.move(步数) — 朝当前 angle 方向移动指定像素，自动检测碰撞，会拆分成小步避免穿墙
 - hero.jump(power=10) — 施加向上的力（角色 vy 变为正数）。不判断地面！必须配合 on_ground 使用。用法：if hero.on_ground: hero.jump(10)
+- hero.smart_jump(power=10) — 大小跳：按下起跳、按住跳得高、松手就落下。必须写在 if key_down("up"): 里面（每帧调用一次），松手时引擎自动截断，不需要 cut_jump
 - hero.cut_jump() — 截断跳跃。只在角色正在上升时生效，将 _jump_cut 标记为 True，下一帧重力从 0.5 变为 2.8，角色快速下落。用于控制跳跃高度：按住跳得高，轻点跳得矮
 - hero.drop_through() — 穿过脚下跳板。必须在地面上调用，角色会短暂下穿跳板
 - hero.add_x(n) / hero.add_y(n) — 直接修改坐标（不检测碰撞），正数向右/上，负数向左/下

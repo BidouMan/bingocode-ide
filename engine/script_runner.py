@@ -40,8 +40,10 @@ def discover_and_merge(project_dir: str, target_file: str = None) -> str:
             content = fh.read()
         try:
             tree = ast.parse(content)
-        except SyntaxError:
-            return ''
+        except SyntaxError as e:
+            raise SyntaxError(
+                f"{os.path.basename(target_file)} 第 {e.lineno} 行语法错误：{e.msg}"
+            ) from None
 
         # 含 while True 或顶层循环的文件都转 generator（循环逐帧可见）
         if _has_while_true(tree) or _has_top_level_loop(tree):
@@ -71,6 +73,9 @@ def discover_and_merge(project_dir: str, target_file: str = None) -> str:
     # 收集所有非 import 代码块
     code_blocks = []
 
+    # 记录第一个语法错误：全部文件都解析失败时抛出，避免误报"没有找到 Python 文件"
+    parse_error = None
+
     for f in py_files:
         filepath = os.path.join(search_dir, f)
         with open(filepath, 'r', encoding='utf-8') as fh:
@@ -78,7 +83,9 @@ def discover_and_merge(project_dir: str, target_file: str = None) -> str:
 
         try:
             tree = ast.parse(content)
-        except SyntaxError:
+        except SyntaxError as e:
+            if parse_error is None:
+                parse_error = (f, e)
             continue
 
         # 提取 import 语句
@@ -108,6 +115,11 @@ def discover_and_merge(project_dir: str, target_file: str = None) -> str:
     if all_imports:
         parts.append('\n'.join(all_imports))
     parts.extend(code_blocks)
+
+    # 所有文件都有语法错误 → 抛出真实错误信息，而不是返回空串
+    if not parts and parse_error is not None:
+        f, e = parse_error
+        raise SyntaxError(f"{f} 第 {e.lineno} 行语法错误：{e.msg}") from None
 
     return '\n\n'.join(parts)
 

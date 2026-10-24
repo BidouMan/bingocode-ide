@@ -47,6 +47,7 @@ const categories = [
       { label: 'goto 传送到某个位置', code: 'hero.goto(100, 200)\nhero.goto(player.get_marker())', desc: '让角色瞬间传送到画面的某个位置。x 是左右方向（0~640），y 是上下方向（0~480）。也可以传送到某个标记上，比如把武器对准角色的手。', badgeType: 'object' },
       { label: 'move 朝前走', code: 'hero.move(5)', desc: '让角色朝着它面朝的方向走几步。比如 move(5) 就往前走 5 步。走的时候会自动避开墙壁。', badgeType: 'object' },
       { label: 'jump 跳起来', code: 'if hero.on_ground:\n    hero.jump(12)', desc: '让角色跳起来！数字越大跳得越高，默认是 10。jump 只是施加向上的力，需要自己用 on_ground 判断是否在地面。', badgeType: 'object' },
+      { label: 'smart_jump 大小跳', code: 'if key_down("up"):\n    hero.smart_jump(12)', desc: '按下起跳，按住跳得高，松手就落下。必须写在 if key_down(...) 里面，按键不用写两遍。不用自己判断松手。', badgeType: 'object' },
       { label: 'cut_jump 提前落地', code: 'if key_pressed("space") and hero.on_ground:\n    hero.jump(10)\nif key_up("space"):\n    hero.cut_jump()', desc: '松手的时候调用，角色会提前下落。按住跳键跳得高，松手就落下来，这样你就能控制跳多高。', badgeType: 'object' },
       { label: 'drop_through 穿过跳板', code: 'hero.drop_through()', desc: '让角色穿过脚下的跳板掉下去。站在跳板上时按向下键就能穿过去。', badgeType: 'object' },
       { label: 'add_x 向右走', code: 'hero.add_x(5)', desc: '让角色向右走几步。写负数就向左走，比如 add_x(-5) 向左走 5 步。', badgeType: 'object' },
