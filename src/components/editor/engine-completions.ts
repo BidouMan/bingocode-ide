@@ -28,19 +28,19 @@ const spriteMethods: EngineCompletionItem[] = [
   // 移动
   { label: 'goto', kind: CompletionItemKind.Method, insertText: 'goto', documentation: '移到指定坐标；也接受标记引用或另一个角色\n\ngoto(320, 240)\ngoto(player.get_marker())  # 武器对准角色的「标记」\ngoto(enemy)  # 对齐另一个角色的注册点', detail: 'goto(x, y)' },
   { label: 'set_xy', kind: CompletionItemKind.Method, insertText: 'set_xy', documentation: '设置坐标（带碰撞检测）\n\nset_xy(x, y)', detail: 'set_xy(x, y)' },
-  { label: 'set_x', kind: CompletionItemKind.Method, insertText: 'set_x', documentation: '设置水平位置\n\nset_x(x)', detail: 'set_x(x)' },
-  { label: 'set_y', kind: CompletionItemKind.Method, insertText: 'set_y', documentation: '设置垂直位置（y 向上为正，画面左下角为 0）\n\nset_y(y)', detail: 'set_y(y)' },
-  { label: 'add_x', kind: CompletionItemKind.Method, insertText: 'add_x', documentation: '将 x 坐标增加（或减少）一定数值\n\nadd_x(delta_x)', detail: 'add_x(delta_x)' },
-  { label: 'add_y', kind: CompletionItemKind.Method, insertText: 'add_y', documentation: '将 y 坐标增加（或减少）一定数值（正数向上）\n\nadd_y(delta_y)', detail: 'add_y(delta_y)' },
+  { label: 'set_x', kind: CompletionItemKind.Method, insertText: 'set_x', documentation: '设置水平位置；落点与墙重叠时会被推到最近一侧（不检查中间路径）\n\nset_x(x)', detail: 'set_x(x)' },
+  { label: 'set_y', kind: CompletionItemKind.Method, insertText: 'set_y', documentation: '设置垂直位置（y 向上为正，画面左下角为 0）；落点与墙重叠时会被推到最近一侧\n\nset_y(y)', detail: 'set_y(y)' },
+  { label: 'add_x', kind: CompletionItemKind.Method, insertText: 'add_x', documentation: '将 x 坐标增加（或减少）一定数值；改完做一次碰撞修正，小步会被墙挡住，一次移动太远可能穿墙\n\nadd_x(delta_x)', detail: 'add_x(delta_x)' },
+  { label: 'add_y', kind: CompletionItemKind.Method, insertText: 'add_y', documentation: '将 y 坐标增加（或减少）一定数值（正数向上）；改完做一次碰撞修正，小步会被墙挡住\n\nadd_y(delta_y)', detail: 'add_y(delta_y)' },
   { label: 'move', kind: CompletionItemKind.Method, insertText: 'move', documentation: '朝着当前 angle 方向移动 distance 像素\n\nmove(distance)', detail: 'move(distance)' },
   { label: 'goto_rand', kind: CompletionItemKind.Method, insertText: 'goto_rand', documentation: '移到随机位置（0-640, 0-480）', detail: 'goto_rand()' },
   { label: 'set_speed', kind: CompletionItemKind.Method, insertText: 'set_speed', documentation: '设置持续速度，引擎每帧自动沿当前方向移动\n\nset_speed(speed)', detail: 'set_speed(speed)' },
 
   // 物理 / 平台跳跃
-  { label: 'jump', kind: CompletionItemKind.Method, insertText: 'jump', documentation: '角色跳跃：给一个向上的起跳速度\n\njump(power=10)\npower: 起跳力度（默认10，约 95 像素高）\n不会自己判断能否跳，需配合 on_ground 使用；松手不会提前落下', detail: 'jump(power=10)' },
-  { label: 'smart_jump', kind: CompletionItemKind.Method, insertText: 'smart_jump', documentation: '大小跳：按下起跳，按住跳得高，松手就落下\n\nsmart_jump(power=10)\n必须写在 if key_down("up"): 里面，每帧调用一次，例如：\nif key_down("up"):\n    hero.smart_jump(12)\n松手时引擎会自动截断，不需要自己写 cut_jump', detail: 'smart_jump(power=10)' },
-  { label: 'cut_jump', kind: CompletionItemKind.Method, insertText: 'cut_jump', documentation: '截断跳跃：只让正在上升的角色提前落下，自己不会起跳，需配合 jump 使用\n松手判断写 if not key_down("space"):\n想一步到位直接用 smart_jump', detail: 'cut_jump()' },
-  { label: 'drop_through', kind: CompletionItemKind.Method, insertText: 'drop_through', documentation: '从跳板下穿：角色站在跳板上时，按下键可穿过跳板下落', detail: 'drop_through()' },
+  { label: 'jump', kind: CompletionItemKind.Method, insertText: 'jump', documentation: '角色跳跃：给一个向上的起跳速度\n\njump(power=10)\npower: 起跳力度（默认10，约 95 像素高）\n不会自己判断能否跳，需配合 is_on_ground() 使用；松手不会提前落下', detail: 'jump(power=10)' },
+  { label: 'smart_jump', kind: CompletionItemKind.Method, insertText: 'smart_jump', documentation: '大小跳：按下起跳，按住跳得高，松手就落下\n\nsmart_jump(power=10)\n必须写在 if key_down("up"): 里面，每帧调用一次，例如：\nif key_down("up"):\n    hero.smart_jump(12)\n松手时引擎会自动停止跳跃，不需要自己写 stop_jump', detail: 'smart_jump(power=10)' },
+  { label: 'stop_jump', kind: CompletionItemKind.Method, insertText: 'stop_jump', documentation: '停止跳跃：角色正在上升时调用，停止继续上升并提前落下，自己不会起跳\n需要先 jump（或给 vy 一个正值）\n普通按键跳跃直接用 smart_jump 更简单；敌人、撞天花板等没有松手的场景用这个', detail: 'stop_jump()' },
+  { label: 'drop_down', kind: CompletionItemKind.Method, insertText: 'drop_down', documentation: '从跳板掉下去：角色站在碰撞类型为「跳板」的平台上时调用，穿过脚下的跳板下落\n不在地面上时调用会被自动忽略，不需要自己判断 is_on_ground()', detail: 'drop_down()' },
 
   // 外观
   { label: 'set_scale', kind: CompletionItemKind.Method, insertText: 'set_scale', documentation: '设置缩放比例（5-1000）\n\nset_scale(value)', detail: 'set_scale(value)' },
@@ -69,7 +69,7 @@ const spriteMethods: EngineCompletionItem[] = [
   { label: 'is_touch', kind: CompletionItemKind.Method, insertText: 'is_touch', documentation: '判断是否碰到另一个 Sprite、鼠标或带有指定标签的图块\n\nis_touch(target)\ntarget 可以是 Sprite、mouse 或字符串（图块标签）', detail: 'is_touch(target) -> bool' },
   { label: 'touch_group', kind: CompletionItemKind.Method, insertText: 'touch_group', documentation: '判断是否撞到了某个组里的任意成员\n如果撞到了，返回那个成员；没撞到返回 None', detail: 'touch_group(group_name) -> Sprite or None' },
   { label: 'distance_to', kind: CompletionItemKind.Method, insertText: 'distance_to', documentation: '计算当前角色视觉中心点到目标（Sprite 或 mouse）的距离', detail: 'distance_to(target) -> float' },
-  { label: 'is_on_floor', kind: CompletionItemKind.Method, insertText: 'is_on_floor', documentation: '检测角色脚底下方是否存在带有碰撞的图块', detail: 'is_on_floor() -> bool' },
+  { label: 'is_on_ground', kind: CompletionItemKind.Method, insertText: 'is_on_ground', documentation: '是否真正站在地面上：由物理落地接触决定，站着为 True；跳起来、下落中、从下方穿过跳板都为 False\n跳跃前用它判断能否跳', detail: 'is_on_ground() -> bool' },
 
   // 分组 / 事件
   { label: 'add_to_group', kind: CompletionItemKind.Method, insertText: 'add_to_group', documentation: '将角色归类，比如 "enemies", "bullets"\n\nadd_to_group(group_name)', detail: 'add_to_group(group_name)' },
@@ -87,7 +87,6 @@ const spriteProperties: EngineCompletionItem[] = [
   { label: 'angle', kind: CompletionItemKind.Property, insertText: 'angle', documentation: '朝向角度（度，逆时针为正：0=右 90=上 180=左 270=下）', detail: 'float' },
   { label: 'scale', kind: CompletionItemKind.Property, insertText: 'scale', documentation: '缩放比例（百分比，默认 100）', detail: 'float' },
   { label: 'layer', kind: CompletionItemKind.Property, insertText: 'layer', documentation: '图层顺序（越大越靠前）', detail: 'int' },
-  { label: 'on_ground', kind: CompletionItemKind.Property, insertText: 'on_ground', documentation: '是否在地面上', detail: 'bool' },
   { label: 'hitbox_scale', kind: CompletionItemKind.Property, insertText: 'hitbox_scale', documentation: '碰撞箱大小倍率（默认 1.0）', detail: 'float' },
 ]
 
@@ -108,6 +107,7 @@ const globalFunctions: EngineCompletionItem[] = [
   // 输入
   { label: 'key_down', kind: CompletionItemKind.Function, insertText: 'key_down', documentation: '判断某个键是否被按住（持续按住返回 True）\n\nkey_down("a")\nkey_down("space")\nkey_down("left")', detail: 'key_down(key) -> bool' },
   { label: 'key_pressed', kind: CompletionItemKind.Function, insertText: 'key_pressed', documentation: '只有按下的那一帧返回 True\n\nkey_pressed("a")', detail: 'key_pressed(key) -> bool' },
+  { label: 'key_up', kind: CompletionItemKind.Function, insertText: 'key_up', documentation: '只有松开的那一帧返回 True\n\nkey_up("space")', detail: 'key_up(key) -> bool' },
   { label: 'mouse_down', kind: CompletionItemKind.Function, insertText: 'mouse_down', documentation: '判断鼠标是否按下（持续按住返回 True）', detail: 'mouse_down() -> bool' },
   { label: 'mouse_pressed', kind: CompletionItemKind.Function, insertText: 'mouse_pressed', documentation: '单次检测：只有在按下的那一帧返回 True', detail: 'mouse_pressed() -> bool' },
 

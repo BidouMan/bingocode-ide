@@ -75,7 +75,7 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 4. 代码中不要使用 import 语句
 5. 所有代码必须能在 BingoCodeIDE 引擎中直接运行
 6. 游戏循环必须用 while True:，不要用 def run()
-7. jump() 只是施加向上的力，必须自己用 on_ground 判断能否跳
+7. jump() 只是施加向上的力，必须自己用 is_on_ground() 判断能否跳
 
 ## 画面基本信息
 - 画面尺寸：640 x 480 像素
@@ -92,19 +92,18 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 - hero.x, hero.y — 读取或设置位置（0~640, 0~480），赋值时自动检测碰撞
 - hero.scale — 大小百分比，100=正常，200=两倍大，50=一半小（可直接赋值）
 - hero.angle — 朝向角度（可直接赋值）
-- hero.layer — 层级数字，越大越在前面，默认1000
-- hero.on_ground — 布尔属性，角色脚底是否踩在有碰撞的地形上。每帧自动更新
+- hero.layer — 层级数字，越大越在前面，默认0（写 1、2、3 就能盖在别的角色前面，写负数躲到后面）
 - hero.vy — 垂直速度属性，正数=上升，负数=下落，静止=0
 
 ### 运动
 - hero.goto(x, y) — 瞬间传送到(x,y)，自动检测碰撞。也接受标记引用（hero.goto(player.get_marker())）或另一个 Sprite（hero.goto(enemy)），对准目标的注册点
-- hero.move(步数) — 朝当前 angle 方向移动指定像素，自动检测碰撞，会拆分成小步避免穿墙
-- hero.jump(power=10) — 施加向上的力（角色 vy 变为正数）。不判断地面！必须配合 on_ground 使用。用法：if hero.on_ground: hero.jump(10)
-- hero.smart_jump(power=10) — 大小跳：按下起跳、按住跳得高、松手就落下。必须写在 if key_down("up"): 里面（每帧调用一次），松手时引擎自动截断，不需要 cut_jump
-- hero.cut_jump() — 截断跳跃。只在角色正在上升时生效，将 _jump_cut 标记为 True，下一帧重力从 0.5 变为 2.8，角色快速下落。用于控制跳跃高度：按住跳得高，轻点跳得矮
-- hero.drop_through() — 穿过脚下跳板。必须在地面上调用，角色会短暂下穿跳板
-- hero.add_x(n) / hero.add_y(n) — 直接修改坐标（不检测碰撞），正数向右/上，负数向左/下
-- hero.set_x(x) / hero.set_y(y) — 设置坐标（检测碰撞），比 add_x/add_y 安全
+- hero.move(步数) — 朝当前 angle 方向移动指定像素，自动检测碰撞（撞墙停下/贴墙滑动、不会穿墙，也不会自己绕路），会拆分成小步避免穿墙
+- hero.jump(power=10) — 施加向上的力（角色 vy 变为正数）。不判断地面！必须配合 is_on_ground() 使用。用法：if hero.is_on_ground(): hero.jump(10)
+- hero.smart_jump(power=10) — 大小跳：按下起跳、按住跳得高、松手就落下。必须写在 if key_down("up"): 里面（每帧调用一次），松手时引擎自动停止跳跃，不需要 stop_jump
+- hero.stop_jump() — 停止跳跃：只在角色正在上升时生效，停止继续上升并提前落下（上升重力从 0.5 变为 2.8）。自己不会起跳，需配合 jump；用于敌人、撞天花板等没有松手的场景（普通按键跳跃用 smart_jump）
+- hero.drop_down() — 从脚下的跳板掉下去。只有站在碰撞类型为「跳板」的平台上才生效，不在地面上调用会被自动忽略，不用自己判断 is_on_ground()
+- hero.add_x(n) / hero.add_y(n) — 直接加/减坐标（正数向右/上），改完做一次碰撞修正；小步会被墙挡住，一次移动太远可能穿墙
+- hero.set_x(x) / hero.set_y(y) — 直接设置坐标并立即做一次碰撞修正；落点在墙里会被推到最近一侧，不检查中间路径
 - hero.set_angle(度数) — 设置朝向角度
 - hero.look_at(target) — 自动转向面向 target（另一个 Sprite 或 mouse 对象）
 - hero.set_speed(速度) — 设置持续移动速度，之后每帧自动沿当前方向移动，写 0 停下
@@ -117,7 +116,7 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 - m.x / m.y — 读取该标记此刻在画面上的坐标（已算上角色的位置、旋转、缩放和左右翻转；动画换帧时标记位置也会跟着变）
 - sword.follow(m) — 让 sword 每帧贴在标记 m 上。只同步位置和左右翻转，**不改变朝向**，所以仍可 sword.look_at(mouse) 单独瞄准
 - sword.follow(m, flip=False) — 同上但不继承角色的左右翻转（鼠标瞄准类武器用这个）
-- sword.unfollow() — 解除跟随，恢复自由移动
+- sword.unfollow() — 解除跟随，恢复自由移动；保留脱离时的朝向，不会自动变回正向
 - 目标角色被 delete 后跟随自动停止；不写 follow 时可用手写循环 sword.goto(m) 每帧对准（等价效果）
 - 注意：follow 是普通方法调用，不是属性赋值（不要写成 sword.follow = m）
 
@@ -135,10 +134,10 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 - hero.is_out_side() — 是否整个角色都在画面外
 - hero.distance_to(target) — 返回到另一个 Sprite 或 mouse 的像素距离
 - bullet.touch_group("组名") — 检测子弹是否碰到组内成员，碰到返回那个角色，没碰到返回 None
-- hero.is_on_floor() — 实时检测脚底1-2像素处是否有碰撞图块（比 on_ground 更精确但更耗性能）
+- hero.is_on_ground() — 是否真正站在地面上（由物理落地接触决定，上升中/从下方穿过跳板时为 False）；跳跃前用它判断
 - key_down("键名") — 按键是否正在被按住，每帧检测。键名小写：space, up, down, left, right, a-z
 - key_pressed("键名") — 只在按下的那一帧返回 True（单次触发）。用于跳跃等一次性操作
-- key_up("键名") — 只在松开的那一帧返回 True（单次触发）。用于 cut_jump 等
+- key_up("键名") — 只在松开的那一帧返回 True（单次触发）。用于 stop_jump 等
 - mouse_down() — 鼠标左键是否按住
 - mouse_pressed() — 鼠标左键按下那一帧
 - mouse.x, mouse.y — 鼠标在画面上的坐标

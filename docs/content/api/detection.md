@@ -42,7 +42,7 @@ if key_pressed("space"):
 
 ```python
 if key_up("space"):
-    hero.cut_jump()
+    hero.stop_jump()
 ```
 
 单次检测：只在松开那一瞬间返回 True。
@@ -128,14 +128,15 @@ if hit:
 
 碰到返回那个精灵，没碰到返回 None。
 
-### is_on_floor — 地面检测
+### is_on_ground — 是否站在地面上
 
 ```python
-if hero.is_on_floor():
-    print("脚底有碰撞地形")
+if hero.is_on_ground():
+    print("脚底有碰撞地形，可以跳")
 ```
 
-检测角色脚底下方是否存在带碰撞的图块。比 `on_ground` 更精确但更耗性能。
+角色是否真正站在地面上（由物理落地的碰撞接触决定）：站着为 True，跳起来、下落中、从下方穿过跳板都为 False。
+`jump()` 不会自己判断，跳跃前要用它检查，否则会变成空中二段跳。
 
 ## 距离和位置
 

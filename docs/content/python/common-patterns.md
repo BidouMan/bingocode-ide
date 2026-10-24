@@ -120,7 +120,7 @@ while True:
         input_buffer.append("jump")
     
     # 处理输入
-    if "jump" in input_buffer and hero.on_ground:
+    if "jump" in input_buffer and hero.is_on_ground():
         hero.jump(10)
         input_buffer.remove("jump")
     
@@ -140,7 +140,7 @@ while True:
     # 确定动画状态
     if key_down("left") or key_down("right"):
         current_animation = "walk"
-    elif not hero.on_ground:
+    elif not hero.is_on_ground():
         current_animation = "jump"
     else:
         current_animation = "idle"

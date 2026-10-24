@@ -50,7 +50,7 @@ play_sound("bgm", True)
 
 ```python
 # 跳跃时
-if key_pressed("space") and hero.on_ground:
+if key_pressed("space") and hero.is_on_ground():
     hero.jump(10)
     play_sound("jump")
 
@@ -91,12 +91,12 @@ while True:
         hero.add_x(5)
     
     # 跳跃（带音效）
-    if key_pressed("space") and hero.on_ground:
+    if key_pressed("space") and hero.is_on_ground():
         hero.jump(10)
         play_sound("jump")
     
     if key_up("space"):
-        hero.cut_jump()
+        hero.stop_jump()
     
     # 边界限制
     if hero.x < 0:

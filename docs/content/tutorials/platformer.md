@@ -43,12 +43,12 @@ while True:
         hero.set_angle(0)
     
     # 跳跃
-    if key_pressed("space") and hero.on_ground:
+    if key_pressed("space") and hero.is_on_ground():
         hero.jump(12)
     
-    # 截断跳跃（按住跳得高，轻点跳得矮）
+    # 停止跳跃（按住跳得高，轻点跳得矮）
     if key_up("space"):
-        hero.cut_jump()
+        hero.stop_jump()
 ```
 
 ## 步骤 2：添加敌人
@@ -132,12 +132,12 @@ while True:
         hero.set_angle(0)
     
     # 跳跃
-    if key_pressed("space") and hero.on_ground:
+    if key_pressed("space") and hero.is_on_ground():
         hero.jump(12)
         play_sound("jump")
     
     if key_up("space"):
-        hero.cut_jump()
+        hero.stop_jump()
     
     # 生成敌人
     if enemy_timer.is_timeout():
@@ -179,7 +179,7 @@ jump_count = 0
 while True:
     # 跳跃
     if key_pressed("space"):
-        if hero.on_ground:
+        if hero.is_on_ground():
             hero.jump(12)
             jump_count = 1
         elif jump_count < 2:
@@ -187,7 +187,7 @@ while True:
             jump_count += 1
     
     # 落地重置
-    if hero.on_ground:
+    if hero.is_on_ground():
         jump_count = 0
 ```
 

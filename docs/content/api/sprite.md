@@ -109,21 +109,9 @@ hero.angle = 90  # 朝上
 hero.layer = 10  # 设置图层层级
 ```
 
-- 数字越大越在前面
-- 默认值：1000
-- 用于控制精灵的前后遮挡关系
-
-### on_ground — 是否在地面
-
-```python
-if hero.on_ground:
-    print("在地面上，可以跳")
-    hero.jump(10)
-```
-
-- 布尔值：True = 在地面上，False = 在空中
-- 每帧自动更新
-- 用于判断能否跳跃
+- 数字越大越在前面，越小越在后面（可以是负数）
+- 默认值：0（直接写 1、2、3 就能盖在别的角色前面）
+- 用于控制精灵之间的前后遮挡关系
 
 ### vy — 垂直速度
 
@@ -164,7 +152,7 @@ hero.goto_rand()
 hero.move(5)
 ```
 
-朝着当前 angle 方向移动指定像素。移动时会自动检测碰撞。
+朝着当前 angle 方向移动指定像素。移动时会自动检测碰撞：撞到墙会停住、贴着墙滑动，不会穿墙（但**不会自己绕路**找出口）。
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
@@ -179,7 +167,7 @@ hero.add_y(5)   # 向上移动 5 像素
 hero.add_y(-5)  # 向下移动 5 像素
 ```
 
-直接修改坐标，不检测碰撞。正数向右/上，负数向左/下。
+直接修改坐标，正数向右/上，负数向左/下。改完会立即做一次碰撞修正：小步移动会被墙挡住、从墙里被推出来；但**一次加减太多（比如一次 100 像素）可能直接穿过薄墙**，因为它不会像 `move` 那样拆成小步。
 
 ### set_x / set_y — 设置坐标
 
@@ -188,7 +176,7 @@ hero.set_x(300)  # 设置 x 坐标
 hero.set_y(200)  # 设置 y 坐标
 ```
 
-设置坐标，会自动检测碰撞。比 `add_x`/`add_y` 更安全。
+直接把坐标设成某个值，设置后立即做一次碰撞修正：落点和墙重叠时会被推到最近的一侧。它只检查"终点"、不检查中间路径，所以从墙的一侧直接设到另一侧是可以的。
 
 ### set_angle — 设置朝向
 
@@ -230,7 +218,7 @@ while True:
         hero.smart_jump(12)
 ```
 
-按下起跳、按住跳得高、松手就落下。松手时引擎会自动让角色提前落下，不用自己写 `cut_jump`。
+按下起跳、按住跳得高、松手就落下。松手时引擎会自动让角色提前落下，不用自己写 `stop_jump`。
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
@@ -244,7 +232,7 @@ while True:
 ### jump — 跳跃（基础）
 
 ```python
-if key_pressed("space") and hero.on_ground:
+if key_pressed("space") and hero.is_on_ground():
     hero.jump(10)
 ```
 
@@ -254,14 +242,14 @@ if key_pressed("space") and hero.on_ground:
 |------|------|--------|------|
 | `power` | 数字 | 10 | 起跳力度，越大跳得越高 |
 
-- 引擎不会替你判断能不能跳：在空中调用会变成二段跳，所以要自己用 `on_ground` 判断
-- `jump` 只管「跳起来」，松手不会提前落下；要做到大小跳请配合 `cut_jump`，或直接用 `smart_jump`
+- 引擎不会替你判断能不能跳：在空中调用会变成二段跳，所以要自己用 `is_on_ground()` 判断
+- `jump` 只管「跳起来」，松手不会提前落下；要做到大小跳请配合 `stop_jump`，或直接用 `smart_jump`
 
-### cut_jump — 截断跳跃（配合 jump 使用）
+### stop_jump — 停止跳跃（配合 jump 使用）
 
 ```python
-if not key_down("space"):
-    hero.cut_jump()
+if key_up("space"):
+    hero.stop_jump()
 ```
 
 用来实现「按住跳得高、轻点跳得矮」。
@@ -269,33 +257,33 @@ if not key_down("space"):
 - **它自己不会让角色跳起来**：只有角色正在上升时才有效（把上升重力从 0.5 变成 2.8，让角色提前落下），所以必须先用 `jump`（或直接给 `vy` 一个正值）让角色上升
 - 单独在平地上或下落中调用：没有任何效果，也不会报错
 - 角色已经在下落时调用也没关系，所以松开键后每帧调用都可以
-- 引擎里没有 `key_up()`，松手用「没有按住」来判断
+- 松手判断用 `key_up("space")`（也可以用 `if not key_down("space")`）
 - 觉得两步太麻烦，直接用上面的 `smart_jump` 即可
 
 ```python
 while True:
-    if key_pressed("space") and hero.on_ground:
+    if key_pressed("space") and hero.is_on_ground():
         hero.jump(12)
 
     # 松手就提前落下
-    if not key_down("space"):
-        hero.cut_jump()
+    if key_up("space"):
+        hero.stop_jump()
 ```
 
-### drop_through — 穿过跳板
+### drop_down — 从跳板掉下去
 
 ```python
-# 站在跳板上时按下 ↓ 键，穿过去掉到下面
+# 站在跳板上时按下 ↓ 键，掉到跳板下面
 if key_down("down"):
-    hero.drop_through()
+    hero.drop_down()
 ```
 
-让角色穿过脚下的跳板掉下去。
+让角色从脚下的跳板掉下去。
 
 - 只有站在碰撞类型为「跳板」的地面上才生效（在地图编辑器里把该碰撞类型设为「跳板」）
 - 普通墙体不能穿过
-- 角色不在地面上时调用会被自动忽略，不会报错，不需要自己判断 `on_ground`
-- 穿过后约 0.16 秒内忽略跳板碰撞，之后恢复正常
+- 角色不在地面上时调用会被自动忽略，不会报错，不需要自己判断 `is_on_ground()`
+- 掉下去后约 0.16 秒内忽略跳板碰撞，之后恢复正常
 
 ### show / hide — 显示/隐藏
 
@@ -397,14 +385,17 @@ if hit:
 
 检测是否碰到组内成员，碰到返回那个精灵，没碰到返回 None。
 
-### is_on_floor — 地面检测
+### is_on_ground — 是否站在地面上
 
 ```python
-if hero.is_on_floor():
-    print("脚底有地面")
+if hero.is_on_ground():
+    print("脚底有地面，可以跳")
+    hero.jump(10)
 ```
 
-比 `on_ground` 更精确，但更耗性能。
+角色是否真正站在地面上（由物理落地的碰撞接触决定）：站着为 True，跳起来、下落中、从下方穿过跳板都为 False。
+
+`jump()` 不会自己判断，跳跃前要用它检查，否则会变成空中二段跳。
 
 ### add_to_group — 加入组
 
@@ -446,12 +437,12 @@ while True:
         hero.set_angle(0)    # 朝右
     
     # 跳跃
-    if key_pressed("space") and hero.on_ground:
+    if key_pressed("space") and hero.is_on_ground():
         hero.jump(12)
     
-    # 截断跳跃（松手就提前落下）
-    if not key_down("space"):
-        hero.cut_jump()
+    # 停止跳跃（松手就提前落下）
+    if key_up("space"):
+        hero.stop_jump()
     
     # 边界限制
     if hero.x < 0:

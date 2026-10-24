@@ -102,13 +102,13 @@ while True:
         hero.add_x(5)
     
     # 跳跃（按空格键）
-    if key_pressed("space") and hero.on_ground:
+    if key_pressed("space") and hero.is_on_ground():
         hero.jump(12)
 ```
 
 **关键点**：
 - `key_pressed("space")` 只在按下那一瞬间返回 True（适合做跳跃）
-- `hero.on_ground` 检查角色是否在地面上
+- `hero.is_on_ground()` 检查角色是否在地面上
 - 只有在地面上才能跳，防止空中无限跳
 
 ## 进阶：添加边界限制
@@ -159,7 +159,7 @@ while True:
         hero.add_x(5)
     
     # 跳跃
-    if key_pressed("space") and hero.on_ground:
+    if key_pressed("space") and hero.is_on_ground():
         hero.jump(12)
     
     # 边界限制

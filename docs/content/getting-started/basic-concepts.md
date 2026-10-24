@@ -87,7 +87,8 @@ hero = Sprite("洛克人")
 | `scale` | 大小百分比 | `hero.scale = 200` |
 | `angle` | 朝向角度 | `hero.angle = 90` |
 | `layer` | 图层顺序 | `hero.layer = 10` |
-| `on_ground` | 是否在地面 | `if hero.on_ground:` |
+
+跳跃前用 `hero.is_on_ground()` 判断角色是否站在地面上（详见「侦测」）。
 
 ### 角度系统
 
@@ -212,7 +213,7 @@ hero.vy = -10
 
 ```python
 # 检测是否站在地面上
-if hero.on_ground:
+if hero.is_on_ground():
     print("在地面上，可以跳")
 else:
     print("在空中")
@@ -223,12 +224,12 @@ else:
 ```python
 while True:
     # 按空格跳
-    if key_pressed("space") and hero.on_ground:
+    if key_pressed("space") and hero.is_on_ground():
         hero.jump(10)  # 施加向上的力
     
-    # 松手时截断跳跃（可选）
+    # 松手时停止跳跃（可选）
     if key_up("space"):
-        hero.cut_jump()
+        hero.stop_jump()
 ```
 
 ## 广播系统

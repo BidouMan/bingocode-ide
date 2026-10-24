@@ -74,24 +74,30 @@ export function useEngine() {
         })
         break
 
-      case 'UPDATE':
-        renderStore.updateSprite(cmd.id!, {
-          x: cmd.data.x,
-          y: cmd.data.y,
-          angle: cmd.data.angle,
-          scale: cmd.data.scale,
-          scaleX: cmd.data.scale_x,
-          scaleY: cmd.data.scale_y,
-          visible: cmd.data.visible ?? true,
-          layer: cmd.data.layer,
-          imagePath: cmd.data.image,
-          vox: cmd.data.vox ?? 0,
-          voy: cmd.data.voy ?? 0,
-          // 部分更新（仅 visible/layer）不带 frame_rect 时保留原 UV，避免瞬时整张贴图
-          ...(cmd.data.frame_rect !== undefined ? { frameRect: cmd.data.frame_rect } : {}),
-          // 自然尺寸（自动渲染判定用）：帧大小变化时随 UPDATE 一起更新
-          ...(cmd.data.cw ? { frameW: cmd.data.cw, frameH: cmd.data.ch } : {}),
-        })
+      case 'UPDATE': {
+        // 局部更新（例如只改 layer/visible）只合并本次真正携带的字段，
+        // 不能把 x/y/角度/纹理等未携带的字段覆盖成 undefined
+        const d = cmd.data
+        const patch: Parameters<typeof renderStore.updateSprite>[1] = {}
+        if (d.x !== undefined) patch.x = d.x
+        if (d.y !== undefined) patch.y = d.y
+        if (d.angle !== undefined) patch.angle = d.angle
+        if (d.scale !== undefined) patch.scale = d.scale
+        if (d.scale_x !== undefined) patch.scaleX = d.scale_x
+        if (d.scale_y !== undefined) patch.scaleY = d.scale_y
+        if (d.visible !== undefined) patch.visible = d.visible
+        if (d.layer !== undefined) patch.layer = d.layer
+        if (d.image !== undefined) patch.imagePath = d.image
+        if (d.vox !== undefined) patch.vox = d.vox
+        if (d.voy !== undefined) patch.voy = d.voy
+        // 部分更新不带 frame_rect 时保留原 UV，避免瞬时整张贴图
+        if (d.frame_rect !== undefined) patch.frameRect = d.frame_rect
+        // 自然尺寸（自动渲染判定用）：帧大小变化时随 UPDATE 一起更新
+        if (d.cw) {
+          patch.frameW = d.cw
+          patch.frameH = d.ch
+        }
+        renderStore.updateSprite(cmd.id!, patch)
         // 更新碰撞盒
         if (cmd.data.hitbox) {
           renderStore.setHitbox(cmd.id!, cmd.data.hitbox)
@@ -101,10 +107,11 @@ export function useEngine() {
         // 同步气泡位置（存原始坐标，气泡偏移由 GameCanvas 按字号计算）
         const sayText = renderStore.sayTexts.get(cmd.id!)
         if (sayText) {
-          sayText.x = cmd.data.x
-          sayText.y = cmd.data.y
+          if (d.x !== undefined) sayText.x = d.x
+          if (d.y !== undefined) sayText.y = d.y
         }
         break
+      }
 
       case 'DELETE':
         renderStore.deleteSprite(cmd.id!)
@@ -469,7 +476,7 @@ export function useEngine() {
       // 根据模式决定如何运行
       if (editorStore.isGameMode) {
         // ═══ 游戏模式：保存所有 tab 到 code/ 目录，引擎自动发现并运行 ═══
-        const gameKeywords = ['run()', 'Sprite(', 'load_map(', 'key_down(', 'key_pressed(', 'Timer(', 'mouse', 'wait(']
+        const gameKeywords = ['run()', 'Sprite(', 'load_map(', 'key_down(', 'key_pressed(', 'key_up(', 'Timer(', 'mouse', 'wait(']
         const codeDir = projectDir ? `${projectDir}/code` : ''
 
         // 确保 code/ 目录存在

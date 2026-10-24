@@ -147,7 +147,7 @@ while True:
         hero.play("idle")
     
     # 跳跃
-    if key_pressed("space") and hero.on_ground:
+    if key_pressed("space") and hero.is_on_ground():
         hero.jump(10)
         hero.play("jump")
     

@@ -144,9 +144,9 @@ while True:
     if key_down("right"):
         hero.add_x(5)
     
-    if key_pressed("space") and hero.on_ground:
+    if key_pressed("space") and hero.is_on_ground():
         hero.jump(10)
     
     if key_up("space"):
-        hero.cut_jump()
+        hero.stop_jump()
 ```

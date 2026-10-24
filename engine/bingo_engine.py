@@ -29,7 +29,12 @@ if project_root not in sys.path:
 sys.stdout = os.fdopen(sys.stdout.fileno(), "w", buffering=1)
 
 _PRESSED_KEYS = set()
+_PRESSED_KEYS_FRAME = set()
 _PRESSED_KEYS_PREV = set()
+# 松开事件：监听线程累积到 _RELEASED_KEYS，每个物理步开始快照到 _RELEASED_FRAME，
+# 供 key_up() 读取；这样不会因为事件到达时机跨帧而漏掉"刚松开"的那一帧
+_RELEASED_KEYS = set()
+_RELEASED_FRAME = set()
 _WAIT_TIMERS = {}
 _EVENT_LISTENERS = {}
 _SHOW_FPS = False
@@ -183,6 +188,21 @@ def _normalize_image_collision_points(raw_points, img_w, img_h, allow_pixel_coor
     return points
 
 
+def _collision_polygon_parts(points):
+    """碰撞层多边形 → SAT 判定用的凸多边形集合（凹多边形做耳切三角化）
+
+    SAT 只对凸多边形严格成立：凹多边形直接投影会在凹陷空区判定出假碰撞，
+    表现为角色还悬在斜面上方就被拦住（看起来像整层碰撞"位移"了）。
+    """
+    pts = [[float(p[0]), float(p[1])] for p in points]
+    convex = [[(x, y) for x, y in pts]]
+    if _is_convex_polygon(pts):
+        return convex
+    tris = _triangulate_polygon(pts) or []
+    parts = [[(float(x), float(y)) for x, y in tri] for tri in tris if len(tri) >= 3]
+    return parts or convex
+
+
 def _image_collision_local_polygons(image):
     """图像实例碰撞形状 → 图片本地归一化凸多边形列表（缓存到运行时字典）
 
@@ -265,7 +285,7 @@ def _image_collision_world_polygons(image):
     except (TypeError, ValueError):
         rotation = 0.0
 
-    # 同一帧内 x/y 两次碰撞检测、is_on_floor 会重复调用；
+    # 同一帧内 x/y 两次碰撞检测、is_on_ground 会重复调用；
     # 变换未变化时直接复用世界多边形，避免每帧重复分配
     cache_key = (px, py, img_w, img_h, sx, sy, rotation)
     if image.get("_collision_world_key") == cache_key:
@@ -359,7 +379,7 @@ def _point_in_polygon(x, y, polygon):
 
 
 def _polygon_hits_horizontal(polygon, x0, x1, y):
-    """多边形是否与水平检测带 [x0,x1] × y 相交（用于 is_on_floor）"""
+    """多边形是否与水平检测带 [x0,x1] × y 相交（用于 is_on_ground）"""
     n = len(polygon)
     for i in range(n):
         x1p, y1p = polygon[i]
@@ -437,6 +457,7 @@ __all__ = [
     "run",
     "key_down",
     "key_pressed",
+    "key_up",
     "wait",
     "broadcast",
     "receive",
@@ -509,15 +530,17 @@ class Sprite:
         self._rotation_style = "all"
         self._current_scale_x = 1.0
         self.hitbox_scale = 1.0
-        self.on_ground = False
+        self._on_ground = False
         self._vy = 0
         self._prev_bottom_y = 0
         self._jump_cut = False
         # smart_jump：active=正在由 smart_jump 控制的跳跃；called=本帧是否被调用过
         # 目标写法是 if key_down("w"): smart_jump()，按键松开后就不会再被调用，
-        # 引擎据此判断松手并自动截断跳跃
+        # 引擎据此判断松手并自动停止跳跃
         self._smart_jump_active = False
         self._smart_jump_called = False
+        # 记录这次起跳对应的按键；松开该键时引擎自动停止跳跃
+        self._smart_jump_key = None
         self._drop_through = False
         self._drop_through_timer = 0
         self._groups = []
@@ -529,7 +552,8 @@ class Sprite:
         self._auto_destroy = False
         # 位置跟随目标（get_marker 挂点引用 / 另一个 Sprite）：None = 不跟随
         self._follow_ref = None
-        # 跟随镜像继承（±1）：父翻面武器跟着翻（Godot 子节点语义）；非跟随者恒 1.0
+        # 跟随镜像继承（±1）：父翻面武器跟着翻（Godot 子节点语义）
+        # 脱离跟随（unfollow）后保留最后一次取值，使挂件保持脱离瞬间的朝向
         self._follow_flip = 1.0
         # follow(target, flip=False) 可关闭镜像继承（如鼠标瞄准武器）
         self._follow_flip_on = True
@@ -599,7 +623,7 @@ class Sprite:
             "scale_x": 1.0,
             "scale_y": 1.0,
             "type": "image",
-            "layer": 1000,  # 默认在图层之上（地图图层 z=0~N）
+            "layer": self._layer,  # 默认 0：数字越大越靠前，学生设 1/2 即可盖住别人
             "vox": self._visual_offset_x,
             "voy": self._visual_offset_y,
             "raw_cw": self._content_w,
@@ -652,17 +676,38 @@ class Sprite:
                 poly_top = min(p[1] for p in points)
                 if self._prev_bottom_y > poly_top:
                     continue
+                if axis == "y":
+                    # 必须先和平台横向重叠，否则远处的跳板会把角色"吸"上去
+                    if (
+                        sprite_rect[2] <= min(p[0] for p in points)
+                        or sprite_rect[0] >= max(p[0] for p in points)
+                    ):
+                        continue
+                    # 单向平台只需落回顶面：薄多边形用 SAT 求 MTV 会残留穿透，
+                    # 下一帧就会被误判成"从下方穿过"而整块掉下去
+                    if sprite_rect[3] > poly_top:
+                        cand = poly_top - sprite_rect[3] - 0.05
+                        if best is None or abs(cand) > abs(best):
+                            best = cand
+                    continue
 
-            mtv = _aabb_polygon_mtv(sprite_rect, points)
-            if not mtv:
+            part_best = None
+            # 凹多边形已拆成凸块：SAT 只能对凸多边形判定，否则凹陷空区会误判碰撞
+            for part in poly.get("parts") or [points]:
+                if len(part) < 3:
+                    continue
+                mtv = _aabb_polygon_mtv(sprite_rect, part)
+                if not mtv:
+                    continue
+                part_correction = mtv[0] if axis == "x" else mtv[1]
+                if abs(part_correction) < 1e-6:
+                    continue
+                if part_best is None or abs(part_correction) > abs(part_best):
+                    part_best = part_correction
+            if part_best is None:
                 continue
-            correction = mtv[0] if axis == "x" else mtv[1]
-            if is_one_way and axis == "y" and correction >= 0:
-                continue
-            if abs(correction) < 1e-6:
-                continue
-            if best is None or abs(correction) > abs(best):
-                best = correction
+            if best is None or abs(part_best) > abs(best):
+                best = part_best
 
         return best
 
@@ -700,14 +745,24 @@ class Sprite:
                 poly_top = min(p[1] for poly in world_polys for p in poly)
                 if self._prev_bottom_y > poly_top:
                     continue
+                if axis == "y":
+                    # 必须和平台横向重叠，避免远处跳板把角色吸上去
+                    poly_left = min(p[0] for poly in world_polys for p in poly)
+                    poly_right = max(p[0] for poly in world_polys for p in poly)
+                    if sprite_rect[2] <= poly_left or sprite_rect[0] >= poly_right:
+                        continue
+                    # 单向平台只落到顶面，避免 SAT 对薄碰撞形状残留穿透
+                    if sprite_rect[3] > poly_top:
+                        cand = poly_top - sprite_rect[3] - 0.05
+                        if best is None or abs(cand) > abs(best):
+                            best = cand
+                    continue
 
             for poly in world_polys:
                 mtv = _aabb_polygon_mtv(sprite_rect, poly)
                 if not mtv:
                     continue
                 correction = mtv[0] if axis == "x" else mtv[1]
-                if is_one_way and axis == "y" and correction >= 0:
-                    continue
                 if abs(correction) < 1e-6:
                     continue
                 if best is None or abs(correction) > abs(best):
@@ -745,7 +800,7 @@ class Sprite:
                         self._y += correction + margin
                         # 向上推出 = 落到平台/地面
                         if correction < 0:
-                            self.on_ground = True
+                            self._on_ground = True
                             self._vy = 0
                     return
                 continue
@@ -762,7 +817,7 @@ class Sprite:
                         self._y += correction + margin
                         # 向上推出 = 落到平台/地面
                         if correction < 0:
-                            self.on_ground = True
+                            self._on_ground = True
                             self._vy = 0
                     return
                 continue
@@ -865,7 +920,7 @@ class Sprite:
                                                         - (rect[3] - self._y)
                                                         - 0.05
                                                     )
-                                                    self.on_ground = True
+                                                    self._on_ground = True
                                                     self._vy = 0
                                                 return
                                             continue
@@ -893,7 +948,7 @@ class Sprite:
                                                 self._y = tile_bottom + (self._y - rect[1]) + 0.05
                                             else:
                                                 self._y = tile_top - (rect[3] - self._y) - 0.05
-                                                self.on_ground = True
+                                                self._on_ground = True
                                                 self._vy = 0
                                             return
 
@@ -974,7 +1029,7 @@ class Sprite:
         默认继承目标的左右镜像（父翻面武器跟着翻，Godot 子节点观感）；
         鼠标瞄准类武器可关：w.follow(m, flip=False)。
         朝向/缩放仍可独立控制（如 w.look_at(mouse) 瞄准）；
-        目标被删除时自动停止跟随。w.unfollow() 手动解除。
+        目标被删除时自动停止跟随。w.unfollow() 手动解除（保留脱离时的朝向）。
         """
         if isinstance(target, (_MarkerRef, Sprite)):
             self._follow_ref = target
@@ -984,11 +1039,10 @@ class Sprite:
             print("[警告] follow 参数无效：需要标记或角色")
 
     def unfollow(self):
-        """停止跟随（镜像继承一并解除）"""
+        """停止跟随（保留脱离瞬间的朝向，不恢复为正向）"""
         self._follow_ref = None
-        if self._follow_flip != 1.0:
-            self._follow_flip = 1.0
-            self._update_transform()
+        # 故意不重置 _follow_flip：它保存着最后一次继承来的镜像，
+        # 留着才能让挂件停在脱离时的朝向；再次 follow() 会重新初始化
 
     # ---------- 坐标（用户空间：原点在画面左下角，y 向上为正） ----------
     def set_xy(self, x, y):
@@ -1038,7 +1092,7 @@ class Sprite:
 
     def _handle_step_move(self, dx, dy):
         """处理单步移动和碰撞检测"""
-        was_on_floor = self.on_ground
+        was_on_floor = self._on_ground
         old_x = self._x
         old_y = self._y
 
@@ -1050,7 +1104,7 @@ class Sprite:
         self._resolve_collision("x")
 
         if was_on_floor:
-            self.on_ground = True
+            self._on_ground = True
 
         self._y += dy
         self._resolve_collision("y")
@@ -1062,14 +1116,22 @@ class Sprite:
             power: 跳跃力度（默认10，越大跳得越高）
         """
         self._vy = -power
-        self.on_ground = False
+        self._on_ground = False
         self._jump_cut = False
 
-    def cut_jump(self):
-        """截断跳跃（松开跳跃键时调用），使角色提前下落"""
+    def stop_jump(self):
+        """停止跳跃：角色正在上升时调用，停止继续上升并提前落下
+
+        只在上升阶段生效（上升重力从 0.5 变为 2.8），自己不会让角色起跳；
+        没有"松手"动作的场景（敌人 AI、撞天花板等）也能直接调用。
+        """
         if self._vy < 0:
             self._jump_cut = True
         self._jump_buffered = False
+
+    def cut_jump(self):
+        """旧名字，保留兼容；等价于 stop_jump()"""
+        self.stop_jump()
 
     def smart_jump(self, power=10):
         """大小跳：按下起跳，按住跳得高，松手就落下
@@ -1081,24 +1143,32 @@ class Sprite:
                     hero.smart_jump(12)
 
         引擎通过「本帧有没有被调用」判断按键状态：松开后这个函数不再被调用，
-        引擎会自动帮你截断跳跃，所以不需要自己写 cut_jump。
+        引擎会自动帮你停止跳跃，所以不需要自己写 stop_jump。
 
         Args:
             power: 最大跳跃力度（默认 10，越大跳得越高）
         """
         self._smart_jump_called = True
-        if not self._smart_jump_active and self.on_ground:
+        if not self._smart_jump_active and self._on_ground:
             # 刚按下且站在地面上：起跳
             self.jump(power)
             self._smart_jump_active = True
+            # 记住本步刚按下的键：无论学生把 smart_jump 写在 if key_down 还是
+            # if key_pressed 里，松手判断都按这个键的真实状态来，不会误截断
+            newly = _PRESSED_KEYS_FRAME - _PRESSED_KEYS_PREV
+            self._smart_jump_key = next(iter(newly), None)
 
-    def drop_through(self):
-        """从跳板下穿：角色站在跳板上时，按下键可穿过跳板下落"""
-        if self.on_ground:
+    def drop_down(self):
+        """从跳板掉下去：角色站在跳板上时调用，穿过脚下的跳板下落"""
+        if self._on_ground:
             self._drop_through = True
             self._drop_through_timer = 10
-            self.on_ground = False
+            self._on_ground = False
             self._vy = 2
+
+    def drop_through(self):
+        """旧名字，保留兼容；等价于 drop_down()"""
+        self.drop_down()
 
     def set_speed(self, speed):
         """设置持续速度，引擎每帧自动沿当前方向移动"""
@@ -1174,10 +1244,13 @@ class Sprite:
             # 如果不是 mouse 也不是 Sprite，不执行旋转
             return
 
-        # 2. 🚀 获取自身的视觉中心
-        # 必须从视觉中心发出射线，指向才不会歪
-        s_rect = self._get_hitbox_rect()
-        sx, sy = (s_rect[0] + s_rect[2]) / 2.0, (s_rect[1] + s_rect[3]) / 2.0
+        # 2. 🚀 以自身旋转轴心为射线起点
+        # 非 .bsf 角色：轴心 = 内容重心 = 世界坐标 (x, y)，与旧实现（包围盒中心）完全等价
+        # .bsf 角色：轴心 = manifest pivot，而 pivot 可能明显偏离内容重心。
+        # 此时若仍用「包围盒中心」作起点，该中心会随 angle 绕轴心旋转，形成
+        # angle → 中心 → angle 的自反馈，近目标处相邻两帧角度来回跳变
+        # （看起来像两个不同朝向的角色），故起点固定为不随旋转变化的轴心。
+        sx, sy = self._x, self._y
 
         # 3. 计算坐标差并求角度
         dx = tx - sx
@@ -1574,149 +1647,19 @@ class Sprite:
         dy = cy1 - cy2
         return math.sqrt(dx**2 + dy**2)
 
+    def is_on_ground(self):
+        """是否站在地面上（由物理落地接触决定）
+
+        只有角色真正落在有碰撞的地形上才返回 True：上升中、从下方穿过跳板、
+        从平台侧面擦过都返回 False。与 jump()/smart_jump()/drop_down() 内部判定一致。
+        """
+        if self._is_deleted:
+            return False
+        return self._on_ground
+
     def is_on_floor(self):
-        """
-        检测角色脚底下方 1-2 像素处是否存在带有碰撞的图块
-        返回: True 如果在地面上，False 否则
-        """
-        if self._is_deleted or not _CURRENT_MAP:
-            return False
-
-        # 获取角色的碰撞盒
-        rect = self._get_hitbox_rect()
-        if not rect:
-            return False
-
-        # 获取角色脚底位置（底部边缘）
-        bottom_y = rect[3]
-        # 检测脚底下方 1-2 像素处的位置
-        check_y = bottom_y + 1.5
-
-        # 获取地图的瓦片大小
-        tile_size = _CURRENT_MAP.get("tile_size", 16)
-
-        # 计算需要检查的图块范围（角色宽度范围内的所有图块）
-        # 策略：稍微加宽 Y 轴的探测范围（左右各多出 2 像素）
-        # 这样即使 X 轴修正把角色往外推了一点点，也不会导致"踩空"
-        min_tile_x = math.floor((rect[0] - 2) / tile_size)
-        max_tile_x = math.floor((rect[2] + 2) / tile_size)
-        check_tile_y = math.floor(check_y // tile_size)
-
-        # 遍历所有图层
-        for layer in _CURRENT_MAP.get("layers", []):
-            # --- 碰撞层地面检测（世界坐标多边形） ---
-            if layer.get("type") == "collision":
-                for poly in layer.get("polygons", []):
-                    if poly.get("disabled"):
-                        continue
-                    pts = poly.get("points") or []
-                    if len(pts) < 3:
-                        continue
-                    if poly.get("collisionType") == "跳板" and self._drop_through:
-                        continue
-                    if _polygon_hits_horizontal(pts, rect[0] - 2, rect[2] + 2, check_y):
-                        return True
-                continue
-
-            # --- 图像图层地面检测（按真实多边形采样） ---
-            if layer.get("type") == "image" and "images" in layer:
-                for image in layer["images"]:
-                    collision_enabled = image.get(
-                        "collisionEnabled", image.get("collision_enabled", False)
-                    )
-                    if not collision_enabled:
-                        continue
-
-                    col_type = image.get("collisionType", image.get("collision_type", "图像"))
-                    is_one_way = col_type == "跳板"
-                    if is_one_way and self._drop_through:
-                        continue
-
-                    world_polys = _image_collision_world_polygons(image)
-                    if not world_polys:
-                        continue
-
-                    if is_one_way:
-                        poly_top = min(p[1] for poly in world_polys for p in poly)
-                        if self._prev_bottom_y > poly_top:
-                            continue
-
-                    for poly in world_polys:
-                        if _polygon_hits_horizontal(poly, rect[0] - 2, rect[2] + 2, check_y):
-                            return True
-
-            tiles = layer.get("tiles", {})
-
-            # 检查角色宽度范围内的每个图块
-            for tile_x in range(min_tile_x, max_tile_x + 1):
-                tile_pos = (tile_x, check_tile_y)
-                if tile_pos in tiles:
-                    tile_id = tiles[tile_pos]
-                    if tile_id > 0:
-                        # 使用Tiled标准：通过firstgid范围查找瓦片集
-                        tile_id_int = int(tile_id)
-                        resource_index, tile_index = _find_tileset_for_gid(
-                            tile_id_int, _CURRENT_MAP["tile_sets"]
-                        )
-
-                        # 获取图块碰撞状态
-                        if _MAP_MODEL:
-                            collision_enabled = _MAP_MODEL.get_tile_collision(
-                                resource_index, tile_index
-                            )
-                            if collision_enabled:
-                                col_type = _MAP_MODEL.get_tile_collision_type(
-                                    resource_index, tile_index
-                                )
-                                is_one_way = col_type == "跳板"
-
-                                # 获取图块的碰撞形状
-                                collision_shape = _MAP_MODEL.get_tile_collision_shape(
-                                    resource_index, tile_index
-                                )
-
-                                # 计算图块的碰撞盒
-                                tile_size = _CURRENT_MAP.get("tile_size", 16)
-                                if collision_shape and "points" in collision_shape:
-                                    # 使用自定义碰撞形状
-                                    points = collision_shape["points"]
-                                    # 编辑器保存的是归一化坐标(0~1)，需乘以 tile_size 转为像素
-                                    # 转换为世界坐标
-                                    world_points = [
-                                        (
-                                            tile_x * tile_size + p[0] * tile_size,
-                                            check_tile_y * tile_size + p[1] * tile_size,
-                                        )
-                                        for p in points
-                                    ]
-                                    # 计算自定义形状的边界盒
-                                    tile_left = min(p[0] for p in world_points)
-                                    tile_top = min(p[1] for p in world_points)
-                                    tile_right = max(p[0] for p in world_points)
-                                    tile_bottom = max(p[1] for p in world_points)
-                                else:
-                                    # 使用默认矩形碰撞盒
-                                    tile_left = tile_x * tile_size
-                                    tile_top = check_tile_y * tile_size
-                                    tile_right = tile_left + tile_size
-                                    tile_bottom = tile_top + tile_size
-
-                                if is_one_way and self._prev_bottom_y > tile_top:
-                                    continue
-
-                                if is_one_way and self._drop_through:
-                                    continue
-
-                                # 检查角色脚底是否在图块的碰撞盒内
-                                if (
-                                    rect[0] - 2 <= tile_right
-                                    and rect[2] + 2 >= tile_left
-                                    and check_y >= tile_top
-                                    and check_y <= tile_bottom
-                                ):
-                                    return True
-
-        return False
+        """旧名字，保留兼容；等价于 is_on_ground()"""
+        return self.is_on_ground()
 
     # ----------- 属性赋值 ----------
     @property
@@ -2203,6 +2146,8 @@ class Sprite:
             "scale": base_scale,
             "scale_x": final_scale_x,
             "scale_y": final_scale_y,
+            # 层级必须随每帧更新一起下发，否则学生会看到 layer 被默认值覆盖
+            "layer": self._layer,
             # 添加碰撞盒信息，用于可视化调试
             "hitbox": self._get_hitbox_rect()
             if self._show_hitbox and hasattr(self, "_get_hitbox_rect")
@@ -2302,6 +2247,9 @@ def _input_sync_listener():
                 _PRESSED_KEYS.add(key)
             elif clean_line.startswith("K_UP:"):
                 key = clean_line.split(":", 1)[1]
+                # 只有确实按下过的键才算松开，避免启动前的多余松开事件触发 key_up
+                if key in _PRESSED_KEYS:
+                    _RELEASED_KEYS.add(key)
                 _PRESSED_KEYS.discard(key)
 
                 # 🚀 新增鼠标事件处理
@@ -2383,12 +2331,33 @@ def mouse_pressed():
 
 def key_down(key):
     """供用户调用：if key_down('a')"""
-    return str(key).lower() in _PRESSED_KEYS
+    return str(key).lower() in _PRESSED_KEYS_FRAME
 
 
 def key_pressed(key):
     """只有按下的那一帧返回 True"""
-    return str(key).lower() in _PRESSED_KEYS and str(key).lower() not in _PRESSED_KEYS_PREV
+    k = str(key).lower()
+    return k in _PRESSED_KEYS_FRAME and k not in _PRESSED_KEYS_PREV
+
+
+def key_up(key):
+    """只有松开的那一帧返回 True"""
+    return str(key).lower() in _RELEASED_FRAME
+
+
+def _sync_input_frame():
+    """物理步开始前同步输入状态快照
+
+    输入线程是异步改 _PRESSED_KEYS / _RELEASED_KEYS 的，这里统一快照一份给本步的
+    学生代码，保证 key_down / key_pressed / key_up 三个 API 看到的是同一时刻的状态
+    """
+    _PRESSED_KEYS_PREV.clear()
+    _PRESSED_KEYS_PREV.update(_PRESSED_KEYS_FRAME)
+    _PRESSED_KEYS_FRAME.clear()
+    _PRESSED_KEYS_FRAME.update(_PRESSED_KEYS)
+    _RELEASED_FRAME.clear()
+    _RELEASED_FRAME.update(_RELEASED_KEYS)
+    _RELEASED_KEYS.clear()
 
 
 def wait(seconds):
@@ -2684,10 +2653,8 @@ def _update_follows():
         ref = sprite._follow_ref
         pos = _resolve_target_xy(ref)
         if pos is None:
+            # 目标已被删除：等同 unfollow，保留最后一次镜像继承的朝向
             sprite._follow_ref = None
-            if sprite._follow_flip != 1.0:
-                sprite._follow_flip = 1.0
-                sprite._update_transform()
             continue
         # 镜像继承：取目标的本帧显示翻转（链式跟随时含祖辈继承）
         flip = 1.0
@@ -2836,6 +2803,8 @@ def load_map(map_name):
                     if len(pts) >= 3:
                         polygons.append({
                             "points": pts,
+                            # 凸块：凹多边形预先三角化，供 SAT 碰撞判定使用
+                            "parts": _collision_polygon_parts(pts),
                             "collisionType": poly_raw.get("collisionType", "墙体"),
                             "disabled": bool(poly_raw.get("disabled", False)),
                         })
@@ -3056,14 +3025,23 @@ def _handle_physics_collision():
             if sprite._drop_through_timer <= 0:
                 sprite._drop_through = False
 
-        # smart_jump：本帧没有被调用（按键已松开）且角色还在上升 → 自动截断跳跃
-        if sprite._smart_jump_active and not sprite._smart_jump_called:
-            if sprite._vy < 0:
-                sprite.cut_jump()
-            sprite._smart_jump_active = False
+        # smart_jump：松手后自动停止跳跃
+        # 优先按"起跳时记录的键"判断（支持 if key_down 和 if key_pressed 两种写法）；
+        # 没有记录到键时退回"本步是否被调用"的判断
+        if sprite._smart_jump_active:
+            if sprite._smart_jump_key is not None:
+                if sprite._smart_jump_key not in _PRESSED_KEYS_FRAME:
+                    if sprite._vy < 0:
+                        sprite.stop_jump()
+                    sprite._smart_jump_active = False
+                    sprite._smart_jump_key = None
+            elif not sprite._smart_jump_called:
+                if sprite._vy < 0:
+                    sprite.stop_jump()
+                sprite._smart_jump_active = False
         sprite._smart_jump_called = False
 
-        sprite.on_ground = False
+        sprite._on_ground = False
 
         hitbox = sprite._get_hitbox_rect()
         if hitbox:
@@ -3084,7 +3062,7 @@ def _handle_physics_collision():
         sprite._y += sprite._vy
         sprite._resolve_collision("y")
         sprite._resolve_collision("x")
-        if sprite.on_ground:
+        if sprite._on_ground:
             sprite._vy = 0
             sprite._jump_cut = False
 
@@ -3319,6 +3297,7 @@ def run():
         steps = 0
         while accumulator >= _PHYSICS_DT and steps < _MAX_PHYSICS_STEPS:
             if not _PAUSED:
+                _sync_input_frame()
                 for sprite in _SPRITES.values():
                     if hasattr(sprite, "_is_transitioning") and sprite._is_transitioning:
                         source_state = sprite._source_animation
@@ -3413,7 +3392,6 @@ def run():
         _flush_frame_updates()
 
         _MOUSE_STATE["last_down"] = _MOUSE_STATE["down"]
-        _PRESSED_KEYS_PREV = _PRESSED_KEYS.copy()
 
         _PERF_STATS["frame_count"] += 1
         t = time.time()
@@ -3501,6 +3479,7 @@ def start_game(project_dir=None, target_file=None):
             "input": _custom_input,
             "key_down": key_down,
             "key_pressed": key_pressed,
+            "key_up": key_up,
             "mouse": mouse,
             "mouse_down": mouse_down,
             "mouse_pressed": mouse_pressed,
@@ -3543,6 +3522,7 @@ def start_game(project_dir=None, target_file=None):
         steps = 0
         while accumulator >= _PHYSICS_DT and steps < _MAX_PHYSICS_STEPS:
             if not _PAUSED:
+                _sync_input_frame()
                 # 动画更新
                 for sprite in _SPRITES.values():
                     if hasattr(sprite, "animation_state") and sprite.animation_state:
@@ -3621,7 +3601,6 @@ def start_game(project_dir=None, target_file=None):
 
         # 状态更新
         _MOUSE_STATE["last_down"] = _MOUSE_STATE["down"]
-        _PRESSED_KEYS_PREV = _PRESSED_KEYS.copy()
 
         # FPS 统计
         _PERF_STATS["frame_count"] += 1

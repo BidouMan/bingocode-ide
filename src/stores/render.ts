@@ -139,7 +139,12 @@ export const useRenderStore = defineStore('render', () => {
   function updateSprite(id: string, data: Partial<SpriteData>) {
     const sprite = sprites.value.get(id)
     if (sprite) {
-      Object.assign(sprite, data)
+      // 只合并有值的字段：局部更新（比如只改 layer）不会把 x/y/角度等清成 undefined
+      for (const [key, value] of Object.entries(data)) {
+        if (value !== undefined) {
+          (sprite as Record<string, any>)[key] = value
+        }
+      }
     }
   }
 
