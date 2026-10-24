@@ -143,7 +143,7 @@ const globalFunctions: EngineCompletionItem[] = [
 
   // 随机工具
   { label: 'random_int', kind: CompletionItemKind.Function, insertText: 'random_int', documentation: '在 min_val 和 max_val 之间取随机整数（包含两端）\n\nrandom_int(1, 10)', detail: 'random_int(min_val, max_val) -> int' },
-  { label: 'random_float', kind: CompletionItemKind.Function, insertText: 'random_float', documentation: '在 min_val 和 max_val 之间取随机浮点数\n\nrandom_float(0, 1)', detail: 'random_float(min_val=0.0, max_val=1.0) -> float' },
+  { label: 'random_float', kind: CompletionItemKind.Function, insertText: 'random_float', documentation: '在 min_val 和 max_val 之间取随机浮点数\n\nrandom_float(0, 1)       # 默认保留 2 位小数\nrandom_float(0, 1, 4)    # 保留 4 位\nrandom_float(0, 1, None) # 完整精度', detail: 'random_float(min_val=0.0, max_val=1.0, decimals=2) -> float' },
 
   // 生成器
   { label: 'register_generator', kind: CompletionItemKind.Function, insertText: 'register_generator', documentation: '注册一个 generator 到调度器', detail: 'register_generator(gen)' },

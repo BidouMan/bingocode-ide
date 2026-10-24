@@ -438,13 +438,13 @@
         {
           "label": "random_int 随机整数",
           "code": "random_int(1, 6)",
-          "desc": "随机生成一个整数（没有小数点的数）。random_int(1, 6) 就像掷骰子，可能返回 1~6 中的任意一个。",
+          "desc": "随机生成一个整数。",
           "badgeType": "function"
         },
         {
           "label": "random_float 随机小数",
-          "code": "random_float(0, 1)",
-          "desc": "随机生成一个小数。random_float(0, 1) 会返回 0 到 1 之间的某个小数。",
+          "code": "random_float(0, 1)\nrandom_float(0, 1, 4)\nrandom_float(0, 1, None)",
+          "desc": "随机生成一个小数，默认保留 2 位小数，可以更改参数修改保留位数。",
           "badgeType": "function"
         }
       ]

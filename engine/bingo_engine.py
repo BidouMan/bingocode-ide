@@ -2469,9 +2469,14 @@ def random_int(min_val, max_val):
     return random.randint(int(min_val), int(max_val))
 
 
-def random_float(min_val=0.0, max_val=1.0):
-    """在 min_val 和 max_val 之间取随机浮点数"""
-    return random.uniform(float(min_val), float(max_val))
+def random_float(min_val=0.0, max_val=1.0, decimals=2):
+    """在 min_val 和 max_val 之间取随机浮点数
+
+    Args:
+        decimals: 保留小数位数，默认 2 位（对中小学生更友好）；传 None 返回完整精度
+    """
+    value = random.uniform(float(min_val), float(max_val))
+    return value if decimals is None else round(value, decimals)
 
 
 def shake(intensity=5, duration=0.3):

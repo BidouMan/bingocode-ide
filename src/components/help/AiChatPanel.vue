@@ -173,7 +173,7 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 - clock.is_timeout() — 计时器时间到了返回 True
 - wait(秒数) — 每隔N秒返回一次 True
 - random_int(a, b) — 随机整数（包含a和b两端）
-- random_float(a, b) — 随机浮点数
+- random_float(a, b, 位数=2) — 随机小数，默认保留 2 位小数；需要更精确可传第三个数，或传 None 表示完整精度。范围小于 0.01 时要传更大的位数，否则随机性会丢失
 
 ## 回答格式
 - 用中文回答

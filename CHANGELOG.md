@@ -70,6 +70,7 @@ BingoCode IDE 的版本更新记录，最新在前。
 
 ### 优化
 
+- **`random_float` 默认保留 2 位小数**：`random_float(0, 1)` 现在返回 `0.73` 这类干净的小数，不再是一长串位数；需要更高精度可传第三个数 `random_float(0, 1, 4)`，传 `None` 则恢复完整精度。注意范围小于 0.01 时 2 位小数会丢失随机性，文档已提示改用更大位数。自动补全、帮助面板、AI 提示与 API 文档同步更新
 - **摄像机跟随函数 `follow` 更名为 `camera_follow`**：避免和角色挂点跟随 `hero.follow(目标)` 混淆，也与地图编辑器里的「相机跟随」叫法统一；该功能尚未发版，直接改名、不保留旧名。文档、帮助面板、自动补全与 AI 提示同步更新
 - **广播接收 API 更名为 `on_receive`（原 `receive`，旧名不再保留）**：对齐 Scratch「当接收到」帽子积木与 Godot `connect` / Unity `AddListener` 的事件订阅模型；`on_receive("事件名", 函数)` 传函数名即可，注册一次长期有效，不返回 True/False。同时保留 `Sprite.receive` / `Sprite.on_receive` 纯粹作为防误用提示（只提示不注册）：学生误写 `monster.receive(...)` 或 `monster.on_receive(...)` 时会得到明确指引且不再中断游戏；帮助面板、自动补全、AI 提示与 API 文档同步更新。**注意：旧项目里的 `receive(...)` 需改成 `on_receive(...)`**
 - **碰撞回调 API 更名为 `on_touch_group`（原 `on_hit`）**：与 `is_touch_group` 配对成「`is_` = 检查碰到了吗 / `on_` = 碰到时自动处理」，一眼能分清"查询"和"注册"，也说明它是注册一次、由引擎每帧自动执行；旧名 `on_hit()` 保留为兼容别名（不出现在文档/补全中）。同批：帮助卡片从「控制」移到「侦测」分组、去掉 lambda 示例，改为「只写组名 `on_touch_group("enemies")` = 引擎自动删除双方」的最简用法并写清前提（对方必须先 `add_to_group("敌方组名")`），自定义处理改用普通 `def` 函数示例；`lambda` 仅在 FAQ 中作为语法说明保留
