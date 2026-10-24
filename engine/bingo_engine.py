@@ -35,8 +35,13 @@ _PRESSED_KEYS_PREV = set()
 # 供 key_up() 读取；这样不会因为事件到达时机跨帧而漏掉"刚松开"的那一帧
 _RELEASED_KEYS = set()
 _RELEASED_FRAME = set()
-_WAIT_TIMERS = {}
+_WAIT_TIMERS = {}  # key=(code_id, lineno) -> 上次触发时的游戏时间（每个调用位置独立）
+_GAME_TIME = 0.0  # 游戏时间（秒）：只在未暂停时随物理步累加，Timer / time_passed 统一使用
 _EVENT_LISTENERS = {}
+# 广播事件的两帧缓冲：broadcast() 写入 _EVENT_PENDING，下一步开始提升到 _EVENT_ACTIVE，
+# 供 receive() 查询；持续一帧后自动清空，保证同一帧内代码顺序不影响结果
+_EVENT_PENDING = set()
+_EVENT_ACTIVE = set()
 _SHOW_FPS = False
 _PAUSED = False
 _STOPPED = False
@@ -464,8 +469,10 @@ __all__ = [
     "key_down",
     "key_pressed",
     "key_up",
-    "wait",
+    "time_passed",
+    "wait",  # 兼容旧项目，文档与补全中不再展示
     "broadcast",
+    "receive",
     "on_receive",
     "pause",
     "resume",
@@ -482,7 +489,7 @@ __all__ = [
     "show_collision",
     "random_int",
     "random_float",
-    "draw_text",
+    "show_text",
     "stop_sound",
     "shake",
     "start_game",
@@ -494,27 +501,29 @@ __all__ = [
 
 
 class Timer:
-    def __init__(self, seconds, loop=True, autostart=False):
-        self._interval = seconds
+    def __init__(self, seconds, loop=True):
+        self._interval = float(seconds)
         self._loop = loop
         self._running = False
-        self._last_time = 0
-        if autostart:
-            self.start()
+        self._last_time = 0.0
+        # 创建即自动开始（与文档、教程写法一致）；需要手动控制就先 stop() 再 start()
+        self.start()
 
     def start(self):
+        """开始/重新开始计时（会重置计时起点）"""
         self._running = True
-        self._last_time = time.time()
+        self._last_time = _GAME_TIME
 
     def stop(self):
+        """停止计时（再次 start() 后重新计时）"""
         self._running = False
 
     def is_timeout(self):
+        """时间到了返回 True；循环计时器会自动重新计时"""
         if not self._running:
             return False
-        now = time.time()
-        if now - self._last_time >= self._interval:
-            self._last_time = now
+        if _GAME_TIME - self._last_time >= self._interval:
+            self._last_time = _GAME_TIME
             if not self._loop:
                 self._running = False
             return True
@@ -1198,15 +1207,15 @@ class Sprite:
         broadcast(event_name)
 
     def receive(self, event_name):
-        """防误用提示：on_receive 是全局函数，不是 Sprite 的方法"""
-        if not getattr(self, "_receive_hint_shown", False):
-            print("[提示] on_receive 是全局函数，不是角色的方法。正确写法：on_receive(\"事件名\", 函数)，写在循环外面；它不会返回 True/False，不能写在 if 里")
-            self._receive_hint_shown = True
-        return None
+        """这一帧有没有收到指定广播（广播是全局的，写在哪个角色上结果一样）"""
+        return receive(event_name)
 
     def on_receive(self, event_name, callback=None):
-        """防误用提示：on_receive 是全局函数，不要写成角色方法"""
-        return self.receive(event_name)
+        """防误用提示：on_receive 是注册用的全局函数，不是角色的方法"""
+        if not getattr(self, "_receive_hint_shown", False):
+            print("[提示] on_receive 是全局函数，不是角色的方法。注册写法：on_receive(\"事件名\", 函数)，写在循环外面；只想检查有没有收到广播，用 if 角色.receive(\"事件名\")")
+            self._receive_hint_shown = True
+        return None
 
     def move(self, distance):
         """朝着当前 angle 方向移动 distance 像素"""
@@ -1382,7 +1391,7 @@ class Sprite:
         if seconds > 0:
             def _hide():
                 self._send_command("SAY", {"text": ""})
-            timer = Timer(seconds, loop=False, autostart=True)
+            timer = Timer(seconds, loop=False)
             _SAY_TIMERS[self.id] = (timer, _hide)
 
     def play(self, animation_name, transition_time=0.1):
@@ -2406,17 +2415,40 @@ def _sync_input_frame():
     _MOUSE_STATE["released"] = False
 
 
-def wait(seconds):
-    """每 N 秒返回一次 True"""
-    now = time.time()
-    if seconds not in _WAIT_TIMERS or now - _WAIT_TIMERS[seconds] >= seconds:
-        _WAIT_TIMERS[seconds] = now
+def _time_passed_impl(seconds, frame):
+    key = (id(frame.f_code), frame.f_lineno)
+    now = _GAME_TIME
+    last = _WAIT_TIMERS.get(key)
+    if last is None:
+        _WAIT_TIMERS[key] = now
+        return False
+    if now - last >= seconds:
+        _WAIT_TIMERS[key] = now
         return True
     return False
 
 
+def time_passed(seconds):
+    """每个调用位置独立计时：经过 N 秒后第一次返回 True，之后每隔 N 秒返回一次"""
+    return _time_passed_impl(seconds, sys._getframe(1))
+
+
+def wait(seconds):
+    """旧名字，保留兼容；等价于 time_passed(seconds)"""
+    return _time_passed_impl(seconds, sys._getframe(1))
+
+
+def _promote_event_frame():
+    """物理步开始：把上一步发出的广播提升为本步可见"""
+    _EVENT_ACTIVE.clear()
+    _EVENT_ACTIVE.update(_EVENT_PENDING)
+    _EVENT_PENDING.clear()
+
+
 def broadcast(event_name):
     """发送全局广播（单个回调出错不会中断游戏主循环）"""
+    # 登记给 receive() 轮询：下一物理步可见，持续一帧
+    _EVENT_PENDING.add(event_name)
     for callback in list(_EVENT_LISTENERS.get(event_name, [])):
         try:
             callback()
@@ -2424,6 +2456,11 @@ def broadcast(event_name):
             raise
         except Exception as e:
             print(f"[错误] 广播「{event_name}」的处理函数出错: {e}")
+
+
+def receive(event_name):
+    """这一帧有没有收到指定广播（广播发出后的下一帧返回一次 True）"""
+    return event_name in _EVENT_ACTIVE
 
 
 def on_receive(event_name, callback):
@@ -2488,28 +2525,14 @@ def shake(intensity=5, duration=0.3):
     print(json.dumps(packet))
 
 
-def stop_sound(sound_name=None):
-    """停止音效。不传参数则停止所有音效。"""
-    packet = {
-        "type": "STOP_SOUND",
-        "data": {"sound": sound_name} if sound_name else {},
-    }
-    print(json.dumps(packet))
+def _resolve_sound_path(sound_name):
+    """在项目 assets/sounds 下查找音效，返回绝对路径；找不到返回 None"""
+    if not sound_name:
+        return None
+    # 允许直接传绝对路径或带路径的文件名
+    if os.path.exists(sound_name):
+        return os.path.abspath(sound_name)
 
-
-def draw_text(x, y, *args):
-    """在屏幕指定位置绘制文字，参数自动拼接为字符串
-    draw_text(100, 50, "分数:", score)
-    """
-    text = "".join(str(a) for a in args)
-    packet = {
-        "type": "DRAW_TEXT",
-        "data": {"id": f"text_{x}_{y}", "text": text, "x": x, "y": y},
-    }
-    print(json.dumps(packet))
-
-
-def play_sound(sound_name, loop=False):
     sounds_dir = os.path.join("assets", "sounds")
     sound_path = None
     if os.path.exists(os.path.join(sounds_dir, sound_name)):
@@ -2529,11 +2552,46 @@ def play_sound(sound_name, loop=False):
                     break
             if sound_path:
                 break
+    return os.path.abspath(sound_path) if sound_path else None
+
+
+_SOUND_WARNED = set()
+
+
+def stop_sound(sound_name=None):
+    """停止音效。不传参数则停止所有音效。"""
+    sound = _resolve_sound_path(sound_name) or sound_name
+    packet = {
+        "type": "STOP_SOUND",
+        "data": {"sound": sound} if sound else {},
+    }
+    print(json.dumps(packet))
+
+
+def show_text(x, y, *args):
+    """在屏幕指定位置显示文字，参数自动拼接为字符串
+    show_text(100, 50, "分数:", score)
+    """
+    text = "".join(str(a) for a in args)
+    packet = {
+        "type": "DRAW_TEXT",
+        "data": {"id": f"text_{x}_{y}", "text": text, "x": x, "y": y},
+    }
+    print(json.dumps(packet))
+
+
+def play_sound(sound_name, loop=False):
+    sound_path = _resolve_sound_path(sound_name)
     if not sound_path:
+        # 只提示一次，避免循环里每帧刷屏
+        if sound_name not in _SOUND_WARNED:
+            _SOUND_WARNED.add(sound_name)
+            print(f"[提示] 找不到音效 '{sound_name}'，请先在资源管理器中导入音效")
         return
     packet = {
         "type": "PLAY_SOUND",
         "data": {
+            # 前端 convertFileSrc 需要绝对路径
             "sound": sound_path,
             "loop": loop,
         },
@@ -3327,10 +3385,14 @@ def _render_map():
 
 
 def run():
-    global _PERF_STATS, _MOUSE_STATE, _SPRITES, _PENDING_RESPONSES
+    global _PERF_STATS, _MOUSE_STATE, _SPRITES, _PENDING_RESPONSES, _GAME_TIME, _WAIT_TIMERS
     _MOUSE_STATE["down"] = False
     _MOUSE_STATE["released"] = False
     _MOUSE_STATE["released_frame"] = False
+    _GAME_TIME = 0.0
+    _WAIT_TIMERS.clear()
+    _EVENT_PENDING.clear()
+    _EVENT_ACTIVE.clear()
     main_module = sys.modules["__main__"]
     if not hasattr(main_module, "loop"):
         return
@@ -3356,7 +3418,9 @@ def run():
         while accumulator >= _PHYSICS_DT and steps < _MAX_PHYSICS_STEPS:
             # 暂停时也要同步输入快照：用户代码需要靠按键检测来调用 resume()
             _sync_input_frame()
+            _promote_event_frame()
             if not _PAUSED:
+                _GAME_TIME += _PHYSICS_DT
                 for sprite in _SPRITES.values():
                     if hasattr(sprite, "_is_transitioning") and sprite._is_transitioning:
                         source_state = sprite._source_animation
@@ -3513,12 +3577,16 @@ def start_game(project_dir=None, target_file=None):
         project_dir: 项目目录路径，用于自动发现 .py 文件
         target_file: 指定要运行的文件路径
     """
-    global _STOPPED, _PERF_STATS, _MOUSE_STATE, _PENDING_RESPONSES
+    global _STOPPED, _PERF_STATS, _MOUSE_STATE, _PENDING_RESPONSES, _GAME_TIME, _WAIT_TIMERS
 
     _STOPPED = False
     _MOUSE_STATE["down"] = False
     _MOUSE_STATE["released"] = False
     _MOUSE_STATE["released_frame"] = False
+    _GAME_TIME = 0.0
+    _WAIT_TIMERS.clear()
+    _EVENT_PENDING.clear()
+    _EVENT_ACTIVE.clear()
 
     # 如果提供了项目目录，使用脚本发现模块
     if project_dir:
@@ -3545,11 +3613,12 @@ def start_game(project_dir=None, target_file=None):
             "mouse_down": mouse_down,
             "mouse_pressed": mouse_pressed,
             "mouse_up": mouse_up,
-            "wait": wait,
+            "time_passed": time_passed,
+            "wait": wait,  # 兼容旧项目
             "load_map": load_map,
             "play_sound": play_sound,
             "stop_sound": stop_sound,
-            "draw_text": draw_text,
+            "show_text": show_text,
             "shake": shake,
             "camera_follow": camera_follow,
             "show_fps": show_fps,
@@ -3557,6 +3626,7 @@ def start_game(project_dir=None, target_file=None):
             "random_int": random_int,
             "random_float": random_float,
             "broadcast": broadcast,
+            "receive": receive,
             "on_receive": on_receive,
             "pause": pause,
             "resume": resume,
@@ -3590,8 +3660,10 @@ def start_game(project_dir=None, target_file=None):
         while accumulator >= _PHYSICS_DT and steps < _MAX_PHYSICS_STEPS:
             # 暂停时也要同步输入快照：学生代码需要靠按键检测来调用 resume()
             _sync_input_frame()
+            _promote_event_frame()
 
             if not _PAUSED:
+                _GAME_TIME += _PHYSICS_DT
                 # 动画更新
                 for sprite in _SPRITES.values():
                     if hasattr(sprite, "animation_state") and sprite.animation_state:

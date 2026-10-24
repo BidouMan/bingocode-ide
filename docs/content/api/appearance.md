@@ -21,10 +21,13 @@ hero.hide()
 把角色藏起来。藏起来不代表删除了，还可以再 `show` 出来。
 
 ```python
-# 隐藏后再显示
+# 隐藏 2 秒后再显示
 hero.hide()
-wait(2)  # 等 2 秒
-hero.show()
+show_timer = Timer(2, False)
+
+while True:
+    if show_timer.is_timeout():
+        hero.show()
 ```
 
 ## 说话气泡
@@ -42,10 +45,13 @@ hero.say("得分+1", 2)    # 2 秒后消失
 | `seconds` | 数字 | 0 | 显示时间，0 = 永久 |
 
 ```python
-# 角色对话
-hero.say("欢迎来到我的游戏！")
-wait(3)
-hero.say("准备好冒险了吗？")
+# 角色对话：第一句显示 3 秒后再显示第二句
+hero.say("欢迎来到我的游戏！", 3)
+next_line = Timer(3, False)
+
+while True:
+    if next_line.is_timeout():
+        hero.say("准备好冒险了吗？", 3)
 ```
 
 ## 大小控制

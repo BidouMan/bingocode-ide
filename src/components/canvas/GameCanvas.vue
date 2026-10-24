@@ -714,7 +714,7 @@ function invalidateUsesEngineCache() {
 
 function usesEngine(): boolean {
   if (usesEngineCache.valid) return usesEngineCache.value
-  const gameKeywords = ['run()', 'Sprite(', 'load_map(', 'key_down(', 'key_pressed(', 'key_up(', 'Timer(', 'mouse', 'wait(']
+  const gameKeywords = ['run()', 'Sprite(', 'load_map(', 'key_down(', 'key_pressed(', 'key_up(', 'Timer(', 'mouse', 'time_passed(']
   // 游戏模式下检查所有 tabs，不只是当前 tab
   // 用户可能切换了 tab，但游戏引擎仍在运行
   const tabs = editorStore.isGameMode ? editorStore.currentTabs : [editorStore.currentTab]

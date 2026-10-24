@@ -245,30 +245,40 @@ broadcast("游戏开始")
 
 ### 接收广播
 
+最简单的写法是每帧检查一次：
+
 ```python
-# 注册广播接收器（要在发送之前注册，写在循环外面）
+while True:
+    if enemy.receive("游戏开始"):
+        enemy.show()
+        print("收到游戏开始信号！")
+```
+
+广播发出后的下一帧返回一次 True，所以要写在 `while True` 里。
+
+如果要做的事比较多，也可以写成一个函数，注册一次就行：
+
+```python
 def 收到游戏开始():
+    enemy.show()
     print("收到游戏开始信号！")
 
 on_receive("游戏开始", 收到游戏开始)
 ```
-
-回调函数不需要参数；放进 `while True` 里会重复注册，一次广播执行多次。
 
 ### 实际应用
 
 ```python
 hero = Sprite("玩家")
 enemy = Sprite("敌人")
+enemy.hide()
 
-# 游戏开始时让敌人出现
-def 怪物出现():
-    enemy.show()
+while True:
+    if key_pressed("1"):
+        broadcast("游戏开始")
 
-on_receive("游戏开始", 怪物出现)
-
-# 发送广播
-broadcast("游戏开始")
+    if enemy.receive("游戏开始"):
+        enemy.show()
 ```
 
 ## 下一步

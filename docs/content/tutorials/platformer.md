@@ -93,7 +93,7 @@ while True:
         hit.delete()
         score += 10
         play_sound("coin")
-        draw_text(10, 10, "得分：", score)
+        show_text(10, 10, "得分：", score)
 ```
 
 ## 步骤 4：碰撞检测
@@ -166,7 +166,7 @@ while True:
         shake(8, 0.3)
     
     # 显示分数
-    draw_text(10, 10, "得分：", score)
+    show_text(10, 10, "得分：", score)
 ```
 
 ## 进阶功能

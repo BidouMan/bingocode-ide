@@ -153,7 +153,8 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 - hero.on_touch_group("组名") — 注册碰撞：对方要先 add_to_group("组名")。对同一个角色注册一次即可（不要每帧调用）；每次新建的子弹需在创建后各注册一次。注册后碰到组内成员时，引擎自动把「自己」和「对方」一起删除，无需再写 is_touch_group 判断和 delete()。要自定义（加分/播声音/扣血）就传函数：on_touch_group("组名", 函数)，函数参数为 (自己, 碰到的角色)
 - hero.add_to_group("组名") — 把角色加入组（如 "enemies"、"bullets"）
 - broadcast("事件名") — 发送广播消息
-- on_receive("事件名", 函数) — 全局函数（不是角色方法，不能写 monster.on_receive()）：注册广播接收器，收到广播时执行该函数。函数不需要参数；必须在广播之前注册，且写在循环外（放进循环会重复注册导致执行多次）。它不返回 True/False，不能放在 if 里判断
+- if hero.receive("事件名") — 检查这一帧有没有收到广播（入门写法，不需要写函数）。广播发出后的下一帧返回一次 True，必须写在 while True 里
+- on_receive("事件名", 函数) — 进阶写法：全局函数（不是角色方法，不能写 monster.on_receive()），注册广播接收器，收到广播时执行该函数。函数不需要参数；必须在广播之前注册，且写在循环外（放进循环会重复注册导致执行多次）。它不返回 True/False，不能放在 if 里判断。简单场景优先用 if hero.receive("事件名")
 
 ### 声音
 - play_sound("文件名") / play_sound("文件名", True) — 播放音效。不写循环参数=播放一次，True=循环播放
@@ -165,13 +166,12 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 - camera_follow(hero) — 摄像机跟随指定角色移动，画面会跟着角色走
 
 ### 工具
-- draw_text(x, y, 内容...) — 在(x,y)位置画文字，多个参数自动拼接为字符串
+- show_text(x, y, 内容...) — 在(x,y)位置显示文字，多个参数自动拼接为字符串
 - shake(强度=5, 秒数=0.3) — 画面震动
 - show_fps(True) / show_fps(False) — 显示/隐藏帧率
 - show_collision(hero) — 画出角色的碰撞范围（调试用）
-- Timer(秒数) / Timer(秒数, False) — 创建计时器。默认循环计时，False=只计一次
-- clock.is_timeout() — 计时器时间到了返回 True
-- wait(秒数) — 每隔N秒返回一次 True
+- Timer(秒数, 循环=True) — 创建并自动开始的计时器；is_timeout() 到点返回 True（循环计时器自动重新计时）；第二个参数 False=只触发一次；timer.stop()/start() 暂停/重新计时
+- time_passed(秒数) — 每隔几秒做一件事，简单定时就用它；需要暂停、重新计时、只做一次，用 Timer
 - random_int(a, b) — 随机整数（包含a和b两端）
 - random_float(a, b, 位数=2) — 随机小数，默认保留 2 位小数；需要更精确可传第三个数，或传 None 表示完整精度。范围小于 0.01 时要传更大的位数，否则随机性会丢失
 

@@ -75,6 +75,7 @@ const spriteMethods: EngineCompletionItem[] = [
   { label: 'add_to_group', kind: CompletionItemKind.Method, insertText: 'add_to_group', documentation: '将角色归类，比如 "enemies", "bullets"\n\nadd_to_group(group_name)', detail: 'add_to_group(group_name)' },
   { label: 'on_touch_group', kind: CompletionItemKind.Method, insertText: 'on_touch_group', documentation: '注册碰撞处理（对方需先 add_to_group）\n\non_touch_group("enemies") 碰到组内成员时，引擎自动删除自己和对方\non_touch_group("enemies", 函数) 自定义处理，函数参数为 (自己, 碰到的角色)', detail: 'on_touch_group(group, callback=None)' },
   { label: 'broadcast', kind: CompletionItemKind.Method, insertText: 'broadcast', documentation: '发送广播（触发所有接收该事件的回调）\n\nbroadcast("事件名")', detail: 'broadcast(event_name)' },
+  { label: 'receive', kind: CompletionItemKind.Method, insertText: 'receive', documentation: '这一帧有没有收到指定广播\n\nif enemy.receive("开始"):\n    enemy.show()\n广播发出后的下一帧返回一次 True；要写在 while True 里', detail: 'receive(event_name) -> bool' },
 
   // 生命周期
   { label: 'delete', kind: CompletionItemKind.Method, insertText: 'delete', documentation: '彻底删除（视觉移除 + 物理移除 + 内存清理）', detail: 'delete()' },
@@ -93,14 +94,14 @@ const spriteProperties: EngineCompletionItem[] = [
 
 /** Timer 类 */
 const timerCompletions: EngineCompletionItem[] = [
-  { label: 'Timer', kind: CompletionItemKind.Class, insertText: 'Timer', documentation: '创建一个定时器\n\nTimer(seconds, loop=True, autostart=False)\n- seconds: 间隔秒数\n- loop: 是否循环\n- autostart: 是否立即开始', detail: 'class Timer(seconds, loop, autostart)' },
+  { label: 'Timer', kind: CompletionItemKind.Class, insertText: 'Timer', documentation: '创建一个自动开始的计时器\n\nTimer(seconds, loop=True)\n- seconds: 间隔秒数\n- loop: True=循环，False=只触发一次\n\n需要手动控制时先 stop()，之后 start() 重新计时', detail: 'class Timer(seconds, loop=True)' },
 ]
 
 /** Timer 方法（通过 . 触发时显示） */
 const timerMethods: EngineCompletionItem[] = [
-  { label: 'start', kind: CompletionItemKind.Method, insertText: 'start', documentation: '启动定时器', detail: 'start()' },
-  { label: 'stop', kind: CompletionItemKind.Method, insertText: 'stop', documentation: '停止定时器', detail: 'stop()' },
-  { label: 'is_timeout', kind: CompletionItemKind.Method, insertText: 'is_timeout', documentation: '检查定时器是否到期\n到期后自动重置，loop=False 时停止', detail: 'is_timeout() -> bool' },
+  { label: 'start', kind: CompletionItemKind.Method, insertText: 'start', documentation: '开始/重新开始计时（重置计时起点）', detail: 'start()' },
+  { label: 'stop', kind: CompletionItemKind.Method, insertText: 'stop', documentation: '停止计时（再次 start() 后重新计时）', detail: 'stop()' },
+  { label: 'is_timeout', kind: CompletionItemKind.Method, insertText: 'is_timeout', documentation: '时间到了返回 True；循环计时器会自动重新计时，loop=False 触发一次后停止\n计时使用游戏时间，暂停游戏时会冻结', detail: 'is_timeout() -> bool' },
 ]
 
 /** 全局函数 */
@@ -114,9 +115,10 @@ const globalFunctions: EngineCompletionItem[] = [
   { label: 'mouse_up', kind: CompletionItemKind.Function, insertText: 'mouse_up', documentation: '单次检测：只有在松开鼠标左键的那一帧返回 True', detail: 'mouse_up() -> bool' },
 
   // 事件
-  { label: 'wait', kind: CompletionItemKind.Function, insertText: 'wait', documentation: '每 N 秒返回一次 True\n\n用法：if wait(1): do_something()', detail: 'wait(seconds) -> bool' },
+  { label: 'time_passed', kind: CompletionItemKind.Function, insertText: 'time_passed', documentation: '每隔几秒做一件事，就用它。\n比如 time_passed(1) 就是每 1 秒做一次。\n需要暂停、重新计时、只做一次，用 Timer。\n\n用法：if time_passed(1): do_something()', detail: 'time_passed(seconds) -> bool' },
   { label: 'broadcast', kind: CompletionItemKind.Function, insertText: 'broadcast', documentation: '发送全局广播（触发所有接收该事件的回调）\n\nbroadcast("事件名")', detail: 'broadcast(event_name)' },
-  { label: 'on_receive', kind: CompletionItemKind.Function, insertText: 'on_receive', documentation: '注册全局广播接收（全局函数，不是 sprite 方法）\n\non_receive("事件名", 函数)\n函数不需要参数；必须在 broadcast 之前注册，且写在循环外；不会返回 True/False，不能写在 if 里', detail: 'on_receive(event_name, callback)' },
+  { label: 'receive', kind: CompletionItemKind.Function, insertText: 'receive', documentation: '这一帧有没有收到指定广播（不需要写函数，入门写法）\n\nif receive("开始"):\n    ...\n广播发出后的下一帧返回一次 True；要写在 while True 里', detail: 'receive(event_name) -> bool' },
+  { label: 'on_receive', kind: CompletionItemKind.Function, insertText: 'on_receive', documentation: '当收到广播时执行自己写的函数（进阶写法）\n\non_receive("事件名", 函数)\n函数不需要参数；注册一次，写在循环外。\n入门场景可以直接用 if 角色.receive("事件名")', detail: 'on_receive(event_name, callback)' },
 
   // 游戏控制
   { label: 'pause', kind: CompletionItemKind.Function, insertText: 'pause', documentation: '暂停游戏（loop 仍运行，但精灵停止移动）', detail: 'pause()' },
@@ -130,7 +132,7 @@ const globalFunctions: EngineCompletionItem[] = [
   // 渲染
   { label: 'show_fps', kind: CompletionItemKind.Function, insertText: 'show_fps', documentation: '显示/隐藏帧率计数器\n\nshow_fps() → 显示\nshow_fps(False) → 隐藏', detail: 'show_fps(visible=True)' },
   { label: 'show_collision', kind: CompletionItemKind.Function, insertText: 'show_collision', documentation: '显示精灵的碰撞箱可视化', detail: 'show_collision(sprite)' },
-  { label: 'draw_text', kind: CompletionItemKind.Function, insertText: 'draw_text', documentation: '在屏幕指定位置绘制文字\n\ndraw_text(100, 50, "分数:", score)', detail: 'draw_text(x, y, *args)' },
+  { label: 'show_text', kind: CompletionItemKind.Function, insertText: 'show_text', documentation: '在屏幕指定位置显示文字（多个参数自动拼接）\n\nshow_text(100, 50, "分数:", score)', detail: 'show_text(x, y, *args)' },
   { label: 'shake', kind: CompletionItemKind.Function, insertText: 'shake', documentation: '屏幕震动效果\n\nshake(intensity=5, duration=0.3)', detail: 'shake(intensity=5, duration=0.3)' },
 
   // 音频

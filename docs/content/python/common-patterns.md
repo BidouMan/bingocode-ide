@@ -17,7 +17,7 @@ while True:
         score += 10
     
     # 显示分数
-    draw_text(10, 10, "得分：", score)
+    show_text(10, 10, "得分：", score)
 ```
 
 ## 状态机模式

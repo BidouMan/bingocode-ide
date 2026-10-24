@@ -476,7 +476,7 @@ export function useEngine() {
       // 根据模式决定如何运行
       if (editorStore.isGameMode) {
         // ═══ 游戏模式：保存所有 tab 到 code/ 目录，引擎自动发现并运行 ═══
-        const gameKeywords = ['run()', 'Sprite(', 'load_map(', 'key_down(', 'key_pressed(', 'key_up(', 'Timer(', 'mouse', 'wait(']
+        const gameKeywords = ['run()', 'Sprite(', 'load_map(', 'key_down(', 'key_pressed(', 'key_up(', 'Timer(', 'mouse', 'time_passed(']
         const codeDir = projectDir ? `${projectDir}/code` : ''
 
         // 确保 code/ 目录存在

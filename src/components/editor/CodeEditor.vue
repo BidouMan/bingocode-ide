@@ -319,12 +319,23 @@ async function initMonaco() {
       }
 
       // 点号后触发：根据模式过滤对应类的方法/属性
-      const dotMatch = textUntilPosition.match(/(\w+)\.\s*$/)
+      // 支持 "clock." 和继续输入中的 "clock.is" 两种情况
+      const dotMatch = textUntilPosition.match(/([A-Za-z_\u4e00-\u9fa5][\w\u4e00-\u9fa5]*)\.(\w*)$/)
       if (dotMatch) {
         const varName = dotMatch[1].toLowerCase()
         if (editorStore.isGameMode) {
-          // 游戏模式：优先匹配已知变量名，否则默认显示 Sprite 方法
-          const methods = dotCompletions[varName] || spriteDotDefault
+          // 游戏模式：优先匹配已知对象名；否则按代码里的 `变量 = Timer(...)` 推断
+          let methods = dotCompletions[varName]
+          if (!methods) {
+            const timerVars = new Set<string>()
+            const timerAssignRe = /^\s*([A-Za-z_\u4e00-\u9fa5][\w\u4e00-\u9fa5]*)\s*=\s*Timer\s*\(/gm
+            let match: RegExpExecArray | null
+            const fullText = model.getValue()
+            while ((match = timerAssignRe.exec(fullText)) !== null) {
+              timerVars.add(match[1].toLowerCase())
+            }
+            methods = timerVars.has(varName) ? dotCompletions.timer : spriteDotDefault
+          }
           return { suggestions: methods.map(item => ({ ...item, range })), incomplete: true }
         } else {
           // 代码模式：匹配 Python 类型方法

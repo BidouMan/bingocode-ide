@@ -259,6 +259,12 @@
           "badgeType": "object"
         },
         {
+          "label": "add_to_group 加入组",
+          "code": "zombie.add_to_group(\"enemies\")\nmonster.add_to_group(\"enemies\")",
+          "desc": "把角色归到某个组里，方便批量管理。\n比如把所有敌人都放到 \"enemies\" 组。",
+          "badgeType": "object"
+        },
+        {
           "label": "is_touch_group 碰到组了吗",
           "code": "bullet.is_touch_group(\"enemies\")",
           "desc": "将多个角色设为\"组\"，检查子弹是否碰撞其中任何一个角色。",
@@ -330,6 +336,30 @@
       ]
     },
     {
+      "name": "事件",
+      "color": "#FFBF00",
+      "funcs": [
+        {
+          "label": "broadcast 广播消息",
+          "code": "broadcast(\"开始游戏\")\nhero.broadcast(\"开始游戏\")",
+          "desc": "发一条广播消息，所有检查这条消息的地方都能收到。",
+          "badgeType": "function"
+        },
+        {
+          "label": "receive 角色收到消息",
+          "code": "if enemy.receive(\"开始\"):\n    enemy.show()",
+          "desc": "当角色收到消息后，做某件事情。",
+          "badgeType": "function"
+        },
+        {
+          "label": "on_receive 收到消息时做什么",
+          "code": "def 做某件事():\n    hero.show()\n\non_receive(\"消息\", 做某件事)",
+          "desc": "收到广播时执行自己写的函数（进阶写法）。\n将需要做的事情写成自定义函数。\n简单场景直接用 if enemy.receive(\"消息\") 就好。",
+          "badgeType": "function"
+        }
+      ]
+    },
+    {
       "name": "控制",
       "color": "#FFAB19",
       "funcs": [
@@ -342,7 +372,7 @@
         {
           "label": "for 计数循环",
           "code": "for i in range(10):\n        hero.move(3)",
-          "desc": "计数循环，重置执行指定次数。",
+          "desc": "计数循环，重复执行指定次数。",
           "badgeType": "function"
         },
         {
@@ -374,23 +404,41 @@
           "code": "stop()",
           "desc": "结束游戏。游戏画面停住，程序退出 run 循环。\n可以用在\"游戏结束\"或者\"通关\"的时候。",
           "badgeType": "function"
+        }
+      ]
+    },
+    {
+      "name": "时间",
+      "color": "#0FBD8C",
+      "funcs": [
+        {
+          "label": "Timer 创建计时器",
+          "code": "clock = Timer(2)         # 每 2 秒，循环触发\nclock = Timer(2, False)  # 只触发一次",
+          "desc": "创建后自动开始计时。\n不写第二个参数 = 一直重复；\n写 False = 只做一次。",
+          "badgeType": "module"
         },
         {
-          "label": "add_to_group 加入组",
-          "code": "zombie.add_to_group(\"enemies\")\nmonster.add_to_group(\"enemies\")",
-          "desc": "把角色归到某个组里，方便批量管理。比如把所有敌人都放到 \"enemies\" 组。",
+          "label": "is_timeout 到点了吗",
+          "code": "if clock.is_timeout():\n    print(\"时间到\")",
+          "desc": "判断计时器时间是否到点，然后做某件事。\n写在 while True 里用 if 判断。",
           "badgeType": "object"
         },
         {
-          "label": "broadcast 广播消息",
-          "code": "broadcast(\"开始游戏\")",
-          "desc": "发一条广播消息，所有\"收到\"这条消息的角色都会执行对应的行动。",
-          "badgeType": "function"
+          "label": "Timer.start 重新计时",
+          "code": "clock.start()",
+          "desc": "开始或重新开始计时，计时起点会重置。",
+          "badgeType": "object"
         },
         {
-          "label": "on_receive 收到消息",
-          "code": "def 做某件事():\n    hero.show()\n\non_receive(\"消息\", 做某件事)",
-          "desc": "收到这条广播时，就执行自定义函数。\n回调函数不需要参数，必须写在发广播之前，写在循环外面。",
+          "label": "Timer.stop 暂停计时",
+          "code": "clock.stop()",
+          "desc": "暂停计时，不再触发。\n再次 clock.start() 会重新计时。",
+          "badgeType": "object"
+        },
+        {
+          "label": "time_passed 每隔几秒做一次",
+          "code": "if time_passed(1):\n    print(\"过了一秒\")",
+          "desc": "每隔几秒做一件事，就用它。\n比如 time_passed(1) 就是每 1 秒做一次。\n需要暂停、重新计时、只做一次，用 Timer。",
           "badgeType": "function"
         }
       ]
@@ -454,45 +502,27 @@
       "color": "#FF8C1A",
       "funcs": [
         {
-          "label": "draw_text 在画面上写字",
-          "code": "draw_text(100, 50, \"得分：\", score)",
-          "desc": "在画面指定位置显示文字。所有参数会自动拼在一起。比如 draw_text(100, 50, \"得分：\", score) 就会在 (100, 50) 的位置显示\"得分：XX\"。",
+          "label": "show_text 显示文字",
+          "code": "show_text(100, 50, \"得分：\", score)",
+          "desc": "在画面指定位置显示文字。所有参数会自动拼在一起。比如 show_text(100, 50, \"得分：\", score) 就会在 (100, 50) 的位置显示\"得分：XX\"。",
+          "badgeType": "function"
+        },
+        {
+          "label": "show_fps 显示帧率",
+          "code": "show_fps(True)\nshow_fps(False)",
+          "desc": "在画面上显示游戏帧数FPS。\nTrue-显示\nFalse-隐藏",
+          "badgeType": "function"
+        },
+        {
+          "label": "show_collision 显示碰撞范围",
+          "code": "show_collision(hero)",
+          "desc": "显示角色碰撞框，方便检查碰撞检测是否正确。",
           "badgeType": "function"
         },
         {
           "label": "shake 画面震动",
           "code": "shake(8, 0.5)",
           "desc": "让画面抖一抖！第一个数字是强度（越大越厉害），第二个是秒数（抖多久）。可以用在角色被撞到的时候。",
-          "badgeType": "function"
-        },
-        {
-          "label": "show_fps 显示帧率",
-          "code": "show_fps(True)",
-          "desc": "在画面上显示游戏运行速度（每秒画面刷新多少次）。True 显示，False 隐藏。用来检查游戏跑得流不流畅。",
-          "badgeType": "function"
-        },
-        {
-          "label": "show_collision 显示碰撞范围",
-          "code": "show_collision(hero)",
-          "desc": "把角色的碰撞范围画出来（一个彩色框框），方便检查碰撞检测有没有弄对。",
-          "badgeType": "function"
-        },
-        {
-          "label": "Timer 创建计时器",
-          "code": "clock = Timer(2)\nif clock.is_timeout():\n    print(\"时间到！\")",
-          "desc": "创建一个计时器，每隔几秒提醒你一次。Timer(2) 就是每 2 秒提醒一次。第二个参数写 True（默认）一直重复，写 False 只提醒一次。",
-          "badgeType": "module"
-        },
-        {
-          "label": "is_timeout 时间到了吗",
-          "code": "if clock.is_timeout():\n    print(\"时间到\")",
-          "desc": "检查计时器的时间到了没。到了就返回 True。通常在 run() 里面用 if 来判断。",
-          "badgeType": "object"
-        },
-        {
-          "label": "wait 每隔几秒",
-          "code": "if wait(1):\n    print(\"过了一秒\")",
-          "desc": "每隔指定的时间返回一次 True。比如 wait(1) 每隔 1 秒返回 True，可以用它来做定时的事情。",
           "badgeType": "function"
         }
       ]

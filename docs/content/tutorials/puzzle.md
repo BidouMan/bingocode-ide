@@ -43,27 +43,31 @@ for row in range(4):
 
 ```python
 flipped = []
-matched = 0
+matched = []
+flip_back = Timer(0.5, False)   # 0.5 秒后把不匹配的牌翻回去
 
 while True:
-    if mouse_pressed():
+    # 时间到：两张牌翻回去
+    if flip_back.is_timeout():
+        cards[flipped[0]].say("")
+        cards[flipped[1]].say("")
+        flipped = []
+
+    if mouse_pressed() and len(flipped) < 2:
         # 检测点击了哪张牌
         for i, card in enumerate(cards):
             if card.is_touch(mouse) and card not in matched:
                 card.say(str(card_values[i]))
                 flipped.append(i)
-                
+
                 if len(flipped) == 2:
                     # 检查是否匹配
                     if card_values[flipped[0]] == card_values[flipped[1]]:
                         matched.extend(flipped)
                         flipped = []
                     else:
-                        # 不匹配，翻回去
-                        wait(0.5)
-                        cards[flipped[0]].say("")
-                        cards[flipped[1]].say("")
-                        flipped = []
+                        # 不匹配：0.5 秒后翻回去
+                        flip_back.start()
 ```
 
 ## 方案二：推箱子
@@ -129,7 +133,7 @@ clock = Timer(1)
 while True:
     if clock.is_timeout():
         game_time -= 1
-        draw_text(300, 10, "时间：", game_time)
+        show_text(300, 10, "时间：", game_time)
         
         if game_time <= 0:
             stop()

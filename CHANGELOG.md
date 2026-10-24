@@ -8,6 +8,7 @@ BingoCode IDE 的版本更新记录，最新在前。
 
 ### 新增
 
+- 引擎新增 **`receive()` 入门事件查询**：`if enemy.receive("事件名"):` 直接检查这一帧有没有收到广播，不需要自己写函数；广播发出后的下一物理步返回一次 True、持续一帧、不消费，同一帧内代码顺序不影响结果。`on_receive("事件名", 函数)` 回调写法保留为进阶用法，两者可同时使用；补全、语法高亮、帮助面板、AI 提示与文档同步
 - 引擎新增 **`hero.pos`**：一次性读取角色坐标 `(x, y)`，可直接拆包写成 `x, y = hero.pos`；与 `hero.x` / `hero.y` 等价且只读（用户坐标：左下角原点，y 向上）；已加入自动补全、帮助面板与文档
 - 引擎新增 **`mouse.pos`**：一次性获取鼠标坐标 `(x, y)`，可直接拆包写成 `x, y = mouse.pos`；与 `mouse.x` / `mouse.y` 等价（用户坐标：左下角原点，y 向上）；已加入自动补全、帮助面板与文档
 - 引擎新增 **`mouse_up()`**：只有松开鼠标左键的那一帧返回 True，与 `mouse_down()`、`mouse_pressed()` 组成完整的鼠标输入检测。采用与 `key_up()` 一致的「事件累积 + 物理步快照」实现，避免异步事件落在两步之间被漏掉；已加入语法高亮、自动补全与内置帮助
@@ -37,6 +38,10 @@ BingoCode IDE 的版本更新记录，最新在前。
 
 ### 修复
 
+- **`play_sound()` / `stop_sound()` 无法播放与停止音效**：引擎发给前端的音效路径是相对路径（`assets/sounds/xxx.wav`），`convertFileSrc` 只接受绝对路径，播放失败被前端静默吞掉；按名停止时又只发送文件名，和播放时登记的键不一致，导致指定音效永远停不掉。现在播放与停止统一解析为绝对路径，两边键一致；找不到音效时会打印一次「请先在资源管理器中导入音效」提示，不再静默失败
+- **`Timer` 实例的点号补全不出 `is_timeout` / `start` / `stop`**：补全原来只按变量名硬编码识别（必须刚好叫 `timer`），学生写 `clock.` 时会回退成 Sprite 方法；且点号匹配只认行尾的 `.`，继续输入 `clock.is` 后提示就消失了。现在会根据代码里的 `变量 = Timer(...)` 自动识别 Timer 变量（支持中文变量名），并支持输入到一半继续补全
+- **`Timer` 创建后不自动启动，文档写法永远不触发**：构造函数默认 `autostart=False`，而帮助面板和所有教程都写 `clock = Timer(2)` 直接用，导致 `is_timeout()` 恒为 False。现在 `Timer(seconds, loop=True)` 创建即自动开始、首次在 N 秒后触发；需要手动控制先 `stop()`，之后 `start()` 重新计时。第三个 `autostart` 参数已删除
+- **`time_passed()` 不同调用位置互相抢计时器**（原 `wait()`）：原来按「秒数」共用同一个时间戳，两处计时判断在同一帧只有先调用者返回 True。现在按调用位置（代码 + 行号）独立计时，两处互不影响，且首次要等满 N 秒才返回 True
 - **`on_receive()` 回调里用 `global` 计分会导致游戏直接停下**：引擎会把整个脚本包进一个 generator 函数（`while True` 逐帧执行），原先的模块级变量（如 `score`）实际变成了这个函数的局部变量，回调里的 `global score` 找不到变量 → 抛 `name 'score' is not defined`，且该异常会让整个主循环 generator 被移除，游戏当场停止。现在代码转换会把「直接嵌套函数（on_receive / on_touch_group 回调）里、实际指向生成函数局部变量的 `global`」自动改写成 `nonlocal`，`score += 1` 正常生效，主循环也能读到新值；真正的模块级 global（如导入模块）保持原样
 - **单个广播回调出错会连带停掉整个游戏**：`broadcast` 现在逐个隔离回调异常，只打印「广播「事件名」的处理函数出错：原因」，其余回调和主循环继续运行；回调里调用 `stop()` 仍能正常结束游戏
 - **`pause()` 之后 `resume()` 永远无法继续游戏**：`start_game` 主循环在暂停时把用户代码（generator）一起跳过了，而 `resume()` 只能写在用户代码里，等于没有任何机会被调用。现在暂停期间仍每帧执行用户循环并同步输入快照，只冻结动画、物理碰撞与引擎自动移动（与旧版 `run()` 语义一致，也符合文档「程序还在运行，可随时 resume」）
@@ -70,9 +75,13 @@ BingoCode IDE 的版本更新记录，最新在前。
 
 ### 优化
 
+- **API 帮助面板按 Scratch 重新分组**：新增「事件」分类（`broadcast` / `on_receive`）与「时间」分类（`Timer` / `Timer.start` / `Timer.stop` / `is_timeout` / `time_passed`），`add_to_group` 归入「侦测」，「控制」只保留循环与暂停/继续/结束，与 Scratch 的积木分组习惯一致；帮助文档站点同步新增「事件」「时间」两页
+- **`wait()` 更名为 `time_passed()`**：`wait` 在 Scratch 里是「阻塞等待」，而这里的实现是「每帧检查、每 N 秒返回一次 True」，名字会误导学生以为会停下来等。新名字与 `key_pressed` 同为「某个时刻到了吗」的句式：`if time_passed(1):`。旧名 `wait()` 保留为兼容别名（不出现在文档/补全/帮助中）
+- **计时器统一使用游戏时间**：`Timer`、`time_passed()` 与 `say()` 气泡计时从墙上时间改为随物理步累加的游戏时间；`pause()` 暂停时计时冻结、`resume()` 后继续，不受系统时间调整影响，行为与 Godot/Unity 的暂停语义一致。帮助面板补齐 `Timer.start` / `Timer.stop` 卡片
+- **`draw_text` 更名为 `show_text`**：与 `show_fps` / `show_collision` 统一为「在画面上显示」一族，去掉"绘制"这种绘图术语，对中小学生更直观；旧名不保留。自动补全、帮助面板、AI 提示、教程示例与全部文档同步更新（后续若改为 UI 文字组件，该临时 API 可直接退场）
 - **`random_float` 默认保留 2 位小数**：`random_float(0, 1)` 现在返回 `0.73` 这类干净的小数，不再是一长串位数；需要更高精度可传第三个数 `random_float(0, 1, 4)`，传 `None` 则恢复完整精度。注意范围小于 0.01 时 2 位小数会丢失随机性，文档已提示改用更大位数。自动补全、帮助面板、AI 提示与 API 文档同步更新
 - **摄像机跟随函数 `follow` 更名为 `camera_follow`**：避免和角色挂点跟随 `hero.follow(目标)` 混淆，也与地图编辑器里的「相机跟随」叫法统一；该功能尚未发版，直接改名、不保留旧名。文档、帮助面板、自动补全与 AI 提示同步更新
-- **广播接收 API 更名为 `on_receive`（原 `receive`，旧名不再保留）**：对齐 Scratch「当接收到」帽子积木与 Godot `connect` / Unity `AddListener` 的事件订阅模型；`on_receive("事件名", 函数)` 传函数名即可，注册一次长期有效，不返回 True/False。同时保留 `Sprite.receive` / `Sprite.on_receive` 纯粹作为防误用提示（只提示不注册）：学生误写 `monster.receive(...)` 或 `monster.on_receive(...)` 时会得到明确指引且不再中断游戏；帮助面板、自动补全、AI 提示与 API 文档同步更新。**注意：旧项目里的 `receive(...)` 需改成 `on_receive(...)`**
+- **广播接收 API 更名为 `on_receive`（原 `receive`，旧名不再保留）**：对齐 Scratch「当接收到」帽子积木与 Godot `connect` / Unity `AddListener` 的事件订阅模型；`on_receive("事件名", 函数)` 传函数名即可，注册一次长期有效，不返回 True/False。同时保留 `Sprite.receive` / `Sprite.on_receive` 纯粹作为防误用提示（只提示不注册）：学生误写 `monster.receive(...)` 或 `monster.on_receive(...)` 时会得到明确指引且不再中断游戏；帮助面板、自动补全、AI 提示与 API 文档同步更新。**注意：注册回调请用 `on_receive(...)`；`receive` 随后以入门轮询查询的形式重新加入（见「新增」），`if monster.receive("事件名")` 现在可直接使用**
 - **碰撞回调 API 更名为 `on_touch_group`（原 `on_hit`）**：与 `is_touch_group` 配对成「`is_` = 检查碰到了吗 / `on_` = 碰到时自动处理」，一眼能分清"查询"和"注册"，也说明它是注册一次、由引擎每帧自动执行；旧名 `on_hit()` 保留为兼容别名（不出现在文档/补全中）。同批：帮助卡片从「控制」移到「侦测」分组、去掉 lambda 示例，改为「只写组名 `on_touch_group("enemies")` = 引擎自动删除双方」的最简用法并写清前提（对方必须先 `add_to_group("敌方组名")`），自定义处理改用普通 `def` 函数示例；`lambda` 仅在 FAQ 中作为语法说明保留
 - **`touch_group` 更名为 `is_touch_group`**：与 `is_touch`、`is_touch_edge` 命名风格统一，一眼看出是"检测有没有碰到"；旧名 `touch_group()` 保留为兼容别名（不出现在文档/补全中），已有项目不受影响。文档、帮助面板、自动补全与 AI 提示同步更新
 - **`drop_through` 更名为 `drop_down`（从跳板掉下去）**：`through` 对小学生太抽象，新名字直接表达"往下掉"；旧名 `drop_through()` 保留为兼容别名，文档、帮助面板与补全同步更新

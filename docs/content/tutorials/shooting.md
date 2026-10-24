@@ -150,7 +150,7 @@ while True:
         stop()
     
     # 显示分数
-    draw_text(10, 10, "得分：", score)
+    show_text(10, 10, "得分：", score)
 ```
 
 ## 进阶功能
