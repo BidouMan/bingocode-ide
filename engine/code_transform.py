@@ -52,6 +52,99 @@ def _has_top_level_loop(tree: ast.Module) -> bool:
     return any(isinstance(n, (ast.For, ast.While)) for n in tree.body)
 
 
+def _target_names(node) -> list:
+    """收集赋值目标里的变量名（支持 Name / 元组 / 列表 / 星号）"""
+    if isinstance(node, ast.Name):
+        return [node.id]
+    if isinstance(node, (ast.Tuple, ast.List)):
+        names = []
+        for elt in node.elts:
+            names.extend(_target_names(elt))
+        return names
+    if isinstance(node, ast.Starred):
+        return _target_names(node.value)
+    return []
+
+
+def _scope_bound_names(stmts) -> set:
+    """收集生成函数作用域内绑定的变量名（不进入嵌套函数/类）
+
+    转换会把整个模块塞进一个函数，原本的模块级变量（score、hero…）都变成了
+    这个函数的局部变量。嵌套函数里的 `global score` 仍指向模块全局，会找不到
+    变量，因此需要识别出这些"其实是外层局部变量"的名字，把 global 改写成 nonlocal。
+    """
+    bound = set()
+    declared_global = set()
+    stack = list(stmts)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            # 函数/类名本身绑定在外层作用域，但不进入其函数体
+            bound.add(node.name)
+            continue
+        if isinstance(node, ast.Lambda):
+            continue
+        if isinstance(node, ast.Global):
+            declared_global.update(node.names)
+            continue
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                bound.update(_target_names(target))
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            bound.update(_target_names(node.target))
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            bound.update(_target_names(node.target))
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if item.optional_vars is not None:
+                    bound.update(_target_names(item.optional_vars))
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                bound.add(alias.asname or alias.name.split('.')[0])
+        stack.extend(ast.iter_child_nodes(node))
+    return bound - declared_global
+
+
+class _GlobalToNonlocal(ast.NodeTransformer):
+    """把生成函数内部直接嵌套函数里的 global 改写成 nonlocal
+
+    只处理"生成函数的直接嵌套函数"（回调最常见的位置）；更深层的嵌套函数
+    其 global 指向中间函数，保持原样避免误改。
+    """
+
+    def __init__(self, bound_names):
+        self._bound = bound_names
+        self._depth = 0
+
+    def visit_FunctionDef(self, node):
+        self._depth += 1
+        # 深度 1 = 生成函数本身，深度 2 = 直接嵌套的回调函数；
+        # 两者都要向下遍历才能找到 global，深度 3 起不再进入
+        if self._depth <= 2:
+            self.generic_visit(node)
+        self._depth -= 1
+        return node
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+    def visit_Lambda(self, node):
+        # lambda 里不能写 global，无需处理
+        return node
+
+    def visit_Global(self, node):
+        # 只改写直接嵌套函数里的 global（生成函数自身作用域的 global 保持原样）
+        if self._depth != 2:
+            return node
+        converted = [n for n in node.names if n in self._bound]
+        kept = [n for n in node.names if n not in self._bound]
+        nodes = []
+        if converted:
+            nodes.append(ast.copy_location(ast.Nonlocal(names=converted), node))
+        if kept:
+            nodes.append(ast.copy_location(ast.Global(names=kept), node))
+        return nodes or node
+
+
 def transform_while_true(source_code: str, func_name: str = '__game__') -> str:
     """
     将源代码转换为 generator，循环每轮让出一帧（Scratch 语义）
@@ -99,6 +192,12 @@ def transform_while_true(source_code: str, func_name: str = '__game__') -> str:
         decorator_list=[],
         returns=None,
     )
+
+    # 嵌套函数（on_receive / on_touch_group 回调）里的 global 其实指向生成函数的
+    # 局部变量，改写成 nonlocal，否则 score += 1 会报 name 'score' is not defined
+    bound_names = _scope_bound_names(func_def.body)
+    if bound_names:
+        _GlobalToNonlocal(bound_names).visit(func_def)
 
     # 递归给函数体内（while True 及嵌套的 for / 条件 while）插入 yield
     _insert_loop_yields(func_def)

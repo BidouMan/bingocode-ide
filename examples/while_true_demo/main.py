@@ -25,4 +25,4 @@ while True:
     enemy.move(2)
     
     # 摄像机跟随玩家
-    follow(hero)
+    camera_follow(hero)

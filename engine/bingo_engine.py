@@ -61,7 +61,7 @@ _CAMERA_ZOOM = 1.0  # 相机缩放比例
 _SCREEN_WIDTH = 640  # 屏幕宽度
 _SCREEN_HEIGHT = 480  # 屏幕高度
 _FOLLOW_TARGET = None  # 摄像机跟随目标
-_AUTO_CAMERA_TARGET = None  # 由地图相机设置自动跟随的主玩家（区别于代码 follow()）
+_AUTO_CAMERA_TARGET = None  # 由地图相机设置自动跟随的主玩家（区别于代码 camera_follow()）
 
 # 渲染缓存
 _RENDERED_TILES = set()  # 已渲染的瓦片缓存
@@ -466,7 +466,7 @@ __all__ = [
     "key_up",
     "wait",
     "broadcast",
-    "receive",
+    "on_receive",
     "pause",
     "resume",
     "is_paused",
@@ -477,7 +477,7 @@ __all__ = [
     "mouse_up",
     "mouse",
     "load_map",
-    "follow",
+    "camera_follow",
     "play_sound",
     "show_collision",
     "random_int",
@@ -1194,9 +1194,19 @@ class Sprite:
         return self.on_touch_group(group, callback)
 
     def broadcast(self, event_name):
-        """发送广播（触发所有接收该事件的回调）"""
-        for callback in _EVENT_LISTENERS.get(event_name, []):
-            callback()
+        """发送广播（触发所有接收该事件的回调；单个回调出错不会中断游戏）"""
+        broadcast(event_name)
+
+    def receive(self, event_name):
+        """防误用提示：on_receive 是全局函数，不是 Sprite 的方法"""
+        if not getattr(self, "_receive_hint_shown", False):
+            print("[提示] on_receive 是全局函数，不是角色的方法。正确写法：on_receive(\"事件名\", 函数)，写在循环外面；它不会返回 True/False，不能写在 if 里")
+            self._receive_hint_shown = True
+        return None
+
+    def on_receive(self, event_name, callback=None):
+        """防误用提示：on_receive 是全局函数，不要写成角色方法"""
+        return self.receive(event_name)
 
     def move(self, distance):
         """朝着当前 angle 方向移动 distance 像素"""
@@ -2406,13 +2416,18 @@ def wait(seconds):
 
 
 def broadcast(event_name):
-    """发送全局广播"""
-    for callback in _EVENT_LISTENERS.get(event_name, []):
-        callback()
+    """发送全局广播（单个回调出错不会中断游戏主循环）"""
+    for callback in list(_EVENT_LISTENERS.get(event_name, [])):
+        try:
+            callback()
+        except GameStop:
+            raise
+        except Exception as e:
+            print(f"[错误] 广播「{event_name}」的处理函数出错: {e}")
 
 
-def receive(event_name, callback):
-    """注册全局广播接收"""
+def on_receive(event_name, callback):
+    """当收到指定的广播时，执行 callback（Scratch「当接收到」帽子积木同款）"""
     if event_name not in _EVENT_LISTENERS:
         _EVENT_LISTENERS[event_name] = []
     _EVENT_LISTENERS[event_name].append(callback)
@@ -2565,7 +2580,7 @@ def _send_camera_update(x, y, world_bounds=None):
 
 
 def _camera_config():
-    """当前地图的相机设置（缺省为空字典 = 仅支持代码 follow()）"""
+    """当前地图的相机设置（缺省为空字典 = 仅支持代码 camera_follow()）"""
     if not _CURRENT_MAP:
         return {}
     cfg = _CURRENT_MAP.get("camera") or {}
@@ -2595,21 +2610,21 @@ def _update_camera_follow():
 
     支持两种来源：
     - 地图属性里的相机设置（勾选「相机跟随」后自动跟随指定角色/1 号角色，可设偏移/平滑/边界限制）；
-    - 代码调用 follow() 手动跟随（优先级高于自动跟随）。
+    - 代码调用 camera_follow() 手动跟随（优先级高于自动跟随）。
     """
     global _CAMERA_X, _CAMERA_Y, _FOLLOW_TARGET, _AUTO_CAMERA_TARGET
     cfg = _camera_config()
     enabled = bool(cfg.get("enabled"))
 
     if enabled:
-        # 只在没有目标时解析一次（代码 follow() 或已解析的目标不会被覆盖）
+        # 只在没有目标时解析一次（代码 camera_follow() 或已解析的目标不会被覆盖）
         if _FOLLOW_TARGET is None:
             target = _resolve_camera_target(cfg.get("target", ""))
             if target is not None:
                 _FOLLOW_TARGET = target
                 _AUTO_CAMERA_TARGET = target
     elif _AUTO_CAMERA_TARGET is not None and _FOLLOW_TARGET is _AUTO_CAMERA_TARGET:
-        # 关闭相机跟随：撤销自动目标，不影响代码 follow()
+        # 关闭相机跟随：撤销自动目标，不影响代码 camera_follow()
         _FOLLOW_TARGET = None
         _AUTO_CAMERA_TARGET = None
 
@@ -2703,7 +2718,7 @@ def _update_follows():
         sprite._update_transform()
 
 
-def follow(sprite):
+def camera_follow(sprite):
     """
     设置摄像机跟随指定精灵
 
@@ -3033,7 +3048,7 @@ def _clear_map():
         print(json.dumps(packet))
         del _MAP_SPRITES[sprite_id]
 
-    # 地图卸载：撤销自动相机跟随目标（代码 follow() 的仍保留）
+    # 地图卸载：撤销自动相机跟随目标（代码 camera_follow() 的仍保留）
     if _AUTO_CAMERA_TARGET is not None and _FOLLOW_TARGET is _AUTO_CAMERA_TARGET:
         _FOLLOW_TARGET = None
     _AUTO_CAMERA_TARGET = None
@@ -3423,7 +3438,7 @@ def run():
         if accumulator > _PHYSICS_DT * _MAX_PHYSICS_STEPS:
             accumulator = 0.0
 
-        # 相机跟随（地图属性设置 / 代码 follow()）
+        # 相机跟随（地图属性设置 / 代码 camera_follow()）
         _update_camera_follow()
 
         # 同步位置跟随（挂点/角色），再合并发送本帧所有精灵更新
@@ -3531,13 +3546,13 @@ def start_game(project_dir=None, target_file=None):
             "stop_sound": stop_sound,
             "draw_text": draw_text,
             "shake": shake,
-            "follow": follow,
+            "camera_follow": camera_follow,
             "show_fps": show_fps,
             "show_collision": show_collision,
             "random_int": random_int,
             "random_float": random_float,
             "broadcast": broadcast,
-            "receive": receive,
+            "on_receive": on_receive,
             "pause": pause,
             "resume": resume,
             "is_paused": is_paused,
@@ -3643,7 +3658,7 @@ def start_game(project_dir=None, target_file=None):
         if accumulator > _PHYSICS_DT * _MAX_PHYSICS_STEPS:
             accumulator = 0.0
 
-        # 相机跟随（地图属性设置 / 代码 follow()）
+        # 相机跟随（地图属性设置 / 代码 camera_follow()）
         _update_camera_follow()
 
         # 同步位置跟随（挂点/角色），再帧合并发送

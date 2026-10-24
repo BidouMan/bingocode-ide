@@ -382,15 +382,15 @@
           "badgeType": "object"
         },
         {
-          "label": "broadcast 发广播",
+          "label": "broadcast 广播消息",
           "code": "broadcast(\"开始游戏\")",
-          "desc": "发一条广播消息，就像学校广播站喊话。所有\"听到\"这条消息的角色都会执行对应的行动。",
+          "desc": "发一条广播消息，所有\"收到\"这条消息的角色都会执行对应的行动。",
           "badgeType": "function"
         },
         {
-          "label": "receive 接收广播",
-          "code": "receive(\"开始游戏\",\n    lambda: hero.show())",
-          "desc": "注册一个\"广播接收器\"。当收到指定的广播时，就执行你写好的那段代码。记得要在发广播之前注册好。",
+          "label": "on_receive 收到消息",
+          "code": "def 做某件事():\n    hero.show()\n\non_receive(\"消息\", 做某件事)",
+          "desc": "收到这条广播时，就执行自定义函数。\n回调函数不需要参数，必须写在发广播之前，写在循环外面。",
           "badgeType": "function"
         }
       ]
@@ -424,8 +424,8 @@
           "badgeType": "function"
         },
         {
-          "label": "follow 镜头跟随",
-          "code": "follow(hero)",
+          "label": "camera_follow 镜头跟随",
+          "code": "camera_follow(hero)",
           "desc": "让摄像机（画面的\"眼睛\"）跟着某个角色移动。用了之后画面就会跟着角色走。",
           "badgeType": "function"
         }

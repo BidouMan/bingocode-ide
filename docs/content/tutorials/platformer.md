@@ -31,7 +31,7 @@ hero.set_rotation_mode("left_right")  # 只左右翻转
 
 # 加载地图
 load_map("平台关卡")
-follow(hero)  # 镜头跟随
+camera_follow(hero)  # 镜头跟随
 
 while True:
     # 左右移动
@@ -116,7 +116,7 @@ hero.goto(100, 300)
 hero.set_rotation_mode("left_right")
 
 load_map("平台关卡")
-follow(hero)
+camera_follow(hero)
 
 score = 0
 enemy_timer = Timer(3)

@@ -26,10 +26,10 @@ hero = Sprite("玩家")
 
 ## 摄像机
 
-### follow — 镜头跟随
+### camera_follow — 镜头跟随
 
 ```python
-follow(hero)
+camera_camera_follow(hero)
 ```
 
 让摄像机（画面的"眼睛"）跟着指定角色移动。用了之后画面就会跟着角色走。
@@ -42,7 +42,7 @@ load_map("大型关卡")
 hero = Sprite("玩家")
 
 # 让镜头跟着玩家
-follow(hero)
+camera_follow(hero)
 
 # 现在移动玩家时，画面会自动滚动
 while True:
@@ -63,7 +63,7 @@ hero = Sprite("玩家")
 hero.goto(100, 300)  # 放在地图起始位置
 
 # 镜头跟随
-follow(hero)
+camera_follow(hero)
 
 while True:
     # 左右移动
@@ -87,7 +87,7 @@ load_map("关卡1")
 
 hero = Sprite("玩家")
 hero.goto(100, 300)
-follow(hero)
+camera_follow(hero)
 
 # 生成敌人
 enemy_timer = Timer(3)
@@ -121,4 +121,4 @@ while True:
 - 地图需要先在资源面板中添加
 - 地图名必须和资源面板中显示的名字完全一致
 - 加载地图后，之前的精灵不会消失
-- `follow` 只能跟随一个角色，多次调用会覆盖
+- `camera_follow` 只能跟随一个角色，多次调用会覆盖

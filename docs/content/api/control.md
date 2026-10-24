@@ -87,18 +87,39 @@ broadcast("关卡通过")
 
 发送一条广播消息，所有"听到"这条消息的接收器都会执行对应代码。
 
-### receive — 接收广播
+### on_receive — 接收广播
 
 ```python
-# 注册广播接收器（要在发送广播之前注册）
-receive("游戏开始", lambda: print("收到！"))
-
-# 也可以用普通函数
+# 用普通函数注册（推荐）
 def on_game_start():
     enemy.show()
     hero.goto(320, 400)
 
-receive("游戏开始", on_game_start)
+on_receive("游戏开始", on_game_start)
+
+# 一行代码也可以用 lambda
+on_receive("得分+1", lambda: print("得分！"))
+```
+
+- 回调函数**不需要参数**，也不用写 return
+- 必须在 `broadcast` **之前**注册
+- 注册要写在 `while True` **外面**：放进循环会每帧重复注册，一次广播执行很多次
+- 回调里修改外面的计数器可以直接用 `global 变量名`
+- 回调出错只会打印提示，不会中断整个游戏
+
+**常见错误**：`monster.on_receive("start")` —— `on_receive` 是**全局函数**，不是角色的方法，也不返回 True/False，不能写在 `if` 里。它只负责"注册"：
+
+```python
+# 正确：把「收到广播后要做什么」写成函数，注册一次
+def 怪物收到开始():
+    怪物.show()
+    print("收到广播")
+
+on_receive("start", 怪物收到开始)
+
+while True:
+    if key_down("1"):
+        player.broadcast("start")
 ```
 
 **重要**：接收器必须在发送广播之前注册好。
@@ -117,7 +138,7 @@ broadcast("获得道具")    # 通知获得道具
 
 # 场景 3：角色间通信
 # 玩家死亡时通知 UI
-receive("玩家死亡", lambda: show_game_over())
+on_receive("玩家死亡", lambda: show_game_over())
 ```
 
 ## 完整示例
@@ -128,7 +149,7 @@ hero = Sprite("玩家")
 score = 0
 
 # 分数显示
-receive("得分+1", lambda: update_score())
+on_receive("得分+1", lambda: update_score())
 
 def update_score():
     global score

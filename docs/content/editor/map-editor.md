@@ -124,7 +124,7 @@ load_map("我的地图")
 hero = Sprite("玩家")
 
 # 镜头跟随
-follow(hero)
+camera_follow(hero)
 ```
 
 ## 常见问题

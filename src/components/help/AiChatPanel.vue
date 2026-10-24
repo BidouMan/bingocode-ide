@@ -153,7 +153,7 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 - hero.on_touch_group("组名") — 注册碰撞：对方要先 add_to_group("组名")。对同一个角色注册一次即可（不要每帧调用）；每次新建的子弹需在创建后各注册一次。注册后碰到组内成员时，引擎自动把「自己」和「对方」一起删除，无需再写 is_touch_group 判断和 delete()。要自定义（加分/播声音/扣血）就传函数：on_touch_group("组名", 函数)，函数参数为 (自己, 碰到的角色)
 - hero.add_to_group("组名") — 把角色加入组（如 "enemies"、"bullets"）
 - broadcast("事件名") — 发送广播消息
-- receive("事件名", lambda: 代码) — 注册广播接收器，收到消息时执行代码。必须在广播之前注册
+- on_receive("事件名", 函数) — 全局函数（不是角色方法，不能写 monster.on_receive()）：注册广播接收器，收到广播时执行该函数。函数不需要参数；必须在广播之前注册，且写在循环外（放进循环会重复注册导致执行多次）。它不返回 True/False，不能放在 if 里判断
 
 ### 声音
 - play_sound("文件名") / play_sound("文件名", True) — 播放音效。不写循环参数=播放一次，True=循环播放
@@ -162,7 +162,7 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 
 ### 地图
 - load_map("地图名") — 加载并显示地图，地图名和资源面板中一致
-- follow(hero) — 摄像机跟随指定角色移动，画面会跟着角色走
+- camera_follow(hero) — 摄像机跟随指定角色移动，画面会跟着角色走
 
 ### 工具
 - draw_text(x, y, 内容...) — 在(x,y)位置画文字，多个参数自动拼接为字符串

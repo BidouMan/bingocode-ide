@@ -116,7 +116,7 @@ const globalFunctions: EngineCompletionItem[] = [
   // 事件
   { label: 'wait', kind: CompletionItemKind.Function, insertText: 'wait', documentation: '每 N 秒返回一次 True\n\n用法：if wait(1): do_something()', detail: 'wait(seconds) -> bool' },
   { label: 'broadcast', kind: CompletionItemKind.Function, insertText: 'broadcast', documentation: '发送全局广播（触发所有接收该事件的回调）\n\nbroadcast("事件名")', detail: 'broadcast(event_name)' },
-  { label: 'receive', kind: CompletionItemKind.Function, insertText: 'receive', documentation: '注册全局广播接收\n\nreceive("事件名", callback)', detail: 'receive(event_name, callback)' },
+  { label: 'on_receive', kind: CompletionItemKind.Function, insertText: 'on_receive', documentation: '注册全局广播接收（全局函数，不是 sprite 方法）\n\non_receive("事件名", 函数)\n函数不需要参数；必须在 broadcast 之前注册，且写在循环外；不会返回 True/False，不能写在 if 里', detail: 'on_receive(event_name, callback)' },
 
   // 游戏控制
   { label: 'pause', kind: CompletionItemKind.Function, insertText: 'pause', documentation: '暂停游戏（loop 仍运行，但精灵停止移动）', detail: 'pause()' },
@@ -139,7 +139,7 @@ const globalFunctions: EngineCompletionItem[] = [
 
   // 地图 / 摄像机
   { label: 'load_map', kind: CompletionItemKind.Function, insertText: 'load_map', documentation: '加载并显示地图\n\nload_map("地图名")\n地图名对应 assets/maps/ 下的地图包', detail: 'load_map(map_name) -> bool' },
-  { label: 'follow', kind: CompletionItemKind.Function, insertText: 'follow', documentation: '设置摄像机跟随指定精灵\n\nfollow(sprite)', detail: 'follow(sprite)' },
+  { label: 'camera_follow', kind: CompletionItemKind.Function, insertText: 'camera_follow', documentation: '设置摄像机跟随指定精灵（镜头跟随）\n\ncamera_follow(hero)', detail: 'camera_follow(sprite)' },
 
   // 随机工具
   { label: 'random_int', kind: CompletionItemKind.Function, insertText: 'random_int', documentation: '在 min_val 和 max_val 之间取随机整数（包含两端）\n\nrandom_int(1, 10)', detail: 'random_int(min_val, max_val) -> int' },

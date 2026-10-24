@@ -57,7 +57,7 @@ while True:
     enemy.move(2)
     
     # 摄像机跟随
-    follow(hero)
+    camera_follow(hero)
 ```
 
 ### player.py

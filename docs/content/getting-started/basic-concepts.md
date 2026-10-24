@@ -246,9 +246,14 @@ broadcast("游戏开始")
 ### 接收广播
 
 ```python
-# 注册广播接收器（要在发送之前注册）
-receive("游戏开始", lambda: print("收到游戏开始信号！"))
+# 注册广播接收器（要在发送之前注册，写在循环外面）
+def 收到游戏开始():
+    print("收到游戏开始信号！")
+
+on_receive("游戏开始", 收到游戏开始)
 ```
+
+回调函数不需要参数；放进 `while True` 里会重复注册，一次广播执行多次。
 
 ### 实际应用
 
@@ -257,7 +262,10 @@ hero = Sprite("玩家")
 enemy = Sprite("敌人")
 
 # 游戏开始时让敌人出现
-receive("游戏开始", lambda: enemy.show())
+def 怪物出现():
+    enemy.show()
+
+on_receive("游戏开始", 怪物出现)
 
 # 发送广播
 broadcast("游戏开始")
