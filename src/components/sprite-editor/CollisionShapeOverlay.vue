@@ -12,11 +12,15 @@ const props = defineProps<{
   canvasH: number
   shape: SpriteCollisionShape
   zoom: number
+  /** 禁用碰撞：形状仍显示但整体置灰（与地图编辑器禁用碰撞体同观感） */
+  disabled?: boolean
 }>()
 const emit = defineEmits<{ update: [shape: SpriteCollisionShape] }>()
 
-const COL = '#478CBF'              // Godot 编辑器钢蓝（边框/形状描边）
-const FILL = 'rgba(76,151,255,0.28)'  // Scratch 风格半透明蓝填充
+// Godot 编辑器钢蓝（边框/形状描边）；禁用时转为灰色
+const COL = computed(() => (props.disabled ? '#8a8f98' : '#478CBF'))
+// Scratch 风格半透明蓝填充；禁用时转为低透明度灰
+const FILL = computed(() => (props.disabled ? 'rgba(160,160,170,0.14)' : 'rgba(76,151,255,0.28)'))
 const snap = (v: number) => Math.round(v * 2) / 2
 
 const rootRef = ref<HTMLDivElement | null>(null)
@@ -254,6 +258,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
   <div
     ref="rootRef"
     class="cso-root"
+    :class="{ 'cso-disabled': disabled }"
     :style="{ width: `${canvasW}px`, height: `${canvasH}px` }"
   >
     <svg
@@ -411,4 +416,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
   border-color: #ffffff;
   box-shadow: 0 0 0 2px rgba(71, 140, 191, 0.55);
 }
+/* 禁用碰撞：形状整体置灰（手柄半透明，仍可编辑） */
+.cso-disabled .cso-handle { opacity: 0.5; }
 </style>

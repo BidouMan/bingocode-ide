@@ -147,13 +147,13 @@
         {
           "label": "edge_bounce 碰到边缘反弹",
           "code": "hero.edge_bounce()",
-          "desc": "角色碰到画面边缘会自动弹回来，就像弹力球撞墙一样。",
+          "desc": "角色碰到地图边界会自动弹回来，就像弹力球撞墙一样。",
           "badgeType": "object"
         },
         {
           "label": "goto_rand 移到随机位置",
           "code": "hero.goto_rand()",
-          "desc": "让角色随机移动到画面上的某个位置。",
+          "desc": "让角色随机移动到地图上的某个位置。",
           "badgeType": "object"
         },
         {
@@ -237,13 +237,13 @@
         {
           "label": "is_touch_edge 碰到边框了吗",
           "code": "hero.is_touch_edge()",
-          "desc": "检查角色有没有碰到画面的边框。",
+          "desc": "检查角色有没有碰到地图的边框。",
           "badgeType": "object"
         },
         {
           "label": "is_out_side 完全出去了吗",
           "code": "hero.is_out_side()",
-          "desc": "检查角色是不是整个都跑到画面外面去了，只有一点点出去不算，要整个都出去才行。",
+          "desc": "检查角色是不是整个都跑到地图外面去了，只有一点点出去不算，要整个都出去才行。",
           "badgeType": "object"
         },
         {

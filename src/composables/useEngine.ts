@@ -179,11 +179,13 @@ export function useEngine() {
         break
 
       case 'SCENE_UPDATE':
+        // 相机边界用地图矩形（width/height 已是像素尺寸）；
+        // world_bounds 含绘制图层出血区（40×30 地图会变成 1280×960），不能用于相机
         renderStore.updateCamera({
-          limitLeft: cmd.data.world_bounds.left,
-          limitRight: cmd.data.world_bounds.right,
-          limitTop: cmd.data.world_bounds.top,
-          limitBottom: cmd.data.world_bounds.bottom,
+          limitLeft: 0,
+          limitRight: cmd.data.width,
+          limitTop: 0,
+          limitBottom: cmd.data.height,
         })
         break
 

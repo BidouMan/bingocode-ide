@@ -3,7 +3,7 @@
  *
  * 世界空间：原点在舞台左上角，x 向右、y 向下（与 PixiJS 渲染一致）。
  *          地图数据、碰撞体、图层位置、渲染全部用它。
- * 用户空间：原点在舞台左下角，x 向右、y 向上，角度逆时针为正。
+ * 用户空间：原点在地图左下角，x 向右、y 向上，角度逆时针为正。
  *          只出现在学生会看到的数字上（坐标读数、属性面板、教学图）。
  *
  * 约定：整个前端只有本文件允许出现 y / 角度取反的符号。
@@ -13,9 +13,14 @@
 export const STAGE_W = 640
 export const STAGE_H = 480
 
-/** 用户坐标原点在舞台中的世界坐标（舞台左下角） */
+/** 用户坐标原点在世界空间中的位置（y 原点跟随地图高度，地图底部 = y 0） */
 export const USER_ORIGIN_X = 0
-export const USER_ORIGIN_Y = STAGE_H
+export let USER_ORIGIN_Y: number = STAGE_H
+
+/** 更新用户坐标 y 原点（地图加载/改尺寸时传地图像素高度） */
+export function setUserOriginY(worldY: number): void {
+  USER_ORIGIN_Y = worldY
+}
 
 /** 世界 x → 用户 x */
 export function toUserX(xWorld: number): number {

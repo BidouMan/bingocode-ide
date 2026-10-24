@@ -18,6 +18,8 @@ from models.coords import (
     to_user_dy,
     to_world_angle,
     to_user_angle,
+    set_user_origin_y,
+    screen_to_user_y,
 )
 
 # 添加项目根目录到Python路径（确保在任何目录运行都能找到models模块）
@@ -72,6 +74,25 @@ _AUTO_CAMERA_TARGET = None  # 由地图相机设置自动跟随的主玩家（�
 _RENDERED_TILES = set()  # 已渲染的瓦片缓存
 _IMAGE_SIZE_CACHE = {}   # 图像尺寸缓存，避免重复磁盘IO
 _FRAME_UPDATES = []      # 每帧精灵更新缓冲，帧末合并发送
+
+
+def _playable_bounds():
+    """游戏可玩区域 = 地图矩形（width×tile_size × height×tile_size）
+
+    边界碰撞与边界类 API 必须都用这一套边界。不能用 world_bounds：
+    它包含绘制图层四周的出血区与超出地图的素材（40×30 的地图可能算出 1280×960），
+    角色会被挡在屏幕外，看起来就像"走出去了"。
+    没有地图时退回 640×480 舞台。
+    """
+    if _CURRENT_MAP:
+        ts = _CURRENT_MAP.get("tile_size", 16)
+        return {
+            "left": 0,
+            "top": 0,
+            "right": _CURRENT_MAP["width"] * ts,
+            "bottom": _CURRENT_MAP["height"] * ts,
+        }
+    return {"left": 0, "top": 0, "right": _SCREEN_WIDTH, "bottom": _SCREEN_HEIGHT}
 
 
 # ---------- 图像实例碰撞几何（图像模式） ----------
@@ -410,8 +431,8 @@ class _MouseType:
 
     @property
     def y(self):
-        # 用户空间：y 向上为正
-        return to_user_y(_MOUSE_STATE["y"])
+        # 鼠标是屏幕坐标：固定在屏幕左下角，不随地图高度变化
+        return screen_to_user_y(_MOUSE_STATE["y"])
 
     @property
     def pos(self):
@@ -590,6 +611,8 @@ class Sprite:
         # 注意：角色资源必须由用户在资源管理器中添加后才会存在于项目目录
         # 不再自动从引擎内置素材解压
         self._is_bsf = False
+        # 禁用碰撞（编辑器「禁用碰撞」开关；仅 .bsf manifest 提供，缺省开启）
+        self._collision_disabled = False
         self.config = self._load_sprite_config()
 
         if self.config:
@@ -793,6 +816,10 @@ class Sprite:
         """
         global _CURRENT_MAP, _MAP_MODEL
 
+        # 禁用碰撞：完全不参与地形/边界阻挡（碰到检测仍按碰撞盒工作）
+        if self._collision_disabled:
+            return
+
         if not _CURRENT_MAP:
             return
 
@@ -969,20 +996,18 @@ class Sprite:
                                             return
 
         # 地图边界碰撞检测
-        # 仅重力地图（平台模式）把世界边界当隐形墙钳制；
-        # 无重力地图（俯视/太空）保持自由移动，edge_bounce/is_touch_edge/
-        # is_out_side/子弹出界销毁等边界 API 才能正常工作
-        if not _CURRENT_MAP.get("gravity", False):
+        # 只有开启「边界碰撞」才把地图像素矩形当隐形墙钳制；
+        # 关闭时保持自由移动，edge_bounce/is_touch_edge/is_out_side/
+        # 子弹出界销毁等边界 API 才能正常工作
+        if not _CURRENT_MAP.get("boundaryCollision", _CURRENT_MAP.get("gravity", False)):
             return
 
-        bounds = _CURRENT_MAP.get(
-            "world_bounds", {"left": 0, "top": 0, "right": 640, "bottom": 480}
-        )
+        bounds = _playable_bounds()
 
         # 获取精灵的碰撞盒
         sprite_rect = self._get_hitbox_rect()
         if sprite_rect:
-            # 检查地图边界（使用 world_bounds，支持负坐标）
+            # 检查地图边界（使用地图矩形，与边界碰撞/边界 API 同一套）
             if axis == "x":
                 # 左边界
                 if sprite_rect[0] < bounds["left"]:
@@ -1060,9 +1085,9 @@ class Sprite:
         # 故意不重置 _follow_flip：它保存着最后一次继承来的镜像，
         # 留着才能让挂件停在脱离时的朝向；再次 follow() 会重新初始化
 
-    # ---------- 坐标（用户空间：原点在画面左下角，y 向上为正） ----------
+    # ---------- 坐标（用户空间：原点在地图左下角，y 向上为正） ----------
     def set_xy(self, x, y):
-        """设置坐标（用户坐标：画面左下角为 (0,0)，y 向上为正）"""
+        """设置坐标（用户坐标：地图左下角为 (0,0)，y 向上为正）"""
         self._set_xy_world(to_world_x(x), to_world_y(y))
 
     def _set_xy_world(self, x, y):
@@ -1248,9 +1273,10 @@ class Sprite:
         self._update_transform()
 
     def goto_rand(self):
-        """移到随机位置"""
-        self._x = random.randint(0, 640)
-        self._y = random.randint(0, 480)
+        """移到地图内的随机位置"""
+        bounds = _playable_bounds()
+        self._x = random.randint(int(bounds["left"]), int(bounds["right"]))
+        self._y = random.randint(int(bounds["top"]), int(bounds["bottom"]))
         self._update_transform()
 
     def set_angle(self, angle):
@@ -1299,11 +1325,8 @@ class Sprite:
         self._update_transform()
 
     def edge_bounce(self):
-        """基于 Hitbox 的精准反弹，自动识别世界边界"""
-        if _CURRENT_MAP:
-            bounds = _CURRENT_MAP.get("world_bounds", {"left": 0, "top": 0, "right": 640, "bottom": 480})
-        else:
-            bounds = {"left": 0, "top": 0, "right": 640, "bottom": 480}
+        """基于 Hitbox 的精准反弹，自动识别地图边界"""
+        bounds = _playable_bounds()
 
         STAGE_LEFT = bounds["left"]
         STAGE_TOP = bounds["top"]
@@ -1487,50 +1510,52 @@ class Sprite:
     # ---------- 侦测模块 ----------
     def is_touch_edge(self):
         """
-        精准边界检测：判定角色的实际视觉边缘是否接触或越过 640*480 的舞台边界
+        精准边界检测：判定角色的实际视觉边缘是否接触或越过地图边界
         """
         # 1. 获取缩放和偏移后的真实包围盒 [left, top, right, bottom]
         rect = self._get_hitbox_rect()
         if not rect:
             return False
 
-        # 2. 舞台固定尺寸
-        STAGE_W = 640
-        STAGE_H = 480
-        # 重力地图的边界钳制会把越界精灵拉回边界内 0.05px，
+        # 2. 地图矩形边界（与物理钳制同一套边界，没有地图时退回 640×480 舞台）
+        bounds = _playable_bounds()
+        # 边界碰撞会把越界精灵拉回边界内 0.05px，
         # 只判 overflow 会永远 False——贴边（容差内）也算碰到
         EPS = 0.5
 
-        # 3. 任何一边接触或超出舞台，就返回 True
+        # 3. 任何一边接触或超出地图边界，就返回 True
         if (
-            rect[0] <= EPS  # 左边贴边/出界
-            or rect[2] >= STAGE_W - EPS  # 右边贴边/出界
-            or rect[1] <= EPS  # 上边贴边/出界
-            or rect[3] >= STAGE_H - EPS
-        ):  # 下边贴边/出界
+            rect[0] <= bounds["left"] + EPS  # 左边贴边/出界
+            or rect[2] >= bounds["right"] - EPS  # 右边贴边/出界
+            or rect[1] <= bounds["top"] + EPS  # 上边贴边/出界
+            or rect[3] >= bounds["bottom"] - EPS  # 下边贴边/出界
+        ):
             return True
 
         return False
 
     def is_out_side(self):
         """
-        完全出界检测：只有当角色整体（所有像素）都离开舞台时才返回 True
-        舞台尺寸固定为 640 * 480
+        完全出界检测：只有当角色整体（所有像素）都离开地图边界时才返回 True
         """
         # 获取当前精准包围盒 [left, top, right, bottom]
         rect = self._get_hitbox_rect()
         if not rect:
             return False
 
-        STAGE_W = 640
-        STAGE_H = 480
+        bounds = _playable_bounds()
 
         # 逻辑判断：
-        # rect[2] < 0: 右边缘比舞台左边还要小（在左侧完全出界）
-        # rect[0] > STAGE_W: 左边缘比舞台右边还要大（在右侧完全出界）
-        # rect[3] < 0: 下边缘比舞台顶边还要小（在上方完全出界）
-        # rect[1] > STAGE_H: 上边缘比舞台底边还要大（在下方完全出界）
-        if rect[2] < 0 or rect[0] > STAGE_W or rect[3] < 0 or rect[1] > STAGE_H:
+        # rect[2] < left: 右边缘比地图左边还要小（在左侧完全出界）
+        # rect[0] > right: 左边缘比地图右边还要大（在右侧完全出界）
+        # rect[3] < top: 下边缘比地图顶边还要小（在上方完全出界）
+        # rect[1] > bottom: 上边缘比地图底边还要大（在下方完全出界）
+        if (
+            rect[2] < bounds["left"]
+            or rect[0] > bounds["right"]
+            or rect[3] < bounds["top"]
+            or rect[1] > bounds["bottom"]
+        ):
             return True
 
         return False
@@ -1821,6 +1846,10 @@ class Sprite:
         }
         # 自定义碰撞形状（可选）：无/非法 = 自动碰撞（内容包围盒）
         self._bsf_collision = manifest.get("collision")
+        # 禁用碰撞（可选）：True = 该角色不参与地形/边界物理阻挡，仍可被碰到检测
+        self._collision_disabled = bool(
+            manifest.get("collisionDisabled", manifest.get("collision_disabled", False))
+        )
         # 挂点（可选）：名字 → {x, y}（画布坐标）；帧级覆盖在 frames[i].markers
         self._bsf_markers = manifest.get("markers") or {}
         self._bsf_clips = {
@@ -2961,6 +2990,11 @@ def load_map(map_name):
             "height": save_data["height"],
             "tile_size": save_data.get("tileSize", save_data.get("tile_size", 16)),
             "gravity": save_data.get("gravity", False),
+            # 边界碰撞：勾选后角色被地图像素矩形挡住，不能离开可玩区域
+            # 旧存档没有该字段时沿用重力地图原来的行为（重力=钳制）
+            "boundaryCollision": bool(
+                save_data.get("boundaryCollision", save_data.get("gravity", False))
+            ),
             "layers": layers,
             "tile_sets": tilesets,
             # 地图相机设置（属性面板里的相机跟随/偏移/平滑/边界限制）
@@ -2973,6 +3007,10 @@ def load_map(map_name):
         tile_size = _CURRENT_MAP.get("tile_size", 16)
         map_width_px = _CURRENT_MAP["width"] * tile_size
         map_height_px = _CURRENT_MAP["height"] * tile_size
+
+        # 用户坐标原点跟随地图高度：y=0 永远在地图底部。
+        # 单屏地图（高 480）与旧行为完全一致；更高的地图不再出现负 y。
+        set_user_origin_y(map_height_px)
 
         # 计算地图的世界像素边界（world_bounds）
         all_tile_positions = []
@@ -3120,6 +3158,8 @@ def _clear_map():
     _MAP_DIR = None
     _MAP_SPRITES = {}
     _RENDERED_TILES.clear()
+    # 卸载地图后用户坐标原点退回单屏舞台
+    set_user_origin_y(_SCREEN_HEIGHT)
 
 
 def _handle_physics_collision():
@@ -3132,6 +3172,12 @@ def _handle_physics_collision():
     # 遍历所有精灵
     for sprite in _SPRITES.values():
         if sprite._is_deleted:
+            continue
+
+        # 禁用碰撞：不参与重力、落地与墙体修正（照常渲染与按代码移动）
+        if sprite._collision_disabled:
+            sprite._on_ground = False
+            sprite._update_transform()
             continue
 
         if sprite._drop_through:

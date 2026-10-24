@@ -109,23 +109,23 @@ if hero.is_touch("地面"):
 |------|------|------|
 | `target` | 精灵/字符串 | 另一个精灵、mouse 对象或标签字符串 |
 
-### is_touch_edge — 是否碰到画面边缘
+### is_touch_edge — 是否碰到地图边界
 
 ```python
 if hero.is_touch_edge():
-    print("碰到画面边缘了！")
+    print("碰到地图边界了！")
 ```
 
 只要有一边碰到就返回 True。
 
-### is_out_side — 是否完全在画面外
+### is_out_side — 是否完全在地图外
 
 ```python
 if hero.is_out_side():
-    print("角色完全在画面外面")
+    print("角色完全在地图外面")
 ```
 
-只有整个角色都在画面外才返回 True。
+只有整个角色都在地图外才返回 True。
 
 ### is_touch_group — 组碰撞检测
 

@@ -50,7 +50,7 @@ const imageOpacityPercent = computed(() =>
 )
 
 // ====== 图像变换（位置 / 旋转 / 缩放 / 不透明度） ======
-// 位置与旋转按用户坐标显示：原点在画面左下角、y 向上为正、角度逆时针为正；
+// 位置与旋转按用户坐标显示：原点在地图左下角、y 向上为正、角度逆时针为正；
 // 内部仍以世界坐标（左上原点、y 向下）存储，只在显示/输入时换算。
 const selectedImage = computed(() => mapStore.selectedImage)
 const imagePosX = computed(() => Math.round(toUserX(selectedImage.value?.position?.[0] ?? 0)))
@@ -432,6 +432,19 @@ function onCollisionEnabledChange(enabled: boolean) {
               :checked="mapStore.mapData.gravity"
               :disabled="disabled"
               @change="mapStore.updateMapProperty('gravity', ($event.target as HTMLInputElement).checked)"
+            />
+            <span class="att-checkbox-text">启用</span>
+          </label>
+        </div>
+
+        <div class="att-row">
+          <span class="att-label">边界碰撞</span>
+          <label class="att-checkbox">
+            <input
+              type="checkbox"
+              :checked="mapStore.mapData.boundaryCollision"
+              :disabled="disabled"
+              @change="mapStore.updateMapProperty('boundaryCollision', ($event.target as HTMLInputElement).checked)"
             />
             <span class="att-checkbox-text">启用</span>
           </label>

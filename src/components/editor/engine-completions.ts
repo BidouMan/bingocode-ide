@@ -29,11 +29,11 @@ const spriteMethods: EngineCompletionItem[] = [
   { label: 'goto', kind: CompletionItemKind.Method, insertText: 'goto', documentation: '移到指定坐标；也接受标记引用或另一个角色\n\ngoto(320, 240)\ngoto(player.get_marker())  # 武器对准角色的「标记」\ngoto(enemy)  # 对齐另一个角色的注册点', detail: 'goto(x, y)' },
   { label: 'set_xy', kind: CompletionItemKind.Method, insertText: 'set_xy', documentation: '设置坐标（带碰撞检测）\n\nset_xy(x, y)', detail: 'set_xy(x, y)' },
   { label: 'set_x', kind: CompletionItemKind.Method, insertText: 'set_x', documentation: '设置水平位置；落点与墙重叠时会被推到最近一侧（不检查中间路径）\n\nset_x(x)', detail: 'set_x(x)' },
-  { label: 'set_y', kind: CompletionItemKind.Method, insertText: 'set_y', documentation: '设置垂直位置（y 向上为正，画面左下角为 0）；落点与墙重叠时会被推到最近一侧\n\nset_y(y)', detail: 'set_y(y)' },
+  { label: 'set_y', kind: CompletionItemKind.Method, insertText: 'set_y', documentation: '设置垂直位置（y 向上为正，地图左下角为 0）；落点与墙重叠时会被推到最近一侧\n\nset_y(y)', detail: 'set_y(y)' },
   { label: 'add_x', kind: CompletionItemKind.Method, insertText: 'add_x', documentation: '将 x 坐标增加（或减少）一定数值；改完做一次碰撞修正，小步会被墙挡住，一次移动太远可能穿墙\n\nadd_x(delta_x)', detail: 'add_x(delta_x)' },
   { label: 'add_y', kind: CompletionItemKind.Method, insertText: 'add_y', documentation: '将 y 坐标增加（或减少）一定数值（正数向上）；改完做一次碰撞修正，小步会被墙挡住\n\nadd_y(delta_y)', detail: 'add_y(delta_y)' },
   { label: 'move', kind: CompletionItemKind.Method, insertText: 'move', documentation: '朝着当前 angle 方向移动 distance 像素\n\nmove(distance)', detail: 'move(distance)' },
-  { label: 'goto_rand', kind: CompletionItemKind.Method, insertText: 'goto_rand', documentation: '移到随机位置（0-640, 0-480）', detail: 'goto_rand()' },
+  { label: 'goto_rand', kind: CompletionItemKind.Method, insertText: 'goto_rand', documentation: '移到地图内的随机位置', detail: 'goto_rand()' },
   { label: 'set_speed', kind: CompletionItemKind.Method, insertText: 'set_speed', documentation: '设置持续速度，引擎每帧自动沿当前方向移动\n\nset_speed(speed)', detail: 'set_speed(speed)' },
 
   // 物理 / 平台跳跃
@@ -64,8 +64,8 @@ const spriteMethods: EngineCompletionItem[] = [
   { label: 'edge_bounce', kind: CompletionItemKind.Method, insertText: 'edge_bounce', documentation: '基于 Hitbox 的精准反弹，自动识别世界边界\n碰到边界时自动反转角度', detail: 'edge_bounce()' },
 
   // 感知 / 碰撞
-  { label: 'is_touch_edge', kind: CompletionItemKind.Method, insertText: 'is_touch_edge', documentation: '精准边界检测：判定角色的实际视觉边缘是否越过了舞台', detail: 'is_touch_edge() -> bool' },
-  { label: 'is_out_side', kind: CompletionItemKind.Method, insertText: 'is_out_side', documentation: '完全出界检测：只有当角色整体（所有像素）都离开舞台时才返回 True', detail: 'is_out_side() -> bool' },
+  { label: 'is_touch_edge', kind: CompletionItemKind.Method, insertText: 'is_touch_edge', documentation: '精准边界检测：判定角色的实际视觉边缘是否接触或越过地图边界', detail: 'is_touch_edge() -> bool' },
+  { label: 'is_out_side', kind: CompletionItemKind.Method, insertText: 'is_out_side', documentation: '完全出界检测：只有当角色整体（所有像素）都离开地图边界时才返回 True', detail: 'is_out_side() -> bool' },
   { label: 'is_touch', kind: CompletionItemKind.Method, insertText: 'is_touch', documentation: '判断是否碰到另一个 Sprite、鼠标或带有指定标签的图块\n\nis_touch(target)\ntarget 可以是 Sprite、mouse 或字符串（图块标签）', detail: 'is_touch(target) -> bool' },
   { label: 'is_touch_group', kind: CompletionItemKind.Method, insertText: 'is_touch_group', documentation: '判断是否撞到了某个组里的任意成员\n如果撞到了，返回那个成员；没撞到返回 None', detail: 'is_touch_group(group_name) -> Sprite or None' },
   { label: 'distance_to', kind: CompletionItemKind.Method, insertText: 'distance_to', documentation: '计算当前角色视觉中心点到目标（Sprite 或 mouse）的距离', detail: 'distance_to(target) -> float' },
@@ -84,7 +84,7 @@ const spriteMethods: EngineCompletionItem[] = [
 /** Sprite 属性（通过 . 触发时显示） */
 const spriteProperties: EngineCompletionItem[] = [
   { label: 'x', kind: CompletionItemKind.Property, insertText: 'x', documentation: '水平位置（默认 320，正数向右）', detail: 'float' },
-  { label: 'y', kind: CompletionItemKind.Property, insertText: 'y', documentation: '垂直位置（默认 240，正数向上，画面左下角为 0）', detail: 'float' },
+  { label: 'y', kind: CompletionItemKind.Property, insertText: 'y', documentation: '垂直位置（默认 240，正数向上，地图左下角为 0）', detail: 'float' },
   { label: 'pos', kind: CompletionItemKind.Property, insertText: 'pos', documentation: '一次性读取角色坐标 (x, y)，可直接拆包：x, y = hero.pos（只读）', detail: '(float, float)' },
   { label: 'angle', kind: CompletionItemKind.Property, insertText: 'angle', documentation: '朝向角度（度，逆时针为正：0=右 90=上 180=左 270=下）', detail: 'float' },
   { label: 'scale', kind: CompletionItemKind.Property, insertText: 'scale', documentation: '缩放比例（百分比，默认 100）', detail: 'float' },

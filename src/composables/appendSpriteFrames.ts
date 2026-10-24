@@ -340,8 +340,9 @@ async function rewriteBsfDir(
     sheet: 'sheet.png',
     canvas: meta.canvas,
     pivot: meta.pivot,
-    // 根级可选标注字段：统一碰撞 / 统一挂点（缺省不写）
+    // 根级可选标注字段：统一碰撞 / 禁用碰撞 / 统一挂点（缺省不写）
     ...(meta.collision ? { collision: meta.collision } : {}),
+    ...(meta.collisionDisabled ? { collisionDisabled: true } : {}),
     ...(meta.markers && Object.keys(meta.markers).length > 0 ? { markers: meta.markers } : {}),
     frames: packed.frames,
     clips: clips.length > 0

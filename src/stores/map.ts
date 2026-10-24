@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useMapEditorStore } from './mapEditor'
+import { setUserOriginY } from '../utils/coords'
 
 export interface TileData {
   collision: boolean
@@ -134,6 +135,8 @@ export interface MapData {
   height: number
   tileSize: number
   gravity: boolean
+  /** 边界碰撞：勾选后角色被地图矩形（地图尺寸）挡住，不能离开可玩区域 */
+  boundaryCollision: boolean
   collisionType: string
   collisionEnabled: boolean
   // 地图级素材库：图层只引用素材，不再各自持有一份
@@ -165,12 +168,20 @@ export const useMapStore = defineStore('map', () => {
     height: 30,
     tileSize: 16,
     gravity: false,
+    boundaryCollision: false,
     collisionType: '图像',
     collisionEnabled: false,
     resources: [],
     layers: [],
     tileSets: [],
   })
+
+  // 用户坐标原点 = 地图底部：地图加载 / 改宽高 / 改图块尺寸时同步
+  watch(
+    () => ({ height: mapData.value.height, tileSize: mapData.value.tileSize }),
+    ({ height, tileSize }) => setUserOriginY(Math.max(1, height * tileSize)),
+    { immediate: true, flush: 'sync' },
+  )
 
   const mapEditor = useMapEditorStore()
   const activeLayerIndex = ref(-1)
@@ -291,6 +302,7 @@ export const useMapStore = defineStore('map', () => {
       height: 30,
       tileSize: 16,
       gravity: false,
+      boundaryCollision: false,
       collisionType: '图像',
       collisionEnabled: false,
       resources: [],

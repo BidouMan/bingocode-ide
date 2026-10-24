@@ -83,7 +83,7 @@ export function useMapViewport(options: MapViewportOptions) {
     if (axisX) { app.stage.removeChild(axisX); axisX.destroy() }
     if (axisY) { app.stage.removeChild(axisY); axisY.destroy() }
 
-    // 坐标轴按用户坐标画：x 轴在用户 y=0 处（世界 y=480，画面左下角），y 轴在 x=0 处
+    // 坐标轴按用户坐标画：x 轴在用户 y=0 处（世界 y=地图底部），y 轴在 x=0 处
     axisX = new PIXI.Graphics()
     axisX.moveTo(-100000, USER_ORIGIN_Y)
     axisX.lineTo(100000, USER_ORIGIN_Y)

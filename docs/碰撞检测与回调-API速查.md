@@ -7,8 +7,8 @@
 | `add_to_group("组名")` | 把角色加入组 | `enemy.add_to_group("enemies")` |
 | `is_touch(目标)` | 是否碰到某个角色 / 鼠标 | `hero.is_touch(enemy)`、`hero.is_touch(mouse)` |
 | `is_touch_group("组名")` | 是否碰到组里任意成员，返回那个成员 | `hit = bullet.is_touch_group("enemies")` |
-| `is_touch_edge()` | 是否碰到画面边缘（640×480） | `hero.is_touch_edge()` |
-| `is_out_side()` | 是否整个角色都在画面外 | `bullet.is_out_side()` |
+| `is_touch_edge()` | 是否碰到地图边界 | `hero.is_touch_edge()` |
+| `is_out_side()` | 是否整个角色都在地图外 | `bullet.is_out_side()` |
 | `on_touch_group("组名")` | 注册碰撞处理：碰到组员时由引擎自动执行 | `bullet.on_touch_group("enemies")` |
 
 ---

@@ -78,9 +78,10 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 7. jump() 只是施加向上的力，必须自己用 is_on_ground() 判断能否跳
 
 ## 画面基本信息
-- 画面尺寸：640 x 480 像素
-- 坐标原点在左下角：(0,0) 是左下角，(640,480) 是右上角，画面中心是 (320,240)
+- 窗口尺寸：640 x 480 像素
+- 坐标原点在地图左下角：(0,0) 是地图左下角，(地图宽, 地图高) 是右上角；单屏地图（640x480）时右上角就是 (640,480)
 - y 轴向上增大（向上移动 y 变大），x 轴向右增大
+- 鼠标坐标是屏幕坐标：以窗口左下角为 (0,0)，不随地图高度变化
 - 角度：0=朝右，90=朝上，180=朝左，270=朝下（逆时针）
 - while True 循环约每秒执行 60 次（60FPS）
 
@@ -89,7 +90,7 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 ### 精灵 Sprite
 - hero = Sprite("角色名") — 创建角色，角色名必须和资源面板中添加的角色文件夹名一致。初始位置在画面中央(320,240)，初始大小100%，朝向0度
 - hero.delete() — 从画面删除角色，删后不能再使用
-- hero.x, hero.y — 读取或设置位置（0~640, 0~480），赋值时自动检测碰撞
+- hero.x, hero.y — 读取或设置位置（0~地图宽度, 0~地图高度），赋值时自动检测碰撞
 - hero.pos — 一次性读取角色坐标 (x, y)，只能读取：x, y = hero.pos
 - hero.scale — 大小百分比，100=正常，200=两倍大，50=一半小（可直接赋值）
 - hero.angle — 朝向角度（可直接赋值）
@@ -108,8 +109,8 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 - hero.set_angle(度数) — 设置朝向角度
 - hero.look_at(target) — 自动转向面向 target（另一个 Sprite 或 mouse 对象）
 - hero.set_speed(速度) — 设置持续移动速度，之后每帧自动沿当前方向移动，写 0 停下
-- hero.edge_bounce() — 碰到画面边缘(640x480)自动反弹
-- hero.goto_rand() — 随机传送到画面内任意位置
+- hero.edge_bounce() — 碰到地图边界自动反弹
+- hero.goto_rand() — 随机传送到地图内任意位置
 
 ### 标记与挂载（仅 .bsf 角色有标记）
 - 标记是角色身上预先画好的锚点（在角色编辑器「标记」图层添加，默认名「标记」，新增自动编号「标记1」「标记2」…），用于把武器/道具挂到角色身上
@@ -131,8 +132,8 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 
 ### 侦测
 - hero.is_touch(target) — 碰撞检测。target 可以是：另一个 Sprite、mouse 对象、字符串标签。返回 True/False
-- hero.is_touch_edge() — 是否碰到画面边缘(640x480)
-- hero.is_out_side() — 是否整个角色都在画面外
+- hero.is_touch_edge() — 是否碰到地图边界
+- hero.is_out_side() — 是否整个角色都在地图外
 - hero.distance_to(target) — 返回到另一个 Sprite 或 mouse 的像素距离
 - bullet.is_touch_group("组名") — 检测子弹是否碰到组内成员，碰到返回那个角色，没碰到返回 None
 - hero.is_on_ground() — 是否真正站在地面上（由物理落地接触决定，上升中/从下方穿过跳板时为 False）；跳跃前用它判断

@@ -32,7 +32,7 @@ const projectStore = useProjectStore()
 
 const hasMaps = computed(() => resourceStore.maps.length > 0)
 
-/** 光标所在格子的左下角坐标（用户坐标：原点在画面左下角，y 向上为正） */
+/** 光标所在格子的左下角坐标（用户坐标：原点在地图左下角，y 向上为正） */
 const cursorCoordText = computed(() => {
   const cx = mapEditorStore.cursorX
   const cy = mapEditorStore.cursorY

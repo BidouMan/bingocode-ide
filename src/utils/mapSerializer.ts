@@ -7,6 +7,8 @@ export interface MapSaveData {
   height: number
   tileSize: number
   gravity: boolean
+  /** 边界碰撞：勾选后角色被地图矩形挡住；旧存档缺省时沿用 gravity */
+  boundaryCollision?: boolean
   collisionType: string
   collisionEnabled: boolean
   renderMode?: 'smooth' | 'pixelated'
@@ -102,6 +104,7 @@ export interface MapLoadData {
   height: number
   tileSize: number
   gravity: boolean
+  boundaryCollision: boolean
   collisionType: string
   collisionEnabled: boolean
   renderMode?: 'smooth' | 'pixelated'
@@ -271,6 +274,7 @@ export function serializeMap(mapData: any): MapSaveData {
     height: mapData.height,
     tileSize: mapData.tileSize,
     gravity: mapData.gravity,
+    boundaryCollision: mapData.boundaryCollision,
     collisionType: mapData.collisionType || '图像',
     collisionEnabled: mapData.collisionEnabled || false,
     resources: mapResources,
@@ -505,6 +509,8 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
     height: data.height,
     tileSize: data.tileSize,
     gravity: data.gravity,
+    // 旧存档没有该字段：沿用重力地图原来的钳制行为
+    boundaryCollision: data.boundaryCollision ?? data.gravity ?? false,
     collisionType: data.collisionType || '图像',
     collisionEnabled: data.collisionEnabled || false,
     resources,

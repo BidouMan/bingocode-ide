@@ -662,6 +662,16 @@ function resetCollisionToAuto() {
   scheduleSave()
 }
 
+/** 禁用碰撞：整角色不参与地形/边界物理阻挡（碰撞形状保留，重新勾选即恢复） */
+const collisionDisabled = computed(() => !!currentSprite.value?.bsf?.collisionDisabled)
+
+function onCollisionDisabledChange(e: Event) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  bsf.collisionDisabled = (e.target as HTMLInputElement).checked
+  scheduleSave()
+}
+
 /** 当前帧内容框（画布坐标）→ 自定义碰撞初值：与自动碰撞行为一致起步 */
 function frameContentCollision(): SpriteCollisionShape {
   const bsf = currentSprite.value!.bsf!
@@ -681,7 +691,12 @@ function activateAnnoLayer(layer: 'pivot' | 'collision' | 'marker') {
     const bsf = currentSprite.value?.bsf
     if (!bsf) return
     // 首次启用：以当前帧内容框初始化统一碰撞（行为与自动一致，用户在此基础上调）
-    if (!bsf.collision && !bsf.frames[annoFrameIndex.value]?.collision) {
+    // 已禁用碰撞时不写入形状数据，避免关闭状态反而产生无意义的碰撞体
+    if (
+      !bsf.collisionDisabled &&
+      !bsf.collision &&
+      !bsf.frames[annoFrameIndex.value]?.collision
+    ) {
       bsf.collision = frameContentCollision()
       scheduleSave()
     }
@@ -748,6 +763,15 @@ function collisionBBox(shape: SpriteCollisionShape): { x0: number; y0: number; x
 // ═══ 标记标注（锚点，武器/道具挂载用；统一值 + 帧级覆盖，与中心/碰撞同构） ═══
 
 const selMarkerName = ref<string | null>(null)
+
+/**
+ * 标记名称输入草稿：输入框必须用本地状态（v-model），
+ * 不能单向绑定 :value——动画播放时组件每帧重渲染会把用户正在删改的文字重置回原名
+ */
+const markerNameDraft = ref('')
+watch(selMarkerName, (name) => {
+  markerNameDraft.value = name ?? ''
+}, { immediate: true })
 
 /** 全部标记名（统一值 key ∪ 各帧覆盖 key——被删统一值但帧覆盖仍在的名字也要能清除） */
 const markerNames = computed(() => {
@@ -854,6 +878,24 @@ function renameMarker(name: string, newName: string) {
   }
   selMarkerName.value = trimmed
   scheduleSave()
+}
+
+/** 提交标记改名（失焦/回车）：空名或重名时回显原名，不生效 */
+function commitMarkerRename() {
+  const name = selMarkerName.value
+  if (!name) return
+  const trimmed = markerNameDraft.value.trim()
+  if (!trimmed || trimmed === name || markerNames.value.includes(trimmed)) {
+    markerNameDraft.value = name
+    return
+  }
+  renameMarker(name, trimmed)
+}
+
+/** 取消标记改名（Esc）：丢弃草稿并退出输入 */
+function cancelMarkerRename(e: KeyboardEvent) {
+  markerNameDraft.value = selMarkerName.value ?? ''
+  ;(e.target as HTMLInputElement).blur()
 }
 
 /** 删除标记：统一值 + 全部帧覆盖 */
@@ -1315,6 +1357,15 @@ onBeforeUnmount(() => {
               @click="annoScope = 'one'"
             >仅当前帧</button>
           </div>
+          <div class="props-sep"></div>
+          <label class="anno-checkbox" title="关闭后不参与物理：不会被墙壁、地面挡住，也不受重力下落">
+            <input
+              type="checkbox"
+              :checked="collisionDisabled"
+              @change="onCollisionDisabledChange"
+            />
+            <span>禁用碰撞</span>
+          </label>
         </template>
         <template v-else>
           <!-- 标记：画布点选操作 + 添加/改名/删除 + 坐标 + 作用域 -->
@@ -1323,9 +1374,11 @@ onBeforeUnmount(() => {
           <input
             v-if="selMarkerName"
             class="marker-rename-input"
-            :value="selMarkerName"
+            v-model="markerNameDraft"
             title="标记名称"
-            @change="renameMarker(selMarkerName!, ($event.target as HTMLInputElement).value)"
+            @blur="commitMarkerRename"
+            @keydown.enter="($event.target as HTMLInputElement).blur()"
+            @keydown.escape="cancelMarkerRename"
           />
           <button
             v-if="selMarkerName"
@@ -1438,6 +1491,7 @@ onBeforeUnmount(() => {
                 :canvas-h="currentSprite.bsf.canvas.h"
                 :shape="collisionDisplay"
                 :zoom="canvasZoom"
+                :disabled="collisionDisabled"
                 @update="onCollisionUpdate"
               />
               <!-- 标记手柄：标记.svg 图钉（图标配色独立于 svg 填充，mask 上色），画布点选/拖拽 -->
@@ -2059,6 +2113,24 @@ onBeforeUnmount(() => {
 .scope-seg button:hover { background: var(--bg-hover); }
 .scope-seg button.on { background: var(--accent); color: #10131a; font-weight: 600; }
 .scope-seg button.on-blue { background: #61afef; }
+/* 禁用碰撞开关（与地图编辑器碰撞层工具栏同款） */
+.anno-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  color: #9ca0a4;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.anno-checkbox input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: #528bff;
+  cursor: pointer;
+}
 .preset-btn {
   padding: 4px 10px;
   border-radius: 4px;
