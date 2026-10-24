@@ -18,6 +18,12 @@
           "badgeType": "object"
         },
         {
+          "label": "pos 角色坐标",
+          "code": "x, y = hero.pos",
+          "desc": "一次性读取角色的横坐标和纵坐标，只能读取不能赋值。",
+          "badgeType": "property"
+        },
+        {
           "label": "x 角色横坐标",
           "code": "hero.x = 100\nhero.x += 10",
           "desc": "角色在画面上的左右位置。可以直接赋值改位置,使用自增自减改位置，也可以读取当前值。",
@@ -29,6 +35,7 @@
           "desc": "角色在画面上的上下位置。可以直接赋值改位置,使用自增自减改位置，也可以读取当前值。",
           "badgeType": "property"
         },
+        
         {
           "label": "scale 角色的大小",
           "code": "hero.scale = 200\nhero.scale += 10",
@@ -246,17 +253,24 @@
           "badgeType": "object"
         },
         {
-          "label": "is_touch_group 碰到组了吗",
-          "code": "bullet.is_touch_group(\"enemies\")",
-          "desc": "将多个角色设为\"组\"，检查子弹是否碰撞其中任何一个角色。",
-          "badgeType": "object"
-        },
-        {
           "label": "is_on_ground 脚下有地面吗",
           "code": "hero.is_on_ground()",
           "desc": "判断角色是否真正站在地面上，一般用于跳跃判断。",
           "badgeType": "object"
         },
+        {
+          "label": "is_touch_group 碰到组了吗",
+          "code": "bullet.is_touch_group(\"enemies\")",
+          "desc": "将多个角色设为\"组\"，检查子弹是否碰撞其中任何一个角色。",
+          "badgeType": "object"
+        },
+              {
+          "label": "on_touch_group 碰到时自动执行",
+          "code": "enemy.add_to_group(\"enemies\")\nbullet.on_touch_group(\"enemies\")",
+          "desc": "先将敌人加入\"enemies\"组，然后子弹创建后，注册on_touch_group，当子弹碰到敌人时，引擎会自动把子弹和敌人一起删除。\n如果碰到敌人下个播放声音、加分、扣血等，就传入一个自己写好的函数。",
+          "badgeType": "object"
+        },
+        
         {
           "label": "key_down 按键按住了吗",
           "code": "key_down(\"space\")\nkey_down(\"up\")\nkey_down(\"a\")",
@@ -294,17 +308,25 @@
           "badgeType": "function"
         },
         {
+          "label": "mouse.pos 鼠标坐标",
+          "code": "x, y = mouse.pos",
+          "desc": "一次性获取鼠标的横坐标和纵坐标。",
+          "badgeType": "property"
+        },
+        {
           "label": "mouse.x 鼠标横坐标",
           "code": "print(mouse.x)",
-          "desc": "获取鼠标指针在画面上的左右位置。画面左边是 0，右边是 640。",
+          "desc": "获取鼠标指针在画面上的\"x坐标\"。",
           "badgeType": "property"
         },
         {
           "label": "mouse.y 鼠标纵坐标",
           "code": "print(mouse.y)",
-          "desc": "获取鼠标指针在画面上的上下位置。画面下边是 0，上边是 480，越往上数字越大。",
+          "desc": "获取鼠标指针在画面上的\"y坐标\"。",
           "badgeType": "property"
         }
+  
+        
       ]
     },
     {
@@ -314,7 +336,19 @@
         {
           "label": "while True 主循环",
           "code": "while True:\n    if key_down(\"right\"):\n        hero.move(3)",
-          "desc": "这是游戏的核心！用 while True 不断重复执行游戏逻辑，游戏就是这样\"跑\"起来的。",
+          "desc": "这是游戏的核心！\n用 while True 不断重复执行游戏逻辑，游戏就是这样\"跑\"起来的。",
+          "badgeType": "function"
+        },
+        {
+          "label": "for 计数循环",
+          "code": "for i in range(10):\n        hero.move(3)",
+          "desc": "计数循环，重置执行指定次数。",
+          "badgeType": "function"
+        },
+        {
+          "label": "if 条件判断",
+          "code": "if key_down(\"right\"):\n        hero.move(3)",
+          "desc": "根据条件判断执行不同的代码。",
           "badgeType": "function"
         },
         {
@@ -332,20 +366,14 @@
         {
           "label": "is_paused 暂停了吗",
           "code": "if is_paused():\n    resume()",
-          "desc": "检查游戏是不是暂停了。暂停了返回 True，正在玩返回 False。",
+          "desc": "检查游戏是不是暂停了，暂停后可以做某些操作。",
           "badgeType": "function"
         },
         {
           "label": "stop 结束游戏",
           "code": "stop()",
-          "desc": "结束游戏。游戏画面停住，程序退出 run 循环。可以用在\"游戏结束\"或者\"通关\"的时候。",
+          "desc": "结束游戏。游戏画面停住，程序退出 run 循环。\n可以用在\"游戏结束\"或者\"通关\"的时候。",
           "badgeType": "function"
-        },
-        {
-          "label": "on_hit 注册碰撞回调",
-          "code": "bullet.on_hit(\"enemies\",\n    lambda b, e: (b.delete(), e.delete()))",
-          "desc": "当角色碰到某个组里的成员时，自动执行你写的代码。比如子弹碰到敌人，两者都消失。",
-          "badgeType": "object"
         },
         {
           "label": "add_to_group 加入组",

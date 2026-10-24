@@ -90,6 +90,7 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 - hero = Sprite("角色名") — 创建角色，角色名必须和资源面板中添加的角色文件夹名一致。初始位置在画面中央(320,240)，初始大小100%，朝向0度
 - hero.delete() — 从画面删除角色，删后不能再使用
 - hero.x, hero.y — 读取或设置位置（0~640, 0~480），赋值时自动检测碰撞
+- hero.pos — 一次性读取角色坐标 (x, y)，只能读取：x, y = hero.pos
 - hero.scale — 大小百分比，100=正常，200=两倍大，50=一半小（可直接赋值）
 - hero.angle — 朝向角度（可直接赋值）
 - hero.layer — 层级数字，越大越在前面，默认0（写 1、2、3 就能盖在别的角色前面，写负数躲到后面）
@@ -142,13 +143,14 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 - mouse_pressed() — 鼠标左键按下那一帧
 - mouse_up() — 鼠标左键松开那一帧
 - mouse.x, mouse.y — 鼠标在画面上的坐标
+- mouse.pos — 一次性拿到鼠标坐标，可拆包：x, y = mouse.pos
 
 ### 控制
 - while True: — 游戏主循环，引擎每帧自动执行循环体内的代码
 - pause() / resume() — 暂停/继续游戏（角色停止移动但程序还在跑）
 - is_paused() — 检查是否暂停
 - stop() — 结束游戏，退出循环
-- hero.on_hit("组名", lambda b, e: 代码) — 注册碰撞回调，b=自己，e=碰到的角色
+- hero.on_touch_group("组名") — 注册碰撞：对方要先 add_to_group("组名")。对同一个角色注册一次即可（不要每帧调用）；每次新建的子弹需在创建后各注册一次。注册后碰到组内成员时，引擎自动把「自己」和「对方」一起删除，无需再写 is_touch_group 判断和 delete()。要自定义（加分/播声音/扣血）就传函数：on_touch_group("组名", 函数)，函数参数为 (自己, 碰到的角色)
 - hero.add_to_group("组名") — 把角色加入组（如 "enemies"、"bullets"）
 - broadcast("事件名") — 发送广播消息
 - receive("事件名", lambda: 代码) — 注册广播接收器，收到消息时执行代码。必须在广播之前注册

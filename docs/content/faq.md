@@ -174,14 +174,14 @@ random_int(1, 6)
 
 ```python
 # 普通函数
-def on_hit(bullet, enemy):
-    bullet.delete()
-    enemy.delete()
+def 子弹碰到敌人(子弹, 敌人):
+    子弹.delete()
+    敌人.delete()
 
-bullet.on_hit("enemies", on_hit)
+bullet.on_touch_group("enemies", 子弹碰到敌人)
 
 # 等价的 lambda 写法
-bullet.on_hit("enemies", lambda b, e: (b.delete(), e.delete()))
+bullet.on_touch_group("enemies", lambda b, e: (b.delete(), e.delete()))
 ```
 
 ## 其他问题

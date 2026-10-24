@@ -72,11 +72,14 @@ if mouse_up():
 
 单次检测：只在松开鼠标左键的那一瞬间返回 True。
 
-### mouse.x / mouse.y — 鼠标位置
+### mouse.x / mouse.y / mouse.pos — 鼠标位置
 
 ```python
 print(mouse.x)  # 鼠标 x 坐标 (0~640)
 print(mouse.y)  # 鼠标 y 坐标 (0~480，画面下边为 0，向上增大)
+
+# 一次性拿到两个坐标
+x, y = mouse.pos
 
 # 让角色看向鼠标
 hero.look_at(mouse)
@@ -164,30 +167,91 @@ if hero.distance_to(enemy) < 50:
 
 ## 碰撞回调
 
-### on_hit — 注册碰撞回调
+### on_touch_group — 碰到时自动执行
+
+`on_touch_group` 对**同一个角色**只需注册一次（不是每帧调用），引擎会每帧自动帮你检测，不需要你在 `while True` 里自己判断。如果子弹是每次发射新建的，就在新建后给这个新子弹注册一次。
+
+**最常见用法：只写组名，碰到后双方自动消失**
 
 ```python
-# 子弹碰到敌人时，两者都消失
-bullet.on_hit("enemies", lambda b, e: (b.delete(), e.delete()))
+# ① 先让敌人加入 "enemies" 组（不写这句，组是空的，永远不会触发）
+enemy.add_to_group("enemies")
+
+# ② 给子弹注册一次：以后碰到 enemies 组里的任何成员，
+#     引擎自动删除「子弹自己」和「那个敌人」，不用你写 delete()
+bullet.on_touch_group("enemies")
 ```
 
-当精灵碰到指定组的成员时，自动执行回调函数。
+注意：`on_touch_group("enemies")` **不传第二个参数**时，引擎默认执行的就是：
+
+```python
+bullet.delete()   # 自己消失
+enemy.delete()    # 碰到的那个敌人消失
+```
+
+**完整例子（可直接运行）**
+
+```python
+hero = Sprite("玩家")
+enemy = Sprite("敌人")
+enemy.add_to_group("enemies")   # 先让敌人进组
+
+bullet = None
+
+while True:
+    if key_down("left"):
+        hero.add_x(-5)
+    if key_down("right"):
+        hero.add_x(5)
+
+    # 按 Z 发射子弹
+    if key_pressed("z"):
+        bullet = Sprite("子弹")
+        bullet.goto(hero.x, hero.y)
+        bullet.set_speed(10)
+        bullet.on_touch_group("enemies")   # 注册：子弹碰到敌人 → 两者自动消失
+
+    # 子弹飞出画面后清理
+    if bullet and bullet.is_out_side():
+        bullet.delete()
+        bullet = None
+```
+
+对比一下：同样效果如果不用 `on_touch_group`，就得自己在 `while True` 里每帧写判断：
+
+```python
+if bullet and bullet.is_touch_group("enemies"):
+    hit = bullet.is_touch_group("enemies")
+    hit.delete()
+    bullet.delete()
+    bullet = None
+```
+
+**想自己决定碰到后做什么，就传一个函数**
+
+函数会收到两个参数：`自己`、`碰到的角色`。传入函数后，引擎**不再自动删除**，一切由你的函数决定：
+
+```python
+def 子弹碰到敌人(子弹, 敌人):
+    敌人.delete()
+    子弹.delete()
+    broadcast("得分+1")
+
+bullet.on_touch_group("enemies", 子弹碰到敌人)
+```
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
-| `group` | 字符串 | 组名 |
-| `callback` | 函数 | 回调函数，参数为 (自己, 碰到的精灵) |
+| `group` | 字符串 | 组名，对方必须先用 `add_to_group("组名")` 加入 |
+| `callback` | 函数（可选） | 碰到时执行，参数为 (自己, 碰到的精灵)；不写则默认双方自动消失 |
 
-回调函数可以是 lambda 或普通函数：
+#### 和 is_touch_group 的区别
 
-```python
-def on_bullet_hit(bullet, enemy):
-    bullet.delete()
-    enemy.delete()
-    broadcast("得分+1")
-
-bullet.on_hit("enemies", on_bullet_hit)
-```
+| | `is_touch_group("组名")` | `on_touch_group("组名")` |
+|---|---|---|
+| 谁来检测 | 你的 `while True` 里每帧主动调用 | 注册一次，引擎每帧自动检测 |
+| 结果 | 返回碰到的角色（没碰到返回 `None`） | 自动处理（默认双方删除，或执行你传入的函数） |
+| 适合场景 | 需要"碰到后按条件决定做什么"（拿金币、碰到敌人扣血） | 子弹/道具这类"碰到就自动处理、不用再管"的对象 |
 
 ## 完整示例
 

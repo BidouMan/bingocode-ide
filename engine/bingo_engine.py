@@ -408,6 +408,11 @@ class _MouseType:
         # 用户空间：y 向上为正
         return to_user_y(_MOUSE_STATE["y"])
 
+    @property
+    def pos(self):
+        """一次性获取鼠标坐标 (x, y)，可直接拆包：x, y = mouse.pos"""
+        return self.x, self.y
+
     def __repr__(self):
         return "mouse"
 
@@ -1176,9 +1181,17 @@ class Sprite:
         """设置持续速度，引擎每帧自动沿当前方向移动"""
         self._speed = speed
 
-    def on_hit(self, group, callback=None):
-        """注册碰撞回调。callback(bullet, other) 或默认双方删除"""
+    def on_touch_group(self, group, callback=None):
+        """碰到指定组的成员时自动处理（注册一次即可，引擎每帧自动检测）
+
+        - 不传 callback：碰到后默认双方都删除
+        - 传 callback：执行 callback(自己, 碰到的角色)，删不删由函数决定
+        """
         self._on_hit_callbacks.append((group, callback))
+
+    # 兼容旧项目代码，旧名不再出现在文档与补全中
+    def on_hit(self, group, callback=None):
+        return self.on_touch_group(group, callback)
 
     def broadcast(self, event_name):
         """发送广播（触发所有接收该事件的回调）"""
@@ -1685,6 +1698,11 @@ class Sprite:
     @y.setter
     def y(self, value):
         self.set_y(value)
+
+    @property
+    def pos(self):
+        """一次性获取角色坐标 (x, y)，可直接拆包：x, y = hero.pos（只读）"""
+        return self.x, self.y
 
     @property
     def vy(self):
@@ -3316,8 +3334,9 @@ def run():
 
         steps = 0
         while accumulator >= _PHYSICS_DT and steps < _MAX_PHYSICS_STEPS:
+            # 暂停时也要同步输入快照：用户代码需要靠按键检测来调用 resume()
+            _sync_input_frame()
             if not _PAUSED:
-                _sync_input_frame()
                 for sprite in _SPRITES.values():
                     if hasattr(sprite, "_is_transitioning") and sprite._is_transitioning:
                         source_state = sprite._source_animation
@@ -3536,6 +3555,11 @@ def start_game(project_dir=None, target_file=None):
     prev_time = time.perf_counter()
 
     while True:
+        # 用户可能用 `from bingo_engine import *` 拿到只设置 _STOPPED 的 stop()，
+        # 与 exec_globals 里抛 GameStop 的版本并存，两种都要能真正结束游戏
+        if _STOPPED:
+            return
+
         now = time.perf_counter()
         frame_time = min(now - prev_time, _MAX_FRAME_TIME)
         prev_time = now
@@ -3544,26 +3568,30 @@ def start_game(project_dir=None, target_file=None):
         # 物理步进
         steps = 0
         while accumulator >= _PHYSICS_DT and steps < _MAX_PHYSICS_STEPS:
+            # 暂停时也要同步输入快照：学生代码需要靠按键检测来调用 resume()
+            _sync_input_frame()
+
             if not _PAUSED:
-                _sync_input_frame()
                 # 动画更新
                 for sprite in _SPRITES.values():
                     if hasattr(sprite, "animation_state") and sprite.animation_state:
                         _update_sprite_animation(sprite)
 
-                # 执行所有 generator（每帧一次迭代）
-                for gen in list(_generators):
-                    try:
-                        next(gen)
-                    except StopIteration:
-                        _generators.remove(gen)
-                    except GameStop:
-                        _generators.clear()
-                        return
-                    except Exception as e:
-                        print(f"[错误] Generator 错误: {e}")
-                        _generators.remove(gen)
+            # 执行所有 generator（每帧一次迭代）
+            # 暂停时照常执行：文档约定「程序还在跑」，否则 resume() 永远不会被调用
+            for gen in list(_generators):
+                try:
+                    next(gen)
+                except StopIteration:
+                    _generators.remove(gen)
+                except GameStop:
+                    _generators.clear()
+                    return
+                except Exception as e:
+                    print(f"[错误] Generator 错误: {e}")
+                    _generators.remove(gen)
 
+            if not _PAUSED:
                 # 所有 generator 结束且无活跃行为时自动退出主循环，
                 # 让 Python 进程正常结束，IDE 才能收到 engine:finished 复位运行按钮
                 if not _generators and not _SAY_TIMERS:

@@ -75,6 +75,15 @@ hero.y = 200  # 移动到 y=200
 - 下边是 0，上边是 480（向上移动，y 变大）
 - 赋值时自动检测碰撞
 
+### pos — 一次性获取坐标（只读）
+
+```python
+x, y = hero.pos  # 一次拿到两个坐标
+```
+
+- 等价于 `hero.x` 和 `hero.y`
+- 只能读取；要改位置请用 `hero.x = ...`、`hero.y = ...` 或 `hero.goto(x, y)`
+
 ### scale — 大小
 
 ```python
@@ -406,18 +415,32 @@ enemy2.add_to_group("enemies")
 
 把精灵归到某个组里，方便批量管理。
 
-### on_hit — 碰撞回调
+### on_touch_group — 碰到时自动执行
+
+先让要被碰到的角色加入组，再给主动的一方注册一次：
 
 ```python
-bullet.on_hit("enemies", lambda b, e: (b.delete(), e.delete()))
+enemy.add_to_group("enemies")   # 敌人进组（不写这句永远不会触发）
+bullet.on_touch_group("enemies")        # 子弹碰到 enemies 组的人 → 双方自动消失
 ```
 
-当子弹碰到 "enemies" 组的成员时，自动执行回调函数。
+`on_touch_group("enemies")` 不传第二个参数时，引擎默认执行 `bullet.delete()` + `敌人.delete()`，不需要你再写判断。对同一个角色注册一次即可；如果子弹是每次新建的，就在新建后各注册一次。
+
+想自己决定碰到后发生什么，传入一个函数（参数为：自己、碰到的精灵）；传了函数后引擎不再自动删除：
+
+```python
+def 子弹碰到敌人(子弹, 敌人):
+    敌人.delete()
+    子弹.delete()
+    broadcast("得分+1")
+
+bullet.on_touch_group("enemies", 子弹碰到敌人)
+```
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
-| `group` | 字符串 | 组名 |
-| `callback` | 函数 | 回调函数，参数为 (自己, 碰到的精灵) |
+| `group` | 字符串 | 组名，对方必须先用 `add_to_group("组名")` 加入 |
+| `callback` | 函数（可选） | 碰到时执行；不写则默认双方自动消失 |
 
 ## 完整示例
 

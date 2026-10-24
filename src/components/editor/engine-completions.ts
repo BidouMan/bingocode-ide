@@ -73,7 +73,7 @@ const spriteMethods: EngineCompletionItem[] = [
 
   // 分组 / 事件
   { label: 'add_to_group', kind: CompletionItemKind.Method, insertText: 'add_to_group', documentation: '将角色归类，比如 "enemies", "bullets"\n\nadd_to_group(group_name)', detail: 'add_to_group(group_name)' },
-  { label: 'on_hit', kind: CompletionItemKind.Method, insertText: 'on_hit', documentation: '注册碰撞回调\n\non_hit("bullets", callback)\ncallback(bullet, other)', detail: 'on_hit(group, callback=None)' },
+  { label: 'on_touch_group', kind: CompletionItemKind.Method, insertText: 'on_touch_group', documentation: '注册碰撞处理（对方需先 add_to_group）\n\non_touch_group("enemies") 碰到组内成员时，引擎自动删除自己和对方\non_touch_group("enemies", 函数) 自定义处理，函数参数为 (自己, 碰到的角色)', detail: 'on_touch_group(group, callback=None)' },
   { label: 'broadcast', kind: CompletionItemKind.Method, insertText: 'broadcast', documentation: '发送广播（触发所有接收该事件的回调）\n\nbroadcast("事件名")', detail: 'broadcast(event_name)' },
 
   // 生命周期
@@ -84,6 +84,7 @@ const spriteMethods: EngineCompletionItem[] = [
 const spriteProperties: EngineCompletionItem[] = [
   { label: 'x', kind: CompletionItemKind.Property, insertText: 'x', documentation: '水平位置（默认 320，正数向右）', detail: 'float' },
   { label: 'y', kind: CompletionItemKind.Property, insertText: 'y', documentation: '垂直位置（默认 240，正数向上，画面左下角为 0）', detail: 'float' },
+  { label: 'pos', kind: CompletionItemKind.Property, insertText: 'pos', documentation: '一次性读取角色坐标 (x, y)，可直接拆包：x, y = hero.pos（只读）', detail: '(float, float)' },
   { label: 'angle', kind: CompletionItemKind.Property, insertText: 'angle', documentation: '朝向角度（度，逆时针为正：0=右 90=上 180=左 270=下）', detail: 'float' },
   { label: 'scale', kind: CompletionItemKind.Property, insertText: 'scale', documentation: '缩放比例（百分比，默认 100）', detail: 'float' },
   { label: 'layer', kind: CompletionItemKind.Property, insertText: 'layer', documentation: '图层顺序（越大越靠前）', detail: 'int' },
@@ -151,7 +152,7 @@ const globalFunctions: EngineCompletionItem[] = [
 
 /** 全局对象 */
 const globalObjects: EngineCompletionItem[] = [
-  { label: 'mouse', kind: CompletionItemKind.Variable, insertText: 'mouse', documentation: '全局鼠标对象\n\nmouse.x → 鼠标水平位置\nmouse.y → 鼠标垂直位置', detail: 'mouse object' },
+  { label: 'mouse', kind: CompletionItemKind.Variable, insertText: 'mouse', documentation: '全局鼠标对象\n\nmouse.x → 鼠标水平位置\nmouse.y → 鼠标垂直位置\nmouse.pos → (x, y) 元组，可拆包：x, y = mouse.pos', detail: 'mouse object' },
   { label: 'GameStop', kind: CompletionItemKind.Class, insertText: 'GameStop', documentation: '游戏停止异常\n由 stop_game() 抛出，用于中断 generator', detail: 'class GameStop(Exception)' },
 ]
 
@@ -159,6 +160,7 @@ const globalObjects: EngineCompletionItem[] = [
 const mouseProperties: EngineCompletionItem[] = [
   { label: 'x', kind: CompletionItemKind.Property, insertText: 'x', documentation: '鼠标水平位置（游戏坐标）', detail: 'float' },
   { label: 'y', kind: CompletionItemKind.Property, insertText: 'y', documentation: '鼠标垂直位置（画面左下角为 0，正数向上）', detail: 'float' },
+  { label: 'pos', kind: CompletionItemKind.Property, insertText: 'pos', documentation: '一次性获取鼠标坐标 (x, y)，可直接拆包：x, y = mouse.pos', detail: '(float, float)' },
 ]
 
 // ─── 汇总导出 ───
