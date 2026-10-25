@@ -1390,8 +1390,8 @@ function deleteSpriteFromContext(id: string) {
   resourceStore.removeItem(id, 'sprite')
   if (resourceStore.selectedSpriteId === id) resourceStore.selectedSpriteId = null
   spriteContextMenu.value.show = false
-  // 同步删除项目目录中的文件
-  if (item?.path) invoke('delete_path', { path: item.path }).catch(() => {})
+  // 同步删除项目目录中的文件（失败必须留痕：磁盘残留会让引擎按名字解析到已删除的旧角色）
+  if (item?.path) invoke('delete_path', { path: item.path }).catch(e => console.error('[MainLayout] 删除角色文件失败:', item.path, e))
 }
 
 function deleteMapFromContext(id: string) {
@@ -1401,8 +1401,8 @@ function deleteMapFromContext(id: string) {
     selectedResource.value = resourceStore.maps.length > 0 ? resourceStore.maps[0].id : null
   }
   mapContextMenu.value.show = false
-  // 同步删除项目目录中的文件
-  if (item?.path) invoke('delete_path', { path: item.path }).catch(() => {})
+  // 同步删除项目目录中的文件（失败必须留痕：磁盘残留会让引擎按名字解析到已删除的旧地图）
+  if (item?.path) invoke('delete_path', { path: item.path }).catch(e => console.error('[MainLayout] 删除地图文件失败:', item.path, e))
 }
 
 // 导出角色：.bgs/.bsf 目录 → 对应扩展名的精灵包；图片角色 → 原图片文件

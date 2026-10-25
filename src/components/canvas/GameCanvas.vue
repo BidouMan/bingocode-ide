@@ -1,14 +1,3 @@
-<script lang="ts">
-// 模块级共享缓存：MainLayout 同时挂着两个 GameCanvas 实例（预览窗 + 全屏 v-show 窗），
-// 若各实例自持缓存，同一文件会重复走 IPC 加载且渲染 store 的贴图计数器被翻倍登记，
-// 「加载资源中」覆盖层的进度与完成判定随之失真（表现为覆盖层随动画节奏闪烁）
-export const sharedTextureCache: Map<string, any> = new Map()
-export const sharedTilesetFrameCache: Map<string, Map<number, any>> = new Map()
-export const sharedFrameTextureCache: Map<string, any> = new Map()
-// 同一路径加载中的 Promise：同帧并发请求（两个实例 / 预载+首渲染）只算一次计数
-export const sharedInFlightTextures: Map<string, Promise<any>> = new Map()
-</script>
-
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
@@ -17,6 +6,17 @@ import { useEditorStore } from '../../stores/editor'
 import { useEngine } from '../../composables/useEngine'
 import { signalGameCanvasReady, resetGameCanvasReady } from '../../utils/gameCanvasReady'
 import { effectiveScaleMode } from '../../utils/renderMode'
+// 模块级共享缓存：MainLayout 同时挂着两个 GameCanvas 实例（预览窗 + 全屏 v-show 窗），
+// 若各实例自持缓存，同一文件会重复走 IPC 加载且渲染 store 的贴图计数器被翻倍登记，
+// 「加载资源中」覆盖层的进度与完成判定随之失真（表现为覆盖层随动画节奏闪烁）。
+// 运行开始由 useEngine.run() 调用 invalidateGameTextures() 统一清空。
+// frameTextureCache 的 key = sheet路径#x,y,w,h（.bsf UV 取帧，复用同一张 BaseTexture）
+import {
+  sharedTextureCache as textureCache,
+  sharedTilesetFrameCache as tilesetFrameCache,
+  sharedFrameTextureCache as frameTextureCache,
+  sharedInFlightTextures,
+} from '../../utils/gameTextures'
 
 const renderStore = useRenderStore()
 const editorStore = useEditorStore()
@@ -35,10 +35,6 @@ let tileDisplayObjects: Map<string, any> = new Map()
 let sayDisplayObjects: Map<string, any> = new Map()
 let drawTextDisplayObjects: Map<string, any> = new Map()
 let hitboxDisplayObjects: Map<string, any> = new Map()
-const textureCache = sharedTextureCache
-const tilesetFrameCache = sharedTilesetFrameCache
-// .bsf sheet 子纹理缓存：key = sheet路径#x,y,w,h（UV 取帧，复用同一张 BaseTexture）
-const frameTextureCache = sharedFrameTextureCache
 let gameContainer: any = null
 let tileLayerContainer: any = null
 let spriteContainer: any = null

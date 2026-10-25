@@ -8,6 +8,7 @@ import { useTerminalStore } from '../stores/terminal'
 import { useProjectStore } from '../stores/project'
 import { useResourceStore } from '../stores/resource'
 import { waitForGameCanvasReady } from '../utils/gameCanvasReady'
+import { invalidateGameTextures } from '../utils/gameTextures'
 import type { AnyEngineCommand } from '../types/engine'
 
 let unlisteners: (() => void)[] = []
@@ -434,6 +435,10 @@ export function useEngine() {
     await editorStore.saveAllModifiedTabs()
 
     renderStore.clearAll()
+    // 纹理缓存按文件路径做 key，而磁盘文件在两次运行间可能变化（角色改名顶替旧名、
+    // 删除后重建同名、重新上传同名文件、绘制保存覆盖原图），跨运行复用会渲染出
+    // 已删除旧资源的贴图。缓存只在单次运行内复用，运行开始一律清空重新加载。
+    invalidateGameTextures()
     renderStore.resetTextureLoading()
     terminalStore.clear()
     // 运行期间切到 python 模式：屏蔽后台 zsh 提示符（%）泄漏到控制台，
