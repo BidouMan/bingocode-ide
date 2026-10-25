@@ -264,6 +264,9 @@ export function useEngine() {
         return
       }
 
+      // 已停止（刚点停止、旧进程正在退出）：丢弃残留渲染指令，避免停止后画布被旧程序重新填满
+      if (!editorStore.isRunning) return
+
       // 游戏模式：需要解析 JSON 指令
       // Rust read_line 保留结尾 \n，split 后末尾的空串是分隔产物、不是用户输出的空行
       const hadTrailingNewline = data.endsWith('\n')
@@ -359,6 +362,8 @@ export function useEngine() {
           terminalStore.flushNow()
           terminalStore.resetInputState()
           editorStore.setRunning(false)
+          // 保留最后一帧画面：程序结束后画布继续显示结束时的画面
+          renderStore.resetTextureLoading()
           if (terminalStore.terminalMode === 'python') {
             terminalStore.terminalMode = 'shell'
           }
@@ -390,6 +395,10 @@ export function useEngine() {
   }
 
   async function run() {
+    // 再次点击运行 = 重新开始：先彻底停掉旧进程（杀进程 + 摘监听）。
+    // 不先停的话，启动准备阶段旧程序残留的渲染指令会追加进新场景，出现新旧角色同屏
+    if (editorStore.isRunning) await stop()
+
     // 等待项目初始化完成（onMounted 可能尚未完成）
     if (!projectStore.root) {
       await projectStore.initProject()
@@ -597,18 +606,25 @@ export function useEngine() {
     _stopping = true
     // 立即更新 UI，不等待 Rust 返回（防止 mutex 阻塞导致 UI 卡死）
     editorStore.setRunning(false)
+    // 先摘掉事件监听：否则旧进程收到 SIGTERM 前还会吐出几帧 JSON 渲染指令，
+    // 停止后的画布又被旧程序填充（表现为「程序早就关了，窗口还是那个程序」）
+    cleanup()
     // 手动停止时收回控制台面板（仅游戏模式；程序自然结束不收回，方便查看最后的输出）
     if (editorStore.isGameMode) {
       terminalStore.consoleVisible = false
     }
     terminalStore.flushNow()
+    // 停止后保留最后一帧画面（不清空渲染数据）：学生需要看停止时的画面。
+    // 新一轮运行由 run() 的 clearAll() + 场景代次清场保证不复用旧对象/旧纹理。
     renderStore.resetTextureLoading()
     terminalStore.resetInputState()
     if (terminalStore.terminalMode === 'python') {
       terminalStore.terminalMode = 'shell'
     }
-    // 发送停止命令到后端（不 await，后台执行）
-    invoke('stop_script').catch(() => {}).finally(() => { _stopping = false })
+    // 必须等 Rust 真正杀完旧进程再返回：点击运行时是「先停后启」，
+    // 若 stop_script 排在 run_script 之后执行，会把刚启动的新进程杀掉
+    try { await invoke('stop_script') } catch {}
+    _stopping = false
   }
 
   async function sendInput(data: string) {

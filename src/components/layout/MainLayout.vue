@@ -812,24 +812,20 @@ let _toggling = false
 let _lastToggleTime = 0
 const TOGGLE_COOLDOWN_MS = 400
 async function toggleRun() {
-  // 防抖 + 冷却：忽略连点，防止停止后立即重启导致 Rust 端 stop_script
-  // 和 run_script 竞态杀死新进程（小学生疯狂点击场景）
+  // 防抖 + 冷却：小学生狂点时只生效一次，避免反复杀进程/重启把界面拖垮
   const now = Date.now()
   if (_toggling || now - _lastToggleTime < TOGGLE_COOLDOWN_MS) return
   _toggling = true
   _lastToggleTime = now
   try {
-    // 正在运行 → 只停止，不重新启动
-    if (editorStore.isRunning) {
-      engine.stop()
-      return
-    }
     // 如果当前在角色/地图编辑器，自动切回代码模式（GameCanvas 只在代码模式下挂载）
     if (editorStore.activeEditorMode === 'sprite' || editorStore.activeEditorMode === 'map') {
       editorStore.setActiveEditorMode('code')
     }
     // 控制台不在此处强制弹出：引擎有打印信息时自动弹出（见 useEngine）
     await nextTick()
+    // 点击运行 = 重新开始：正在运行也直接重启。
+    // Rust 的 run_script / run_script_file 在启动前会先杀掉旧进程，不会出现两个程序同时跑。
     await engine.run()
   } finally {
     _toggling = false
@@ -2147,11 +2143,14 @@ function spriteDisplayName(name: string) {
           <span>保存</span>
         </button>
 
-        <!-- 运行/停止 -->
-        <button class="menu-btn" @click="toggleRun" v-tooltip="editorStore.isRunning ? '停止' : '运行'">
-          <img v-if="!editorStore.isRunning" :src="iconCodeRun" class="menu-icon" />
-          <img v-else :src="iconCodeStop" class="menu-icon" />
-          <span>{{ editorStore.isRunning ? '停止' : '运行' }}</span>
+        <!-- 运行/停止：运行按钮始终表示「开始/重新开始」，停止单独一个按钮 -->
+        <button class="menu-btn" @click="toggleRun" v-tooltip="'运行'">
+          <img :src="iconCodeRun" class="menu-icon" />
+          <span>运行</span>
+        </button>
+        <button v-if="editorStore.isRunning" class="menu-btn" @click="engine.stop()" v-tooltip="'停止'">
+          <img :src="iconCodeStop" class="menu-icon" />
+          <span>停止</span>
         </button>
 
         <!-- 格式化 -->

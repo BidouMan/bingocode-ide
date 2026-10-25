@@ -100,6 +100,10 @@ export const useRenderStore = defineStore('render', () => {
   const cameraUpdateTime = ref(0)
   const fps = ref(0)
   const isPaused = ref(false)
+  // 场景代次：每次清场（clearAll）自增，GameCanvas 据此在下一帧先销毁全部显示对象再同步新数据。
+  // 必须有这一层：新一次运行创建的角色 id 会与上一轮残留的显示对象撞号
+  // （引擎按 1、2、3 递增编号），直接复用旧对象会连旧纹理一起保留 → 渲染出错图。
+  const sceneEpoch = ref(0)
 
   // 调试工具状态
   const showFps = ref(false)
@@ -209,6 +213,8 @@ export const useRenderStore = defineStore('render', () => {
     showStats.value = false
     shakeIntensity.value = 0
     resetTextureLoading()
+    // 通知画布：下一帧先销毁全部显示对象再重建，避免跨运行复用旧对象/旧纹理
+    sceneEpoch.value++
   }
 
   function resetTextureLoading() {
@@ -329,6 +335,7 @@ export const useRenderStore = defineStore('render', () => {
     camera,
     fps,
     isPaused,
+    sceneEpoch,
     showFps,
     showCollision,
     showStats,

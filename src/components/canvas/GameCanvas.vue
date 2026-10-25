@@ -50,6 +50,8 @@ let autoScaleModes = new WeakMap<object, 'nearest' | 'linear'>()
 let resizeObserver: ResizeObserver | null = null
 let tilesSyncing = false
 let spritesSyncing = false
+// 已应用到的场景代次：与 renderStore.sceneEpoch 不一致时先整体清场（见 gameLoop）
+let appliedSceneEpoch = -1
 
 const LOGIC_W = 640
 const LOGIC_H = 480
@@ -124,6 +126,10 @@ function handleResize() {
     resizeTicking = false
     if (!app || !containerRef.value) return
     const vp = containerRef.value
+    // 全屏页/预览页用 v-show 隐藏时容器尺寸为 0：此时绝不能 resize 到 0×0，
+    // 否则 WebGL 帧缓冲变成 0 尺寸，重新显示时旧画面会残留在画布上（表现为
+    // 「最大化后窗口还是很久以前那个程序」）。等重新显示时 ResizeObserver 再触发。
+    if (vp.clientWidth === 0 || vp.clientHeight === 0) return
     app.renderer.resize(vp.clientWidth, vp.clientHeight)
     fitStage()
     app.renderer.render(app.stage)
@@ -133,6 +139,7 @@ function handleResize() {
 function fitStage() {
   if (!app || !containerRef.value) return
   const vp = containerRef.value
+  if (vp.clientWidth === 0 || vp.clientHeight === 0) return
   const scaleX = vp.clientWidth / LOGIC_W
   const scaleY = vp.clientHeight / LOGIC_H
   const scale = Math.min(scaleX, scaleY)
@@ -155,6 +162,13 @@ function applyRenderMode() {
   autoScaleModes = new WeakMap()
   // 已创建的精灵仍持有旧 scaleMode 的纹理：清掉 texKey 让下一帧重新取纹理
   for (const obj of spriteDisplayObjects.values()) obj._texKey = null
+  // 已放置的瓦片/图像图层：直接改纹理源的采样方式，不重建对象
+  // （重建要重新加载全部贴图，会闪烁且更耗性能）。auto 模式下 currentScaleMode 是 linear，
+  // 与新建瓦片一致，所以这里不需要额外处理
+  for (const obj of tileDisplayObjects.values()) {
+    const source = obj.texture?.source
+    if (source && source.scaleMode !== currentScaleMode) source.scaleMode = currentScaleMode
+  }
 }
 
 /**
@@ -428,6 +442,8 @@ async function syncSprites() {
 async function syncTiles() {
   if (!app || !tileLayerContainer || tilesSyncing) return
   tilesSyncing = true
+  // 记录本轮同步开始时的场景代次：等待贴图期间可能已开始新一轮运行（清场）
+  const syncEpoch = renderStore.sceneEpoch
 
   const currentTileIds = new Set(renderStore.tiles.keys())
 
@@ -465,6 +481,11 @@ async function syncTiles() {
       }
 
       if (displayObj) {
+        // 等待贴图期间场景已被清场（新一轮运行）：丢弃这个过期对象，避免撞号复用旧纹理
+        if (syncEpoch !== renderStore.sceneEpoch) {
+          displayObj.destroy()
+          continue
+        }
         tileLayerContainer.addChild(displayObj)
         tileDisplayObjects.set(tileData.id, displayObj)
       }
@@ -665,8 +686,36 @@ function syncHitboxes() {
   }
 }
 
+/**
+ * 销毁全部显示对象（清场专用）。
+ * 停止运行不清场（画布保留最后一帧），所以下一次运行时上一轮的显示对象还在；
+ * 引擎角色 id 是每进程从 1 递增，新角色可能与旧对象撞号，一旦复用就会沿用旧纹理。
+ * 因此清场时必须整体销毁，让下一帧全部重建。
+ */
+function resetDisplayObjects() {
+  const destroyAll = (objs: Map<string, any>, container: any) => {
+    for (const obj of objs.values()) {
+      if (container) container.removeChild(obj)
+      obj.destroy()
+    }
+    objs.clear()
+  }
+  destroyAll(spriteDisplayObjects, spriteContainer)
+  destroyAll(tileDisplayObjects, tileLayerContainer)
+  destroyAll(sayDisplayObjects, uiContainer)
+  destroyAll(drawTextDisplayObjects, uiContainer)
+  destroyAll(hitboxDisplayObjects, uiContainer)
+}
+
 function gameLoop() {
   if (!app) return
+
+  // 场景代次变化（新一轮运行 / 切换项目 / 应用启动）：
+  // 必须在同步精灵和瓦片之前销毁残留对象，否则撞号的旧对象会被直接复用
+  if (appliedSceneEpoch !== renderStore.sceneEpoch) {
+    appliedSceneEpoch = renderStore.sceneEpoch
+    resetDisplayObjects()
+  }
 
   // 更新帧耗时（仅在性能面板开启时计算，避免不必要的开销）
   if (renderStore.showStats) {
