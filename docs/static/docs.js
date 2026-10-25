@@ -1,6 +1,6 @@
 /**
  * BingoCode 帮助文档 · 页面脚本
- * 负责：侧边栏、搜索、代码复制、本页目录高亮。
+ * 负责：侧边栏、搜索、代码复制。
  */
 (function () {
   'use strict'
@@ -212,57 +212,6 @@
     doc.body.removeChild(area)
   }
 
-  /* ─── 本页目录高亮 ─── */
-  function initToc() {
-    var toc = doc.getElementById('toc')
-    if (!toc) return
-
-    var links = Array.prototype.slice.call(toc.querySelectorAll('a[href^="#"]'))
-    if (!links.length) return
-
-    var targets = links
-      .map(function (link) {
-        var id = decodeURIComponent(link.getAttribute('href').slice(1))
-        var heading = doc.getElementById(id)
-        return heading ? { link: link, heading: heading } : null
-      })
-      .filter(Boolean)
-
-    var current = null
-
-    function update() {
-      var offset = 96
-      var active = targets[0]
-
-      for (var i = 0; i < targets.length; i += 1) {
-        if (targets[i].heading.getBoundingClientRect().top <= offset) {
-          active = targets[i]
-        } else {
-          break
-        }
-      }
-
-      if (active && active.link !== current) {
-        if (current) current.classList.remove('active')
-        active.link.classList.add('active')
-        current = active.link
-      }
-    }
-
-    var scheduled = false
-    function onScroll() {
-      if (scheduled) return
-      scheduled = true
-      window.requestAnimationFrame(function () {
-        scheduled = false
-        update()
-      })
-    }
-
-    window.addEventListener('scroll', onScroll, { passive: true })
-    update()
-  }
-
   /* ─── 首页主界面截图：缺失时显示占位 ─── */
   function initHomeShot() {
     doc.querySelectorAll('.home-app-shot').forEach(function (img) {
@@ -318,7 +267,6 @@
     initNavGroups()
     initSearch()
     initCopyButtons()
-    initToc()
     initHomeShot()
     initDevReload()
   })

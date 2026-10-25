@@ -15,6 +15,7 @@
     "docs:dev": "tsx docs/dev.ts",
     "docs:preview": "open docs/dist/index.html",
     "docs:publish": "pnpm docs:build && rsync -rlt --delete --exclude '.DS_Store' --exclude '.trim-manifest.json' docs/dist/ \"/Volumes/XC_MAC/BingoCode帮助文档/\"",
+    "docs:publish:remote": "pnpm docs:build && SSHPASS=\"$KADAHUB_PASS\" sshpass -e rsync -rltz --delete --exclude '.DS_Store' --exclude '.trim-manifest.json' -e 'ssh -o StrictHostKeyChecking=accept-new' docs/dist/ root@8.133.171.188:/www/wwwroot/kadahub/help/ && SSHPASS=\"$KADAHUB_PASS\" sshpass -e ssh -o StrictHostKeyChecking=accept-new root@8.133.171.188 'chown -R www:www /www/wwwroot/kadahub/help'",
     "manual:build": "tsx manual/build.ts",
     "manual:serve": "tsx manual/build.ts --serve"
   },

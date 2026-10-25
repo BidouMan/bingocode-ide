@@ -28,7 +28,7 @@
   --inline-code-bg: #F2F4F7;
 
   --sidebar-width: 264px;
-  --content-width: 780px;
+  --content-width: 860px;
   --radius: 6px;
   --shadow-pop: 0 8px 24px rgba(20, 28, 45, 0.10);
 
@@ -296,62 +296,7 @@ body {
   padding: 44px 32px 96px;
 }
 
-.layout.has-toc {
-  max-width: calc(var(--content-width) + 264px);
-  display: grid;
-  grid-template-columns: minmax(0, var(--content-width)) 200px;
-  gap: 48px;
-  padding-right: 24px;
-}
-
 .content { min-width: 0; }
-
-/* ─── 本页目录 ─── */
-
-.toc { display: none; }
-
-.has-toc .toc {
-  display: block;
-  position: sticky;
-  top: 40px;
-  align-self: start;
-  max-height: calc(100vh - 80px);
-  overflow-y: auto;
-  padding-left: 16px;
-  border-left: 1px solid var(--border);
-  font-size: 12.5px;
-  line-height: 1.6;
-}
-
-.toc-title {
-  margin-bottom: 8px;
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.4px;
-  color: var(--text-muted);
-}
-
-.toc a {
-  display: block;
-  padding: 4px 0 4px 10px;
-  margin-left: -17px;
-  border-left: 2px solid transparent;
-  color: var(--text-muted);
-  text-decoration: none;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.toc a:hover { color: var(--text); }
-
-.toc a.active {
-  color: var(--accent);
-  border-left-color: var(--accent);
-  font-weight: 500;
-}
-
-.toc a.toc-h3 { padding-left: 24px; }
 
 /* ─── 正文排版 ─── */
 
@@ -1080,15 +1025,6 @@ tbody tr:nth-child(even) td { background: #FCFCFD; }
   z-index: 90;
 }
 
-@media (max-width: 1240px) {
-  .layout.has-toc {
-    display: block;
-    max-width: calc(var(--content-width) + 48px);
-    padding-right: 32px;
-  }
-  .has-toc .toc { display: none; }
-}
-
 @media (max-width: 1200px) {
   /* 空间不足时回退为上下构图 */
   .home-hero {
@@ -1114,7 +1050,7 @@ tbody tr:nth-child(even) td { background: #FCFCFD; }
   .sidebar.open { transform: translateX(0); box-shadow: var(--shadow-pop); }
   .sidebar-overlay.open { display: block; }
   .main { margin-left: 0; }
-  .layout, .layout.has-toc { padding: 68px 20px 80px; }
+  .layout { padding: 68px 20px 80px; }
   .layout.is-home { padding: 68px 20px 80px; }
   h1 { font-size: 24px; }
   h2 { font-size: 18px; }

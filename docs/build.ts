@@ -259,23 +259,6 @@ function addHeadingIds(html: string): { html: string; headings: Heading[] } {
   return { html: result, headings }
 }
 
-function renderToc(headings: Heading[]): string {
-  const entries = headings.filter((heading) => heading.level === 2 || heading.level === 3)
-  if (!entries.length) return ''
-
-  const links = entries
-    .map(
-      (heading) =>
-        `<a class="toc-h${heading.level}" href="#${encodeURIComponent(heading.id)}" title="${heading.text.replace(/"/g, '&quot;')}">${heading.text}</a>`
-    )
-    .join('\n')
-
-  return `<div class="toc-title">本页目录</div>
-    <nav aria-label="本页目录">
-      ${links}
-    </nav>`
-}
-
 // ─── 处理内容中的链接 ───
 
 // 源 Markdown 与产出的 HTML 相对目录深度一致，所以作者写的相对路径（同级 xx.md、
@@ -306,12 +289,9 @@ function buildPage(mdPath: string, template: string, searchIndex: string): void 
 
   let content = processLinks(processScreenshots(rawHtml, prefix))
 
-  // 首页不生成锚点和右侧目录，保持一个干净的开场
-  let headings: Heading[] = []
+  // 首页不生成锚点，保持一个干净的开场
   if (!isHome) {
-    const withIds = addHeadingIds(content)
-    content = withIds.html
-    headings = withIds.headings
+    content = addHeadingIds(content).html
   }
 
   const titleMatch =
@@ -320,14 +300,10 @@ function buildPage(mdPath: string, template: string, searchIndex: string): void 
     ? titleMatch[1].replace(/<[^>]+>/g, '').trim()
     : '帮助文档'
 
-  const toc = isHome ? '' : renderToc(headings)
-
   const fullHtml = template
     .replace(/\{\{PAGE_TITLE\}\}/g, pageTitle)
     .replace('{{SIDEBAR}}', generateSidebar(mdPath))
     .replace('{{CONTENT}}', content)
-    .replace('{{TOC}}', toc)
-    .replace('{{TOC_CLASS}}', toc ? ' has-toc' : '')
     .replace('{{HOME_CLASS}}', isHome ? ' is-home' : '')
     .replace('{{SEARCH_INDEX}}', searchIndex)
     .replace(/\{\{RELATIVE_PATH\}\}/g, prefix)
