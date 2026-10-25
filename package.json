@@ -1,7 +1,7 @@
 {
   "name": "bingo-ide",
   "private": true,
-  "version": "0.6.3",
+  "version": "0.7.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,10 @@
     "engine:setup": "cd engine && bash setup.sh",
     "engine:portable": "bash scripts/setup-portable-python.sh",
     "docs:build": "tsx docs/build.ts",
-    "docs:preview": "open docs/dist/index.html"
+    "docs:dev": "tsx docs/dev.ts",
+    "docs:preview": "open docs/dist/index.html",
+    "manual:build": "tsx manual/build.ts",
+    "manual:serve": "tsx manual/build.ts --serve"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

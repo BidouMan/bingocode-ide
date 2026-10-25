@@ -1,6 +1,6 @@
 [package]
 name = "bingo-ide"
-version = "0.6.1"
+version = "0.7.0"
 description = "BingoCode IDE - Game Development Environment"
 authors = ["BingoCode"]
 edition = "2021"
