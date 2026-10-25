@@ -26,7 +26,7 @@ export const SPRITE_CATEGORIES: Array<{ dir: string; label: string }> = [
   { dir: 'items', label: '道具' },
 ]
 
-const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']
+const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg']
 
 // 路径拼接：兼容 Windows（反斜杠）和 Unix（正斜杠）
 function joinPath(base: string, ...parts: string[]): string {

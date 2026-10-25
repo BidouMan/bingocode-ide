@@ -4,6 +4,7 @@ import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { useSpriteLibStore, SPRITE_CATEGORIES } from '../../stores/spriteLib'
 import { useResourceStore } from '../../stores/resource'
 import { useProjectStore } from '../../stores/project'
+import { svgToPngBlob } from '../../utils/imageConvert'
 
 const emit = defineEmits<{
   close: []
@@ -116,6 +117,28 @@ async function selectSprite(item: { name: string; filePath: string; type: string
       path: projectPath,
     })
     emit('imported', id as string, spriteName, item.filePath)
+  } else if (item.filePath.toLowerCase().endsWith('.svg')) {
+    // SVG：引擎（Pillow）不支持，导入时栅格化为 PNG（与上传流程一致）
+    const spriteName = resourceStore.nextSequentialName('sprite', '角色')
+    try {
+      const bytes = await invoke<number[]>('read_binary', { path: item.filePath })
+      const svgBlob = new Blob([new Uint8Array(bytes)], { type: 'image/svg+xml' })
+      const pngBlob = await svgToPngBlob(svgBlob)
+      const projectPath = `${projectRoot}/assets/sprites/${spriteName}.png`
+      await invoke('write_binary', {
+        path: projectPath,
+        data: Array.from(new Uint8Array(await pngBlob.arrayBuffer())),
+      })
+
+      const id = resourceStore.addItem({
+        name: spriteName,
+        type: 'sprite',
+        path: projectPath,
+      })
+      emit('imported', id as string, spriteName, item.filePath)
+    } catch (e) {
+      console.error('[SpriteLib] 导入 SVG 失败:', e)
+    }
   } else {
     // 常规图片文件：复制到项目目录（磁盘文件名与 store 名字一致，保留原扩展名供引擎查找）
     const spriteName = resourceStore.nextSequentialName('sprite', '角色')
