@@ -299,7 +299,15 @@ jobs:
             found { print }
           ' CHANGELOG_USER.md)
 
-          # 没找到对应版本时回退到通用说明
+          # 没找到对应版本时，沿用最新一条日志（静默修复版本不单独对外写说明）
+          if [ -z "$USER_NOTES" ]; then
+            USER_NOTES=$(awk '
+              /^## / { if (found) exit; found=1; next }
+              found { print }
+            ' CHANGELOG_USER.md)
+          fi
+
+          # 仍然为空（日志里一条版本章节都没有）时回退到通用说明
           if [ -z "$USER_NOTES" ]; then
             USER_NOTES="本次更新包含新功能、问题修复和体验改进，欢迎更新体验！"
           fi

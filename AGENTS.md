@@ -86,6 +86,7 @@ engine/
   - 未发版的 master 改动记入「未发布」小节，发版时移入正式版本号。
   - CI（`.github/workflows/release.yml`）会自动从 `CHANGELOG_USER.md` 提取当前版本的内容写入 `latest.json` 的 `notes` 字段，客户端检查更新弹窗直接展示该内容。因此日志的措辞直接决定用户看到的更新说明，务必认真写。
   - 同步更新 README 顶部「功能特性」中的当前版本号，并在 README「更新日志」一节刷新"当前最新版本"一句话摘要。
+  - 纯内部修复的静默版本可以不新增日志条目：CI（`release.yml` 的 awk）与客户端（`MainLayout.vue` 的 `extractChangelogNotes`）都会自动沿用最新一条日志，用户看到的仍是上一版的说明。
 
 ## Key quirks
 
@@ -100,6 +101,7 @@ engine/
 - **Event listeners scoped to canvas**: Keyboard/mouse events only on GameCanvas element, not window, to avoid blocking Monaco.
 - **Asset directory**: `engine/assets/` is the single source of truth for all game resources. Vite serves static files from here via `publicDir` config. No `public/` directory - everything goes through `engine/assets/`.
 - **Stale `_up_` resource copy (dev)**: `src-tauri/target/debug/_up_/engine/` is Tauri's incremental resource copy — it does NOT remove deleted files, so reorganizing `engine/assets/` leaves stale dirs behind and `get_engine_assets_dir`/`resolve_engine_env` used to hit them first. Fixed: both now prefer the source tree (cwd upward search) under `debug_assertions`; packaged builds unchanged. If dev behavior looks stale after a reorg, `rm -rf src-tauri/target/debug/_up_`.
+- **更新检查必须走 Tauri 更新插件 `check()`**: 请求由 Rust 侧发出，不受网页跨域限制。**绝不能用网页 `fetch()` 去取 GitHub 上的 `latest.json`** —— GitHub Release 资源的 302 跳转链路不带 `Access-Control-Allow-Origin`，正式包里 fetch 必定失败并报「无法获取更新信息」，而 dev 模式因为另走了内置日志分支看不到这个坑。已是最新版时弹窗里的更新说明读打包进前端的 `CHANGELOG_USER.md`（`?raw` 导入），离线可用。
 - **Map format**: JSON with base64+zlib compressed tile data. `.bgm` files are zips containing `map.json` + `thumbnail.png`. No binary format.
 - **Default project directory**: `~/BingoCodeIDE/Projects/default/` - cleaned on startup, stores user-created sprites and maps.
 
