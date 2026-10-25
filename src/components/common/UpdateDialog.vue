@@ -18,6 +18,7 @@ const {
 const showDialog = ref(false)
 const dialogMode = ref<'update' | 'none' | 'error' | 'download-error' | 'install-done'>('update')
 const errorMessage = ref('')
+const isLatestHint = ref(false) // 已是最新版时点击立即更新的提示
 const skippedVersion = localStorage.getItem('skippedVersion')
 const RELEASE_PAGE = 'https://github.com/BidouMan/bingocode-ide/releases/latest'
 
@@ -29,15 +30,26 @@ const manualDownloadUrl = computed(() => {
   return `https://ghfast.top/https://github.com/BidouMan/bingocode-ide/releases/download/v${ver}/${file}`
 })
 
-// 更新日志接口 - 未来可从服务器获取
-function getUpdateNotes(version: string): string[] {
-  // TODO: 从服务器获取更新日志
-  // 目前使用静态数据
-  const notes: Record<string, string[]> = {
-    // '0.6.0': ['新增应用自动更新功能', '优化控制台日志输出', '清理无用内置资源'],
+// 解析 latest.json 返回的用户向更新说明（CHANGELOG_USER.md 格式：### 分组 / - 条目）
+type NoteLine = { type: 'title' | 'bullet' | 'text'; text: string }
+const parsedNotes = computed<NoteLine[]>(() => {
+  const raw = updateInfo.value?.notes?.trim()
+  if (!raw) return []
+  const lines = raw.split('\n')
+  const result: NoteLine[] = []
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    if (trimmed.startsWith('### ')) {
+      result.push({ type: 'title', text: trimmed.slice(4) })
+    } else if (trimmed.startsWith('- ')) {
+      result.push({ type: 'bullet', text: trimmed.slice(2) })
+    } else {
+      result.push({ type: 'text', text: trimmed })
+    }
   }
-  return notes[version] || ['包含 bug 修复和性能优化']
-}
+  return result
+})
 
 // 处理手动检查更新事件
 function handleUpdateAvailable(event: Event) {
@@ -57,7 +69,14 @@ function handleUpdateAvailable(event: Event) {
   }
 }
 
-function handleUpdateNone() {
+function handleUpdateNone(event: Event) {
+  const customEvent = event as CustomEvent
+  const detail = customEvent.detail || {}
+  updateInfo.value = {
+    version: detail.version || '未知',
+    notes: detail.notes || '',
+  }
+  isLatestHint.value = false
   dialogMode.value = 'none'
   showDialog.value = true
 }
@@ -83,6 +102,7 @@ onBeforeUnmount(() => {
 
 function closeDialog() {
   showDialog.value = false
+  isLatestHint.value = false
   emit('close')
 }
 
@@ -113,6 +133,10 @@ function retryUpdate() {
   dialogMode.value = 'update'
 }
 
+function handleLatestClick() {
+  isLatestHint.value = true
+}
+
 async function openManualDownload() {
   try {
     await open(manualDownloadUrl.value)
@@ -140,16 +164,15 @@ async function openReleasePage() {
           </div>
           <div class="update-body">
             <div class="update-version">Version {{ updateInfo?.version }}</div>
-            <div class="update-notes">
-              <template v-if="getUpdateNotes(updateInfo?.version || '').length > 0">
-                <div v-for="(note, index) in getUpdateNotes(updateInfo?.version || '')" :key="index" class="update-note-item">
-                  {{ note }}
-                </div>
-              </template>
-              <template v-else>
-                <div class="update-note-item">{{ updateInfo?.notes || '包含 bug 修复和性能优化' }}</div>
+            <div class="update-notes" v-if="parsedNotes.length > 0">
+              <template v-for="(item, index) in parsedNotes" :key="index">
+                <div v-if="item.type === 'title'" class="update-note-title">{{ item.text }}</div>
+                <div v-else-if="item.type === 'bullet'" class="update-note-item">{{ item.text }}</div>
+                <div v-else class="update-note-text">{{ item.text }}</div>
               </template>
             </div>
+            <div v-else class="update-note-item">本次更新包含新功能、问题修复和体验改进，欢迎更新体验！</div>
+            <button class="update-link" @click="openReleasePage">查看完整更新日志 →</button>
           </div>
           <div v-if="isDownloading" class="update-progress-wrapper">
             <div class="update-progress">
@@ -178,17 +201,32 @@ async function openReleasePage() {
           </div>
         </template>
 
-        <!-- 无更新 -->
+        <!-- 无更新（已是最新版，仍展示当前版本的更新内容） -->
         <template v-else-if="dialogMode === 'none'">
           <div class="update-header">
-            <span class="update-title">检查更新</span>
+            <span class="update-title">最新版本</span>
             <button class="update-close" @click="closeDialog">×</button>
           </div>
           <div class="update-body">
-            <div class="update-message">当前已是最新版本</div>
+            <div class="update-version">Version {{ updateInfo?.version }}</div>
+            <div class="update-notes" v-if="parsedNotes.length > 0">
+              <template v-for="(item, index) in parsedNotes" :key="index">
+                <div v-if="item.type === 'title'" class="update-note-title">{{ item.text }}</div>
+                <div v-else-if="item.type === 'bullet'" class="update-note-item">{{ item.text }}</div>
+                <div v-else class="update-note-text">{{ item.text }}</div>
+              </template>
+            </div>
+            <div v-else class="update-note-item">暂无更新说明</div>
+            <button class="update-link" @click="openReleasePage">查看完整更新日志 →</button>
           </div>
-          <div class="update-footer update-footer-center">
-            <button class="update-btn update-btn-later" @click="closeDialog">确定</button>
+          <div v-if="isLatestHint" class="update-progress-wrapper">
+            <div class="update-status update-status-done">当前已是最新版本</div>
+          </div>
+          <div v-else class="update-footer">
+            <button class="update-btn update-btn-skip" @click="closeDialog">关闭</button>
+            <div class="update-footer-right">
+              <button class="update-btn update-btn-install" @click="handleLatestClick">立即更新</button>
+            </div>
           </div>
         </template>
 
@@ -260,8 +298,11 @@ async function openReleasePage() {
   background: #1a1b26;
   border: 1px solid #3b4261;
   border-radius: 8px;
-  width: 340px;
+  width: 640px;
+  max-height: 65vh;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .update-header {
@@ -294,6 +335,9 @@ async function openReleasePage() {
 
 .update-body {
   padding: 16px 14px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .update-version {
@@ -309,14 +353,50 @@ async function openReleasePage() {
   line-height: 1.6;
 }
 
+.update-note-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #c0caf5;
+  margin-top: 10px;
+  margin-bottom: 4px;
+}
+
+.update-note-title:first-child {
+  margin-top: 0;
+}
+
 .update-note-item {
-  padding: 2px 0;
+  padding: 2px 0 2px 14px;
+  position: relative;
 }
 
 .update-note-item::before {
   content: '•';
   color: #565f89;
-  margin-right: 6px;
+  position: absolute;
+  left: 0;
+}
+
+.update-note-text {
+  padding: 2px 0;
+  color: #a9b1d6;
+}
+
+.update-link {
+  display: block;
+  margin-top: 12px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: #7aa2f7;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.update-link:hover {
+  color: #89b4fa;
+  text-decoration: underline;
 }
 
 .update-message {
@@ -339,6 +419,7 @@ async function openReleasePage() {
 
 .update-progress-wrapper {
   padding: 0 14px 8px;
+  flex-shrink: 0;
 }
 
 .update-status {
@@ -385,6 +466,7 @@ async function openReleasePage() {
   padding: 10px 14px;
   justify-content: space-between;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .update-footer-center {

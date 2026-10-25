@@ -597,15 +597,52 @@ async function checkUpdate() {
   closeSettingsMenu()
   try {
     const { check } = await import('@tauri-apps/plugin-updater')
-    const update = await check()
+    let update = await check()
+    // 开发预览：无更新时读取 CHANGELOG_USER.md 的「未发布」章节，方便随时预览更新日志效果
+    if (!update && import.meta.env.DEV) {
+      try {
+        const mod = await import('../../../CHANGELOG_USER.md?raw')
+        const content = mod.default
+        const m = content.match(/##\s*未发布\s*\n([\s\S]*?)(?=\n##\s|\s*$)/)
+        const body = m ? m[1].trim() : ''
+        if (body) {
+          update = { version: '未发布', body }
+        }
+      } catch { /* 文件不存在或读取失败时忽略 */ }
+    }
     if (update) {
       hasUpdate.value = true
       // 发现更新，触发 UpdateDialog 显示
       window.dispatchEvent(new CustomEvent('app-update-available', { detail: update }))
     } else {
       hasUpdate.value = false
-      // 没有更新，触发 UpdateDialog 显示提示
-      window.dispatchEvent(new CustomEvent('app-update-none'))
+      // 已是最新版：从 latest.json 取当前版本的更新说明，一并展示给用户
+      let currentVersion = ''
+      let currentNotes = ''
+      try {
+        const { getVersion } = await import('@tauri-apps/api/app')
+        currentVersion = await getVersion()
+      } catch { /* ignore */ }
+      try {
+        const endpoints = [
+          'https://ghfast.top/https://github.com/BidouMan/bingocode-ide/releases/latest/download/latest.json',
+          'https://github.com/BidouMan/bingocode-ide/releases/latest/download/latest.json',
+        ]
+        for (const url of endpoints) {
+          try {
+            const res = await fetch(url)
+            if (res.ok) {
+              const json = await res.json()
+              currentVersion = currentVersion || json.version || ''
+              currentNotes = json.notes || ''
+              break
+            }
+          } catch { /* try next endpoint */ }
+        }
+      } catch { /* ignore fetch errors */ }
+      window.dispatchEvent(new CustomEvent('app-update-none', {
+        detail: { version: currentVersion, notes: currentNotes },
+      }))
     }
   } catch (e: unknown) {
     const errorMsg = e instanceof Error ? e.message : String(e)
@@ -914,6 +951,7 @@ async function onCreateMap() {
     tileSize: 16,
     gravity: false,
     boundaryCollision: true,
+    stopOnSlope: true,
     collisionType: '图像',
     collisionEnabled: false,
     resources: [],
@@ -1050,6 +1088,7 @@ async function createImageMapProject(fileName: string, opts: { bytes?: number[];
     tileSize: 16,
     gravity: false,
     boundaryCollision: true,
+    stopOnSlope: true,
     collisionType: '图像',
     collisionEnabled: false,
     resources: [imageResource],

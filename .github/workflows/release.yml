@@ -291,10 +291,25 @@ jobs:
             echo "⚠️ Windows: 未找到更新包或签名"
           fi
 
+          # 从 CHANGELOG_USER.md 提取当前版本的用户向更新说明（无技术术语）
+          # 匹配 "## vX.Y.Z" 开头到下一个 "## " 之间的内容
+          USER_NOTES=$(awk -v ver="## v${VERSION}" '
+            $0 ~ "^"ver { found=1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG_USER.md)
+
+          # 没找到对应版本时回退到通用说明
+          if [ -z "$USER_NOTES" ]; then
+            USER_NOTES="本次更新包含新功能、问题修复和体验改进，欢迎更新体验！"
+          fi
+
+          echo "✅ 已提取用户向更新说明（字数: ${#USER_NOTES}）"
+
           # 生成 latest.json
           jq -n \
             --arg version "v${VERSION}" \
-            --arg notes "Version ${VERSION}" \
+            --arg notes "$USER_NOTES" \
             --arg pubkey "${PUBKEY}" \
             --argjson platforms "$PLATFORMS_JSON" \
             '{

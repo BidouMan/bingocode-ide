@@ -81,7 +81,12 @@ engine/
 - **Comments and some variable names are in Chinese** — do not change
 - **Respond to user in Chinese**
 - **Cross-platform safety (Mac + Windows)**: This project is a dual-platform (macOS + Windows) desktop app. When fixing Windows-specific bugs, NEVER break macOS functionality. Always check if a change uses platform-specific code paths before modifying. If the fix requires platform branching, use `#[cfg(target_os = "windows")]` / `#[cfg(target_os = "macos")]` in Rust, or `process.platform` checks in TypeScript. When in doubt, preserve the existing Mac behavior and only add Windows-specific handling.
-- **每次打包发版必须更新 CHANGELOG.md**：打 tag 发布前，在根目录 `CHANGELOG.md` 的「更新日志」中为该版本号添加条目（最新在前），按 **新增 / 修复 / 优化 / 资源** 分类写清新功能与修复的 bug。未发版的 master 改动记入「未发布」小节，发版时移入正式版本号。同步更新 README 顶部「功能特性」中的当前版本号，并在 README「更新日志」一节刷新"当前最新版本"一句话摘要。
+- **每次打包发版必须更新两份更新日志**：
+  - `CHANGELOG.md`（开发版，给开发者看）：按 **新增 / 修复 / 优化 / 资源** 分类记录，可含技术术语与实现细节。未发版的 master 改动记入「未发布」小节，发版时移入正式版本号。
+  - `CHANGELOG_USER.md`（用户版，给普通用户看）：同样的版本结构与分类，但语言必须**通俗易懂、无技术术语**（面向中小学生）。只写用户能感知到的变化，不写内部实现、重构、性能开销等开发细节。发版时同步把「未发布」移入对应版本号。
+  - 两份日志的版本号、分类、条目顺序必须一一对应，只是表述详略与措辞不同。
+  - CI（`.github/workflows/release.yml`）会自动从 `CHANGELOG_USER.md` 提取当前版本的内容写入 `latest.json` 的 `notes` 字段，客户端检查更新弹窗直接展示该内容。因此用户版日志的措辞直接决定用户看到的更新说明，务必认真写。
+  - 同步更新 README 顶部「功能特性」中的当前版本号，并在 README「更新日志」一节刷新"当前最新版本"一句话摘要。
 
 ## Key quirks
 
