@@ -2,10 +2,12 @@
 /**
  * BingoCodeIDE 帮助文档构建脚本
  * 将 content/ 下的 Markdown 文件转换为带侧边栏的静态 HTML 页面
+ *
+ * 设计目标：清晰的层级、克制的视觉、适合长时间阅读。
  */
 
 import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, existsSync } from 'fs'
-import { join, relative, dirname, basename } from 'path'
+import { join, relative, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { Marked } from 'marked'
 import hljs from 'highlight.js'
@@ -14,10 +16,15 @@ import hljs from 'highlight.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const DOCS_ROOT = dirname(__filename)
+const REPO_ROOT = dirname(DOCS_ROOT)
 const CONTENT_DIR = join(DOCS_ROOT, 'content')
 const TEMPLATE_DIR = join(DOCS_ROOT, 'templates')
 const DIST_DIR = join(DOCS_ROOT, 'dist')
 const STATIC_DIR = join(DOCS_ROOT, 'static')
+
+const VERSION = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf-8')).version
+// 每次构建生成新戳，给首页截图加查询参数，避免浏览器缓存旧图
+const BUILD_STAMP = Date.now().toString(36)
 
 // ─── Markdown 解析器配置 ───
 
@@ -36,7 +43,7 @@ marked.use({
       return `<div class="code-block">
         <div class="code-header">
           <span class="code-lang">${langLabel}</span>
-          <button class="copy-btn" onclick="copyCode(this)">复制</button>
+          <button class="copy-btn" type="button" data-copy>复制</button>
         </div>
         <pre><code class="hljs language-${language}">${highlighted}</code></pre>
       </div>`
@@ -110,10 +117,13 @@ const NAV_STRUCTURE: NavItem[] = [
 
 // ─── 侧边栏 HTML 生成 ───
 
+function getPrefix(mdPath: string): string {
+  const depth = mdPath.split('/').length - 1
+  return depth > 0 ? '../'.repeat(depth) : './'
+}
+
 function generateSidebar(currentPath: string): string {
-  // 计算当前页面的深度，确定需要多少 ../ 回到根目录
-  const depth = currentPath.split('/').length - 1
-  const prefix = depth > 0 ? '../'.repeat(depth) : './'
+  const prefix = getPrefix(currentPath)
 
   const items = NAV_STRUCTURE.map((item) => {
     if (item.children) {
@@ -124,13 +134,12 @@ function generateSidebar(currentPath: string): string {
         })
         .join('\n')
 
-      // 判断当前分组是否包含活动页面
-      const hasActiveChild = item.children.some((c) => c.path === currentPath)
+      const hasActiveChild = item.children.some((child) => child.path === currentPath)
 
-      return `<div class="nav-group${hasActiveChild ? ' expanded' : ''}">
-        <button class="nav-group-header" onclick="toggleNavGroup(this)">
+      return `<div class="nav-group${hasActiveChild ? ' expanded' : ''}" data-group="${item.title}">
+        <button class="nav-group-header" type="button">
           <span>${item.title}</span>
-          <svg class="nav-arrow" width="12" height="12" viewBox="0 0 12 12">
+          <svg class="nav-arrow" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
             <path d="M4 2L8 6L4 10" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
           </svg>
         </button>
@@ -138,25 +147,25 @@ function generateSidebar(currentPath: string): string {
           ${childrenHtml}
         </div>
       </div>`
-    } else {
-      const isActive = item.path === currentPath
-      return `<a class="nav-item top-level${isActive ? ' active' : ''}" href="${prefix}${item.path.replace('.md', '.html')}">${item.title}</a>`
     }
+
+    const isActive = item.path === currentPath
+    return `<a class="nav-item top-level${isActive ? ' active' : ''}" href="${prefix}${item.path.replace('.md', '.html')}">${item.title}</a>`
   })
 
   return `<div class="nav-brand">
       <img class="nav-brand-logo" src="${prefix}static/icons/app-logo.png" alt="BingoCodeIDE" />
       <div>
-        <div class="nav-brand-text">BingoCodeIDE</div>
+        <div class="nav-brand-text">BingoCode</div>
         <div class="nav-brand-tag">帮助文档</div>
       </div>
     </div>
     <div class="search-wrapper">
       <div class="search-box">
-        <svg class="search-icon" viewBox="0 0 16 16" fill="none">
+        <svg class="search-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path d="M7 12A5 5 0 1 0 7 2a5 5 0 0 0 0 10zM14 14l-3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
         </svg>
-        <input type="text" id="search-input" class="search-input" placeholder="搜索文档..." />
+        <input type="text" id="search-input" class="search-input" placeholder="搜索文档…" autocomplete="off" />
         <div id="search-results" class="search-results"></div>
       </div>
     </div>
@@ -171,35 +180,106 @@ function getTemplate(): string {
 }
 
 // ─── 截图占位符处理 ───
+// 支持两种写法：
+//   1. <!-- screenshot: editor/sprite-editor.png -->
+//   2. <!-- screenshot: 路径 | 说明文字 -->
+// 图片存在则直接显示；不存在时显示占位框，提示需要补哪张图。
 
-function processScreenshots(html: string, mdPath: string): string {
-  // 处理 <!-- screenshot: ... --> 注释
-  return html.replace(
-    /<!--\s*screenshot:\s*(.*?)\s*-->\s*<!--\s*alt:\s*(.*?)\s*-->\s*<!--\s*description:\s*(.*?)\s*-->/g,
-    (_, src, alt, desc) => {
-      const imgSrc = `static/screenshots/${src}`
-      return `<div class="screenshot-placeholder">
-        <img src="${imgSrc}" alt="${alt}" loading="lazy" />
-        <p class="screenshot-desc">${desc}</p>
-      </div>`
+function processScreenshots(html: string, prefix: string): string {
+  return html.replace(/<!--\s*screenshot:\s*(.*?)\s*-->/g, (_match, raw: string) => {
+    const [filePart, captionPart] = raw.split('|')
+    const file = filePart.trim()
+    const caption = (captionPart || '').trim()
+    const safeFile = file.replace(/^\/+/, '')
+    const imagePath = join(STATIC_DIR, 'screenshots', safeFile)
+    const src = `${prefix}static/screenshots/${safeFile}`
+
+    if (existsSync(imagePath)) {
+      return `<figure class="screenshot-figure">
+        <img src="${src}" alt="${caption}" loading="lazy" />
+        ${caption ? `<figcaption class="screenshot-caption">${caption}</figcaption>` : ''}
+      </figure>`
     }
-  )
+
+    return `<div class="screenshot-placeholder">
+      <svg class="shot-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <rect x="3" y="4" width="18" height="16" rx="2"/>
+        <circle cx="8.5" cy="9.5" r="1.5"/>
+        <path d="m4 16 5-4 4 3 3-2 4 3"/>
+      </svg>
+      <div class="shot-title">待补充截图</div>
+      <span class="shot-file">${safeFile}</span>
+      <p class="shot-desc">${caption || '把截图放到 docs/static/screenshots/ 下的同名路径，重新构建后会自动替换此占位框。'}</p>
+    </div>`
+  })
+}
+
+// ─── 标题锚点与本页目录 ───
+
+interface Heading {
+  level: number
+  id: string
+  text: string
+}
+
+function slugify(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[\s\u3000]+/g, '-')
+    .replace(/[^\p{L}\p{N}_-]/gu, '')
+}
+
+function addHeadingIds(html: string): { html: string; headings: Heading[] } {
+  const headings: Heading[] = []
+  const used = new Map<string, number>()
+
+  const result = html.replace(/<h([234])>([\s\S]*?)<\/h\1>/g, (match, level: string, inner: string) => {
+    const text = inner
+      .replace(/<[^>]+>/g, '')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .trim()
+
+    let id = slugify(text) || `section-${headings.length + 1}`
+    const count = used.get(id) || 0
+    used.set(id, count + 1)
+    if (count > 0) id = `${id}-${count + 1}`
+
+    headings.push({ level: Number(level), id, text })
+    return `<h${level} id="${id}">${inner}</h${level}>`
+  })
+
+  return { html: result, headings }
+}
+
+function renderToc(headings: Heading[]): string {
+  const entries = headings.filter((heading) => heading.level === 2 || heading.level === 3)
+  if (!entries.length) return ''
+
+  const links = entries
+    .map(
+      (heading) =>
+        `<a class="toc-h${heading.level}" href="#${encodeURIComponent(heading.id)}" title="${heading.text.replace(/"/g, '&quot;')}">${heading.text}</a>`
+    )
+    .join('\n')
+
+  return `<div class="toc-title">本页目录</div>
+    <nav aria-label="本页目录">
+      ${links}
+    </nav>`
 }
 
 // ─── 处理内容中的链接 ───
 
-function processLinks(html: string, mdPath: string): string {
-  // 计算当前页面的深度
-  const depth = mdPath.split('/').length - 1
-  const prefix = depth > 0 ? '../'.repeat(depth) : './'
-
-  // 修复相对链接 - 匹配 href="xxx.md" 格式
-  return html.replace(/href="([^"]*\.md)"/g, (match, path) => {
-    // 跳过已经处理过的链接
+function processLinks(html: string, prefix: string): string {
+  return html.replace(/href="([^"]*\.md)"/g, (match, path: string) => {
     if (path.startsWith('./') || path.startsWith('../') || path.startsWith('http')) {
       return match
     }
-    return `href="${prefix}${path}"`
+    return `href="${prefix}${path.replace('.md', '.html')}"`
   })
 }
 
@@ -212,32 +292,45 @@ function buildPage(mdPath: string, template: string, searchIndex: string): void 
     return
   }
 
+  const prefix = getPrefix(mdPath)
   const mdContent = readFileSync(mdFullPath, 'utf-8')
-  const htmlContent = marked.parse(mdContent) as string
-  const processedContent = processLinks(processScreenshots(htmlContent, mdPath), mdPath)
 
-  // 提取标题
-  const titleMatch = mdContent.match(/^#\s+(.+)/m)
-  const pageTitle = titleMatch ? titleMatch[1] : 'BingoCodeIDE 帮助文档'
+  // 首页由整段 HTML 组成：直接使用，避免 Markdown 解析打断卡片结构
+  const isHome = mdPath === 'index.md'
+  const rawHtml = isHome ? mdContent : (marked.parse(mdContent) as string)
 
-  // 生成侧边栏
-  const sidebar = generateSidebar(mdPath)
+  let content = processLinks(processScreenshots(rawHtml, prefix), prefix)
 
-  // 组装完整 HTML
+  // 首页不生成锚点和右侧目录，保持一个干净的开场
+  let headings: Heading[] = []
+  if (!isHome) {
+    const withIds = addHeadingIds(content)
+    content = withIds.html
+    headings = withIds.headings
+  }
+
+  const titleMatch =
+    mdContent.match(/^#\s+(.+)/m) || mdContent.match(/<h1[^>]*>([\s\S]*?)<\/h1>/)
+  const pageTitle = titleMatch
+    ? titleMatch[1].replace(/<[^>]+>/g, '').trim()
+    : '帮助文档'
+
+  const toc = isHome ? '' : renderToc(headings)
+
   const fullHtml = template
-    .replace('{{PAGE_TITLE}}', pageTitle)
-    .replace('{{SIDEBAR}}', sidebar)
-    .replace('{{CONTENT}}', processedContent)
+    .replace(/\{\{PAGE_TITLE\}\}/g, pageTitle)
+    .replace('{{SIDEBAR}}', generateSidebar(mdPath))
+    .replace('{{CONTENT}}', content)
+    .replace('{{TOC}}', toc)
+    .replace('{{TOC_CLASS}}', toc ? ' has-toc' : '')
+    .replace('{{HOME_CLASS}}', isHome ? ' is-home' : '')
     .replace('{{SEARCH_INDEX}}', searchIndex)
-    .replace(
-      '{{RELATIVE_PATH}}',
-      mdPath.split('/').length > 1 ? '../'.repeat(mdPath.split('/').length - 1) : ''
-    )
+    .replace(/\{\{RELATIVE_PATH\}\}/g, prefix)
+    .replace(/\{\{BUILD_STAMP\}\}/g, BUILD_STAMP)
+    .replace(/\{\{VERSION\}\}/g, VERSION)
 
-  // 输出文件
   const outPath = join(DIST_DIR, mdPath.replace('.md', '.html'))
-  const outDir = dirname(outPath)
-  mkdirSync(outDir, { recursive: true })
+  mkdirSync(dirname(outPath), { recursive: true })
   writeFileSync(outPath, fullHtml, 'utf-8')
   console.log(`✅ ${mdPath} → ${relative(DIST_DIR, outPath)}`)
 }
@@ -287,27 +380,32 @@ function collectMarkdownFiles(dir: string, prefix: string = ''): string[] {
 // ─── 构建搜索索引 ───
 
 function buildSearchIndex(mdFiles: string[]): string {
-  const index = mdFiles.map(mdPath => {
+  const index = mdFiles.map((mdPath) => {
     const mdFullPath = join(CONTENT_DIR, mdPath)
     const content = readFileSync(mdFullPath, 'utf-8')
-    
-    // 提取标题
-    const titleMatch = content.match(/^#\s+(.+)/m)
-    const title = titleMatch ? titleMatch[1] : mdPath.replace('.md', '')
-    
-    // 清理内容用于搜索（移除代码块、特殊字符）
-    const cleanContent = content
-      .replace(/```[\s\S]*?```/g, '') // 移除代码块
-      .replace(/#{1,6}\s+/g, '') // 移除标题标记
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // 链接转文本
-      .replace(/[*_`]/g, '') // 移除格式符号
-      .replace(/\n+/g, ' ') // 换行转空格
-      .trim()
-      .substring(0, 500) // 限制长度
 
-    const htmlPath = './' + mdPath.replace('.md', '.html')
-    
-    return { title, content: cleanContent, path: htmlPath }
+    const titleMatch =
+      content.match(/^#\s+(.+)/m) || content.match(/<h1[^>]*>([\s\S]*?)<\/h1>/)
+    const title = titleMatch
+      ? titleMatch[1].replace(/<[^>]+>/g, '').trim()
+      : mdPath.replace('.md', '')
+
+    const cleanContent = content
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/#{1,6}\s+/g, '')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/[*_`]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .substring(0, 600)
+
+    return {
+      title,
+      content: cleanContent,
+      path: './' + mdPath.replace('.md', '.html'),
+    }
   })
 
   return JSON.stringify(index)
@@ -316,29 +414,23 @@ function buildSearchIndex(mdFiles: string[]): string {
 // ─── 主函数 ───
 
 function main() {
-  console.log('🔨 开始构建 BingoCodeIDE 帮助文档...\n')
+  console.log('🔨 开始构建 BingoCode 帮助文档…\n')
 
-  // 确保输出目录存在
   mkdirSync(DIST_DIR, { recursive: true })
 
-  // 加载模板
   const template = getTemplate()
   console.log('📄 模板已加载')
 
-  // 收集所有 Markdown 文件
   const mdFiles = collectMarkdownFiles(CONTENT_DIR)
   console.log(`📚 找到 ${mdFiles.length} 个文档文件`)
 
-  // 构建搜索索引
   const searchIndex = buildSearchIndex(mdFiles)
   console.log('🔍 搜索索引已构建')
 
-  // 构建每个页面
   for (const mdFile of mdFiles) {
     buildPage(mdFile, template, searchIndex)
   }
 
-  // 复制静态资源
   copyStatic()
 
   console.log('\n✨ 构建完成！输出目录: docs/dist/')
