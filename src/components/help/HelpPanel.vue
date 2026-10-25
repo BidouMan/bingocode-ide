@@ -2,6 +2,7 @@
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import iconRightArrow from '../../assets/icons/right_arrow.svg'
 import apiHelpData from '../../data/apiHelp.json'
+import { openHelpDocs } from './HelpDocsOpener'
 
 defineProps<{ visible: boolean }>()
 const emit = defineEmits<{ close: [] }>()
@@ -163,7 +164,13 @@ const filteredCategories = computed(() => {
           <div class="help-header">
             <div class="help-title-row">
               <img src="../../assets/icons/help.svg" class="help-header-icon" />
-              <span class="help-title">API 帮助文档</span>
+              <button class="help-title help-title-link" type="button" title="在浏览器中打开在线帮助文档" @click="openHelpDocs">
+                <span>API 帮助文档</span>
+                <svg class="help-title-link-icon" width="14" height="14" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                  <path d="M5 2H2.5A1.5 1.5 0 0 0 1 3.5v6A1.5 1.5 0 0 0 2.5 11h6A1.5 1.5 0 0 0 10 9.5V7" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                  <path d="M7 1h4v4M11 1 5.6 6.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
             </div>
             <button class="help-close-btn" @click="emit('close')">
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -321,6 +328,18 @@ const filteredCategories = computed(() => {
 .help-title-row { display: flex; align-items: center; gap: 8px; }
 .help-header-icon { width: 20px; height: 20px; }
 .help-title { font-size: 14px; font-weight: 600; color: white; }
+/* 标题点击后跳转浏览器中的在线帮助文档 */
+.help-title-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 4px; margin: 0 -4px;
+  background: none; border: none; border-radius: 4px;
+  font-family: inherit; line-height: 1.4;
+  cursor: pointer; transition: color 0.15s, background 0.15s;
+}
+.help-title-link span { line-height: 1; }
+.help-title-link:hover { color: #5BFB84; background: var(--bg-hover); }
+.help-title-link-icon { display: block; flex-shrink: 0; opacity: 0.65; transition: opacity 0.15s; }
+.help-title-link:hover .help-title-link-icon { opacity: 1; }
 .help-close-btn {
   display: flex; align-items: center; justify-content: center;
   width: 28px; height: 28px;
