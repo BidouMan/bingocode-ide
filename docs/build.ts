@@ -63,11 +63,11 @@ const NAV_STRUCTURE: NavItem[] = [
   { title: '欢迎', path: 'index.md' },
   {
     title: '快速入门',
-    path: 'getting-started/install.md',
+    path: 'getting-started/first-game.md',
     children: [
-      { title: '安装与环境配置', path: 'getting-started/install.md' },
       { title: '第一个游戏', path: 'getting-started/first-game.md' },
       { title: '核心概念', path: 'getting-started/basic-concepts.md' },
+      { title: '安装与环境配置', path: 'getting-started/install.md' },
     ],
   },
   {
