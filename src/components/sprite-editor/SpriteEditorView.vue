@@ -171,6 +171,8 @@ function redrawSpriteImages() {
 
 const currentSprite = ref<SpriteData | null>(null)
 const currentSpritePath = ref('')
+// 当前已加载角色对应的资源 id：用于区分「重命名当前角色」与「切换到别的角色」
+const currentSpriteId = ref<string | null>(null)
 /** 载入失败信息（读盘/解析异常直接显示出来，避免"点了没反应"看起来像跳转失败） */
 const loadError = ref<string | null>(null)
 const selectedFrameIndex = ref(0)
@@ -223,6 +225,7 @@ watch(
       revokeSpriteUrls(currentSprite.value)
       currentSprite.value = null
       currentSpritePath.value = ''
+      currentSpriteId.value = null
       loadError.value = null
       return
     }
@@ -230,6 +233,17 @@ watch(
     if (item && item.path) loadSprite(item)
   },
   { immediate: true }
+)
+
+// 资源面板重命名当前角色后 item.path 会变：只同步保存路径，不重新加载（内容未变，避免打断编辑）。
+// 不处理切换角色的场景（selectedSpriteId 与已加载 id 不一致），那个由上面的 loadSprite 负责
+watch(
+  () => resourceStore.sprites.find(s => s.id === resourceStore.selectedSpriteId)?.path,
+  (p) => {
+    if (!p || !currentSprite.value) return
+    if (resourceStore.selectedSpriteId !== currentSpriteId.value) return
+    if (p !== currentSpritePath.value) currentSpritePath.value = p
+  }
 )
 
 // 自动保存：每次修改后写回 config.json / manifest.json
@@ -312,6 +326,7 @@ async function loadSprite(item: { id: string; name: string; path: string }) {
       }
     }
     currentSpritePath.value = item.path
+    currentSpriteId.value = item.id
     loadError.value = null
     // 自然尺寸：.bsf 取画布（sheet 是几十帧拼图，尺寸不能当素材尺寸），其余取首帧图片尺寸
     await updateSpriteNaturalSize()

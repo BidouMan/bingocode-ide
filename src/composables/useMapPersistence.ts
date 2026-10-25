@@ -79,6 +79,9 @@ export function useMapPersistence(options: MapPersistenceOptions) {
     // 优先从预解析缓存读取
     const cached = resourceStore.getCachedMapData(itemId)
     if (cached) {
+      // 资源名为准：缓存内 name 可能是改名前的残留，避免保存写回旧目录
+      const cachedItem = resourceStore.maps.find(m => m.id === itemId)
+      if (cachedItem && cached.name !== cachedItem.name) cached.name = cachedItem.name
       mapStore.loadMap(cached)
       return true
     }
@@ -105,6 +108,8 @@ export function useMapPersistence(options: MapPersistenceOptions) {
       }
 
       const mapData = deserializeMap(saveData)
+      // 资源名为准：存档内 name 可能是改名前的残留，避免保存写回旧目录
+      mapData.name = mapName
       resolveRelativePaths(mapData, mapDirPath(mapName))
       mapStore.loadMap(mapData)
       return true
@@ -159,7 +164,7 @@ export function useMapPersistence(options: MapPersistenceOptions) {
       height: 30,
       tileSize: 16,
       gravity: false,
-      boundaryCollision: false,
+      boundaryCollision: true,
       collisionType: '图像',
       collisionEnabled: false,
       resources: [],

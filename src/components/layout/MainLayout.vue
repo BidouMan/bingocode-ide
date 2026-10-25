@@ -195,6 +195,8 @@ const mapRenameValue = ref('')
 
 // 声音右键菜单
 const soundContextMenu = ref<{ show: boolean; x: number; y: number; item: { id: string; name: string } | null }>({ show: false, x: 0, y: 0, item: null })
+const soundRenameId = ref<string | null>(null)
+const soundRenameValue = ref('')
 
 // 角色列表变化时立即加载缩略图
 async function loadAllSpriteThumbnails() {
@@ -289,6 +291,8 @@ async function loadProjectResources(root: string) {
       const saveData = JSON.parse(json)
       const { deserializeMap } = await import('../../utils/mapSerializer')
       const mapData = deserializeMap(saveData)
+      // 目录名为准：旧存档内部 name 可能是改名前的残留，会导致保存写回旧目录
+      mapData.name = mapName
       if (stale()) return
       const mapId = resourceStore.addItem({ name: mapName, type: 'map', path: `${root}/assets/maps/${mapName}` })
       resourceStore.setCachedMapData(mapId, mapData)
@@ -909,7 +913,7 @@ async function onCreateMap() {
     height: 30,
     tileSize: 16,
     gravity: false,
-    boundaryCollision: false,
+    boundaryCollision: true,
     collisionType: '图像',
     collisionEnabled: false,
     resources: [],
@@ -1045,7 +1049,7 @@ async function createImageMapProject(fileName: string, opts: { bytes?: number[];
     height: 30,
     tileSize: 16,
     gravity: false,
-    boundaryCollision: false,
+    boundaryCollision: true,
     collisionType: '图像',
     collisionEnabled: false,
     resources: [imageResource],
@@ -1184,13 +1188,6 @@ async function onResLibImported(path: string) {
   // 图像模式：内置资源选图后直接生成一个图片图层
   if (isImageLayer) {
     await mapEditorRef.value?.placeImageResource(relativePath)
-  }
-}
-
-function renameResource(item: { id: string; name: string; type: string }) {
-  const newName = prompt('重命名为:', item.name)
-  if (newName && newName !== item.name) {
-    item.name = newName
   }
 }
 
@@ -1441,6 +1438,10 @@ function confirmSpriteRename() {
     } else if (projectStore.root) {
       item.path = `${projectStore.root}/assets/sprites/${val}`
     }
+    // 绘制页打开的是该角色时同步目标快照，否则保存回写旧路径会复活旧文件
+    if (paintTarget.value?.id === item.id) {
+      paintTarget.value = { id: item.id, name: val, path: item.path }
+    }
     spriteRenameId.value = null
   })
 }
@@ -1482,20 +1483,63 @@ function confirmMapRename() {
   if (!mapRenameId.value) return
   const val = mapRenameValue.value.trim()
   if (!val) { mapRenameId.value = null; return }
-  
+
   const item = resourceStore.maps.find(i => i.id === mapRenameId.value)
   const oldName = item?.name
   if (!item || !oldName || oldName === val) { mapRenameId.value = null; return }
-  
+
+  const renameId = mapRenameId.value
   // 先执行目录迁移，再改名字
   migrateMapDir(oldName, val).then(() => {
-    resourceStore.renameItem(mapRenameId.value!, val)
+    resourceStore.renameItem(renameId, val)
     // 更新 item.path
     if (projectStore.root) {
       item.path = `${projectStore.root}/assets/maps/${val}`
     }
+    // 同步预解析缓存与正在编辑的地图内存，
+    // 否则自动保存仍写回旧目录：旧地图复活成双份，新地图丢重力/碰撞等后续修改
+    syncRenamedMapState(renameId, oldName, val)
     mapRenameId.value = null
   })
+}
+
+// 替换地图路径中的旧目录名前缀（兼容相对 assets/maps/ 与绝对路径两种格式）
+function replaceMapPathPrefix(p: string | undefined, oldName: string, newName: string): string | undefined {
+  if (!p) return p
+  const oldRel = `assets/maps/${oldName}/`
+  if (p.startsWith(oldRel)) return `assets/maps/${newName}/` + p.slice(oldRel.length)
+  if (projectStore.root) {
+    const oldAbs = `${projectStore.root}/assets/maps/${oldName}/`
+    if (p.startsWith(oldAbs)) return `${projectStore.root}/assets/maps/${newName}/` + p.slice(oldAbs.length)
+  }
+  return p
+}
+
+// 改名后同步内存态：预解析缓存 + 正在编辑的地图数据（名称与资源路径）
+function syncRenamedMapState(id: string, oldName: string, newName: string) {
+  const fixData = (data: any) => {
+    if (!data) return
+    data.name = newName
+    for (const res of data.resources || []) {
+      res.path = replaceMapPathPrefix(res.path, oldName, newName) ?? res.path
+    }
+    for (const ts of data.tileSets || []) {
+      ts.imagePath = replaceMapPathPrefix(ts.imagePath, oldName, newName) ?? ts.imagePath
+    }
+    for (const layer of data.layers || []) {
+      if (layer.image) {
+        layer.image.imagePath = replaceMapPathPrefix(layer.image.imagePath, oldName, newName) ?? layer.image.imagePath
+      }
+    }
+  }
+  const cached = resourceStore.getCachedMapData(id)
+  if (cached) {
+    fixData(cached)
+    resourceStore.setCachedMapData(id, cached)
+  }
+  if (mapStore.currentMapPath === id) {
+    fixData(mapStore.mapData)
+  }
 }
 
 async function migrateMapDir(oldName: string, newName: string) {
@@ -1509,43 +1553,30 @@ async function migrateMapDir(oldName: string, newName: string) {
     // 原子重命名整个目录
     await invoke('rename_path', { oldPath: oldDir, newPath: newDir })
 
-    // 更新 map.json 中的资源路径（旧名→新名）
+    // 更新 map.json 中的地图名与资源路径（旧名→新名）
     const jsonPath = `${newDir}/map.json`
     const jsonExists = await invoke<boolean>('path_exists', { path: jsonPath })
     if (jsonExists) {
       const json = await invoke<string>('read_file', { path: jsonPath })
       const data = JSON.parse(json)
-      let changed = false
+      // 内部 name 必须与目录名一致，否则下次加载后自动保存会写回旧目录
+      data.name = newName
       for (const res of data.resources || []) {
-        if (res.path?.startsWith(`assets/maps/${oldName}/`)) {
-          res.path = res.path.replace(`assets/maps/${oldName}/`, `assets/maps/${newName}/`)
-          changed = true
-        }
+        res.path = replaceMapPathPrefix(res.path, oldName, newName) ?? res.path
       }
       for (const layer of data.layers || []) {
         for (const res of layer.resources || []) {
-          if (res.path?.startsWith(`assets/maps/${oldName}/`)) {
-            res.path = res.path.replace(`assets/maps/${oldName}/`, `assets/maps/${newName}/`)
-            changed = true
-          }
+          res.path = replaceMapPathPrefix(res.path, oldName, newName) ?? res.path
         }
         for (const img of layer.images || []) {
-          if (img.imagePath?.startsWith(`assets/maps/${oldName}/`)) {
-            img.imagePath = img.imagePath.replace(`assets/maps/${oldName}/`, `assets/maps/${newName}/`)
-            changed = true
-          }
+          img.imagePath = replaceMapPathPrefix(img.imagePath, oldName, newName) ?? img.imagePath
         }
       }
       // 更新 tilesets 中的 image 路径
       for (const ts of data.tilesets || []) {
-        if (ts.image?.startsWith(`assets/maps/${oldName}/`)) {
-          ts.image = ts.image.replace(`assets/maps/${oldName}/`, `assets/maps/${newName}/`)
-          changed = true
-        }
+        ts.image = replaceMapPathPrefix(ts.image, oldName, newName) ?? ts.image
       }
-      if (changed) {
-        await invoke('write_file', { path: jsonPath, content: JSON.stringify(data) })
-      }
+      await invoke('write_file', { path: jsonPath, content: JSON.stringify(data) })
     }
   } catch (e) {
     console.error('[MainLayout] 迁移地图目录失败:', e)
@@ -1561,6 +1592,60 @@ function onSoundContextMenu(e: MouseEvent, item: { id: string; name: string }) {
   e.preventDefault()
   e.stopPropagation()
   soundContextMenu.value = { show: true, x: e.clientX, y: e.clientY, item }
+}
+
+function startSoundRename(id: string) {
+  const item = resourceStore.sounds.find(i => i.id === id)
+  if (!item) return
+  soundRenameId.value = id
+  soundRenameValue.value = item.name
+  soundContextMenu.value.show = false
+  nextTick(() => nextTick(() => {
+    const input = document.querySelector('.sound-rename-input') as HTMLInputElement | null
+    if (input) {
+      input.focus()
+      input.select()  // 默认全选，方便一键删除重写
+    }
+  }))
+}
+
+// 声音是单文件资源：按支持的扩展名逐个尝试改名，返回新路径
+async function migrateSoundFile(oldName: string, newName: string): Promise<string | null> {
+  if (!projectStore.root) return null
+  const base = `${projectStore.root}/assets/sounds`
+  try {
+    for (const ext of ['.wav', '.mp3', '.ogg']) {
+      const oldFile = `${base}/${oldName}${ext}`
+      if (await invoke<boolean>('path_exists', { path: oldFile })) {
+        await invoke('rename_path', { oldPath: oldFile, newPath: `${base}/${newName}${ext}` })
+        return `${base}/${newName}${ext}`
+      }
+    }
+  } catch (e) {
+    console.error('[MainLayout] 迁移声音文件失败:', e)
+  }
+  return null
+}
+
+function confirmSoundRename() {
+  if (!soundRenameId.value) return
+  const val = soundRenameValue.value.trim()
+  if (!val) { soundRenameId.value = null; return }
+
+  const item = resourceStore.sounds.find(i => i.id === soundRenameId.value)
+  const oldName = item?.name
+  if (!item || !oldName || oldName === val) { soundRenameId.value = null; return }
+
+  // 先执行磁盘迁移，再改名字
+  migrateSoundFile(oldName, val).then((newPath) => {
+    resourceStore.renameItem(item.id, val)
+    if (newPath) item.path = newPath
+    soundRenameId.value = null
+  })
+}
+
+function cancelSoundRename() {
+  soundRenameId.value = null
 }
 
 function deleteSoundFromContext(id: string) {
@@ -2230,7 +2315,19 @@ function spriteDisplayName(name: string) {
                     @contextmenu="onSoundContextMenu($event, item)"
                   >
                     <div class="resource-thumb resource-thumb-sound"><img :src="iconSoundIcon" class="resource-thumb-img" /></div>
-                    <span class="resource-grid-name">{{ item.name }}</span>
+                    <template v-if="soundRenameId === item.id">
+                      <input
+                        class="sound-rename-input"
+                        v-model="soundRenameValue"
+                        @blur="confirmSoundRename"
+                        @keydown.enter.prevent="confirmSoundRename"
+                        @keydown.escape="cancelSoundRename"
+                        @click.stop
+                      />
+                    </template>
+                    <template v-else>
+                      <span class="resource-grid-name">{{ item.name }}</span>
+                    </template>
                   </div>
                   <div v-if="resourceStore.sounds.length === 0" class="resource-empty"></div>
                 </div>
@@ -2525,6 +2622,7 @@ function spriteDisplayName(name: string) {
         :style="{ left: soundContextMenu.x + 'px', top: soundContextMenu.y + 'px' }"
         @click.stop
       >
+        <div class="sprite-ctx-item" @click="startSoundRename(soundContextMenu.item!.id)">重命名</div>
         <div class="sprite-ctx-item sprite-ctx-del" @click="deleteSoundFromContext(soundContextMenu.item!.id)">删除</div>
       </div>
     </Teleport>
@@ -3198,9 +3296,23 @@ function spriteDisplayName(name: string) {
   outline: none;
   caret-color: white;
 }
+.sound-rename-input {
+  width: 74px;
+  height: 18px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 0;
+  text-align: center;
+  outline: none;
+  caret-color: white;
+}
 /* 重命名输入框选中高亮：主题 accent 绿背景 + 亮白文字，与主题风格统一 */
 .sprite-rename-input::selection,
 .map-rename-input::selection,
+.sound-rename-input::selection,
 .code-rename-input::selection,
 .tab-rename-input::selection {
   background: var(--accent);

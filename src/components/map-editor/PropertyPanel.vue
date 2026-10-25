@@ -438,7 +438,7 @@ function onCollisionEnabledChange(enabled: boolean) {
         </div>
 
         <div class="att-row">
-          <span class="att-label">边界碰撞</span>
+          <span class="att-label">限制边界</span>
           <label class="att-checkbox">
             <input
               type="checkbox"
