@@ -4,7 +4,7 @@
     <h1>用 Python，<br>做出能玩的游戏。</h1>
     <p class="home-lede">从画第一个角色开始，到让角色跑、跳、碰撞、切换场景。编辑器的每个操作、引擎的每个函数，这里都写清楚了。</p>
     <div class="home-actions">
-      <a class="home-btn primary" href="getting-started/install.md">从快速入门开始</a>
+      <a class="home-btn primary" href="getting-started/first-game.md">从第一个游戏开始</a>
       <a class="home-btn ghost" href="api/sprite.md">浏览 API 参考</a>
     </div>
     <p class="home-meta">v{{VERSION}} · 23 篇文档 · 离线可读，可部署到局域网</p>
@@ -27,12 +27,12 @@
   <p class="home-section-desc">第一次打开手册，不用从头读到尾。选一个最接近当前目标的方向。</p>
 
   <div class="home-cards">
-    <a class="home-card" href="getting-started/install.md">
+    <a class="home-card" href="getting-started/first-game.md">
       <span class="home-card-head">
         <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5A1.5 1.5 0 0 1 4.5 3H15v10H4.5A1.5 1.5 0 0 0 3 14.5v-10Z"/><path d="M3 14.5A1.5 1.5 0 0 1 4.5 13H15"/></svg>
         <span class="home-card-title">快速入门</span>
       </span>
-      <span class="home-card-desc">安装编辑器、跑通第一个游戏，理解坐标与游戏循环。</span>
+      <span class="home-card-desc">跟着做第一个小游戏，理解坐标、精灵与游戏循环。</span>
     </a>
     <a class="home-card" href="editor/sprite-editor.md">
       <span class="home-card-head">
