@@ -1397,17 +1397,24 @@ class Sprite:
         # 立即触发一次更新以应用新样式
         self._update_transform()
 
+    def _apply_visible(self, visible):
+        """设置可见状态并同步帧缓冲：本帧已排队的更新若仍带旧状态，
+        会在 hide()/show() 之后才刷出，把角色又画出来，这里一并改写"""
+        self._visible = visible
+        for update in _FRAME_UPDATES:
+            if update.get("id") == self.id:
+                update["visible"] = visible
+        self._send_command("UPDATE", {"id": self.id, "visible": visible})
+
     def show(self):
         """显示角色"""
         if self._is_deleted:
             return  # 已经删除的不能显示
-        self._visible = True
-        self._send_command("UPDATE", {"id": self.id, "visible": True})
+        self._apply_visible(True)
 
     def hide(self):
         """隐藏角色（仅仅是看不见，物体还在内存里）"""
-        self._visible = False
-        self._send_command("UPDATE", {"id": self.id, "visible": False})
+        self._apply_visible(False)
 
     def say(self, text, seconds=0):
         """
@@ -2238,6 +2245,9 @@ class Sprite:
             "scale_y": final_scale_y,
             # 层级必须随每帧更新一起下发，否则学生会看到 layer 被默认值覆盖
             "layer": self._layer,
+            # 可见状态必须随每帧更新下发：批量更新里缺省 visible 会被前端默认成 True，
+            # 导致 hide() 之后角色视觉上又冒出来（但引擎内部仍隐藏、碰撞检测不到）
+            "visible": self._visible,
             # 添加碰撞盒信息，用于可视化调试
             "hitbox": self._get_hitbox_rect()
             if self._show_hitbox and hasattr(self, "_get_hitbox_rect")
