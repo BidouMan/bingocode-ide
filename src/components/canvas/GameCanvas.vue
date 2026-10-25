@@ -356,6 +356,19 @@ async function getSpriteTexture(imagePath: string, frameRect?: number[] | null):
   return texture
 }
 
+/**
+ * 同步取缓存里的精灵纹理：预览窗从角色编辑器切回代码页重新挂载时，
+ * 共享缓存里已有上一轮的贴图，直接同步命中可避免一帧的透明占位闪烁。
+ * 未命中返回 null，由调用方走异步 getSpriteTexture 加载。
+ */
+function getCachedSpriteTextureSync(imagePath: string, frameRect?: number[] | null): any | null {
+  const base = textureCache.get(imagePath)
+  if (!base) return null
+  if (!frameRect || frameRect.length !== 4) return base
+  const key = `${imagePath}#${frameRect.join(',')}`
+  return frameTextureCache.get(key) ?? null
+}
+
 async function syncSprites() {
   if (!app || !spriteContainer || spritesSyncing) return
   spritesSyncing = true
@@ -398,6 +411,13 @@ async function syncSprites() {
         : spriteData.imagePath
       if (displayObj._texKey !== texKey) {
         displayObj._texKey = texKey
+        // 先同步命中缓存：预览窗重挂载时共享缓存已有上一轮贴图，直接贴上可零闪烁恢复最后一帧；
+        // 未命中再走异步加载（首帧用 Texture.EMPTY 透明占位，加载完成后替换）。
+        const cached = getCachedSpriteTextureSync(spriteData.imagePath, spriteData.frameRect)
+        if (cached) {
+          displayObj.texture = cached
+          applyAutoScaleMode(cached, spriteData)
+        }
         getSpriteTexture(spriteData.imagePath, spriteData.frameRect).then(texture => {
           if (displayObj && !displayObj.destroyed && displayObj._texKey === texKey) {
             displayObj.texture = texture
@@ -904,13 +924,20 @@ onBeforeUnmount(() => {
 
   if (app) {
     app.ticker.remove(gameLoop)
-    app.destroy(true)
+    // 用 false 而非 true：app.destroy(true) 会递归销毁舞台上所有 sprite 的纹理及其 source，
+    // 而两个 GameCanvas 实例（预览窗 + 全屏 v-show 窗）共享 gameTextures.ts 中的纹理缓存，
+    // 一旦此处销毁 source，另一个仍在运行的实例持有的同源纹理就变成了「缺失纹理」，
+    // WebGL 会渲染出粉紫色方块（0xFF00FF）。
+    // renderer.destroy(false) 只释放本渲染器的 GPU 资源，source 对象本身保留，
+    // 新实例挂载时由新渲染器按需重新上传，零闪烁。
+    app.destroy(false)
     app = null
   }
 
-  textureCache.clear()
-  tilesetFrameCache.clear()
-  frameTextureCache.clear()
+  // 不清空共享纹理缓存：缓存由 useEngine.run() 里的 invalidateGameTextures() 在每次运行开始时统一清空，
+  // 此处清空会导致预览窗从角色编辑器切回代码页时重新走 IPC 加载全部贴图，
+  // 一瞬间画面里的角色变成粉紫色占位块。保留缓存可让最后一帧瞬间恢复。
+  // 只清空本实例的显示对象映射（显示对象已随 stage 销毁/脱离）。
   spriteDisplayObjects.clear()
   tileDisplayObjects.clear()
   sayDisplayObjects.clear()
