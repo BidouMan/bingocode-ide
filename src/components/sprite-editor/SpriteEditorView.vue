@@ -1358,7 +1358,7 @@ onBeforeUnmount(() => {
               type="button"
               :class="{ on: effCol?.type === 'polygon' }"
               @click="convertCollisionType('polygon')"
-            >多边形</button>
+            >自定义</button>
           </div>
           <div class="props-sep"></div>
           <button
