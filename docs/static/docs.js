@@ -289,11 +289,37 @@
     })
   }
 
+  /* ─── 本地开发热重载：dev 服务提供 __dev 版本号时自动刷新 ─── */
+  function initDevReload() {
+    if (!window.fetch) return
+    var stamp = null
+    fetch(PREFIX + '__dev', { cache: 'no-store' })
+      .then(function (res) {
+        return res.ok ? res.text() : null
+      })
+      .then(function (value) {
+        if (value === null) return
+        stamp = value
+        setInterval(function () {
+          fetch(PREFIX + '__dev', { cache: 'no-store' })
+            .then(function (res) {
+              return res.ok ? res.text() : null
+            })
+            .then(function (next) {
+              if (next && next !== stamp) window.location.reload()
+            })
+            .catch(function () {})
+        }, 800)
+      })
+      .catch(function () {})
+  }
+
   doc.addEventListener('DOMContentLoaded', function () {
     initNavGroups()
     initSearch()
     initCopyButtons()
     initToc()
     initHomeShot()
+    initDevReload()
   })
 })()

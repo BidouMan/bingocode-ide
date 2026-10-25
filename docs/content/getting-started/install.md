@@ -20,10 +20,6 @@
 3. 按照提示完成安装
 4. 桌面会出现 BingoCodeIDE 图标
 
-<!-- screenshot: getting-started/install-windows.png -->
-<!-- alt: Windows 安装界面 -->
-<!-- description: 显示安装向导的欢迎页面 -->
-
 ### macOS
 
 1. 下载 `.dmg` 文件
@@ -31,9 +27,6 @@
 3. 首次打开时，系统可能提示安全警告
 4. 前往「系统设置 → 隐私与安全性」允许打开
 
-<!-- screenshot: getting-started/install-macos.png -->
-<!-- alt: macOS 安装界面 -->
-<!-- description: 显示将应用拖入 Applications 文件夹的界面 -->
 
 ## 首次启动
 

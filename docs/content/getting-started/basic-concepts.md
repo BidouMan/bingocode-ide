@@ -94,20 +94,58 @@ hero = Sprite("洛克人")
 
 ### 角度系统
 
-```
-        90° (上)
-          │
-          │
-180° (左) ─┼─ 0° (右)
-          │
-          │
-        270° (下)
-```
+每个角色都记着一个角度，表示它面朝哪个方向。默认是 0°，也就是朝右。
 
-- 0° = 朝右
-- 90° = 朝上
-- 180° = 朝左
-- 270° = 朝下
+<div class="dir-grid">
+  <div class="dir-card">
+    <div class="dir-stage">
+      <svg class="dir-hero" viewBox="0 0 48 48" aria-hidden="true">
+        <rect x="5" y="18.5" width="21" height="11" rx="3.5" fill="currentColor"/>
+        <path d="M23 10 43 24 23 38Z" fill="currentColor"/>
+      </svg>
+    </div>
+    <div class="dir-angle">0°</div>
+    <div class="dir-name">朝右</div>
+    <div class="dir-code">hero.set_angle(0)</div>
+  </div>
+  <div class="dir-card">
+    <div class="dir-stage">
+      <svg class="dir-hero dir-hero-90" viewBox="0 0 48 48" aria-hidden="true">
+        <rect x="5" y="18.5" width="21" height="11" rx="3.5" fill="currentColor"/>
+        <path d="M23 10 43 24 23 38Z" fill="currentColor"/>
+      </svg>
+    </div>
+    <div class="dir-angle">90°</div>
+    <div class="dir-name">朝上</div>
+    <div class="dir-code">hero.set_angle(90)</div>
+  </div>
+  <div class="dir-card">
+    <div class="dir-stage">
+      <svg class="dir-hero dir-hero-180" viewBox="0 0 48 48" aria-hidden="true">
+        <rect x="5" y="18.5" width="21" height="11" rx="3.5" fill="currentColor"/>
+        <path d="M23 10 43 24 23 38Z" fill="currentColor"/>
+      </svg>
+    </div>
+    <div class="dir-angle">180°</div>
+    <div class="dir-name">朝左</div>
+    <div class="dir-code">hero.set_angle(180)</div>
+  </div>
+  <div class="dir-card">
+    <div class="dir-stage">
+      <svg class="dir-hero dir-hero-270" viewBox="0 0 48 48" aria-hidden="true">
+        <rect x="5" y="18.5" width="21" height="11" rx="3.5" fill="currentColor"/>
+        <path d="M23 10 43 24 23 38Z" fill="currentColor"/>
+      </svg>
+    </div>
+    <div class="dir-angle">270°</div>
+    <div class="dir-name">朝下</div>
+    <div class="dir-code">hero.set_angle(270)</div>
+  </div>
+</div>
+
+<p class="dir-note">角度按逆时针方向增大：从朝右开始往上转是 90°，再往左是 180°，往下是 270°。想走斜线也可以用 45°、135° 这样的角度。</p>
+
+`set_angle()` 只是改变朝向，不会移动角色。要沿当前朝向移动，用 `hero.move(距离)`。
 
 ## 输入系统
 
@@ -172,17 +210,19 @@ while True:
         print("碰到敌人了！")
 ```
 
-### 检测碰到画面边缘
+### 检测碰到地图边缘
 
 ```python
 if hero.is_touch_edge():
-    print("碰到画面边缘了！")
+    print("碰到地图边缘了！")
 ```
+
+单屏地图时，地图边缘就是画面边缘；地图比窗口大时，它判断的是地图边界。
 
 ### 检测组碰撞
 
 ```python
-# 把敌人加入组
+# enemy1、enemy2 是已经创建好的两个敌人
 enemy1.add_to_group("enemies")
 enemy2.add_to_group("enemies")
 

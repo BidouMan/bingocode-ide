@@ -32,6 +32,12 @@
   --radius: 6px;
   --shadow-pop: 0 8px 24px rgba(20, 28, 45, 0.10);
 
+  /* 所有插图统一外观：圆角 + 1px 淡描边 + 淡投影。
+     新增截图走 <!-- screenshot: ... --> 会自动套用，不要单独写样式。 */
+  --shot-radius: 10px;
+  --shot-ring: rgba(20, 28, 45, 0.08);
+  --shot-shadow: 0 0 0 1px var(--shot-ring), 0 6px 18px rgba(20, 28, 45, 0.1);
+
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
     "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
@@ -555,25 +561,42 @@ tbody tr:nth-child(even) td { background: #FCFCFD; }
 
 /* ─── 截图 / 占位 ─── */
 
-.screenshot-figure { margin: 22px 0; }
-
-.screenshot-figure img {
-  display: block;
+/* 兜底：正文里直接插入的图片也套用同一外观（截图块另有铺满宽度规则） */
+.content img:not(.home-app-shot) {
   max-width: 100%;
   height: auto;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-soft);
+  border-radius: var(--shot-radius);
+  box-shadow: var(--shot-shadow);
+}
+
+.screenshot-figure { margin: 22px 0; }
+
+/* 截图不设尺寸要求：宽度铺满正文栏，高度按原图比例自适应。
+   不加背景色（否则透明区域会透出“卡片”底色），只保留圆角 + 淡描边 + 淡投影。
+   截图自带的透明边距在构建时由 trim-screenshots.py 裁掉。 */
+.screenshot-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--shot-radius);
+  /* 1px 描边用 box-shadow 实现，才能贴合圆角 */
+  box-shadow: var(--shot-shadow);
 }
 
 .screenshot-caption {
-  margin-top: 8px;
+  margin-top: 12px;
   font-size: 12.5px;
   line-height: 1.6;
   color: var(--text-muted);
 }
 
+/* 占位框用较矮的固定高度，避免未补图时页面被大片空白撑长 */
 .screenshot-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
   margin: 22px 0;
   padding: 26px 20px;
   border: 1px dashed var(--border-strong);
@@ -614,6 +637,94 @@ tbody tr:nth-child(even) td { background: #FCFCFD; }
   font-size: 12.5px;
   line-height: 1.65;
   color: var(--text-muted);
+}
+
+.screenshot-placeholder .shot-hint {
+  margin: 6px auto 0;
+  font-size: 12px;
+  color: #A6AFBE;
+}
+
+/* ─── 角度 / 方向演示 ─── */
+
+.dir-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 20px 0 10px;
+}
+
+.dir-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 10px 14px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+/* 圆形深色舞台，和游戏预览的画面底色保持一致 */
+.dir-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 76px;
+  height: 76px;
+  margin-bottom: 10px;
+  border-radius: 50%;
+  background: #22252B;
+  box-shadow: inset 0 0 0 1px #0C0C0C;
+}
+
+/* 角色本身朝右；不同方向用 CSS 旋转（CSS 顺时针为正，游戏角度逆时针为正，故取负） */
+.dir-hero {
+  width: 38px;
+  height: 38px;
+  color: #5BFB84;
+  transform-origin: 50% 50%;
+  filter: drop-shadow(0 2px 5px rgba(91, 251, 132, 0.25));
+}
+
+.dir-hero-90 { transform: rotate(-90deg); }
+.dir-hero-180 { transform: rotate(180deg); }
+.dir-hero-270 { transform: rotate(90deg); }
+
+.dir-angle {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text);
+}
+
+.dir-name {
+  margin-top: 1px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.dir-code {
+  margin-top: 8px;
+  padding: 2px 7px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: #B03A2E;
+  white-space: nowrap;
+}
+
+.dir-note {
+  margin: 0 0 18px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-muted);
+}
+
+/* 视口变窄时正文栏放不下四张卡片，改成两列（1080 以下正文栏约 750px） */
+@media (max-width: 1080px) {
+  .dir-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* ─── 首页 ─── */
@@ -729,17 +840,17 @@ tbody tr:nth-child(even) td { background: #FCFCFD; }
   margin: 0;
   width: 100%;
   align-self: center;
-  /* 统一裁掉截图自带阴影与圆角，由页面对齐卡片风格 */
-  border-radius: 10px;
+  /* 与正文插图同一套外观：圆角 + 淡描边 + 淡投影 */
+  border-radius: var(--shot-radius);
   overflow: hidden;
   background: var(--app-bg);
-  box-shadow: 0 10px 24px rgba(20, 28, 45, 0.14);
+  box-shadow: var(--shot-shadow);
 }
 
 /* 没有截图时的占位需要自己的窗口边框 */
 .home-app.no-shot {
   border: 1px solid #0C0C0C;
-  border-radius: 10px;
+  border-radius: var(--shot-radius);
   background: var(--app-bg);
 }
 

@@ -7,6 +7,7 @@
  */
 
 import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, existsSync } from 'fs'
+import { execFileSync } from 'child_process'
 import { join, relative, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { Marked } from 'marked'
@@ -30,7 +31,9 @@ const BUILD_STAMP = Date.now().toString(36)
 
 const marked = new Marked({
   gfm: true,
-  breaks: false,
+  // 单个回车即换行：中文写作习惯里，作者敲回车就是想要换行，
+  // 不必再刻意行尾加两个空格。空行仍然是分段。
+  breaks: true,
 })
 
 // 代码高亮
@@ -210,6 +213,7 @@ function processScreenshots(html: string, prefix: string): string {
       <div class="shot-title">待补充截图</div>
       <span class="shot-file">${safeFile}</span>
       <p class="shot-desc">${caption || '把截图放到 docs/static/screenshots/ 下的同名路径，重新构建后会自动替换此占位框。'}</p>
+      <p class="shot-hint">截图尺寸不限，页面会自动缩放并裁掉透明边距。</p>
     </div>`
   })
 }
@@ -274,12 +278,13 @@ function renderToc(headings: Heading[]): string {
 
 // ─── 处理内容中的链接 ───
 
-function processLinks(html: string, prefix: string): string {
-  return html.replace(/href="([^"]*\.md)"/g, (match, path: string) => {
-    if (path.startsWith('./') || path.startsWith('../') || path.startsWith('http')) {
-      return match
-    }
-    return `href="${prefix}${path.replace('.md', '.html')}"`
+// 源 Markdown 与产出的 HTML 相对目录深度一致，所以作者写的相对路径（同级 xx.md、
+// 上级 ../api/xx.md、根目录 page.md）都可以原样沿用，只需把扩展名换成 .html。
+// 不能再人为加 prefix，否则子目录页面里的同级链接会变成 ../xx.html 而失效。
+function processLinks(html: string): string {
+  return html.replace(/href="([^"#?]+\.md)([^"]*)"/g, (_match, path: string, rest: string) => {
+    if (path.startsWith('http')) return `href="${path}${rest}"`
+    return `href="${path.replace(/\.md$/, '.html')}${rest}"`
   })
 }
 
@@ -299,7 +304,7 @@ function buildPage(mdPath: string, template: string, searchIndex: string): void 
   const isHome = mdPath === 'index.md'
   const rawHtml = isHome ? mdContent : (marked.parse(mdContent) as string)
 
-  let content = processLinks(processScreenshots(rawHtml, prefix), prefix)
+  let content = processLinks(processScreenshots(rawHtml, prefix))
 
   // 首页不生成锚点和右侧目录，保持一个干净的开场
   let headings: Heading[] = []
@@ -337,26 +342,65 @@ function buildPage(mdPath: string, template: string, searchIndex: string): void 
 
 // ─── 复制静态资源 ───
 
+function copyDirRecursive(src: string, dest: string, skip?: Set<string>): void {
+  if (!existsSync(src)) return
+  for (const entry of readdirSync(src)) {
+    if (skip && skip.has(entry)) continue
+    const srcPath = join(src, entry)
+    const destPath = join(dest, entry)
+    if (statSync(srcPath).isDirectory()) {
+      mkdirSync(destPath, { recursive: true })
+      copyDirRecursive(srcPath, destPath)
+    } else {
+      writeFileSync(destPath, readFileSync(srcPath))
+    }
+  }
+}
+
 function copyStatic(): void {
   const distStatic = join(DIST_DIR, 'static')
   mkdirSync(distStatic, { recursive: true })
 
-  function copyDir(src: string, dest: string) {
-    if (!existsSync(src)) return
-    for (const entry of readdirSync(src)) {
-      const srcPath = join(src, entry)
-      const destPath = join(dest, entry)
-      if (statSync(srcPath).isDirectory()) {
-        mkdirSync(destPath, { recursive: true })
-        copyDir(srcPath, destPath)
-      } else {
-        writeFileSync(destPath, readFileSync(srcPath))
-      }
+  // screenshots 单独处理：顺手裁掉 macOS 窗口截图自带的透明外框
+  copyDirRecursive(STATIC_DIR, distStatic, new Set(['screenshots']))
+  copyScreenshots()
+  console.log('📁 静态资源已复制')
+}
+
+// 找到能 import PIL 的 Python；找不到就退回原样复制
+function findPythonWithPillow(): string | null {
+  const candidates = [
+    join(REPO_ROOT, 'engine/venv/bin/python'),
+    join(REPO_ROOT, 'engine/venv/bin/python3'),
+    join(REPO_ROOT, 'engine/venv/Scripts/python.exe'),
+    'python3',
+    'python',
+  ]
+  for (const python of candidates) {
+    try {
+      execFileSync(python, ['-c', 'import PIL'], { stdio: 'ignore' })
+      return python
+    } catch {
+      // 试下一个
     }
   }
+  return null
+}
 
-  copyDir(STATIC_DIR, distStatic)
-  console.log('📁 静态资源已复制')
+function copyScreenshots(): void {
+  const src = join(STATIC_DIR, 'screenshots')
+  const dest = join(DIST_DIR, 'static/screenshots')
+  mkdirSync(dest, { recursive: true })
+  if (!existsSync(src)) return
+
+  const python = findPythonWithPillow()
+  if (!python) {
+    console.warn('⚠️  未找到带 Pillow 的 Python，截图按原样复制（透明外框不会被裁掉）')
+    copyDirRecursive(src, dest)
+    return
+  }
+
+  execFileSync(python, [join(DOCS_ROOT, 'trim-screenshots.py'), src, dest], { stdio: 'inherit' })
 }
 
 // ─── 收集所有 Markdown 文件 ───

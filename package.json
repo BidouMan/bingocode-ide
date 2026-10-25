@@ -14,6 +14,7 @@
     "docs:build": "tsx docs/build.ts",
     "docs:dev": "tsx docs/dev.ts",
     "docs:preview": "open docs/dist/index.html",
+    "docs:publish": "pnpm docs:build && rsync -rlt --delete --exclude '.DS_Store' --exclude '.trim-manifest.json' docs/dist/ \"/Volumes/XC_MAC/BingoCode帮助文档/\"",
     "manual:build": "tsx manual/build.ts",
     "manual:serve": "tsx manual/build.ts --serve"
   },
