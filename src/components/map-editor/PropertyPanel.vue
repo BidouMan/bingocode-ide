@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useMapStore, DEFAULT_CAMERA_SETTINGS } from '../../stores/map'
 import { useEditorStore } from '../../stores/editor'
 import { useResourceStore } from '../../stores/resource'
 import CustomSelect from '../common/CustomSelect.vue'
 import { toUserX, toWorldX, toUserY, toWorldY, toUserAngle, toWorldAngle } from '../../utils/coords'
+import iconSettings from '../../assets/icons/icon--settings.svg'
 
 defineProps<{
   disabled?: boolean
@@ -20,6 +21,9 @@ const emit = defineEmits<{
 const mapStore = useMapStore()
 const editorStore = useEditorStore()
 const resourceStore = useResourceStore()
+
+/** 下滑设置子面板展开状态（选项为占位，功能后续版本实现） */
+const showSlopeSettings = ref(false)
 
 const collisionTypeOptions = [
   { label: '墙体', value: '墙体' },
@@ -449,6 +453,61 @@ function onCollisionEnabledChange(enabled: boolean) {
             <span class="att-checkbox-text">启用</span>
           </label>
         </div>
+
+        <div class="att-row">
+          <span class="att-label">禁止下滑</span>
+          <label class="att-checkbox">
+            <input
+              type="checkbox"
+              :checked="mapStore.mapData.stopOnSlope"
+              :disabled="disabled"
+              @change="mapStore.updateMapProperty('stopOnSlope', ($event.target as HTMLInputElement).checked)"
+            />
+            <span class="att-checkbox-text">启用</span>
+          </label>
+          <button
+            class="att-gear-btn"
+            :class="{ active: showSlopeSettings }"
+            :disabled="disabled"
+            title="下滑设置"
+            @click="showSlopeSettings = !showSlopeSettings"
+          >
+            <img :src="iconSettings" alt="下滑设置" />
+          </button>
+        </div>
+
+        <!-- 下滑设置：占位选项，功能后续版本实现
+             参考成熟引擎：坡度上限=Godot floor_max_angle / Unity slopeLimit，
+             下坡贴地=Godot floor_snap_length，坡上匀速=Godot floor_constant_speed -->
+        <div v-if="showSlopeSettings" class="att-subgroup">
+          <div class="att-row">
+            <span class="att-label">坡度上限</span>
+            <input class="att-input att-input-no-spin" type="number" value="45" disabled />
+            <span class="att-value">度</span>
+          </div>
+
+          <div class="att-row">
+            <span class="att-label">下滑速度</span>
+            <input class="att-range" type="range" min="0" max="100" value="50" disabled />
+            <span class="att-value">50%</span>
+          </div>
+
+          <div class="att-row">
+            <span class="att-label">下坡贴地</span>
+            <label class="att-checkbox">
+              <input type="checkbox" checked disabled />
+              <span class="att-checkbox-text">启用</span>
+            </label>
+          </div>
+
+          <div class="att-row">
+            <span class="att-label">坡上匀速</span>
+            <label class="att-checkbox">
+              <input type="checkbox" disabled />
+              <span class="att-checkbox-text">启用</span>
+            </label>
+          </div>
+        </div>
       </div>
 
       <!-- 当前图层属性 -->
@@ -666,6 +725,49 @@ function onCollisionEnabledChange(enabled: boolean) {
   font-size: 12px;
   min-width: 60px;
   flex-shrink: 0;
+}
+
+/* 下滑设置齿轮按钮：靠右对齐，hover/展开时用底色高亮提示状态 */
+.att-gear-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.att-gear-btn img {
+  width: 14px;
+  height: 14px;
+  opacity: 0.55;
+}
+
+.att-gear-btn:hover {
+  background: rgb(61, 64, 72);
+}
+
+.att-gear-btn:hover img {
+  opacity: 0.9;
+}
+
+.att-gear-btn.active {
+  background: rgb(61, 64, 72);
+}
+
+.att-gear-btn.active img {
+  opacity: 1;
+}
+
+.att-gear-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .att-input {

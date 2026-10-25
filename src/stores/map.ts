@@ -137,6 +137,8 @@ export interface MapData {
   gravity: boolean
   /** 边界碰撞：勾选后角色被地图矩形（地图尺寸）挡住，不能离开可玩区域 */
   boundaryCollision: boolean
+  /** 禁止下滑：勾选后角色站在斜坡上不会下滑（默认开启） */
+  stopOnSlope: boolean
   collisionType: string
   collisionEnabled: boolean
   // 地图级素材库：图层只引用素材，不再各自持有一份
@@ -169,6 +171,7 @@ export const useMapStore = defineStore('map', () => {
     tileSize: 16,
     gravity: false,
     boundaryCollision: true,
+    stopOnSlope: true,
     collisionType: '图像',
     collisionEnabled: false,
     resources: [],
@@ -303,6 +306,7 @@ export const useMapStore = defineStore('map', () => {
       tileSize: 16,
       gravity: false,
       boundaryCollision: true,
+      stopOnSlope: true,
       collisionType: '图像',
       collisionEnabled: false,
       resources: [],

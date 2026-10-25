@@ -585,6 +585,8 @@ class Sprite:
         self._is_deleted = False
         self._layer = 0
         self._speed = 0
+        # 本物理步学生代码执行前的 x：用于区分主动移动与斜面碰撞推挤下滑
+        self._frame_start_x = 0.0
         self._on_hit_callbacks = []
         self._auto_destroy = False
         # 位置跟随目标（get_marker 挂点引用 / 另一个 Sprite）：None = 不跟随
@@ -2995,6 +2997,8 @@ def load_map(map_name):
             "boundaryCollision": bool(
                 save_data.get("boundaryCollision", save_data.get("gravity", False))
             ),
+            # 禁止下滑：勾选后角色站在斜坡上不下滑；旧存档缺省视为开启
+            "stopOnSlope": bool(save_data.get("stopOnSlope", True)),
             "layers": layers,
             "tile_sets": tilesets,
             # 地图相机设置（属性面板里的相机跟随/偏移/平滑/边界限制）
@@ -3169,6 +3173,9 @@ def _handle_physics_collision():
     if not _CURRENT_MAP:
         return
 
+    # 地图属性「禁止下滑」：开启时站在斜坡上不下滑（缺省视为开启）
+    stop_on_slope = _CURRENT_MAP.get("stopOnSlope", True)
+
     # 遍历所有精灵
     for sprite in _SPRITES.values():
         if sprite._is_deleted:
@@ -3219,9 +3226,14 @@ def _handle_physics_collision():
         else:
             gravity = 0
 
+        x_before = sprite._x
         sprite._y += sprite._vy
         sprite._resolve_collision("y")
         sprite._resolve_collision("x")
+        # 禁止下滑：本步学生代码与自动移动都没动过 x 时，
+        # 落地状态下撤销重力+碰撞推挤带来的水平漂移（即 Godot floor_stop_on_slope 语义）
+        if stop_on_slope and sprite._on_ground and x_before == sprite._frame_start_x:
+            sprite._x = x_before
         if sprite._on_ground:
             sprite._vy = 0
             sprite._jump_cut = False
@@ -3512,6 +3524,11 @@ def run():
                             sprite_state["last_frame_time"] = t
                             sprite._update_animation_frame()
 
+            # 记录本物理步学生代码执行前的 x（禁止下滑功能据此区分主动移动与推挤下滑）
+            if not _PAUSED and _CURRENT_MAP is not None:
+                for sprite in _SPRITES.values():
+                    sprite._frame_start_x = sprite._x
+
             main_module.loop()
 
             for sid in list(_SAY_TIMERS.keys()):
@@ -3714,6 +3731,11 @@ def start_game(project_dir=None, target_file=None):
                 for sprite in _SPRITES.values():
                     if hasattr(sprite, "animation_state") and sprite.animation_state:
                         _update_sprite_animation(sprite)
+
+            # 记录本物理步学生代码执行前的 x（禁止下滑功能据此区分主动移动与推挤下滑）
+            if not _PAUSED and _CURRENT_MAP is not None:
+                for sprite in _SPRITES.values():
+                    sprite._frame_start_x = sprite._x
 
             # 执行所有 generator（每帧一次迭代）
             # 暂停时照常执行：文档约定「程序还在跑」，否则 resume() 永远不会被调用

@@ -5,8 +5,8 @@
 ## 打开角色编辑器
 
 1. 确保在「游戏模式」下
-2. 点击菜单栏的「角色」按钮
-3. 角色编辑器会在主区域显示
+2. **双击**已经创建的角色图标
+3. 页面会跳转到角色编辑器页面
 
 <!-- screenshot: editor/sprite-editor-overview.png -->
 <!-- alt: 角色编辑器界面 -->
@@ -19,17 +19,17 @@ BingoCodeIDE 使用 `.bgs` 格式的角色包文件。一个角色包包含：
 - **config.json**：角色配置文件
 - **PNG 图片**：角色的每一帧图片
 
-### 创建新角色
+### 内置角色库
 
-1. 在资源面板点击「角色」标签
-2. 点击「+」按钮
-3. 选择一张或多张 PNG 图片
-4. 输入角色名称
-5. 点击确定
+BingoCodeIDE 提供了丰富的内置角色：
 
-<!-- screenshot: editor/create-sprite.png -->
-<!-- alt: 创建新角色对话框 -->
-<!-- description: 显示文件选择和角色命名界面 -->
+1. 在资源面板点击「角色库」标签
+2. 浏览可用的角色
+3. 点击角色即可添加到项目中
+
+<!-- screenshot: editor/sprite-library.png -->
+<!-- alt: 内置角色库 -->
+<!-- description: 显示各种内置角色的预览 -->
 
 ### 内置角色库
 
@@ -42,6 +42,18 @@ BingoCodeIDE 提供了丰富的内置角色：
 <!-- screenshot: editor/sprite-library.png -->
 <!-- alt: 内置角色库 -->
 <!-- description: 显示各种内置角色的预览 -->
+
+### 创建新角色
+
+1. 在资源面板点击「角色」标签
+2. 点击「+」按钮
+3. 选择一张或多张 PNG 图片
+4. 输入角色名称
+5. 点击确定
+
+<!-- screenshot: editor/create-sprite.png -->
+<!-- alt: 创建新角色对话框 -->
+<!-- description: 显示文件选择和角色命名界面 -->
 
 ## 帧动画
 
