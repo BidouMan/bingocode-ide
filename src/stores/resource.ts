@@ -52,7 +52,8 @@ export const useResourceStore = defineStore('resource', () => {
     return name
   }
 
-  function addItem(item: Omit<ResourceItem, 'id'>) {
+  // id 可选：代码资源的 id 必须与标签页 id 保持一致，重命名/删除才能正确联动
+  function addItem(item: Omit<ResourceItem, 'id'>, id?: string) {
     const list = getList(item.type)
     let name = item.name
     const existingNames = list.value.map(i => i.name)
@@ -62,9 +63,9 @@ export const useResourceStore = defineStore('resource', () => {
       name = `${name}-${counter}`
     }
 
-    const id = `res-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
-    list.value.push({ ...item, name, id })
-    return id
+    const newId = id || `res-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    list.value.push({ ...item, name, id: newId })
+    return newId
   }
 
   function removeItem(id: string, type: ResourceItem['type']) {

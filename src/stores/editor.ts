@@ -20,7 +20,7 @@ let tabIdCounter = 0
 function createDefaultTab(): Tab {
   return {
     id: `tab-${++tabIdCounter}`,
-    name: '未命名-1.py',
+    name: '游戏脚本_1.py',
     path: '',
     content: '',
     modified: false,
@@ -180,7 +180,17 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   // ─── 标签操作 (自动判断当前模式) ───
-  function createTab(name: string, path: string, content = ''): number {
+  // 新建代码文件的默认名：游戏脚本_1.py、游戏脚本_2.py、游戏脚本_3.py …
+  function nextCodeFileName(): string {
+    let max = 0
+    for (const tab of currentTabs.value) {
+      const m = tab.name.match(/^游戏脚本_(\d+)\.py$/)
+      if (m) max = Math.max(max, parseInt(m[1], 10))
+    }
+    return `游戏脚本_${max + 1}.py`
+  }
+
+  function createTab(name: string, path: string, content = '', id?: string): number {
     const tabs = currentTabs.value
     const existing = tabs.findIndex((t) => t.path === path && path !== '')
     if (existing >= 0) {
@@ -190,7 +200,7 @@ export const useEditorStore = defineStore('editor', () => {
     }
 
     const tab: Tab = {
-      id: `tab-${++tabIdCounter}`,
+      id: id || `tab-${++tabIdCounter}`,
       name,
       path,
       content,
@@ -366,6 +376,7 @@ export const useEditorStore = defineStore('editor', () => {
     setResourceTab,
     setRenderMode,
     setFocusMode,
+    nextCodeFileName,
     createTab,
     closeTab,
     closeOtherTabs,

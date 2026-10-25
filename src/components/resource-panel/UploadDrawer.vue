@@ -121,8 +121,14 @@ async function handleAction(key: string) {
           console.error('[UploadDrawer] 读取图片文件失败:', e)
         }
       } else if (props.type === 'code') {
-        resourceStore.addItem({ name: result.name, type: 'code', path: result.name, content: result.content || undefined })
-        editorStore.createTab(result.name, result.name, result.content || '')
+        const idx = editorStore.createTab(result.name, result.name, result.content || '')
+        const tab = editorStore.currentTabs[idx]
+        if (tab) {
+          resourceStore.addItem(
+            { name: tab.name, type: 'code', path: tab.path, content: tab.content || undefined },
+            tab.id,
+          )
+        }
         emit('uploaded', 'code', result.name, result.content || undefined)
       } else {
         // 声音文件：复制到项目目录
@@ -169,7 +175,7 @@ async function handleAction(key: string) {
     }
     case 'new':
       if (props.type === 'code') {
-        editorStore.createTab('未命名.py', '')
+        editorStore.createTab(editorStore.nextCodeFileName(), '')
       }
       break
     case 'paint':

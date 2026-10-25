@@ -262,8 +262,14 @@ async function loadProjectResources(root: string) {
       if (file.endsWith('.py')) {
         const content = await invoke<string>('read_file', { path: `${root}/code/${file}` })
         if (stale()) return
-        editorStore.createTab(file, `${root}/code/${file}`, content)
-        resourceStore.addItem({ name: file, type: 'code', path: `${root}/code/${file}`, content })
+        const idx = editorStore.createTab(file, `${root}/code/${file}`, content)
+        const tab = editorStore.currentTabs[idx]
+        if (tab) {
+          resourceStore.addItem(
+            { name: tab.name, type: 'code', path: tab.path, content: tab.content },
+            tab.id,
+          )
+        }
       }
     }
   } catch { /* code 目录可能不存在 */ }
@@ -394,15 +400,21 @@ onMounted(async () => {
   editorStore.gameActiveTabIndex = 0
   editorStore.codeActiveTabIndex = 0
 
-  // 创建默认空代码文件（与"新建项目"一致，只保留一个 未命名-1.py）
+  // 创建默认空代码文件（与"新建项目"一致，只保留一个 游戏脚本_1.py）
   if (projectStore.root) {
     const projectRoot = projectStore.root
-    const name = '未命名-1.py'
+    const name = '游戏脚本_1.py'
     editorStore.setActiveEditorMode('code')
     await invoke('create_dir', { path: `${projectRoot}/code` })
     await invoke('write_file', { path: `${projectRoot}/code/${name}`, content: '' })
-    editorStore.createTab(name, `${projectRoot}/code/${name}`, '')
-    resourceStore.addItem({ name, type: 'code', path: `${projectRoot}/code/${name}`, content: '' })
+    const idx = editorStore.createTab(name, `${projectRoot}/code/${name}`, '')
+    const tab = editorStore.currentTabs[idx]
+    if (tab) {
+      resourceStore.addItem(
+        { name: tab.name, type: 'code', path: tab.path, content: tab.content },
+        tab.id,
+      )
+    }
   }
   console.log(`[Perf] Startup: ${(performance.now() - t0).toFixed(0)}ms`)
 })
@@ -633,12 +645,18 @@ async function fileMenuAction(action: string) {
       editorStore.codeActiveTabIndex = 0
       await nextTick()
       // 创建新项目默认代码文件（先切代码模式，确保 createTab 加入 codeTabs）
-      const name = '未命名-1.py'
+      const name = '游戏脚本_1.py'
       await invoke('create_dir', { path: `${projectRoot}/code` })
       await invoke('write_file', { path: `${projectRoot}/code/${name}`, content: '' })
       editorStore.setActiveEditorMode('code')
-      editorStore.createTab(name, `${projectRoot}/code/${name}`, '')
-      resourceStore.addItem({ name, type: 'code', path: `${projectRoot}/code/${name}`, content: '' })
+      const idx = editorStore.createTab(name, `${projectRoot}/code/${name}`, '')
+      const tab = editorStore.currentTabs[idx]
+      if (tab) {
+        resourceStore.addItem(
+          { name: tab.name, type: 'code', path: tab.path, content: tab.content },
+          tab.id,
+        )
+      }
       editorStore.setResourceTab('sprite')
       currentPage.value = 0
       break
@@ -756,15 +774,18 @@ async function uploadResource(type: 'sprite' | 'map' | 'sound' | 'code') {
   const file = await fileDialog.openFile(acceptMap[type])
   if (!file) return
 
-  resourceStore.addItem({
-    name: file.name,
-    type,
-    path: file.name,
-    content: type === 'code' ? file.content : undefined,
-  })
-
   if (type === 'code') {
-    editorStore.createTab(file.name, file.name, file.content)
+    // 先建标签再建资源项，并复用标签 id，保证重命名/删除联动
+    const idx = editorStore.createTab(file.name, file.name, file.content)
+    const tab = editorStore.currentTabs[idx]
+    if (tab) {
+      resourceStore.addItem(
+        { name: tab.name, type: 'code', path: tab.path, content: tab.content },
+        tab.id,
+      )
+    }
+  } else {
+    resourceStore.addItem({ name: file.name, type, path: file.name })
   }
 }
 
@@ -776,8 +797,8 @@ async function openResource(item: { id: string; name: string; type: string; cont
       idx = editorStore.gameTabs.findIndex(t => t.path === item.path)
     }
     if (idx < 0) {
-      // 标签已关闭，重新创建
-      idx = editorStore.createTab(item.name, item.path || '', item.content || '')
+      // 标签已关闭，重新创建；复用资源 id，保持重命名/删除联动
+      idx = editorStore.createTab(item.name, item.path || '', item.content || '', item.id)
     }
     editorStore.setGameMode(true)
     editorStore.setActiveTab(idx)
@@ -1714,13 +1735,14 @@ async function ideNewFileInTree() {
     await ideOpenFolder()
     return
   }
-  const name = '新文件.py'
-  let counter = 1
-  let finalName = name
+  let finalName = editorStore.nextCodeFileName()
   const basePath = fileExplorerStore.workspaceFolder
+  const matched = finalName.match(/^(.*_)(\d+)\.py$/)
+  const prefix = matched ? matched[1] : '游戏脚本_'
+  let counter = matched ? parseInt(matched[2], 10) : 1
   while (await invoke<boolean>('path_exists', { path: `${basePath}/${finalName}` })) {
     counter++
-    finalName = `新文件-${counter}.py`
+    finalName = `${prefix}${counter}.py`
   }
   try {
     await fileExplorerStore.createFile(basePath, finalName)
@@ -2257,7 +2279,7 @@ function spriteDisplayName(name: string) {
                   </template>
                   <button class="tab-close" @click.stop="editorStore.closeTab(index)">×</button>
                 </div>
-                <button class="tab-add" @click="editorStore.createTab('未命名.py', '')" v-tooltip="'新建文件'">+</button>
+                <button class="tab-add" @click="editorStore.createTab(editorStore.nextCodeFileName(), '')" v-tooltip="'新建文件'">+</button>
               </div>
             </div>
             <div class="code-area">
