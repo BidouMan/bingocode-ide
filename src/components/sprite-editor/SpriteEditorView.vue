@@ -194,6 +194,8 @@ const panStartY = ref(0)
 const panStartOffsetX = ref(0)
 const panStartOffsetY = ref(0)
 const canvasRef = ref<HTMLDivElement | null>(null)
+/** 标注层：屏幕坐标 → 画布坐标用它实测的包围盒反推比例（含 pan/缩放/余量缩放） */
+const annoLayerRef = ref<HTMLDivElement | null>(null)
 
 const costumeContextMenu = ref<{ show: boolean; x: number; y: number; index: number }>({ show: false, x: 0, y: 0, index: 0 })
 const animContextMenu = ref<{ show: boolean; x: number; y: number; name: string }>({ show: false, x: 0, y: 0, name: '' })
@@ -986,15 +988,21 @@ const pivotHandleStyle = computed(() => {
   return p ? { left: `${p.x}px`, top: `${p.y}px` } : {}
 })
 
-/** 屏幕坐标 → 逻辑画布坐标（画布中心锚点 + pan + zoom，0.5px 吸附） */
+/**
+ * 屏幕坐标 → 逻辑画布坐标（0.5px 吸附）。
+ * 不能手算 zoom/pan 逆变换：标注层既被 canvasLayoutZoom 缩放，又可能被外层的
+ * 「余量缩放」(canvasResidualScale) 二次缩放，手算极易漏项（旧实现把画布中心
+ * 偏移当未缩放处理，缩放≠1 时中心点/标记就会偏离鼠标）。
+ * 直接读标注层实际包围盒反推比例，与 CollisionShapeOverlay 同一套算法。
+ */
 function screenToCanvas(e: MouseEvent): { x: number; y: number } | null {
-  const rect = canvasRef.value?.getBoundingClientRect()
+  const el = annoLayerRef.value
   const bsf = currentSprite.value?.bsf
-  if (!rect || !bsf) return null
-  const offX = e.clientX - rect.left - rect.width / 2
-  const offY = e.clientY - rect.top - rect.height / 2
-  const lx = (offX - canvasPanX.value + bsf.canvas.w / 2) / canvasZoom.value
-  const ly = (offY - canvasPanY.value + bsf.canvas.h / 2) / canvasZoom.value
+  if (!el || !bsf || bsf.canvas.w <= 0 || bsf.canvas.h <= 0) return null
+  const rect = el.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return null
+  const lx = (e.clientX - rect.left) / (rect.width / bsf.canvas.w)
+  const ly = (e.clientY - rect.top) / (rect.height / bsf.canvas.h)
   return { x: Math.round(lx * 2) / 2, y: Math.round(ly * 2) / 2 }
 }
 
@@ -1473,6 +1481,7 @@ onBeforeUnmount(() => {
             <!-- 标注层：画布坐标 + transform 缩放（手柄内部再 1/zoom 反向缩放保持屏幕尺寸恒定） -->
             <div
               v-if="canAnno && currentSprite?.bsf"
+              ref="annoLayerRef"
               class="canvas-anno-layer"
               :style="annoLayerStyle"
             >
@@ -2010,10 +2019,9 @@ onBeforeUnmount(() => {
   position: absolute;
   width: 0;
   height: 0;
-  cursor: grab;
+  cursor: default;
   z-index: 5;
 }
-.marker-handle:active { cursor: grabbing; }
 .marker-visual {
   position: absolute;
   left: 0;
@@ -2032,10 +2040,10 @@ onBeforeUnmount(() => {
 }
 .marker-icon {
   position: absolute;
-  left: -10px;
-  top: -18.5px;
-  width: 20px;
-  height: 20px;
+  left: -13px;
+  top: -24px;
+  width: 26px;
+  height: 26px;
   color: var(--mk-color);
   filter: drop-shadow(0 0 4px var(--mk-glow));
   pointer-events: auto;
@@ -2048,13 +2056,13 @@ onBeforeUnmount(() => {
 }
 .marker-label {
   position: absolute;
-  left: 11px;
-  top: -16px;
-  font-size: 10px;
-  line-height: 14px;
+  left: 14px;
+  top: -24px;
+  font-size: 14px;
+  line-height: 18px;
   color: var(--mk-color);
   background: rgba(34, 37, 43, 0.85);
-  padding: 0 4px;
+  padding: 0 5px;
   border-radius: 3px;
   white-space: nowrap;
   pointer-events: none;
@@ -2087,7 +2095,7 @@ onBeforeUnmount(() => {
 }
 .marker-rename-input:focus {
   outline: none;
-  border-color: #EA4942;
+  border-color: var(--accent);
 }
 .anno-toolbar .marker-rename-input { height: 20px; }
 
