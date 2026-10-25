@@ -164,7 +164,7 @@ export function useMapPersistence(options: MapPersistenceOptions) {
       height: 30,
       tileSize: 16,
       gravity: false,
-      boundaryCollision: true,
+      boundaryCollision: false,
       stopOnSlope: true,
       collisionType: '图像',
       collisionEnabled: false,
