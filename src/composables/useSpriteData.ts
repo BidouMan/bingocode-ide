@@ -50,6 +50,8 @@ export interface BsfMeta {
   collision?: SpriteCollisionShape
   /** 禁用碰撞：true = 该角色完全不参与地形/边界物理阻挡（不影响碰到检测） */
   collisionDisabled?: boolean
+  /** 受重力影响：false = 重力地图里也不下坠（撞墙/落地等碰撞照常）；缺省 = 受重力 */
+  gravity?: boolean
   /** 统一挂点（按名字，画布坐标）：武器/道具挂载锚点，如 hand_r / head */
   markers?: Record<string, { x: number; y: number }>
 }
@@ -259,6 +261,7 @@ async function buildBsfSpriteData(manifest: any, sheetImage: HTMLImageElement): 
       frames: manifest.frames,
       ...(manifest.collision ? { collision: manifest.collision } : {}),
       ...(manifest.collisionDisabled ? { collisionDisabled: true } : {}),
+      ...(manifest.gravity === false ? { gravity: false } : {}),
       ...(manifest.markers ? { markers: manifest.markers } : {}),
     },
   }
@@ -305,6 +308,8 @@ export async function saveBsfManifest(dirPath: string, sprite: SpriteData): Prom
     ...(sprite.bsf.collision ? { collision: sprite.bsf.collision } : {}),
     // 禁用碰撞（可选）：true = 不参与物理阻挡；缺省不写字段
     ...(sprite.bsf.collisionDisabled ? { collisionDisabled: true } : {}),
+    // 受重力影响（可选）：false = 不受地图重力；缺省不写字段（= 受重力）
+    ...(sprite.bsf.gravity === false ? { gravity: false } : {}),
     // 挂点（可选）：名字 → 画布坐标；空表不写字段
     ...(sprite.bsf.markers && Object.keys(sprite.bsf.markers).length > 0
       ? { markers: sprite.bsf.markers }

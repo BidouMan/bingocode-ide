@@ -689,6 +689,21 @@ function onCollisionDisabledChange(e: Event) {
   scheduleSave()
 }
 
+/** 受重力影响：缺省受重力（勾选）；不勾选 = 重力地图里也不下坠，撞墙/落地照常 */
+const gravityEnabled = computed(() => currentSprite.value?.bsf?.gravity !== false)
+
+function onGravityChange(e: Event) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  const checked = (e.target as HTMLInputElement).checked
+  if (checked) {
+    delete bsf.gravity
+  } else {
+    bsf.gravity = false
+  }
+  scheduleSave()
+}
+
 /** 当前帧内容框（画布坐标）→ 自定义碰撞初值：与自动碰撞行为一致起步 */
 function frameContentCollision(): SpriteCollisionShape {
   const bsf = currentSprite.value!.bsf!
@@ -1381,13 +1396,21 @@ onBeforeUnmount(() => {
             >仅当前帧</button>
           </div>
           <div class="props-sep"></div>
-          <label class="anno-checkbox" title="关闭后不参与物理：不会被墙壁、地面挡住，也不受重力下落">
+          <label class="anno-checkbox" title="关闭后不参与物理：不会被墙壁、地面挡住，也无法站在地上">
             <input
               type="checkbox"
               :checked="collisionDisabled"
               @change="onCollisionDisabledChange"
             />
             <span>禁用碰撞</span>
+          </label>
+          <label class="anno-checkbox" title="关闭后不受地图重力影响，不会向下掉落；撞墙、落地等碰撞不受影响（适合子弹、飞行敌人）">
+            <input
+              type="checkbox"
+              :checked="gravityEnabled"
+              @change="onGravityChange"
+            />
+            <span>重力</span>
           </label>
         </template>
         <template v-else>

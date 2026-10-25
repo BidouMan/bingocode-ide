@@ -90,6 +90,7 @@ const spriteProperties: EngineCompletionItem[] = [
   { label: 'scale', kind: CompletionItemKind.Property, insertText: 'scale', documentation: '缩放比例（百分比，默认 100）', detail: 'float' },
   { label: 'layer', kind: CompletionItemKind.Property, insertText: 'layer', documentation: '图层顺序（越大越靠前）', detail: 'int' },
   { label: 'hitbox_scale', kind: CompletionItemKind.Property, insertText: 'hitbox_scale', documentation: '碰撞箱大小倍率（默认 1.0）', detail: 'float' },
+  { label: 'gravity', kind: CompletionItemKind.Property, insertText: 'gravity', documentation: '是否受地图重力影响（默认 True）\n\nbullet.gravity = False → 地图开了重力也不会下坠，撞墙、落地等碰撞照常\n适合做子弹、会飞的敌人；关掉后用 jump() 会一直上升不落回', detail: 'bool' },
 ]
 
 /** Timer 类 */

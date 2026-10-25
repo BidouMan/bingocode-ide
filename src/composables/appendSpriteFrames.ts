@@ -343,6 +343,7 @@ async function rewriteBsfDir(
     // 根级可选标注字段：统一碰撞 / 禁用碰撞 / 统一挂点（缺省不写）
     ...(meta.collision ? { collision: meta.collision } : {}),
     ...(meta.collisionDisabled ? { collisionDisabled: true } : {}),
+    ...(meta.gravity === false ? { gravity: false } : {}),
     ...(meta.markers && Object.keys(meta.markers).length > 0 ? { markers: meta.markers } : {}),
     frames: packed.frames,
     clips: clips.length > 0

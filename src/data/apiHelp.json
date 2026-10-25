@@ -59,6 +59,12 @@
           "code": "hero.vy = 10",
           "desc": "控制角色在上下方向的速度,可以实现角色的跳跃、下落等运动。",
           "badgeType": "property"
+        },
+        {
+          "label": "gravity 受重力影响",
+          "code": "bullet.gravity = False",
+          "desc": "地图开了重力以后，所有角色默认都会往下掉。把角色的 gravity 改成 False，它就不会下落了，撞墙、落地等碰撞都不受影响，适合做子弹、会飞的敌人。\n注意：关掉重力的角色用 jump() 会一直往上飞，不会自己落下来。",
+          "badgeType": "property"
         }
       ]
     },

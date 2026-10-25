@@ -615,7 +615,12 @@ class Sprite:
         self._is_bsf = False
         # 禁用碰撞（编辑器「禁用碰撞」开关；仅 .bsf manifest 提供，缺省开启）
         self._collision_disabled = False
+        # 受重力影响（编辑器「重力」开关 / 代码 sprite.gravity；缺省受重力）
+        self._gravity = True
         self.config = self._load_sprite_config()
+        # .bgs 的 config.json 直接携带 gravity 字段（.bsf 已在 normalize 时读取）
+        if self.config and not self._is_bsf:
+            self._gravity = bool(self.config.get("gravity", True))
 
         if self.config:
             # 如果是 BGS 角色包格式
@@ -1760,6 +1765,15 @@ class Sprite:
         self._vy = to_world_dy(value)
 
     @property
+    def gravity(self):
+        """是否受地图重力影响（默认 True）。设为 False 后不下坠，撞墙/落地等碰撞照常"""
+        return self._gravity
+
+    @gravity.setter
+    def gravity(self, value):
+        self._gravity = bool(value)
+
+    @property
     def angle(self):
         """朝向角度（用户坐标：逆时针为正）"""
         return to_user_angle(self._angle)
@@ -1852,6 +1866,8 @@ class Sprite:
         self._collision_disabled = bool(
             manifest.get("collisionDisabled", manifest.get("collision_disabled", False))
         )
+        # 受重力影响（可选）：False = 重力地图里也不下坠，撞墙/落地等碰撞照常
+        self._gravity = bool(manifest.get("gravity", True))
         # 挂点（可选）：名字 → {x, y}（画布坐标）；帧级覆盖在 frames[i].markers
         self._bsf_markers = manifest.get("markers") or {}
         self._bsf_clips = {
@@ -3214,7 +3230,7 @@ def _handle_physics_collision():
         if hitbox:
             sprite._prev_bottom_y = hitbox[3]
 
-        if _CURRENT_MAP.get("gravity", False):
+        if _CURRENT_MAP.get("gravity", False) and sprite._gravity:
             if sprite._vy < 0:
                 if sprite._jump_cut:
                     gravity = 2.8
