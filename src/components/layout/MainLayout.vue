@@ -593,55 +593,82 @@ async function onOpenHelpDocs() {
   }
 }
 
+// 语义化版本比较：返回正数表示 a > b，0 表示相等，负数表示 a < b
+function compareVersion(a: string, b: string): number {
+  const pa = a.replace(/^v/, '').split('.').map(Number)
+  const pb = b.replace(/^v/, '').split('.').map(Number)
+  const len = Math.max(pa.length, pb.length)
+  for (let i = 0; i < len; i++) {
+    const na = pa[i] || 0
+    const nb = pb[i] || 0
+    if (na !== nb) return na - nb
+  }
+  return 0
+}
+
+const LATEST_JSON_ENDPOINTS = [
+  'https://ghfast.top/https://github.com/BidouMan/bingocode-ide/releases/latest/download/latest.json',
+  'https://github.com/BidouMan/bingocode-ide/releases/latest/download/latest.json',
+]
+
+async function fetchLatestJson(): Promise<{ version: string; notes: string } | null> {
+  for (const url of LATEST_JSON_ENDPOINTS) {
+    try {
+      const res = await fetch(url)
+      if (res.ok) {
+        const json = await res.json()
+        return { version: json.version || '', notes: json.notes || '' }
+      }
+    } catch { /* try next endpoint */ }
+  }
+  return null
+}
+
 async function checkUpdate() {
   closeSettingsMenu()
   try {
-    const { check } = await import('@tauri-apps/plugin-updater')
-    let update = await check()
-    // 开发预览：无更新时读取 CHANGELOG_USER.md 的「未发布」章节，方便随时预览更新日志效果
-    if (!update && import.meta.env.DEV) {
+    // 开发预览：读取 CHANGELOG_USER.md 的「未发布」章节，方便随时预览更新日志效果
+    if (import.meta.env.DEV) {
       try {
         const mod = await import('../../../CHANGELOG_USER.md?raw')
         const content = mod.default
         const m = content.match(/##\s*未发布\s*\n([\s\S]*?)(?=\n##\s|\s*$)/)
         const body = m ? m[1].trim() : ''
         if (body) {
-          update = { version: '未发布', body }
+          hasUpdate.value = true
+          window.dispatchEvent(new CustomEvent('app-update-available', {
+            detail: { version: '未发布', body },
+          }))
+          return
         }
       } catch { /* 文件不存在或读取失败时忽略 */ }
     }
-    if (update) {
+
+    // 只请求一次 latest.json，自己判断版本新旧，避免 check() 与额外 fetch 的重复请求
+    const latest = await fetchLatestJson()
+    if (!latest) {
+      throw new Error('无法获取更新信息，请检查网络连接')
+    }
+
+    let currentVersion = ''
+    try {
+      const { getVersion } = await import('@tauri-apps/api/app')
+      currentVersion = await getVersion()
+    } catch { /* ignore */ }
+
+    const hasNewVersion = currentVersion ? compareVersion(latest.version, currentVersion) > 0 : false
+
+    if (hasNewVersion) {
       hasUpdate.value = true
-      // 发现更新，触发 UpdateDialog 显示
-      window.dispatchEvent(new CustomEvent('app-update-available', { detail: update }))
+      // 发现更新：直接用 latest.json 里的 notes 展示，check() 推迟到用户点「立即更新」时才调用
+      window.dispatchEvent(new CustomEvent('app-update-available', {
+        detail: { version: latest.version, body: latest.notes },
+      }))
     } else {
       hasUpdate.value = false
-      // 已是最新版：从 latest.json 取当前版本的更新说明，一并展示给用户
-      let currentVersion = ''
-      let currentNotes = ''
-      try {
-        const { getVersion } = await import('@tauri-apps/api/app')
-        currentVersion = await getVersion()
-      } catch { /* ignore */ }
-      try {
-        const endpoints = [
-          'https://ghfast.top/https://github.com/BidouMan/bingocode-ide/releases/latest/download/latest.json',
-          'https://github.com/BidouMan/bingocode-ide/releases/latest/download/latest.json',
-        ]
-        for (const url of endpoints) {
-          try {
-            const res = await fetch(url)
-            if (res.ok) {
-              const json = await res.json()
-              currentVersion = currentVersion || json.version || ''
-              currentNotes = json.notes || ''
-              break
-            }
-          } catch { /* try next endpoint */ }
-        }
-      } catch { /* ignore fetch errors */ }
+      // 已是最新版：展示当前版本的更新说明
       window.dispatchEvent(new CustomEvent('app-update-none', {
-        detail: { version: currentVersion, notes: currentNotes },
+        detail: { version: currentVersion || latest.version, notes: latest.notes },
       }))
     }
   } catch (e: unknown) {
