@@ -1989,6 +1989,7 @@ async function enterVectorModeInner(): Promise<boolean> {
 function bakeVectorRasterSync(): ImagePaintSession | null {
   const s = paintSession
   if (!vectorActive.value || !s) return null
+  vectorEngine.penCancel() // 烘焙前不保留进行中的半成品钢笔形状
   const raster = vectorEngine.getFrameRaster(0)
   if (raster) {
     pushPaintUndo()
@@ -2104,7 +2105,7 @@ async function exitVectorMode(switchUiToBitmap = true) {
     vectorCursorPos.value = null
     // 矢量专属工具回退到位图可用工具
     const tool = mapEditorStore.imageTool
-    if (tool === 'reshape' || tool === 'text' || tool === 'eyedropper') {
+    if (tool === 'reshape' || tool === 'text' || tool === 'eyedropper' || tool === 'pen') {
       mapEditorStore.setImageTool('brush')
       paintStore.setTool('brush')
     } else {
@@ -2148,6 +2149,21 @@ const vectorBoxStroke = computed(() => 1.4 / vectorScreenScale.value)
 const vectorHandleSize = computed(() => 8 / vectorScreenScale.value)
 const vectorRotateRadius = computed(() => 4 / vectorScreenScale.value)
 const vectorPointSize = computed(() => 8 / vectorScreenScale.value)
+
+// ─── 钢笔（自定义形状）进行中预览：固定配色（不跟随颜色面板），屏幕尺寸恒定 ───
+const vectorPenStroke = computed(() => 1.4 / vectorScreenScale.value)
+const vectorPenDash = computed(() => {
+  const s = vectorScreenScale.value
+  return `${5 / s} ${3 / s}`
+})
+const vectorPenAnchorSize = computed(() => 6.5 / vectorScreenScale.value)
+const vectorPenRing = computed(() => 9 / vectorScreenScale.value)
+const vectorPenPoints = computed(() => {
+  const ps = paintStore.penState
+  if (!ps) return ''
+  const pts = ps.cursor ? [...ps.anchors, ps.cursor] : ps.anchors
+  return pts.map(p => `${p.x},${p.y}`).join(' ')
+})
 
 const vectorBoxPoints = computed(() => {
   const box = paintStore.vectorSelBox
@@ -2689,6 +2705,17 @@ function onKeyDown(e: KeyboardEvent) {
       paintStore.endEyedropper()
       e.preventDefault()
       return
+    }
+    // 钢笔：Esc 取消半成品、Enter 直接闭合收尾
+    if (paintStore.activeTool === 'pen') {
+      if (e.key === 'Escape' && vectorEngine.penCancel()) {
+        e.preventDefault()
+        return
+      }
+      if (e.key === 'Enter' && vectorEngine.penFinish()) {
+        e.preventDefault()
+        return
+      }
     }
     if (e.key === 'Escape') {
       if (!vectorEngine.reshapeEscape()) vectorEngine.deselect()
@@ -3455,6 +3482,48 @@ defineExpose({
             />
           </g>
         </template>
+        <!-- 钢笔（自定义形状）进行中预览：固定配色（不跟随颜色面板）——
+             虚线橡皮筋 + 已落锚点方块 + 首锚收尾热点（进入命中区脉冲高亮） -->
+        <template v-if="paintStore.penState">
+          <polyline
+            :points="vectorPenPoints"
+            fill="none"
+            :stroke="VEC_SEL"
+            :stroke-width="vectorPenStroke"
+            :stroke-dasharray="vectorPenDash"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+          <circle
+            v-if="paintStore.penState.cursor && !paintStore.penState.closing"
+            :cx="paintStore.penState.cursor.x"
+            :cy="paintStore.penState.cursor.y"
+            :r="vectorPenAnchorSize * 0.42"
+            :fill="VEC_SEL"
+          />
+          <rect
+            v-for="(pt, i) in paintStore.penState.anchors"
+            :key="'pen' + i"
+            :x="pt.x - vectorPenAnchorSize / 2"
+            :y="pt.y - vectorPenAnchorSize / 2"
+            :width="vectorPenAnchorSize"
+            :height="vectorPenAnchorSize"
+            fill="#ffffff"
+            :stroke="VEC_SEL_DEEP"
+            :stroke-width="vectorPenStroke"
+          />
+          <circle
+            v-if="paintStore.penState.anchors.length >= 3"
+            class="pen-close-hotspot"
+            :class="{ 'pen-close-hotspot-active': paintStore.penState.closing }"
+            :cx="paintStore.penState.anchors[0].x"
+            :cy="paintStore.penState.anchors[0].y"
+            :r="vectorPenRing"
+            :fill="paintStore.penState.closing ? 'rgba(129, 140, 248, 0.28)' : 'none'"
+            :stroke="VEC_SEL"
+            :stroke-width="vectorPenStroke"
+          />
+        </template>
       </svg>
       <textarea
         v-if="paintStore.textEdit"
@@ -3525,6 +3594,15 @@ defineExpose({
   height: 100%;
   overflow: visible;
   pointer-events: none;
+}
+
+/* 钢笔首锚收尾热点：光标进入命中半径时描边脉冲，明确「点这里闭合」 */
+.pen-close-hotspot-active {
+  animation: pen-close-pulse 0.9s ease-in-out infinite;
+}
+@keyframes pen-close-pulse {
+  0%, 100% { stroke-opacity: 1; }
+  50% { stroke-opacity: 0.35; }
 }
 
 /* 文字编辑框：与 paper PointText 对齐（无 padding/border，尺寸由引擎写入） */

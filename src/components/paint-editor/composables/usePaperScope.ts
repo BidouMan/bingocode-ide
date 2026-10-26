@@ -325,6 +325,7 @@ export function usePaperScope(
 
   function restoreFrom(json: string) {
     if (!scope) return
+    penDiscard() // 场景即将重建，进行中的钢笔路径随 project 一起销毁
     scope.project.clear() // 代理随之脱离（对象引用保留在 bitmapRaster）
     scope.project.importJSON(json) // 历史快照本身不含代理
     // clear 后无层，importJSON 重建；确保 activeLayer 指向可用层
@@ -557,6 +558,7 @@ export function usePaperScope(
   /** 导出活动帧到槽位（离开当前帧/保存前调用） */
   function exportActiveFrame() {
     if (!scope || currentIdx < 0 || currentIdx >= frameJson.length) return
+    penCancel() // 保存/切帧前不保留进行中的半成品形状
     const layer = scope.project.activeLayer
     const live = layer ? layer.children.some((c) => c !== bitmapRaster) : false
     frameJson[currentIdx] = live ? snapshotForGesture() : null
@@ -567,6 +569,7 @@ export function usePaperScope(
   function importFrame(index: number) {
     if (!scope) return
     restoreFillPreview() // 换帧清场景前收口悬停态（防引用悬空到已销毁对象）
+    penDiscard() // 进行中的钢笔路径不跨帧保留（引用随 project.clear 失效）
     scope.project.clear()
     const json = frameJson[index]
     if (json) {
@@ -668,6 +671,7 @@ export function usePaperScope(
     currentIdx = -1
     if (scope) {
       scope.project.clear()
+      penDiscard()
       if (scope.project.layers.length === 0) new scope.Layer()
       scope.project.activeLayer?.activate()
       scope.view.update()
@@ -692,6 +696,7 @@ export function usePaperScope(
   function clearAllForBake() {
     if (!scope) return
     restoreFillPreview()
+    penDiscard() // 烘焙前丢弃进行中的钢笔路径（引用随 project.clear 失效）
     clearSelection()
     removeBitmapRaster() // 防御：正常由 mode watch 先行摘除
     scope.project.clear()
@@ -967,6 +972,119 @@ export function usePaperScope(
       }
     }
     strokeStart = null
+  }
+
+  // ─── 自定义形状（钢笔）：逐点落锚，点回首锚/双击/回车闭合 ───
+  /**
+   * 进行中的钢笔路径：只存已落锚点，场景内不描边不填充（不可见）。
+   * 预览线/锚点/收尾高亮全部由 SVG overlay 按固定配色绘制（store.penState）——
+   * 既不跟随颜色面板取色，也绝不会被快照/导出/缩略图带走。
+   */
+  let penPath: paper.Path | null = null
+  /** 橡皮筋末端（光标位置，画板逻辑坐标） */
+  let penCursor: { x: number; y: number } | null = null
+
+  /** 首锚收尾命中半径（屏幕 10px 恒定 → 逻辑坐标） */
+  function penCloseRadius(): number {
+    return 10 / Math.max(0.1, store.zoom)
+  }
+
+  /** 已落锚点数 */
+  function penAnchorCount(): number {
+    return penPath ? penPath.segments.length : 0
+  }
+
+  /** 同步 overlay 预览状态（落点/移动/收尾都要刷新） */
+  function syncPenState() {
+    if (!penPath) {
+      store.penState = null
+      return
+    }
+    const anchors = penPath.segments.map((s) => ({ x: s.point.x, y: s.point.y }))
+    const first = anchors[0]
+    const closing =
+      anchors.length >= 3 &&
+      !!penCursor &&
+      Math.hypot(penCursor.x - first.x, penCursor.y - first.y) <= penCloseRadius()
+    store.penState = { anchors, cursor: penCursor, closing }
+  }
+
+  /** 丢弃进行中的路径（场景即将整体重建：撤销/切帧/载入/烘焙，不回滚撤销栈） */
+  function penDiscard() {
+    penPath = null
+    penCursor = null
+    store.penState = null
+  }
+
+  function penBegin(p: { x: number; y: number }) {
+    pushHistory()
+    penCursor = p
+    penPath = new scope!.Path([new scope!.Segment(new scope!.Point(p.x, p.y))])
+    penPath.fillColor = null as unknown as paper.Color
+    penPath.strokeColor = null as unknown as paper.Color
+    syncPenState()
+  }
+
+  /** 落一个锚点；双击=收尾，点回首锚=闭合 */
+  function penPress(p: { x: number; y: number }, detail: number) {
+    if (!penPath) {
+      penBegin(p)
+      return
+    }
+    penCursor = p
+    if (detail >= 2) {
+      // 双击：先落点（不足 3 点时补成有效锚点），再尝试闭合
+      if (penAnchorCount() < 3) {
+        penPath.add(new scope!.Segment(new scope!.Point(p.x, p.y)))
+        syncPenState()
+      }
+      penFinish()
+      return
+    }
+    const first = penPath.firstSegment!.point
+    if (penAnchorCount() >= 3 && Math.hypot(p.x - first.x, p.y - first.y) <= penCloseRadius()) {
+      penFinish()
+      return
+    }
+    penPath.add(new scope!.Segment(new scope!.Point(p.x, p.y)))
+    syncPenState()
+  }
+
+  /** 鼠标移动：橡皮筋末端跟随光标（不按键也跟随） */
+  function penMove(p: { x: number; y: number }) {
+    penCursor = p
+    if (penPath) syncPenState()
+  }
+
+  /** 收尾：至少 3 个锚点才成形；闭合后选中并切到选择工具（与矩形/圆形一致） */
+  function penFinish(): boolean {
+    if (!penPath || penAnchorCount() < 3) return false
+    const path = penPath
+    penPath = null
+    penCursor = null
+    path.closed = true
+    shapeStyle(path, false)
+    markDirty()
+    store.penState = null
+    setSelection([path])
+    store.setTool('select')
+    scope?.view.update()
+    return true
+  }
+
+  /**
+   * 取消进行中的钢笔路径。
+   * rollbackHistory=false 用于场景即将整体替换（撤销/切帧/烘焙/卸载）的场合，只丢引用不动撤销栈。
+   */
+  function penCancel(rollbackHistory = true): boolean {
+    const had = !!penPath
+    penPath?.remove()
+    penPath = null
+    penCursor = null
+    store.penState = null
+    if (had && rollbackHistory) popHistory()
+    if (had) scope?.view.update()
+    return had
   }
 
   // ─── 填充（Scratch fill-tool 同款：命中换色 + 悬停预览 + 洞覆盖）───
@@ -3159,6 +3277,7 @@ export function usePaperScope(
   function clearLayer() {
     const layer = activeLayer()
     if (!layer) return
+    penCancel() // 先丢弃进行中的半成品形状
     // 清空矢量层（排除位图代理：位图层的清空走位图模式或 Delete 命中代理）
     const targets = layer.children.filter((c) => c !== bitmapRaster)
     if (targets.length === 0) return
@@ -3187,6 +3306,8 @@ export function usePaperScope(
       beginBrush(p)
     } else if (tool === 'line' || tool === 'rect' || tool === 'ellipse') {
       beginShape(p, e.shiftKey)
+    } else if (tool === 'pen') {
+      penPress(p, e.detail)
     } else if (tool === 'fill') {
       fillPress(p)
     } else if (tool === 'eraser') {
@@ -3219,6 +3340,11 @@ export function usePaperScope(
     // 不区分按键状态——点空白还原也在此分支完成）
     if (store.mode === 'vector' && store.activeTool === 'fill') {
       fillMove(clientToArtboard(e))
+      return
+    }
+    // 钢笔：橡皮筋预览锚跟随光标（不按键也要跟随）
+    if (store.mode === 'vector' && store.activeTool === 'pen') {
+      penMove(clientToArtboard(e))
       return
     }
     if (e.buttons !== 1) return
@@ -3293,6 +3419,7 @@ export function usePaperScope(
       tool === 'line' ||
       tool === 'rect' ||
       tool === 'ellipse' ||
+      tool === 'pen' ||
       tool === 'fill' ||
       tool === 'text'
     ) {
@@ -3435,6 +3562,7 @@ export function usePaperScope(
     rotateStart = null
     bitmapRaster = null // scope.remove 已销毁场景对象，仅丢引用
     bitmapRasterBase = null
+    penDiscard()
     blobPath = null
     blobLast = null
     brushStartPt = null
@@ -3472,6 +3600,8 @@ export function usePaperScope(
     () => [store.activeTool, store.brushSize, store.zoom],
     () => {
       restoreFillPreview() // 切工具/缩放 → 悬停态失效还原（再次移入会重新预览）
+      if (store.activeTool !== 'pen') penCancel() // 切走钢笔：丢弃未闭合的半成品
+      else if (penPath) syncPenState() // 缩放改变收尾命中半径 → 重算首锚热点状态
       updateCursor()
       // 切走文字/选择工具时收口编辑会话（空删非空留）
       if (textMode === 'edit' && store.activeTool !== 'text' && store.activeTool !== 'select') {
@@ -3501,6 +3631,7 @@ export function usePaperScope(
     restoreFillPreview()
     forceEndTextEdit() // 编辑态不得跨模式残留
     if (m !== 'vector') {
+      penCancel() // 离开矢量：丢弃未闭合的半成品
       clearSelection()
       removeBitmapRaster()
     } else {
@@ -3524,6 +3655,7 @@ export function usePaperScope(
   /** 当前 project 的 JSON 快照（地图矢量图层保存/切换用） */
   function getProjectJson(): string | null {
     if (!scope) return null
+    penCancel() // 地图暂存/保存前不保留半成品形状
     const layer = scope.project.activeLayer
     const live = layer ? layer.children.some(c => c !== bitmapRaster) : false
     return live ? snapshotForGesture() : null
@@ -3536,6 +3668,7 @@ export function usePaperScope(
       restoreFrom(json)
     } else {
       clearSelection()
+      penDiscard()
       scope.project.clear()
       if (scope.project.layers.length === 0) new scope.Layer()
       scope.project.activeLayer?.activate()
@@ -3565,6 +3698,10 @@ export function usePaperScope(
     groupSelection,
     ungroupSelection,
     layerMove,
+    /** 钢笔：取消进行中的路径（返回是否有路径被取消） */
+    penCancel: () => penCancel(),
+    /** 钢笔：收尾闭合当前路径（返回是否成形） */
+    penFinish,
     /** 收起选中（Esc 路由；清 selected 与变换框） */
     deselect: clearSelection,
     /** 塑形：选中锚点曲线化（顶栏「曲线」按钮） */

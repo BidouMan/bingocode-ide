@@ -26,7 +26,7 @@ const emit = defineEmits<{
   'layer-up': []
   'layer-down': []
   'switch-paint-mode': [mode: 'bitmap' | 'vector']
-  'create-paint-layer': [tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse' | 'text' | 'reshape' | 'eyedropper']
+  'create-paint-layer': [tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse' | 'pen' | 'text' | 'reshape' | 'eyedropper']
 }>()
 
 const mapStore = useMapStore()

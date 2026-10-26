@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
 
-export type PaintTool = 'select' | 'reshape' | 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse' | 'text' | 'eyedropper'
+export type PaintTool = 'select' | 'reshape' | 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse' | 'pen' | 'text' | 'eyedropper'
 export type PaintMode = 'vector' | 'bitmap'
 
 /** 绘制帧的 UI 元数据（像素数据在引擎闭包的离屏画布中，不进 store） */
@@ -126,6 +126,18 @@ export const usePaintStore = defineStore('paint', () => {
     rotateAt: { x: number; y: number }
   } | null>(null)
 
+  // ─── 钢笔（自定义形状）进行态（usePaperScope 写入，两个绘制页 SVG overlay 渲染）───
+  /**
+   * 进行中的钢笔路径预览（画板逻辑坐标）：anchors=已落锚点，cursor=橡皮筋末端，
+   * closing=光标落在首锚收尾范围内（首锚高亮提示「点这里闭合」）。null=未在创建。
+   * 预览全部由 SVG overlay 绘制（固定配色，不进 paper 场景 → 绝不进快照/导出/缩略图）。
+   */
+  const penState = ref<{
+    anchors: { x: number; y: number }[]
+    cursor: { x: number; y: number } | null
+    closing: boolean
+  } | null>(null)
+
   // ─── 塑形工具锚点状态（usePaperScope 写入，PaintArtboard SVG overlay 渲染）───
   /**
    * 塑形工具选中对象的全部锚点（画板逻辑坐标）。手柄为绝对坐标（锚点+偏移经
@@ -235,8 +247,8 @@ export const usePaintStore = defineStore('paint', () => {
     if (m === 'vector' && !vectorEnabled.value) return
     mode.value = m
     // 模式切换工具回退（对齐 Scratch switchModeForFormat）：
-    // reshape 仅矢量存在 → 切位图回退 select；其余工具两模式共有保持不变
-    if (m === 'bitmap' && activeTool.value === 'reshape') {
+    // reshape/pen 仅矢量存在 → 切位图回退 select；其余工具两模式共有保持不变
+    if (m === 'bitmap' && (activeTool.value === 'reshape' || activeTool.value === 'pen')) {
       activeTool.value = 'select'
     }
   }
@@ -288,6 +300,7 @@ export const usePaintStore = defineStore('paint', () => {
     hasVectorClipboard.value = false
     vectorContent.value = false
     vectorSelBox.value = null
+    penState.value = null
     reshapePts.value = null
     reshapeOutline.value = null
     reshapeHasUncurved.value = false
@@ -338,6 +351,7 @@ export const usePaintStore = defineStore('paint', () => {
     hasVectorClipboard,
     vectorContent,
     vectorSelBox,
+    penState,
     reshapePts,
     reshapeOutline,
     reshapeHasUncurved,

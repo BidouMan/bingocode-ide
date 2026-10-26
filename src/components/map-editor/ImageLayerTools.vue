@@ -13,6 +13,7 @@ import iconText from '../../assets/icons/文字_text.svg'
 import iconLine from '../../assets/icons/直线工具.svg'
 import iconRect from '../../assets/icons/矩形_rectangle.svg'
 import iconEllipse from '../../assets/icons/圆形_round.svg'
+import iconPen from '../../assets/icons/钢笔工具.svg'
 import iconCopy from '../../assets/icons/copy.svg'
 import iconPaste from '../../assets/icons/粘贴.svg'
 import iconFlipH from '../../assets/icons/水平翻转.svg'
@@ -36,7 +37,7 @@ const emit = defineEmits<{
   'layer-up': []
   'layer-down': []
   'switch-paint-mode': [mode: 'bitmap' | 'vector']
-  'create-layer': [tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse' | 'text' | 'reshape' | 'eyedropper']
+  'create-layer': [tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse' | 'pen' | 'text' | 'reshape' | 'eyedropper']
 }>()
 
 const mapStore = useMapStore()
@@ -60,6 +61,7 @@ const VECTOR_TOOLS = [
   { id: 'line' as const, icon: iconLine, label: '直线' },
   { id: 'rect' as const, icon: iconRect, label: '矩形' },
   { id: 'ellipse' as const, icon: iconEllipse, label: '椭圆' },
+  { id: 'pen' as const, icon: iconPen, label: '自定义形状' },
 ]
 
 const isVector = computed(() => mapEditorStore.paintMode === 'vector')

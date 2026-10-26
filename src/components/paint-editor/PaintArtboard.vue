@@ -279,6 +279,26 @@ const vectorBoxPoints = computed(() => {
 const boxPtSize = computed(() => 8 / Math.max(0.1, store.zoom))
 const boxHandleDot = computed(() => 6.5 / Math.max(0.1, store.zoom))
 
+// ─── 钢笔（自定义形状）进行中预览 overlay ───
+// 固定配色：预览虚线/锚点不跟随颜色面板（与变换框同色系，白底锚点在任意底色上可见）
+const PEN = '#818cf8' // 预览线 / 收尾热点环
+const PEN_DEEP = '#6366f1' // 锚点方块描边
+const penStrokeW = computed(() => 1.4 / Math.max(0.1, store.zoom))
+const penDashArray = computed(() => {
+  const z = Math.max(0.1, store.zoom)
+  return `${5 / z} ${3 / z}`
+})
+const penAnchorSize = computed(() => 6.5 / Math.max(0.1, store.zoom))
+/** 首锚收尾热点半径（与引擎 10px 命中半径视觉对齐，屏幕恒定） */
+const penCloseRingR = computed(() => 9 / Math.max(0.1, store.zoom))
+/** 预览折线：已落锚点 + 橡皮筋末端（光标） */
+const penPolyline = computed(() => {
+  const ps = store.penState
+  if (!ps) return ''
+  const pts = ps.cursor ? [...ps.anchors, ps.cursor] : ps.anchors
+  return pts.map((p) => `${p.x},${p.y}`).join(' ')
+})
+
 /**
  * 画笔/橡皮自绘光标圈（矢量模式，Scratch 同款画布内圈）：
  * 位于 overlay（与 artboard 同 transform）→ 位置用画板逻辑坐标、
@@ -374,6 +394,17 @@ function onStageKeydown(e: KeyboardEvent) {
   }
 
   if (store.mode === 'vector') {
+    // 钢笔：Esc 取消半成品、Enter 直接闭合收尾
+    if (store.activeTool === 'pen') {
+      if (e.key === 'Escape' && vectorEngine.penCancel()) {
+        e.preventDefault()
+        return
+      }
+      if (e.key === 'Enter' && vectorEngine.penFinish()) {
+        e.preventDefault()
+        return
+      }
+    }
     if (e.key === 'Escape') {
       // 塑形：先清锚点选择再清对象选择；其余收起矢量选中
       if (!vectorEngine.reshapeEscape()) vectorEngine.deselect()
@@ -924,6 +955,56 @@ defineExpose({
             />
           </g>
         </svg>
+        <!-- 钢笔（自定义形状）进行中预览：固定配色（不跟随颜色面板）——
+             虚线橡皮筋 + 已落锚点方块 + 首锚收尾热点（进入命中区脉冲高亮，指示可闭合） -->
+        <svg
+          v-if="store.penState && store.mode === 'vector'"
+          class="transform-box"
+          :viewBox="`0 0 ${store.artboardWidth} ${store.artboardHeight}`"
+          preserveAspectRatio="none"
+        >
+          <polyline
+            :points="penPolyline"
+            fill="none"
+            :stroke="PEN"
+            :stroke-width="penStrokeW"
+            :stroke-dasharray="penDashArray"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+          <!-- 下一锚点落点提示（收尾命中时隐藏，避免与首锚热点重叠） -->
+          <circle
+            v-if="store.penState.cursor && !store.penState.closing"
+            :cx="store.penState.cursor.x"
+            :cy="store.penState.cursor.y"
+            :r="penAnchorSize * 0.42"
+            :fill="PEN"
+          />
+          <!-- 已落锚点：白底小方块（角点样式，屏幕尺寸恒定） -->
+          <rect
+            v-for="(pt, i) in store.penState.anchors"
+            :key="'pen' + i"
+            :x="pt.x - penAnchorSize / 2"
+            :y="pt.y - penAnchorSize / 2"
+            :width="penAnchorSize"
+            :height="penAnchorSize"
+            fill="#ffffff"
+            :stroke="PEN_DEEP"
+            :stroke-width="penStrokeW"
+          />
+          <!-- 首锚收尾热点：≥3 点常驻提示环；光标进入命中半径 → 填充 + 脉冲 -->
+          <circle
+            v-if="store.penState.anchors.length >= 3"
+            class="pen-close-hotspot"
+            :class="{ 'pen-close-hotspot-active': store.penState.closing }"
+            :cx="store.penState.anchors[0].x"
+            :cy="store.penState.anchors[0].y"
+            :r="penCloseRingR"
+            :fill="store.penState.closing ? 'rgba(129, 140, 248, 0.28)' : 'none'"
+            :stroke="PEN"
+            :stroke-width="penStrokeW"
+          />
+        </svg>
         <!-- 变换框（浮动选区）：独立 SVG 矢量图层——专业绘图软件做法，
              绝不画进图像画布（防烙印），矢量渲染任意缩放平滑 -->
         <svg
@@ -1195,6 +1276,15 @@ defineExpose({
   pointer-events: none;
   z-index: 6;
   overflow: visible;
+}
+
+/* 钢笔首锚收尾热点：光标进入命中半径时描边脉冲，明确「点这里闭合」 */
+.pen-close-hotspot-active {
+  animation: pen-close-pulse 0.9s ease-in-out infinite;
+}
+@keyframes pen-close-pulse {
+  0%, 100% { stroke-opacity: 1; }
+  50% { stroke-opacity: 0.35; }
 }
 
 /* 画笔/橡皮自绘光标圈：0 尺寸 svg 锚定在光标逻辑坐标，overflow visible 画圆，

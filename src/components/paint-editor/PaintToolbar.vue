@@ -11,6 +11,7 @@ import iconFill from '../../assets/icons/填充_fill.svg'
 import iconLine from '../../assets/icons/直线工具.svg'
 import iconRect from '../../assets/icons/矩形_rectangle.svg'
 import iconEllipse from '../../assets/icons/圆形_round.svg'
+import iconPen from '../../assets/icons/钢笔工具.svg'
 import iconText from '../../assets/icons/文字_text.svg'
 import iconEyedropper from '../../assets/icons/取色器.svg'
 import iconClear from '../../assets/icons/清空画布.svg'
@@ -24,6 +25,7 @@ const ICONS: Record<PaintTool, string> = {
   line: iconLine,
   rect: iconRect,
   ellipse: iconEllipse,
+  pen: iconPen,
   text: iconText,
   eyedropper: iconEyedropper,
 }
@@ -37,15 +39,16 @@ const LABELS: Record<PaintTool, string> = {
   line: '直线',
   rect: '矩形',
   ellipse: '椭圆',
+  pen: '自定义形状',
   text: '文字',
   eyedropper: '取色',
 }
 
 // 工具集随模式切换（对齐 Scratch 官方两套工具集，仅参考 UX 规格）：
-// 矢量 = 选择/塑形/画笔/橡皮/填充/文字/直线/矩形/椭圆（reshape 仅矢量）
-// 位图 = 选择(框选)/画笔/橡皮/填充/文字/直线/矩形/椭圆/取色（无 reshape）
+// 矢量 = 选择/塑形/画笔/橡皮/填充/文字/直线/矩形/椭圆/自定义形状（reshape/pen 仅矢量）
+// 位图 = 选择(框选)/画笔/橡皮/填充/文字/直线/矩形/椭圆/取色（无 reshape/pen）
 const VECTOR_TOOLS: PaintTool[] = [
-  'select', 'reshape', 'brush', 'eraser', 'fill', 'text', 'line', 'rect', 'ellipse', 'eyedropper',
+  'select', 'reshape', 'brush', 'eraser', 'fill', 'text', 'line', 'rect', 'ellipse', 'pen', 'eyedropper',
 ]
 const BITMAP_TOOLS: PaintTool[] = [
   'select', 'brush', 'eraser', 'fill', 'text', 'line', 'rect', 'ellipse', 'eyedropper',

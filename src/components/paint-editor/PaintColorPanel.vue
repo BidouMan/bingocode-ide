@@ -99,7 +99,7 @@ const showStrokeSection = () => {
   if (store.activeTool === 'brush' || store.activeTool === 'eraser' || store.activeTool === 'line') {
     return false
   }
-  if (store.activeTool === 'rect' || store.activeTool === 'ellipse') return vectorMode()
+  if (store.activeTool === 'rect' || store.activeTool === 'ellipse' || store.activeTool === 'pen') return vectorMode()
   // 选择/塑形等：有选中矢量图形时可编辑其描边
   return vectorMode() && store.vectorSelectedCount > 0
 }

@@ -91,7 +91,7 @@ watch(
     if (mode !== 'bitmap') return
     paintStore.setMode('bitmap')
     const t = mapEditorStore.imageTool
-    if (t === 'reshape' || t === 'text' || t === 'eyedropper') {
+    if (t === 'reshape' || t === 'text' || t === 'eyedropper' || t === 'pen') {
       mapEditorStore.setImageTool('brush')
       paintStore.setTool('brush')
     }
@@ -100,7 +100,7 @@ watch(
 )
 
 // 绘制按钮/画笔工具：新建一张空白图片图层并启用指定工具
-async function startImagePaint(tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse' | 'text' | 'reshape' | 'eyedropper' = 'brush') {
+async function startImagePaint(tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse' | 'pen' | 'text' | 'reshape' | 'eyedropper' = 'brush') {
   const w = Math.max(1, mapStore.mapData.width * mapStore.mapData.tileSize)
   const h = Math.max(1, mapStore.mapData.height * mapStore.mapData.tileSize)
   const canvas = document.createElement('canvas')
@@ -112,7 +112,7 @@ async function startImagePaint(tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rec
     await mapPaint.saveMapImage(blob, w, h, mapStore.activeLayer?.id ?? -1, mapEditorStore.paintMode)
     mapEditorStore.setImageTool(tool)
     // 矢量专属工具需要矢量模式（新建图层后进入）
-    if (tool === 'text' || tool === 'reshape' || tool === 'eyedropper') {
+    if (tool === 'text' || tool === 'reshape' || tool === 'eyedropper' || tool === 'pen') {
       mapEditorStore.setPaintMode('vector')
     }
   } catch (e) {

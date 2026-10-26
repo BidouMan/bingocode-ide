@@ -14,7 +14,7 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
   const collisionTool = ref<CollisionTool>('move')
   const cursorX = ref<number | null>(null)
   const cursorY = ref<number | null>(null)
-  const imageTool = ref<'select' | 'reshape' | 'brush' | 'eraser' | 'fill' | 'text' | 'line' | 'rect' | 'ellipse' | 'eyedropper'>('select')
+  const imageTool = ref<'select' | 'reshape' | 'brush' | 'eraser' | 'fill' | 'text' | 'line' | 'rect' | 'ellipse' | 'pen' | 'eyedropper'>('select')
   // 图片绘制模式：位图 / 矢量（默认矢量，与角色编辑器一致）
   const paintMode = ref<'bitmap' | 'vector'>('vector')
   // 碰撞层工具：默认选择移动，形状按钮用独立状态记住上次形状
@@ -60,7 +60,7 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
     activeCollisionPolygonId.value = id
   }
 
-  function setImageTool(tool: 'select' | 'reshape' | 'brush' | 'eraser' | 'fill' | 'text' | 'line' | 'rect' | 'ellipse' | 'eyedropper') {
+  function setImageTool(tool: 'select' | 'reshape' | 'brush' | 'eraser' | 'fill' | 'text' | 'line' | 'rect' | 'ellipse' | 'pen' | 'eyedropper') {
     imageTool.value = tool
   }
 
