@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, type CSSProperties } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { useMapStore, type MapResource, type ImageData as MapImageData } from '../../stores/map'
 import { useMapEditorStore } from '../../stores/mapEditor'
@@ -88,6 +88,22 @@ let layerContainers: Map<number, any> = new Map()
 let tileSprites: Map<string, any> = new Map() // "layerId:x,y" -> Sprite
 let tileTextures: Map<string, any> = new Map() // "resourcePath:tileIndex" -> Texture
 let sourceImageCache: Map<string, any> = new Map() // "resourcePath" -> HTMLImageElement
+
+// ─── 增量渲染状态（切层/重渲染不再清空全部容器，避免画面闪烁、图层"打架"）───
+/** 图层 id → 已渲染内容签名；签名未变则复用现有精灵 */
+const layerRenderKeys = new Map<number, string>()
+/** 上次渲染的图层结构（地图 + id/类型/顺序），变化时必须全量重建 */
+let lastRenderStructureKey = ''
+
+// ─── 矢量模式：当前矢量图层「之上」图层的快照（保证画布始终按图层顺序显示）───
+const upperSnapshotRef = ref<HTMLCanvasElement>()
+const upperSnapshotRect = ref<{ x: number; y: number; w: number; h: number } | null>(null)
+/** 快照容器：矢量编辑时把上方图层容器移出舞台，只渲染进快照，避免与快照重复叠加 */
+let upperSnapshotContainer: any = null
+/** 最近一次渲染出的快照画布（DOM 挂载后拷贝过去） */
+let upperSnapshotSource: HTMLCanvasElement | null = null
+let upperSnapshotPendingRect: { x: number; y: number; w: number; h: number } | null = null
+let upperSnapshotTimer: ReturnType<typeof setTimeout> | null = null
 
 async function initPixi() {
   if (!canvasRef.value) return
@@ -230,6 +246,46 @@ function clearLayerContainer(layerId: number) {
   for (const key of keysToRemove) tileSprites.delete(key)
 }
 
+/** 图片图层的渲染签名：路径/几何/透明度/采样方式变化时才重建精灵 */
+function imageLayerSignature(img: any): string {
+  return [
+    img?.imagePath ?? '',
+    img?.width ?? 0, img?.height ?? 0,
+    img?.position?.[0] ?? 0, img?.position?.[1] ?? 0,
+    img?.scaleX ?? img?.scale ?? 1,
+    img?.scaleY ?? img?.scale ?? 1,
+    img?.rotation ?? 0, img?.opacity ?? 1,
+    currentScaleMode,
+  ].join('|')
+}
+
+/** 图层内容签名：图块层按 tileRevision 整体重建，图片层按自身签名，碰撞层无内容 */
+function layerContentKey(layer: any): string {
+  if (layer.type === 'drawing') return `tiles:${mapStore.tileRevision}:${currentScaleMode}`
+  if (layer.type === 'image') return `img:${imageLayerSignature(layer.image)}`
+  return ''
+}
+
+/**
+ * 保存绘制结果只会改写文件路径，画面内容仍是同一个会话画布：
+ * 立即同步签名，避免下一次重渲染从磁盘重载造成闪烁（切层的"颜色打架"根因）。
+ */
+function syncLayerRenderKey(layerId: number) {
+  const layer = mapStore.mapData.layers.find(l => l.id === layerId)
+  if (!layer || layer.type !== 'image') return
+  layerRenderKeys.set(layerId, layerContentKey(layer))
+}
+
+/** 取图层容器里已有的图片精灵（增量渲染时复用，避免销毁重建） */
+function findLayerSprite(layerId: number): any {
+  const container = layerContainers.get(layerId)
+  if (!container || !PIXI) return null
+  for (const child of container.children ?? []) {
+    if (child instanceof PIXI.Sprite && !child.destroyed) return child
+  }
+  return null
+}
+
 function ensureLayerOrder() {
   const layers = mapStore.mapData.layers
   for (let i = 0; i < layers.length; i++) {
@@ -305,6 +361,14 @@ async function renderAllLayers() {
 
   const layers = mapStore.mapData.layers
 
+  // 地图切换 / 图层增删 / 顺序变化：必须全量重建（图层 id 可能被复用，不能沿用旧内容）
+  const structureKey = `${mapStore.mapLoadCount}:${layers.map(l => `${l.id}:${l.type}`).join(',')}`
+  const structureChanged = structureKey !== lastRenderStructureKey
+  if (structureChanged) {
+    lastRenderStructureKey = structureKey
+    layerRenderKeys.clear()
+  }
+
   // 移除不再存在的图层容器
   const activeIds = new Set(layers.map(l => l.id))
   for (const [id, container] of layerContainers) {
@@ -312,6 +376,7 @@ async function renderAllLayers() {
       tileContainer.removeChild(container)
       container.destroy({ children: true })
       layerContainers.delete(id)
+      layerRenderKeys.delete(id)
     }
   }
 
@@ -321,23 +386,36 @@ async function renderAllLayers() {
     const container = getOrCreateLayerContainer(layer.id)
     container.zIndex = i
     container.visible = layer.visible
+    if (structureChanged) clearLayerContainer(layer.id)
   }
 
-  // 先清空所有图层容器的内容
+  // 逐图层增量重建：签名未变则保留现有内容（切图/切层不再出现空画布闪烁）
   for (const layer of layers) {
-    clearLayerContainer(layer.id)
-  }
-
-  // 逐图层重建内容
-  for (const layer of layers) {
-    if (layer.type === 'drawing') {
-      for (const [posKey, tileId] of Object.entries(layer.tiles)) {
-        const [x, y] = posKey.split(',').map(Number)
-        await renderTile(layer.id, x, y, tileId)
+    const key = layerContentKey(layer)
+    if (layerRenderKeys.get(layer.id) !== key) {
+      if (layer.type === 'drawing') {
+        clearLayerContainer(layer.id)
+        for (const [posKey, tileId] of Object.entries(layer.tiles)) {
+          const [x, y] = posKey.split(',').map(Number)
+          await renderTile(layer.id, x, y, tileId)
+        }
+      } else if (layer.type === 'image') {
+        clearLayerContainer(layer.id)
+        const container = getOrCreateLayerContainer(layer.id)
+        await renderImageLayer(container, layer.image, layer.id)
       }
+      if (app) layerRenderKeys.set(layer.id, key)
     } else if (layer.type === 'image') {
-      const container = getOrCreateLayerContainer(layer.id)
-      await renderImageLayer(container, layer.image, layer.id)
+      // 内容未变：复用现有精灵，只确保会话纹理与命中缓存仍指向当前图层
+      const sprite = findLayerSprite(layer.id)
+      if (sprite) {
+        if (paintSession && paintSession.layerId === layer.id) bindPaintTexture(sprite, layer.image)
+        transform.noteRenderedImage(layer.image, sprite)
+      } else {
+        const container = getOrCreateLayerContainer(layer.id)
+        await renderImageLayer(container, layer.image, layer.id)
+        if (app) layerRenderKeys.set(layer.id, key)
+      }
     }
   }
 
@@ -351,6 +429,8 @@ async function renderAllLayers() {
 
   // 图像精灵重建后重绘碰撞叠加层
   collision.drawOverlay()
+  // 矢量模式下把当前图层之上的图层叠回矢量画布之上，保持整张画布仍按图层顺序显示
+  refreshUpperLayerSnapshot()
 }
 
 async function renderImageLayer(container: any, imgData: any, layerId: number) {
@@ -1863,6 +1943,8 @@ async function flushPaintSave(session: ImagePaintSession, finalize: boolean) {
         // 图层改指向新的绘制文件，旧路径的解析缓存要丢弃，避免切回时读到旧图
         resolvedPathCache.delete(layer.image.imagePath)
         layer.image.imagePath = session.savePath
+        // 路径变了但画面仍是这块会话画布：同步签名，避免重渲染时从磁盘重载出现闪烁
+        syncLayerRenderKey(session.layerId)
       }
     }
     resolvedPathCache.delete(session.savePath)
@@ -1942,6 +2024,8 @@ const viewport = useMapViewport({
     redrawBrushCursor()
     // 矢量覆盖层随视口缩放
     syncVectorGeometry()
+    // 缩放停下后按新倍率重拍上方图层快照，静置时保持清晰
+    scheduleUpperSnapshotRefresh()
   },
 })
 
@@ -2163,6 +2247,8 @@ async function enterVectorModeInner(): Promise<boolean> {
     await new Promise(r => requestAnimationFrame(r))
   }
   vectorEngine.loadProjectJson(initialJson)
+  // 进入矢量模式后把「本图层之上」的图层叠回矢量画布之上（不能因选中而置顶）
+  refreshUpperLayerSnapshot()
   if ((mapEditorStore.imageTool === 'brush' || mapEditorStore.imageTool === 'eraser')
     && !vectorCursorPos.value && vectorCanvasRef.value) {
     vectorCanvasRef.value.style.cursor = 'crosshair'
@@ -2281,6 +2367,12 @@ async function exitVectorMode(switchUiToBitmap = true) {
     else await stashVectorLayer()
     vectorActive.value = false
     paintStore.mode = switchUiToBitmap ? 'bitmap' : 'vector'
+    // 退出矢量模式：上方图层快照作废，图层容器回到 Pixi 舞台
+    if (upperSnapshotTimer) {
+      clearTimeout(upperSnapshotTimer)
+      upperSnapshotTimer = null
+    }
+    clearUpperSnapshot()
     if (switchUiToBitmap) mapEditorStore.setPaintMode('bitmap')
     paintStore.vectorSelBox = null
     paintStore.vectorSelectedCount = 0
@@ -2311,6 +2403,165 @@ async function exitVectorMode(switchUiToBitmap = true) {
   }
 }
 
+// ─── 矢量模式图层顺序修正：把「当前矢量图层之上」的图层渲染成快照 ───
+
+/** 把快照容器里的图层全部放回舞台树（Pixi 会正常渲染它们） */
+function reattachUpperContainers() {
+  if (!upperSnapshotContainer || !tileContainer) return
+  const children = [...upperSnapshotContainer.children]
+  if (children.length === 0) return
+  for (const child of children) tileContainer.addChild(child)
+  tileContainer.sortChildren()
+}
+
+/** 清空上方图层快照并让上方图层回到 Pixi 舞台 */
+function clearUpperSnapshot() {
+  reattachUpperContainers()
+  upperSnapshotSource = null
+  upperSnapshotPendingRect = null
+  if (upperSnapshotRect.value) upperSnapshotRect.value = null
+  const el = upperSnapshotRef.value
+  if (el) {
+    const ctx = el.getContext('2d')
+    if (ctx) ctx.clearRect(0, 0, el.width, el.height)
+  }
+}
+
+/** 把生成好的快照画布拷进 DOM 画布（覆盖层挂载后才可写） */
+function paintUpperSnapshotToDom(retry = 0) {
+  const rect = upperSnapshotPendingRect
+  const src = upperSnapshotSource
+  if (!rect || !src) return
+  const el = upperSnapshotRef.value
+  if (!el) {
+    // 覆盖层还没挂载（进入矢量模式后要等一拍）——有限次补画，避免覆盖层不在时死循环
+    if (retry < 3) void nextTick(() => paintUpperSnapshotToDom(retry + 1))
+    return
+  }
+  if (el.width !== src.width || el.height !== src.height) {
+    el.width = src.width
+    el.height = src.height
+  }
+  const ctx = el.getContext('2d')
+  if (ctx) {
+    ctx.clearRect(0, 0, el.width, el.height)
+    ctx.drawImage(src, 0, 0)
+  }
+  upperSnapshotRect.value = rect
+}
+
+/** 缩放结束后重拍快照（按新倍率渲染，静置时与 Pixi 画质一致） */
+function scheduleUpperSnapshotRefresh(delay = 160) {
+  if (upperSnapshotTimer) clearTimeout(upperSnapshotTimer)
+  upperSnapshotTimer = setTimeout(() => {
+    upperSnapshotTimer = null
+    if (vectorActive.value) refreshUpperLayerSnapshot()
+  }, delay)
+}
+
+/**
+ * 矢量内容画在独立的 DOM canvas 上（恒在 Pixi 画布之上），因此选中矢量图层不能把它顶到最上层：
+ * 若该图层之上还有图层，就把这些图层单独渲染成一张快照，叠在矢量画布之上，
+ * 画布最终仍严格按图层顺序显示。快照坐标 = 画板坐标，缩放/平移由覆盖层的 CSS 矩阵跟随。
+ */
+function refreshUpperLayerSnapshot() {
+  if (!app || !PIXI || !tileContainer) return
+  // 上一轮的快照容器先归位，保证下面按完整图层树重新判断
+  reattachUpperContainers()
+
+  if (!vectorActive.value) {
+    clearUpperSnapshot()
+    return
+  }
+  const s = paintSession
+  const layers = mapStore.mapData.layers
+  const idx = s ? layers.findIndex(l => l.id === s.layerId) : -1
+  const frame = vectorFrame()
+  const m = frame ? computeMapVectorMatrix(frame) : null
+  const det = m ? m.a * m.d - m.b * m.c : 0
+  if (!s || idx < 0 || !frame || !m || Math.abs(det) < 1e-9) {
+    clearUpperSnapshot()
+    return
+  }
+  const upperLayers = layers.slice(idx + 1).filter(l => l.visible)
+  if (upperLayers.length === 0) {
+    clearUpperSnapshot()
+    return
+  }
+
+  // 世界坐标 → 画板坐标（画板 = 矢量图层的绘制画布像素）
+  const scale = frame.scale
+  const sx = frame.stageX - m.tx
+  const sy = frame.stageY - m.ty
+  const a = (scale * m.d) / det
+  const b = (-scale * m.b) / det
+  const c = (-scale * m.c) / det
+  const d = (scale * m.a) / det
+  const tx = (m.d * sx - m.c * sy) / det
+  const ty = (-m.b * sx + m.a * sy) / det
+
+  // 快照区域 = 画板区域 ∪ 上方图层投影包围盒（矢量画板较小也不会裁掉上方大图层）
+  let minX = 0
+  let minY = 0
+  let maxX = Math.max(1, s.canvas.width)
+  let maxY = Math.max(1, s.canvas.height)
+  for (const layer of upperLayers) {
+    const container = layerContainers.get(layer.id)
+    if (!container) continue
+    // 容器无局部变换 → 局部包围盒即世界坐标包围盒
+    const bb = container.getLocalBounds()
+    if (!bb || bb.width <= 0 || bb.height <= 0) continue
+    const corners = [
+      [bb.minX, bb.minY], [bb.maxX, bb.minY],
+      [bb.minX, bb.maxY], [bb.maxX, bb.maxY],
+    ]
+    for (const [wx, wy] of corners) {
+      const ax = a * wx + c * wy + tx
+      const ay = b * wx + d * wy + ty
+      if (ax < minX) minX = ax
+      if (ax > maxX) maxX = ax
+      if (ay < minY) minY = ay
+      if (ay > maxY) maxY = ay
+    }
+  }
+  const artW = Math.max(1, maxX - minX)
+  const artH = Math.max(1, maxY - minY)
+  const dpr = app.renderer?.resolution || 1
+  let res = Math.min(3, Math.max(1, vectorScreenScale.value * dpr))
+  const MAX_PIXELS = 8_000_000
+  if (artW * artH * res * res > MAX_PIXELS) {
+    res = Math.max(0.25, Math.sqrt(MAX_PIXELS / (artW * artH)))
+  }
+  const rw = Math.max(1, Math.round(artW * res))
+  const rh = Math.max(1, Math.round(artH * res))
+
+  if (!upperSnapshotContainer) {
+    upperSnapshotContainer = new PIXI.Container()
+    upperSnapshotContainer.sortableChildren = true
+  }
+  // 上方图层容器本身无局部变换：只给快照容器套「世界 → 画板（含倍率）」矩阵
+  upperSnapshotContainer.setFromMatrix(new PIXI.Matrix(
+    a * res, b * res, c * res, d * res,
+    (tx - minX) * res, (ty - minY) * res
+  ))
+  for (const layer of upperLayers) {
+    const container = layerContainers.get(layer.id)
+    if (container) upperSnapshotContainer.addChild(container)
+  }
+  try {
+    const rt = PIXI.RenderTexture.create({ width: rw, height: rh })
+    app.renderer.render({ container: upperSnapshotContainer, target: rt })
+    const canvas = app.renderer.extract.canvas(rt) as HTMLCanvasElement
+    rt.destroy(true)
+    upperSnapshotSource = canvas
+    upperSnapshotPendingRect = { x: minX, y: minY, w: artW, h: artH }
+    paintUpperSnapshotToDom()
+  } catch (e) {
+    console.error('[MapCanvas] 上方图层快照渲染失败:', e)
+    clearUpperSnapshot()
+  }
+}
+
 // ─── 覆盖层投影（SVG 变换框 / 塑形锚点 / 光标 / 文字框）───
 
 const VEC_SEL = '#818cf8'
@@ -2324,6 +2575,20 @@ const vectorOverlayStyle = computed(() => {
     height: `${paintStore.artboardHeight}px`,
     transform: `matrix(${m.a}, ${m.b}, ${m.c}, ${m.d}, ${m.tx}, ${m.ty})`,
     transformOrigin: '0 0',
+  }
+})
+
+/** 上方图层快照的定位（画板坐标）；位图场景用像素采样，放大后保持像素块观感 */
+const upperSnapshotStyle = computed<CSSProperties>(() => {
+  const r = upperSnapshotRect.value
+  if (!r) return { display: 'none' }
+  return {
+    display: 'block',
+    left: `${r.x}px`,
+    top: `${r.y}px`,
+    width: `${r.w}px`,
+    height: `${r.h}px`,
+    imageRendering: mapStore.sceneRenderMode === 'pixelated' ? 'pixelated' : 'auto',
   }
 })
 
@@ -3095,6 +3360,8 @@ function setZoomAtCenter(next: number) {
   drawSelectionOverlay()
   redrawBrushCursor()
   syncVectorGeometry()
+  // 工具条缩放停下后按新倍率重拍上方图层快照
+  scheduleUpperSnapshotRefresh()
 }
 
 function zoomIn() {
@@ -3109,6 +3376,8 @@ function resetZoom() {
   viewport.centerView()
   collision.drawOverlay()
   drawSelectionOverlay()
+  syncVectorGeometry()
+  scheduleUpperSnapshotRefresh()
 }
 
 function onMouseDown(e: MouseEvent) {
@@ -3312,6 +3581,8 @@ watch(
     ensureLayerOrder()
     // 碰撞层显隐同步叠加层
     collision.drawOverlay()
+    // 矢量模式下上方图层集合随可见性变化，快照需同步重拍
+    refreshUpperLayerSnapshot()
   }
 )
 
@@ -3508,11 +3779,16 @@ onBeforeUnmount(() => {
     clearTimeout(layerThumbTimer)
     layerThumbTimer = null
   }
+  if (upperSnapshotTimer) {
+    clearTimeout(upperSnapshotTimer)
+    upperSnapshotTimer = null
+  }
   if (vectorActive.value) {
     bakeVectorRasterSync()
     vectorActive.value = false
     paintStore.mode = 'bitmap'
   }
+  clearUpperSnapshot()
   void commitPaintSession()
   resizeObserver?.disconnect()
   resizeObserver = null
@@ -3645,10 +3921,13 @@ function scheduleLayerThumbUpdate() {
 
 async function getThumbnailDataUrl(): Promise<string | null> {
   if (!app || !PIXI || !app.renderer) return null
+  // 矢量编辑时上方图层被移出舞台单独渲染成快照：截图期间先归位，避免缩略图缺层
+  const needSnapshotRestore = (upperSnapshotContainer?.children.length ?? 0) > 0
   try {
     // 渲染时会先清空图层容器再异步重建图片；必须等这次重建结束，
     // 否则保存时拍到的是全透明的空容器，缩略图就会变空白
     await whenRenderIdle()
+    reattachUpperContainers()
     const tileSize = mapStore.mapData.tileSize
     const mapW = mapStore.mapData.width * tileSize
     const mapH = mapStore.mapData.height * tileSize
@@ -3663,6 +3942,8 @@ async function getThumbnailDataUrl(): Promise<string | null> {
     return dataUrl
   } catch {
     return null
+  } finally {
+    if (needSnapshotRestore) refreshUpperLayerSnapshot()
   }
 }
 
@@ -3718,6 +3999,8 @@ defineExpose({
       class="map-vector-overlay"
       :style="vectorOverlayStyle"
     >
+      <!-- 上方图层快照：矢量画布恒在 Pixi 之上，用这张快照把「当前矢量图层之上」的图层按原顺序叠回去 -->
+      <canvas ref="upperSnapshotRef" class="map-upper-snapshot" :style="upperSnapshotStyle"></canvas>
       <svg
         class="map-vector-svg"
         :viewBox="`0 0 ${paintStore.artboardWidth} ${paintStore.artboardHeight}`"
@@ -3920,6 +4203,12 @@ defineExpose({
   top: 0;
   pointer-events: none;
   z-index: 11;
+}
+
+/* 上方图层快照：坐标与画板一致（随覆盖层矩阵缩放/平移），位于矢量画布之上、选框之下 */
+.map-upper-snapshot {
+  position: absolute;
+  pointer-events: none;
 }
 
 .map-vector-svg {
