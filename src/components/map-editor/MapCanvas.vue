@@ -2983,6 +2983,18 @@ watch(
   }
 )
 
+// 矢量引擎自动切工具（矩形/椭圆/钢笔成形后回到选择）→ 同步地图工具栏高亮与光标：
+// 工具栏读的是 imageTool，引擎只改 paintStore.activeTool，不同步就会出现
+// “已经能拖选了，图标还停在矩形/钢笔上”
+watch(
+  () => paintStore.activeTool,
+  (tool) => {
+    if (!vectorActive.value || paintStore.mode !== 'vector') return
+    if (mapEditorStore.imageTool === tool) return
+    mapEditorStore.setImageTool(tool)
+  }
+)
+
 // 矢量画布挂载期间始终保证 paintStore.mode 为 vector：
 // Paper 的指针处理依赖该状态，任何异步时序导致 mode 落后都会让选取/框选"失效"
 watch(vectorActive, (active) => {

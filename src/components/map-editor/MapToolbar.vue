@@ -265,13 +265,16 @@ function onToolAreaWheel(e: WheelEvent) {
   flex: 1;
 }
 
-/* 工具区：内容可横向滚动，滚动条隐藏（滚轮可横向滚动） */
+/* 工具区：内容可横向滚动，滚动条隐藏（滚轮可横向滚动）。
+   上下 padding 留给工具按钮外置的选中指示条（overflow 裁剪边界是 padding box，
+   没有这段 padding 时 bottom:-4px 的绿条会被裁掉） */
 .tool-area {
   display: flex;
   align-items: center;
   gap: 4px;
   min-width: 0;
   flex: 0 1 auto;
+  padding: 7px 0;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;

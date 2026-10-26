@@ -51,6 +51,7 @@ const BITMAP_TOOLS = [
   { id: 'line' as const, icon: iconLine, label: '直线' },
   { id: 'rect' as const, icon: iconRect, label: '矩形' },
   { id: 'ellipse' as const, icon: iconEllipse, label: '椭圆' },
+  { id: 'pen' as const, icon: iconPen, label: '自定义形状' },
 ]
 const VECTOR_TOOLS = [
   { id: 'reshape' as const, icon: iconReshape, label: '塑形' },
@@ -129,6 +130,9 @@ function setTool(tool: typeof mapEditorStore.imageTool) {
   }
   mapEditorStore.setImageTool(tool)
   paintStore.setTool(tool)
+  // 钢笔产出的是矢量路径（闭合后可选中/变换/塑形）：位图模式下点它先切到矢量模式，
+  // 否则只有像素落笔、没有锚点与闭合交互
+  if (tool === 'pen' && !isVector.value) emit('switch-paint-mode', 'vector')
 }
 </script>
 
@@ -167,7 +171,7 @@ function setTool(tool: typeof mapEditorStore.imageTool) {
   <div class="edit-op-wrap">
     <button
       class="toolbar-btn"
-      :class="{ 'toolbar-btn-active': editMenuOpen }"
+      :class="{ 'toolbar-btn-open': editMenuOpen }"
       :disabled="disabled"
       v-tooltip="'选区操作'"
       @click.stop="toggleEditMenu($event)"
@@ -251,8 +255,30 @@ function setTool(tool: typeof mapEditorStore.imageTool) {
 .toolbar-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .toolbar-btn:disabled:hover { background: transparent; }
 .toolbar-btn:active { background: rgb(72, 75, 82); }
-.toolbar-btn-active { background: rgb(46, 49, 58); border: 1px solid var(--border-light); }
+.toolbar-btn-active {
+  position: relative;
+  background: rgb(46, 49, 58);
+  border: 1px solid var(--border-light);
+}
+/* 选中指示：绿色小条（与角色绘制页左侧工具栏一致，画在按钮外侧下沿；
+   外层 .tool-area 的上下 padding 给它留出不被裁掉的空间） */
+.toolbar-btn-active::before {
+  content: '';
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  bottom: -6px;
+  height: 2.5px;
+  border-radius: 1.25px;
+  background: var(--accent);
+}
 .toolbar-btn-active:hover { background: var(--border-light); }
+/* 菜单展开态：只保留选中底色，不画绿色指示条（它不是绘图工具） */
+.toolbar-btn-open {
+  background: rgb(46, 49, 58);
+  border: 1px solid var(--border-light);
+}
+.toolbar-btn-open:hover { background: var(--border-light); }
 .toolbar-icon { width: 20px; height: 20px; flex-shrink: 0; }
 
 /* 矢量|位图 分段切换：与角色编辑器 PaintTopBar 完全一致 */
