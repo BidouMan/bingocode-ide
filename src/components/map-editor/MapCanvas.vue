@@ -28,6 +28,7 @@ const emit = defineEmits<{
   'tile-painted': [x: number, y: number, tileId: number]
   'tile-erased': [x: number, y: number]
   'cursor-move': [x: number, y: number]
+  'cursor-leave': []
   'layer-thumb-updated': [layerId: number, dataUrl: string]
 }>()
 
@@ -2654,6 +2655,7 @@ function updateVectorCursorScreen(e: PointerEvent) {
 function onVectorPointerLeave() {
   vectorCursorPos.value = null
   vectorPanning = false
+  emit('cursor-leave')
 }
 
 // ─── 文字编辑（复用角色页 textEdit 投影）───
@@ -2807,6 +2809,9 @@ function onVectorPointerDownCapture(e: PointerEvent) {
 
 function onVectorPointerMoveCapture(e: PointerEvent) {
   updateVectorCursorScreen(e)
+  // 矢量画布盖在 Pixi 画布之上，这里也要上报坐标，否则矢量绘制时信息栏坐标不动
+  const cursorWorld = viewport.screenToWorld(e)
+  if (cursorWorld) emit('cursor-move', cursorWorld.x, cursorWorld.y)
   if (vectorPanning) {
     e.stopImmediatePropagation()
     viewport.handlePanMove(e.clientX, e.clientY)
@@ -2983,6 +2988,9 @@ function onPointerDown(e: PointerEvent) {
 }
 
 function onPointerMove(e: PointerEvent) {
+  // 所有模式都实时上报鼠标世界像素坐标（信息栏显示用）；绘制/框选分支提前 return 也不影响
+  const cursorWorld = viewport.screenToWorld(e)
+  if (cursorWorld) emit('cursor-move', cursorWorld.x, cursorWorld.y)
   // 碰撞层：未按键时确保平移状态已结束，不会出现"鼠标一动整块画布跟着走"
   if (mapStore.activeMode === 'collision' && e.buttons === 0) viewport.endPan()
   if (viewport.handlePanMove(e.clientX, e.clientY)) {
@@ -3101,6 +3109,8 @@ function onPointerLeave(e: PointerEvent) {
   viewport.endPan()
   painter.resetPaintKey()
   cursorGridPos.value = null
+  // 鼠标离开画布时清空信息栏坐标，避免残留上一次的位置
+  emit('cursor-leave')
   painter.hidePreview()
   hideBrushCursor()
   // 绘制中离开画布：结束当前笔画（钢笔保留已落锚点，等用户回来继续）

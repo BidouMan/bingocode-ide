@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { open } from '@tauri-apps/plugin-shell'
-import { useUpdater } from '../../composables/useUpdater'
+import { useUpdater, toDisplayVersion } from '../../composables/useUpdater'
 
 const emit = defineEmits<{
   close: []
@@ -163,7 +163,7 @@ async function openReleasePage() {
             <button class="update-close" @click="closeDialog">×</button>
           </div>
           <div class="update-body">
-            <div class="update-version">Version {{ updateInfo?.version }}</div>
+            <div class="update-version">Version {{ toDisplayVersion(updateInfo?.version) }}</div>
             <div class="update-notes" v-if="parsedNotes.length > 0">
               <template v-for="(item, index) in parsedNotes" :key="index">
                 <div v-if="item.type === 'title'" class="update-note-title">{{ item.text }}</div>
@@ -208,7 +208,7 @@ async function openReleasePage() {
             <button class="update-close" @click="closeDialog">×</button>
           </div>
           <div class="update-body">
-            <div class="update-version">Version {{ updateInfo?.version }}</div>
+            <div class="update-version">Version {{ toDisplayVersion(updateInfo?.version) }}</div>
             <div class="update-notes" v-if="parsedNotes.length > 0">
               <template v-for="(item, index) in parsedNotes" :key="index">
                 <div v-if="item.type === 'title'" class="update-note-title">{{ item.text }}</div>

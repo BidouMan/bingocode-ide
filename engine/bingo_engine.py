@@ -720,6 +720,7 @@ class Sprite:
 
             if is_one_way:
                 poly_top = min(p[1] for p in points)
+                poly_bottom = max(p[1] for p in points)
                 if self._prev_bottom_y > poly_top:
                     continue
                 if axis == "y":
@@ -731,7 +732,8 @@ class Sprite:
                         continue
                     # 单向平台只需落回顶面：薄多边形用 SAT 求 MTV 会残留穿透，
                     # 下一帧就会被误判成"从下方穿过"而整块掉下去
-                    if sprite_rect[3] > poly_top:
+                    # 必须真正与平台竖直方向交叠：角色整体在平台下方时不能被"吸"上去
+                    if sprite_rect[3] > poly_top and sprite_rect[1] < poly_bottom:
                         cand = poly_top - sprite_rect[3] - 0.05
                         if best is None or abs(cand) > abs(best):
                             best = cand
@@ -789,6 +791,7 @@ class Sprite:
             # 单向平台：只在下落且脚底在平台顶面之上时生效
             if is_one_way:
                 poly_top = min(p[1] for poly in world_polys for p in poly)
+                poly_bottom = max(p[1] for poly in world_polys for p in poly)
                 if self._prev_bottom_y > poly_top:
                     continue
                 if axis == "y":
@@ -798,7 +801,8 @@ class Sprite:
                     if sprite_rect[2] <= poly_left or sprite_rect[0] >= poly_right:
                         continue
                     # 单向平台只落到顶面，避免 SAT 对薄碰撞形状残留穿透
-                    if sprite_rect[3] > poly_top:
+                    # 必须真正与平台竖直方向交叠：角色整体在平台下方时不能被吸上去
+                    if sprite_rect[3] > poly_top and sprite_rect[1] < poly_bottom:
                         cand = poly_top - sprite_rect[3] - 0.05
                         if best is None or abs(cand) > abs(best):
                             best = cand

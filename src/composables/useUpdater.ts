@@ -2,6 +2,21 @@ import { ref } from 'vue'
 import { check } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
 
+/**
+ * 静默补丁版本映射：安装包内部版本号必须比已装版本大，更新器才会推送；
+ * 但界面上仍按 0.7.4 展示，和学生看到的版本保持一致。
+ * 下次正式发版时删除这里的映射即可。
+ */
+const SILENT_DISPLAY_VERSIONS: Record<string, string> = {
+  '0.7.41': '0.7.4',
+}
+
+/** 把内部版本号转成界面上展示的版本号 */
+export function toDisplayVersion(version?: string | null): string {
+  const raw = String(version || '').replace(/^v/, '')
+  return SILENT_DISPLAY_VERSIONS[raw] || raw || '未知'
+}
+
 export function useUpdater() {
   const isChecking = ref(false)
   const updateAvailable = ref(false)

@@ -32,13 +32,18 @@ const projectStore = useProjectStore()
 
 const hasMaps = computed(() => resourceStore.maps.length > 0)
 
-/** 光标所在格子的左下角坐标（用户坐标：原点在地图左下角，y 向上为正） */
+// 切换地图后鼠标未移动，清空坐标避免显示上一张地图的旧位置
+watch(
+  () => mapStore.mapLoadCount,
+  () => mapEditorStore.setCursorPos(null, null),
+)
+
+/** 鼠标所在像素坐标（用户坐标：原点在地图左下角，y 向上为正） */
 const cursorCoordText = computed(() => {
-  const cx = mapEditorStore.cursorX
-  const cy = mapEditorStore.cursorY
-  if (cx === null || cy === null) return '--'
-  const ts = mapStore.mapData.tileSize
-  return `${toUserX(cx * ts)},${toUserY((cy + 1) * ts)}`
+  const wx = mapEditorStore.cursorX
+  const wy = mapEditorStore.cursorY
+  if (wx === null || wy === null) return '--'
+  return `${Math.round(toUserX(wx))},${Math.round(toUserY(wy))}`
 })
 
 const mapCanvasRef = ref<InstanceType<typeof MapCanvas>>()
@@ -407,7 +412,7 @@ defineExpose({ switchToMap, placeImageResource })
             @create-paint-layer="startImagePaint"
           />
           <div class="canvas-stage">
-            <MapCanvas ref="mapCanvasRef" class="map-canvas-area" :class="{ disabled: !hasMaps }" @cursor-move="onCursorMove" @layer-thumb-updated="onLayerThumbUpdated" />
+            <MapCanvas ref="mapCanvasRef" class="map-canvas-area" :class="{ disabled: !hasMaps }" @cursor-move="onCursorMove" @cursor-leave="mapEditorStore.setCursorPos(null, null)" @layer-thumb-updated="onLayerThumbUpdated" />
             <!-- 浮动视图工具条：撤销/重做/缩放（与角色绘制页一致） -->
             <div v-if="hasMaps" class="view-float-bar" @dblclick.stop>
               <button class="view-float-btn" v-tooltip="'缩小'" @click="mapCanvasRef?.zoomOut()">
@@ -448,10 +453,8 @@ defineExpose({ switchToMap, placeImageResource })
           />
           <div class="map-info-bar">
             <span class="info-spacer" />
-            <span class="info-label">ID:{{ mapStore.currentMapPath ? mapStore.currentMapPath.split('/').pop()?.split('.')[0] ?? '--' : '--' }}</span>
             <span class="info-label">场景大小:{{ mapStore.mapData.width * mapStore.mapData.tileSize }}×{{ mapStore.mapData.height * mapStore.mapData.tileSize }}</span>
             <span class="info-label">坐标:{{ cursorCoordText }}</span>
-            <span class="info-label">资源尺寸:{{ mapStore.selectedResource?.tileWidth ?? '--' }}×{{ mapStore.selectedResource?.tileHeight ?? '--' }}</span>
             <span class="info-spacer" />
           </div>
         </div>

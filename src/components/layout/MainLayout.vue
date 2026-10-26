@@ -11,6 +11,7 @@ import { useMapStore } from '../../stores/map'
 import { useRenderStore } from '../../stores/render'
 import { useTerminalStore } from '../../stores/terminal'
 import { useEngine } from '../../composables/useEngine'
+import { useUpdater, toDisplayVersion } from '../../composables/useUpdater'
 import { useFileDialog } from '../../composables/useFileDialog'
 import GameCanvas from '../canvas/GameCanvas.vue'
 import CodeEditor from '../editor/CodeEditor.vue'
@@ -365,11 +366,11 @@ watch(() => editorStore.activeEditorMode, (mode) => {
 onMounted(loadAllMapThumbnails)
 
 // 启动时静默检查更新，只显示圆点提示，不弹窗
-// 窗口标题动态显示实际安装的版本号（读取 app bundle 元数据，更新后重启即反映新版本）
+// 窗口标题显示面向用户的版本号（静默补丁版本内部号更大，但界面仍显示 0.7.4）
 onMounted(async () => {
   try {
     const { getVersion } = await import('@tauri-apps/api/app')
-    await getCurrentWebviewWindow().setTitle(`BingoCode IDE v${await getVersion()}`)
+    await getCurrentWebviewWindow().setTitle(`BingoCode IDE v${toDisplayVersion(await getVersion())}`)
   } catch (_e) {
     // 静默失败，保留 tauri.conf.json 里的静态标题
   }
@@ -667,7 +668,7 @@ async function checkUpdate() {
         detail: {
           version,
           // 优先用服务端 notes（latest.json），读不到时回退到内置日志
-          body: update.body || extractChangelogNotes(changelog, version),
+          body: update.body || extractChangelogNotes(changelog, toDisplayVersion(version)),
         },
       }))
       return
@@ -684,7 +685,7 @@ async function checkUpdate() {
     window.dispatchEvent(new CustomEvent('app-update-none', {
       detail: {
         version: currentVersion || '当前版本',
-        notes: extractChangelogNotes(changelog, currentVersion),
+        notes: extractChangelogNotes(changelog, toDisplayVersion(currentVersion)),
       },
     }))
   } catch (e: unknown) {
