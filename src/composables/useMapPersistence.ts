@@ -8,7 +8,7 @@ import { serializeMap, deserializeMap } from '../utils/mapSerializer'
 
 interface MapPersistenceOptions {
   /** 画布缩略图（保存 map.json 时一并写入 thumbnail.png） */
-  getThumbnailDataUrl: () => string | null
+  getThumbnailDataUrl: () => Promise<string | null>
   /** 缩略图写回资源列表缓存 */
   onThumbnailUpdated?: (itemId: string, dataUrl: string) => void
 }
@@ -50,8 +50,8 @@ export function useMapPersistence(options: MapPersistenceOptions) {
       const saveData = serializeMap(mapStore.mapData)
       await invoke('write_file', { path: savePath, content: JSON.stringify(saveData) })
 
-      // 同时生成 thumbnail.png 快照
-      const thumbDataUrl = options.getThumbnailDataUrl()
+      // 同时生成 thumbnail.png 快照（等待画面重建完成后再截图）
+      const thumbDataUrl = await options.getThumbnailDataUrl()
       if (thumbDataUrl && thumbDataUrl.startsWith('data:image/')) {
         const base64 = thumbDataUrl.split(',')[1]
         const raw = Uint8Array.from(atob(base64), c => c.charCodeAt(0))

@@ -135,7 +135,7 @@ const {
   resolveRelativePaths,
   createEmptyMapData,
 } = useMapPersistence({
-  getThumbnailDataUrl: () => mapCanvasRef.value?.getThumbnailDataUrl() ?? null,
+  getThumbnailDataUrl: async () => (await mapCanvasRef.value?.getThumbnailDataUrl()) ?? null,
   onThumbnailUpdated: (itemId, dataUrl) => emit('map-thumbnail-updated', itemId, dataUrl),
 })
 

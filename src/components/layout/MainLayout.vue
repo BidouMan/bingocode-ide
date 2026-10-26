@@ -341,8 +341,7 @@ async function loadProjectResources(root: string) {
 // 地图列表变化时不自动加载缩略图（改为切换标签时刷新）
 watch(() => editorStore.resourceTab, (tab) => {
   if (tab === 'map') {
-    // 切换到地图标签时刷新缩略图
-    mapThumbnails.value = {}
+    // 切换到地图标签时补齐还没加载的缩略图（不清空缓存：清空后重读可能撞上保存写盘，读到空白/残缺图）
     loadAllMapThumbnails()
   }
 })
@@ -354,10 +353,11 @@ watch(() => resourceStore.maps.length, () => {
   }
 })
 
-// 监听编辑器模式切换（从地图编辑器返回时刷新）
+// 监听编辑器模式切换（从地图编辑器返回时补齐缩略图）
 watch(() => editorStore.activeEditorMode, (mode) => {
   if (mode !== 'map' && editorStore.resourceTab === 'map') {
-    mapThumbnails.value = {}
+    // 已缓存的缩略图直接保留：保存完成时会通过 onMapThumbnailUpdated 写入最新快照，
+    // 清空缓存重读反而会在保存写盘期间读到空/残缺的 thumbnail.png，导致缩略图变空白
     loadAllMapThumbnails()
   }
 })
@@ -1295,6 +1295,13 @@ async function switchEditorMode(mode: 'code' | 'sprite' | 'map') {
     if (!ok) return
   }
   switchPage(0)
+  if (mode === 'map') {
+    // 资源管理器中选中的地图同步给编辑器：否则顶部菜单切回地图页时仍显示上次编辑的那张
+    const selectedMap = resourceStore.maps.find(m => m.id === selectedResource.value)
+    if (selectedMap && selectedMap.id !== mapStore.currentMapPath) {
+      mapStore.setMapPath(selectedMap.id)
+    }
+  }
   editorStore.setActiveEditorMode(mode)
 }
 
@@ -1358,6 +1365,9 @@ async function loadMapThumbnail(item: { id: string; path: string }) {
   try {
     // 用 Tauri invoke 直接读取图片（与角色缩略图同理，避免 convertFileSrc 权限问题）
     const thumbUrl = await invoke<string>('read_image_as_data_url', { path: `${item.path}/thumbnail.png` })
+    // 保存正在写 thumbnail.png 时可能读到空文件/残缺 PNG，这种数据不写入缓存，
+    // 否则会一直显示空白（缩略图都是 PNG，base64 头固定为 iVBORw0KGgo）
+    if (!thumbUrl.startsWith('data:image/png;base64,iVBORw0KGgo')) return
     mapThumbnails.value[item.id] = thumbUrl
   } catch {
     // thumbnail load failed

@@ -3156,12 +3156,20 @@ watch(
 )
 
 // 统一的渲染调度：合并多次变更，用锁防止并发渲染
+let renderIdleWaiters: Array<() => void> = []
+
+/** 等待当前排队/进行中的渲染完成（保存缩略图前调用，避免拍到清空重建中的空画布） */
+function whenRenderIdle(): Promise<void> {
+  if (!renderQueued && !pendingRender) return Promise.resolve()
+  return new Promise(resolve => renderIdleWaiters.push(resolve))
+}
+
 function scheduleRender() {
   pendingRender = true
-  if (!renderQueued) {
-    renderQueued = true
-    nextTick(async () => {
-      renderQueued = false
+  if (renderQueued) return
+  renderQueued = true
+  nextTick(async () => {
+    try {
       while (pendingRender) {
         pendingRender = false
         // app 未就绪时轮询等待（initPixi 是异步的）
@@ -3172,8 +3180,14 @@ function scheduleRender() {
         // 图片变换 / 图层重渲染后同步矢量覆盖层矩阵
         syncVectorGeometry()
       }
-    })
-  }
+    } finally {
+      // 锁必须保持到渲染真正结束，否则 await 期间又会被新任务插进来并发渲染
+      renderQueued = false
+      const waiters = renderIdleWaiters
+      renderIdleWaiters = []
+      waiters.forEach(fn => fn())
+    }
+  })
 }
 
 // 保护性 watcher：如果 tileRevision 变化时 app 还没初始化，等就绪后补渲染
@@ -3186,7 +3200,8 @@ watch(
       const checkReady = () => {
         if (app) {
           pendingMapRender = false
-          renderAllLayers()
+          // 统一走 scheduleRender，避免与排队中的渲染并发重建容器
+          scheduleRender()
         } else {
           requestAnimationFrame(checkReady)
         }
@@ -3322,9 +3337,12 @@ async function getLayerThumbnailDataUrl(layerId: number): Promise<string | null>
   return canvas.toDataURL('image/png')
 }
 
-function getThumbnailDataUrl(): string | null {
+async function getThumbnailDataUrl(): Promise<string | null> {
   if (!app || !PIXI || !app.renderer) return null
   try {
+    // 渲染时会先清空图层容器再异步重建图片；必须等这次重建结束，
+    // 否则保存时拍到的是全透明的空容器，缩略图就会变空白
+    await whenRenderIdle()
     const tileSize = mapStore.mapData.tileSize
     const mapW = mapStore.mapData.width * tileSize
     const mapH = mapStore.mapData.height * tileSize
