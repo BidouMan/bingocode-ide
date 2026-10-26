@@ -107,6 +107,14 @@ async function refreshTileThumbs() {
   thumbUrls.value = next
 }
 
+/** 图片绘制中由 MapCanvas 推送当前图层缩略图：只更新这一条，避免全量读盘 */
+function setLayerThumb(layerId: number, dataUrl: string) {
+  if (!mapStore.mapData.layers.some(l => l.id === layerId)) return
+  const next = new Map(thumbUrls.value)
+  next.set(layerId, dataUrl)
+  thumbUrls.value = next
+}
+
 watch(() => mapStore.imageRevision, refreshThumbs)
 // 地图载入后 Pixi 渲染有延迟，稍后再补一次图块缩略图
 let loadThumbTimer: ReturnType<typeof setTimeout> | null = null
@@ -231,6 +239,8 @@ function applyReorder(from: number, insertDisplayIndex: number) {
   const to = rest.length - 1 - rest.indexOf(from)
   if (to !== from) mapStore.moveLayerTo(from, to)
 }
+
+defineExpose({ setLayerThumb })
 </script>
 
 <template>

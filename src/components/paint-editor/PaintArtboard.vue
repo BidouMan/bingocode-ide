@@ -26,6 +26,7 @@ const {
   transformWholeFrame: bitmapTransformFrame,
   getCanvas,
   textEditInput: bitmapTextInput, textEditCommit: bitmapTextCommit,
+  penFinish: bitmapPenFinish, penCancel: bitmapPenCancel,
 } = useBitmapCanvas(bitmapCanvas)
 
 // 矢量绘制引擎（paper 场景图/对象操作/多帧 JSON 快照），坐标与位图同源（clientToArtboard）
@@ -435,6 +436,18 @@ function onStageKeydown(e: KeyboardEvent) {
     return
   }
 
+  // 位图模式钢笔：Enter 闭合收尾、Esc 丢弃半成品（与矢量模式一致）
+  if (store.activeTool === 'pen') {
+    if (e.key === 'Escape' && bitmapPenCancel()) {
+      e.preventDefault()
+      return
+    }
+    if (e.key === 'Enter' && bitmapPenFinish()) {
+      e.preventDefault()
+      return
+    }
+  }
+
   if (e.key === 'Escape') {
     commitAndDeselect()
     e.preventDefault()
@@ -589,6 +602,7 @@ function commitBitmapSelection() {
 
 // 模式切换：离开位图先烘焙浮动选区（矢量侧清选由引擎内部 mode watch 处理）
 watch(() => store.mode, () => {
+  bitmapPenCancel() // 未闭合的钢笔半成品不跨模式残留
   commitTextEdit() // 编辑态不得跨模式残留（引擎内也有兜底，此处保证顺序在 commitAndDeselect 前）
   commitAndDeselect()
 })

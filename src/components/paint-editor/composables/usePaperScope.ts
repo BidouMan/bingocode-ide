@@ -14,6 +14,13 @@ import {
 const HISTORY_LIMIT = 25
 
 /**
+ * 图形（形状）工具集合：创建完成后自动选中新图形并显示变换框，
+ * 但**不切换工具**——保持当前工具即可直接操作选框（与位图模式统一）。
+ */
+const SHAPE_TOOLS = new Set(['line', 'rect', 'ellipse', 'pen'])
+const isShapeTool = (tool: string) => SHAPE_TOOLS.has(tool)
+
+/**
  * 可选视口适配器：让矢量引擎脱离角色绘制页的固定居中画板，
  * 挂到任意画布（如地图画布）上。逻辑坐标始终为“绘制画布像素”。
  */
@@ -548,6 +555,32 @@ export function usePaperScope(
     return frameRaster[i]
   }
 
+  /**
+   * 以缩略图尺寸把当前 project 直绘到目标画布（不按全分辨率栅格化）。
+   * target 画布尺寸即目标像素；返回是否确实存在矢量内容（无内容时不绘制）。
+   * 绘制结束后目标画布可再叠加底图，用于合成图层缩略图。
+   */
+  function drawProjectToThumbnail(target: HTMLCanvasElement): boolean {
+    if (!scope) return false
+    const layer = scope.project.activeLayer
+    const live = layer ? layer.children.some((c) => c !== bitmapRaster) : false
+    if (!live) return false
+    return withRasterDetached(() => {
+      const w = store.artboardWidth
+      const h = store.artboardHeight
+      if (!w || !h || !target.width || !target.height) return false
+      const scale = Math.min(target.width / w, target.height / h)
+      const ctx = target.getContext('2d')
+      if (!ctx) return false
+      ctx.setTransform(scale, 0, 0, scale, 0, 0)
+      const proj = scope!.project as unknown as {
+        draw: (ctx: CanvasRenderingContext2D, m: paper.Matrix, pr: number) => void
+      }
+      proj.draw(ctx, new scope!.Matrix(), scale)
+      return true
+    })
+  }
+
   /** 任意帧存在矢量内容（供保存合成决定是否叠加） */
   function hasVectorContent(): boolean {
     return store.vectorContent
@@ -950,8 +983,10 @@ export function usePaperScope(
         activePath = null
         popHistory()
       } else {
+        const created = activePath
         activePath = null
         markDirty()
+        finishShapeSelect(created)
       }
     } else {
       // rebuildShape 已在 continue 中生成终态；零尺寸则丢弃
@@ -963,15 +998,20 @@ export function usePaperScope(
         const created = shapePreview
         shapePreview = null
         markDirty()
-        // 仅矩形/圆形：绘制完成自动激活选择工具并选中该形状——
-        // 立即可拖手柄缩放/旋转（直线/画笔等不触发）
-        if (created && (store.activeTool === 'rect' || store.activeTool === 'ellipse')) {
-          setSelection([created])
-          store.setTool('select')
-        }
+        finishShapeSelect(created)
       }
     }
     strokeStart = null
+  }
+
+  /**
+   * 图形创建完成 → 激活编辑选框（与位图模式统一）：
+   * 选中新图形并显示变换框，但**不切换工具**——当前形状工具下就能直接拖动/缩放/旋转，
+   * 点击选框外或换工具才收起选框（收尾逻辑见 beginFrameGesture）。
+   */
+  function finishShapeSelect(created: paper.Item | null) {
+    if (!created) return
+    setSelection([created])
   }
 
   // ─── 自定义形状（钢笔）：逐点落锚，点回首锚/双击/回车闭合 ───
@@ -1056,7 +1096,7 @@ export function usePaperScope(
     if (penPath) syncPenState()
   }
 
-  /** 收尾：至少 3 个锚点才成形；闭合后选中并切到选择工具（与矩形/圆形一致） */
+  /** 收尾：至少 3 个锚点才成形；闭合后选中新图形（不切工具，与直线/矩形/圆形一致） */
   function penFinish(): boolean {
     if (!penPath || penAnchorCount() < 3) return false
     const path = penPath
@@ -1067,7 +1107,7 @@ export function usePaperScope(
     markDirty()
     store.penState = null
     setSelection([path])
-    store.setTool('select')
+    // 不切换工具：保持当前钢笔工具，选框可直接操作（与直线/矩形/圆形一致）
     scope?.view.update()
     return true
   }
@@ -2833,6 +2873,58 @@ export function usePaperScope(
     lastPointer = p
   }
 
+  /**
+   * 变换框手势起手（旋转 > 缩放 > 框内移动）。
+   * 选择工具与「图形创建后自动选框」的其他绘制工具共用；命中返回 true。
+   */
+  function beginFrameGesture(p: { x: number; y: number }): boolean {
+    if (selected.size === 0 || !selFrame) return false
+    const hit = hitTestFrame(p)
+    if (hit.kind === 'rotate') {
+      opSnapshot = snapshotForGesture()
+      opMoved = false
+      rotateStart = {
+        angle0: selFrame.angle,
+        center: { x: selFrame.cx, y: selFrame.cy },
+        a0: Math.atan2(p.y - selFrame.cy, p.x - selFrame.cx),
+        applied: 0,
+      }
+      selOp = 'rotate'
+      return true
+    }
+    if (hit.kind === 'scale') {
+      opSnapshot = snapshotForGesture()
+      opMoved = false
+      const f: SelFrame = { ...selFrame }
+      const c = Math.cos(f.angle)
+      const s = Math.sin(f.angle)
+      // 锚点 = 对侧边/角的局部坐标（与手柄方向相反）→ 世界坐标
+      const aLocal = { x: -hit.def.dir.x * f.hw, y: -hit.def.dir.y * f.hh }
+      const anchor = {
+        x: f.cx + aLocal.x * c - aLocal.y * s,
+        y: f.cy + aLocal.x * s + aLocal.y * c,
+      }
+      const dx = p.x - anchor.x
+      const dy = p.y - anchor.y
+      scaleStart = {
+        f,
+        dir: hit.def.dir,
+        axes: hit.def.axes,
+        anchor,
+        p0Local: { x: dx * c + dy * s, y: -dx * s + dy * c },
+        sx: 1,
+        sy: 1,
+      }
+      selOp = 'scale'
+      return true
+    }
+    if (hit.kind === 'move') {
+      startMove(p)
+      return true
+    }
+    return false
+  }
+
   function beginSelect(p: { x: number; y: number }, shift: boolean, time = 0) {
     if (!scope) return
 
@@ -2843,52 +2935,8 @@ export function usePaperScope(
     }
 
     // 变换框手柄优先（旋转 > 缩放 > 框内移动），随后才是内容命中与框选
-    if (selected.size > 0 && selFrame) {
-      const hit = hitTestFrame(p)
-      if (hit.kind === 'rotate') {
-        opSnapshot = snapshotForGesture()
-        opMoved = false
-        rotateStart = {
-          angle0: selFrame.angle,
-          center: { x: selFrame.cx, y: selFrame.cy },
-          a0: Math.atan2(p.y - selFrame.cy, p.x - selFrame.cx),
-          applied: 0,
-        }
-        selOp = 'rotate'
-        return
-      }
-      if (hit.kind === 'scale') {
-        opSnapshot = snapshotForGesture()
-        opMoved = false
-        const f: SelFrame = { ...selFrame }
-        const c = Math.cos(f.angle)
-        const s = Math.sin(f.angle)
-        // 锚点 = 对侧边/角的局部坐标（与手柄方向相反）→ 世界坐标
-        const aLocal = { x: -hit.def.dir.x * f.hw, y: -hit.def.dir.y * f.hh }
-        const anchor = {
-          x: f.cx + aLocal.x * c - aLocal.y * s,
-          y: f.cy + aLocal.x * s + aLocal.y * c,
-        }
-        const dx = p.x - anchor.x
-        const dy = p.y - anchor.y
-        scaleStart = {
-          f,
-          dir: hit.def.dir,
-          axes: hit.def.axes,
-          anchor,
-          p0Local: { x: dx * c + dy * s, y: -dx * s + dy * c },
-          sx: 1,
-          sy: 1,
-        }
-        selOp = 'scale'
-        return
-      }
-      if (hit.kind === 'move') {
-        startMove(p)
-        return
-      }
-      // 框外：落到下方内容命中/框选（框选会 clearSelection 收起变换框）
-    }
+    // 框外：落到下方内容命中/框选（框选会 clearSelection 收起变换框）
+    if (beginFrameGesture(p)) return
 
     const tol = 4 / Math.max(0.1, store.zoom)
     const rawHit = scope.project.hitTest(new scope.Point(p.x, p.y), {
@@ -3302,6 +3350,17 @@ export function usePaperScope(
       canvasRef.value?.setPointerCapture(e.pointerId)
     }
 
+    // 图形创建后自动出现的选框（与位图模式统一）：形状/钢笔工具下也能直接操作选框，
+    // 无需切换到选择工具；点击选框外 = 收起选框并继续用当前工具画下一个。
+    // 己方手势进行中（正在拉直线/形状、正在落钢笔锚点）时不抢，避免打断绘制。
+    if (isShapeTool(tool) && selected.size > 0 && selFrame) {
+      const drawing = tool === 'pen' ? !!penPath : !!strokeStart
+      if (!drawing) {
+        if (beginFrameGesture(p)) return
+        clearSelection()
+      }
+    }
+
     if (tool === 'brush') {
       beginBrush(p)
     } else if (tool === 'line' || tool === 'rect' || tool === 'ellipse') {
@@ -3335,6 +3394,11 @@ export function usePaperScope(
     ) {
       const hp = clientToArtboard(e)
       store.cursorPos = { x: hp.x, y: hp.y }
+    }
+    // 变换框手势进行中（选择工具，或图形创建后自动选框的形状工具）：统一走选择手势
+    if ((selOp === 'move' || selOp === 'scale' || selOp === 'rotate') && e.buttons === 1) {
+      continueSelect(clientToArtboard(e), e.shiftKey)
+      return
     }
     // 填充：悬停/按下拖动都走目标跟随预览（Scratch updateFillPreview 移动即预览，
     // 不区分按键状态——点空白还原也在此分支完成）
@@ -3385,6 +3449,11 @@ export function usePaperScope(
     if (!scope) return
     const p = clientToArtboard(e)
     const tool = store.activeTool
+    // 变换框手势收尾（形状工具操作自动选框时同样走这里，不能落进形状收尾）
+    if (selOp === 'move' || selOp === 'scale' || selOp === 'rotate') {
+      endSelect()
+      return
+    }
     if (tool === 'brush') {
       endBrush()
     } else if (tool === 'line' || tool === 'rect' || tool === 'ellipse') {
@@ -3613,7 +3682,17 @@ export function usePaperScope(
   // 塑形工具互斥：进入=收起变换框、显示已选对象的锚点；离开=清锚点显示并恢复变换框
   watch(
     () => store.activeTool,
-    (t) => {
+    (t, old) => {
+      // 创建后自动选框：离开形状工具（且不是切到选择/塑形）= 收起选框（对齐位图模式语义）
+      if (
+        old !== t &&
+        isShapeTool(old) &&
+        t !== 'select' &&
+        t !== 'reshape' &&
+        selected.size > 0
+      ) {
+        clearSelection()
+      }
       if (t !== 'reshape') {
         clearReshapeOverlay()
         syncVectorSelBox() // 切回 select 等：reshape 期间被抑制的变换框按选中状态重建
@@ -3722,6 +3801,8 @@ export function usePaperScope(
     beforeExport,
     clearAllForBake,
     getFrameRaster,
+    /** 按缩略图尺寸直绘矢量内容（不按全分辨率栅格化） */
+    drawProjectToThumbnail,
     hasVectorContent,
     exportActiveFrame,
     /** 矢量剪贴板是否有内容（供顶栏粘贴按钮） */

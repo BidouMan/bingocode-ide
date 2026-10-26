@@ -2,6 +2,7 @@ import { watch, nextTick, onBeforeUnmount, type Ref } from 'vue'
 import { usePaintStore } from '../../../stores/paint'
 import { floodFill } from '../tools/floodFill'
 import { rgbaCss, hexToRgba } from '../utils/artboardExport'
+import { createBitmapPen } from '../utils/bitmapPen'
 import { contentBBox } from '../../../utils/bsfPacker'
 import {
   ensurePaintFont,
@@ -173,6 +174,11 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
   }
 
   function undo() {
+    // 钢笔进行中：撤销只丢弃半成品，不动历史
+    if (bitmapPen.isActive()) {
+      bitmapPen.cancel()
+      return
+    }
     const c = ctx2d()
     if (!c || undoStack.length === 0) return
     const current = snapshot()
@@ -189,6 +195,10 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
   }
 
   function redo() {
+    if (bitmapPen.isActive()) {
+      bitmapPen.cancel()
+      return
+    }
     const c = ctx2d()
     if (!c || redoStack.length === 0) return
     const current = snapshot()
@@ -204,6 +214,7 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
   }
 
   function clear() {
+    bitmapPen.cancel()
     const c = ctx2d()
     if (!c) return
     bakeFloatIfAny()
@@ -331,6 +342,23 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     }
   }
 
+  /** 形状内容包围盒（逻辑像素，含描边外扩）：用于创建后自动建立编辑选框 */
+  function shapePixelBounds(
+    start: { x: number; y: number },
+    end: { x: number; y: number }
+  ): { x: number; y: number; w: number; h: number } {
+    const lw = store.activeTool === 'line'
+      ? Math.max(1, store.lineWidth)
+      : store.strokeWidth > 0 ? store.strokeWidth : 4
+    const pad = Math.ceil(lw / 2) + 1
+    return normRect(
+      Math.min(start.x, end.x) - pad,
+      Math.min(start.y, end.y) - pad,
+      Math.max(start.x, end.x) + pad,
+      Math.max(start.y, end.y) + pad
+    )
+  }
+
   function beginShape(point: { x: number; y: number }) {
     bakeFloatIfAny()
     const base = snapshot()
@@ -354,16 +382,24 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
       resetShapeState()
       return
     }
+    const start = strokeStart
+    const origin = baseSnapshot
     const end = constrainPoint(point, shift)
-    const isClick = Math.abs(end.x - strokeStart.x) < 0.5 && Math.abs(end.y - strokeStart.y) < 0.5
-    c.putImageData(baseSnapshot, 0, 0)
+    const isClick = Math.abs(end.x - start.x) < 0.5 && Math.abs(end.y - start.y) < 0.5
+    c.putImageData(origin, 0, 0)
     if (isClick) {
       // 零尺寸空点击：丢弃本次压栈，不产生可见变更
       undoStack.pop()
       syncHistoryFlags()
     } else {
-      drawShapePreview(c, strokeStart, end)
+      drawShapePreview(c, start, end)
       markDirty()
+      // 创建完图形 → 立即激活编辑选框（图形作为独立浮动对象，点空白落定）
+      activateShapeFloat(
+        shapePixelBounds(start, end),
+        origin,
+        (target) => drawShapePreview(target, start, end)
+      )
     }
     resetShapeState()
   }
@@ -373,6 +409,41 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     strokeStart = null
     baseSnapshot = null
   }
+
+  // ─── 位图钢笔（自定义形状）：逐点落锚，闭合后按填充/描边设置烤成像素 ───
+  // 交互外观与矢量钢笔一致（锚点方块 / 闭合提示环 / 固定预览色），不切换绘制模式。
+  const bitmapPen = createBitmapPen({
+    ctx: ctx2d,
+    snapshot: () => {
+      const canvas = canvasRef.value
+      const c = ctx2d()
+      if (!c || !canvas) return null
+      return c.getImageData(0, 0, canvas.width, canvas.height)
+    },
+    restore: (img) => {
+      ctx2d()?.putImageData(img, 0, 0)
+    },
+    pushHistory,
+    popHistory: () => {
+      undoStack.pop()
+      syncHistoryFlags()
+    },
+    zoom: () => store.zoom,
+    style: () => ({
+      color: rgbaCss(store.fillColor, store.opacity),
+      mode: store.shapeStyle === 'outline' ? 'outline' : 'fill',
+      lineWidth: store.strokeWidth > 0 ? store.strokeWidth : 4,
+    }),
+    onFinish: (bounds, origin, paint) => {
+      // 闭合完成后自动进入编辑选框（与直线/矩形/椭圆一致）
+      activateShapeFloat(
+        normRect(bounds.x, bounds.y, bounds.x + bounds.w, bounds.y + bounds.h),
+        origin,
+        paint
+      )
+    },
+    onDirty: () => markDirty(),
+  })
 
   // ─── 多帧像素管理 ───
 
@@ -398,6 +469,7 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
 
   /** 活动帧（DOM canvas）→ 离屏存储 + 刷新缩略图 */
   function flushActiveToPixels() {
+    bitmapPen.cancel() // 未闭合的钢笔半成品不进帧存储/存档
     const canvas = canvasRef.value
     if (!canvas || currentIdx < 0 || currentIdx >= pixels.length) return
     let off = pixels[currentIdx]
@@ -932,6 +1004,52 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     rerenderComposite()
   }
 
+  /**
+   * 新画的图形 → 独立浮动对象（Scratch 行为）：
+   * 图层画布恢复成「落笔前底稿」，新图形按相同样式单独渲染到浮动画布。
+   * 这样拖动/缩放/旋转时只移动图形本身，不会把选框里原有的像素一起带走；
+   * 点空白或切工具时再把浮动图形合成回图层。
+   */
+  function floatShapeFromPaint(
+    r: { x: number; y: number; w: number; h: number },
+    origin: ImageData,
+    paint: (target: CanvasRenderingContext2D) => void
+  ) {
+    if (r.w < 2 || r.h < 2) return
+    const fc = makeOffscreen(r.w, r.h)
+    const fctx = fc.getContext('2d')!
+    fctx.save()
+    fctx.translate(-r.x, -r.y) // 绘制函数用画布像素坐标，平移进浮动画布
+    paint(fctx)
+    fctx.restore()
+    // 图层恢复成落笔前底稿（图形不再占图层像素，移动后能露出下方原有内容）
+    const base = makeOffscreen(origin.width, origin.height)
+    base.getContext('2d')!.putImageData(origin, 0, 0)
+    pixels[currentIdx] = base
+    floatCanvas = fc
+    floatXf = { cx: r.x + r.w / 2, cy: r.y + r.h / 2, sx: 1, sy: 1, angle: 0 }
+    setFloatActive(true)
+    const aabb = floatAabb()
+    if (aabb) setSelection(aabb)
+    rerenderComposite()
+  }
+
+  /** 创建完图形立即激活编辑选框（Scratch 行为）：移动/缩放/旋转，点空白或切工具落定 */
+  function activateShapeFloat(
+    r: { x: number; y: number; w: number; h: number } | null,
+    origin: ImageData | null = null,
+    paint: ((target: CanvasRenderingContext2D) => void) | null = null
+  ) {
+    if (!r || r.w < 2 || r.h < 2) return
+    if (origin && paint) {
+      floatShapeFromPaint(r, origin, paint)
+      return
+    }
+    // 兜底（拿不到落笔前底稿）：按矩形切图
+    setSelection(r)
+    cutSelectionToFloat()
+  }
+
   function startSelectionOp(point: { x: number; y: number }) {
     // 有浮动选区：手柄命中优先
     if (floatCanvas && store.floatActive) {
@@ -1284,6 +1402,23 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
 
     const point = clientToArtboard(e)
     store.cursorPos = point
+    // 图形创建后自动出现的编辑选框：优先响应手柄/内部拖动（直线/矩形/椭圆/钢笔工具下）
+    if (store.activeTool !== 'select' && floatCanvas && store.floatActive) {
+      if (hitTestFloat(point) !== 'outside') {
+        startSelectionOp(point)
+        canvas.setPointerCapture(e.pointerId)
+        return
+      }
+      // 点击选框外 = 完成确定（落定像素），随后继续当前工具的正常行为
+      commitFloatNow()
+      setSelection(null)
+      updateCursor()
+    }
+    if (store.activeTool === 'pen') {
+      // 钢笔：逐点落锚（无需拖拽），不捕获指针
+      bitmapPen.press(point, e.detail)
+      return
+    }
     if (store.activeTool === 'select') {
       startSelectionOp(point)
     } else if (FREE_TOOLS.has(store.activeTool)) {
@@ -1306,6 +1441,23 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     if (store.mode === 'bitmap') store.cursorPos = clientToArtboard(e)
     if (selOp !== 'none') {
       continueSelectionOp(clientToArtboard(e), e.shiftKey)
+      return
+    }
+    // 自动编辑选框：非选择工具下也按命中区域显示对应光标
+    if (store.activeTool !== 'select' && floatCanvas && store.floatActive) {
+      const canvas = canvasRef.value
+      if (canvas && e.buttons === 0) {
+        const hit = hitTestFloat(clientToArtboard(e))
+        canvas.style.cursor =
+          hit === 'move' ? 'move'
+            : hit === 'rotate' ? 'grab'
+              : hit === 'scale' ? 'nwse-resize'
+                : 'crosshair'
+      }
+    }
+    if (store.activeTool === 'pen') {
+      // 橡皮筋预览跟随鼠标（不需要按住）
+      bitmapPen.move(clientToArtboard(e))
       return
     }
     if (activeOp === 'none') return
@@ -1342,7 +1494,7 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
       canvas.style.cursor = 'none'
     } else {
       store.cursorPos = null
-      if (tool === 'line' || tool === 'rect' || tool === 'ellipse' || tool === 'fill' || tool === 'text') {
+      if (tool === 'line' || tool === 'rect' || tool === 'ellipse' || tool === 'pen' || tool === 'fill' || tool === 'text') {
         canvas.style.cursor = 'crosshair'
       } else {
         canvas.style.cursor = 'default'
@@ -1392,8 +1544,17 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
 
   // 离开选择工具：烘焙浮动并收起选区（位图绘制不按选区约束，蚂蚁线留着无意义）
   watch(() => store.activeTool, (tool, oldTool) => {
+    // 离开钢笔：丢弃未闭合的半成品（还原像素 + 回滚撤销步）
+    if (oldTool === 'pen' && tool !== 'pen') bitmapPen.cancel()
     if (oldTool === 'select' && tool !== 'select') {
       commitAndDeselect()
+    }
+    // 图形创建后的自动编辑选框：切换其它绘制工具 = 最终确定（烘焙为像素并收起选框）；
+    // 切到选择工具则保留浮动，方便继续用选框操作
+    if (oldTool !== 'select' && tool !== oldTool && tool !== 'select' && floatCanvas) {
+      commitFloatNow()
+      setSelection(null)
+      updateCursor()
     }
     // 切走文字工具：栅格化编辑中的文字
     if (oldTool === 'text' && tool !== 'text') {
@@ -1414,6 +1575,7 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
 
   onBeforeUnmount(() => {
     detach()
+    bitmapPen.cancel() // 半成品钢笔不进存档
     commitBitmapText() // 未收口的文字不丢失（组件卸载前栅格化）
     undoStack = []
     redoStack = []
@@ -1452,5 +1614,9 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
       commitBitmapText()
     },
     isTextEditing: () => textAnchor !== null,
+    /** 位图钢笔：Enter 闭合 / Esc 丢弃（PaintArtboard 键盘转发） */
+    penFinish: () => bitmapPen.finish(),
+    penCancel: () => bitmapPen.cancel(),
+    penActive: () => bitmapPen.isActive(),
   }
 }

@@ -247,8 +247,8 @@ export const usePaintStore = defineStore('paint', () => {
     if (m === 'vector' && !vectorEnabled.value) return
     mode.value = m
     // 模式切换工具回退（对齐 Scratch switchModeForFormat）：
-    // reshape/pen 仅矢量存在 → 切位图回退 select；其余工具两模式共有保持不变
-    if (m === 'bitmap' && (activeTool.value === 'reshape' || activeTool.value === 'pen')) {
+    // reshape 仅矢量存在 → 切位图回退 select；钢笔两模式都有（位图直接烤像素）
+    if (m === 'bitmap' && activeTool.value === 'reshape') {
       activeTool.value = 'select'
     }
   }

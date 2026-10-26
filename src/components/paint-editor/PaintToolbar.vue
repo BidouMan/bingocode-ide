@@ -45,13 +45,13 @@ const LABELS: Record<PaintTool, string> = {
 }
 
 // 工具集随模式切换（对齐 Scratch 官方两套工具集，仅参考 UX 规格）：
-// 矢量 = 选择/塑形/画笔/橡皮/填充/文字/直线/矩形/椭圆/自定义形状（reshape/pen 仅矢量）
-// 位图 = 选择(框选)/画笔/橡皮/填充/文字/直线/矩形/椭圆/取色（无 reshape/pen）
+// 矢量 = 选择/塑形/画笔/橡皮/填充/文字/直线/矩形/椭圆/自定义形状（reshape 仅矢量）
+// 位图 = 选择(框选)/画笔/橡皮/填充/文字/直线/矩形/椭圆/自定义形状/取色（钢笔直接烤像素）
 const VECTOR_TOOLS: PaintTool[] = [
   'select', 'reshape', 'brush', 'eraser', 'fill', 'text', 'line', 'rect', 'ellipse', 'pen', 'eyedropper',
 ]
 const BITMAP_TOOLS: PaintTool[] = [
-  'select', 'brush', 'eraser', 'fill', 'text', 'line', 'rect', 'ellipse', 'eyedropper',
+  'select', 'brush', 'eraser', 'fill', 'text', 'line', 'rect', 'ellipse', 'pen', 'eyedropper',
 ]
 
 // 侧边工具 tips 固定显示在按钮右侧（避开画布/面板遮挡）

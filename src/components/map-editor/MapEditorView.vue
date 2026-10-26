@@ -42,6 +42,7 @@ const cursorCoordText = computed(() => {
 })
 
 const mapCanvasRef = ref<InstanceType<typeof MapCanvas>>()
+const layerPanelRef = ref<InstanceType<typeof LayerPanel>>()
 const tileResourceBarRef = ref<{ uploadLocalTiles: () => void } | null>(null)
 const propertyPanelRef = ref<InstanceType<typeof PropertyPanel>>()
 
@@ -91,7 +92,7 @@ watch(
     if (mode !== 'bitmap') return
     paintStore.setMode('bitmap')
     const t = mapEditorStore.imageTool
-    if (t === 'reshape' || t === 'text' || t === 'eyedropper' || t === 'pen') {
+    if (t === 'reshape' || t === 'text' || t === 'eyedropper') {
       mapEditorStore.setImageTool('brush')
       paintStore.setTool('brush')
     }
@@ -111,8 +112,8 @@ async function startImagePaint(tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rec
   try {
     await mapPaint.saveMapImage(blob, w, h, mapStore.activeLayer?.id ?? -1, mapEditorStore.paintMode)
     mapEditorStore.setImageTool(tool)
-    // 矢量专属工具需要矢量模式（新建图层后进入）
-    if (tool === 'text' || tool === 'reshape' || tool === 'eyedropper' || tool === 'pen') {
+    // 矢量专属工具需要矢量模式（新建图层后进入）；钢笔两种模式都支持
+    if (tool === 'text' || tool === 'reshape' || tool === 'eyedropper') {
       mapEditorStore.setPaintMode('vector')
     }
   } catch (e) {
@@ -367,6 +368,11 @@ function getLayerThumbnail(layerId: number): string | null | Promise<string | nu
   return mapCanvasRef.value?.getLayerThumbnailDataUrl(layerId) ?? null
 }
 
+/** 绘制过程中即时推送的单图层缩略图（只更新对应一条） */
+function onLayerThumbUpdated(layerId: number, dataUrl: string) {
+  layerPanelRef.value?.setLayerThumb(layerId, dataUrl)
+}
+
 defineExpose({ switchToMap, placeImageResource })
 </script>
 
@@ -375,6 +381,7 @@ defineExpose({ switchToMap, placeImageResource })
     <div class="map-editor-body" :class="{ disabled: !hasMaps }">
       <div class="map-editor-left">
         <LayerPanel
+          ref="layerPanelRef"
           :disabled="!hasMaps"
           :get-layer-thumbnail="getLayerThumbnail"
           @paint="startImagePaint"
@@ -400,7 +407,7 @@ defineExpose({ switchToMap, placeImageResource })
             @create-paint-layer="startImagePaint"
           />
           <div class="canvas-stage">
-            <MapCanvas ref="mapCanvasRef" class="map-canvas-area" :class="{ disabled: !hasMaps }" @cursor-move="onCursorMove" />
+            <MapCanvas ref="mapCanvasRef" class="map-canvas-area" :class="{ disabled: !hasMaps }" @cursor-move="onCursorMove" @layer-thumb-updated="onLayerThumbUpdated" />
             <!-- 浮动视图工具条：撤销/重做/缩放（与角色绘制页一致） -->
             <div v-if="hasMaps" class="view-float-bar" @dblclick.stop>
               <button class="view-float-btn" v-tooltip="'缩小'" @click="mapCanvasRef?.zoomOut()">

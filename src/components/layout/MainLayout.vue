@@ -713,7 +713,10 @@ async function fileMenuAction(action: string) {
   // 任何项目操作都先停止运行（不等待后端返回）
   if (editorStore.isRunning) {
     engine.stop()
-    renderStore.clearAll()
+    // 只有新建/打开项目才清场：它们会切换整个工作区，旧画面不能带过去。
+    // 保存/另存为只是写文件 + 打包，保留最后一帧定格，
+    // 与学生点「停止」按钮的体验一致（原先无条件 clearAll，导致运行中保存时画布被清空）。
+    if (action === 'new' || action === 'open') renderStore.clearAll()
   }
 
   switch (action) {

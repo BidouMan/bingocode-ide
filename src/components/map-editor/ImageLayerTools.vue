@@ -130,9 +130,6 @@ function setTool(tool: typeof mapEditorStore.imageTool) {
   }
   mapEditorStore.setImageTool(tool)
   paintStore.setTool(tool)
-  // 钢笔产出的是矢量路径（闭合后可选中/变换/塑形）：位图模式下点它先切到矢量模式，
-  // 否则只有像素落笔、没有锚点与闭合交互
-  if (tool === 'pen' && !isVector.value) emit('switch-paint-mode', 'vector')
 }
 </script>
 

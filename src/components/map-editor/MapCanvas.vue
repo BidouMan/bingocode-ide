@@ -14,6 +14,7 @@ import { useImageTransform } from '../../composables/useImageTransform'
 import { useCollisionLayerEditor } from '../../composables/useCollisionLayerEditor'
 import { useTilePainter } from '../../composables/useTilePainter'
 import { usePaperScope } from '../paint-editor/composables/usePaperScope'
+import { createBitmapPen } from '../paint-editor/utils/bitmapPen'
 import { ensurePaintFont } from '../paint-editor/utils/paintFont'
 import { collectSnapLines, snapRectOffset, snapThreshold } from '../../utils/smartSnap'
 import {
@@ -27,6 +28,7 @@ const emit = defineEmits<{
   'tile-painted': [x: number, y: number, tileId: number]
   'tile-erased': [x: number, y: number]
   'cursor-move': [x: number, y: number]
+  'layer-thumb-updated': [layerId: number, dataUrl: string]
 }>()
 
 const cursorGridPos = ref<{ x: number; y: number } | null>(null)
@@ -758,14 +760,36 @@ function cutSelectionToFloat() {
     clearPixelSelection()
     return
   }
-  pushPaintUndo()
-  floatOrigin = ctx.getImageData(0, 0, s.canvas.width, s.canvas.height)
+  cutRectToFloat(r)
+}
+
+/**
+ * 把画布像素矩形切成浮动层并进入变换框状态。
+ * origin = 生成该内容前的底稿（图形刚创建时传入，Esc 取消即回到创建前）；
+ * pushHistory = false 时不额外压撤销（创建图形本身已经压过一步）。
+ */
+function cutRectToFloat(
+  r: { x: number; y: number; w: number; h: number },
+  origin: ImageData | null = null,
+  pushHistory = true
+) {
+  const s = paintSession
+  const ctx = paintCtx()
+  if (!s || !ctx || !sessionMatchesSelection() || !r || r.w < 2 || r.h < 2) {
+    clearPixelSelection()
+    return
+  }
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  if (pushHistory) pushPaintUndo()
+  floatOrigin = origin ?? ctx.getImageData(0, 0, s.canvas.width, s.canvas.height)
   const base = makeOffscreenCanvas(s.canvas.width, s.canvas.height)
   const bctx = base.getContext('2d')!
   bctx.drawImage(s.canvas, 0, 0)
   bctx.clearRect(r.x, r.y, r.w, r.h)
   const fc = makeOffscreenCanvas(r.w, r.h)
   fc.getContext('2d')!.drawImage(s.canvas, r.x, r.y, r.w, r.h, 0, 0, r.w, r.h)
+  ctx.restore()
   floatBaseCanvas = base
   floatCanvas = fc
   floatXf = { cx: r.x + r.w / 2, cy: r.y + r.h / 2, sx: 1, sy: 1, angle: 0 }
@@ -1496,13 +1520,25 @@ function drawShapePreview(px: number, py: number, shift = false) {
   if (!s || !ctx || !s.startPoint) return
   restorePaintSnapshot()
   const end = constrainPoint({ x: px, y: py }, s.startPoint, shift)
-  const start = s.startPoint
+  paintShapeInto(ctx, s.startPoint, end)
+}
+
+/**
+ * 把形状按当前工具/配色画进指定 ctx（start/end 为画布像素坐标）。
+ * applyClip = 是否套用当前像素选区裁剪（浮动对象渲染时沿同一坐标系平移，裁剪依然正确）。
+ */
+function paintShapeInto(
+  ctx: CanvasRenderingContext2D,
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  applyClip = true
+) {
   const tool = mapEditorStore.imageTool
   // 位图形状：实心 / 轮廓 二选一（直线始终是描边）
   const fillOn = tool !== 'line' && paintStore.shapeStyle === 'fill'
   const strokeOn = tool === 'line' || paintStore.shapeStyle === 'outline'
   ctx.save()
-  clipToSelection(ctx)
+  if (applyClip) clipToSelection(ctx)
   ctx.lineWidth = tool === 'line'
     ? Math.max(1, paintStore.lineWidth)
     : paintStore.strokeWidth > 0 ? paintStore.strokeWidth : 4
@@ -1583,6 +1619,62 @@ function pushPaintUndo() {
   bumpPaintHistory()
 }
 
+/** 钢笔预览尺寸换算：屏幕像素 → 画布像素（视图缩放 × 图片实例缩放） */
+function paintPenZoom(): number {
+  const img = sessionImage()
+  const sx = Math.abs(img?.scaleX ?? img?.scale ?? 1)
+  return Math.max(0.1, viewport.currentScale.value * sx)
+}
+
+/**
+ * 位图模式钢笔（自定义形状）：交互外观与矢量钢笔一致（锚点方块/首锚闭合提示/固定预览色），
+ * 但不切换模式——闭合后按当前填充/描边设置直接烤成像素写回当前图片图层。
+ */
+const bitmapPen = createBitmapPen({
+  ctx: paintCtx,
+  snapshot: () => {
+    const s = paintSession
+    const ctx = paintCtx()
+    if (!s || !ctx) return null
+    return ctx.getImageData(0, 0, s.canvas.width, s.canvas.height)
+  },
+  restore: (img) => {
+    paintCtx()?.putImageData(img, 0, 0)
+  },
+  pushHistory: pushPaintUndo,
+  popHistory: () => {
+    paintUndo.pop()
+    bumpPaintHistory()
+  },
+  zoom: paintPenZoom,
+  style: () => ({
+    color: rgbaCss(paintStore.fillColor, paintStore.opacity),
+    mode: paintStore.shapeStyle === 'outline' ? 'outline' : 'fill',
+    lineWidth: paintStore.strokeWidth > 0 ? paintStore.strokeWidth : 4,
+  }),
+  clip: clipToSelection,
+  onPreview: () => {
+    paintSession?.texture.source.update()
+  },
+  onFinish: (bounds, origin, paint) => {
+    // 闭合完成后自动进入编辑选框（与直线/矩形/椭圆一致）
+    const s = paintSession
+    if (!s) return
+    const x = Math.max(0, Math.floor(bounds.x))
+    const y = Math.max(0, Math.floor(bounds.y))
+    const x1 = Math.min(s.canvas.width, Math.ceil(bounds.x + bounds.w))
+    const y1 = Math.min(s.canvas.height, Math.ceil(bounds.y + bounds.h))
+    activateShapeFloat({ x, y, w: x1 - x, h: y1 - y }, origin, paint)
+  },
+  onDirty: () => {
+    const s = paintSession
+    if (!s) return
+    s.dirty = true
+    s.texture.source.update()
+    schedulePaintSave()
+  },
+})
+
 function toCanvasPoint(world: { x: number; y: number }): { x: number; y: number } | null {
   const s = paintSession
   const img = sessionImage()
@@ -1635,14 +1727,88 @@ function paintMove(world: { x: number; y: number }, shift = false) {
   s.texture.source.update()
 }
 
+/** 形状内容包围盒（画布像素，含描边外扩）：创建后自动建立编辑选框用 */
+function shapeRectPx(
+  start: { x: number; y: number },
+  end: { x: number; y: number }
+): { x: number; y: number; w: number; h: number } | null {
+  const s = paintSession
+  if (!s) return null
+  const lw = mapEditorStore.imageTool === 'line'
+    ? Math.max(1, paintStore.lineWidth)
+    : paintStore.strokeWidth > 0 ? paintStore.strokeWidth : 4
+  const pad = Math.ceil(lw / 2) + 1
+  const x = Math.max(0, Math.floor(Math.min(start.x, end.x) - pad))
+  const y = Math.max(0, Math.floor(Math.min(start.y, end.y) - pad))
+  const x1 = Math.min(s.canvas.width, Math.ceil(Math.max(start.x, end.x) + pad))
+  const y1 = Math.min(s.canvas.height, Math.ceil(Math.max(start.y, end.y) + pad))
+  return { x, y, w: x1 - x, h: y1 - y }
+}
+
+/**
+ * 新画的图形 → 独立浮动对象（Scratch 行为）：
+ * 图层画布恢复成「落笔前底稿」，新图形按相同样式单独渲染到浮动画布。
+ * 这样拖动/缩放/旋转时只移动图形本身，不会把选框里原有的像素一起带走；
+ * 点空白或切工具时才把浮动图形合成回图层。
+ */
+function floatShapeFromPaint(
+  rect: { x: number; y: number; w: number; h: number },
+  origin: ImageData,
+  paint: (target: CanvasRenderingContext2D) => void
+) {
+  const s = paintSession
+  const ctx = paintCtx()
+  if (!s || !ctx || !sessionMatchesSelection() || rect.w < 2 || rect.h < 2) {
+    clearPixelSelection()
+    return
+  }
+  const fc = makeOffscreenCanvas(rect.w, rect.h)
+  const fctx = fc.getContext('2d')!
+  fctx.save()
+  fctx.translate(-rect.x, -rect.y) // 绘制函数用画布像素坐标，平移进浮动画布
+  paint(fctx)
+  fctx.restore()
+  // 图层恢复成落笔前底稿（图形不再占图层像素，移动后能露出下方原有内容）
+  const base = makeOffscreenCanvas(origin.width, origin.height)
+  base.getContext('2d')!.putImageData(origin, 0, 0)
+  floatBaseCanvas = base
+  floatCanvas = fc
+  floatXf = { cx: rect.x + rect.w / 2, cy: rect.y + rect.h / 2, sx: 1, sy: 1, angle: 0 }
+  pixelSelection = null
+  floatOp = 'none'
+  floatStartXf = null
+  floatOrigin = origin
+  mapEditorStore.hasPixelSelection = true
+  transform.removeTransformBox()
+  compositeFloat()
+  s.dirty = true
+  schedulePaintSave()
+}
+
+/** 图形创建完立即进入编辑选框（Scratch 行为）：移动/缩放/旋转，点空白或切工具落定 */
+function activateShapeFloat(
+  rect: { x: number; y: number; w: number; h: number } | null,
+  origin: ImageData | null,
+  paint: ((target: CanvasRenderingContext2D) => void) | null = null
+) {
+  if (!rect || rect.w < 2 || rect.h < 2) return
+  if (origin && paint) {
+    floatShapeFromPaint(rect, origin, paint)
+    return
+  }
+  // 兜底（拿不到落笔前底稿）：按矩形切图
+  cutRectToFloat(rect, origin, false)
+}
+
 function paintEnd(world?: { x: number; y: number }, shift = false) {
   const s = paintSession
   if (!s) return
   if (s.startPoint) {
     const start = s.startPoint
+    const origin = s.snapshot
     const p = world ? toCanvasPoint(world) : s.lastPoint
     restorePaintSnapshot()
-    if (!p) {
+    if (!p || !origin) {
       paintUndo.pop()
       bumpPaintHistory()
     } else {
@@ -1656,6 +1822,9 @@ function paintEnd(world?: { x: number; y: number }, shift = false) {
         drawShapePreview(p.x, p.y, shift)
         s.dirty = true
         s.texture.source.update()
+        activateShapeFloat(shapeRectPx(start, end), origin, (target) =>
+          paintShapeInto(target, start, end)
+        )
       }
     }
   }
@@ -1667,6 +1836,8 @@ function paintEnd(world?: { x: number; y: number }, shift = false) {
 
 function schedulePaintSave() {
   if (paintSaveTimer) clearTimeout(paintSaveTimer)
+  // 位图内容变更统一走这里：顺带刷新当前图层缩略图（防抖合并）
+  scheduleLayerThumbUpdate()
   paintSaveTimer = setTimeout(() => {
     paintSaveTimer = null
     if (paintSession) void flushPaintSave(paintSession, false)
@@ -1703,6 +1874,8 @@ async function flushPaintSave(session: ImagePaintSession, finalize: boolean) {
 }
 
 async function commitPaintSession(finalize = true) {
+  // 未闭合的钢笔半成品不落盘（还原到底稿，同时回滚起笔压的撤销步）
+  bitmapPen.cancel()
   if (paintSaveTimer) {
     clearTimeout(paintSaveTimer)
     paintSaveTimer = null
@@ -1722,6 +1895,11 @@ async function commitPaintSession(finalize = true) {
 }
 
 function undoPaint() {
+  // 钢笔进行中：先整步丢弃半成品（与矢量钢笔一致），不打断到上一步
+  if (bitmapPen.isActive()) {
+    bitmapPen.cancel()
+    return
+  }
   const s = paintSession
   const ctx = paintCtx()
   if (!s || !ctx || paintUndo.length === 0) return
@@ -1735,6 +1913,10 @@ function undoPaint() {
 }
 
 function redoPaint() {
+  if (bitmapPen.isActive()) {
+    bitmapPen.cancel()
+    return
+  }
   const s = paintSession
   const ctx = paintCtx()
   if (!s || !ctx || paintRedo.length === 0) return
@@ -1870,7 +2052,8 @@ const vectorEngine = usePaperScope(
   vectorCanvasRef,
   {
     onFrameSwitched: () => {},
-    onContentChanged: () => {},
+    // 每笔/每次矢量操作结束：只刷新当前图层缩略图
+    onContentChanged: () => scheduleLayerThumbUpdate(),
     bitmapLayer: {
       getFrame: () => null,
       transformFrame: () => {},
@@ -1899,6 +2082,10 @@ function syncVectorGeometry() {
 }
 
 async function enterVectorMode(): Promise<boolean> {
+  // 进入矢量模式前丢弃位图钢笔半成品（还没闭合的形状不应被烘焙进像素）
+  bitmapPen.cancel()
+  // 图形刚创建后的自动编辑选框：切换绘制模式同样算最终确定（先烘焙为像素再走矢量）
+  bakeFloatingSelection()
   // 只有已处于"目标图层的矢量模式"时才能直接复用；
   // 否则必须先退出旧图层，避免新图层沿用上一图层的矢量内容
   if (vectorActive.value && paintSession?.layerId === mapStore.selectedImageLayerId) {
@@ -2105,7 +2292,7 @@ async function exitVectorMode(switchUiToBitmap = true) {
     vectorCursorPos.value = null
     // 矢量专属工具回退到位图可用工具
     const tool = mapEditorStore.imageTool
-    if (tool === 'reshape' || tool === 'text' || tool === 'eyedropper' || tool === 'pen') {
+    if (tool === 'reshape' || tool === 'text' || tool === 'eyedropper') {
       mapEditorStore.setImageTool('brush')
       paintStore.setTool('brush')
     } else {
@@ -2498,13 +2685,28 @@ function onPointerDown(e: PointerEvent) {
     if (isImagePaintTool()) {
       const worldPos = viewport.screenToWorld(e)
       if (worldPos) {
-        if (sessionMatchesSelection()) {
-          paintBegin(worldPos)
-        } else {
-          void startPaintSession().then(ok => {
-            if (ok) paintBegin(worldPos)
-          })
+        const startAndHandle = (handler: () => void) => {
+          if (sessionMatchesSelection()) handler()
+          else void startPaintSession().then(ok => { if (ok) handler() })
         }
+        // 图形创建后自动出现的编辑选框：优先响应手柄/内部拖动（任意位图绘制工具下）
+        if (floatCanvas && floatOp === 'none' && hitTestFloat(worldPos).kind !== 'outside') {
+          // 浮动选区必然属于当前会话：同步处理，避免异步建会话后鼠标已松开导致手势卡住
+          if (sessionMatchesSelection()) handleSelectPointerDown(worldPos)
+          capturePointer(app?.canvas as HTMLCanvasElement | undefined, e.pointerId)
+          return
+        }
+        startAndHandle(() => {
+          // 点击选框外 = 完成确定（落定像素），随后继续当前工具的正常行为
+          if (floatCanvas) bakeFloatingSelection()
+          // 位图钢笔：单击落锚（不是拖拽笔画），需要绘制会话才能写像素
+          if (mapEditorStore.imageTool === 'pen' && mapEditorStore.paintMode === 'bitmap') {
+            const p = toCanvasPoint(worldPos)
+            if (p) bitmapPen.press(p, e.detail)
+          } else {
+            paintBegin(worldPos)
+          }
+        })
         return
       }
     }
@@ -2549,7 +2751,22 @@ function onPointerMove(e: PointerEvent) {
 
   // 图片模式绘制工具：圆圈光标跟随鼠标并绘制
   if (isImagePaintTool()) {
+    // 自动编辑选框的拖动（移动/缩放/旋转）优先
+    if (floatOp !== 'none') {
+      const worldPos = viewport.screenToWorld(e)
+      if (worldPos) handleSelectPointerMove(worldPos, e.shiftKey)
+      return
+    }
     if (isBrushCursorActive()) drawBrushCursorAt(e.clientX, e.clientY)
+    // 位图钢笔：橡皮筋预览跟随光标（无需按住鼠标）
+    if (mapEditorStore.imageTool === 'pen' && mapEditorStore.paintMode === 'bitmap') {
+      if (sessionMatchesSelection()) {
+        const worldPos = viewport.screenToWorld(e)
+        const p = worldPos ? toCanvasPoint(worldPos) : null
+        if (p) bitmapPen.move(p)
+      }
+      return
+    }
     if (e.buttons === 1 && sessionMatchesSelection()) {
       const worldPos = viewport.screenToWorld(e)
       if (worldPos) paintMove(worldPos, e.shiftKey)
@@ -2588,6 +2805,19 @@ function onPointerUp(e: PointerEvent) {
     return
   }
 
+  // 自动编辑选框的拖动收尾（移动/缩放/旋转）
+  if (isImagePaintTool() && floatOp !== 'none') {
+    handleSelectPointerUp()
+    viewport.endPan()
+    return
+  }
+
+  // 位图钢笔：落锚靠点击，不走拖拽笔画的收尾逻辑
+  if (isImagePaintTool() && mapEditorStore.imageTool === 'pen' && mapEditorStore.paintMode === 'bitmap') {
+    viewport.endPan()
+    return
+  }
+
   if (isImagePaintTool() && sessionMatchesSelection()) {
     paintEnd(viewport.screenToWorld(e) ?? undefined, e.shiftKey)
     viewport.endPan()
@@ -2608,8 +2838,8 @@ function onPointerLeave(e: PointerEvent) {
   cursorGridPos.value = null
   painter.hidePreview()
   hideBrushCursor()
-  // 绘制中离开画布：结束当前笔画
-  if (isImagePaintTool() && sessionMatchesSelection()) paintEnd()
+  // 绘制中离开画布：结束当前笔画（钢笔保留已落锚点，等用户回来继续）
+  if (isImagePaintTool() && mapEditorStore.imageTool !== 'pen' && sessionMatchesSelection()) paintEnd()
   // 框选中离开画布：按当前尺寸收口，避免选框悬空
   if (mapStore.activeMode === 'image' && mapEditorStore.imageTool === 'select' && floatOp === 'create') {
     handleSelectPointerUp()
@@ -2785,6 +3015,33 @@ function onKeyDown(e: KeyboardEvent) {
       return
     }
   }
+  // 位图模式钢笔：Enter 闭合收尾、Esc 丢弃半成品（与矢量模式一致）
+  if (mapStore.activeMode === 'image' && mapEditorStore.paintMode === 'bitmap'
+    && mapEditorStore.imageTool === 'pen'
+    && (e.target as HTMLElement).tagName !== 'INPUT'
+    && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
+    if (e.key === 'Escape' && bitmapPen.cancel()) {
+      e.preventDefault()
+      return
+    }
+    if (e.key === 'Enter' && bitmapPen.finish()) {
+      e.preventDefault()
+      return
+    }
+  }
+  // 图形刚创建后的自动编辑选框：Esc 取消（回到创建前），Delete 删除该图形
+  if (mapStore.activeMode === 'image' && floatCanvas && floatOp === 'none') {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      cancelFloatingSelection()
+      return
+    }
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault()
+      deleteFloatingPixels()
+      return
+    }
+  }
   // 绘制模式下不响应地图快捷键（避免误删图层/切工具）
   if (isImagePaintTool()) return
   // Tool shortcuts (only when not typing in an input)
@@ -2957,6 +3214,8 @@ watch(
   () => mapEditorStore.imageTool,
   (tool) => {
     if (mapStore.activeMode !== 'image') return
+    // 切走钢笔：丢弃未闭合的半成品，避免预览线残留在像素里
+    if (tool !== 'pen') bitmapPen.cancel()
     // 选取工具：两种模式统一光标，避免从画笔切过来遗留圆圈/十字
     if (tool === 'select') {
       syncSelectCursor()
@@ -2983,9 +3242,9 @@ watch(
   }
 )
 
-// 矢量引擎自动切工具（矩形/椭圆/钢笔成形后回到选择）→ 同步地图工具栏高亮与光标：
+// 矢量引擎主动切工具（如文字编辑结束）→ 同步地图工具栏高亮与光标：
 // 工具栏读的是 imageTool，引擎只改 paintStore.activeTool，不同步就会出现
-// “已经能拖选了，图标还停在矩形/钢笔上”
+// “工具已变、图标还停在原来那个”
 watch(
   () => paintStore.activeTool,
   (tool) => {
@@ -3245,6 +3504,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   // 卸载无法 await：同步烘焙矢量内容后的像素，再交给 commitPaintSession 落盘
+  if (layerThumbTimer) {
+    clearTimeout(layerThumbTimer)
+    layerThumbTimer = null
+  }
   if (vectorActive.value) {
     bakeVectorRasterSync()
     vectorActive.value = false
@@ -3335,6 +3598,49 @@ async function getLayerThumbnailDataUrl(layerId: number): Promise<string | null>
     )
   }
   return canvas.toDataURL('image/png')
+}
+
+// ─── 图片图层缩略图即时刷新（每笔结束，只推当前图层）───
+const LAYER_THUMB_MAX = 128
+let layerThumbTimer: ReturnType<typeof setTimeout> | null = null
+
+/** 用内存中的绘制画布生成当前图层缩略图（不读盘、不触发地图重渲染） */
+function buildLayerThumbDataUrl(layerId: number): string | null {
+  const s = paintSession
+  if (!s || s.layerId !== layerId) return null
+  const w = s.canvas.width
+  const h = s.canvas.height
+  if (!w || !h) return null
+  const scale = Math.min(1, LAYER_THUMB_MAX / Math.max(w, h))
+  const tw = Math.max(1, Math.round(w * scale))
+  const th = Math.max(1, Math.round(h * scale))
+  const c = document.createElement('canvas')
+  c.width = tw
+  c.height = th
+  const ctx = c.getContext('2d')
+  if (!ctx) return null
+  ctx.imageSmoothingEnabled = mapStore.sceneRenderMode !== 'pixelated'
+  ctx.drawImage(s.canvas, 0, 0, w, h, 0, 0, tw, th)
+  // 矢量内容不在绘制画布里：按缩略图尺寸直绘后叠加，避免全分辨率栅格化
+  if (vectorActive.value && paintStore.mode === 'vector') {
+    const vec = document.createElement('canvas')
+    vec.width = tw
+    vec.height = th
+    if (vectorEngine.drawProjectToThumbnail(vec)) ctx.drawImage(vec, 0, 0)
+  }
+  return c.toDataURL('image/png')
+}
+
+/** 每笔/每次操作结束后刷新当前图层缩略图（独立信号，不用 imageRevision 以免全量重渲染） */
+function scheduleLayerThumbUpdate() {
+  if (layerThumbTimer) clearTimeout(layerThumbTimer)
+  layerThumbTimer = setTimeout(() => {
+    layerThumbTimer = null
+    const s = paintSession
+    if (!s) return
+    const url = buildLayerThumbDataUrl(s.layerId)
+    if (url) emit('layer-thumb-updated', s.layerId, url)
+  }, 60)
 }
 
 async function getThumbnailDataUrl(): Promise<string | null> {
