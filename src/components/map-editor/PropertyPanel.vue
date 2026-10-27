@@ -739,7 +739,7 @@ function onCollisionEnabledChange(enabled: boolean) {
   background: transparent;
   border: none;
   border-radius: 4px;
-  cursor: pointer;
+  cursor: default;
   flex-shrink: 0;
 }
 
@@ -837,7 +837,7 @@ function onCollisionEnabledChange(enabled: boolean) {
   display: flex;
   align-items: center;
   gap: 4px;
-  cursor: pointer;
+  cursor: default;
 }
 
 .att-checkbox input[type="checkbox"] {

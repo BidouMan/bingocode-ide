@@ -92,7 +92,7 @@ function removeActivePolygon() {
   background: transparent;
   border: none;
   border-radius: 4px;
-  cursor: pointer;
+  cursor: default;
   padding: 0;
   flex-shrink: 0;
   transition: background 0.15s;
@@ -119,7 +119,7 @@ function removeActivePolygon() {
   border: none;
   background: transparent;
   color: #8a8f98;
-  cursor: pointer;
+  cursor: default;
   font-size: 12px;
   white-space: nowrap;
 }

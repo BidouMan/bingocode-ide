@@ -29,6 +29,8 @@ export interface MapSaveData {
     smoothing: number
     limitBounds: boolean
   }
+  // 场景标记：世界坐标（引擎暂未读取，仅存档/编辑器使用）
+  markers?: { id: string; name: string; x: number; y: number }[]
 }
 
 export interface LayerSaveData {
@@ -123,6 +125,7 @@ export interface MapLoadData {
     smoothing: number
     limitBounds: boolean
   }
+  markers: { id: string; name: string; x: number; y: number }[]
 }
 
 /**
@@ -286,6 +289,12 @@ export function serializeMap(mapData: any): MapSaveData {
     tilesets,
     tilePalette: mapData.tilePalette,
     camera: mapData.camera,
+    markers: (mapData.markers || []).map((m: any) => ({
+      id: m.id,
+      name: m.name,
+      x: Number(m.x) || 0,
+      y: Number(m.y) || 0,
+    })),
   }
 }
 
@@ -533,5 +542,11 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
           limitBounds: data.camera.limitBounds !== false,
         }
       : undefined,
+    markers: (Array.isArray(data.markers) ? data.markers : []).map((m, i) => ({
+      id: m.id || `mk_legacy_${i}`,
+      name: typeof m.name === 'string' && m.name.trim() ? m.name : `标记${i > 0 ? i : ''}`,
+      x: Math.round(Number(m.x) || 0),
+      y: Math.round(Number(m.y) || 0),
+    })),
   }
 }

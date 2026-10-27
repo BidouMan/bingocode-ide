@@ -20,6 +20,8 @@ export function useMapViewport(options: MapViewportOptions) {
   const { canvasRef, getApp, getPIXI } = options
 
   const currentScale = ref(1.6)
+  // 视口版本号：平移/缩放/尺寸变化时递增，供 DOM 叠加层（标记图钉）重新计算屏幕坐标
+  const viewVersion = ref(0)
 
   let isPanning = false
   let isSpaceHeld = false
@@ -74,6 +76,8 @@ export function useMapViewport(options: MapViewportOptions) {
     g.stroke({ width: 0.5, color: 0x333333 })
 
     g.visible = mapEditorStore.showGrid
+    // 网格随视口重绘，说明视口刚刚变化；通知 DOM 叠加层同步
+    viewVersion.value++
   }
 
   function drawAxes() {
@@ -222,11 +226,16 @@ export function useMapViewport(options: MapViewportOptions) {
   }
 
   function screenToWorld(e: PointerEvent | DragEvent): { x: number; y: number } | null {
+    const clientX = 'clientX' in e ? e.clientX : 0
+    const clientY = 'clientY' in e ? e.clientY : 0
+    return clientToWorld(clientX, clientY)
+  }
+
+  /** 客户端屏幕坐标 → 地图世界坐标（标记拖拽等非 PointerEvent 场景使用） */
+  function clientToWorld(clientX: number, clientY: number): { x: number; y: number } | null {
     const app = getApp()
     if (!canvasRef.value || !app) return null
     const rect = canvasRef.value.getBoundingClientRect()
-    const clientX = 'clientX' in e ? e.clientX : 0
-    const clientY = 'clientY' in e ? e.clientY : 0
     return {
       x: (clientX - rect.left - app.stage.x) / currentScale.value,
       y: (clientY - rect.top - app.stage.y) / currentScale.value,
@@ -239,6 +248,7 @@ export function useMapViewport(options: MapViewportOptions) {
 
   return {
     currentScale,
+    viewVersion,
     drawGrid,
     drawAxes,
     drawGameWindow,
@@ -256,5 +266,6 @@ export function useMapViewport(options: MapViewportOptions) {
     setCursor,
     screenToGrid,
     screenToWorld,
+    clientToWorld,
   }
 }

@@ -77,7 +77,7 @@ const collisionEditorRef = ref<InstanceType<typeof CollisionEditor>>()
   background: rgb(40, 43, 52);
   border: none;
   border-radius: 4px;
-  cursor: pointer;
+  cursor: default;
   padding: 2px;
   transition: background 0.15s;
 }

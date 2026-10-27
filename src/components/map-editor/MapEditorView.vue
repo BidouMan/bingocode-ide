@@ -8,6 +8,8 @@ import iconZoomIn from '../../assets/icons/add-one.svg'
 import iconUndo from '../../assets/icons/undo.svg'
 import iconRedo from '../../assets/icons/redo.svg'
 import iconMapLibrary from '../../assets/icons/图片库.svg'
+import iconCopy from '../../assets/icons/copy.svg'
+import iconDelete from '../../assets/icons/选中删除.svg'
 import TileResourceBar from './TileResourceBar.vue'
 import PropertyPanel from './PropertyPanel.vue'
 import LayerPanel from './LayerPanel.vue'
@@ -22,7 +24,7 @@ import { useMapPersistence } from '../../composables/useMapPersistence'
 import { useMapPaint } from '../../composables/useMapPaint'
 import JSZip from 'jszip'
 import { deserializeMap } from '../../utils/mapSerializer'
-import { toUserX, toUserY } from '../../utils/coords'
+import { toUserX, toUserY, toWorldX, toWorldY } from '../../utils/coords'
 
 const mapStore = useMapStore()
 const mapEditorStore = useMapEditorStore()
@@ -35,7 +37,11 @@ const hasMaps = computed(() => resourceStore.maps.length > 0)
 // 切换地图后鼠标未移动，清空坐标避免显示上一张地图的旧位置
 watch(
   () => mapStore.mapLoadCount,
-  () => mapEditorStore.setCursorPos(null, null),
+  () => {
+    mapEditorStore.setCursorPos(null, null)
+    // 切图后取消可能残留的放置状态
+    mapEditorStore.cancelMarkerPlacing()
+  },
 )
 
 /** 鼠标所在像素坐标（用户坐标：原点在地图左下角，y 向上为正） */
@@ -45,6 +51,92 @@ const cursorCoordText = computed(() => {
   if (wx === null || wy === null) return '--'
   return `${Math.round(toUserX(wx))},${Math.round(toUserY(wy))}`
 })
+
+// ====== 场景标记：选中后在图钉正下方弹出操作胶囊 ======
+const selectedMarker = computed(() => mapStore.selectedMarker)
+const markerNameInputRef = ref<HTMLInputElement>()
+const markerMenuRef = ref<HTMLElement>()
+// 胶囊实际宽度：用于贴边时水平内收，避免溢出画布
+const markerMenuWidth = ref(0)
+// 图钉到胶囊的间距：留出标签高度，避免遮挡
+const MARKER_MENU_GAP = 30
+const MARKER_MENU_HEIGHT = 34
+
+/** 胶囊位置：默认贴在图钉正下方；下方空间不足时翻到图钉上方 */
+const markerMenuPos = computed(() => {
+  const id = mapEditorStore.selectedMarkerId
+  if (!id) return null
+  const canvas = mapCanvasRef.value
+  const anchor = canvas?.markerScreenPos(id)
+  if (!canvas || !anchor) return null
+  const host = canvas.$el as HTMLElement
+  const width = markerMenuWidth.value || 300
+  const half = width / 2
+  const minX = half + 10
+  const maxX = Math.max(minX, host.clientWidth - half - 10)
+  const left = Math.min(Math.max(anchor.x, minX), maxX)
+  const belowTop = anchor.y + MARKER_MENU_GAP
+  // 画布底部放不下就翻到图钉上方（图钉高 26px，再留 8px 呼吸）
+  const flip = belowTop + MARKER_MENU_HEIGHT > host.clientHeight - 8
+  const top = flip ? Math.max(8, anchor.y - 26 - 8 - MARKER_MENU_HEIGHT) : belowTop
+  return { left, top, flip }
+})
+
+/** 胶囊内容变化后重新测量宽度（渲染完成后读取，保证钳制准确） */
+watch(
+  () => [mapEditorStore.selectedMarkerId, selectedMarker.value?.name],
+  () => {
+    markerMenuWidth.value = markerMenuRef.value?.offsetWidth ?? 0
+  },
+  { flush: 'post' },
+)
+
+/** 改名失焦/回车生效；空名或重名回填原名 */
+function onMarkerNameChange(e: Event) {
+  const marker = selectedMarker.value
+  const el = e.target as HTMLInputElement
+  if (!marker) return
+  if (!mapStore.renameMarker(marker.id, el.value)) el.value = marker.name
+}
+
+/** 坐标输入：用户坐标 ↔ 世界坐标；空值或非数字回填当前值 */
+function onMarkerCoordChange(axis: 'x' | 'y', e: Event) {
+  const marker = selectedMarker.value
+  const el = e.target as HTMLInputElement
+  if (!marker) return
+  const raw = el.value.trim()
+  const value = Number(raw)
+  if (!raw || !Number.isFinite(value)) {
+    el.value = String(Math.round(axis === 'x' ? toUserX(marker.x) : toUserY(marker.y)))
+    return
+  }
+  const user = Math.round(value)
+  if (axis === 'x') mapStore.updateMarkerPosition(marker.id, toWorldX(user), marker.y)
+  else mapStore.updateMarkerPosition(marker.id, marker.x, toWorldY(user))
+  el.value = String(user)
+}
+
+function onMarkerXChange(e: Event) {
+  onMarkerCoordChange('x', e)
+}
+
+function onMarkerYChange(e: Event) {
+  onMarkerCoordChange('y', e)
+}
+
+/** 名称/坐标输入框按回车直接生效并退出编辑 */
+function blurMarkerInput(e: KeyboardEvent) {
+  (e.target as HTMLInputElement).blur()
+}
+
+/** 双击图钉：选中并直接把焦点放到胶囊的名称输入框 */
+function onMarkerActivate(id: string) {
+  mapEditorStore.setSelectedMarkerId(id)
+  nextTick(() => {
+    markerNameInputRef.value?.focus()
+    markerNameInputRef.value?.select()
+  })
+}
 
 const mapCanvasRef = ref<InstanceType<typeof MapCanvas>>()
 const layerPanelRef = ref<InstanceType<typeof LayerPanel>>()
@@ -412,7 +504,15 @@ defineExpose({ switchToMap, placeImageResource })
             @create-paint-layer="startImagePaint"
           />
           <div class="canvas-stage">
-            <MapCanvas ref="mapCanvasRef" class="map-canvas-area" :class="{ disabled: !hasMaps }" @cursor-move="onCursorMove" @cursor-leave="mapEditorStore.setCursorPos(null, null)" @layer-thumb-updated="onLayerThumbUpdated" />
+            <MapCanvas
+              ref="mapCanvasRef"
+              class="map-canvas-area"
+              :class="{ disabled: !hasMaps }"
+              @cursor-move="onCursorMove"
+              @cursor-leave="mapEditorStore.setCursorPos(null, null)"
+              @layer-thumb-updated="onLayerThumbUpdated"
+              @marker-activate="onMarkerActivate"
+            />
             <!-- 浮动视图工具条：撤销/重做/缩放（与角色绘制页一致） -->
             <div v-if="hasMaps" class="view-float-bar" @dblclick.stop>
               <button class="view-float-btn" v-tooltip="'缩小'" @click="mapCanvasRef?.zoomOut()">
@@ -440,6 +540,60 @@ defineExpose({ switchToMap, placeImageResource })
                 @click="mapCanvasRef?.redoActive()"
               >
                 <img :src="iconRedo" width="14" height="14" draggable="false" />
+              </button>
+            </div>
+
+            <!-- 标记操作胶囊：贴在选中图钉正下方，水平居中，完全圆角 -->
+            <div
+              v-if="hasMaps && selectedMarker && markerMenuPos"
+              ref="markerMenuRef"
+              class="marker-menu"
+              :style="{
+                left: `${markerMenuPos.left}px`,
+                top: `${markerMenuPos.top}px`,
+              }"
+              @mousedown.stop
+              @contextmenu.prevent
+            >
+              <input
+                ref="markerNameInputRef"
+                class="marker-name-input"
+                :value="selectedMarker.name"
+                maxlength="20"
+                placeholder="标记名"
+                @change="onMarkerNameChange"
+                @keydown.enter="blurMarkerInput"
+              />
+              <div class="marker-coord-group">
+                <span class="marker-axis">X</span>
+                <input
+                  class="marker-coord-input"
+                  :value="Math.round(toUserX(selectedMarker.x))"
+                  @change="onMarkerXChange"
+                  @keydown.enter="blurMarkerInput"
+                />
+                <span class="marker-axis">Y</span>
+                <input
+                  class="marker-coord-input"
+                  :value="Math.round(toUserY(selectedMarker.y))"
+                  @change="onMarkerYChange"
+                  @keydown.enter="blurMarkerInput"
+                />
+              </div>
+              <div class="marker-menu-divider"></div>
+              <button
+                class="marker-float-btn"
+                v-tooltip="'复制'"
+                @click="mapStore.duplicateMarker(selectedMarker.id)"
+              >
+                <img :src="iconCopy" width="14" height="14" draggable="false" />
+              </button>
+              <button
+                class="marker-float-btn marker-float-btn-danger"
+                v-tooltip="'删除'"
+                @click="mapStore.removeMarker(selectedMarker.id)"
+              >
+                <img :src="iconDelete" width="14" height="14" draggable="false" />
               </button>
             </div>
           </div>
@@ -538,7 +692,7 @@ defineExpose({ switchToMap, placeImageResource })
   border: none;
   color: #9ca0a4;
   font-size: 12px;
-  cursor: pointer;
+  cursor: default;
 }
 
 .right-tab-active {
@@ -625,7 +779,7 @@ defineExpose({ switchToMap, placeImageResource })
   background: transparent;
   border: none;
   border-radius: 6px;
-  cursor: pointer;
+  cursor: default;
   transition: background 0.15s ease;
 }
 
@@ -653,7 +807,7 @@ defineExpose({ switchToMap, placeImageResource })
   font-family: 'JetBrains Mono', monospace;
   font-weight: 500;
   color: var(--text-secondary);
-  cursor: pointer;
+  cursor: default;
   white-space: nowrap;
   transition: color 0.15s, background 0.15s;
 }
@@ -668,6 +822,116 @@ defineExpose({ switchToMap, placeImageResource })
   height: 14px;
   background: rgba(255, 255, 255, 0.1);
   margin: 0 4px;
+}
+
+/* ─── 标记操作胶囊：贴在选中图钉正下方，水平居中 ─── */
+.marker-menu {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 6px;
+  transform: translateX(-50%);
+  background: rgba(30, 32, 40, 0.94);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  white-space: nowrap;
+  z-index: 30;
+}
+
+.marker-name-input {
+  width: 100px;
+  height: 24px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 12px;
+  text-align: center;
+  outline: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.marker-name-input:focus {
+  border-color: #5bfb84;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* X / Y 坐标：合并成一枚胶囊小分组，输入框无边框，聚焦时才显绿边 */
+.marker-coord-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 24px;
+  padding: 0 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 999px;
+}
+
+.marker-axis {
+  color: rgb(139, 143, 150);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  user-select: none;
+}
+
+.marker-coord-input {
+  width: 40px;
+  height: 20px;
+  padding: 0 2px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  text-align: center;
+  outline: none;
+  transition: background 0.15s;
+}
+
+.marker-coord-input:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.marker-coord-input:focus {
+  background: rgba(0, 0, 0, 0.35);
+  box-shadow: inset 0 0 0 1px #5bfb84;
+}
+
+.marker-menu-divider {
+  width: 1px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 1px;
+}
+
+.marker-float-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  cursor: default;
+  opacity: 0.8;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.marker-float-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  opacity: 1;
+}
+
+.marker-float-btn-danger:hover {
+  background: rgba(224, 108, 108, 0.16);
 }
 
 .map-info-bar {
@@ -772,7 +1036,7 @@ defineExpose({ switchToMap, placeImageResource })
   background: #4B9B5C;
   color: #fff;
   font-size: 13px;
-  cursor: pointer;
+  cursor: default;
   transition: all 0.15s;
 }
 

@@ -128,6 +128,17 @@ export const DEFAULT_CAMERA_SETTINGS: CameraSettings = {
   limitBounds: true,
 }
 
+/**
+ * 场景标记：地图上给用户看的坐标图钉。
+ * 坐标为世界坐标（地图左上角原点、y 向下），界面显示时换算为用户坐标。
+ */
+export interface SceneMarker {
+  id: string
+  name: string
+  x: number
+  y: number
+}
+
 export interface MapData {
   name: string
   version: number
@@ -149,6 +160,8 @@ export interface MapData {
   tilePalette?: TilePaletteEntry[]
   // 相机设置（缺省视为未启用）
   camera?: CameraSettings
+  // 场景标记（地图级，不属于任何图层）
+  markers: SceneMarker[]
 }
 
 export interface TilePaletteEntry {
@@ -177,6 +190,7 @@ export const useMapStore = defineStore('map', () => {
     resources: [],
     layers: [],
     tileSets: [],
+    markers: [],
   })
 
   // 用户坐标原点 = 地图底部：地图加载 / 改宽高 / 改图块尺寸时同步
@@ -279,6 +293,8 @@ export const useMapStore = defineStore('map', () => {
   }
 
   function loadMap(data: MapData) {
+    // 兼容缺 markers 字段的数据源
+    if (!Array.isArray(data.markers)) data.markers = []
     mapData.value = data
     // 默认选中最上方的图层（数组最后一个）
     activeLayerIndex.value = data.layers.length > 0 ? data.layers.length - 1 : -1
@@ -291,6 +307,7 @@ export const useMapStore = defineStore('map', () => {
       clearImageSelection()
     }
     mapEditor.setActiveCollisionPolygonId(null)
+    mapEditor.setSelectedMarkerId(null)
     // 强制触发 canvas 重新渲染（mapData 完全替换后所有瓦片和图像都变了）
     tileRevision.value++
     imageRevision.value++
@@ -312,11 +329,13 @@ export const useMapStore = defineStore('map', () => {
       resources: [],
       layers: [],
       tileSets: [],
+      markers: [],
     }
     activeLayerIndex.value = -1
     selectedResourceIndex.value = -1
     selectedTileIndex.value = -1
     clearImageSelection()
+    mapEditor.setSelectedMarkerId(null)
     syncToolWithLayer()
     currentMapPath.value = ''
     // 强制画布重建：否则清空后 Pixi 仍保留上一张地图的渲染结果
@@ -681,6 +700,78 @@ export const useMapStore = defineStore('map', () => {
     }
   }
 
+  // ====== 场景标记 ======
+  const selectedMarker = computed<SceneMarker | null>(() => {
+    const id = mapEditor.selectedMarkerId
+    return id ? mapData.value.markers.find(m => m.id === id) ?? null : null
+  })
+
+  function createMarkerId(): string {
+    return `mk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+  }
+
+  /** 新增标记：唯一命名 标记 / 标记1 / 标记2 ...，坐标取世界像素 */
+  function addMarker(xWorld: number, yWorld: number): string {
+    const used = new Set(mapData.value.markers.map(m => m.name))
+    let name = '标记'
+    let n = 1
+    while (used.has(name)) { name = `标记${n}`; n++ }
+    const marker: SceneMarker = {
+      id: createMarkerId(),
+      name,
+      x: Math.round(xWorld),
+      y: Math.round(yWorld),
+    }
+    mapData.value.markers.push(marker)
+    mapEditor.setSelectedMarkerId(marker.id)
+    return marker.id
+  }
+
+  /** 重命名标记：空名或重名不生效，返回是否成功 */
+  function renameMarker(id: string, name: string): boolean {
+    const marker = mapData.value.markers.find(m => m.id === id)
+    const trimmed = name.trim()
+    if (!marker || !trimmed) return false
+    if (trimmed !== marker.name && mapData.value.markers.some(m => m.name === trimmed)) return false
+    marker.name = trimmed
+    return true
+  }
+
+  /** 移动标记（世界像素坐标） */
+  function updateMarkerPosition(id: string, xWorld: number, yWorld: number) {
+    const marker = mapData.value.markers.find(m => m.id === id)
+    if (!marker) return
+    marker.x = Math.round(xWorld)
+    marker.y = Math.round(yWorld)
+  }
+
+  /** 复制标记：紧邻原标记偏移一点，命名「原名副本 / 原名副本2 ...」 */
+  function duplicateMarker(id: string): string | null {
+    const src = mapData.value.markers.find(m => m.id === id)
+    if (!src) return null
+    const used = new Set(mapData.value.markers.map(m => m.name))
+    const base = `${src.name}副本`
+    let name = base
+    let n = 2
+    while (used.has(name)) { name = `${base}${n}`; n++ }
+    const marker: SceneMarker = {
+      id: createMarkerId(),
+      name,
+      x: src.x + 16,
+      y: src.y + 16,
+    }
+    mapData.value.markers.push(marker)
+    mapEditor.setSelectedMarkerId(marker.id)
+    return marker.id
+  }
+
+  function removeMarker(id: string) {
+    const idx = mapData.value.markers.findIndex(m => m.id === id)
+    if (idx < 0) return
+    mapData.value.markers.splice(idx, 1)
+    if (mapEditor.selectedMarkerId === id) mapEditor.setSelectedMarkerId(null)
+  }
+
   // ====== 图层 / 图像选中 ======
 
   function selectImage(layerId: number) {
@@ -864,6 +955,12 @@ export const useMapStore = defineStore('map', () => {
     updateMapProperty,
     updateCameraSettings,
     updateTileSize,
+    selectedMarker,
+    addMarker,
+    renameMarker,
+    updateMarkerPosition,
+    duplicateMarker,
+    removeMarker,
     setTileCollision,
     setTileCollisionType,
     selectedImageLayerId,

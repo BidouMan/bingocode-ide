@@ -172,6 +172,7 @@ export function useMapPersistence(options: MapPersistenceOptions) {
       // 空地图不带图层，进入编辑页后由编辑器自动创建默认图像图层
       layers: [],
       tileSets: [],
+      markers: [],
     }
   }
 

@@ -242,7 +242,7 @@ function setTool(tool: typeof mapEditorStore.imageTool) {
   background: transparent;
   border: none;
   border-radius: 4px;
-  cursor: pointer;
+  cursor: default;
   padding: 0;
   flex-shrink: 0;
   transition: background 0.15s;
@@ -296,7 +296,7 @@ function setTool(tool: typeof mapEditorStore.imageTool) {
   background: transparent;
   border: none;
   border-radius: 4px;
-  cursor: pointer;
+  cursor: default;
   white-space: nowrap;
   transition: background 0.15s, color 0.15s;
 }
@@ -355,7 +355,7 @@ function setTool(tool: typeof mapEditorStore.imageTool) {
   border-radius: 5px;
   color: var(--text-secondary);
   font-size: 12px;
-  cursor: pointer;
+  cursor: default;
   text-align: left;
   white-space: nowrap;
 }

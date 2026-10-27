@@ -40,7 +40,7 @@ const drawingTools: { id: MapTool; icon: string; label: string }[] = [
   background: transparent;
   border: none;
   border-radius: 4px;
-  cursor: pointer;
+  cursor: default;
   padding: 0;
   flex-shrink: 0;
   transition: background 0.15s;

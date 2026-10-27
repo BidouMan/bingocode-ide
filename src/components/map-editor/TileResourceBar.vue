@@ -492,7 +492,7 @@ async function copyResourceToMapDir(srcPath: string): Promise<string> {
   background: transparent;
   border: none;
   border-radius: 4px;
-  cursor: pointer;
+  cursor: default;
   padding: 3px;
   flex-shrink: 0;
   transition: background 0.15s;
@@ -573,7 +573,7 @@ async function copyResourceToMapDir(srcPath: string): Promise<string> {
   background: rgb(50, 53, 62);
   border: 1px solid transparent;
   border-radius: 3px;
-  cursor: grab;
+  cursor: default;
   transition: border-color 0.1s;
 }
 

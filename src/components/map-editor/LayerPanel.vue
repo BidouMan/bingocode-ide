@@ -369,7 +369,7 @@ defineExpose({ setLayerThumb })
   background: rgb(40, 43, 52);
   border: none;
   border-radius: 4px;
-  cursor: pointer;
+  cursor: default;
   padding: 2px;
   transition: background 0.15s;
 }
@@ -402,7 +402,7 @@ defineExpose({ setLayerThumb })
   height: 54px;
   padding: 0 6px;
   border-radius: 4px;
-  cursor: grab;
+  cursor: default;
   transition: background 0.12s;
   position: relative;
 }
@@ -502,7 +502,7 @@ defineExpose({ setLayerThumb })
   background: transparent;
   border: none;
   border-radius: 3px;
-  cursor: pointer;
+  cursor: default;
   font-size: 12px;
   line-height: 1;
 }

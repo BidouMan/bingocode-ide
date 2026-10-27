@@ -26,6 +26,9 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
   // 像素浮动选区是否存在 / 选区剪贴板是否有内容（工具条按钮可用性）
   const hasPixelSelection = ref(false)
   const hasPaintClipboard = ref(false)
+  // 场景标记：一次性放置模式 / 当前选中标记（选中后在其正下方显示操作胶囊）
+  const markerPlacing = ref(false)
+  const selectedMarkerId = ref<string | null>(null)
 
   function setTool(tool: MapTool) {
     currentTool.value = tool
@@ -68,6 +71,20 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
     paintMode.value = mode
   }
 
+  /** 工具栏「标记」：点一下直接进入放置状态（鼠标变为半透明标记），再点一下退出；Esc 也可取消 */
+  function toggleMarkerPlacing() {
+    markerPlacing.value = !markerPlacing.value
+    // 进入放置时收起当前标记的操作胶囊，避免与新标记混淆
+    if (markerPlacing.value) selectedMarkerId.value = null
+  }
+  function cancelMarkerPlacing() {
+    markerPlacing.value = false
+  }
+  /** 选中标记：界面上表现为图钉高亮 + 正下方弹出操作胶囊 */
+  function setSelectedMarkerId(id: string | null) {
+    selectedMarkerId.value = id
+  }
+
   return {
     showGrid,
     smartSnap,
@@ -82,8 +99,13 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
     activeCollisionPolygonId,
     hasPixelSelection,
     hasPaintClipboard,
+    markerPlacing,
+    selectedMarkerId,
     setImageTool,
     setPaintMode,
+    toggleMarkerPlacing,
+    cancelMarkerPlacing,
+    setSelectedMarkerId,
     setCollisionLayerTool,
     setActiveCollisionPolygonId,
     setTool,

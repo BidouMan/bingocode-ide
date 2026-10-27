@@ -9,6 +9,7 @@ import DrawingLayerTools from './DrawingLayerTools.vue'
 import CollisionLayerTools from './CollisionLayerTools.vue'
 import iconGrid from '../../assets/icons/显示网格.svg'
 import iconSnapGrid from '../../assets/icons/吸附锚点.svg'
+import iconMarker from '../../assets/icons/标记.svg'
 
 const props = defineProps<{
   disabled?: boolean
@@ -137,6 +138,16 @@ function onToolAreaWheel(e: WheelEvent) {
       <DrawingLayerTools v-else :disabled="disabled" />
     </div>
 
+    <!-- 标记：紧跟在工具区（自定义形状）右侧 -->
+    <button
+      class="toolbar-btn"
+      :class="{ 'toolbar-btn-active': mapEditorStore.markerPlacing }"
+      v-tooltip="mapEditorStore.markerPlacing ? '取消放置标记' : '标记'"
+      @click="mapEditorStore.toggleMarkerPlacing()"
+    >
+      <img :src="iconMarker" class="toolbar-icon" />
+    </button>
+
     <div class="toolbar-separator" />
 
     <button
@@ -216,7 +227,7 @@ function onToolAreaWheel(e: WheelEvent) {
   background: transparent;
   border: none;
   border-radius: 4px;
-  cursor: pointer;
+  cursor: default;
   padding: 0;
   flex-shrink: 0;
   transition: background 0.15s;
@@ -337,7 +348,7 @@ function onToolAreaWheel(e: WheelEvent) {
   gap: 6px;
   flex-shrink: 0;
   margin-left: 8px;
-  cursor: pointer;
+  cursor: default;
   user-select: none;
 }
 
@@ -345,7 +356,7 @@ function onToolAreaWheel(e: WheelEvent) {
   width: 15px;
   height: 15px;
   accent-color: #528bff;
-  cursor: pointer;
+  cursor: default;
   margin: 0;
 }
 

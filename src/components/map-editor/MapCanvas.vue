@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, type CSSProperties } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
-import { useMapStore, type MapResource, type ImageData as MapImageData } from '../../stores/map'
+import { useMapStore, type MapResource, type ImageData as MapImageData, type SceneMarker } from '../../stores/map'
 import { useMapEditorStore } from '../../stores/mapEditor'
 import { useProjectStore } from '../../stores/project'
 import { useEditorStore } from '../../stores/editor'
@@ -17,6 +17,8 @@ import { usePaperScope } from '../paint-editor/composables/usePaperScope'
 import { createBitmapPen } from '../paint-editor/utils/bitmapPen'
 import { ensurePaintFont } from '../paint-editor/utils/paintFont'
 import { collectSnapLines, snapRectOffset, snapThreshold } from '../../utils/smartSnap'
+import { toUserX, toUserY } from '../../utils/coords'
+import iconMarkerRaw from '../../assets/icons/标记.svg?raw'
 import {
   createMapVectorViewport,
   computeMapVectorMatrix,
@@ -30,6 +32,8 @@ const emit = defineEmits<{
   'cursor-move': [x: number, y: number]
   'cursor-leave': []
   'layer-thumb-updated': [layerId: number, dataUrl: string]
+  /** 双击标记：请编辑器把焦点交给标记浮条的名称输入 */
+  'marker-activate': [id: string]
 }>()
 
 const cursorGridPos = ref<{ x: number; y: number } | null>(null)
@@ -2803,8 +2807,23 @@ function onVectorPointerDownCapture(e: PointerEvent) {
     e.stopImmediatePropagation()
     vectorPanning = true
     viewport.startPan(e.clientX, e.clientY)
-    viewport.setCursor('grabbing')
+    viewport.setCursor('default')
+    return
   }
+  // 矢量画布盖在 Pixi 之上：标记放置 / 取消选中也要在这里接管
+  if (e.button === 0 && mapEditorStore.markerPlacing) {
+    e.preventDefault()
+    e.stopImmediatePropagation()
+    const world = viewport.screenToWorld(e)
+    if (world) {
+      const id = mapStore.addMarker(world.x, world.y)
+      mapEditorStore.cancelMarkerPlacing()
+      markerGhost.value = null
+      emit('marker-activate', id)
+    }
+    return
+  }
+  if (e.button === 0) mapEditorStore.setSelectedMarkerId(null)
 }
 
 function onVectorPointerMoveCapture(e: PointerEvent) {
@@ -2812,6 +2831,7 @@ function onVectorPointerMoveCapture(e: PointerEvent) {
   // 矢量画布盖在 Pixi 画布之上，这里也要上报坐标，否则矢量绘制时信息栏坐标不动
   const cursorWorld = viewport.screenToWorld(e)
   if (cursorWorld) emit('cursor-move', cursorWorld.x, cursorWorld.y)
+  if (mapEditorStore.markerPlacing) markerGhost.value = cursorWorld
   if (vectorPanning) {
     e.stopImmediatePropagation()
     viewport.handlePanMove(e.clientX, e.clientY)
@@ -2889,10 +2909,26 @@ function layerDownActive() {
 function onPointerDown(e: PointerEvent) {
   if (e.button === 1 || (e.button === 0 && viewport.isSpacePressed()) || (e.button === 0 && e.altKey)) {
     viewport.startPan(e.clientX, e.clientY)
-    viewport.setCursor('grabbing')
+    viewport.setCursor('default')
     e.preventDefault()
     return
   }
+
+  // 标记放置：左键点一下即落点并退出放置（空格/Alt 仍优先平移）
+  if (mapEditorStore.markerPlacing && e.button === 0) {
+    const worldPos = viewport.screenToWorld(e)
+    if (worldPos) {
+      const id = mapStore.addMarker(worldPos.x, worldPos.y)
+      mapEditorStore.cancelMarkerPlacing()
+      markerGhost.value = null
+      // 落点后直接聚焦名称输入，顺手就能起名字
+      emit('marker-activate', id)
+    }
+    return
+  }
+
+  // 画布空白处左键：取消标记选中
+  if (e.button === 0) mapEditorStore.setSelectedMarkerId(null)
 
   // 位图取色：点击画布读取像素色并结束会话
   if (mapStore.activeMode === 'image' && paintStore.eyedropperActive) {
@@ -2991,6 +3027,7 @@ function onPointerMove(e: PointerEvent) {
   // 所有模式都实时上报鼠标世界像素坐标（信息栏显示用）；绘制/框选分支提前 return 也不影响
   const cursorWorld = viewport.screenToWorld(e)
   if (cursorWorld) emit('cursor-move', cursorWorld.x, cursorWorld.y)
+  if (mapEditorStore.markerPlacing) markerGhost.value = cursorWorld
   // 碰撞层：未按键时确保平移状态已结束，不会出现"鼠标一动整块画布跟着走"
   if (mapStore.activeMode === 'collision' && e.buttons === 0) viewport.endPan()
   if (viewport.handlePanMove(e.clientX, e.clientY)) {
@@ -3109,6 +3146,7 @@ function onPointerLeave(e: PointerEvent) {
   viewport.endPan()
   painter.resetPaintKey()
   cursorGridPos.value = null
+  markerGhost.value = null
   // 鼠标离开画布时清空信息栏坐标，避免残留上一次的位置
   emit('cursor-leave')
   painter.hidePreview()
@@ -3197,6 +3235,25 @@ function onDrop(e: DragEvent) {
 }
 
 function onKeyDown(e: KeyboardEvent) {
+  const tag = (e.target as HTMLElement).tagName
+  const typing = tag === 'INPUT' || tag === 'TEXTAREA'
+  // 标记：Esc 退出放置 / 取消选中；Delete 删除选中
+  if (e.key === 'Escape') {
+    if (mapEditorStore.markerPlacing) {
+      mapEditorStore.cancelMarkerPlacing()
+      markerGhost.value = null
+      return
+    }
+    if (!typing && mapEditorStore.selectedMarkerId) {
+      mapEditorStore.setSelectedMarkerId(null)
+      return
+    }
+  }
+  if (!typing && (e.key === 'Delete' || e.key === 'Backspace') && mapEditorStore.selectedMarkerId) {
+    mapStore.removeMarker(mapEditorStore.selectedMarkerId)
+    e.preventDefault()
+    return
+  }
   if (e.code === 'Space' && !e.repeat) {
     viewport.onSpaceDown()
     return
@@ -3804,6 +3861,7 @@ onBeforeUnmount(() => {
   resizeObserver = null
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
+  window.removeEventListener('mousemove', onMarkerDragMove)
   document.removeEventListener('dragover', onDragOver)
   document.removeEventListener('drop', onDrop)
   if (app?.canvas) {
@@ -3957,6 +4015,98 @@ async function getThumbnailDataUrl(): Promise<string | null> {
   }
 }
 
+// ─── 场景标记：DOM 图钉叠加层（屏幕坐标，图标不随缩放变大） ───
+
+/** 标记.svg 内联为 DOM，fill 换成 currentColor，颜色由 CSS 控制 */
+const markerIconSvg = computed(() =>
+  iconMarkerRaw
+    .replace(/fill="#ffffff"/gi, 'fill="currentColor"')
+    .replace(/fill:white/gi, 'fill="currentColor"'),
+)
+
+/** 图钉屏幕位置：视口变化后靠 viewVersion 触发重算 */
+function markerScreenStyle(m: { x: number; y: number }) {
+  void viewport.viewVersion.value
+  if (!app) return { display: 'none' }
+  const scale = viewport.currentScale.value
+  return {
+    left: `${app.stage.x + m.x * scale}px`,
+    top: `${app.stage.y + m.y * scale}px`,
+  }
+}
+
+/**
+ * 标记的屏幕坐标（相对画布左上角），供编辑器把操作胶囊贴到图钉正下方。
+ * 内部读取 viewVersion / 标记坐标，父组件 computed 调用后会自动随平移缩放和拖动更新。
+ */
+function markerScreenPos(id: string | null): { x: number; y: number } | null {
+  void viewport.viewVersion.value
+  if (!id || !app) return null
+  const m = mapStore.mapData.markers.find(item => item.id === id)
+  if (!m) return null
+  const scale = viewport.currentScale.value
+  return { x: app.stage.x + m.x * scale, y: app.stage.y + m.y * scale }
+}
+
+/** 图钉下方坐标文本：(用户坐标) */
+function markerCoordText(p: { x: number; y: number } | null) {
+  if (!p) return ''
+  return `(${Math.round(toUserX(p.x))},${Math.round(toUserY(p.y))})`
+}
+
+let draggingMarkerId: string | null = null
+
+function onMarkerDragMove(e: MouseEvent) {
+  if (!draggingMarkerId) return
+  const world = viewport.clientToWorld(e.clientX, e.clientY)
+  if (world) mapStore.updateMarkerPosition(draggingMarkerId, world.x, world.y)
+}
+
+function onMarkerDragEnd() {
+  draggingMarkerId = null
+  window.removeEventListener('mousemove', onMarkerDragMove)
+}
+
+/** 点选 / 拖动标记（仅左键；拖动时全局监听，移出画布也不中断） */
+function onMarkerMouseDown(m: SceneMarker, e: MouseEvent) {
+  // 左右键都阻断画布事件：右键不再触发平移/放置
+  e.stopPropagation()
+  if (e.button !== 0) return
+  e.preventDefault()
+  // 选已有标记时退出放置，避免误加新点
+  if (mapEditorStore.markerPlacing) {
+    mapEditorStore.cancelMarkerPlacing()
+    markerGhost.value = null
+  }
+  mapEditorStore.setSelectedMarkerId(m.id)
+  draggingMarkerId = m.id
+  window.addEventListener('mousemove', onMarkerDragMove)
+  window.addEventListener('mouseup', onMarkerDragEnd, { once: true })
+}
+
+/** 双击标记：选中并把焦点交给浮条的名称输入。右键只负责选中，操作统一在浮条里 */
+function onMarkerActivate(m: SceneMarker) {
+  mapEditorStore.setSelectedMarkerId(m.id)
+  emit('marker-activate', m.id)
+}
+
+// 放置时的幽灵图钉：跟随鼠标显示落点坐标
+const markerGhost = ref<{ x: number; y: number } | null>(null)
+
+// 进入放置时鼠标可能没再动过：直接用上一次记录的光标位置显示幽灵，避免光标“消失”
+watch(
+  () => mapEditorStore.markerPlacing,
+  (placing) => {
+    if (!placing) {
+      markerGhost.value = null
+      return
+    }
+    const cx = mapEditorStore.cursorX
+    const cy = mapEditorStore.cursorY
+    if (cx !== null && cy !== null) markerGhost.value = { x: cx, y: cy }
+  },
+)
+
 defineExpose({
   redraw,
   cursorGridPos,
@@ -3983,13 +4133,19 @@ defineExpose({
   zoomIn,
   zoomOut,
   resetZoom,
+  markerScreenPos,
   /** 地图保存/切换前：烘焙矢量内容但保留“矢量模式”选择，随后切图会自动重新进入 */
   exitVectorPaint: () => exitVectorMode(false),
 })
 </script>
 
 <template>
-  <div ref="canvasRef" class="map-canvas" @mousedown="onMouseDown">
+  <div
+    ref="canvasRef"
+    class="map-canvas"
+    :class="{ 'marker-placing': mapEditorStore.markerPlacing }"
+    @mousedown="onMouseDown"
+  >
     <!-- 矢量绘制画布：铺满地图画布、无 CSS transform，缩放/旋转由 paper view.matrix 处理 -->
     <canvas
       v-if="vectorActive"
@@ -4175,6 +4331,35 @@ defineExpose({
     ></div>
     <!-- 碰撞叠加层：屏幕坐标 canvas，置于矢量画布之上，避免被图像层遮挡 -->
     <canvas ref="collisionOverlayRef" class="map-collision-overlay"></canvas>
+    <!-- 场景标记：DOM 图钉叠加层（图钉尖对准坐标，标签显示「标记名(用户坐标)」） -->
+    <div class="map-marker-layer">
+      <!-- 放置中的幽灵图钉：半透明，跟随鼠标并实时显示落点坐标 -->
+      <div
+        v-if="mapEditorStore.markerPlacing && markerGhost"
+        class="map-marker is-ghost"
+        :style="markerScreenStyle(markerGhost)"
+      >
+        <div class="map-marker-icon" v-html="markerIconSvg"></div>
+        <span class="map-marker-label">
+          <b>新标记</b><span>{{ markerCoordText(markerGhost) }}</span>
+        </span>
+      </div>
+      <div
+        v-for="m in mapStore.mapData.markers"
+        :key="m.id"
+        class="map-marker"
+        :class="{ 'is-selected': m.id === mapEditorStore.selectedMarkerId }"
+        :style="markerScreenStyle(m)"
+        @mousedown="onMarkerMouseDown(m, $event)"
+        @dblclick.stop="onMarkerActivate(m)"
+        @contextmenu.prevent.stop="mapEditorStore.setSelectedMarkerId(m.id)"
+      >
+        <div class="map-marker-icon" v-html="markerIconSvg"></div>
+        <span class="map-marker-label">
+          <b>{{ m.name }}</b><span>{{ markerCoordText(m) }}</span>
+        </span>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -4186,6 +4371,15 @@ defineExpose({
   background: rgb(30, 30, 30);
   overflow: hidden;
   outline: none;
+}
+
+/* 放置标记：隐藏系统光标，由跟随鼠标的半透明幽灵图钉充当指针（覆盖各工具自设光标） */
+.map-canvas.marker-placing {
+  cursor: none;
+}
+
+.map-canvas.marker-placing > canvas {
+  cursor: none !important;
 }
 
 .map-vector-canvas {
@@ -4277,5 +4471,114 @@ defineExpose({
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
   pointer-events: none;
   z-index: 12;
+}
+
+/* 场景标记叠加层：铺满画布、默认不拦截事件，只有图钉可点 */
+.map-marker-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 13;
+}
+
+.map-marker {
+  position: absolute;
+  width: 0;
+  height: 0;
+  --mk-ink: #e3e7ed;   /* 未选中：灰白 */
+  --mk-red: #ff5252;   /* 选中：红 */
+}
+
+/* 图钉：钉尖位于 (left, top)，所以图标向上偏移半个宽/整高 */
+.map-marker-icon {
+  position: absolute;
+  left: -13px;
+  top: -26px;
+  width: 26px;
+  height: 26px;
+  color: var(--mk-ink);
+  pointer-events: auto;
+  cursor: default;
+  transition: color 0.16s ease, transform 0.16s ease;
+}
+
+.map-marker-icon :deep(svg) {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+
+/* 唯一的"阴影"：1px 深色描边（svg 是 1024 视图框，38 用户单位 ≈ 26px 下的 1px），
+   浅色地图上也看得清；不用发光/模糊投影，避免显脏 */
+.map-marker-icon :deep(path) {
+  stroke: rgba(0, 0, 0, 0.62);
+  stroke-width: 38;
+  stroke-linejoin: round;
+  paint-order: stroke fill;
+}
+
+/* 标签在图钉下方：标记名(用户坐标) */
+.map-marker-label {
+  position: absolute;
+  left: 0;
+  top: 5px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(14, 16, 20, 0.86);
+  white-space: nowrap;
+  pointer-events: auto;
+  cursor: default;
+  user-select: none;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.map-marker-label b {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.15;
+  color: #e8ebf0;
+  transition: color 0.16s ease;
+}
+
+.map-marker-label span {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.15;
+  color: #98a0aa;
+  transition: color 0.16s ease;
+}
+
+/* 选中态：灰白 → 红（只换颜色，不发光），轻微放大，标签染红 */
+.map-marker.is-selected .map-marker-icon {
+  color: var(--mk-red);
+  transform: scale(1.07);
+  transform-origin: 50% 88%;
+}
+
+.map-marker.is-selected .map-marker-label {
+  background: rgba(255, 82, 82, 0.14);
+  border-color: rgba(255, 82, 82, 0.45);
+}
+
+.map-marker.is-selected .map-marker-label b { color: #ffd3d3; }
+.map-marker.is-selected .map-marker-label span { color: rgba(255, 188, 188, 0.72); }
+
+/* 放置预览：半透明、不拦截事件 */
+.map-marker.is-ghost {
+  opacity: 0.55;
+}
+
+.map-marker.is-ghost .map-marker-icon {
+  pointer-events: none;
+}
+
+.map-marker.is-ghost .map-marker-label {
+  pointer-events: none;
 }
 </style>
