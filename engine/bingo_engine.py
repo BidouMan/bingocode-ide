@@ -354,6 +354,15 @@ def _rect_corners(rect):
     return [(rect[0], rect[1]), (rect[2], rect[1]), (rect[2], rect[3]), (rect[0], rect[3])]
 
 
+def _sign(value):
+    """位移方向：正数返回 1，负数返回 -1，零返回 0（碰撞按方向解算用）"""
+    if value > 0:
+        return 1
+    if value < 0:
+        return -1
+    return 0
+
+
 def _aabb_polygon_mtv(rect, polygon):
     """SAT：返回把矩形推出多边形的最小平移向量 (mtv_x, mtv_y)；不相交返回 None"""
     axes = [(1.0, 0.0), (0.0, 1.0)]
@@ -570,6 +579,8 @@ class Sprite:
         self._on_ground = False
         self._vy = 0
         self._prev_bottom_y = 0
+        # 本步移动前的内容盒上沿：与 _prev_bottom_y 一起判断「从上方落地 / 从下方撞头」
+        self._prev_top_y = 0
         self._jump_cut = False
         # smart_jump：active=正在由 smart_jump 控制的跳跃；called=本帧是否被调用过
         # 目标写法是 if key_down("w"): smart_jump()，按键松开后就不会再被调用，
@@ -747,6 +758,8 @@ class Sprite:
                 mtv = _aabb_polygon_mtv(sprite_rect, part)
                 if not mtv:
                     continue
+                if not self._mtv_axis_dominant(mtv, axis):
+                    continue
                 part_correction = mtv[0] if axis == "x" else mtv[1]
                 if abs(part_correction) < 1e-6:
                     continue
@@ -812,6 +825,8 @@ class Sprite:
                 mtv = _aabb_polygon_mtv(sprite_rect, poly)
                 if not mtv:
                     continue
+                if not self._mtv_axis_dominant(mtv, axis):
+                    continue
                 correction = mtv[0] if axis == "x" else mtv[1]
                 if abs(correction) < 1e-6:
                     continue
@@ -820,10 +835,43 @@ class Sprite:
 
         return best
 
-    def _resolve_collision(self, axis):
+    # 多边形/图像碰撞在 y 轴上可接受的推挤距离上限（像素）。
+    # 超过这个距离说明角色是嵌进了墙体侧面，不是正常落地/撞头，应交给 x 轴处理；
+    # 斜坡每帧的抬升只有几像素，远小于这个值，所以上坡不受影响。
+    _MAX_CONTACT_SNAP = 12.0
+    # 站在地面时能自动抬脚走上去的最大台阶高度（像素）
+    _MAX_STEP_UP = 8.0
+    # 多边形 MTV 的「主导轴」系数：只有 MTV 在该轴上的分量不小于另一轴 0.5 倍时，
+    # 才认为这个轴是该面的真实朝向（0.5 ≈ 允许 63° 以内的斜坡）。
+    # 手画碰撞层的「竖直墙」常常歪几度，三角形边缘的 MTV 是斜的，
+    # 硬取它的 y 分量会把贴墙下落的角色一帧帧往上顶（表现为挂在墙上慢慢下滑）。
+    _MTV_DOMINANT_RATIO = 0.5
+
+    def _mtv_axis_dominant(self, mtv, axis):
+        """MTV 是否主要沿指定轴（x 轴看 x 分量、y 轴看 y 分量）"""
+        main = abs(mtv[0]) if axis == "x" else abs(mtv[1])
+        other = abs(mtv[1]) if axis == "x" else abs(mtv[0])
+        return main >= other * self._MTV_DOMINANT_RATIO
+
+    def _accept_axis_correction(self, correction, direction):
+        """是否采纳本轴的推挤修正：只接受与运动方向相反的推挤
+
+        direction = 0 表示本步没有主动移动，保留旧的「最近边推出」兜底行为
+        """
+        if direction == 0 or correction is None:
+            return True
+        return (correction > 0) != (direction > 0)
+
+    def _resolve_collision(self, axis, direction=0):
         """
         处理碰撞检测和位移修正
         axis: 'x' 或 'y'，指定要处理的轴
+        direction: 本步在该轴上的移动方向（世界坐标正负）；0 = 本步没有主动移动
+
+        轴向解算只接受「与运动方向相反」的推挤（Godot move_and_slide 的思路）：
+        往右走只处理迎面撞上来的墙，往上升只处理头顶，往下降只处理脚下。
+        同方向的推挤说明角色本来就已经嵌在地形里，硬推开会把人瞬移到墙的另一侧，
+        或者把贴着墙面上升的角色「吸」到墙顶。
         """
         global _CURRENT_MAP, _MAP_MODEL
 
@@ -847,14 +895,26 @@ class Sprite:
             if layer.get("type") == "collision":
                 correction = self._collision_layer_correction(layer, axis)
                 if correction is not None:
+                    # y 轴只处理迎面（落地/撞头），且抬升距离不能大得离谱
+                    if axis == "y" and (
+                        not self._accept_axis_correction(correction, direction)
+                        or abs(correction) > self._MAX_CONTACT_SNAP
+                    ):
+                        continue
                     margin = 0.05 if correction > 0 else -0.05
                     if axis == "x":
                         self._x += correction + margin
                     else:
                         self._y += correction + margin
-                        # 向上推出 = 落到平台/地面
+                        # 向上推出 = 落到平台/地面；向下推出 = 撞到天花板。
+                        # direction == 0（本步没有上下移动，例如 move() 的水平移动）
+                        # 只做位置修正，不能判着地、更不能清零 vy，
+                        # 否则贴墙下落时每帧被顶一下，就会变成「挂在墙上慢慢下滑」。
                         if correction < 0:
-                            self._on_ground = True
+                            if direction > 0:
+                                self._on_ground = True
+                                self._vy = 0
+                        elif direction < 0:
                             self._vy = 0
                     return
                 continue
@@ -864,14 +924,26 @@ class Sprite:
             if layer.get("type") == "image" and "images" in layer:
                 correction = self._image_collision_correction(layer, axis)
                 if correction is not None:
+                    # y 轴只处理迎面（落地/撞头），且抬升距离不能大得离谱
+                    if axis == "y" and (
+                        not self._accept_axis_correction(correction, direction)
+                        or abs(correction) > self._MAX_CONTACT_SNAP
+                    ):
+                        continue
                     margin = 0.05 if correction > 0 else -0.05
                     if axis == "x":
                         self._x += correction + margin
                     else:
                         self._y += correction + margin
-                        # 向上推出 = 落到平台/地面
+                        # 向上推出 = 落到平台/地面；向下推出 = 撞到天花板。
+                        # direction == 0（本步没有上下移动，例如 move() 的水平移动）
+                        # 只做位置修正，不能判着地、更不能清零 vy，
+                        # 否则贴墙下落时每帧被顶一下，就会变成「挂在墙上慢慢下滑」。
                         if correction < 0:
-                            self._on_ground = True
+                            if direction > 0:
+                                self._on_ground = True
+                                self._vy = 0
+                        elif direction < 0:
                             self._vy = 0
                     return
                 continue
@@ -879,13 +951,14 @@ class Sprite:
             tiles = layer.get("tiles", {})
 
             # 计算精灵覆盖的图块范围
-            # 进一步收缩 X 轴探测盒，彻底不给它碰到地板和天花板的机会
+            # X 轴探测盒上下各缩进 1 像素：脚正好贴地/头正好贴天花板时不算横向碰撞，
+            # 同时避免缩进过大导致「只压到墙边一条」时 x 轴看不见墙
             if axis == "x":
                 check_rect = [
                     sprite_rect[0],
-                    sprite_rect[1] + 8,  # 缩进加大到8像素
+                    sprite_rect[1] + 1,
                     sprite_rect[2],
-                    sprite_rect[3] - 8,  # 缩进加大到8像素
+                    sprite_rect[3] - 1,
                 ]
                 min_tile_x = math.floor(check_rect[0] / tile_size)
                 max_tile_x = math.floor(check_rect[2] / tile_size)
@@ -980,30 +1053,56 @@ class Sprite:
                                             continue
 
                                         if axis == "x":
+                                            # 台阶自动上台：站在地面时，抬升不超过 _MAX_STEP_UP 的台阶直接踩上去
+                                            step_up = sprite_rect[3] - tile_top
+                                            if self._on_ground and 0 < step_up <= self._MAX_STEP_UP:
+                                                self._y = tile_top - (sprite_rect[3] - self._y) - 0.05
+                                                # 抬脚后必须刷新碰撞盒，否则一排相邻台阶会被连续抬多次
+                                                sprite_rect = self._get_hitbox_rect() or sprite_rect
+                                                continue
+
                                             dist_to_right = abs(sprite_rect[0] - tile_right)
                                             dist_to_left = abs(sprite_rect[2] - tile_left)
 
                                             if dist_to_right < dist_to_left:
-                                                center_to_left = self._x - sprite_rect[0]
-                                                self._x = tile_right + center_to_left + 0.05
+                                                correction = tile_right - sprite_rect[0] + 0.05
                                             else:
-                                                center_to_right = sprite_rect[2] - self._x
-                                                self._x = tile_left - center_to_right - 0.05
+                                                correction = tile_left - sprite_rect[2] - 0.05
+                                            # 只接受与运动方向相反的推挤，避免嵌在墙里被弹到另一侧
+                                            if not self._accept_axis_correction(correction, direction):
+                                                continue
+                                            self._x += correction
                                             return
 
                                         elif axis == "y":
                                             rect = self._get_hitbox_rect()
                                             if not rect:
                                                 return
-                                            # 按穿透深度选择最近的边缘推出（支持任意深度穿透）
-                                            overlap_up = tile_bottom - rect[1]
-                                            overlap_down = rect[3] - tile_top
-                                            if overlap_up < overlap_down:
-                                                self._y = tile_bottom + (self._y - rect[1]) + 0.05
-                                            else:
+
+                                            if direction > 0:
+                                                # 下落：脚原本在顶面之上才算落地。
+                                                # 从侧面蹭到墙/墙顶时这里直接跳过，交给 x 轴推出，
+                                                # 避免把正在上升的角色「吸」到墙顶并误判成着地
+                                                if self._prev_bottom_y > tile_top + 0.5:
+                                                    continue
                                                 self._y = tile_top - (rect[3] - self._y) - 0.05
                                                 self._on_ground = True
                                                 self._vy = 0
+                                            elif direction < 0:
+                                                # 上升：头原本在底面之下才算撞天花板。
+                                                # 从侧面蹭到墙时跳过，跳跃不会被墙角打断
+                                                if self._prev_top_y < tile_bottom - 0.5:
+                                                    continue
+                                                self._y = tile_bottom + (self._y - rect[1]) + 0.05
+                                                self._vy = 0
+                                            else:
+                                                # 本步没有上下移动（兜底）：按最近边推出，但不判定落地
+                                                overlap_up = tile_bottom - rect[1]
+                                                overlap_down = rect[3] - tile_top
+                                                if overlap_up < overlap_down:
+                                                    self._y = tile_bottom + (self._y - rect[1]) + 0.05
+                                                else:
+                                                    self._y = tile_top - (rect[3] - self._y) - 0.05
                                             return
 
         # 地图边界碰撞检测
@@ -1106,16 +1205,19 @@ class Sprite:
         hitbox = self._get_hitbox_rect()
         if hitbox:
             self._prev_bottom_y = hitbox[3]
+            self._prev_top_y = hitbox[1]
         self._x = x
         self._y = y
+        # 传送没有「运动方向」，按兜底解算（最近边推出）
         self._resolve_collision("x")
         self._resolve_collision("y")
         self._update_transform()
 
     def set_x(self, x):
         """设置 x 坐标（用户坐标：正数向右）"""
+        old_x = self._x
         self._x = to_world_x(x)
-        self._resolve_collision("x")
+        self._resolve_collision("x", _sign(self._x - old_x))
         self._update_transform()
 
     def set_y(self, y):
@@ -1123,14 +1225,17 @@ class Sprite:
         hitbox = self._get_hitbox_rect()
         if hitbox:
             self._prev_bottom_y = hitbox[3]
+            self._prev_top_y = hitbox[1]
+        old_y = self._y
         self._y = to_world_y(y)
-        self._resolve_collision("y")
+        self._resolve_collision("y", _sign(self._y - old_y))
         self._update_transform()
 
     def add_x(self, delta_x):
         """将 x 坐标增加（或减少）一定数值（用户坐标：正数向右）"""
-        self._x += to_world_dx(delta_x)
-        self._resolve_collision("x")
+        dx = to_world_dx(delta_x)
+        self._x += dx
+        self._resolve_collision("x", _sign(dx))
         self._update_transform()
 
     def add_y(self, delta_y):
@@ -1138,28 +1243,24 @@ class Sprite:
         hitbox = self._get_hitbox_rect()
         if hitbox:
             self._prev_bottom_y = hitbox[3]
-        self._y += to_world_dy(delta_y)
-        self._resolve_collision("y")
+            self._prev_top_y = hitbox[1]
+        dy = to_world_dy(delta_y)
+        self._y += dy
+        self._resolve_collision("y", _sign(dy))
         self._update_transform()
 
     def _handle_step_move(self, dx, dy):
         """处理单步移动和碰撞检测"""
-        was_on_floor = self._on_ground
-        old_x = self._x
-        old_y = self._y
-
         hitbox = self._get_hitbox_rect()
         if hitbox:
             self._prev_bottom_y = hitbox[3]
+            self._prev_top_y = hitbox[1]
 
         self._x += dx
-        self._resolve_collision("x")
-
-        if was_on_floor:
-            self._on_ground = True
+        self._resolve_collision("x", _sign(dx))
 
         self._y += dy
-        self._resolve_collision("y")
+        self._resolve_collision("y", _sign(dy))
 
     def jump(self, power=10):
         """角色跳跃
@@ -3243,6 +3344,7 @@ def _handle_physics_collision():
         hitbox = sprite._get_hitbox_rect()
         if hitbox:
             sprite._prev_bottom_y = hitbox[3]
+            sprite._prev_top_y = hitbox[1]
 
         if _CURRENT_MAP.get("gravity", False) and sprite._gravity:
             if sprite._vy < 0:
@@ -3258,7 +3360,7 @@ def _handle_physics_collision():
 
         x_before = sprite._x
         sprite._y += sprite._vy
-        sprite._resolve_collision("y")
+        sprite._resolve_collision("y", _sign(sprite._vy))
         sprite._resolve_collision("x")
         # 禁止下滑：本步学生代码与自动移动都没动过 x 时，
         # 落地状态下撤销重力+碰撞推挤带来的水平漂移（即 Godot floor_stop_on_slope 语义）
