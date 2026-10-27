@@ -87,6 +87,7 @@ const NAV_STRUCTURE: NavItem[] = [
     path: 'tutorials/platformer.md',
     children: [
       { title: '平台跳跃游戏', path: 'tutorials/platformer.md' },
+      { title: '跳跃手感优化', path: 'tutorials/jump-feel.md' },
       { title: '射击游戏', path: 'tutorials/shooting.md' },
       { title: '益智游戏', path: 'tutorials/puzzle.md' },
     ],
@@ -105,6 +106,7 @@ const NAV_STRUCTURE: NavItem[] = [
       { title: '声音', path: 'api/sound.md' },
       { title: '地图', path: 'api/map.md' },
       { title: '工具函数', path: 'api/tools.md' },
+      { title: '功能总览', path: 'api/overview.md' },
     ],
   },
   {

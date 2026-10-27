@@ -7,7 +7,7 @@
       <a class="home-btn primary" href="getting-started/first-game.md">从第一个游戏开始</a>
       <a class="home-btn ghost" href="api/sprite.md">浏览 API 参考</a>
     </div>
-    <p class="home-meta">v{{VERSION}} · 23 篇文档 · 离线可读，可部署到局域网</p>
+    <p class="home-meta">v{{VERSION}} · 25 篇文档 · 离线可读，可部署到局域网</p>
   </div>
 
   <figure class="home-app">
@@ -41,12 +41,12 @@
       </span>
       <span class="home-card-desc">角色、地图、资源面板，把素材变成能用的游戏内容。</span>
     </a>
-    <a class="home-card" href="api/sprite.md">
+    <a class="home-card" href="api/overview.md">
       <span class="home-card-head">
-        <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6.5 4.5-4 4.5 4 4.5M11.5 4.5l4 4.5-4 4.5"/></svg>
-        <span class="home-card-title">API 参考</span>
+        <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h12M3 9h12M3 14h12"/><path d="M5.5 4v0M5.5 9v0"/></svg>
+        <span class="home-card-title">功能总览</span>
       </span>
-      <span class="home-card-desc">按分类查函数：签名、参数、返回值、注意事项与示例。</span>
+      <span class="home-card-desc">一张表看完引擎已实现的能力，忘了某个功能叫什么就来这里。</span>
     </a>
     <a class="home-card" href="tutorials/platformer.md">
       <span class="home-card-head">
@@ -60,7 +60,7 @@
 
 <section class="home-section">
   <h2>API 参考</h2>
-  <p class="home-section-desc">10 个分类，覆盖引擎提供的全部函数。也可以直接在左上角搜索函数名。</p>
+  <p class="home-section-desc">10 个分类，覆盖引擎提供的全部函数。想先扫一遍全部功能，打开 <a href="api/overview.md">功能总览</a>；也可以直接在左上角搜索函数名。</p>
 
   <div class="home-api">
     <a href="api/sprite.md"><span class="home-api-name">精灵 Sprite</span><span class="home-api-desc">创建、坐标、外观、分组</span></a>
