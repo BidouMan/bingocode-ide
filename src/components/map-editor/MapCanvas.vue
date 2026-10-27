@@ -4554,20 +4554,12 @@ defineExpose({
   transition: color 0.16s ease;
 }
 
-/* 选中态：灰白 → 红（只换颜色，不发光），轻微放大，标签染红 */
+/* 选中态：只让图标变红（标签始终用深色底，保证任何地图上都看得清字），轻微放大 */
 .map-marker.is-selected .map-marker-icon {
   color: var(--mk-red);
   transform: scale(1.07);
   transform-origin: 50% 88%;
 }
-
-.map-marker.is-selected .map-marker-label {
-  background: rgba(255, 82, 82, 0.14);
-  border-color: rgba(255, 82, 82, 0.45);
-}
-
-.map-marker.is-selected .map-marker-label b { color: #ffd3d3; }
-.map-marker.is-selected .map-marker-label span { color: rgba(255, 188, 188, 0.72); }
 
 /* 放置预览：半透明、不拦截事件 */
 .map-marker.is-ghost {
