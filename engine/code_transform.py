@@ -20,11 +20,78 @@ def _make_yield() -> ast.Expr:
     return ast.Expr(value=ast.Yield(value=ast.Constant(value=None)))
 
 
-def _insert_loop_yields(node: ast.AST):
+# 循环里出现这些「增量 / 按时间」动作时，学生想看到过程，循环才逐帧让出：
+# 增量移动、逐步显示（say）、按时间播放动画（play）、等待
+_STEP_CALLS = {
+    "move", "add_x", "add_y", "add_scale", "edge_bounce",
+    "say", "play", "wait", "time_passed",
+}
+# 增量赋值（s.x += 5）同上；绝对赋值（s.x = 30 / goto）算「一次性摆好位置」，
+# 批量创建角色后摆位不应该被拖成逐帧出现
+_STEP_AUG_ATTRS = {"x", "y", "pos", "angle", "scale"}
+
+
+def _collect_functions(node: ast.AST) -> dict:
+    """收集作用域内的函数定义（含嵌套），供穿透分析用户自定义函数"""
+    funcs = {}
+    for sub in ast.walk(node):
+        if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            funcs[sub.name] = sub
+    return funcs
+
+
+def _call_name(node: ast.Call) -> str:
+    """取调用名：s.move(...) -> move；move(...) -> move"""
+    func = node.func
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    if isinstance(func, ast.Name):
+        return func.id
+    return ""
+
+
+def _has_step_op(stmts, funcs: dict, seen=None) -> bool:
+    """判断一段语句里有没有「必须逐帧才看得见」的操作。
+
+    规则对齐学生写法：增量动作（move / add_x / s.x += 5 / say / play）逐帧，
+    绝对动作（Sprite() 创建、s.x = 30、goto、delete）同一帧直接生效。
+    嵌套循环体内的动作由嵌套循环自己让出帧，这里不重复计算；
+    调用用户自定义函数时递归穿透函数体（函数体不会被插入 yield）。
+    """
+    seen = seen or frozenset()
+    stack = list(stmts)
+    while stack:
+        node = stack.pop()
+        # 函数/类定义不在本层执行，交给调用处穿透分析
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        if isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
+            # 嵌套循环自己会 yield，只看它的迭代/条件表达式
+            stack.append(node.iter if isinstance(node, ast.For) else node.test)
+            continue
+        if isinstance(node, ast.Call):
+            name = _call_name(node)
+            if name in _STEP_CALLS:
+                return True
+            func = funcs.get(name)
+            if func is not None and name not in seen:
+                if _has_step_op(func.body, funcs, seen | {name}):
+                    return True
+        elif isinstance(node, ast.AugAssign):
+            target = node.target
+            if isinstance(target, ast.Attribute) and target.attr in _STEP_AUG_ATTRS:
+                return True
+        stack.extend(ast.iter_child_nodes(node))
+    return False
+
+
+def _insert_loop_yields(node: ast.AST, funcs: dict = None):
     """
     递归在循环体中插入 yield（Scratch 语义：循环每轮让出一帧）。
 
-    - for：每轮结束 yield（对应 Scratch "重复执行 N 次"）
+    - for：只有循环体里有「看得见的过程」（增量移动 / say / play / 等待）
+      才在每轮结束 yield；纯创建、纯摆位、纯计算、纯列表操作同一帧跑完，
+      否则 for 批量创建角色会一个一个蹦出来
     - while（含 while True 和条件 while）：循环体开头 yield（保持原有
       while True 时序；并让 "while not 按键: continue" 这类等待写法
       不会在单帧内死循环卡死引擎）
@@ -32,19 +99,34 @@ def _insert_loop_yields(node: ast.AST):
     不进入函数/类定义——用户函数体里插 yield 会把函数变成 generator，
     调用处拿到 generator 对象而不再执行（旧式 def loop()+run() 写法同理保留）。
     """
+    funcs = funcs or {}
     for child in ast.iter_child_nodes(node):
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
             continue
         if isinstance(child, ast.For):
-            child.body.append(_make_yield())
-            _insert_loop_yields(child)
+            if _has_step_op(child.body, funcs):
+                child.body.append(_make_yield())
+            _insert_loop_yields(child, funcs)
         elif isinstance(child, ast.While):
             # while True 与条件 while 均在开头 yield：保持原有 while True 时序，
             # 并让 "while not 按键: continue" 这类等待写法不会单帧死循环
             child.body.insert(0, _make_yield())
-            _insert_loop_yields(child)
+            _insert_loop_yields(child, funcs)
         else:
-            _insert_loop_yields(child)
+            _insert_loop_yields(child, funcs)
+
+
+def _has_own_yield(stmts) -> bool:
+    """判断生成函数的自身作用域里有没有 yield（不进入嵌套函数/类）"""
+    stack = list(stmts)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        if isinstance(node, (ast.Yield, ast.YieldFrom)):
+            return True
+        stack.extend(ast.iter_child_nodes(node))
+    return False
 
 
 def _has_top_level_loop(tree: ast.Module) -> bool:
@@ -200,7 +282,15 @@ def transform_while_true(source_code: str, func_name: str = '__game__') -> str:
         _GlobalToNonlocal(bound_names).visit(func_def)
 
     # 递归给函数体内（while True 及嵌套的 for / 条件 while）插入 yield
-    _insert_loop_yields(func_def)
+    # funcs 用于穿透分析循环体里调用的用户自定义函数
+    _insert_loop_yields(func_def, _collect_functions(func_def))
+
+    # 一次 yield 都没插进去时（例如脚本只有「顶层 for 批量创建角色」），
+    # 这个函数就不是 generator，调用后立刻返回 None，
+    # register_generator(None) 会让主循环报「'NoneType' object is not an iterator」。
+    # 这类脚本本来就是一帧跑完，直接返回原源码同步执行即可。
+    if not _has_own_yield(func_def.body):
+        return source_code
 
     new_body.append(func_def)
 

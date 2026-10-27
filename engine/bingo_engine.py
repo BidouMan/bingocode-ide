@@ -73,7 +73,46 @@ _AUTO_CAMERA_TARGET = None  # 由地图相机设置自动跟随的主玩家（�
 # 渲染缓存
 _RENDERED_TILES = set()  # 已渲染的瓦片缓存
 _IMAGE_SIZE_CACHE = {}   # 图像尺寸缓存，避免重复磁盘IO
+_IMAGE_BBOX_CACHE = {}   # 图片内容框缓存：同一张图批量创建角色时免去重复读盘+像素采样
 _FRAME_UPDATES = []      # 每帧精灵更新缓冲，帧末合并发送
+
+
+def _image_bbox_info(path):
+    """读取图片尺寸与非透明内容框（按路径+修改时间缓存，批量创建角色不必反复读盘）
+
+    返回 (原宽, 原高, 内容框, 内容宽, 内容高, 横向视觉偏移, 纵向视觉偏移)；
+    图片读不出来返回 None（调用方按 50x50 兜底）。
+    """
+    try:
+        st = os.stat(path)
+        key = (os.path.abspath(path), st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+
+    info = _IMAGE_BBOX_CACHE.get(key)
+    if info is not None:
+        return info
+
+    try:
+        with Image.open(path) as img:
+            orig_w, orig_h = img.size
+            # 转换为 RGBA 确保 getbbox 能正常工作
+            bbox = img.convert("RGBA").getbbox()
+    except Exception:
+        return None
+
+    if bbox:
+        l, t, r, b = bbox
+        content_w, content_h = r - l, b - t
+        vox = (l + r) / 2.0 - orig_w / 2.0
+        voy = (t + b) / 2.0 - orig_h / 2.0
+    else:
+        content_w, content_h = orig_w, orig_h
+        vox = voy = 0
+
+    info = (orig_w, orig_h, bbox, content_w, content_h, vox, voy)
+    _IMAGE_BBOX_CACHE[key] = info
+    return info
 
 
 def _playable_bounds():
@@ -2101,33 +2140,19 @@ class Sprite:
         if hasattr(self, "_content_w") and self._cached_image == self.image:
             return self._cached_hitbox
 
-        try:
-            with Image.open(self.image) as img:
-                self._orig_w, self._orig_h = img.size
-                # 转换为 RGBA 确保 getbbox 能正常工作
-                bbox = img.convert("RGBA").getbbox()
-
-                if bbox:
-                    l, t, r, b = bbox
-                    self._content_w = r - l
-                    self._content_h = b - t
-                    self._content_bbox = bbox  # 保存非透明区域边界
-
-                    self._visual_offset_x = (l + r) / 2.0 - self._orig_w / 2.0
-                    self._visual_offset_y = (t + b) / 2.0 - self._orig_h / 2.0
-
-                else:
-                    self._content_w, self._content_h = self._orig_w, self._orig_h
-                    self._visual_offset_x = self._visual_offset_y = 0
-
-                self._cached_hitbox = [0, 0, self._content_w, self._content_h]
-                self._cached_image = self.image
-        except:
+        info = _image_bbox_info(self.image)
+        if info is None:
             self._content_w = self._content_h = 50
             self._visual_offset_x = self._visual_offset_y = 0
             self._orig_w = self._orig_h = 50
             self._content_bbox = (0, 0, 50, 50)
             self._cached_hitbox = [0, 0, 50, 50]
+            self._cached_image = self.image
+        else:
+            (self._orig_w, self._orig_h, self._content_bbox,
+             self._content_w, self._content_h,
+             self._visual_offset_x, self._visual_offset_y) = info
+            self._cached_hitbox = [0, 0, self._content_w, self._content_h]
             self._cached_image = self.image
 
         return self._cached_hitbox
