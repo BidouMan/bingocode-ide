@@ -47,7 +47,8 @@ class StaticEntry:
     ref: Any = None
     origin: Any = None
     bbox: AABB = field(init=False)
-    _sensor_shape: Optional[Shape] = field(default=None, init=False, repr=False)
+    # 缓存的感应外扩形状：只做判定，不参与相等性比较（避免 dataclass 比较性格外依赖 Shape）
+    _sensor_shape: Optional[Shape] = field(default=None, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self.bbox = self.shape.bbox

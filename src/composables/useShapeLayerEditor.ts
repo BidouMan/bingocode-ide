@@ -3,6 +3,7 @@ import { useMapStore, type ShapeLayer, type ShapeItem } from '../stores/map'
 import { useMapEditorStore } from '../stores/mapEditor'
 import { pointInPolygon } from '../utils/mapImageGeometry'
 import { collectSnapLines, snapAxisValue, snapRectOffset, snapThreshold } from '../utils/smartSnap'
+import { shapeColorHex } from '../utils/shapeStyle'
 
 interface ShapeLayerEditorOptions {
   getApp: () => any
@@ -267,13 +268,8 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
     })
   }
 
-  /** 形状颜色：按能力类型区分，禁用统一灰色 */
-  function shapeColor(poly: ShapeItem): number {
-    if (poly.disabled) return 0x888888
-    if (poly.kind === 'sensor') return 0xe5c07b
-    if (poly.kind === 'both') return 0x528bff
-    return 0xff5050
-  }
+  /** 形状颜色：按能力类型区分，禁用统一灰色（与属性面板列表共用 shapeStyle） */
+  const shapeColor = shapeColorHex
 
   function drawOverlay() {
     const app = getApp()

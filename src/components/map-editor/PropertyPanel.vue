@@ -6,6 +6,7 @@ import { useResourceStore } from '../../stores/resource'
 import { useMapEditorStore } from '../../stores/mapEditor'
 import CustomSelect from '../common/CustomSelect.vue'
 import { toUserX, toWorldX, toUserY, toWorldY, toUserAngle, toWorldAngle } from '../../utils/coords'
+import { shapeColorCss, shapeKindLabel } from '../../utils/shapeStyle'
 import iconChevron from '../../assets/icons/right_arrow.svg'
 import iconSettings from '../../assets/icons/icon--settings.svg'
 import iconCopy from '../../assets/icons/copy.svg'
@@ -538,7 +539,8 @@ function commonValue(pick: (s: ShapeItem) => string): string {
   return values.size === 1 ? [...values][0] : ''
 }
 const checkedKindValue = computed(() => commonValue(s => s.kind || 'solid'))
-const checkedTagValue = computed(() => commonValue(s => (s.tag || '').trim()))
+// 不做 trim：绑定的值会回写输入框，trim 会让用户打不出标签中间的末尾空格
+const checkedTagValue = computed(() => commonValue(s => s.tag || ''))
 const checkedMaterialValue = computed(() => commonValue(s => s.collisionType || '墙体'))
 const checkedDisabledValue = computed(() => {
   const ids = new Set(checkedShapeIds.value)
@@ -563,6 +565,16 @@ function removeCheckedShapes() {
   checkedShapeIds.value = []
 }
 
+/** 点击已有标签：单个形状直接填到标签框 */
+function onPickShapeTag(tag: string) {
+  const s = selectedShapeItem.value
+  if (s) mapStore.setShapeTag(s.id, tag)
+}
+/** 点击已有标签：批量填到所有勾选的形状 */
+function onPickCheckedTag(tag: string) {
+  mapStore.updateShapes(checkedShapeIds.value, { tag })
+}
+
 /** 点击列表行：选中画布上的形状并切回鼠标工具 */
 function selectShapeFromList(id: string) {
   mapEditorStore.setActiveShapeId(id)
@@ -572,23 +584,6 @@ function selectShapeFromList(id: string) {
 function focusShapeFromList(id: string) {
   selectShapeFromList(id)
   emit('focus-shape', id)
-}
-
-const SHAPE_KIND_LABELS: Record<ShapeKind, string> = {
-  solid: '阻挡',
-  sensor: '感应',
-  both: '阻挡 + 感应',
-}
-const SHAPE_KIND_COLORS: Record<ShapeKind, string> = {
-  solid: '#ff5050',
-  sensor: '#e5c07b',
-  both: '#528bff',
-}
-function shapeKindLabel(kind: string) {
-  return SHAPE_KIND_LABELS[(kind || 'solid') as ShapeKind] ?? '阻挡'
-}
-function shapeKindColor(item: ShapeItem) {
-  return item.disabled ? '#888888' : SHAPE_KIND_COLORS[(item.kind || 'solid') as ShapeKind]
 }
 
 // ====== 面板信息（只读展示，用于填充属性区） ======
@@ -1168,18 +1163,31 @@ function onCollisionEnabledChange(enabled: boolean) {
                 @update:model-value="onShapeKindChange"
               />
             </div>
-            <div class="att-row">
+            <div class="att-row att-row-stacked">
               <span class="att-label">标签</span>
-              <input
-                class="att-input"
-                :value="selectedShapeItem?.tag"
-                list="shape-tag-suggestions"
-                maxlength="40"
-                placeholder="代码里用 is_touch(标签) 查询"
-                :disabled="disabled"
-                @input="onShapeTagInput"
-                @keydown.enter="blurPanelInput"
-              />
+              <div class="att-field">
+                <input
+                  class="att-input"
+                  :value="selectedShapeItem?.tag"
+                  maxlength="40"
+                  placeholder="代码里用 is_touch(标签) 查询"
+                  :disabled="disabled"
+                  @input="onShapeTagInput"
+                  @keydown.enter="blurPanelInput"
+                />
+                <!-- 已有标签：点一下直接复用（比原生 datalist 在 macOS 上更可靠） -->
+                <div v-if="shapeTagSuggestions.length" class="tag-chips">
+                  <button
+                    v-for="tag in shapeTagSuggestions"
+                    :key="tag"
+                    type="button"
+                    class="tag-chip"
+                    :disabled="disabled"
+                    :title="`使用标签「${tag}」`"
+                    @click="onPickShapeTag(tag)"
+                  >{{ tag }}</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1787,7 +1795,7 @@ function onCollisionEnabledChange(enabled: boolean) {
                   @click="selectShapeFromList(item.id)"
                   @dblclick="focusShapeFromList(item.id)"
                 >
-                  <span class="sm-dot" :style="{ background: shapeKindColor(item) }" />
+                  <span class="sm-dot" :style="{ background: shapeColorCss(item) }" />
                   <span class="sm-index">{{ index + 1 }}</span>
                   <span class="sm-kind">{{ shapeKindLabel(item.kind) }}</span>
                   <span class="sm-tag" :class="{ empty: !(item.tag || '').trim() }">
@@ -1818,18 +1826,30 @@ function onCollisionEnabledChange(enabled: boolean) {
                   @update:model-value="onCheckedKindChange"
                 />
               </div>
-              <div class="att-row">
+              <div class="att-row att-row-stacked">
                 <span class="att-label">标签</span>
-                <input
-                  class="att-input"
-                  :value="checkedTagValue"
-                  list="shape-tag-suggestions"
-                  maxlength="40"
-                  :placeholder="checkedTagValue ? '批量设置标签' : '多个不同标签'"
-                  :disabled="disabled"
-                  @input="onCheckedTagInput"
-                  @keydown.enter="blurPanelInput"
-                />
+                <div class="att-field">
+                  <input
+                    class="att-input"
+                    :value="checkedTagValue"
+                    maxlength="40"
+                    :placeholder="checkedTagValue ? '批量设置标签' : '多个不同标签'"
+                    :disabled="disabled"
+                    @input="onCheckedTagInput"
+                    @keydown.enter="blurPanelInput"
+                  />
+                  <div v-if="shapeTagSuggestions.length" class="tag-chips">
+                    <button
+                      v-for="tag in shapeTagSuggestions"
+                      :key="tag"
+                      type="button"
+                      class="tag-chip"
+                      :disabled="disabled"
+                      :title="`把所选形状的标签都设为「${tag}」`"
+                      @click="onPickCheckedTag(tag)"
+                    >{{ tag }}</button>
+                  </div>
+                </div>
               </div>
               <div v-if="checkedKindValue !== 'sensor'" class="att-row">
                 <span class="att-label">物理属性</span>
@@ -1863,11 +1883,6 @@ function onCollisionEnabledChange(enabled: boolean) {
           </div>
         </div>
       </div>
-
-      <!-- 标签候选：检视器与批量设置的标签输入框共用 -->
-      <datalist id="shape-tag-suggestions">
-        <option v-for="tag in shapeTagSuggestions" :key="tag" :value="tag" />
-      </datalist>
 
       <!-- 标记管理右键菜单：Teleport 到 body，避免被右栏滚动容器裁剪
            放在 v-if / v-else 分支之外，避免打断条件分支链 -->
@@ -2596,4 +2611,28 @@ function onCollisionEnabledChange(enabled: boolean) {
 .sm-batch-del { flex: 0 0 auto; margin-left: auto; }
 
 .sm-hint { padding: 2px 0; font-size: 11px; color: #7c818a; }
+
+/* 已有标签候选：点击直接复用，避免手打拼错（跨平台不依赖原生 datalist） */
+.tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tag-chip {
+  height: 20px;
+  padding: 0 7px;
+  background: rgb(48, 51, 60);
+  border: 1px solid var(--border-light);
+  border-radius: 999px;
+  color: #a7acb4;
+  font-size: 11px;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: default;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.tag-chip:hover { background: rgb(61, 64, 72); color: #fff; }
+.tag-chip:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

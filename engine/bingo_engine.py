@@ -277,6 +277,29 @@ def _collision_polygon_parts(points):
     return parts or convex
 
 
+def _shape_convex_parts(poly):
+    """形状层多边形 → 凸块形状列表（凹多边形耳切三角化），结果缓存到 poly。
+
+    不能直接 ConvexPolygon(points)：自定义工具画出的凹多边形会抛 ValueError，
+    旧实现会静默丢掉整块形状（既不阻挡也不触发感应）。
+    """
+    cached = poly.get("_shape_parts")
+    if cached is not None:
+        return cached
+
+    parts = []
+    for source in poly.get("parts") or [poly.get("points") or []]:
+        for convex_points in _collision_polygon_parts(source):
+            if len(convex_points) < 3:
+                continue
+            try:
+                parts.append(ConvexPolygon(convex_points))
+            except (ValueError, TypeError):
+                continue
+    poly["_shape_parts"] = parts
+    return parts
+
+
 def _image_collision_local_polygons(image):
     """图像实例碰撞形状 → 图片本地归一化凸多边形列表（缓存到运行时字典）
 
@@ -854,17 +877,7 @@ class Sprite:
                     continue
 
             # 凸块形状缓存：凹多边形已拆成凸块，SAT 只能对凸多边形判定
-            part_shapes = poly.get("_shape_parts")
-            if part_shapes is None:
-                part_shapes = []
-                for part in poly.get("parts") or [points]:
-                    if len(part) < 3:
-                        continue
-                    try:
-                        part_shapes.append(ConvexPolygon(part))
-                    except (ValueError, TypeError):
-                        continue
-                poly["_shape_parts"] = part_shapes
+            part_shapes = _shape_convex_parts(poly)
 
             part_best = None
             for part_shape in part_shapes:
@@ -1951,8 +1964,8 @@ class Sprite:
 
         if target is mouse:
             mx, my = _MOUSE_STATE["x"], _MOUSE_STATE["y"]
-            # 🚀 2. 判定鼠标点 (mx, my) 是否在内容矩形 r1 内
-            return r1[0] <= mx <= r1[2] and r1[1] <= my <= r1[3]
+            # 用真实判定形状：胶囊/多边形的斜角区域不再误判为碰到
+            return point_inside(self._get_collision_shape(), (mx, my))
 
         # 🚀 3. 如果目标是字符串，进行标签碰撞检测
         if isinstance(target, str):
@@ -2703,6 +2716,9 @@ class Sprite:
 
         if not points or len(points) < 3:
             rect = self._get_hitbox_rect()
+            if not rect:
+                # 没有内容框（空图片等极端情况）：给一个零尺寸形状，避免崩溃/误判
+                return aabb_shape(self._x, self._y, self._x, self._y)
             return aabb_shape(rect[0], rect[1], rect[2], rect[3])
 
         s = self._scale / 100.0
@@ -2752,7 +2768,8 @@ class Sprite:
             shape = polygon_shape(world_points)
         except (ValueError, TypeError):
             rect = self._get_hitbox_rect()
-            shape = aabb_shape(rect[0], rect[1], rect[2], rect[3])
+            shape = (aabb_shape(rect[0], rect[1], rect[2], rect[3]) if rect
+                     else aabb_shape(self._x, self._y, self._x, self._y))
 
         self._cached_shape = shape
         self._cached_shape_key = cache_key
@@ -3442,18 +3459,11 @@ def _build_static_world(map_data, map_model):
             for poly in layer.get("polygons", []):
                 if poly.get("disabled"):
                     continue
-                parts = poly.get("parts") or [poly.get("points") or []]
-                convex = []
-                for part in parts:
-                    if len(part) < 3:
-                        continue
-                    try:
-                        convex.append(ConvexPolygon(part))
-                    except (ValueError, TypeError):
-                        continue
-                if not convex:
+                # 凹多边形按耳切拆成凸块（直接构造 ConvexPolygon 会失败并丢掉整块形状）
+                shape_parts = _shape_convex_parts(poly)
+                if not shape_parts:
                     continue
-                shape = convex[0] if len(convex) == 1 else CompoundShape(convex)
+                shape = shape_parts[0] if len(shape_parts) == 1 else CompoundShape(shape_parts)
                 entries.append(StaticEntry(
                     shape=shape,
                     source="shape",
