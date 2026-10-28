@@ -56,7 +56,8 @@ const collisionEditorRef = ref<InstanceType<typeof CollisionEditor>>()
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  background: var(--bg-root);
+  /* 与绘制/属性面板一致，底部信息栏才是更深的一整条 */
+  background: var(--bg-base);
 }
 
 .col-toolbar {

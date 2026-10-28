@@ -2583,6 +2583,18 @@ const vectorOverlayStyle = computed(() => {
   }
 })
 
+/**
+ * 矢量 UI 层（选框/锚点/钢笔）的画板→屏幕矩阵，走 SVG 内部 transform。
+ * 不能沿用 CSS transform：WebKit 会把 CSS 变换过的图层按布局尺寸栅格化再放大，
+ * 放大画布后选框描边糊成一圈（叠在图形边缘上就是「选中后边缘发虚」）。SVG 内矩阵
+ * 在最终设备分辨率下矢量绘制，缩放后始终锐利。
+ */
+const vectorUiTransform = computed(() => {
+  const m = vectorMatrix.value
+  if (!m) return null
+  return `matrix(${m.a}, ${m.b}, ${m.c}, ${m.d}, ${m.tx}, ${m.ty})`
+})
+
 /** 上方图层快照的定位（画板坐标）；位图场景用像素采样，放大后保持像素块观感 */
 const upperSnapshotStyle = computed<CSSProperties>(() => {
   const r = upperSnapshotRect.value
@@ -4024,6 +4036,25 @@ const markerIconSvg = computed(() =>
     .replace(/fill:white/gi, 'fill="currentColor"'),
 )
 
+/** 标记管理里双击 / 定位：把视口居中到该标记 */
+function centerMarker(id: string) {
+  if (!app) return
+  const marker = mapStore.mapData.markers.find(m => m.id === id)
+  if (!marker) return
+  const scale = viewport.currentScale.value
+  app.stage.x = app.screen.width / 2 - marker.x * scale
+  app.stage.y = app.screen.height / 2 - marker.y * scale
+  viewport.redraw()
+  app.render()
+}
+
+/** 只渲染未隐藏的标记；临时「显示隐藏标记」时把隐藏项也带上（弱化显示，便于重新选中） */
+const visibleMarkers = computed(() =>
+  mapStore.mapData.markers.filter(
+    m => m.visible !== false || mapEditorStore.showHiddenMarkers,
+  ),
+)
+
 /** 图钉屏幕位置：视口变化后靠 viewVersion 触发重算 */
 function markerScreenStyle(m: { x: number; y: number }) {
   void viewport.viewVersion.value
@@ -4066,6 +4097,8 @@ function onMarkerMouseDown(m: SceneMarker, e: MouseEvent) {
     markerGhost.value = null
   }
   mapEditorStore.setSelectedMarkerId(m.id)
+  // 锁定后只允许选中，不再跟随鼠标拖动
+  if (m.locked) return
   draggingMarkerId = m.id
   window.addEventListener('mousemove', onMarkerDragMove)
   window.addEventListener('mouseup', onMarkerDragEnd, { once: true })
@@ -4096,6 +4129,7 @@ watch(
 
 defineExpose({
   redraw,
+  centerMarker,
   cursorGridPos,
   renderAllLayers,
   showTransformBox: transform.showTransformBox,
@@ -4153,11 +4187,27 @@ defineExpose({
     >
       <!-- 上方图层快照：矢量画布恒在 Pixi 之上，用这张快照把「当前矢量图层之上」的图层按原顺序叠回去 -->
       <canvas ref="upperSnapshotRef" class="map-upper-snapshot" :style="upperSnapshotStyle"></canvas>
-      <svg
-        class="map-vector-svg"
-        :viewBox="`0 0 ${paintStore.artboardWidth} ${paintStore.artboardHeight}`"
-        preserveAspectRatio="none"
-      >
+      <textarea
+        v-if="paintStore.textEdit"
+        ref="textAreaRef"
+        class="map-vector-text"
+        :style="vectorTextEditStyle"
+        spellcheck="false"
+        autocomplete="off"
+        @input="onVectorTextInput"
+        @compositionstart="onVectorTextCompositionStart"
+        @compositionend="onVectorTextCompositionEnd"
+        @keydown="onVectorTextKeydown"
+      ></textarea>
+    </div>
+    <!-- 矢量 UI 层（框选/变换框/手柄/锚点/钢笔）：屏幕坐标 SVG，位移缩放走 <g> 内部矩阵。
+         不能放进上面的 CSS transform 层：WebKit 会按布局尺寸栅格化再放大，放大画布后选框描边发虚 -->
+    <div
+      v-if="vectorActive && paintStore.mode === 'vector' && vectorUiTransform"
+      class="map-vector-ui"
+    >
+      <svg class="map-vector-ui-svg">
+        <g :transform="vectorUiTransform">
         <!-- 框选矩形：矢量模式下拖拽框选对象时显示 -->
         <rect
           v-if="paintStore.selection"
@@ -4295,19 +4345,8 @@ defineExpose({
             :stroke-width="vectorPenStroke"
           />
         </template>
+        </g>
       </svg>
-      <textarea
-        v-if="paintStore.textEdit"
-        ref="textAreaRef"
-        class="map-vector-text"
-        :style="vectorTextEditStyle"
-        spellcheck="false"
-        autocomplete="off"
-        @input="onVectorTextInput"
-        @compositionstart="onVectorTextCompositionStart"
-        @compositionend="onVectorTextCompositionEnd"
-        @keydown="onVectorTextKeydown"
-      ></textarea>
     </div>
     <!-- 矢量画笔/橡皮光标（屏幕坐标，DOM 圆圈抗锯齿） -->
     <div
@@ -4331,18 +4370,24 @@ defineExpose({
         </span>
       </div>
       <div
-        v-for="m in mapStore.mapData.markers"
+        v-for="m in visibleMarkers"
         :key="m.id"
         class="map-marker"
-        :class="{ 'is-selected': m.id === mapEditorStore.selectedMarkerId }"
+        :class="{
+          'is-selected': m.id === mapEditorStore.selectedMarkerId,
+          'is-hidden': m.visible === false,
+        }"
         :style="markerScreenStyle(m)"
         @mousedown="onMarkerMouseDown(m, $event)"
         @dblclick.stop="onMarkerActivate(m)"
         @contextmenu.prevent.stop="mapEditorStore.setSelectedMarkerId(m.id)"
       >
         <div class="map-marker-icon" v-html="markerIconSvg"></div>
-        <span class="map-marker-label">
-          <b>{{ m.name }}</b><span>{{ markerCoordText(m) }}</span>
+        <span
+          v-if="m.showName !== false || m.showCoord !== false"
+          class="map-marker-label"
+        >
+          <b v-if="m.showName !== false">{{ m.name }}</b><span v-if="m.showCoord !== false">{{ markerCoordText(m) }}</span>
         </span>
       </div>
     </div>
@@ -4401,7 +4446,15 @@ defineExpose({
   pointer-events: none;
 }
 
-.map-vector-svg {
+/* 矢量 UI 层：屏幕像素坐标（不受画板 CSS 变换影响，缩放后描边保持锐利） */
+.map-vector-ui {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 11;
+}
+
+.map-vector-ui-svg {
   position: absolute;
   left: 0;
   top: 0;
@@ -4545,6 +4598,15 @@ defineExpose({
   color: var(--mk-red);
   transform: scale(1.07);
   transform-origin: 50% 88%;
+}
+
+/* 隐藏的标记：仅在「显示隐藏标记」临时打开时弱化呈现，仍可点选后恢复显示 */
+.map-marker.is-hidden {
+  opacity: 0.3;
+}
+
+.map-marker.is-hidden.is-selected {
+  opacity: 0.75;
 }
 
 /* 放置预览：半透明、不拦截事件 */

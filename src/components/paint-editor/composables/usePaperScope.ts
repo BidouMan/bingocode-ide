@@ -97,6 +97,22 @@ export function usePaperScope(
 ) {
   const store = usePaintStore()
 
+  /**
+   * 本引擎是否在前台可见。
+   *
+   * 角色绘制页（PaintArtboard）与地图编辑器（MapCanvas）各跑一套本引擎，
+   * 页面用 v-show 常驻挂载（切换只用 display:none 隐藏），且共用同一个 paintStore。
+   * 隐藏的一方 canvas rect 恒为 0：它不得再改写共享的选中投影（vectorSelBox /
+   * vectorSelectedCount / reshape 锚点），否则会把另一方正在编辑的选框清掉
+   * （地图编辑器滚轮缩放后选框整体消失即此原因）。
+   */
+  function isViewVisible(): boolean {
+    const el = canvasRef.value
+    if (!el || !el.isConnected) return false
+    const r = el.getBoundingClientRect()
+    return r.width > 0 && r.height > 0
+  }
+
   let scope: paper.PaperScope | null = null
 
   // ─── 多帧矢量状态（与 store.frames 下标对齐）───  /** 每帧 project JSON 快照；null = 该帧无矢量内容 */
@@ -426,6 +442,8 @@ export function usePaperScope(
   }
 
   function syncVectorSelBox() {
+    // 隐藏中的引擎不改写共享选中投影（另一编辑器正持有同一个 store）
+    if (!isViewVisible()) return
     // 「取消组合」可用性：选中项里真有 Group 才可点（普通 Path/文字点了也是空操作）
     store.vectorCanUngroup =
       !!scope && Array.from(selected).some((it) => it instanceof scope!.Group)
@@ -3683,6 +3701,8 @@ export function usePaperScope(
   watch(
     () => store.activeTool,
     (t, old) => {
+      // 隐藏中的引擎不得改写共享选中/塑形投影（另一方编辑器正持有同一个 store）
+      if (!isViewVisible()) return
       // 创建后自动选框：离开形状工具（且不是切到选择/塑形）= 收起选框（对齐位图模式语义）
       if (
         old !== t &&

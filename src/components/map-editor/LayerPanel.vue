@@ -531,7 +531,9 @@ defineExpose({ setLayerThumb })
   align-items: center;
   justify-content: center;
   height: 30px;
-  background: var(--bg-root);
+  /* 比面板更深一档 + 一条细分隔线，保证是独立的一条信息栏 */
+  background: rgb(26, 28, 33);
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
   flex-shrink: 0;
 }
 

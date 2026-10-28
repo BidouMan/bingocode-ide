@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useMapStore, DEFAULT_CAMERA_SETTINGS } from '../../stores/map'
 import { useEditorStore } from '../../stores/editor'
 import { useResourceStore } from '../../stores/resource'
+import { useMapEditorStore } from '../../stores/mapEditor'
 import CustomSelect from '../common/CustomSelect.vue'
 import { toUserX, toWorldX, toUserY, toWorldY, toUserAngle, toWorldAngle } from '../../utils/coords'
+import iconChevron from '../../assets/icons/right_arrow.svg'
 import iconSettings from '../../assets/icons/icon--settings.svg'
-import iconMarker from '../../assets/icons/标记.svg'
 import iconCopy from '../../assets/icons/copy.svg'
 import iconDelete from '../../assets/icons/选中删除.svg'
 
@@ -17,23 +18,224 @@ defineProps<{
 const emit = defineEmits<{
   /** 属性面板修改了图像变换（位置/旋转/缩放/不透明度） */
   'transform-changed': []
+  /** 标记管理里请求把视口居中到某个标记 */
+  'focus-marker': [id: string]
 }>()
 
 const mapStore = useMapStore()
 const editorStore = useEditorStore()
 const resourceStore = useResourceStore()
+const mapEditorStore = useMapEditorStore()
 
 // ====== 场景标记检视器 ======
 /** 选中的图钉：选中时属性面板整体切换为该标记的检视器 */
 const selectedMarker = computed(() => mapStore.selectedMarker)
 
+/** 名称输入草稿：提交前就能提示重名（store 提交时还会再校验一次） */
+const markerNameDraft = ref('')
+
+watch(
+  () => [selectedMarker.value?.id, selectedMarker.value?.name],
+  ([, name]) => {
+    markerNameDraft.value = typeof name === 'string' ? name : ''
+  },
+  { immediate: true },
+)
+
+/** 名称重复会让代码里 get_marker("名字") 有歧义，重复时在面板里提示 */
+const markerNameDuplicated = computed(() => {
+  const marker = selectedMarker.value
+  const text = markerNameDraft.value.trim()
+  if (!marker || !text) return false
+  return mapStore.mapData.markers.some(item => item.id !== marker.id && item.name === text)
+})
+
 /** 检视器分区的折叠状态（Godot / Unity 风格的可折叠分组，默认全展开） */
-const markerFold = reactive({ basic: true, type: true, range: true, display: true, actions: true })
+const markerFold = reactive({ basic: true, display: true, manage: true })
+
+/** 标记管理列表：这张地图上的全部标记 */
+const sceneMarkers = computed(() => mapStore.mapData.markers)
+
+/** 类型筛选：默认全部；选项由地图里实际出现的类型生成 */
+const MARKER_FILTER_ALL = '__all__'
+const markerTypeFilter = ref(MARKER_FILTER_ALL)
+const markerFilterOptions = computed(() => {
+  const types = new Set<string>()
+  for (const item of sceneMarkers.value) if (item.type) types.add(item.type)
+  return [
+    { label: '全部类型', value: MARKER_FILTER_ALL },
+    ...[...types].sort((a, b) => a.localeCompare(b, 'zh-CN')).map(type => ({ label: type, value: type })),
+  ]
+})
+
+/** 筛选后的列表；选中项被筛掉时仍保持选中，只是暂时看不到 */
+const filteredMarkers = computed(() =>
+  markerTypeFilter.value === MARKER_FILTER_ALL
+    ? sceneMarkers.value
+    : sceneMarkers.value.filter(item => item.type === markerTypeFilter.value),
+)
+
+// 类型被改名/删除后筛选项消失，自动退回「全部类型」
+watch(markerFilterOptions, (options) => {
+  if (!options.some(option => option.value === markerTypeFilter.value)) {
+    markerTypeFilter.value = MARKER_FILTER_ALL
+  }
+})
+
+/** 点击管理列表某一行：选中画布上对应的图钉 */
+function selectMarkerFromList(id: string) {
+  mapEditorStore.setSelectedMarkerId(id)
+}
+
+/** 双击管理列表某一行：把视口居中到该标记（大地图快速定位） */
+function focusMarkerFromList(id: string) {
+  mapEditorStore.setSelectedMarkerId(id)
+  emit('focus-marker', id)
+}
+
+/** 删除标记后自动落到相邻标记上，管理列表不会因面板关闭而中断 */
+function removeMarkerWithNeighbor(id: string) {
+  const list = sceneMarkers.value
+  const index = list.findIndex(item => item.id === id)
+  const next = list[index + 1] ?? list[index - 1]
+  mapStore.removeMarker(id)
+  if (next) mapEditorStore.setSelectedMarkerId(next.id)
+}
+
+function deleteSelectedMarker() {
+  const marker = selectedMarker.value
+  if (!marker) return
+  removeMarkerWithNeighbor(marker.id)
+}
+
+// ====== 行内改名（右键菜单里的「重命名」） ======
+const renamingMarkerId = ref<string | null>(null)
+const renameDraft = ref('')
+const renameInputRef = ref<HTMLInputElement | null>(null)
+
+/** 行内输入框的 ref 回调：同时只有一个改名输入框，直接存元素本身 */
+function setRenameInput(el: unknown) {
+  if (el) renameInputRef.value = el as HTMLInputElement
+}
+
+/** 进入改名：展开管理分区并聚焦输入框、全选原名 */
+function startMarkerRename(id: string) {
+  const marker = sceneMarkers.value.find(item => item.id === id)
+  if (!marker) return
+  markerFold.manage = true
+  mapEditorStore.setSelectedMarkerId(id)
+  renamingMarkerId.value = id
+  renameDraft.value = marker.name
+  nextTick(() => {
+    renameInputRef.value?.focus()
+    renameInputRef.value?.select()
+  })
+}
+
+/** 提交改名：去空格，空名或重名时保持原名（store 也会再校验一次） */
+function commitMarkerRename(id: string) {
+  if (renamingMarkerId.value !== id) return
+  const marker = sceneMarkers.value.find(item => item.id === id)
+  const text = renameDraft.value.trim()
+  if (marker && text && text !== marker.name) mapStore.renameMarker(id, text)
+  renamingMarkerId.value = null
+  renameDraft.value = ''
+}
+
+function cancelMarkerRename() {
+  renamingMarkerId.value = null
+  renameDraft.value = ''
+}
+
+// ====== 列表右键菜单（重命名 / 定位 / 复制 / 显示 / 锁定 / 删除） ======
+const markerMenu = ref<{ id: string; x: number; y: number } | null>(null)
+const markerMenuRef = ref<HTMLElement | null>(null)
+
+/** 右键菜单对应的标记：标记被删掉时菜单自动失效 */
+const menuMarker = computed(() => {
+  const menu = markerMenu.value
+  if (!menu) return null
+  return sceneMarkers.value.find(item => item.id === menu.id) ?? null
+})
+
+function openMarkerMenu(id: string, e: MouseEvent) {
+  e.preventDefault()
+  // 右键同时也选中该行，和文件管理器的习惯一致
+  mapEditorStore.setSelectedMarkerId(id)
+  markerMenu.value = { id, x: e.clientX, y: e.clientY }
+  nextTick(() => clampMarkerMenu())
+}
+
+/** 菜单贴边时往回收，避免超出窗口 */
+function clampMarkerMenu() {
+  const el = markerMenuRef.value
+  const menu = markerMenu.value
+  if (!el || !menu) return
+  const margin = 8
+  menu.x = Math.max(margin, Math.min(menu.x, window.innerWidth - el.offsetWidth - margin))
+  menu.y = Math.max(margin, Math.min(menu.y, window.innerHeight - el.offsetHeight - margin))
+}
+
+type MarkerMenuAction =
+  | 'rename'
+  | 'focus'
+  | 'duplicate'
+  | 'toggle-visible'
+  | 'toggle-locked'
+  | 'delete'
+
+function runMarkerMenu(action: MarkerMenuAction) {
+  const marker = menuMarker.value
+  markerMenu.value = null
+  if (!marker) return
+  switch (action) {
+    case 'rename':
+      startMarkerRename(marker.id)
+      break
+    case 'focus':
+      focusMarkerFromList(marker.id)
+      break
+    case 'duplicate':
+      mapStore.duplicateMarker(marker.id)
+      break
+    case 'toggle-visible':
+      mapStore.setMarkerVisible(marker.id, marker.visible === false)
+      break
+    case 'toggle-locked':
+      mapStore.setMarkerLocked(marker.id, marker.locked !== true)
+      break
+    case 'delete':
+      removeMarkerWithNeighbor(marker.id)
+      break
+  }
+}
+
+/** 点菜单以外的地方关闭（菜单内点击由 click 处理，不能提前关） */
+function onWindowPointerDownCloseMenu(e: PointerEvent) {
+  if (!markerMenu.value) return
+  if ((e.target as HTMLElement | null)?.closest('.mi-menu')) return
+  markerMenu.value = null
+}
+
+function onWindowKeydownCloseMenu(e: KeyboardEvent) {
+  if (e.key === 'Escape' && markerMenu.value) markerMenu.value = null
+}
+
+onMounted(() => {
+  window.addEventListener('pointerdown', onWindowPointerDownCloseMenu)
+  window.addEventListener('keydown', onWindowKeydownCloseMenu)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('pointerdown', onWindowPointerDownCloseMenu)
+  window.removeEventListener('keydown', onWindowKeydownCloseMenu)
+})
 
 /** 地图 / 图层检视器分区折叠状态（与标记检视器共用同一套外观） */
-const fold = reactive({ map: true, camera: true, physics: true, layer: true, transform: true })
+const fold = reactive({ map: true, scene: true, layer: true, transform: true })
 
-const markerTypeOptions = [
+/** 标记类型：内置常用的几种，最后一项可输入自定义类型 */
+const MARKER_TYPE_PRESETS = [
   { label: '出生点', value: '出生点' },
   { label: '敌人', value: '敌人' },
   { label: '道具', value: '道具' },
@@ -41,30 +243,33 @@ const markerTypeOptions = [
   { label: '镜头', value: '镜头' },
   { label: '存档点', value: '存档点' },
 ]
+const CUSTOM_MARKER_TYPE = '自定义'
+const markerTypeOptions = [
+  ...MARKER_TYPE_PRESETS,
+  { label: '自定义…', value: CUSTOM_MARKER_TYPE },
+]
 
-/** 标记的扩展设置：半径 / 角度 / 显示 / 锁定
- *  暂为界面占位（未接入引擎与存档），按标记 id 在本次会话内保留，便于先确认交互与排版 */
-interface MarkerExtra {
-  radius: number
-  angle: number
-  visible: boolean
-  locked: boolean
-}
+/** 正在编辑自定义类型的标记 id（下拉选「自定义」时进入，失焦后提交） */
+const customTypeEditingId = ref<string | null>(null)
+const customTypeDraft = ref('')
 
-const markerExtraMap = reactive<Record<string, MarkerExtra>>({})
-const markerExtra = computed(() => {
-  const id = selectedMarker.value?.id
-  return id ? markerExtraMap[id] : null
+/** 下拉框显示值：自定义编辑中或类型不在预设里，都显示为「自定义」 */
+const markerTypeValue = computed(() => {
+  const marker = selectedMarker.value
+  if (!marker) return '出生点'
+  if (customTypeEditingId.value === marker.id) return CUSTOM_MARKER_TYPE
+  return MARKER_TYPE_PRESETS.some(item => item.value === marker.type)
+    ? marker.type
+    : CUSTOM_MARKER_TYPE
 })
 
+// 切换标记时退出自定义编辑态，避免把上一个标记的输入带到新标记
 watch(
   () => selectedMarker.value?.id,
-  (id) => {
-    if (id && !markerExtraMap[id]) {
-      markerExtraMap[id] = { radius: 0, angle: 0, visible: true, locked: false }
-    }
+  () => {
+    customTypeEditingId.value = null
+    customTypeDraft.value = ''
   },
-  { immediate: true },
 )
 
 const markerNameInputRef = ref<HTMLInputElement>()
@@ -83,6 +288,12 @@ function onMarkerRename(e: Event) {
   const el = e.target as HTMLInputElement
   if (!marker) return
   if (!mapStore.renameMarker(marker.id, el.value)) el.value = marker.name
+  markerNameDraft.value = marker.name
+}
+
+/** 名称输入中：同步草稿，重名提示实时出现 */
+function onMarkerNameInput(e: Event) {
+  markerNameDraft.value = (e.target as HTMLInputElement).value
 }
 
 /** 坐标输入：用户坐标 ↔ 世界坐标；空值或非数字回填当前值 */
@@ -102,26 +313,56 @@ function onMarkerCoord(axis: 'x' | 'y', e: Event) {
   el.value = String(user)
 }
 
-/** 半径 / 角度：滑杆与数值输入共用，统一取整并钳制范围 */
-function onMarkerNumber(key: 'radius' | 'angle', e: Event) {
-  const extra = markerExtra.value
-  if (!extra) return
-  const raw = Number((e.target as HTMLInputElement).value)
-  if (!Number.isFinite(raw)) return
-  const max = key === 'radius' ? 500 : 360
-  extra[key] = Math.min(max, Math.max(0, Math.round(raw)))
-}
-
-/** 类型：写入标记本体，代码里 get_markers(类型) 按它分组 */
-function setMarkerType(value: string) {
+/** 类型下拉：选内置类型直接写入；选「自定义」进入输入态，失焦后提交 */
+function onMarkerTypeSelect(value: string) {
   const marker = selectedMarker.value
-  if (marker) mapStore.setMarkerType(marker.id, value)
+  if (!marker) return
+  if (value === CUSTOM_MARKER_TYPE) {
+    customTypeEditingId.value = marker.id
+    customTypeDraft.value = MARKER_TYPE_PRESETS.some(item => item.value === marker.type)
+      ? ''
+      : marker.type
+    return
+  }
+  customTypeEditingId.value = null
+  customTypeDraft.value = ''
+  mapStore.setMarkerType(marker.id, value)
 }
 
-function setMarkerFlag(key: 'visible' | 'locked', e: Event) {
-  const extra = markerExtra.value
-  if (!extra) return
-  extra[key] = (e.target as HTMLInputElement).checked
+/** 自定义类型输入：先存在草稿里，避免中途被空值兜底改成「出生点」 */
+function onCustomMarkerTypeInput(e: Event) {
+  customTypeDraft.value = (e.target as HTMLInputElement).value
+}
+
+/** 自定义类型输入结束：提交去空格后的文字；留空则保持原类型不变 */
+function onCustomMarkerTypeBlur(e: Event) {
+  const marker = selectedMarker.value
+  if (!marker) return
+  const text = (e.target as HTMLInputElement).value.trim()
+  if (text) mapStore.setMarkerType(marker.id, text)
+  customTypeEditingId.value = null
+  customTypeDraft.value = ''
+}
+
+/** 显示：隐藏后不在地图上画图钉，但代码里仍能取到 */
+function onMarkerVisibleChange(e: Event) {
+  const marker = selectedMarker.value
+  if (!marker) return
+  mapStore.setMarkerVisible(marker.id, (e.target as HTMLInputElement).checked)
+}
+
+/** 锁定：锁定后图钉不能拖动，仍可选中和改坐标 */
+function onMarkerLockedChange(e: Event) {
+  const marker = selectedMarker.value
+  if (!marker) return
+  mapStore.setMarkerLocked(marker.id, (e.target as HTMLInputElement).checked)
+}
+
+/** 图钉下方标签：分别控制是否显示名称 / 坐标 */
+function onMarkerLabelChange(part: 'name' | 'coord', e: Event) {
+  const marker = selectedMarker.value
+  if (!marker) return
+  mapStore.setMarkerLabelVisible(marker.id, part, (e.target as HTMLInputElement).checked)
 }
 
 /** 名称/坐标输入框按回车直接生效并退出编辑 */
@@ -129,8 +370,11 @@ function blurPanelInput(e: KeyboardEvent) {
   (e.target as HTMLInputElement).blur()
 }
 
-/** 下滑设置子面板展开状态（选项为占位，功能后续版本实现） */
+/** 相机 / 下滑的详细参数：点行尾的设置按钮展开，避免和分区折叠重复 */
+const showCameraSettings = ref(false)
 const showSlopeSettings = ref(false)
+/** 图层视差：后续版本实现，先占位展示设置项 */
+const showParallaxSettings = ref(false)
 
 const collisionTypeOptions = [
   { label: '墙体', value: '墙体' },
@@ -151,43 +395,61 @@ const tileCount = computed(() => {
 })
 const tileSetCount = computed(() => mapStore.mapData.tileSets.length)
 
-const imageSizeText = computed(() => {
-  const img = mapStore.selectedImage
-  if (!img) return '--'
-  return `${Math.round(img.width || 0)} × ${Math.round(img.height || 0)}`
-})
-const imageOpacityPercent = computed(() =>
-  Math.round((mapStore.selectedImage?.opacity ?? 1) * 100),
-)
 
-// ====== 图像变换（位置 / 旋转 / 缩放 / 不透明度） ======
+// ====== 图像变换（位置 / 旋转 / 缩放） ======
 // 位置与旋转按用户坐标显示：原点在地图左下角、y 向上为正、角度逆时针为正；
 // 内部仍以世界坐标（左上原点、y 向下）存储，只在显示/输入时换算。
 const selectedImage = computed(() => mapStore.selectedImage)
-const imagePosX = computed(() => Math.round(toUserX(selectedImage.value?.position?.[0] ?? 0)))
-const imagePosY = computed(() => Math.round(toUserY(selectedImage.value?.position?.[1] ?? 0)))
+/** 图片中心点的世界坐标：position 存的是左上角，渲染时锚点(0.5)落在中心，旋转也绕中心 */
+function imageCenterWorld(img: {
+  position?: [number, number]
+  width?: number
+  height?: number
+  scale?: number
+  scaleX?: number
+  scaleY?: number
+} | null | undefined) {
+  if (!img) return { x: 0, y: 0 }
+  const sx = img.scaleX ?? img.scale ?? 1
+  const sy = img.scaleY ?? img.scale ?? 1
+  return {
+    x: (img.position?.[0] ?? 0) + ((img.width || 0) * sx) / 2,
+    y: (img.position?.[1] ?? 0) + ((img.height || 0) * sy) / 2,
+  }
+}
+const imagePosX = computed(() => Math.round(toUserX(imageCenterWorld(selectedImage.value).x)))
+const imagePosY = computed(() => Math.round(toUserY(imageCenterWorld(selectedImage.value).y)))
 const imageRotation = computed(() =>
   Math.round(toUserAngle(selectedImage.value?.rotation ?? 0) * 10) / 10,
 )
+/** 缩放按百分比展示（100 = 原尺寸），与不透明度等其它数值的写法保持一致 */
 const imageScaleX = computed(() =>
-  Math.round((selectedImage.value?.scaleX ?? selectedImage.value?.scale ?? 1) * 100) / 100,
+  Math.round((selectedImage.value?.scaleX ?? selectedImage.value?.scale ?? 1) * 100),
 )
 const imageScaleY = computed(() =>
-  Math.round((selectedImage.value?.scaleY ?? selectedImage.value?.scale ?? 1) * 100) / 100,
+  Math.round((selectedImage.value?.scaleY ?? selectedImage.value?.scale ?? 1) * 100),
 )
 // 无选中图像或图层被锁定时不可编辑变换
 const transformDisabled = computed(
   () => !selectedImage.value || mapStore.activeLayer?.locked === true,
 )
 
+/** 缩放锁定（等比缩放）：勾选后改 X 时 Y 按同一倍率跟随，反之亦然 */
+const scaleLocked = ref(true)
+
+/** 位置：输入的是中心点的用户坐标，写回时换算成世界坐标下的左上角 */
 function setImagePosition(axis: 0 | 1, e: Event) {
   const img = selectedImage.value
   const value = Number((e.target as HTMLInputElement).value)
   if (!img || !Number.isFinite(value)) return
+  const sx = img.scaleX ?? img.scale ?? 1
+  const sy = img.scaleY ?? img.scale ?? 1
   const pos = [img.position?.[0] ?? 0, img.position?.[1] ?? 0]
-  // 输入的是用户坐标，写回前换算成世界坐标
-  pos[axis] = axis === 0 ? toWorldX(value) : toWorldY(value)
-  img.position = [pos[0], pos[1]]
+  pos[axis] =
+    axis === 0
+      ? toWorldX(value) - ((img.width || 0) * sx) / 2
+      : toWorldY(value) - ((img.height || 0) * sy) / 2
+  img.position = pos
   emit('transform-changed')
 }
 
@@ -200,28 +462,37 @@ function setImageRotation(e: Event) {
   emit('transform-changed')
 }
 
-function setImageScale(axis: 'x' | 'y', e: Event) {
+/** 缩放：输入的是百分比（100 = 原尺寸），内部换回倍率；锁定等比时另一轴按倍率跟随 */
+function applyImageScale(axis: 'x' | 'y', percent: number) {
   const img = selectedImage.value
-  const value = Number((e.target as HTMLInputElement).value)
-  if (!img || !Number.isFinite(value)) return
-  // 0 会导致矩阵退化，最小保留 0.01（负值=镜像）
-  const clamped = Math.abs(value) < 0.01 ? (value < 0 ? -0.01 : 0.01) : value
+  if (!img) return
+  // 0 会导致矩阵退化，最小保留 1%（负值=镜像）
+  const clamped = Math.abs(percent) < 1 ? (percent < 0 ? -1 : 1) : percent
+  const value = clamped / 100
+  const oldX = img.scaleX ?? img.scale ?? 1
+  const oldY = img.scaleY ?? img.scale ?? 1
+  const round = (n: number) => Math.round(n * 10000) / 10000
   if (axis === 'x') {
-    img.scaleX = clamped
-    img.scale = clamped
+    img.scaleX = value
+    img.scale = value
+    // 等比锁定：Y 按 X 的倍率同步缩放，保持宽高比
+    if (scaleLocked.value && oldX !== 0) img.scaleY = round(oldY * (value / oldX))
   } else {
-    img.scaleY = clamped
+    img.scaleY = value
+    if (scaleLocked.value && oldY !== 0) {
+      img.scaleX = round(oldX * (value / oldY))
+      img.scale = img.scaleX
+    }
   }
   emit('transform-changed')
 }
 
-function setImageOpacity(e: Event) {
-  const img = selectedImage.value
+function setImageScale(axis: 'x' | 'y', e: Event) {
   const value = Number((e.target as HTMLInputElement).value)
-  if (!img || !Number.isFinite(value)) return
-  img.opacity = Math.max(0, Math.min(1, value / 100))
-  emit('transform-changed')
+  if (!Number.isFinite(value)) return
+  applyImageScale(axis, value)
 }
+
 
 /** 地图尺寸提交：输入过程中不实时生效，失焦/回车时统一校验后调整，
  *  避免逐字输入（如 40 → 450）触发多次画板重建与内容裁剪 */
@@ -233,6 +504,13 @@ function commitMapSize(axis: 'width' | 'height', e: Event) {
   if (value !== current) mapStore.updateMapProperty(axis, value)
   // 非法/空值回填当前合法值，避免输入框与实际地图尺寸不一致
   el.value = String(value)
+}
+
+/** 地图尺寸上下箭头：按 1 个单位增减，最小 1，走和手动输入相同的校验 */
+function stepMapSize(axis: 'width' | 'height', delta: number) {
+  const current = axis === 'width' ? mapStore.mapData.width : mapStore.mapData.height
+  const value = Math.round(current) + delta
+  if (value >= 1) mapStore.updateMapProperty(axis, value)
 }
 
 const collisionCount = computed(() => mapStore.activeCollisionPolygons.length)
@@ -247,6 +525,41 @@ function onLayerLockChange(e: Event) {
   if (index < 0) return
   const locked = (e.target as HTMLInputElement).checked
   if (locked !== layerLocked.value) mapStore.toggleLayerLock(index)
+}
+
+/** 显示渲染：等同图层可见性，与图层列表行内的眼睛图标共用一个字段 */
+const layerVisible = computed(() => mapStore.activeLayer?.visible !== false)
+function onLayerVisibleChange(e: Event) {
+  const index = mapStore.activeLayerIndex
+  if (index < 0) return
+  const visible = (e.target as HTMLInputElement).checked
+  if (visible !== layerVisible.value) mapStore.toggleLayerVisibility(index)
+}
+
+/** 渲染：游戏运行窗口是否绘制该图层（默认 true，编辑器里始终可见） */
+const layerRender = computed(() => mapStore.activeLayer?.render !== false)
+function onLayerRenderChange(e: Event) {
+  const layer = mapStore.activeLayer
+  if (!layer) return
+  layer.render = (e.target as HTMLInputElement).checked
+}
+
+/** 不透明度：图片图层才有（一张图 = 一个图层），数值即图片自身的 opacity */
+const layerOpacityPercent = computed(() => {
+  const layer = mapStore.activeLayer
+  if (!layer || layer.type !== 'image') return 100
+  return Math.round((layer.image?.opacity ?? 1) * 100)
+})
+const layerCanOpacity = computed(
+  () => mapStore.activeLayer?.type === 'image' && mapStore.activeLayer?.locked !== true,
+)
+function onLayerOpacityInput(e: Event) {
+  const layer = mapStore.activeLayer
+  if (!layer || layer.type !== 'image') return
+  const value = Number((e.target as HTMLInputElement).value)
+  if (!Number.isFinite(value)) return
+  layer.image.opacity = Math.max(0, Math.min(1, value / 100))
+  mapStore.imageRevision++
 }
 
 // ====== 相机跟随（勾选后在下发展开设置；运行时由引擎读取） ======
@@ -417,34 +730,55 @@ function onCollisionEnabledChange(enabled: boolean) {
 
 <template>
   <div class="property-panel">
-    <div class="att-tag-name">属性</div>
-
     <!-- 地图属性 -->
     <div class="att-frame">
       <!-- 标记检视器：选中图钉时替代地图 / 图层属性 -->
-      <div v-if="selectedMarker && markerExtra" class="att-group marker-inspector">
-        <div class="mi-title">
-          <img :src="iconMarker" alt="" class="mi-title-icon" />
-          <span>标记</span>
-        </div>
-
-        <!-- 基本：名称 / 坐标 -->
+      <div v-if="selectedMarker" class="att-group marker-inspector">
+        <!-- 基本：名称 / 类型 / 坐标 -->
         <div class="mi-section" :class="{ open: markerFold.basic }">
           <button class="mi-head" :disabled="disabled" @click="markerFold.basic = !markerFold.basic">
-            <span class="mi-chevron" />
+            <img :src="iconChevron" class="mi-chevron" alt="" />
             <span class="mi-head-title">基本</span>
           </button>
           <div v-if="markerFold.basic" class="mi-body">
             <div class="att-row">
               <span class="att-label">名称</span>
-              <input
-                ref="markerNameInputRef"
-                class="att-input"
-                :value="selectedMarker?.name"
-                maxlength="20"
-                placeholder="标记名"
+              <div class="att-field">
+                <input
+                  ref="markerNameInputRef"
+                  class="att-input"
+                  :class="{ 'att-input-warn': markerNameDuplicated }"
+                  :value="selectedMarker?.name"
+                  maxlength="20"
+                  placeholder="标记名"
+                  :disabled="disabled"
+                  @input="onMarkerNameInput"
+                  @change="onMarkerRename"
+                  @keydown.enter="blurPanelInput"
+                />
+                <span v-if="markerNameDuplicated" class="att-warn">已有同名标记</span>
+              </div>
+            </div>
+            <div class="att-row">
+              <span class="att-label">类型</span>
+              <CustomSelect
+                class="att-select"
+                :model-value="markerTypeValue"
+                :options="markerTypeOptions"
                 :disabled="disabled"
-                @change="onMarkerRename"
+                @update:model-value="onMarkerTypeSelect"
+              />
+            </div>
+            <div v-if="markerTypeValue === CUSTOM_MARKER_TYPE" class="att-row">
+              <span class="att-label">类型名</span>
+              <input
+                class="att-input"
+                :value="customTypeDraft"
+                maxlength="20"
+                placeholder="输入类型名"
+                :disabled="disabled"
+                @input="onCustomMarkerTypeInput"
+                @blur="onCustomMarkerTypeBlur"
                 @keydown.enter="blurPanelInput"
               />
             </div>
@@ -472,87 +806,11 @@ function onCollisionEnabledChange(enabled: boolean) {
           </div>
         </div>
 
-        <!-- 类型：写入标记本体，代码里可按类型批量查找 -->
-        <div class="mi-section" :class="{ open: markerFold.type }">
-          <button class="mi-head" :disabled="disabled" @click="markerFold.type = !markerFold.type">
-            <span class="mi-chevron" />
-            <span class="mi-head-title">类型</span>
-          </button>
-          <div v-if="markerFold.type" class="mi-body">
-            <div class="att-row">
-              <span class="att-label">类型</span>
-              <CustomSelect
-                class="att-select"
-                :model-value="selectedMarker.type"
-                :options="markerTypeOptions"
-                :disabled="disabled"
-                @update:model-value="setMarkerType"
-              />
-            </div>
-          </div>
-        </div>
-
-        <!-- 范围：半径 / 角度，数值输入与滑杆联动 -->
-        <div class="mi-section" :class="{ open: markerFold.range }">
-          <button class="mi-head" :disabled="disabled" @click="markerFold.range = !markerFold.range">
-            <span class="mi-chevron" />
-            <span class="mi-head-title">范围</span>
-            <span class="mi-head-hint">占位</span>
-          </button>
-          <div v-if="markerFold.range" class="mi-body">
-            <div class="att-row mi-range-row">
-              <span class="att-label">半径</span>
-              <input
-                class="att-range"
-                type="range"
-                min="0"
-                max="500"
-                step="1"
-                :value="markerExtra?.radius ?? 0"
-                :disabled="disabled"
-                @input="onMarkerNumber('radius', $event)"
-              />
-              <input
-                class="att-input att-input-no-spin mi-number"
-                type="number"
-                min="0"
-                max="500"
-                :value="markerExtra?.radius ?? 0"
-                :disabled="disabled"
-                @change="onMarkerNumber('radius', $event)"
-              />
-            </div>
-            <div class="att-row mi-range-row">
-              <span class="att-label">角度</span>
-              <input
-                class="att-range"
-                type="range"
-                min="0"
-                max="360"
-                step="1"
-                :value="markerExtra?.angle ?? 0"
-                :disabled="disabled"
-                @input="onMarkerNumber('angle', $event)"
-              />
-              <input
-                class="att-input att-input-no-spin mi-number"
-                type="number"
-                min="0"
-                max="360"
-                :value="markerExtra?.angle ?? 0"
-                :disabled="disabled"
-                @change="onMarkerNumber('angle', $event)"
-              />
-            </div>
-          </div>
-        </div>
-
-        <!-- 显示与锁定：占位 -->
+        <!-- 显示与锁定：直接写入标记，随地图存档 -->
         <div class="mi-section" :class="{ open: markerFold.display }">
           <button class="mi-head" :disabled="disabled" @click="markerFold.display = !markerFold.display">
-            <span class="mi-chevron" />
+            <img :src="iconChevron" class="mi-chevron" alt="" />
             <span class="mi-head-title">显示与锁定</span>
-            <span class="mi-head-hint">占位</span>
           </button>
           <div v-if="markerFold.display" class="mi-body">
             <div class="att-row">
@@ -560,11 +818,35 @@ function onCollisionEnabledChange(enabled: boolean) {
               <label class="att-checkbox">
                 <input
                   type="checkbox"
-                  :checked="markerExtra?.visible ?? true"
+                  :checked="selectedMarker?.visible !== false"
                   :disabled="disabled"
-                  @change="setMarkerFlag('visible', $event)"
+                  @change="onMarkerVisibleChange"
                 />
                 <span class="att-checkbox-text">在地图上显示</span>
+              </label>
+            </div>
+            <div class="att-row">
+              <span class="att-label">名称</span>
+              <label class="att-checkbox">
+                <input
+                  type="checkbox"
+                  :checked="selectedMarker?.showName !== false"
+                  :disabled="disabled"
+                  @change="onMarkerLabelChange('name', $event)"
+                />
+                <span class="att-checkbox-text">标签显示名称</span>
+              </label>
+            </div>
+            <div class="att-row">
+              <span class="att-label">坐标</span>
+              <label class="att-checkbox">
+                <input
+                  type="checkbox"
+                  :checked="selectedMarker?.showCoord !== false"
+                  :disabled="disabled"
+                  @change="onMarkerLabelChange('coord', $event)"
+                />
+                <span class="att-checkbox-text">标签显示坐标</span>
               </label>
             </div>
             <div class="att-row">
@@ -572,9 +854,9 @@ function onCollisionEnabledChange(enabled: boolean) {
               <label class="att-checkbox">
                 <input
                   type="checkbox"
-                  :checked="markerExtra?.locked ?? false"
+                  :checked="selectedMarker?.locked === true"
                   :disabled="disabled"
-                  @change="setMarkerFlag('locked', $event)"
+                  @change="onMarkerLockedChange"
                 />
                 <span class="att-checkbox-text">禁止拖动</span>
               </label>
@@ -582,13 +864,63 @@ function onCollisionEnabledChange(enabled: boolean) {
           </div>
         </div>
 
-        <!-- 操作：复制 / 删除可用，复制代码为占位 -->
-        <div class="mi-section" :class="{ open: markerFold.actions }">
-          <button class="mi-head" :disabled="disabled" @click="markerFold.actions = !markerFold.actions">
-            <span class="mi-chevron" />
-            <span class="mi-head-title">操作</span>
+        <!-- 标记管理：列出这张地图的全部标记，点一行就选中、双击居中、右键调出更多操作 -->
+        <div class="mi-section" :class="{ open: markerFold.manage }">
+          <button class="mi-head" :disabled="disabled" @click="markerFold.manage = !markerFold.manage">
+            <img :src="iconChevron" class="mi-chevron" alt="" />
+            <span class="mi-head-title">标记管理</span>
+            <span class="mi-count">{{ sceneMarkers.length }}</span>
           </button>
-          <div v-if="markerFold.actions" class="mi-body">
+          <div v-if="markerFold.manage" class="mi-body">
+            <!-- 类型筛选：默认全部，选项来自本图实际出现的类型 -->
+            <CustomSelect
+              class="mi-filter"
+              :model-value="markerTypeFilter"
+              :options="markerFilterOptions"
+              :disabled="disabled"
+              @update:model-value="markerTypeFilter = $event"
+            />
+            <div class="mi-list">
+              <template v-for="item in filteredMarkers" :key="item.id">
+                <!-- 行内改名：右键菜单触发后原地变成输入框 -->
+                <div
+                  v-if="renamingMarkerId === item.id"
+                  class="mi-list-row mi-list-row-edit"
+                  :class="{ 'is-selected': item.id === selectedMarker?.id }"
+                >
+                  <span class="mi-list-dot" />
+                  <input
+                    :ref="setRenameInput"
+                    v-model="renameDraft"
+                    class="mi-list-rename"
+                    maxlength="20"
+                    :disabled="disabled"
+                    @keydown.enter.prevent="commitMarkerRename(item.id)"
+                    @keydown.esc.prevent="cancelMarkerRename"
+                    @blur="commitMarkerRename(item.id)"
+                  />
+                </div>
+                <button
+                  v-else
+                  class="mi-list-row"
+                  :class="{
+                    'is-selected': item.id === selectedMarker?.id,
+                    'is-hidden': item.visible === false,
+                  }"
+                  :disabled="disabled"
+                  @click="selectMarkerFromList(item.id)"
+                  @dblclick="focusMarkerFromList(item.id)"
+                  @contextmenu="openMarkerMenu(item.id, $event)"
+                >
+                  <span class="mi-list-dot" />
+                  <span class="mi-list-name">{{ item.name }}</span>
+                  <span class="mi-list-coord">{{ Math.round(toUserX(item.x)) }}, {{ Math.round(toUserY(item.y)) }}</span>
+                </button>
+              </template>
+              <div v-if="!filteredMarkers.length" class="mi-list-empty">
+                {{ sceneMarkers.length ? '没有这个类型的标记' : '这张地图还没有标记' }}
+              </div>
+            </div>
             <div class="mi-actions">
               <button
                 class="mi-btn"
@@ -601,15 +933,12 @@ function onCollisionEnabledChange(enabled: boolean) {
               <button
                 class="mi-btn mi-btn-danger"
                 :disabled="disabled"
-                @click="selectedMarker && mapStore.removeMarker(selectedMarker.id)"
+                @click="deleteSelectedMarker"
               >
                 <img :src="iconDelete" alt="" />
                 <span>删除</span>
               </button>
             </div>
-            <button class="mi-btn" :disabled="disabled" title="功能待接入">
-              <span>复制代码</span>
-            </button>
           </div>
         </div>
       </div>
@@ -619,7 +948,7 @@ function onCollisionEnabledChange(enabled: boolean) {
         <!-- 地图：名称 / 尺寸 -->
         <div class="mi-section" :class="{ open: fold.map }">
           <button class="mi-head" :disabled="disabled" @click="fold.map = !fold.map">
-            <span class="mi-chevron" />
+            <img :src="iconChevron" class="mi-chevron" alt="" />
             <span class="mi-head-title">地图</span>
           </button>
           <div v-if="fold.map" class="mi-body">
@@ -637,205 +966,226 @@ function onCollisionEnabledChange(enabled: boolean) {
               <span class="att-label">地图尺寸</span>
               <div class="att-size-group">
                 <span class="att-size-label">X</span>
-                <input
-                  class="att-input att-input-no-spin"
-                  type="number"
-                  min="1"
-                  step="1"
-                  :value="mapStore.mapData.width"
-                  :disabled="disabled"
-                  @change="commitMapSize('width', $event)"
-                />
+                <div class="att-spin">
+                  <input
+                    class="att-input att-input-no-spin"
+                    type="number"
+                    min="1"
+                    step="1"
+                    :value="mapStore.mapData.width"
+                    :disabled="disabled"
+                    @change="commitMapSize('width', $event)"
+                  />
+                  <div class="att-spin-btns">
+                    <button class="att-spin-btn" :disabled="disabled" @click="stepMapSize('width', 1)">
+                      <img :src="iconChevron" class="att-spin-arrow up" alt="增加" />
+                    </button>
+                    <button class="att-spin-btn" :disabled="disabled" @click="stepMapSize('width', -1)">
+                      <img :src="iconChevron" class="att-spin-arrow down" alt="减少" />
+                    </button>
+                  </div>
+                </div>
                 <span class="att-size-label">Y</span>
-                <input
-                  class="att-input att-input-no-spin"
-                  type="number"
-                  min="1"
-                  step="1"
-                  :value="mapStore.mapData.height"
-                  :disabled="disabled"
-                  @change="commitMapSize('height', $event)"
-                />
+                <div class="att-spin">
+                  <input
+                    class="att-input att-input-no-spin"
+                    type="number"
+                    min="1"
+                    step="1"
+                    :value="mapStore.mapData.height"
+                    :disabled="disabled"
+                    @change="commitMapSize('height', $event)"
+                  />
+                  <div class="att-spin-btns">
+                    <button class="att-spin-btn" :disabled="disabled" @click="stepMapSize('height', 1)">
+                      <img :src="iconChevron" class="att-spin-arrow up" alt="增加" />
+                    </button>
+                    <button class="att-spin-btn" :disabled="disabled" @click="stepMapSize('height', -1)">
+                      <img :src="iconChevron" class="att-spin-arrow down" alt="减少" />
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- 相机：跟随开关与相机参数 -->
-        <div class="mi-section" :class="{ open: fold.camera }">
-          <button class="mi-head" :disabled="disabled" @click="fold.camera = !fold.camera">
-            <span class="mi-chevron" />
-            <span class="mi-head-title">相机</span>
+        <!-- 场景：相机跟随 / 重力 / 边界 / 下滑 -->
+        <div class="mi-section" :class="{ open: fold.scene }">
+          <button class="mi-head" :disabled="disabled" @click="fold.scene = !fold.scene">
+            <img :src="iconChevron" class="mi-chevron" alt="" />
+            <span class="mi-head-title">场景</span>
           </button>
-          <div v-if="fold.camera" class="mi-body">
+          <div v-if="fold.scene" class="mi-body">
             <div class="att-row">
               <span class="att-label">相机跟随</span>
-          <label class="att-checkbox">
-            <input
-              type="checkbox"
-              :checked="camera.enabled"
-              :disabled="disabled"
-              @change="onCameraEnabledChange"
-            />
-            <span class="att-checkbox-text">启用</span>
-          </label>
-        </div>
-
-        <!-- 相机设置：勾选后展开为「相机跟随」的缩进子菜单，取消勾选即隐藏 -->
-        <div v-if="camera.enabled" class="att-subgroup">
-          <div class="att-row">
-            <span class="att-label">跟随角色</span>
-            <CustomSelect
-              class="att-select"
-              :model-value="camera.target"
-              :options="spriteTargetOptions"
-              :disabled="disabled || spriteTargetOptions.length === 0"
-              placeholder="暂无角色"
-              @update:model-value="onCameraTargetChange"
-            />
-          </div>
-
-          <div class="att-row">
-            <span class="att-label">平滑跟随</span>
-            <input
-              class="att-range"
-              type="range"
-              min="0"
-              max="95"
-              :value="cameraSmoothingPercent"
-              :disabled="disabled"
-              @input="onCameraSmoothingChange"
-            />
-            <span class="att-value">{{ cameraSmoothingPercent }}%</span>
-          </div>
-
-          <div class="att-row">
-            <span class="att-label">偏移</span>
-            <div class="att-size-group">
-              <span class="att-size-label">X</span>
-              <input
-                class="att-input att-input-no-spin"
-                type="number"
-                :value="camera.offsetX"
-                :disabled="disabled"
-                @change="onCameraOffsetChange('x', $event)"
-              />
-              <span class="att-size-label">Y</span>
-              <input
-                class="att-input att-input-no-spin"
-                type="number"
-                :value="camera.offsetY"
-                :disabled="disabled"
-                @change="onCameraOffsetChange('y', $event)"
-              />
-            </div>
-          </div>
-
-            <div class="att-row">
-              <span class="att-label">边界限制</span>
               <label class="att-checkbox">
                 <input
                   type="checkbox"
-                  :checked="camera.limitBounds"
+                  :checked="camera.enabled"
                   :disabled="disabled"
-                  @change="onCameraLimitChange"
+                  @change="onCameraEnabledChange"
                 />
-                <span class="att-checkbox-text">限制在地图内</span>
+                <span class="att-checkbox-text">{{ camera.enabled ? '启用' : '禁用' }}</span>
               </label>
+              <button
+                class="att-gear-btn"
+                :class="{ active: showCameraSettings }"
+                :disabled="disabled"
+                title="相机设置"
+                @click="showCameraSettings = !showCameraSettings"
+              >
+                <img :src="iconSettings" alt="相机设置" />
+              </button>
             </div>
-          </div>
-          </div>
-        </div>
 
-        <!-- 物理：重力 / 边界 / 下滑 -->
-        <div class="mi-section" :class="{ open: fold.physics }">
-          <button class="mi-head" :disabled="disabled" @click="fold.physics = !fold.physics">
-            <span class="mi-chevron" />
-            <span class="mi-head-title">物理</span>
-          </button>
-          <div v-if="fold.physics" class="mi-body">
+            <!-- 相机参数：点行尾设置按钮展开；相机未启用时置灰 -->
+            <div v-if="showCameraSettings" class="att-subgroup">
+              <div class="att-row">
+                <span class="att-label">跟随角色</span>
+                <CustomSelect
+                  class="att-select"
+                  :model-value="camera.target"
+                  :options="spriteTargetOptions"
+                  :disabled="disabled || !camera.enabled || spriteTargetOptions.length === 0"
+                  placeholder="暂无角色"
+                  @update:model-value="onCameraTargetChange"
+                />
+              </div>
+
+              <div class="att-row">
+                <span class="att-label">平滑跟随</span>
+                <input
+                  class="att-range"
+                  type="range"
+                  min="0"
+                  max="95"
+                  :value="cameraSmoothingPercent"
+                  :disabled="disabled || !camera.enabled"
+                  @input="onCameraSmoothingChange"
+                />
+                <span class="att-value">{{ cameraSmoothingPercent }}%</span>
+              </div>
+
+              <div class="att-row">
+                <span class="att-label">偏移</span>
+                <div class="att-size-group">
+                  <span class="att-size-label">X</span>
+                  <input
+                    class="att-input att-input-no-spin"
+                    type="number"
+                    :value="camera.offsetX"
+                    :disabled="disabled || !camera.enabled"
+                    @change="onCameraOffsetChange('x', $event)"
+                  />
+                  <span class="att-size-label">Y</span>
+                  <input
+                    class="att-input att-input-no-spin"
+                    type="number"
+                    :value="camera.offsetY"
+                    :disabled="disabled || !camera.enabled"
+                    @change="onCameraOffsetChange('y', $event)"
+                  />
+                </div>
+              </div>
+
+              <div class="att-row">
+                <span class="att-label">边界限制</span>
+                <label class="att-checkbox">
+                  <input
+                    type="checkbox"
+                    :checked="camera.limitBounds"
+                    :disabled="disabled || !camera.enabled"
+                    @change="onCameraLimitChange"
+                  />
+                  <span class="att-checkbox-text">限制在地图内</span>
+                </label>
+              </div>
+            </div>
+
             <div class="att-row">
               <span class="att-label">地图重力</span>
-          <label class="att-checkbox">
-            <input
-              type="checkbox"
-              :checked="mapStore.mapData.gravity"
-              :disabled="disabled"
-              @change="mapStore.updateMapProperty('gravity', ($event.target as HTMLInputElement).checked)"
-            />
-            <span class="att-checkbox-text">启用</span>
-          </label>
+              <label class="att-checkbox">
+                <input
+                  type="checkbox"
+                  :checked="mapStore.mapData.gravity"
+                  :disabled="disabled"
+                  @change="mapStore.updateMapProperty('gravity', ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="att-checkbox-text">{{ mapStore.mapData.gravity ? '启用' : '禁用' }}</span>
+              </label>
+            </div>
+
+            <div class="att-row">
+              <span class="att-label">限制边界</span>
+              <label class="att-checkbox">
+                <input
+                  type="checkbox"
+                  :checked="mapStore.mapData.boundaryCollision"
+                  :disabled="disabled"
+                  @change="mapStore.updateMapProperty('boundaryCollision', ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="att-checkbox-text">{{ mapStore.mapData.boundaryCollision ? '启用' : '禁用' }}</span>
+              </label>
+            </div>
+
+            <div class="att-row">
+              <span class="att-label">禁止下滑</span>
+              <label class="att-checkbox">
+                <input
+                  type="checkbox"
+                  :checked="mapStore.mapData.stopOnSlope"
+                  :disabled="disabled"
+                  @change="mapStore.updateMapProperty('stopOnSlope', ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="att-checkbox-text">{{ mapStore.mapData.stopOnSlope ? '启用' : '禁用' }}</span>
+              </label>
+              <button
+                class="att-gear-btn"
+                :class="{ active: showSlopeSettings }"
+                :disabled="disabled"
+                title="下滑设置"
+                @click="showSlopeSettings = !showSlopeSettings"
+              >
+                <img :src="iconSettings" alt="下滑设置" />
+              </button>
+            </div>
+
+            <!-- 下滑参数：占位选项，功能后续版本实现
+                 参考成熟引擎：坡度上限=Godot floor_max_angle / Unity slopeLimit，
+                 下坡贴地=Godot floor_snap_length，坡上匀速=Godot floor_constant_speed -->
+            <div v-if="showSlopeSettings" class="att-subgroup">
+              <div class="att-row">
+                <span class="att-label">坡度上限</span>
+                <input class="att-input att-input-no-spin" type="number" value="45" disabled />
+                <span class="att-value">度</span>
+              </div>
+
+              <div class="att-row">
+                <span class="att-label">下滑速度</span>
+                <input class="att-range" type="range" min="0" max="100" value="50" disabled />
+                <span class="att-value">50%</span>
+              </div>
+
+              <div class="att-row">
+                <span class="att-label">下坡贴地</span>
+                <label class="att-checkbox">
+                  <input type="checkbox" checked disabled />
+                  <span class="att-checkbox-text">启用</span>
+                </label>
+              </div>
+
+              <div class="att-row">
+                <span class="att-label">坡上匀速</span>
+                <label class="att-checkbox">
+                  <input type="checkbox" disabled />
+                  <span class="att-checkbox-text">禁用</span>
+                </label>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div class="att-row">
-          <span class="att-label">限制边界</span>
-          <label class="att-checkbox">
-            <input
-              type="checkbox"
-              :checked="mapStore.mapData.boundaryCollision"
-              :disabled="disabled"
-              @change="mapStore.updateMapProperty('boundaryCollision', ($event.target as HTMLInputElement).checked)"
-            />
-            <span class="att-checkbox-text">启用</span>
-          </label>
-        </div>
-
-        <div class="att-row">
-          <span class="att-label">禁止下滑</span>
-          <label class="att-checkbox">
-            <input
-              type="checkbox"
-              :checked="mapStore.mapData.stopOnSlope"
-              :disabled="disabled"
-              @change="mapStore.updateMapProperty('stopOnSlope', ($event.target as HTMLInputElement).checked)"
-            />
-            <span class="att-checkbox-text">启用</span>
-          </label>
-          <button
-            class="att-gear-btn"
-            :class="{ active: showSlopeSettings }"
-            :disabled="disabled"
-            title="下滑设置"
-            @click="showSlopeSettings = !showSlopeSettings"
-          >
-            <img :src="iconSettings" alt="下滑设置" />
-          </button>
-        </div>
-
-        <!-- 下滑设置：占位选项，功能后续版本实现
-             参考成熟引擎：坡度上限=Godot floor_max_angle / Unity slopeLimit，
-             下坡贴地=Godot floor_snap_length，坡上匀速=Godot floor_constant_speed -->
-        <div v-if="showSlopeSettings" class="att-subgroup">
-          <div class="att-row">
-            <span class="att-label">坡度上限</span>
-            <input class="att-input att-input-no-spin" type="number" value="45" disabled />
-            <span class="att-value">度</span>
-          </div>
-
-          <div class="att-row">
-            <span class="att-label">下滑速度</span>
-            <input class="att-range" type="range" min="0" max="100" value="50" disabled />
-            <span class="att-value">50%</span>
-          </div>
-
-          <div class="att-row">
-            <span class="att-label">下坡贴地</span>
-            <label class="att-checkbox">
-              <input type="checkbox" checked disabled />
-              <span class="att-checkbox-text">启用</span>
-            </label>
-          </div>
-
-          <div class="att-row">
-            <span class="att-label">坡上匀速</span>
-            <label class="att-checkbox">
-              <input type="checkbox" disabled />
-              <span class="att-checkbox-text">启用</span>
-            </label>
-          </div>
-        </div>
-          </div>
-        </div>
       </div>
 
       <!-- 当前图层属性 -->
@@ -843,12 +1193,12 @@ function onCollisionEnabledChange(enabled: boolean) {
         <!-- 图层：锁定与按类型的图层信息 -->
         <div class="mi-section" :class="{ open: fold.layer }">
           <button class="mi-head" :disabled="disabled" @click="fold.layer = !fold.layer">
-            <span class="mi-chevron" />
+            <img :src="iconChevron" class="mi-chevron" alt="" />
             <span class="mi-head-title">图层</span>
           </button>
           <div v-if="fold.layer" class="mi-body">
         <div class="att-row">
-          <span class="att-label">图层锁定</span>
+          <span class="att-label">锁定</span>
           <label class="att-checkbox">
             <input
               type="checkbox"
@@ -856,8 +1206,106 @@ function onCollisionEnabledChange(enabled: boolean) {
               :disabled="disabled || mapStore.activeLayerIndex < 0"
               @change="onLayerLockChange"
             />
-            <span class="att-checkbox-text">锁定</span>
+            <span class="att-checkbox-text">{{ layerLocked ? '启用' : '禁用' }}</span>
           </label>
+        </div>
+
+        <div class="att-row">
+          <span class="att-label">显示</span>
+          <label class="att-checkbox">
+            <input
+              type="checkbox"
+              :checked="layerVisible"
+              :disabled="disabled || mapStore.activeLayerIndex < 0"
+              @change="onLayerVisibleChange"
+            />
+            <span class="att-checkbox-text">{{ layerVisible ? '启用' : '禁用' }}</span>
+          </label>
+        </div>
+
+        <!-- 渲染：游戏运行窗口是否绘制该图层（编辑器里始终可见） -->
+        <div class="att-row">
+          <span class="att-label">渲染</span>
+          <label class="att-checkbox">
+            <input
+              type="checkbox"
+              :checked="layerRender"
+              :disabled="disabled || mapStore.activeLayerIndex < 0"
+              @change="onLayerRenderChange"
+            />
+            <span class="att-checkbox-text">{{ layerRender ? '启用' : '禁用' }}</span>
+          </label>
+        </div>
+
+        <!-- 视差：后续版本实现，先占位，设置项全部灰色不可用 -->
+        <div class="att-row">
+          <span class="att-label">视差</span>
+          <label class="att-checkbox">
+            <input type="checkbox" disabled />
+            <span class="att-checkbox-text">禁用</span>
+          </label>
+          <button
+            class="att-gear-btn"
+            :class="{ active: showParallaxSettings }"
+            title="视差设置"
+            @click="showParallaxSettings = !showParallaxSettings"
+          >
+            <img :src="iconSettings" alt="视差设置" />
+          </button>
+        </div>
+
+        <!-- 视差参数：点行尾设置按钮展开，占位项全部禁用 -->
+        <div v-if="showParallaxSettings" class="att-subgroup">
+          <div class="att-row">
+            <span class="att-label">视差系数</span>
+            <div class="att-size-group">
+              <span class="att-size-label">X</span>
+              <input class="att-input att-input-no-spin" type="number" value="1" disabled />
+              <span class="att-size-label">Y</span>
+              <input class="att-input att-input-no-spin" type="number" value="1" disabled />
+            </div>
+          </div>
+
+          <div class="att-row">
+            <span class="att-label">跟随相机</span>
+            <label class="att-checkbox">
+              <input type="checkbox" checked disabled />
+              <span class="att-checkbox-text">启用</span>
+            </label>
+          </div>
+
+          <div class="att-row">
+            <span class="att-label">循环滚动</span>
+            <label class="att-checkbox">
+              <input type="checkbox" disabled />
+              <span class="att-checkbox-text">禁用</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Y 轴排序：按图层内物体脚下位置决定前后遮挡（参考 Godot Y Sort），后续版本实现 -->
+        <div class="att-row">
+          <span class="att-label">Y 轴排序</span>
+          <label class="att-checkbox">
+            <input type="checkbox" disabled />
+            <span class="att-checkbox-text">禁用</span>
+          </label>
+        </div>
+
+        <!-- 不透明度：图片图层生效（改的是图片自身透明度），图块/碰撞层后续版本支持 -->
+        <div class="att-row">
+          <span class="att-label">不透明度</span>
+          <input
+            class="att-range"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            :value="layerOpacityPercent"
+            :disabled="disabled || !layerCanOpacity"
+            @input="onLayerOpacityInput"
+          />
+          <span class="att-value">{{ layerOpacityPercent }}%</span>
         </div>
 
         <template v-if="isTileMode">
@@ -880,7 +1328,7 @@ function onCollisionEnabledChange(enabled: boolean) {
                 :disabled="disabled"
                 @change="onCollisionEnabledChange(($event.target as HTMLInputElement).checked)"
               />
-              <span class="att-checkbox-text">启用</span>
+              <span class="att-checkbox-text">{{ collisionEnabledValue ? '启用' : '禁用' }}</span>
             </label>
           </div>
 
@@ -892,13 +1340,6 @@ function onCollisionEnabledChange(enabled: boolean) {
           <div class="att-row">
             <span class="att-label">图块集</span>
             <span class="att-value">{{ tileSetCount }}</span>
-          </div>
-        </template>
-
-        <template v-if="isImageMode">
-          <div class="att-row">
-            <span class="att-label">图片尺寸</span>
-            <span class="att-value">{{ imageSizeText }}</span>
           </div>
         </template>
 
@@ -917,92 +1358,133 @@ function onCollisionEnabledChange(enabled: boolean) {
         </div>
       </div>
 
-      <!-- 图像变换：位置 / 旋转 / 缩放 / 不透明度 -->
+      <!-- 图像变换：位置 / 旋转 / 缩放（不透明度在图层面板的图层属性里） -->
       <div v-if="isImageMode" class="att-group">
         <!-- 变换：图片位置与形态 -->
         <div class="mi-section" :class="{ open: fold.transform }">
           <button class="mi-head" :disabled="disabled" @click="fold.transform = !fold.transform">
-            <span class="mi-chevron" />
+            <img :src="iconChevron" class="mi-chevron" alt="" />
             <span class="mi-head-title">变换</span>
           </button>
           <div v-if="fold.transform" class="mi-body">
-        <div class="att-row">
+        <!-- 位置：X / Y 上下两行，输入框左边缘对齐 -->
+        <div class="att-row att-row-stacked">
           <span class="att-label">位置</span>
-          <div class="att-size-group">
-            <span class="att-size-label">X</span>
-            <input
-              class="att-input att-input-no-spin"
-              type="number"
-              :value="imagePosX"
-              :disabled="disabled || transformDisabled"
-              @change="setImagePosition(0, $event)"
-            />
-            <span class="att-size-label">Y</span>
-            <input
-              class="att-input att-input-no-spin"
-              type="number"
-              :value="imagePosY"
-              :disabled="disabled || transformDisabled"
-              @change="setImagePosition(1, $event)"
-            />
+          <div class="att-axis-group">
+            <div class="att-axis-row">
+              <span class="att-size-label">X</span>
+              <input
+                class="att-input att-input-no-spin"
+                type="number"
+                :value="imagePosX"
+                :disabled="disabled || transformDisabled"
+                @change="setImagePosition(0, $event)"
+              />
+            </div>
+            <div class="att-axis-row">
+              <span class="att-size-label">Y</span>
+              <input
+                class="att-input att-input-no-spin"
+                type="number"
+                :value="imagePosY"
+                :disabled="disabled || transformDisabled"
+                @change="setImagePosition(1, $event)"
+              />
+            </div>
           </div>
         </div>
 
-        <div class="att-row">
+        <!-- 缩放：X / Y 上下两行，Y 下方单独一行勾选「约束比例」（等比缩放） -->
+        <div class="att-row att-row-stacked">
+          <span class="att-label">缩放</span>
+          <div class="att-axis-group">
+            <div class="att-axis-row">
+              <span class="att-size-label">X</span>
+              <input
+                class="att-input att-input-no-spin"
+                type="number"
+                step="1"
+                :value="imageScaleX"
+                :disabled="disabled || transformDisabled"
+                @change="setImageScale('x', $event)"
+              />
+            </div>
+            <div class="att-axis-row">
+              <span class="att-size-label">Y</span>
+              <input
+                class="att-input att-input-no-spin"
+                type="number"
+                step="1"
+                :value="imageScaleY"
+                :disabled="disabled || transformDisabled"
+                @change="setImageScale('y', $event)"
+              />
+            </div>
+            <div class="att-axis-row att-axis-lock">
+              <span class="att-size-label">约束比例</span>
+              <label class="att-checkbox">
+                <input
+                  type="checkbox"
+                  v-model="scaleLocked"
+                  :disabled="disabled || transformDisabled"
+                />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- 旋转：放最后一行，数字框在上、滑条在下（单位就是度，不写 °） -->
+        <div class="att-row att-row-stacked">
           <span class="att-label">旋转</span>
-          <div class="att-size-group">
+          <div class="att-axis-group">
             <input
               class="att-input att-input-no-spin"
               type="number"
+              step="1"
               :value="imageRotation"
               :disabled="disabled || transformDisabled"
               @change="setImageRotation"
             />
-            <span class="att-size-label">°</span>
-          </div>
-        </div>
-
-        <div class="att-row">
-          <span class="att-label">缩放</span>
-          <div class="att-size-group">
-            <span class="att-size-label">X</span>
             <input
-              class="att-input att-input-no-spin"
-              type="number"
-              step="0.1"
-              :value="imageScaleX"
+              class="att-range"
+              type="range"
+              min="-180"
+              max="180"
+              step="1"
+              :value="imageRotation"
               :disabled="disabled || transformDisabled"
-              @change="setImageScale('x', $event)"
-            />
-            <span class="att-size-label">Y</span>
-            <input
-              class="att-input att-input-no-spin"
-              type="number"
-              step="0.1"
-              :value="imageScaleY"
-              :disabled="disabled || transformDisabled"
-              @change="setImageScale('y', $event)"
+              @input="setImageRotation"
             />
           </div>
-        </div>
-
-        <div class="att-row">
-          <span class="att-label">不透明度</span>
-          <input
-            class="att-range"
-            type="range"
-            min="0"
-            max="100"
-            :value="imageOpacityPercent"
-            :disabled="disabled || transformDisabled"
-            @input="setImageOpacity"
-          />
-          <span class="att-value">{{ imageOpacityPercent }}%</span>
         </div>
           </div>
         </div>
       </div>
       </template>
+
+      <!-- 标记管理右键菜单：Teleport 到 body，避免被右栏滚动容器裁剪
+           放在 v-if / v-else 分支之外，避免打断条件分支链 -->
+      <Teleport to="body">
+        <div
+          v-if="markerMenu"
+          ref="markerMenuRef"
+          class="mi-menu"
+          :style="{ left: `${markerMenu.x}px`, top: `${markerMenu.y}px` }"
+        >
+          <button class="mi-menu-item" @click="runMarkerMenu('rename')">重命名</button>
+          <button class="mi-menu-item" @click="runMarkerMenu('focus')">定位到此标记</button>
+          <button class="mi-menu-item" @click="runMarkerMenu('duplicate')">复制标记</button>
+          <div class="mi-menu-sep" />
+          <button class="mi-menu-item" @click="runMarkerMenu('toggle-visible')">
+            {{ menuMarker?.visible === false ? '在地图上显示' : '在地图上隐藏' }}
+          </button>
+          <button class="mi-menu-item" @click="runMarkerMenu('toggle-locked')">
+            {{ menuMarker?.locked === true ? '解锁（允许拖动）' : '锁定（禁止拖动）' }}
+          </button>
+          <div class="mi-menu-sep" />
+          <button class="mi-menu-item mi-menu-danger" @click="runMarkerMenu('delete')">删除标记</button>
+        </div>
+      </Teleport>
     </div>
   </div>
 </template>
@@ -1011,22 +1493,8 @@ function onCollisionEnabledChange(enabled: boolean) {
 .property-panel {
   display: flex;
   flex-direction: column;
-  background: var(--bg-root);
-}
-
-.att-tag-name {
-  text-align: center;
-  color: #9ca0a4;
-  font-size: 12px;
-  height: 44px;
-  line-height: 44px;
-  border-bottom: 1px solid rgb(45, 45, 45);
-  flex-shrink: 0;
-  /* 面板自身滚动时标题常驻，切换图层后始终能看到分区标题 */
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: var(--bg-root);
+  /* 与绘制面板一致：内容区比底部信息栏(--bg-root)略亮，右侧也能分出块 */
+  background: var(--bg-base);
 }
 
 .att-frame {
@@ -1044,10 +1512,11 @@ function onCollisionEnabledChange(enabled: boolean) {
   gap: 12px;
 }
 
+/* 标签与控件之间收紧：标签只有两个字时也不会拉开一大片空白 */
 .att-row {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 10px;
 }
 
 /* 下拉框：固定占满标签右侧剩余宽度，右边缘对齐属性区 */
@@ -1057,24 +1526,26 @@ function onCollisionEnabledChange(enabled: boolean) {
   min-width: 0;
 }
 
-/* 子菜单：相机跟随展开后的设置（缩进 + 左侧竖线，表明从属于上方开关） */
+/* 子菜单：开关开启后展开的从属设置（缩进 + 左侧竖线，表明从属于上方开关） */
 .att-subgroup {
   display: flex;
   flex-direction: column;
   gap: 10px;
   margin-left: 2px;
   padding: 2px 0 2px 12px;
-  border-left: 2px solid rgb(58, 62, 72);
+  border-left: 1px solid rgba(255, 255, 255, 0.09);
 }
 
+/* 标签列：最长的标签是 4 个字，列宽按此收紧，控件左边缘不再离得太远 */
 .att-label {
   color: #9ca0a4;
   font-size: 12px;
-  min-width: 60px;
+  min-width: 50px;
   flex-shrink: 0;
+  white-space: nowrap;
 }
 
-/* 下滑设置齿轮按钮：靠右对齐，hover/展开时用底色高亮提示状态 */
+/* 行尾设置按钮：相机 / 下滑详细参数的入口，hover 与展开时用底色提示状态 */
 .att-gear-btn {
   display: flex;
   align-items: center;
@@ -1141,6 +1612,25 @@ function onCollisionEnabledChange(enabled: boolean) {
   color: white;
 }
 
+/* 输入框 + 下方提示（如重名警告）的纵向容器 */
+.att-field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.att-input-warn {
+  border-color: rgb(140, 70, 60);
+}
+
+.att-warn {
+  font-size: 11px;
+  line-height: 1.2;
+  color: #e08874;
+}
+
 .att-input-no-spin::-webkit-inner-spin-button,
 .att-input-no-spin::-webkit-outer-spin-button {
   -webkit-appearance: none;
@@ -1168,11 +1658,121 @@ function onCollisionEnabledChange(enabled: boolean) {
   width: 100%;
 }
 
-/* 同一行两个数值输入（地图尺寸 / 位置 / 缩放）等分剩余宽度 */
+/* 同一行两个数值输入（地图尺寸等）等分剩余宽度 */
 .att-size-group .att-input {
   flex: 1 1 0;
   width: 100%;
   min-width: 0;
+}
+
+/* 数字框 + 行尾上下箭头（自绘，macOS 上原生箭头不悬停不显示） */
+.att-spin {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  width: 100%;
+  min-width: 0;
+}
+
+.att-spin .att-input {
+  padding-right: 17px;
+}
+
+.att-spin-btns {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  width: 14px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 0 3px 3px 0;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.att-spin-btn {
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+
+.att-spin-btn + .att-spin-btn {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.att-spin-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.att-spin-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 复用分区标题的小箭头，转成上下两个方向 */
+.att-spin-arrow {
+  width: 8px;
+  height: 8px;
+  opacity: 0.75;
+}
+
+.att-spin-arrow.up {
+  transform: rotate(-90deg);
+}
+
+.att-spin-arrow.down {
+  transform: rotate(90deg);
+}
+
+/* X / Y 分两行：标签贴住第一行，两行输入框左边缘对齐 */
+.att-row-stacked {
+  align-items: flex-start;
+}
+
+.att-row-stacked > .att-label {
+  line-height: 24px;
+}
+
+.att-axis-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* 刻度标签与输入框的间距跟「地图尺寸」那一行保持一致（8px） */
+.att-axis-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.att-axis-row .att-input {
+  flex: 1 1 0;
+  width: 100%;
+  min-width: 0;
+}
+
+/* 缩放下方「约束比例」行：文字跟 X / Y 同列，选框紧跟其后 */
+.att-axis-lock {
+  gap: 8px;
+}
+
+/* 旋转滑条：竖排在输入框下方，按自身 3px 高度撑开，不再参与拉伸分配 */
+.att-axis-group .att-range {
+  flex: 0 0 auto;
+  width: 100%;
+  margin: 3px 0 1px;
 }
 
 .att-size-label {
@@ -1206,6 +1806,7 @@ function onCollisionEnabledChange(enabled: boolean) {
   white-space: nowrap;
 }
 
+
 /* 占位控件：禁用态（功能开发中） */
 .att-range {
   flex: 1;
@@ -1222,45 +1823,38 @@ function onCollisionEnabledChange(enabled: boolean) {
   gap: 0;
 }
 
-.mi-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding-bottom: 8px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #d5d8dc;
-}
-
-.mi-title-icon {
-  width: 14px;
-  height: 14px;
-  opacity: 0.9;
-}
-
 .mi-section {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-/* 分区标题：整行可点，右侧小三角指示展开状态 */
+/* 第一块分区不画上分割线，避免紧贴上方标签栏形成多余线条 */
+.att-frame > .att-group:first-child > .mi-section:first-child {
+  border-top: none;
+}
+
+/* 分区标题：整行可点，左侧箭头指示展开状态（参考 Godot / Unity 检视器） */
 .mi-head {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
-  height: 28px;
-  padding: 0 2px;
+  width: calc(100% + 16px);
+  height: 30px;
+  margin: 0 -8px;
+  padding: 0 8px;
   background: transparent;
   border: none;
-  color: #a8adb4;
+  border-radius: 4px;
+  color: #9ea3aa;
   font-size: 12px;
   font-family: inherit;
   text-align: left;
   cursor: default;
+  transition: background 0.12s ease, color 0.12s ease;
 }
 
 .mi-head:hover {
-  color: #d5d8dc;
+  background: rgba(255, 255, 255, 0.045);
+  color: #e2e5e9;
 }
 
 .mi-head:disabled {
@@ -1268,28 +1862,36 @@ function onCollisionEnabledChange(enabled: boolean) {
   cursor: not-allowed;
 }
 
-.mi-chevron {
-  flex-shrink: 0;
-  width: 5px;
-  height: 5px;
-  margin: 0 1px;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: rotate(-45deg);
-  transition: transform 0.15s ease;
+.mi-head:disabled:hover {
+  background: transparent;
+  color: #9ea3aa;
 }
 
-.mi-section.open .mi-chevron {
-  transform: rotate(45deg);
+/* 展开中的分区标题更亮，让"当前展开哪一组"一眼可见 */
+.mi-section.open > .mi-head {
+  color: #d5d8dc;
+}
+
+/* 收起时朝右 >，展开时朝下 v；与帮助面板、素材栏的箭头保持同一套动作 */
+.mi-chevron {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  opacity: 0.5;
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+
+.mi-section.open > .mi-head .mi-chevron {
+  transform: rotate(90deg);
+  opacity: 0.8;
+}
+
+.mi-head:hover .mi-chevron {
+  opacity: 0.9;
 }
 
 .mi-head-title {
   flex: 1;
-}
-
-.mi-head-hint {
-  font-size: 10px;
-  color: #6b7078;
 }
 
 .mi-body {
@@ -1299,20 +1901,88 @@ function onCollisionEnabledChange(enabled: boolean) {
   padding: 2px 0 12px;
 }
 
-/* 半径 / 角度：滑杆 + 数值输入联动 */
-.mi-range-row {
-  gap: 10px;
-}
-
-.mi-range-row .mi-number {
-  width: 56px;
-  flex-shrink: 0;
-  text-align: center;
-}
-
 .mi-actions {
   display: flex;
   gap: 8px;
+}
+
+/* 分区标题右侧的数量（如标记个数） */
+.mi-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 15px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #a7acb4;
+  font-size: 10px;
+  line-height: 1;
+}
+
+/* 标记管理列表：当前地图的全部标记，点一行就选中对应图钉 */
+.mi-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+
+.mi-list-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.mi-list-row:hover { background: rgb(48, 51, 60); }
+.mi-list-row.is-selected {
+  background: rgb(46, 49, 58);
+  border-color: var(--border-light);
+}
+.mi-list-row.is-hidden { opacity: 0.45; }
+.mi-list-row:disabled { opacity: 0.4; }
+
+.mi-list-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #98a0aa;
+}
+.mi-list-row.is-selected .mi-list-dot { background: #ff5252; }
+
+.mi-list-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: #d7dbe1;
+}
+
+.mi-list-coord {
+  flex-shrink: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  color: #8f959d;
+}
+
+.mi-list-empty {
+  padding: 6px 2px;
+  font-size: 11px;
+  color: #7c818a;
 }
 
 .mi-btn {
@@ -1356,6 +2026,76 @@ function onCollisionEnabledChange(enabled: boolean) {
 .mi-btn-danger:hover {
   background: rgba(95, 45, 39, 0.75);
   border-color: rgba(224, 92, 78, 0.5);
+  color: #ffb4ab;
+}
+
+/* 标记管理顶部的类型筛选 */
+.mi-filter {
+  width: 100%;
+}
+
+/* 行内改名：与列表行同高，输入框占满名称位置 */
+.mi-list-row-edit {
+  background: rgb(46, 49, 58);
+  border-color: var(--border-light);
+}
+
+.mi-list-rename {
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  padding: 0 4px;
+  background: rgb(40, 43, 52);
+  border: 1px solid rgb(65, 69, 82);
+  border-radius: 3px;
+  color: #fff;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+}
+
+/* 列表右键菜单：fixed 定位在鼠标处，由 clampMarkerMenu 收进窗口内 */
+.mi-menu {
+  position: fixed;
+  z-index: 3000;
+  min-width: 148px;
+  padding: 4px;
+  background: var(--bg-root);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.mi-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: #cfd3d9;
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.mi-menu-item:hover {
+  background: rgb(61, 64, 72);
+  color: #fff;
+}
+
+.mi-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.mi-menu-danger:hover {
+  background: rgba(95, 45, 39, 0.75);
   color: #ffb4ab;
 }
 </style>

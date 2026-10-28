@@ -3061,6 +3061,7 @@ def load_map(map_name):
                     "name": layer_raw.get("name", "图层"),
                     "type": "drawing",
                     "visible": layer_raw.get("visible", True),
+                    "render": layer_raw.get("render", True),
                     "locked": layer_raw.get("locked", False),
                     "tiles": tiles,
                     "images": layer_raw.get("images", []),
@@ -3091,6 +3092,7 @@ def load_map(map_name):
                     "name": layer_raw.get("name", "图像层"),
                     "type": "image",
                     "visible": layer_raw.get("visible", True),
+                    "render": layer_raw.get("render", True),
                     "locked": layer_raw.get("locked", False),
                     "tiles": {},
                     "images": images,
@@ -3118,6 +3120,7 @@ def load_map(map_name):
                     "name": layer_raw.get("name", "碰撞"),
                     "type": "collision",
                     "visible": layer_raw.get("visible", True),
+                    "render": layer_raw.get("render", True),
                     "locked": layer_raw.get("locked", False),
                     "tiles": {},
                     "images": [],
@@ -3571,6 +3574,9 @@ def _render_map():
     # 遍历所有图层
     for layer_idx, layer in enumerate(_CURRENT_MAP["layers"]):
         if not layer["visible"]:
+            continue
+        # 渲染开关：编辑器里「渲染」未勾选时，游戏运行窗口不绘制该图层
+        if not layer.get("render", True):
             continue
 
         # 碰撞层只参与物理判定，不参与渲染

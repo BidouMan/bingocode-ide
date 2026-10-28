@@ -50,11 +50,33 @@ const cursorCoordText = computed(() => {
   return `${Math.round(toUserX(wx))},${Math.round(toUserY(wy))}`
 })
 
+/** 选中图片图层的图片尺寸：放在画布下方信息栏，属性面板里不再占一行 */
+const imageSizeText = computed(() => {
+  const img = mapStore.selectedImage
+  if (!img) return ''
+  return `图片尺寸:${Math.round(img.width || 0)}×${Math.round(img.height || 0)}`
+})
+
 // ====== 场景标记：选中后由右侧属性面板展示标记检视器 ======
-/** 双击图钉：选中并把焦点交给属性面板的名称输入框 */
+/** 右栏当前页：绘制（颜色）/ 属性。标签常驻，切换只影响内容 */
+const rightTab = ref<'paint' | 'props'>('props')
+
+/** 右侧底部信息栏：描述当前最下方那块面板在做什么，避免和顶部 tab 名字重复 */
+const rightInfoText = computed(() => {
+  if (mapStore.activeMode === 'tile') return '碰撞编辑'
+  return rightTab.value === 'paint' ? '绘制设置' : '地图设置'
+})
+
+/** 双击图钉：切回属性页、选中并把焦点交给属性面板的名称输入框 */
 function onMarkerActivate(id: string) {
+  rightTab.value = 'props'
   mapEditorStore.setSelectedMarkerId(id)
   nextTick(() => propertyPanelRef.value?.focusMarkerName())
+}
+
+/** 标记管理里双击 / 右键定位：把视口居中到该标记 */
+function onFocusMarker(id: string) {
+  mapCanvasRef.value?.centerMarker(id)
 }
 
 const mapCanvasRef = ref<InstanceType<typeof MapCanvas>>()
@@ -82,11 +104,19 @@ function onImageTransformChanged() {
 
 // ====== 图片模式：直接在画布上绘制，颜色面板复用绘制页 ======
 const mapPaint = useMapPaint()
-const paintRightTab = ref<'paint' | 'props'>('paint')
-// 选中绘制工具即进入绘制模式（画布本身不切换）
+// 图片图层且选用了绘制工具时，右栏默认停在颜色页；其它状态默认停在属性页
 const isPainting = computed(() =>
   mapStore.activeMode === 'image' &&
   (mapEditorStore.paintMode === 'vector' || mapEditorStore.imageTool !== 'select')
+)
+
+// 随图层类型切到习惯的默认页：图片图层看颜色，图块等其它状态看属性
+watch(
+  isPainting,
+  (painting) => {
+    rightTab.value = painting ? 'paint' : 'props'
+  },
+  { immediate: true },
 )
 
 // 浮动画布工具条：撤销/重做按当前绘制模式取可用性
@@ -473,43 +503,40 @@ defineExpose({ switchToMap, placeImageResource })
           <div class="map-info-bar">
             <span class="info-spacer" />
             <span class="info-label">场景大小:{{ mapStore.mapData.width * mapStore.mapData.tileSize }}×{{ mapStore.mapData.height * mapStore.mapData.tileSize }}</span>
+            <span v-if="mapStore.activeMode === 'image' && imageSizeText" class="info-label">{{ imageSizeText }}</span>
             <span class="info-label">坐标:{{ cursorCoordText }}</span>
             <span class="info-spacer" />
           </div>
         </div>
       </div>
       <div class="map-editor-right">
-        <template v-if="isPainting">
-          <div class="right-tabs">
-            <button class="right-tab" :class="{ 'right-tab-active': paintRightTab === 'paint' }" @click="paintRightTab = 'paint'">绘制</button>
-            <button class="right-tab" :class="{ 'right-tab-active': paintRightTab === 'props' }" @click="paintRightTab = 'props'">属性</button>
-          </div>
-          <div class="paint-right-body">
-            <PaintColorPanel v-show="paintRightTab === 'paint'" />
-            <PropertyPanel
-              v-show="paintRightTab === 'props'"
-              :disabled="!hasMaps"
-              @transform-changed="onImageTransformChanged"
-            />
-          </div>
-        </template>
-        <template v-else>
+        <!-- 右侧面板常驻「绘制 / 属性」切换：任何工具状态下都显示，结构保持一致 -->
+        <div class="right-tabs">
+          <button class="right-tab" :class="{ 'right-tab-active': rightTab === 'paint' }" @click="rightTab = 'paint'">绘制</button>
+          <button class="right-tab" :class="{ 'right-tab-active': rightTab === 'props' }" @click="rightTab = 'props'">属性</button>
+        </div>
+        <div class="right-body">
+          <PaintColorPanel v-show="rightTab === 'paint'" />
           <PropertyPanel
+            v-show="rightTab === 'props'"
             ref="propertyPanelRef"
             class="right-props"
             :disabled="!hasMaps"
             @transform-changed="onImageTransformChanged"
+            @focus-marker="onFocusMarker"
           />
-          <!-- 图块模式的碰撞编辑器上移，底部保留与画布/图层一致的信息栏 -->
+        </div>
+        <!-- 图块模式的碰撞编辑器上移，底部保留与画布/图层一致的信息栏 -->
+        <template v-if="mapStore.activeMode === 'tile'">
           <TileCollisionPanel
-            v-if="mapStore.activeMode === 'tile'"
             :key="`${mapStore.currentMapPath}-${mapStore.activeLayer?.id ?? -1}`"
             class="right-collision"
           />
-          <div v-if="mapStore.activeMode === 'tile'" class="right-info-bar">
-            <span class="right-info-text">碰撞编辑</span>
-          </div>
         </template>
+        <!-- 底部信息栏常驻，和左侧「图层管理」、画布「坐标」保持同一结构 -->
+        <div class="right-info-bar">
+          <span class="right-info-text">{{ rightInfoText }}</span>
+        </div>
       </div>
     </div>
     <div v-if="!hasMaps" class="map-empty-banner">
@@ -564,20 +591,21 @@ defineExpose({ switchToMap, placeImageResource })
   background: rgb(46, 49, 58);
 }
 
-.paint-right-body {
+/* 右栏内容区：绘制（颜色）与属性共用，常驻在标签栏下方 */
+.right-body {
   flex: 1;
   min-height: 0;
   display: flex;
   overflow: hidden;
 }
 
-.paint-right-body :deep(.color-panel) {
+.right-body :deep(.color-panel) {
   width: 100%;
   height: 100%;
   border-left: none;
 }
 
-.paint-right-body :deep(.property-panel) {
+.right-body :deep(.property-panel) {
   flex: 1;
   overflow-y: auto;
 }
@@ -696,7 +724,9 @@ defineExpose({ switchToMap, placeImageResource })
   justify-content: center;
   height: 30px;
   gap: 20px;
-  background: var(--bg-root);
+  /* 比面板更深一档 + 一条细分隔线，保证是独立的一条信息栏 */
+  background: rgb(26, 28, 33);
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
   flex-shrink: 0;
 }
 
@@ -741,7 +771,9 @@ defineExpose({ switchToMap, placeImageResource })
   justify-content: center;
   height: 30px;
   flex-shrink: 0;
-  background: var(--bg-root);
+  /* 比面板更深一档 + 一条细分隔线，保证是独立的一条信息栏 */
+  background: rgb(26, 28, 33);
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .right-info-text {

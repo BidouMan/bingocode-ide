@@ -30,7 +30,17 @@ export interface MapSaveData {
     limitBounds: boolean
   }
   // 场景标记：世界坐标；引擎 load_map 后可通过 get_marker / get_markers 读取
-  markers?: { id: string; name: string; x: number; y: number; type?: string }[]
+  markers?: {
+    id: string
+    name: string
+    x: number
+    y: number
+    type?: string
+    visible?: boolean
+    locked?: boolean
+    showName?: boolean
+    showCoord?: boolean
+  }[]
 }
 
 export interface LayerSaveData {
@@ -39,6 +49,8 @@ export interface LayerSaveData {
   type: 'tilelayer' | 'imagelayer' | 'collisionlayer'
   visible: boolean
   locked: boolean
+  /** 游戏运行时是否渲染该图层（缺省视为 true） */
+  render?: boolean
   data?: string
   images?: ImageSaveData[]
   resources?: ResourceSaveData[]
@@ -125,7 +137,17 @@ export interface MapLoadData {
     smoothing: number
     limitBounds: boolean
   }
-  markers: { id: string; name: string; x: number; y: number; type: string }[]
+  markers: {
+    id: string
+    name: string
+    x: number
+    y: number
+    type: string
+    visible?: boolean
+    locked?: boolean
+    showName?: boolean
+    showCoord?: boolean
+  }[]
 }
 
 /**
@@ -242,6 +264,7 @@ export function serializeMap(mapData: any): MapSaveData {
       type: layer.type === 'image' ? 'imagelayer' : layer.type === 'collision' ? 'collisionlayer' : 'tilelayer',
       visible: layer.visible,
       locked: layer.locked,
+      render: layer.render !== false,
     }
 
     if (layer.type === 'collision') {
@@ -295,6 +318,10 @@ export function serializeMap(mapData: any): MapSaveData {
       x: Number(m.x) || 0,
       y: Number(m.y) || 0,
       type: typeof m.type === 'string' && m.type.trim() ? m.type : '出生点',
+      visible: m.visible !== false,
+      locked: m.locked === true,
+      showName: m.showName !== false,
+      showCoord: m.showCoord !== false,
     })),
   }
 }
@@ -429,6 +456,7 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
           type: 'image',
           visible: layer.visible,
           locked: layer.locked,
+          render: layer.render !== false,
           image: img,
         })
       })
@@ -442,6 +470,7 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
         type: 'collision',
         visible: layer.visible,
         locked: layer.locked,
+        render: layer.render !== false,
         polygons: (layer.polygons || [])
           .filter(p => Array.isArray(p.points) && p.points.length >= 3)
           .map(p => ({
@@ -461,6 +490,7 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
       type: 'drawing',
       visible: layer.visible,
       locked: layer.locked,
+      render: layer.render !== false,
       tiles: layer.data ? decompressTileData(layer.data, data.width, data.height) : {},
     })
   }
@@ -549,6 +579,10 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
       x: Math.round(Number(m.x) || 0),
       y: Math.round(Number(m.y) || 0),
       type: typeof m.type === 'string' && m.type.trim() ? m.type : '出生点',
+      visible: m.visible !== false,
+      locked: m.locked === true,
+      showName: m.showName !== false,
+      showCoord: m.showCoord !== false,
     })),
   }
 }

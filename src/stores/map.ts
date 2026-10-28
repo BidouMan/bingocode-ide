@@ -28,6 +28,8 @@ interface MapLayerBase {
   name: string
   visible: boolean
   locked: boolean
+  /** 游戏运行时是否绘制该图层（默认 true；关闭后编辑器仍可见，打包运行时不渲染） */
+  render?: boolean
 }
 
 export interface DrawingLayer extends MapLayerBase {
@@ -139,6 +141,14 @@ export interface SceneMarker {
   y: number
   /** 类型：代码里可按类型批量查找（get_markers("敌人")），默认「出生点」 */
   type: string
+  /** 是否在地图上显示（缺省视为显示，兼容旧地图） */
+  visible?: boolean
+  /** 是否锁定位置（锁定后不能拖动，仍可选中） */
+  locked?: boolean
+  /** 图钉下方是否显示名称（缺省显示） */
+  showName?: boolean
+  /** 图钉下方是否显示坐标（缺省显示） */
+  showCoord?: boolean
 }
 
 export interface MapData {
@@ -747,6 +757,28 @@ export const useMapStore = defineStore('map', () => {
     marker.type = type.trim() || '出生点'
   }
 
+  /** 显示 / 隐藏标记（只影响编辑器画面，代码里仍可读） */
+  function setMarkerVisible(id: string, visible: boolean) {
+    const marker = mapData.value.markers.find(m => m.id === id)
+    if (!marker) return
+    marker.visible = visible
+  }
+
+  /** 锁定 / 解锁标记（锁定后不能拖动，仍可选中） */
+  function setMarkerLocked(id: string, locked: boolean) {
+    const marker = mapData.value.markers.find(m => m.id === id)
+    if (!marker) return
+    marker.locked = locked
+  }
+
+  /** 图钉标签的显示项：名称 / 坐标 */
+  function setMarkerLabelVisible(id: string, part: 'name' | 'coord', visible: boolean) {
+    const marker = mapData.value.markers.find(m => m.id === id)
+    if (!marker) return
+    if (part === 'name') marker.showName = visible
+    else marker.showCoord = visible
+  }
+
   /** 移动标记（世界像素坐标） */
   function updateMarkerPosition(id: string, xWorld: number, yWorld: number) {
     const marker = mapData.value.markers.find(m => m.id === id)
@@ -770,6 +802,10 @@ export const useMapStore = defineStore('map', () => {
       x: src.x + 16,
       y: src.y + 16,
       type: src.type,
+      visible: src.visible,
+      locked: src.locked,
+      showName: src.showName,
+      showCoord: src.showCoord,
     }
     mapData.value.markers.push(marker)
     mapEditor.setSelectedMarkerId(marker.id)
@@ -970,6 +1006,9 @@ export const useMapStore = defineStore('map', () => {
     addMarker,
     renameMarker,
     setMarkerType,
+    setMarkerVisible,
+    setMarkerLocked,
+    setMarkerLabelVisible,
     updateMarkerPosition,
     duplicateMarker,
     removeMarker,

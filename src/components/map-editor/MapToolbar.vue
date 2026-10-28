@@ -10,6 +10,8 @@ import CollisionLayerTools from './CollisionLayerTools.vue'
 import iconGrid from '../../assets/icons/显示网格.svg'
 import iconSnapGrid from '../../assets/icons/吸附锚点.svg'
 import iconMarker from '../../assets/icons/标记.svg'
+import iconShow from '../../assets/icons/icon_show.svg'
+import iconHide from '../../assets/icons/icon_hide.svg'
 
 const props = defineProps<{
   disabled?: boolean
@@ -36,6 +38,12 @@ const resourceStore = useResourceStore()
 
 const isImageLayer = computed(() => mapStore.activeMode === 'image')
 const isCollisionLayer = computed(() => mapStore.activeMode === 'collision')
+
+// 有被隐藏的标记时出现「显示隐藏标记」按钮；全部恢复后自动关掉临时显示，避免状态残留
+const hasHiddenMarkers = computed(() => mapStore.mapData.markers.some(m => m.visible === false))
+watch(hasHiddenMarkers, (has) => {
+  if (!has) mapEditorStore.showHiddenMarkers = false
+})
 
 // 碰撞层：当前碰撞体的物理属性与禁用开关
 const activeCollisionPolygon = computed(() => mapStore.activeCollisionPolygon)
@@ -146,6 +154,17 @@ function onToolAreaWheel(e: WheelEvent) {
       @click="mapEditorStore.toggleMarkerPlacing()"
     >
       <img :src="iconMarker" class="toolbar-icon" />
+    </button>
+
+    <!-- 有被隐藏的标记时才出现：临时把它们弱化显示出来，方便重新选中 -->
+    <button
+      v-if="hasHiddenMarkers"
+      class="toolbar-btn"
+      :class="{ 'toolbar-btn-active': mapEditorStore.showHiddenMarkers }"
+      v-tooltip="mapEditorStore.showHiddenMarkers ? '重新隐藏这些标记' : '显示隐藏的标记'"
+      @click="mapEditorStore.toggleShowHiddenMarkers()"
+    >
+      <img :src="mapEditorStore.showHiddenMarkers ? iconHide : iconShow" class="toolbar-icon" />
     </button>
 
     <div class="toolbar-separator" />
