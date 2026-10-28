@@ -124,7 +124,7 @@ const globalFunctions: EngineCompletionItem[] = [
   { label: 'time_passed', kind: CompletionItemKind.Function, insertText: 'time_passed', documentation: '每隔几秒做一件事，就用它。\n比如 time_passed(1) 就是每 1 秒做一次。\n需要暂停、重新计时、只做一次，用 Timer。\n\n用法：if time_passed(1): do_something()', detail: 'time_passed(seconds) -> bool' },
   { label: 'broadcast', kind: CompletionItemKind.Function, insertText: 'broadcast', documentation: '发送全局广播（触发所有接收该事件的回调）\n\nbroadcast("事件名")', detail: 'broadcast(event_name)' },
   { label: 'receive', kind: CompletionItemKind.Function, insertText: 'receive', documentation: '这一帧有没有收到指定广播（不需要写函数，入门写法）\n\nif receive("开始"):\n    ...\n广播发出后的下一帧返回一次 True；要写在 while True 里', detail: 'receive(event_name) -> bool' },
-  { label: 'on_receive', kind: CompletionItemKind.Function, insertText: 'on_receive', documentation: '当收到广播时执行自己写的函数（进阶写法）\n\non_receive("事件名", 函数)\n函数不需要参数；注册一次，写在循环外。\n入门场景可以直接用 if 角色.receive("事件名")', detail: 'on_receive(event_name, callback)' },
+  { label: 'on_receive', kind: CompletionItemKind.Function, insertText: 'on_receive', documentation: '当收到广播时执行自己写的函数（进阶写法）\n\non_receive("事件名", 函数)\n函数不需要参数；注册一次，建议写在循环外。\n同一个事件重复注册会覆盖上一次，写进循环里也不会重复执行。\n入门场景可以直接用 if 角色.receive("事件名")', detail: 'on_receive(event_name, callback)' },
 
   // 游戏控制
   { label: 'pause', kind: CompletionItemKind.Function, insertText: 'pause', documentation: '暂停游戏（loop 仍运行，但精灵停止移动）', detail: 'pause()' },

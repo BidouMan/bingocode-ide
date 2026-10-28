@@ -259,7 +259,7 @@
           "badgeType": "object"
         },
         {
-          "label": "raycast 往前打一条线",
+          "label": "raycast 射线检测",
           "code": "hit = raycast(hero.x, hero.y, \"right\", 200)\nif hit:\n    print(hit.distance, hit.tag)",
           "desc": "从一个点朝一个方向射出一条看不见的线，返回最近碰到的实心地形；没碰到返回 None。\n命中后可以读：hit.distance（多远）、hit.tag（标签）、hit.x / hit.y（命中点坐标）、hit.normal（表面朝向）。\n方向可以写 left / right / up / down 或角度数字（0右 90上）。",
           "badgeType": "function"
@@ -377,7 +377,7 @@
         {
           "label": "on_receive 收到消息时做什么",
           "code": "def 做某件事():\n    hero.show()\n\non_receive(\"消息\", 做某件事)",
-          "desc": "收到广播时执行自己写的函数（进阶写法）。\n将需要做的事情写成自定义函数。\n简单场景直接用 if enemy.receive(\"消息\") 就好。",
+          "desc": "收到广播时执行自己写的函数（进阶写法）。\n将需要做的事情写成自定义函数。\n简单场景直接用 if enemy.receive(\"消息\") 就好。\n同一个事件重复注册会覆盖上一次，写进循环里也不会重复执行。",
           "badgeType": "function"
         },
         {

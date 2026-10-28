@@ -70,10 +70,11 @@ def receive(event_name):
 
 
 def on_receive(event_name, callback):
-    """当收到指定的广播时，执行 callback（Scratch「当接收到」帽子积木同款）"""
-    if event_name not in st._EVENT_LISTENERS:
-        st._EVENT_LISTENERS[event_name] = []
-    st._EVENT_LISTENERS[event_name].append(callback)
+    """当收到指定的广播时，执行 callback（Scratch「当接收到」帽子积木同款）
+
+    同一个事件重复注册会覆盖上一次：写在 while True 里也不会重复执行、越积越多。
+    """
+    st._EVENT_LISTENERS[event_name] = [callback]
 
 
 # ---------- 物理步共用实现 ----------
