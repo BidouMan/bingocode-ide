@@ -2,7 +2,7 @@ import { watch, onBeforeUnmount, type Ref } from 'vue'
 import paper from 'paper'
 import { usePaintStore } from '../../../stores/paint'
 import { rgbaCss } from '../utils/artboardExport'
-import { snapRectOffset, type SnapLines } from '../../../utils/smartSnap'
+import { snapAxisValue, snapRectOffset, type SnapInfo } from '../../../utils/smartSnap'
 import {
   ensurePaintFont,
   PAINT_FONT_FAMILY,
@@ -51,7 +51,7 @@ export interface PaperScopeOptions {
    * 智能吸附（画布像素坐标）：返回候选线/网格/阈值；
    * 返回 null 表示当前不吸附（例如吸附开关关闭或图层旋转）。
    */
-  smartSnap?: () => { lines: SnapLines; grid: number; threshold: number } | null
+  smartSnap?: () => SnapInfo | null
 }
 
 /**
@@ -278,6 +278,85 @@ export function usePaperScope(
       return fn()
     } finally {
       if (wasAttached && r && !r.parent) activeLayer()?.insertChild(0, r)
+    }
+  }
+
+  // ─── 相邻图形抗锯齿缝隙修复（渲染期同色极细描边）───
+
+  /**
+   * Canvas 2D 对每个图形单独抗锯齿：两个填充图形共边时（几何完全对齐也一样），
+   * 交界像素被两侧各分走一半覆盖率，合成后背景透出来，形成一条发丝级缝隙
+   * （Inkscape FAQ 记录的同款渲染现象，与图形数据无关）。
+   * 修复：绘制时给「纯填充」图形临时补一圈与填充同色的极细描边
+   * （宽 = 设备 1px，向外扩 0.5px）——交界像素必被某一侧完整覆盖，缝隙消失。
+   * 只改绘制瞬间的样式并即刻还原：不进 JSON/快照/撤销栈，也不影响包围盒、
+   * 智能吸附与「描边」面板状态。
+   */
+  function collectFillPaths(items: paper.Item[], out: paper.PathItem[]) {
+    for (const item of items) {
+      if (item instanceof scope!.PathItem) {
+        // 半透明填充不补描边：两层同色半透明叠在交界处会更浓，反成一条深线
+        // （不补时该处只是略透背景，与半透明观感一致）
+        if (item.fillColor && !item.strokeColor && item.fillColor.alpha >= 0.98) out.push(item)
+        continue
+      }
+      const children = (item as paper.Group).children
+      if (children) collectFillPaths(children, out)
+    }
+  }
+
+  /**
+   * deviceScale = 本次绘制的 设备像素 / 逻辑像素 倍率（pixelRatio × 视图缩放）。
+   * 低于 0.2 时图形本身已不足 1 设备像素，缝隙不可见（缩略图/远景），跳过省开销。
+   */
+  function withSeamStroke<T>(deviceScale: number, fn: () => T): T {
+    if (!scope || !Number.isFinite(deviceScale) || deviceScale < 0.2) return fn()
+    const targets: paper.PathItem[] = []
+    collectFillPaths(scope.project.layers, targets)
+    if (targets.length === 0) return fn()
+    const saved = targets.map((item) => {
+      // 描边宽随对象自身变换一起缩放（paper 默认 strokeScaling），需按对象矩阵反算，
+      // 否则被放大过的图形描边会跟着变粗，盖到相邻图形上
+      const gm = (
+        item as unknown as { getGlobalMatrix: (dontClone?: boolean) => paper.Matrix }
+      ).getGlobalMatrix(true)
+      const itemScale = Math.sqrt(Math.abs(gm.a * gm.d - gm.b * gm.c)) || 1
+      return {
+        item,
+        stroke: item.strokeColor as paper.Color | null,
+        lineWidth: item.strokeWidth,
+        width: 1 / (deviceScale * itemScale),
+      }
+    })
+    for (const s of saved) {
+      s.item.strokeColor = s.item.fillColor
+      s.item.strokeWidth = s.width
+    }
+    try {
+      return fn()
+    } finally {
+      for (const s of saved) {
+        s.item.strokeColor = s.stroke as paper.Color
+        s.item.strokeWidth = s.lineWidth
+      }
+    }
+  }
+
+  /**
+   * 接管 project 的绘制入口（CanvasView.update 与栅格直绘共用此入口）：
+   * 每次绘制前临时补缝隙描边、绘完还原，显示与导出得到同一结果。
+   */
+  function hookSeamFillRendering(project: paper.Project) {
+    const proj = project as unknown as {
+      draw: (ctx: CanvasRenderingContext2D, matrix: paper.Matrix, pixelRatio: number) => void
+    }
+    const originalDraw = proj.draw
+    proj.draw = function (ctx, matrix, pixelRatio) {
+      const v = matrix.values
+      const matrixScale = Math.sqrt(Math.abs(v[0] * v[3] - v[1] * v[2])) || 1
+      return withSeamStroke(matrixScale * (pixelRatio || 1), () =>
+        originalDraw.call(this, ctx, matrix, pixelRatio)
+      )
     }
   }
 
@@ -3030,8 +3109,22 @@ export function usePaperScope(
     ) {
       hit = null
     }
-    if (hit) {
-      const top = topLevelOf(hit.item)
+    // 点选兜底：地图图片图层带缩放/旋转时 paper 的 hitTest 会漏判（框选却正常），
+    // 这里用与框选完全一致的几何命中再查一次，取图层里最上面的命中对象
+    let hitItem: paper.Item | null = hit?.item ?? null
+    if (!hitItem) {
+      const layer = activeLayer()
+      if (layer) {
+        const r = new scope.Rectangle(p.x - tol, p.y - tol, tol * 2, tol * 2)
+        const rectPath = new scope.Path.Rectangle({ rectangle: r, insert: false })
+        for (const c of layer.children) {
+          if (c === bitmapRaster || !c.visible) continue
+          if (itemHitsRect(c, r, rectPath)) hitItem = c
+        }
+      }
+    }
+    if (hitItem) {
+      const top = topLevelOf(hitItem)
       // 双击 PointText → 进入文字编辑（对齐 Scratch text-tool SELECT_MODE 双击语义）
       if (
         !shift &&
@@ -3074,6 +3167,22 @@ export function usePaperScope(
       box = box ? box.unite(r) : r.clone()
     }
     return box
+  }
+
+  /**
+   * 智能吸附候选：当前选中对象之外的所有对象包围盒（画板逻辑坐标）。
+   * 位图代理不算对象（整帧画布会把候选线撑满画板）；隐藏对象不参与。
+   */
+  function snapCandidateBounds(): { left: number; top: number; right: number; bottom: number }[] {
+    const layer = activeLayer()
+    if (!layer) return []
+    const out: { left: number; top: number; right: number; bottom: number }[] = []
+    for (const item of layer.children) {
+      if (item === bitmapRaster || selected.has(item) || !item.visible) continue
+      const b = item.bounds
+      out.push({ left: b.x, top: b.y, right: b.x + b.width, bottom: b.y + b.height })
+    }
+    return out
   }
 
   function continueSelect(p: { x: number; y: number }, shift: boolean) {
@@ -3134,8 +3243,16 @@ export function usePaperScope(
       const f0 = ss.f
       const c = Math.cos(f0.angle)
       const s = Math.sin(f0.angle)
-      const dx = p.x - ss.anchor.x
-      const dy = p.y - ss.anchor.y
+      // 智能吸附：拖拽锚点时落点就近对齐候选线（仅地图编辑器注入 smartSnap）
+      const snap = options.smartSnap?.() ?? null
+      const sp = snap
+        ? {
+            x: snapAxisValue(p.x, snap.lines.xs, snap.grid, snap.threshold),
+            y: snapAxisValue(p.y, snap.lines.ys, snap.grid, snap.threshold),
+          }
+        : p
+      const dx = sp.x - ss.anchor.x
+      const dy = sp.y - ss.anchor.y
       const pLocal = { x: dx * c + dy * s, y: -dx * s + dy * c }
       const dL = { x: pLocal.x - ss.p0Local.x, y: pLocal.y - ss.p0Local.y }
 
@@ -3698,6 +3815,7 @@ export function usePaperScope(
     // 独立 PaperScope 实例：与全局默认 scope 隔离，卸载时 remove() 彻底释放
     scope = new paper.PaperScope()
     scope.setup(canvas) // canvas 铺满舞台且其上无 transform → setup 读到的 rect 即舞台布局尺寸
+    hookSeamFillRendering(scope.project) // 相邻图形共边抗锯齿缝隙修复（显示/导出共用）
     if (scope.project.layers.length === 0) new scope.Layer()
     scope.project.activeLayer?.activate()
     syncVectorView()
@@ -3913,6 +4031,8 @@ export function usePaperScope(
     resizeArtboard,
     /** 顶栏尺寸输入：按数值修改选中图形尺寸（矢量） */
     resizeSelectionTo,
+    /** 智能吸附候选：选中对象之外的对象包围盒（角色绘制页组装候选线用） */
+    snapCandidateBounds,
     /** 画布尺寸/位图像素变化后重建位图代理（矢量模式显示位图层） */
     refreshBitmapProxy: syncBitmapRaster,
     getFrameRaster,

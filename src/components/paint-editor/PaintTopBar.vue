@@ -16,6 +16,7 @@ import iconLayerUp from '../../assets/icons/上移图层.svg'
 import iconLayerDown from '../../assets/icons/下移图层.svg'
 import iconCurve from '../../assets/icons/曲线.svg'
 import iconStraight from '../../assets/icons/折线.svg'
+import iconSnap from '../../assets/icons/吸附锚点.svg'
 
 const props = defineProps<{
   /** 保存按钮提示（编辑模式为「保存回角色」） */
@@ -219,6 +220,19 @@ function commitSize(axis: 'w' | 'h', e: Event) {
       </button>
       <button class="icon-btn" v-tooltip="'垂直翻转（无选区时翻转整层/整帧）'" @click="emit('flipV')">
         <img :src="iconFlipV" class="icon-sm" draggable="false" />
+      </button>
+      <div class="op-divider"></div>
+      <button
+        class="icon-btn"
+        :class="{ 'icon-btn-active': store.smartSnap }"
+        v-tooltip="
+          store.smartSnap
+            ? '智能吸附已开启（拖动/缩放时对齐画板的边与中心、其它图形的边与中心）'
+            : '智能吸附已关闭（完全自由移动）'
+        "
+        @click="store.toggleSmartSnap()"
+      >
+        <img :src="iconSnap" class="icon-sm" draggable="false" />
       </button>
     </div>
 

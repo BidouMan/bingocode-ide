@@ -16,7 +16,7 @@ import { useTilePainter } from '../../composables/useTilePainter'
 import { usePaperScope } from '../paint-editor/composables/usePaperScope'
 import { createBitmapPen } from '../paint-editor/utils/bitmapPen'
 import { ensurePaintFont } from '../paint-editor/utils/paintFont'
-import { collectSnapLines, snapRectOffset, snapThreshold } from '../../utils/smartSnap'
+import { collectSnapLines, snapAxisValue, snapRectOffset, snapThreshold } from '../../utils/smartSnap'
 import { toUserX, toUserY } from '../../utils/coords'
 import iconMarkerRaw from '../../assets/icons/标记.svg?raw'
 import {
@@ -1360,6 +1360,31 @@ function snapFloatingMove(img: MapImageData) {
   floatXf.cy += (offset.dy * s.canvas.height) / logicalH
 }
 
+/** 绘制选框锚点吸附：拖拽落点的世界坐标就近对齐候选线（旋转/镜像时不吸附） */
+function snapFloatHandlePoint(
+  world: { x: number; y: number },
+  img: MapImageData,
+): { x: number; y: number } {
+  const s = paintSession
+  if (!s) return world
+  if (Math.abs(img.rotation ?? 0) > 1e-3) return world
+  const sx = img.scaleX ?? img.scale ?? 1
+  const sy = img.scaleY ?? img.scale ?? 1
+  if (sx <= 0 || sy <= 0) return world
+  const ts = Math.max(1, mapStore.mapData.tileSize)
+  const lines = collectSnapLines(
+    mapStore.mapData.layers,
+    mapStore.mapData.width * ts,
+    mapStore.mapData.height * ts,
+    s.layerId,
+  )
+  const threshold = snapThreshold(viewport.currentScale.value)
+  return {
+    x: snapAxisValue(world.x, lines.xs, ts, threshold),
+    y: snapAxisValue(world.y, lines.ys, ts, threshold),
+  }
+}
+
 function handleSelectPointerMove(world: { x: number; y: number }, shift: boolean): boolean {
   const s = paintSession
   const img = sessionImage()
@@ -1400,10 +1425,14 @@ function handleSelectPointerMove(world: { x: number; y: number }, shift: boolean
   }
 
   if (floatOp === 'scale') {
+    // 智能吸附：拖拽锚点时落点就近对齐候选线（与选区移动吸附同一套阈值/候选线）
+    const sp = mapEditorStore.smartSnap ? snapFloatHandlePoint(world, img) : world
+    const lp = imageWorldToLocal(img, sp.x, sp.y)
+    const ps = { x: lp.x * s.canvas.width, y: lp.y * s.canvas.height }
     const cos = Math.cos(floatStartXf.angle)
     const sin = Math.sin(floatStartXf.angle)
-    const dx = p.x - scaleAnchorPx.x
-    const dy = p.y - scaleAnchorPx.y
+    const dx = ps.x - scaleAnchorPx.x
+    const dy = ps.y - scaleAnchorPx.y
     const p1Local = { x: dx * cos + dy * sin, y: -dx * sin + dy * cos }
     const dL = { x: p1Local.x - scalePointer0.x, y: p1Local.y - scalePointer0.y }
     // 锚定缩放：对侧边固定，中心移动 Δ/2、半尺寸增加 Δ·dir/2

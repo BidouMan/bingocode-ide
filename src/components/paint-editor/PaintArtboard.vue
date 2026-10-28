@@ -4,6 +4,7 @@ import { usePaintStore, ARTBOARD_MAX } from '../../stores/paint'
 import { useBitmapCanvas } from './composables/useBitmapCanvas'
 import { usePaperScope } from './composables/usePaperScope'
 import { ensurePaintFont } from './utils/paintFont'
+import { snapThreshold, type SnapInfo } from '../../utils/smartSnap'
 import iconUndo from '../../assets/icons/undo.svg'
 import iconRedo from '../../assets/icons/redo.svg'
 import iconZoomOut from '../../assets/icons/reduce-one.svg'
@@ -28,7 +29,7 @@ const {
   getCanvas,
   textEditInput: bitmapTextInput, textEditCommit: bitmapTextCommit,
   penFinish: bitmapPenFinish, penCancel: bitmapPenCancel,
-} = useBitmapCanvas(bitmapCanvas)
+} = useBitmapCanvas(bitmapCanvas, { smartSnap: paintSnapInfo })
 
 // 矢量绘制引擎（paper 场景图/对象操作/多帧 JSON 快照），坐标与位图同源（clientToArtboard）
 const vectorEngine = usePaperScope(vectorCanvas, bitmapCanvas, {
@@ -45,7 +46,28 @@ const vectorEngine = usePaperScope(vectorCanvas, bitmapCanvas, {
     transformFrame: (m) => bitmapTransformFrame(m),
     clearFrame: () => bitmapClear(),
   },
-})
+}, { smartSnap: paintSnapInfo })
+
+/**
+ * 绘制页智能吸附候选：画板边界与中心 + 其它对象的边/中心（与地图编辑器同一套阈值），
+ * 不做网格吸附（角色画板没有网格）；附近没有候选线时由吸附工具兜底为整数像素。
+ */
+function paintSnapInfo(): SnapInfo | null {
+  if (!store.smartSnap) return null
+  const w = store.artboardWidth
+  const h = store.artboardHeight
+  const xs = [0, w / 2, w]
+  const ys = [0, h / 2, h]
+  for (const r of vectorEngine.snapCandidateBounds()) {
+    xs.push(r.left, (r.left + r.right) / 2, r.right)
+    ys.push(r.top, (r.top + r.bottom) / 2, r.bottom)
+  }
+  return {
+    lines: { xs, ys },
+    grid: 0,
+    threshold: snapThreshold(store.zoom),
+  }
+}
 
 /**
  * 合成第 index 帧缩略图（位图层 + 矢量层叠加，高 44px 等比，与位图引擎 updateThumb 同规格）。

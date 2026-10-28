@@ -345,6 +345,7 @@ async function loadSprite(item: { id: string; name: string; path: string }) {
     stopAnimation()
     annoScope.value = 'all'
     activeAnnoLayer.value = 'pivot'
+    cancelMarkerPlacing()
     annoDefaultPivot.value = currentSprite.value.bsf
       ? { ...currentSprite.value.bsf.pivot }
       : null
@@ -539,13 +540,32 @@ function onCanvasMouseDown(e: MouseEvent) {
     panStartY.value = e.clientY
     panStartOffsetX.value = canvasPanX.value
     panStartOffsetY.value = canvasPanY.value
+    return
+  }
+  // 标记放置：左键点一下就在鼠标处落点并退出放置（点已有标记时由标记手柄拦截，不会误加）
+  if (e.button === 0 && markerPlacing.value) {
+    const p = screenToCanvas(e) ?? ghostPoint
+    if (p) {
+      addMarker(p)
+      cancelMarkerPlacing()
+    }
   }
 }
 
 function onCanvasMouseMove(e: MouseEvent) {
-  if (!isPanning.value) return
-  canvasPanX.value = panStartOffsetX.value + (e.clientX - panStartX.value)
-  canvasPanY.value = panStartOffsetY.value + (e.clientY - panStartY.value)
+  if (isPanning.value) {
+    canvasPanX.value = panStartOffsetX.value + (e.clientX - panStartX.value)
+    canvasPanY.value = panStartOffsetY.value + (e.clientY - panStartY.value)
+    return
+  }
+  // 放置中的幽灵图钉跟随鼠标（直接改 DOM 样式，不触发整页重渲染）
+  if (markerPlacing.value) {
+    const p = screenToCanvas(e)
+    if (p) {
+      ghostPoint = p
+      applyGhostPosition()
+    }
+  }
 }
 
 function onCanvasMouseUp(e: MouseEvent) {
@@ -718,6 +738,8 @@ function frameContentCollision(): SpriteCollisionShape {
 }
 
 function activateAnnoLayer(layer: 'pivot' | 'collision' | 'marker') {
+  // 幽灵图钉只在标记图层有效，切到别的图层先退出放置
+  if (layer !== 'marker') cancelMarkerPlacing()
   activeAnnoLayer.value = layer
   if (layer === 'collision') {
     const bsf = currentSprite.value?.bsf
@@ -735,13 +757,11 @@ function activateAnnoLayer(layer: 'pivot' | 'collision' | 'marker') {
     return
   }
   if (layer === 'marker') {
-    const bsf = currentSprite.value?.bsf
-    if (!bsf) return
-    // 首次启用：默认创建一个标记（内容框中心），选中待编辑
-    if (markerNames.value.length === 0) {
-      addMarker()
-    } else if (!selMarkerName.value || !markerNames.value.includes(selMarkerName.value)) {
-      selMarkerName.value = markerNames.value[0]
+    if (!currentSprite.value?.bsf) return
+    // 只切换工具页：没有选中项时落到第一个标记，右侧改名/删除按钮不至于凭空消失。
+    // 放置标记由此面板里的「添加标记」按钮负责，避免同一个按钮既切页又进入放置、语义冲突
+    if (!selMarkerName.value || !markerNames.value.includes(selMarkerName.value)) {
+      selMarkerName.value = markerNames.value[0] ?? null
     }
   }
 }
@@ -845,7 +865,7 @@ function markerHandleStyle(name: string) {
 
 /**
  * 画布标记图钉：直接把 标记.svg 内联为 DOM（fill 换成 currentColor），
- * 颜色由 CSS color 控制（主题绿 / 帧覆盖蓝），不依赖 mask-image 的跨 WebView 支持差异。
+ * 颜色由 CSS color 控制（未选中灰白 / 选中红 / 帧覆盖蓝），不依赖 mask-image 的跨 WebView 支持差异。
  */
 const markerIconSvg = computed(() =>
   iconMarkerRaw
@@ -875,8 +895,18 @@ function onMarkerCoordChange(axis: 'x' | 'y', e: Event) {
   setMarkerPos(selMarkerName.value, axis === 'x' ? { x: v, y: cur.y } : { x: cur.x, y: v })
 }
 
-/** 新增标记：唯一命名 标记 / 标记1 / 标记2 / ...，初值=当前帧内容框中心 */
-function addMarker() {
+/** 当前帧内容框中心（放置幽灵图钉的默认落点） */
+function frameContentCenter(): { x: number; y: number } | null {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return null
+  const f = bsf.frames[annoFrameIndex.value]
+  return f
+    ? { x: Math.round(f.offset.x + f.rect.w / 2), y: Math.round(f.offset.y + f.rect.h / 2) }
+    : { x: Math.round(bsf.canvas.w / 2), y: Math.round(bsf.canvas.h / 2) }
+}
+
+/** 新增标记：唯一命名 标记 / 标记1 / 标记2 / ...；不传坐标时落在当前帧内容框中心 */
+function addMarker(at?: { x: number; y: number }) {
   const bsf = currentSprite.value?.bsf
   if (!bsf) return
   if (!bsf.markers) bsf.markers = {}
@@ -884,12 +914,46 @@ function addMarker() {
   let name = '标记'
   let n = 1
   while (existing.has(name)) { name = `标记${n}`; n++ }
-  const f = bsf.frames[annoFrameIndex.value]
-  const cx = f ? Math.round(f.offset.x + f.rect.w / 2) : Math.round(bsf.canvas.w / 2)
-  const cy = f ? Math.round(f.offset.y + f.rect.h / 2) : Math.round(bsf.canvas.h / 2)
-  bsf.markers[name] = { x: cx, y: cy }
+  const pos = at ?? frameContentCenter()
+  if (!pos) return
+  bsf.markers[name] = { x: pos.x, y: pos.y }
   selMarkerName.value = name
   scheduleSave()
+}
+
+// ====== 标记放置：点「添加标记」后，半透明图钉跟随鼠标，点一下落点并退出 ======
+const markerPlacing = ref(false)
+/** 幽灵图钉的 DOM：位置直接改 style，不走响应式，避免鼠标一动整页重渲染、图钉 SVG 反复重建导致闪烁 */
+const markerGhostEl = ref<HTMLDivElement | null>(null)
+/** 最近一次的落点（画布坐标，普通变量即可） */
+let ghostPoint: { x: number; y: number } | null = null
+
+/** 把幽灵图钉挪到最近落点（首次挂载时顺便显示出来） */
+function applyGhostPosition() {
+  const el = markerGhostEl.value
+  if (!el || !ghostPoint) return
+  // 用 transform 移动（合成层内平移），不触发每帧重排/重绘，避免跟随鼠标时闪烁
+  el.style.transform = `translate3d(${ghostPoint.x}px, ${ghostPoint.y}px, 0)`
+  el.style.opacity = '0.55'
+}
+
+function startMarkerPlacing() {
+  if (!currentSprite.value?.bsf) return
+  markerPlacing.value = true
+  ghostPoint = ghostPoint ?? frameContentCenter()
+  // 等幽灵图钉挂载到 DOM 后再写样式，避免先在左上角闪一下
+  nextTick(applyGhostPosition)
+}
+
+function cancelMarkerPlacing() {
+  markerPlacing.value = false
+  ghostPoint = null
+}
+
+/** 「添加标记」按钮：再点一次可取消放置 */
+function toggleMarkerPlacing() {
+  if (markerPlacing.value) cancelMarkerPlacing()
+  else startMarkerPlacing()
 }
 
 /** 重命名标记：统一值与全部帧覆盖同步改 key；空/重名不生效 */
@@ -1046,6 +1110,8 @@ function onMarkerMouseDown(name: string, e: MouseEvent) {
   if (e.button !== 0) return
   e.stopPropagation()
   e.preventDefault()
+  // 点已有标记时退出放置，避免误加新点
+  if (markerPlacing.value) cancelMarkerPlacing()
   selMarkerName.value = name
   isMarkerDragging.value = true
 }
@@ -1206,6 +1272,8 @@ onMounted(() => {
   document.addEventListener('mouseup', onPivotDragUp)
   document.addEventListener('mousemove', onMarkerDragMove)
   document.addEventListener('mouseup', onMarkerDragUp)
+  // 标记放置中按 Esc 退出（与地图编辑器一致）
+  window.addEventListener('keydown', onEditorKeydown)
   // 首屏：canvas 挂载后按当前帧画一次
   nextTick(redrawSpriteImages)
 })
@@ -1219,7 +1287,12 @@ onBeforeUnmount(() => {
   document.removeEventListener('mouseup', onPivotDragUp)
   document.removeEventListener('mousemove', onMarkerDragMove)
   document.removeEventListener('mouseup', onMarkerDragUp)
+  window.removeEventListener('keydown', onEditorKeydown)
 })
+
+function onEditorKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && markerPlacing.value) cancelMarkerPlacing()
+}
 </script>
 
 <template>
@@ -1414,9 +1487,15 @@ onBeforeUnmount(() => {
           </label>
         </template>
         <template v-else>
-          <!-- 标记：画布点选操作 + 添加/改名/删除 + 坐标 + 作用域 -->
+          <!-- 标记：点「添加标记」后在画布上点一下放置；再点一次或按 Esc 取消 -->
           <div class="props-sep"></div>
-          <button class="preset-btn" type="button" title="添加标记" @click="addMarker">添加</button>
+          <button
+            class="preset-btn"
+            type="button"
+            :class="{ 'is-active': markerPlacing }"
+            title="点一下进入放置，再在画布上点一下放好标记"
+            @click="toggleMarkerPlacing"
+          >添加标记</button>
           <input
             v-if="selMarkerName"
             class="marker-rename-input"
@@ -1433,54 +1512,57 @@ onBeforeUnmount(() => {
             title="删除标记"
             @click="deleteMarker(selMarkerName)"
           >删除</button>
-          <div class="props-sep"></div>
-          <div class="coord-group">
-            <label>X</label>
-            <input
-              class="coord-input"
-              type="number"
-              step="0.5"
-              :value="selMarkerPos ? selMarkerPos.x.toFixed(1) : ''"
-              @change="onMarkerCoordChange('x', $event)"
-            />
-          </div>
-          <div class="coord-group">
-            <label>Y</label>
-            <input
-              class="coord-input"
-              type="number"
-              step="0.5"
-              :value="selMarkerPos ? selMarkerPos.y.toFixed(1) : ''"
-              @change="onMarkerCoordChange('y', $event)"
-            />
-          </div>
-          <div class="props-sep"></div>
-          <button
-            v-if="selMarkerName && hasMarkerOverride(selMarkerName, annoFrameIndex)"
-            class="clear-override-btn"
-            type="button"
-            @click="clearMarkerOverride"
-          >恢复统一</button>
-          <div class="props-sep"></div>
-          <div class="scope-seg">
+          <!-- 选中标记后才有坐标/作用域可调；没有标记时工具栏留空，提示去画布点一下 -->
+          <template v-if="selMarkerName">
+            <div class="props-sep"></div>
+            <div class="coord-group">
+              <label>X</label>
+              <input
+                class="coord-input"
+                type="number"
+                step="0.5"
+                :value="selMarkerPos ? selMarkerPos.x.toFixed(1) : ''"
+                @change="onMarkerCoordChange('x', $event)"
+              />
+            </div>
+            <div class="coord-group">
+              <label>Y</label>
+              <input
+                class="coord-input"
+                type="number"
+                step="0.5"
+                :value="selMarkerPos ? selMarkerPos.y.toFixed(1) : ''"
+                @change="onMarkerCoordChange('y', $event)"
+              />
+            </div>
+            <div class="props-sep"></div>
             <button
+              v-if="hasMarkerOverride(selMarkerName, annoFrameIndex)"
+              class="clear-override-btn"
               type="button"
-              :class="{ on: annoScope === 'all' }"
-              @click="annoScope = 'all'"
-            >全部帧</button>
-            <button
-              type="button"
-              :class="{ on: annoScope === 'one', 'on-blue': annoScope === 'one' }"
-              @click="annoScope = 'one'"
-            >仅当前帧</button>
-          </div>
+              @click="clearMarkerOverride"
+            >恢复统一</button>
+            <div class="props-sep"></div>
+            <div class="scope-seg">
+              <button
+                type="button"
+                :class="{ on: annoScope === 'all' }"
+                @click="annoScope = 'all'"
+              >全部帧</button>
+              <button
+                type="button"
+                :class="{ on: annoScope === 'one', 'on-blue': annoScope === 'one' }"
+                @click="annoScope = 'one'"
+              >仅当前帧</button>
+            </div>
+          </template>
         </template>
       </div>
 
       <div
         ref="canvasRef"
         class="sprite-canvas"
-        :class="{ 'is-panning': isPanning }"
+        :class="{ 'is-panning': isPanning, 'is-marker-placing': markerPlacing }"
         @wheel.prevent="onCanvasWheel"
         @mousedown="onCanvasMouseDown"
         @mousemove="onCanvasMouseMove"
@@ -1541,6 +1623,17 @@ onBeforeUnmount(() => {
                 :disabled="collisionDisabled"
                 @update="onCollisionUpdate"
               />
+              <!-- 放置中的幽灵图钉：位置由 JS 直接改 style（不参与响应式，鼠标移动不会闪烁） -->
+              <div
+                v-if="markerPlacing"
+                ref="markerGhostEl"
+                class="marker-handle is-ghost"
+              >
+                <div class="marker-visual" :style="{ transform: `scale(${1 / canvasZoom})` }">
+                  <div class="marker-icon" v-html="markerIconSvg"></div>
+                  <span class="marker-label">新标记</span>
+                </div>
+              </div>
               <!-- 标记手柄：标记.svg 图钉（图标配色独立于 svg 填充，mask 上色），画布点选/拖拽 -->
               <div
                 v-for="name in (activeAnnoLayer === 'marker' ? markerNames : [])"
@@ -1890,6 +1983,10 @@ onBeforeUnmount(() => {
 .sprite-canvas.is-panning {
   cursor: grabbing;
 }
+/* 标记放置中：十字光标提示"点击落点" */
+.sprite-canvas.is-marker-placing {
+  cursor: crosshair;
+}
 .canvas-center-anchor {
   display: flex;
   align-items: center;
@@ -2107,6 +2204,19 @@ onBeforeUnmount(() => {
   pointer-events: none;
   user-select: none;
 }
+/* 放置预览：默认透明，由 JS 定位后显示；不拦截事件，点画布即落点 */
+.marker-handle.is-ghost {
+  left: 0;
+  top: 0;
+  opacity: 0;
+  pointer-events: none;
+  /* 跟随鼠标时只改 transform，交给合成层处理，不重排不闪 */
+  will-change: transform;
+}
+.marker-handle.is-ghost .marker-icon {
+  pointer-events: none;
+  transition: none;
+}
 /* 标记改名输入框 */
 .marker-rename-input {
   width: 76px;
@@ -2190,6 +2300,16 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .preset-btn:hover { background: var(--bg-hover); border-color: #8a8f98; }
+/* 放置中：按钮保持高亮，提示"正在等你在画布上点一下" */
+.preset-btn.is-active {
+  border-color: #5bfb84;
+  background: rgba(91, 251, 132, 0.12);
+  color: #5bfb84;
+}
+.preset-btn.is-active:hover {
+  background: rgba(91, 251, 132, 0.2);
+  border-color: #5bfb84;
+}
 .clear-override-btn {
   padding: 4px 10px;
   border-radius: 4px;

@@ -10,6 +10,13 @@ export interface SnapLines {
   ys: number[]
 }
 
+/** 一次吸附操作的上下文：候选线 + 网格周期（0=不吸附网格）+ 触发阈值（逻辑坐标） */
+export interface SnapInfo {
+  lines: SnapLines
+  grid: number
+  threshold: number
+}
+
 /** 屏幕像素阈值 → 世界坐标距离 */
 export function snapThreshold(scale: number): number {
   return SMART_SNAP_SCREEN_PX / Math.max(0.1, scale)

@@ -1,5 +1,6 @@
 import { watch, nextTick, onBeforeUnmount, type Ref } from 'vue'
 import { usePaintStore } from '../../../stores/paint'
+import { snapAxisValue, snapRectOffset, type SnapInfo } from '../../../utils/smartSnap'
 import { floodFill } from '../tools/floodFill'
 import { rgbaCss, hexToRgba } from '../utils/artboardExport'
 import { createBitmapPen } from '../utils/bitmapPen'
@@ -30,7 +31,13 @@ const FREE_TOOLS = new Set(['brush', 'eraser'])
  * 与 store.frames 下标对齐。切换帧时 flush（DOM→离屏）/ load（离屏→DOM）；
  * 撤销栈按帧 id 存放在 histMap，切换时随帧交换。
  */
-export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
+export function useBitmapCanvas(
+  canvasRef: Ref<HTMLCanvasElement | undefined>,
+  options?: {
+    /** 智能吸附（画板逻辑坐标）：返回候选线/阈值；返回 null 表示当前不吸附 */
+    smartSnap?: () => SnapInfo | null
+  },
+) {
   const store = usePaintStore()
 
   // ─── 多帧像素与历史（非响应式闭包）───
@@ -1121,6 +1128,26 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     if (selOp === 'move') {
       floatXf.cx = point.x - floatGrab.x
       floatXf.cy = point.y - floatGrab.y
+      // 智能吸附：浮动选区包围盒的边/中心就近对齐候选线（附近无线时兜底整数像素）
+      const snap = options?.smartSnap?.() ?? null
+      const cs = snap ? floatCorners() : []
+      if (snap && cs.length === 4) {
+        const xs = cs.map(c => c.x)
+        const ys = cs.map(c => c.y)
+        const off = snapRectOffset(
+          {
+            left: Math.min(...xs),
+            top: Math.min(...ys),
+            right: Math.max(...xs),
+            bottom: Math.max(...ys),
+          },
+          snap.lines,
+          snap.grid,
+          snap.threshold,
+        )
+        floatXf.cx += off.dx
+        floatXf.cy += off.dy
+      }
       rerenderComposite()
       return
     }
@@ -1138,10 +1165,18 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     }
 
     if (selOp === 'scale') {
+      // 智能吸附：拖拽手柄时落点就近对齐候选线（与移动同一套候选）
+      const snap = options?.smartSnap?.() ?? null
+      const sp = snap
+        ? {
+            x: snapAxisValue(point.x, snap.lines.xs, snap.grid, snap.threshold),
+            y: snapAxisValue(point.y, snap.lines.ys, snap.grid, snap.threshold),
+          }
+        : point
       const cos = Math.cos(opStartXf.angle)
       const sin = Math.sin(opStartXf.angle)
-      const dx = point.x - scaleAnchorW.x
-      const dy = point.y - scaleAnchorW.y
+      const dx = sp.x - scaleAnchorW.x
+      const dy = sp.y - scaleAnchorW.y
       const p1Local = { x: dx * cos + dy * sin, y: -dx * sin + dy * cos }
       const dL = { x: p1Local.x - scaleP0Local.x, y: p1Local.y - scaleP0Local.y }
 

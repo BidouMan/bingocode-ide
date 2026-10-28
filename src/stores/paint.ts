@@ -101,6 +101,15 @@ export const usePaintStore = defineStore('paint', () => {
   const vectorEnabled = ref(true)
   /** 追加模式（为现有角色画新帧）：画板尺寸锁定为目标角色帧尺寸，禁止修改 */
   const sizeForced = ref(false)
+  /**
+   * 智能吸附开关（绘制页）：拖动/缩放选中对象时吸附画板边缘与中心、
+   * 其它对象的边缘与中心；不做网格吸附（角色画板没有网格）。
+   */
+  const smartSnap = ref(true)
+
+  function toggleSmartSnap() {
+    smartSnap.value = !smartSnap.value
+  }
 
   // ─── 选中图形尺寸（顶栏尺寸输入框复用：有选中时显示/编辑图形尺寸）───
   /** 选中图形尺寸（画板逻辑像素，含描边外扩）：两引擎在选框变化时写入；null=无图形选中 */
@@ -308,6 +317,7 @@ export const usePaintStore = defineStore('paint', () => {
     canRedo.value = false
     dirty.value = false
     sizeForced.value = false
+    smartSnap.value = true
     shapeSize.value = null
     liveShapeSize.value = null
     cropMode.value = false
@@ -363,6 +373,8 @@ export const usePaintStore = defineStore('paint', () => {
     dirty,
     vectorEnabled,
     sizeForced,
+    smartSnap,
+    toggleSmartSnap,
     shapeSize,
     liveShapeSize,
     cropMode,
