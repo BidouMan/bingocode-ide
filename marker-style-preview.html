@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>地图标记 · 样式方案</title>
+<style>
+  :root {
+    --bg-page: #13151A;
+    --bg-card: #1C1F26;
+    --bg-card-top: #20242C;
+    --line: rgba(255, 255, 255, 0.07);
+    --line-strong: rgba(255, 255, 255, 0.12);
+    --text: #E7EAEF;
+    --muted: #8A9099;
+    --muted-2: #6B717A;
+    --coral: #FF5F5F;
+    --coral-soft: #FF7C7C;
+    --mint: #5BFB84;
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 28px 24px 96px;
+    background:
+      radial-gradient(1200px 600px at 50% -10%, rgba(91, 251, 132, 0.05), transparent 60%),
+      var(--bg-page);
+    color: var(--text);
+    font-family: 'HarmonyOS Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page-head {
+    max-width: 1360px;
+    margin: 0 auto 22px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+
+  .page-head h1 {
+    margin: 0 0 6px;
+    font-size: 21px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+  }
+
+  .page-head p {
+    margin: 0;
+    max-width: 720px;
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: var(--muted);
+  }
+
+  .legend {
+    flex-shrink: 0;
+    padding: 7px 12px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 11px;
+    color: var(--muted);
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .grid {
+    max-width: 1360px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(470px, 1fr));
+    gap: 18px;
+  }
+
+  .card {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: linear-gradient(180deg, var(--bg-card-top), var(--bg-card));
+    overflow: hidden;
+    cursor: default;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+  }
+
+  .card:hover {
+    border-color: var(--line-strong);
+  }
+
+  .card.picked {
+    border-color: rgba(91, 251, 132, 0.55);
+    box-shadow: 0 0 0 1px rgba(91, 251, 132, 0.18), 0 10px 30px rgba(0, 0, 0, 0.35);
+  }
+
+  .card-head {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 16px 18px 14px;
+  }
+
+  .no {
+    flex-shrink: 0;
+    width: 26px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .card.picked .no {
+    background: rgba(91, 251, 132, 0.12);
+    border-color: rgba(91, 251, 132, 0.4);
+    color: var(--mint);
+  }
+
+  .card-head h2 {
+    margin: 0 0 4px;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+  }
+
+  .card-head p {
+    margin: 0;
+    font-size: 11.5px;
+    line-height: 1.65;
+    color: var(--muted);
+  }
+
+  .scenes {
+    display: flex;
+    border-top: 1px solid var(--line);
+  }
+
+  .scene {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    min-height: 152px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 26px 10px 18px;
+    background:
+      linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px) 0 0 / 28px 28px,
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px) 0 0 / 28px 28px,
+      #1E1E1E;
+  }
+
+  .scene + .scene {
+    border-left: 1px solid var(--line);
+  }
+
+  .state-tag {
+    position: absolute;
+    top: 9px;
+    left: 10px;
+    font-size: 10px;
+    letter-spacing: 0.4px;
+    color: var(--muted-2);
+    user-select: none;
+  }
+
+  .scene.is-sel .state-tag {
+    color: rgba(255, 255, 255, 0.62);
+  }
+
+  .pin-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+  }
+
+  /* ─── 图钉通用 ─── */
+  .pin {
+    width: 36px;
+    height: 36px;
+    display: block;
+    overflow: visible;
+    color: var(--coral);
+    transition: transform 0.18s ease, filter 0.18s ease, color 0.18s ease;
+  }
+
+  /* ─── 标签通用 ─── */
+  .label {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    margin-top: 3px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    font-size: 11px;
+    line-height: 1.15;
+    white-space: nowrap;
+    user-select: none;
+    transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+  }
+
+  .label b { font-weight: 600; }
+  .label span { font-family: var(--mono); font-size: 10px; }
+
+  .label-dark {
+    background: rgba(16, 18, 23, 0.84);
+    border-color: rgba(255, 255, 255, 0.08);
+    color: #E7EAEF;
+  }
+  .label-dark span { color: #9AA0A8; }
+
+  .label-line {
+    background: rgba(16, 18, 23, 0.5);
+    border-color: rgba(255, 255, 255, 0.18);
+    color: #E7EAEF;
+  }
+  .label-line span { color: rgba(231, 234, 239, 0.58); }
+
+  .label-glass {
+    background: rgba(255, 255, 255, 0.09);
+    border-color: rgba(255, 255, 255, 0.18);
+    color: #F2F5F8;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .label-glass span { color: rgba(242, 245, 248, 0.62); }
+
+  .label-plain {
+    background: transparent;
+    padding: 2px 0;
+    border: none;
+    color: #F3F5F8;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+  }
+  .label-plain span { color: rgba(243, 245, 248, 0.62); }
+
+  .label-mint {
+    background: rgba(91, 251, 132, 0.1);
+    border-color: rgba(91, 251, 132, 0.32);
+    color: #D8FFE4;
+  }
+  .label-mint span { color: rgba(91, 251, 132, 0.72); }
+
+  /* ─── 01 实心图钉 ─── */
+  .s1 .pin { fill: var(--coral); filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.45)); }
+  .scene.is-sel .s1 .pin {
+    transform: scale(1.12);
+    transform-origin: 50% 92%;
+    filter: drop-shadow(0 0 1.5px #fff) drop-shadow(0 2px 5px rgba(0, 0, 0, 0.45));
+  }
+  .scene.is-sel .s1 .label {
+    background: var(--coral);
+    border-color: transparent;
+    color: #fff;
+  }
+  .scene.is-sel .s1 .label span { color: rgba(255, 255, 255, 0.78); }
+
+  /* ─── 02 线框图钉 ─── */
+  .s2 .pin {
+    fill: none;
+    stroke: var(--coral);
+    stroke-width: 1.6;
+    filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.4));
+  }
+  .scene.is-sel .s2 .pin {
+    fill: rgba(255, 95, 95, 0.14);
+    stroke-width: 2;
+    transform: scale(1.1);
+    transform-origin: 50% 92%;
+  }
+  .scene.is-sel .s2 .label {
+    border-color: rgba(255, 95, 95, 0.55);
+    background: rgba(38, 22, 24, 0.9);
+  }
+  .scene.is-sel .s2 .label b { color: var(--coral-soft); }
+  .scene.is-sel .s2 .label span { color: rgba(255, 124, 124, 0.62); }
+
+  /* ─── 03 玻璃图钉 ─── */
+  .s3 .pin {
+    fill: rgba(255, 255, 255, 0.16);
+    stroke: rgba(255, 255, 255, 0.55);
+    stroke-width: 1.1;
+    filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.35));
+  }
+  .scene.is-sel .s3 .pin {
+    fill: rgba(255, 95, 95, 0.26);
+    stroke: rgba(255, 138, 138, 0.95);
+    stroke-width: 1.4;
+    transform: scale(1.1);
+    transform-origin: 50% 92%;
+  }
+  .scene.is-sel .s3 .label {
+    background: rgba(255, 255, 255, 0.13);
+    border-color: rgba(255, 138, 138, 0.55);
+  }
+  .scene.is-sel .s3 .label b { color: #FFD9D9; }
+
+  /* ─── 04 圆点光环 ─── */
+  .s4 .pin {
+    color: var(--coral);
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4));
+  }
+  .s4::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -9px;
+    width: 54px;
+    height: 54px;
+    transform: translateX(-50%);
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(255, 95, 95, 0.22), rgba(255, 95, 95, 0.06) 55%, transparent 70%);
+    pointer-events: none;
+  }
+  .scene.is-sel .s4::before {
+    width: 76px;
+    height: 76px;
+    top: -20px;
+    background: radial-gradient(circle, rgba(255, 95, 95, 0.34), rgba(255, 95, 95, 0.09) 52%, transparent 70%);
+  }
+  .scene.is-sel .s4 .pin {
+    transform: scale(1.08);
+  }
+  .scene.is-sel .s4 .label {
+    background: var(--coral);
+    border-color: transparent;
+    color: #fff;
+  }
+  .scene.is-sel .s4 .label span { color: rgba(255, 255, 255, 0.78); }
+
+  /* ─── 05 菱形标记 ─── */
+  .s5 .pin {
+    fill: var(--coral);
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.45));
+  }
+  .scene.is-sel .s5 .pin {
+    fill: var(--coral-soft);
+    stroke: rgba(255, 255, 255, 0.92);
+    stroke-width: 1;
+    transform: scale(1.1);
+    transform-origin: 50% 92%;
+  }
+  .scene.is-sel .s5 .label {
+    background: var(--coral);
+    border-color: transparent;
+    color: #fff;
+  }
+  .scene.is-sel .s5 .label span { color: rgba(255, 255, 255, 0.78); }
+
+  /* ─── 06 圆角徽章 ─── */
+  .s6 .pin {
+    fill: var(--coral);
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.45));
+  }
+  .scene.is-sel .s6 .pin {
+    transform: scale(1.08);
+    transform-origin: 50% 92%;
+    filter: drop-shadow(0 0 1.5px #fff) drop-shadow(0 2px 5px rgba(0, 0, 0, 0.45));
+  }
+  .scene.is-sel .s6 .label {
+    background: var(--coral);
+    border-color: transparent;
+    color: #fff;
+  }
+  .scene.is-sel .s6 .label span { color: rgba(255, 255, 255, 0.78); }
+
+  /* ─── 07 霓虹描边 ─── */
+  .s7 .pin {
+    fill: none;
+    stroke: var(--mint);
+    stroke-width: 1.5;
+    filter: drop-shadow(0 0 5px rgba(91, 251, 132, 0.4));
+  }
+  .scene.is-sel .s7 .pin {
+    fill: rgba(91, 251, 132, 0.12);
+    stroke-width: 2;
+    transform: scale(1.08);
+    transform-origin: 50% 92%;
+    filter: drop-shadow(0 0 8px rgba(91, 251, 132, 0.6));
+  }
+  .scene.is-sel .s7 .label {
+    background: rgba(91, 251, 132, 0.16);
+    border-color: rgba(91, 251, 132, 0.6);
+    color: #EAFFF0;
+  }
+  .scene.is-sel .s7 .label b { color: #BFFFD2; }
+
+  /* ─── 08 极简白针 ─── */
+  .s8 .pin {
+    fill: #F5F7FA;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+  }
+  .scene.is-sel .s8 .pin {
+    fill: #FFFFFF;
+    stroke: var(--coral);
+    stroke-width: 1.1;
+    transform: scale(1.12);
+    transform-origin: 50% 92%;
+    filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.5));
+  }
+  .scene.is-sel .s8 .label { padding: 2px 0; border-color: transparent; }
+  .scene.is-sel .s8 .label b { color: var(--coral-soft); }
+  .scene.is-sel .s8 .label span { color: rgba(255, 124, 124, 0.7); }
+
+  /* ─── 09 双环靶心 ─── */
+  .s9 .pin {
+    color: var(--coral);
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4));
+  }
+  .scene.is-sel .s9 .pin {
+    color: var(--coral-soft);
+    transform: scale(1.1);
+    filter: drop-shadow(0 0 6px rgba(255, 95, 95, 0.35));
+  }
+  .scene.is-sel .s9 .label {
+    background: var(--coral);
+    border-color: transparent;
+    color: #fff;
+  }
+  .scene.is-sel .s9 .label span { color: rgba(255, 255, 255, 0.78); }
+
+  /* ─── 10 小旗标 ─── */
+  .s10 .pin {
+    color: var(--coral);
+    filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.4));
+  }
+  .scene.is-sel .s10 .pin {
+    color: var(--coral-soft);
+    transform: scale(1.08);
+    transform-origin: 50% 92%;
+    filter: drop-shadow(0 0 1.5px rgba(255, 255, 255, 0.9)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4));
+  }
+  .scene.is-sel .s10 .label {
+    background: var(--coral);
+    border-color: transparent;
+    color: #fff;
+  }
+  .scene.is-sel .s10 .label span { color: rgba(255, 255, 255, 0.78); }
+
+  /* ─── 底部已选提示 ─── */
+  .pickbar {
+    position: fixed;
+    left: 50%;
+    bottom: 22px;
+    transform: translate(-50%, 20px);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 16px;
+    border-radius: 999px;
+    border: 1px solid rgba(91, 251, 132, 0.35);
+    background: rgba(24, 28, 36, 0.94);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+    font-size: 12px;
+    color: var(--muted);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+  }
+
+  .pickbar.show {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+
+  .pickbar b {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--mint);
+    font-weight: 600;
+  }
+
+  .pickbar em {
+    font-style: normal;
+    color: var(--muted-2);
+  }
+
+  @media (max-width: 520px) {
+    body { padding: 18px 12px 90px; }
+    .scenes { flex-direction: column; }
+    .scene + .scene { border-left: none; border-top: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+
+<!-- 复用图形定义 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="pin" viewBox="0 0 24 24">
+      <path fill-rule="evenodd" d="M12 2.2c-4.2 0-7.6 3.4-7.6 7.6 0 5.2 7.6 11.6 7.6 11.6s7.6-6.4 7.6-11.6c0-4.2-3.4-7.6-7.6-7.6zM12 6.85a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/>
+    </symbol>
+    <symbol id="pinOuter" viewBox="0 0 24 24">
+      <path d="M12 2.2c-4.2 0-7.6 3.4-7.6 7.6 0 5.2 7.6 11.6 7.6 11.6s7.6-6.4 7.6-11.6c0-4.2-3.4-7.6-7.6-7.6z"/>
+    </symbol>
+    <symbol id="dotHalo" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="7.2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <circle cx="12" cy="12" r="2.7" fill="currentColor"/>
+    </symbol>
+    <symbol id="diamond" viewBox="0 0 24 24">
+      <path d="M12 2.6 19.4 10.8 12 21.4 4.6 10.8Z"/>
+    </symbol>
+    <symbol id="badge" viewBox="0 0 24 24">
+      <rect x="4.2" y="3.4" width="15.6" height="13.4" rx="4.6"/>
+      <path d="M9.4 16.2h5.2L12 20.8Z"/>
+      <circle cx="12" cy="10.1" r="2.35" fill="#fff" fill-opacity="0.95"/>
+    </symbol>
+    <symbol id="target" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="8.2" fill="none" stroke="currentColor" stroke-width="1.1"/>
+      <circle cx="12" cy="12" r="4.7" fill="none" stroke="currentColor" stroke-width="1.1" opacity="0.6"/>
+      <circle cx="12" cy="12" r="1.7" fill="currentColor"/>
+    </symbol>
+    <symbol id="flag" viewBox="0 0 24 24">
+      <path d="M7.6 3.4v17.4" fill="none" stroke="#E9EDF2" stroke-width="1.7" stroke-linecap="round"/>
+      <path d="M7.6 4.2c3.3-1.5 6.1 1.1 9.4-0.1v6.2c-3.3 1.2-6.1-1.4-9.4 0.1z"/>
+    </symbol>
+  </defs>
+</svg>
+
+<header class="page-head">
+  <div>
+    <h1>地图标记 · 样式方案</h1>
+    <p>每种方案都给出「未选中 / 选中」两种状态，名称与坐标固定显示在标记下方。点击任意卡片即可记下你的选择。</p>
+  </div>
+  <div class="legend">深色地图背景 · 预览放大 1.35×</div>
+</header>
+
+<main class="grid">
+
+  <!-- 01 -->
+  <section class="card" data-no="01">
+    <div class="card-head">
+      <span class="no">01</span>
+      <div>
+        <h2>实心图钉</h2>
+        <p>经典造型的精修版：纯色、清晰边缘、一层很轻的投影，不用发光，不会糊。</p>
+      </div>
+    </div>
+    <div class="scenes">
+      <div class="scene">
+        <span class="state-tag">未选中</span>
+        <div class="pin-wrap s1">
+          <svg class="pin" viewBox="0 0 24 24"><use href="#pin"/></svg>
+          <div class="label label-dark"><b>出生点</b><span>(100,200)</span></div>
+        </div>
+      </div>
+      <div class="scene is-sel">
+        <span class="state-tag">选中</span>
+        <div class="pin-wrap s1">
+          <svg class="pin" viewBox="0 0 24 24"><use href="#pin"/></svg>
+          <div class="label label-dark"><b>出生点</b><span>(100,200)</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 02 -->
+  <section class="card" data-no="02">
+    <div class="card-head">
+      <span class="no">02</span>
+      <div>
+        <h2>线框图钉</h2>
+        <p>只有描边没有填充，轻量通透；选中时加一层淡淡的面色，存在感刚好。</p>
+      </div>
+    </div>
+    <div class="scenes">
+      <div class="scene">
+        <span class="state-tag">未选中</span>
+        <div class="pin-wrap s2">
+          <svg class="pin" viewBox="0 0 24 24"><use href="#pinOuter"/></svg>
+          <div class="label label-line"><b>出生点</b><span>(100,200)</span></div>
+        </div>
+      </div>
+      <div class="scene is-sel">
+        <span class="state-tag">选中</span>
+        <div class="pin-wrap s2">
+          <svg class="pin" viewBox="0 0 24 24"><use href="#pinOuter"/></svg>
+          <div class="label label-line"><b>出生点</b><span>(100,200)</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 03 -->
+  <section class="card" data-no="03">
+    <div class="card-head">
+      <span class="no">03</span>
+      <div>
+        <h2>玻璃图钉</h2>
+        <p>半透明磨砂质感，白色细描边；标签也做磨砂，和地图融合得更自然。</p>
+      </div>
+    </div>
+    <div class="scenes">
+      <div class="scene">
+        <span class="state-tag">未选中</span>
+        <div class="pin-wrap s3">
+          <svg class="pin" viewBox="0 0 24 24"><use href="#pin"/></svg>
+          <div class="label label-glass"><b>出生点</b><span>(100,200)</span></div>
+        </div>
+      </div>
+      <div class="scene is-sel">
+        <span class="state-tag">选中</span>
+        <div class="pin-wrap s3">
+          <svg class="pin" viewBox="0 0 24 24"><use href="#pin"/></svg>
+          <div class="label label-glass"><b>出生点</b><span>(100,200)</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 04 -->
+  <section class="card" data-no="04">
+    <div class="card-head">
+      <span class="no">04</span>
+      <div>
+        <h2>圆点光环</h2>
+        <p>放弃图钉，用圆环 + 圆点 + 很淡的光晕，像地图 APP 的定位点，干净现代。</p>
+      </div>
+    </div>
+    <div class="scenes">
+      <div class="scene">
+        <span class="state-tag">未选中</span>
+        <div class="pin-wrap s4">
+          <svg class="pin" viewBox="0 0 24 24"><use href="#dotHalo"/></svg>
+          <div class="label label-dark"><b>出生点</b><span>(100,200)</span></div>
+        </div>
+      </div>
+      <div class="scene is-sel">
+        <span class="state-tag">选中</span>
+        <div class="pin-wrap s4">
+          <svg class="pin" viewBox="0 0 24 24"><use href="#dotHalo"/></svg>
+          <div class="label label-dark"><b>出生点</b><span>(100,200)</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 05 -->
+  <section class="card" data-no="05">
+    <div class="card-head">
+      <span class="no">05</span>
+      <div>
+        <h2>菱形标记</h2>
+        <p>菱形比图钉更简约，尖端仍然精准指坐标；选中加白描边，显得利落。</p>
+      </div>
+    </div>
+    <div class="scenes">
+      <div class="scene">
+        <span class="state-tag">未选中</span>
+        <div class="pin-wrap s5">
+          <svg class="pin" viewBox="0 0 24 24"><use href="#diamond"/></svg>
+          <div class="label label-dark"><b>出生点</b><span>(100,200)</span></div>
+        </div>
+      </div>
+      <div class="scene is-sel">
+        <span class="state-tag">选中</span>
+        <div class="pin-wrap s5">
+          <svg class="pin" viewBox="0 0 24 24"><use href="#diamond"/></svg>
+          <div class="label label-dark"><b>出生点</b><span>(100,200)</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 06 -->
+  <section class="card" data-no="06">
+    <div class="card-head">
+      <span class="no">06</span>
+      <div>
+        <h2>圆角徽章</h2>
+        <p>圆角方块加一个小尖脚，中间留白点；比传统图钉更「几何」，适合低龄用户。</p>
+      </div>
+    </div>
+    <div class="scenes">
+      <div class="scene">
+        <span class="state-tag">未选中</span>
+        <div class="pin-wrap s6">
+          <svg class="pin" viewBox="0 0 24 24"><use href="#badge"/></svg>
+          <div class="label label-dark"><b>出生点</b><span>(100,200)</span></div>
+        </div>
+      </div>
+      <div class="scene is-sel">
+        <span class="state-tag">选中</span>
+        <div class="pin-wrap s6">
+          <svg class="pin" viewBox="0 0 24 24"><use href="#badge"/></svg>
+          <div class="label label-dark"><b>出生点</b><span>(100,200)</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 07 -->
+  <section class="card" data-no="07">
+    <div class="card-head">
+      <span class="no">07</span>
+      <div>
+        <h2>霓虹描边</h2>
+        <p>薄荷绿细线 + 克制的光晕，和 IDE 的强调色一致；深色地图上最「科技感」。</p>
+      </div>
+    </div>
+    <div class="scenes">
+      <div class="scene">
+        <span class="state-tag">未选中</span>
+        <div class="pin-wrap s7">
+          <svg class="pin" viewBox="0 0 24 24"><use href="#pinOuter"/></svg>
+          <div class="label label-mint"><b>出生点</b><span>(100,200)</span></div>
+        </div>
+      </div>
+      <div class="scene is-sel">
+        <span class="state-tag">选中</span>
+        <div class="pin-wrap s7">
+          <svg class="pin" viewBox="0 0 24 24"><use href="#pinOuter"/></svg>
+          <div class="label label-mint"><b>出生点</b><span>(100,200)</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 08 -->
+  <section class="card" data-no="08">
+    <div class="card-head">
+      <span class="no">08</span>
+      <div>
+        <h2>极简白针</h2>
+        <p>纯白图钉 + 镂空圆点，几乎不带颜色，任何地图上都清楚；选中才点一点红。</p>
+      </div>
+    </div>
+    <div class="scenes">
+      <div class="scene">
+        <span class="state-tag">未选中</span>
+        <div class="pin-wrap s8">
+          <svg class="pin" viewBox="0 0 24 24"><use href="#pin"/></svg>
+          <div class="label label-plain"><b>出生点</b><span>(100,200)</span></div>
+        </div>
+      </div>
+      <div class="scene is-sel">
+        <span class="state-tag">选中</span>
+        <div class="pin-wrap s8">
+          <svg class="pin" viewBox="0 0 24 24"><use href="#pin"/></svg>
+          <div class="label label-plain"><b>出生点</b><span>(100,200)</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 09 -->
+  <section class="card" data-no="09">
+    <div class="card-head">
+      <span class="no">09</span>
+      <div>
+        <h2>双环靶心</h2>
+        <p>三层同心圆，中心一个小点；不用图钉也能精确定位，最像「坐标记号」。</p>
+      </div>
+    </div>
+    <div class="scenes">
+      <div class="scene">
+        <span class="state-tag">未选中</span>
+        <div class="pin-wrap s9">
+          <svg class="pin" viewBox="0 0 24 24"><use href="#target"/></svg>
+          <div class="label label-dark"><b>出生点</b><span>(100,200)</span></div>
+        </div>
+      </div>
+      <div class="scene is-sel">
+        <span class="state-tag">选中</span>
+        <div class="pin-wrap s9">
+          <svg class="pin" viewBox="0 0 24 24"><use href="#target"/></svg>
+          <div class="label label-dark"><b>出生点</b><span>(100,200)</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10 -->
+  <section class="card" data-no="10">
+    <div class="card-head">
+      <span class="no">10</span>
+      <div>
+        <h2>小旗标</h2>
+        <p>旗杆 + 旗面，辨识度最高；像插在地图上的一面旗，适合「这里是重点位置」。</p>
+      </div>
+    </div>
+    <div class="scenes">
+      <div class="scene">
+        <span class="state-tag">未选中</span>
+        <div class="pin-wrap s10">
+          <svg class="pin" viewBox="0 0 24 24"><use href="#flag"/></svg>
+          <div class="label label-dark"><b>出生点</b><span>(100,200)</span></div>
+        </div>
+      </div>
+      <div class="scene is-sel">
+        <span class="state-tag">选中</span>
+        <div class="pin-wrap s10">
+          <svg class="pin" viewBox="0 0 24 24"><use href="#flag"/></svg>
+          <div class="label label-dark"><b>出生点</b><span>(100,200)</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div class="pickbar" id="pickbar">
+  已选方案 <b id="picked">—</b>
+  <em>把编号告诉我就行</em>
+</div>
+
+<script>
+  const cards = Array.from(document.querySelectorAll('.card'))
+  const pickbar = document.getElementById('pickbar')
+  const picked = document.getElementById('picked')
+
+  cards.forEach((card) => {
+    card.addEventListener('click', () => {
+      cards.forEach((c) => c.classList.remove('picked'))
+      card.classList.add('picked')
+      picked.textContent = card.dataset.no
+      pickbar.classList.add('show')
+    })
+  })
+</script>
+</body>
+</html>
