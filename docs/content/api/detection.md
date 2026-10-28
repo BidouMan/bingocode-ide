@@ -136,22 +136,32 @@ if hero.is_blocked("down", 8):
 | `direction` | 字符串/数字 | `"left"` / `"right"` / `"up"` / `"down"`，也接受 `左/右/上/下` 或角度数字（0 右、90 上、180 左、270 下） |
 | `distance` | 数字（可选） | 往前探多远，默认 2 像素 |
 
-### raycast — 从一点打一条射线
+### raycast / hero.raycast — 打一条射线
 
 ```python
-hit = raycast(hero.x, hero.y, "right", 200)
+# 从角色所在点出发（最常用）
+hit = hero.raycast("right", 200)
 if hit:
     print("前方", hit.distance, "像素有东西，标签：", hit.tag)
     print("命中点：", hit.x, hit.y)
+
+# 沿角色当前朝向
+hit = hero.raycast(hero.angle, 300)
+
+# 从任意点出发（鼠标、标记、预测位置）
+hit = raycast(mouse.x, mouse.y, "down", 50)
 ```
 
-从用户坐标 `(x, y)` 朝一个方向射出看不见的线，返回最近碰到的实心地形；没碰到返回 `None`。
+朝一个方向射出看不见的线，返回最近碰到的实心地形；没碰到返回 `None`。
+
+- `hero.raycast(direction, distance=1000)`：起点是角色位置（和 `goto` / `look_at` 用的是同一个点）
+- `raycast(x, y, direction, distance=1000)`：起点是任意用户坐标点
 
 适合做瞄准、视线遮挡、落地预测、探测器。
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
-| `x` / `y` | 数字 | 起点（用户坐标：地图左下角为原点，y 向上） |
+| `x` / `y` | 数字 | 仅全局版需要：起点（用户坐标：地图左下角为原点，y 向上） |
 | `direction` | 字符串/数字 | 同 `is_blocked` 的方向写法 |
 | `distance` | 数字（可选） | 射线长度，默认 1000 像素 |
 

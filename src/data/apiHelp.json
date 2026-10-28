@@ -260,9 +260,9 @@
         },
         {
           "label": "raycast 射线检测",
-          "code": "hit = raycast(hero.x, hero.y, \"right\", 200)\nif hit:\n    print(hit.distance, hit.tag)",
-          "desc": "从一个点朝一个方向射出一条看不见的线，返回最近碰到的实心地形；没碰到返回 None。\n命中后可以读：hit.distance（多远）、hit.tag（标签）、hit.x / hit.y（命中点坐标）、hit.normal（表面朝向）。\n方向可以写 left / right / up / down 或角度数字（0右 90上）。",
-          "badgeType": "function"
+          "code": "hit = hero.raycast(\"right\", 200)\nif hit:\n    print(hit.distance, hit.tag)",
+          "desc": "从角色位置朝一个方向射出一条看不见的线，返回最近碰到的实心地形；没碰到返回 None。\n命中后可以读：hit.distance（多远）、hit.tag（标签）、hit.x / hit.y（命中点坐标）、hit.normal（表面朝向）。\n方向可以写 left / right / up / down 或角度数字（0右 90上）。\n从任意点（鼠标、标记）发射用全局 raycast(x, y, 方向, 距离)。",
+          "badgeType": "object"
         },
         {
           "label": "is_touch_edge 碰到边框了吗",

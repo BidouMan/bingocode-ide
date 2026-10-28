@@ -8,7 +8,7 @@ from models.static_index import SENSOR_EPS
 from collision_geometry import _aabb_polygon_mtv, _image_collision_world_polygons, _playable_bounds, _shape_convex_parts, _sign
 from input_api import mouse
 from map_runtime import _find_tileset_for_gid
-from markers import _parse_direction_world
+from markers import _parse_direction_world, raycast as _raycast
 import engine_state as st
 
 
@@ -864,6 +864,20 @@ class SpritePhysicsMixin:
         if self._is_deleted:
             return False
         return bool(self._contacts & self._CONTACT_UP)
+
+
+    def raycast(self, direction, distance=1000):
+        """从角色所在点（x/y，和 goto/look_at 用的是同一个点）朝一个方向打射线。
+
+        参数与全局 raycast 完全一致，命中返回 RaycastHit，没打中返回 None：
+            hero.raycast("right", 200)      # 从角色位置向右探 200 像素
+            hero.raycast(hero.angle, 300)   # 沿角色当前朝向
+        起点就是角色位置（不是碰撞盒边缘）；角色已删除时返回 None。
+        需要从任意点（鼠标、标记）发射时用全局 raycast(x, y, 方向, 距离)。
+        """
+        if self._is_deleted:
+            return None
+        return _raycast(self.x, self.y, direction, distance)
 
 
     def is_on_ground(self):
