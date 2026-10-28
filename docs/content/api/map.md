@@ -62,6 +62,20 @@ for m in map.get_markers():
 
 > 也可以直接调用全局的 `get_marker("出生点")` / `get_markers("敌人")`，效果相同。
 
+## 地形查询
+
+### map.is_solid — 这个点是不是实心
+
+```python
+map = load_map("我的地图")
+
+if map.is_solid(x, y):
+    hero.say("这里有地面")
+```
+
+检查用户坐标点是否被实心地形占据（形状层「阻挡 / 阻挡 + 感应」、图像碰撞、实心图块）。感应区域不算；跳板算实心。
+坐标和角色的 `x / y` 一致：地图左下角为原点，y 向上。
+
 ## 摄像机
 
 ### camera_follow — 镜头跟随

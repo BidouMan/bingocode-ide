@@ -429,30 +429,7 @@ enemy2.add_to_group("enemies")
 
 ### on_touch_group — 碰到时自动执行
 
-先让要被碰到的角色加入组，再给主动的一方注册一次：
-
-```python
-enemy.add_to_group("enemies")   # 敌人进组（不写这句永远不会触发）
-bullet.on_touch_group("enemies")        # 子弹碰到 enemies 组的人 → 双方自动消失
-```
-
-`on_touch_group("enemies")` 不传第二个参数时，引擎默认执行 `bullet.delete()` + `敌人.delete()`，不需要你再写判断。对同一个角色注册一次即可；如果子弹是每次新建的，就在新建后各注册一次。
-
-想自己决定碰到后发生什么，传入一个函数（参数为：自己、碰到的精灵）；传了函数后引擎不再自动删除：
-
-```python
-def 子弹碰到敌人(子弹, 敌人):
-    敌人.delete()
-    子弹.delete()
-    broadcast("得分+1")
-
-bullet.on_touch_group("enemies", 子弹碰到敌人)
-```
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `group` | 字符串 | 组名，对方必须先用 `add_to_group("组名")` 加入 |
-| `callback` | 函数（可选） | 碰到时执行；不写则默认双方自动消失 |
+属于「事件」类 API（注册一次、引擎每帧自动检测，可在条件满足时自动执行你的函数），完整说明见 [事件](events.md)。
 
 ## 完整示例
 
