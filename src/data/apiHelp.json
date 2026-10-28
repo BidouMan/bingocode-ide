@@ -473,14 +473,26 @@
       "funcs": [
         {
           "label": "load_map 加载地图",
-          "code": "load_map(\"我的地图\")",
-          "desc": "把一张地图显示在画面上。地图需要先在左边的资源管理器里添加好，然后写上名字就行。",
+          "code": "map = load_map(\"我的地图\")",
+          "desc": "把一张地图显示在画面上，并返回地图对象。地图需要先在左边的资源管理器里添加好，然后写上名字就行。",
           "badgeType": "function"
         },
         {
           "label": "camera_follow 镜头跟随",
           "code": "camera_follow(hero)",
           "desc": "让摄像机（画面的\"眼睛\"）跟着某个角色移动。用了之后画面就会跟着角色走。",
+          "badgeType": "function"
+        },
+        {
+          "label": "get_marker 获取标记",
+          "code": "map = load_map(\"我的地图\")\npos = map.get_marker(\"出生点\")\nplayer.goto(pos)",
+          "desc": "按名字拿到地图编辑器里放的图钉。可以直接交给 goto 把角色放过去，也能读 pos.x / pos.y。找不到时返回 None。",
+          "badgeType": "function"
+        },
+        {
+          "label": "get_markers 获取一组标记",
+          "code": "for m in map.get_markers(\"敌人\"):\n    enemy = Sprite(\"史莱姆\")\n    enemy.goto(m)",
+          "desc": "按类型拿到一串图钉，可以一次把同一种类型的标记都取出来，比如铺满所有敌人刷新点。",
           "badgeType": "function"
         }
       ]

@@ -137,6 +137,8 @@ export interface SceneMarker {
   name: string
   x: number
   y: number
+  /** 类型：代码里可按类型批量查找（get_markers("敌人")），默认「出生点」 */
+  type: string
 }
 
 export interface MapData {
@@ -721,6 +723,7 @@ export const useMapStore = defineStore('map', () => {
       name,
       x: Math.round(xWorld),
       y: Math.round(yWorld),
+      type: '出生点',
     }
     mapData.value.markers.push(marker)
     mapEditor.setSelectedMarkerId(marker.id)
@@ -735,6 +738,13 @@ export const useMapStore = defineStore('map', () => {
     if (trimmed !== marker.name && mapData.value.markers.some(m => m.name === trimmed)) return false
     marker.name = trimmed
     return true
+  }
+
+  /** 设置标记类型（代码里 get_markers(类型) 按此分组） */
+  function setMarkerType(id: string, type: string) {
+    const marker = mapData.value.markers.find(m => m.id === id)
+    if (!marker) return
+    marker.type = type.trim() || '出生点'
   }
 
   /** 移动标记（世界像素坐标） */
@@ -759,6 +769,7 @@ export const useMapStore = defineStore('map', () => {
       name,
       x: src.x + 16,
       y: src.y + 16,
+      type: src.type,
     }
     mapData.value.markers.push(marker)
     mapEditor.setSelectedMarkerId(marker.id)
@@ -958,6 +969,7 @@ export const useMapStore = defineStore('map', () => {
     selectedMarker,
     addMarker,
     renameMarker,
+    setMarkerType,
     updateMarkerPosition,
     duplicateMarker,
     removeMarker,

@@ -4035,19 +4035,6 @@ function markerScreenStyle(m: { x: number; y: number }) {
   }
 }
 
-/**
- * 标记的屏幕坐标（相对画布左上角），供编辑器把操作胶囊贴到图钉正下方。
- * 内部读取 viewVersion / 标记坐标，父组件 computed 调用后会自动随平移缩放和拖动更新。
- */
-function markerScreenPos(id: string | null): { x: number; y: number } | null {
-  void viewport.viewVersion.value
-  if (!id || !app) return null
-  const m = mapStore.mapData.markers.find(item => item.id === id)
-  if (!m) return null
-  const scale = viewport.currentScale.value
-  return { x: app.stage.x + m.x * scale, y: app.stage.y + m.y * scale }
-}
-
 /** 图钉下方坐标文本：(用户坐标) */
 function markerCoordText(p: { x: number; y: number } | null) {
   if (!p) return ''
@@ -4133,7 +4120,6 @@ defineExpose({
   zoomIn,
   zoomOut,
   resetZoom,
-  markerScreenPos,
   /** 地图保存/切换前：烘焙矢量内容但保留“矢量模式”选择，随后切图会自动重新进入 */
   exitVectorPaint: () => exitVectorMode(false),
 })

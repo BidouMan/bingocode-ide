@@ -521,9 +521,12 @@ class _MarkerRef:
 
 
 def _resolve_target_xy(target):
-    """把挂点引用 / Sprite 解析为世界坐标 (x, y)；无法解析返回 None"""
+    """把标记引用 / 地图标记 / Sprite 解析为世界坐标 (x, y)；无法解析返回 None"""
     if isinstance(target, _MarkerRef):
         return target._sprite._marker_world_xy(target.name)
+    if isinstance(target, MapMarkerRef):
+        # 地图标记本身保存的就是世界坐标
+        return target.world_xy
     if isinstance(target, Sprite):
         if target._is_deleted:
             return None
@@ -553,6 +556,8 @@ __all__ = [
     "mouse_up",
     "mouse",
     "load_map",
+    "get_marker",
+    "get_markers",
     "camera_follow",
     "play_sound",
     "show_collision",
@@ -3159,6 +3164,8 @@ def load_map(map_name):
             "tile_sets": tilesets,
             # 地图相机设置（属性面板里的相机跟随/偏移/平滑/边界限制）
             "camera": save_data.get("camera") or {},
+            # 场景标记（编辑器里放的坐标图钉），供 get_marker / get_markers 查询
+            "markers": save_data.get("markers") or [],
         }
 
         _CURRENT_MAP = map_data
@@ -3229,7 +3236,7 @@ def load_map(map_name):
 
         # 渲染地图
         _render_map()
-        return True
+        return _MapHandle(map_name)
 
     except Exception as e:
         print(f"[错误] 加载地图时出错: {e}")
@@ -3237,6 +3244,158 @@ def load_map(map_name):
 
         traceback.print_exc()
         return False
+
+
+class MapMarkerRef:
+    """地图标记引用（get_marker 返回）
+
+    可以直接当坐标用：读 .x / .y / .pos，也可以拆包 x, y = m，
+    或者直接 player.goto(m)。坐标为用户坐标（左下角原点，y 向上）。
+    """
+
+    __slots__ = ("_raw",)
+
+    def __init__(self, raw):
+        self._raw = raw
+
+    @property
+    def name(self):
+        return str(self._raw.get("name", ""))
+
+    @property
+    def type(self):
+        """标记类型（属性面板里设置：出生点 / 敌人 / 道具 ...）"""
+        return str(self._raw.get("type", "") or "")
+
+    @property
+    def x(self):
+        return to_user_x(float(self._raw.get("x", 0) or 0))
+
+    @property
+    def y(self):
+        return to_user_y(float(self._raw.get("y", 0) or 0))
+
+    @property
+    def pos(self):
+        """一次性获取坐标 (x, y)，可直接拆包：x, y = m.pos"""
+        return self.x, self.y
+
+    @property
+    def world_xy(self):
+        """世界坐标（y 向下），供 goto / 内部放置使用"""
+        return (
+            float(self._raw.get("x", 0) or 0),
+            float(self._raw.get("y", 0) or 0),
+        )
+
+    # 让标记可以直接当坐标用：x, y = m / m[0] / player.goto(m)
+    def __iter__(self):
+        yield self.x
+        yield self.y
+
+    def __len__(self):
+        return 2
+
+    def __getitem__(self, index):
+        if index in (0, -2):
+            return self.x
+        if index in (1, -1):
+            return self.y
+        raise IndexError("标记只有 x、y 两个坐标")
+
+    def __repr__(self):
+        return "<标记 '%s' (%s, %s)>" % (self.name, round(self.x), round(self.y))
+
+
+def _map_marker_list():
+    """当前地图的全部标记（世界坐标原始数据）"""
+    return (_CURRENT_MAP or {}).get("markers") or []
+
+
+def get_marker(name):
+    """按名称获取地图标记（编辑器里在地图上放的坐标图钉）
+
+    Args:
+        name: 标记名称（属性面板里的「名称」）
+
+    Returns:
+        标记引用，可读 .x / .y（用户坐标）或 .pos，也可直接 goto(marker)；找不到返回 None
+
+    用法：
+        map = load_map("地图1")
+        pos = map.get_marker("出生点")
+        player.goto(pos)          # 直接把角色放到标记位置
+        x, y = pos                # 也可以拆包
+    """
+    markers = _map_marker_list()
+    for raw in markers:
+        if str(raw.get("name", "")) == str(name):
+            return MapMarkerRef(raw)
+    if not _CURRENT_MAP:
+        print("[提示] 还没有加载地图，先用 load_map('地图名') 加载")
+    elif markers:
+        known = [str(m.get("name", "")) for m in markers[:8]]
+        more = "…" if len(markers) > 8 else ""
+        print(f"[警告] 没有名为 '{name}' 的标记（已有标记：{'、'.join(known)}{more}）")
+    else:
+        print("[警告] 这张地图还没有标记，先在地图编辑器里点「标记」放一个")
+    return None
+
+
+def get_markers(marker_type):
+    """按类型获取地图标记列表（类型在属性面板里设置，如 出生点 / 敌人 / 道具）
+
+    Args:
+        marker_type: 标记类型名称
+
+    Returns:
+        同类型的所有标记（列表），没有时返回空列表，可直接 for 遍历
+
+    用法：
+        for m in get_markers("敌人"):
+            enemy = Sprite("史莱姆")
+            enemy.goto(m)
+    """
+    return [
+        MapMarkerRef(raw)
+        for raw in _map_marker_list()
+        if str(raw.get("type", "")) == str(marker_type)
+    ]
+
+
+class _MapHandle:
+    """load_map() 返回的地图对象（加载失败时返回 False）
+
+    Args:
+        name: 地图名称
+
+    用法（与角色统一，用 .get_marker() 取标记）：
+        map = load_map("地图1")
+        pos = map.get_marker("出生点")
+        player.goto(pos)
+    """
+
+    __slots__ = ("name",)
+
+    def __init__(self, name):
+        self.name = name
+
+    def get_marker(self, name="标记"):
+        """按名称获取这张地图上的标记（同 get_marker(name)）"""
+        return get_marker(name)
+
+    def get_markers(self, marker_type=None):
+        """按类型获取标记列表；不传类型则返回全部标记"""
+        if marker_type is None:
+            return [MapMarkerRef(raw) for raw in _map_marker_list()]
+        return get_markers(marker_type)
+
+    def __bool__(self):
+        # 加载成功返回的对象在 if 判断里视为真（由原来的 True 兼容而来）
+        return True
+
+    def __repr__(self):
+        return "map(%r)" % self.name
 
 
 def _decompress_tiles(base64_data, width, height):

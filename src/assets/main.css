@@ -71,3 +71,43 @@ code,
 ::selection {
   background: #264f78;
 }
+
+/* ─── 统一滑条：细轨道 + 圆形手柄（各编辑器不再单独定义） ───
+   元素自身即轨道（height 3px），手柄按此高度垂直居中 */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 3px;
+  margin: 0;
+  border-radius: 2px;
+  background: #3a3d45;
+  outline: none;
+  cursor: default;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 11px;
+  height: 11px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  /* 深色描边保证在浅色/亮色背景上也有轮廓 */
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
+input[type='range']:hover::-webkit-slider-thumb {
+  background: var(--accent-hover);
+}
+
+input[type='range']:disabled {
+  opacity: 0.4;
+  background: #33363d;
+}
+
+input[type='range']:disabled::-webkit-slider-thumb {
+  background: #6b7078;
+  box-shadow: none;
+}

@@ -744,7 +744,5 @@ const showLineWidth = () => store.activeTool === 'line'
 
 .paint-slider {
   width: 100%;
-  accent-color: var(--accent);
-  cursor: pointer;
 }
 </style>

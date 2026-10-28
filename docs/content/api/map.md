@@ -7,22 +7,60 @@
 ### load_map — 加载地图
 
 ```python
-load_map("我的地图")
+map = load_map("我的地图")
 ```
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | `name` | 字符串 | 地图名称（和资源面板中一致） |
 
-地图需要先在资源面板中添加好，然后写上名字即可。
+地图需要先在资源面板中添加好，然后写上名字即可。返回值是地图对象，后面可以用它取标记。
 
 ```python
 # 加载地图
-load_map("关卡1")
+map = load_map("关卡1")
 
 # 加载后可以创建角色在地图上活动
 hero = Sprite("玩家")
 ```
+
+## 标记
+
+地图编辑器里可以在地图上放「标记」（带名字的小图钉），代码里能直接取到摆好的坐标。
+
+### map.get_marker — 按名字取标记
+
+```python
+map = load_map("地图1")
+
+pos = map.get_marker("出生点")   # 返回标记，可以直接当坐标用
+player = Sprite("小猫")
+player.goto(pos)                 # 直接把角色放到标记位置
+
+print(pos.x, pos.y)              # 读取坐标：左下角原点，y 向上
+x, y = pos                       # 也可以拆包
+```
+
+不写名字时默认取名为「标记」的那个；找不到时返回 `None`。
+
+### map.get_markers — 按类型取一组标记
+
+标记可以在属性面板里设置类型（出生点 / 敌人 / 道具 / 触发器 / 镜头 / 存档点）。
+
+```python
+# 所有「敌人」类型的标记，逐个放到标记位置
+for m in map.get_markers("敌人"):
+    enemy = Sprite("史莱姆")
+    enemy.goto(m)
+
+# 不传类型：拿到全部标记
+for m in map.get_markers():
+    print(m.name, m.x, m.y)
+```
+
+没有匹配的标记时返回空列表，`for` 循环自然不执行。
+
+> 也可以直接调用全局的 `get_marker("出生点")` / `get_markers("敌人")`，效果相同。
 
 ## 摄像机
 

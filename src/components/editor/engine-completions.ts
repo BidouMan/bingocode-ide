@@ -141,7 +141,9 @@ const globalFunctions: EngineCompletionItem[] = [
   { label: 'stop_sound', kind: CompletionItemKind.Function, insertText: 'stop_sound', documentation: '停止音效。不传参数则停止所有音效\n\nstop_sound("音效名")\nstop_sound()', detail: 'stop_sound(sound_name=None)' },
 
   // 地图 / 摄像机
-  { label: 'load_map', kind: CompletionItemKind.Function, insertText: 'load_map', documentation: '加载并显示地图\n\nload_map("地图名")\n地图名对应 assets/maps/ 下的地图包', detail: 'load_map(map_name) -> bool' },
+  { label: 'load_map', kind: CompletionItemKind.Function, insertText: 'load_map', documentation: '加载并显示地图，返回地图对象\n\nmap = load_map("地图名")\npos = map.get_marker("出生点")\nfor m in map.get_markers("敌人"):\n    ...\n地图名对应 assets/maps/ 下的地图包', detail: 'load_map(map_name) -> map' },
+  { label: 'get_marker', kind: CompletionItemKind.Function, insertText: 'get_marker', documentation: '按名称获取地图标记（地图编辑器里放的图钉）\n\npos = map.get_marker("出生点")\nplayer.goto(pos)              # 直接放到标记位置\nx, y = pos                    # 也可以拆包\npos.x / pos.y / pos.pos / pos.type\n找不到返回 None', detail: 'get_marker(name) -> marker' },
+  { label: 'get_markers', kind: CompletionItemKind.Function, insertText: 'get_markers', documentation: '按类型获取地图标记列表（类型在属性面板里设置），可直接 for 遍历\n\nfor m in map.get_markers("敌人"):\n    enemy = Sprite("史莱姆")\n    enemy.goto(m)\n没有时返回空列表', detail: 'get_markers(type) -> list' },
   { label: 'camera_follow', kind: CompletionItemKind.Function, insertText: 'camera_follow', documentation: '设置摄像机跟随指定精灵（镜头跟随）\n\ncamera_follow(hero)', detail: 'camera_follow(sprite)' },
 
   // 随机工具

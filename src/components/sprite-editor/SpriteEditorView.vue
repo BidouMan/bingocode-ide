@@ -2324,25 +2324,9 @@ onBeforeUnmount(() => {
 }
 .fps-slider {
   flex: 1;
-  height: 4px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: var(--border-light);
-  border-radius: 2px;
-  outline: none;
   margin: 0;
 }
-.fps-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #9ca0a4;
-  cursor: pointer;
-}
-.fps-slider::-webkit-slider-thumb:hover {
-  background: #abb2bf;
-}
+.fps-slider:disabled { cursor: not-allowed; }
 
 /* 按钮栏 */
 .preview-btns {

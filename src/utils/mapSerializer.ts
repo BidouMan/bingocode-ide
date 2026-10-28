@@ -29,8 +29,8 @@ export interface MapSaveData {
     smoothing: number
     limitBounds: boolean
   }
-  // 场景标记：世界坐标（引擎暂未读取，仅存档/编辑器使用）
-  markers?: { id: string; name: string; x: number; y: number }[]
+  // 场景标记：世界坐标；引擎 load_map 后可通过 get_marker / get_markers 读取
+  markers?: { id: string; name: string; x: number; y: number; type?: string }[]
 }
 
 export interface LayerSaveData {
@@ -125,7 +125,7 @@ export interface MapLoadData {
     smoothing: number
     limitBounds: boolean
   }
-  markers: { id: string; name: string; x: number; y: number }[]
+  markers: { id: string; name: string; x: number; y: number; type: string }[]
 }
 
 /**
@@ -294,6 +294,7 @@ export function serializeMap(mapData: any): MapSaveData {
       name: m.name,
       x: Number(m.x) || 0,
       y: Number(m.y) || 0,
+      type: typeof m.type === 'string' && m.type.trim() ? m.type : '出生点',
     })),
   }
 }
@@ -547,6 +548,7 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
       name: typeof m.name === 'string' && m.name.trim() ? m.name : `标记${i > 0 ? i : ''}`,
       x: Math.round(Number(m.x) || 0),
       y: Math.round(Number(m.y) || 0),
+      type: typeof m.type === 'string' && m.type.trim() ? m.type : '出生点',
     })),
   }
 }

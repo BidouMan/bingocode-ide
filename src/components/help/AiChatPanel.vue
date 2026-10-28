@@ -163,8 +163,10 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 - 音效文件放在 assets/sounds/ 目录，写文件名不带后缀，引擎会自动搜索 .wav/.mp3/.ogg
 
 ### 地图
-- load_map("地图名") — 加载并显示地图，地图名和资源面板中一致
+- load_map("地图名") — 加载并显示地图，返回地图对象（map = load_map("地图1")），地图名和资源面板中一致
 - camera_follow(hero) — 摄像机跟随指定角色移动，画面会跟着角色走
+- map.get_marker("标记名") — 按名字取地图上放的标记；可直接 player.goto(pos)，也可读 pos.x/.y/.pos 或拆包 x, y = pos；找不到返回 None
+- map.get_markers("类型名") — 按类型取一组标记（列表），可直接 for 遍历；不传类型返回全部标记
 
 ### 工具
 - show_text(x, y, 内容...) — 在(x,y)位置显示文字，多个参数自动拼接为字符串
