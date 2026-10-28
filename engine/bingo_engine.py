@@ -1453,9 +1453,9 @@ class Sprite:
         elif isinstance(target, Sprite):
             if target._is_deleted:
                 return
-            # 获取目标的视觉中心
-            t_rect = target._get_hitbox_rect()
-            tx, ty = (t_rect[0] + t_rect[2]) / 2.0, (t_rect[1] + t_rect[3]) / 2.0
+            # 用目标的位置点（轴心）而不是旋转后包围盒中心：
+            # 对方也在旋转时，包围盒中心会绕着它的轴心摆动，瞄准点会跟着抖
+            tx, ty = target._x, target._y
         else:
             # 如果不是 mouse 也不是 Sprite，不执行旋转
             return
@@ -1471,6 +1471,12 @@ class Sprite:
         # 3. 计算坐标差并求角度
         dx = tx - sx
         dy = ty - sy
+
+        # 目标几乎和自己的轴心重合时，方向没有意义：鼠标/对方在原地轻微一动，
+        # atan2 结果就在 0° 和 180° 之间乱跳，画面看起来像疯狂抖动。
+        # 此时保持上一帧的朝向，不再重新瞄准。
+        if dx * dx + dy * dy < 0.25:
+            return
 
         # 使用 atan2 计算弧度，再转换为角度
         radians = math.atan2(dy, dx)
@@ -1844,34 +1850,29 @@ class Sprite:
 
     def distance_to(self, target):
         """
-        计算当前角色视觉中心点到目标（Sprite 或 mouse）的距离
+        计算当前角色到目标（Sprite 或 mouse）的像素距离
+
+        用角色的位置点（.bgs = 内容重心，.bsf = 编辑器标注的轴心）来测距，
+        与 goto()/look_at() 完全一致。不能用旋转后包围盒的中心：
+        轴心标在脚底等位置时，包围盒中心会随旋转绕轴心摆动，
+        角色明明已经站在鼠标上，距离却总是几十像素，导致判断失灵。
         """
         if self._is_deleted:
             return 999999
 
         # 🚀 1. 优先处理鼠标，因为它不是 Sprite 实例
         if target is mouse:
-            # 使用精准的视觉中心点
-            rect = self._get_hitbox_rect()
-            cx, cy = (rect[0] + rect[2]) / 2.0, (rect[1] + rect[3]) / 2.0
-            dx = cx - _MOUSE_STATE["x"]
-            dy = cy - _MOUSE_STATE["y"]
-            return math.sqrt(dx * dx + dy * dy)
+            dx = self._x - _MOUSE_STATE["x"]
+            dy = self._y - _MOUSE_STATE["y"]
+            return math.hypot(dx, dy)
 
         # 🚀 2. 处理其他 Sprite 角色
         if not isinstance(target, Sprite) or target._is_deleted:
             return 999999
 
-        # 为了保持精准，建议角色间测距也使用视觉中心
-        r1 = self._get_hitbox_rect()
-        r2 = target._get_hitbox_rect()
-
-        cx1, cy1 = (r1[0] + r1[2]) / 2.0, (r1[1] + r1[3]) / 2.0
-        cx2, cy2 = (r2[0] + r2[2]) / 2.0, (r2[1] + r2[3]) / 2.0
-
-        dx = cx1 - cx2
-        dy = cy1 - cy2
-        return math.sqrt(dx**2 + dy**2)
+        dx = self._x - target._x
+        dy = self._y - target._y
+        return math.hypot(dx, dy)
 
     def is_on_ground(self):
         """是否站在地面上（由物理落地接触决定）

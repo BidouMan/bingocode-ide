@@ -22,6 +22,7 @@ const {
   addFrame: bitmapAddFrame, removeFrame: bitmapRemoveFrame, moveFrame: bitmapMoveFrame,
   loadFrames: bitmapLoadFrames, getFrameCanvases: bitmapGetFrameCanvases, getFrameNames,
   copySelection, pasteClipboard, deleteSelection, flipSelection, commitAndDeselect,
+  resizeFloatTo,
   replacePixelsForBake: bitmapBakeReplacePixels,
   transformWholeFrame: bitmapTransformFrame,
   getCanvas,
@@ -486,6 +487,49 @@ function resizeArtboard(w: number, h: number, offsetX = 0, offsetY = 0) {
     store.resetView()
   })
 }
+
+/**
+ * 顶栏数值改选中图形尺寸（矢量/位图分派）：
+ * 位图 = 缩放浮动图形；矢量 = 绕选框中心共轭缩放选中项。两者均保持中心与旋转角。
+ */
+function resizeShape(w: number, h: number) {
+  if (store.mode === 'vector') {
+    vectorEngine.resizeSelectionTo(w, h)
+  } else {
+    resizeFloatTo(w, h)
+  }
+}
+
+/**
+ * 图形工具拖拽创建中的实时宽高徽标（屏幕坐标）：把逻辑外框右下角换算到舞台内，
+ * 贴在外框右下角外侧；靠近舞台右/下边缘时翻到内侧，避免被 overflow 裁掉。
+ */
+const LIVE_BADGE_W = 64 // 徽标估算宽度（用于边缘翻面判断）
+const LIVE_BADGE_H = 22
+const liveSizeBadge = computed(() => {
+  const r = store.liveShapeSize
+  if (!r) return null
+  const bc = bitmapCanvas.value
+  const stage = stageRef.value
+  if (!bc || !stage) return null
+  const br = bc.getBoundingClientRect()
+  const sr = stage.getBoundingClientRect()
+  if (br.width <= 0 || br.height <= 0) return null
+  const kx = br.width / store.artboardWidth
+  const ky = br.height / store.artboardHeight
+  const x = br.left - sr.left + (r.x + r.w) * kx
+  const y = br.top - sr.top + (r.y + r.h) * ky
+  const flipX = x + 10 + LIVE_BADGE_W > sr.width
+  const flipY = y + 10 + LIVE_BADGE_H > sr.height
+  return {
+    text: `${Math.round(r.w)} × ${Math.round(r.h)}`,
+    style: {
+      left: `${flipX ? x - 8 : x + 10}px`,
+      top: `${flipY ? y - 8 : y + 10}px`,
+      transform: `translate(${flipX ? '-100%' : '0'}, ${flipY ? '-100%' : '0'})`,
+    },
+  }
+})
 
 // ─── 选区蚂蚁线（框选拖动预览；有浮动选区时改由 SVG 变换框渲染）───
 const selectionStyle = computed(() => {
@@ -1027,6 +1071,8 @@ defineExpose({
   clear: clearActive,
   /** 画布尺寸变更（顶栏数值输入；offset 恒 0 = 内容左上对齐） */
   resizeArtboard,
+  /** 顶栏数值改选中图形尺寸（矢量/位图分派，中心与旋转角不变） */
+  resizeShape,
   /** 手动裁切：进入裁切模式（拖拽锚点，回车确认） */
   beginCrop,
   addFrame,
@@ -1438,6 +1484,10 @@ defineExpose({
     ></div>
     <!-- 裁切操作提示（回车确认 / Esc 取消） -->
     <div v-if="store.cropMode" class="crop-hint">拖动锚点调整画布大小 · 回车确认 · Esc 取消</div>
+    <!-- 图形工具创建中的实时宽高徽标（跟随拖拽外框右下角，不拦截指针） -->
+    <div v-if="liveSizeBadge" class="live-size-badge" :style="liveSizeBadge.style">
+      {{ liveSizeBadge.text }}
+    </div>
     <!-- 浮动视图工具条：撤销/重做/缩放（顶栏窄窗口避让，拾色时隐藏防遮挡）。
          @dblclick.stop：快速连点按钮会被浏览器判成 dblclick 冒泡到舞台触发双击复位——必须拦截 -->
     <div v-show="!store.eyedropperActive" class="view-float-bar" @dblclick.stop>
@@ -1655,6 +1705,21 @@ defineExpose({
   white-space: nowrap;
   pointer-events: none;
   z-index: 31;
+}
+
+/* 图形创建中的实时宽高徽标：深色小胶囊（不用 backdrop-filter，拖拽时每帧重排零开销） */
+.live-size-badge {
+  position: absolute;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: rgba(18, 20, 28, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 32;
 }
 
 /* ─── 浮动视图工具条（画布右下；对齐代码编辑器 ide-float-bar 胶囊风格）─── */

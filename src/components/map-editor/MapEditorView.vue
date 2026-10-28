@@ -451,6 +451,7 @@ defineExpose({ switchToMap, placeImageResource })
             @layer-down="mapCanvasRef?.layerDownActive()"
             @switch-paint-mode="onSwitchPaintMode"
             @create-paint-layer="startImagePaint"
+            @resize-shape="(w, h) => mapCanvasRef?.resizeShapeSize(w, h)"
           />
           <div class="canvas-stage">
             <MapCanvas

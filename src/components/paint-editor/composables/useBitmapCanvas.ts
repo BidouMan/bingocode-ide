@@ -366,13 +366,23 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     activeOp = 'shape'
     strokeStart = point
     baseSnapshot = base
+    // 拖拽创建实时尺寸徽标（原点起步，随 move 更新）
+    store.liveShapeSize = { x: point.x, y: point.y, w: 0, h: 0 }
   }
 
   function continueShape(point: { x: number; y: number }, shift: boolean) {
     const c = ctx2d()
     if (!c || !strokeStart || !baseSnapshot) return
+    const end = constrainPoint(point, shift)
     c.putImageData(baseSnapshot, 0, 0)
-    drawShapePreview(c, strokeStart, constrainPoint(point, shift))
+    drawShapePreview(c, strokeStart, end)
+    // 实时尺寸（未加描边外扩，拖动时看到的是几何宽高）
+    store.liveShapeSize = {
+      x: Math.min(strokeStart.x, end.x),
+      y: Math.min(strokeStart.y, end.y),
+      w: Math.abs(end.x - strokeStart.x),
+      h: Math.abs(end.y - strokeStart.y),
+    }
   }
 
   function endShape(point: { x: number; y: number }, shift: boolean) {
@@ -407,6 +417,7 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     activeOp = 'none'
     strokeStart = null
     baseSnapshot = null
+    store.liveShapeSize = null
   }
 
   // ─── 位图钢笔（自定义形状）：逐点落锚，闭合后按填充/描边设置烤成像素 ───
@@ -759,7 +770,10 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
 
   function setFloatActive(b: boolean) {
     store.floatActive = b
-    if (!b) store.transformBox = null
+    if (!b) {
+      store.transformBox = null
+      store.shapeSize = null
+    }
   }
 
   /**
@@ -770,11 +784,13 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
   function syncTransformBox() {
     if (!floatCanvas || !store.floatActive) {
       store.transformBox = null
+      store.shapeSize = null
       return
     }
     const cs = floatCorners()
     if (cs.length !== 4) {
       store.transformBox = null
+      store.shapeSize = null
       return
     }
     const topMid = { x: (cs[0].x + cs[1].x) / 2, y: (cs[0].y + cs[1].y) / 2 }
@@ -796,6 +812,11 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
       ],
       rotateTop: topMid,
       rotateAt: { x: topMid.x + nx * rotOff, y: topMid.y + ny * rotOff },
+    }
+    // 顶栏尺寸输入框复用：显示选中的浮动图形实际尺寸（未旋转的本体宽高）
+    store.shapeSize = {
+      w: Math.abs(floatCanvas.width * floatXf.sx),
+      h: Math.abs(floatCanvas.height * floatXf.sy),
     }
   }
 
@@ -1274,6 +1295,29 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     markDirty()
   }
 
+  /**
+   * 顶栏数值改尺寸：把浮动图形缩放到精确宽高。
+   * 保持中心不动、旋转角不变（居中锚定，与画布改尺寸的居中锚点一致），
+   * 翻转态（负缩放）只改倍数符号外的绝对值。
+   * @returns false = 无浮动选区或尺寸未变化
+   */
+  function resizeFloatTo(w: number, h: number): boolean {
+    if (!floatCanvas || !store.floatActive) return false
+    const baseW = floatCanvas.width
+    const baseH = floatCanvas.height
+    if (baseW <= 0 || baseH <= 0) return false
+    const sx = (floatXf.sx < 0 ? -1 : 1) * Math.max(1, w) / baseW
+    const sy = (floatXf.sy < 0 ? -1 : 1) * Math.max(1, h) / baseH
+    if (Math.abs(sx - floatXf.sx) < 1e-6 && Math.abs(sy - floatXf.sy) < 1e-6) return false
+    floatXf.sx = sx
+    floatXf.sy = sy
+    rerenderComposite()
+    const aabb = floatAabb()
+    if (aabb) setSelection(aabb)
+    markDirty()
+    return true
+  }
+
   /** Esc / 离开选择工具：烘焙浮动并收起选区 */
   function commitAndDeselect() {
     if (floatCanvas) {
@@ -1588,6 +1632,7 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     deleteSelection,
     flipSelection,
     commitAndDeselect,
+    resizeFloatTo,
     getCanvas: () => canvasRef.value ?? null,
     /** 文字编辑：textarea input（PaintArtboard 转发） */
     textEditInput: (value: string) => {

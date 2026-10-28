@@ -639,6 +639,7 @@ function resetFloatingSelection() {
   floatStartXf = null
   mapEditorStore.hasPixelSelection = false
   selectionGraphics?.clear()
+  paintStore.shapeSize = null
   // 浮选内容已合成到画布：标记脏，切图层提交时才会落盘
   if (hadFloat && paintSession) {
     paintSession.dirty = true
@@ -829,6 +830,17 @@ function compositeFloat() {
   ctx.restore()
   s.texture.source.update()
   drawSelectionOverlay()
+  syncFloatShapeSize()
+}
+
+/** 地图工具栏尺寸输入框：显示浮动图形本体宽高（未旋转，画布像素）；无浮选时为空 */
+function syncFloatShapeSize() {
+  paintStore.shapeSize = floatCanvas
+    ? {
+        w: Math.abs(floatCanvas.width * floatXf.sx),
+        h: Math.abs(floatCanvas.height * floatXf.sy),
+      }
+    : null
 }
 
 // 框选完成：把选区像素切成浮动层，立即进入变换框状态
@@ -901,6 +913,7 @@ function bakeFloatingSelection() {
   floatStartXf = null
   mapEditorStore.hasPixelSelection = false
   selectionGraphics?.clear()
+  paintStore.shapeSize = null
   if (s) {
     s.dirty = true
     schedulePaintSave()
@@ -923,6 +936,7 @@ function cancelFloatingSelection() {
   mapEditorStore.hasPixelSelection = false
   s.texture.source.update()
   selectionGraphics?.clear()
+  paintStore.shapeSize = null
   s.dirty = true
   schedulePaintSave()
 }
@@ -945,6 +959,7 @@ function deleteFloatingPixels() {
   mapEditorStore.hasPixelSelection = false
   s.texture.source.update()
   selectionGraphics?.clear()
+  paintStore.shapeSize = null
   s.dirty = true
   schedulePaintSave()
 }
@@ -952,6 +967,36 @@ function deleteFloatingPixels() {
 // 工具栏删除：只删除浮动选区内容，不影响图层本身
 function deleteSelection() {
   if (floatCanvas) deleteFloatingPixels()
+}
+
+/**
+ * 工具栏数值改尺寸（位图）：把浮动图形缩放到精确宽高。
+ * 中心与旋转角不变（居中锚定，与角色绘制页一致）；翻转态只改绝对值。
+ */
+function resizeFloatShape(w: number, h: number) {
+  if (!floatCanvas) return
+  const bw = floatCanvas.width
+  const bh = floatCanvas.height
+  if (bw <= 0 || bh <= 0) return
+  const sx = (floatXf.sx < 0 ? -1 : 1) * (Math.max(1, w) / bw)
+  const sy = (floatXf.sy < 0 ? -1 : 1) * (Math.max(1, h) / bh)
+  if (Math.abs(sx - floatXf.sx) < 1e-6 && Math.abs(sy - floatXf.sy) < 1e-6) return
+  floatXf.sx = sx
+  floatXf.sy = sy
+  compositeFloat()
+  if (paintSession) {
+    paintSession.dirty = true
+    schedulePaintSave()
+  }
+}
+
+/** 工具栏数值改选中对象尺寸：矢量 → paper 选框，位图 → 浮动图形 */
+function resizeShapeSize(w: number, h: number) {
+  if (vectorActive.value && paintStore.mode === 'vector') {
+    vectorEngine.resizeSelectionTo(w, h)
+  } else {
+    resizeFloatShape(w, h)
+  }
 }
 
 // 复制浮动选区内容（保留原始像素，粘贴后可重新变换）
@@ -1791,6 +1836,8 @@ function paintBegin(world: { x: number; y: number }) {
     s.snapshot = ctx.getImageData(0, 0, s.canvas.width, s.canvas.height)
     s.startPoint = p
     s.lastPoint = p
+    // 图形工具拖拽创建中的实时宽高（画布像素）
+    paintStore.liveShapeSize = { x: p.x, y: p.y, w: 0, h: 0 }
   }
   s.dirty = true
   s.texture.source.update()
@@ -1806,6 +1853,16 @@ function paintMove(world: { x: number; y: number }, shift = false) {
     s.lastPoint = p
   } else {
     drawShapePreview(p.x, p.y, shift)
+    // 实时宽高：按起止点轴对齐外框（每次赋新对象触发响应式）
+    if (s.startPoint) {
+      const end = constrainPoint(p, s.startPoint, shift)
+      paintStore.liveShapeSize = {
+        x: Math.min(s.startPoint.x, end.x),
+        y: Math.min(s.startPoint.y, end.y),
+        w: Math.abs(end.x - s.startPoint.x),
+        h: Math.abs(end.y - s.startPoint.y),
+      }
+    }
     s.lastPoint = p
   }
   s.dirty = true
@@ -1916,6 +1973,7 @@ function paintEnd(world?: { x: number; y: number }, shift = false) {
   s.lastPoint = null
   s.startPoint = null
   s.snapshot = null
+  paintStore.liveShapeSize = null
   schedulePaintSave()
 }
 
@@ -4072,6 +4130,44 @@ function markerCoordText(p: { x: number; y: number } | null) {
   return `(${Math.round(toUserX(p.x))},${Math.round(toUserY(p.y))})`
 }
 
+/** 绘制画布像素 → 屏幕坐标（相对地图画布容器，与标记图钉同一套换算） */
+function paintPointToScreen(p: { x: number; y: number }): { x: number; y: number } | null {
+  const s = paintSession
+  const img = sessionImage()
+  if (!s || !img || !app) return null
+  const world = imageLocalToWorld(img, { x: p.x / s.canvas.width, y: p.y / s.canvas.height })
+  const scale = viewport.currentScale.value
+  return { x: app.stage.x + world.x * scale, y: app.stage.y + world.y * scale }
+}
+
+/** 图形工具创建中的实时宽高徽标（跟随外框右下角；贴近画布边缘时翻到内侧） */
+const LIVE_BADGE_W = 64 // 估算徽标宽度（边缘翻面判断）
+const LIVE_BADGE_H = 22
+const liveSizeBadge = computed(() => {
+  const r = paintStore.liveShapeSize
+  if (!r) return null
+  void viewport.viewVersion.value // 缩放/平移后重算
+  const p0 = paintPointToScreen({ x: r.x, y: r.y })
+  const p1 = paintPointToScreen({ x: r.x + r.w, y: r.y + r.h })
+  if (!p0 || !p1) return null
+  // 图片翻转/旋转时两角可能互换：取屏幕上的右下方向顶点
+  const x = Math.max(p0.x, p1.x)
+  const y = Math.max(p0.y, p1.y)
+  const host = canvasRef.value
+  const maxW = host?.clientWidth ?? Infinity
+  const maxH = host?.clientHeight ?? Infinity
+  const flipX = x + 10 + LIVE_BADGE_W > maxW
+  const flipY = y + 10 + LIVE_BADGE_H > maxH
+  return {
+    text: `${Math.round(r.w)} × ${Math.round(r.h)}`,
+    style: {
+      left: `${flipX ? x - 8 : x + 10}px`,
+      top: `${flipY ? y - 8 : y + 10}px`,
+      transform: `translate(${flipX ? '-100%' : '0'}, ${flipY ? '-100%' : '0'})`,
+    },
+  }
+})
+
 let draggingMarkerId: string | null = null
 
 function onMarkerDragMove(e: MouseEvent) {
@@ -4154,6 +4250,8 @@ defineExpose({
   zoomIn,
   zoomOut,
   resetZoom,
+  /** 工具栏尺寸输入：按数值修改选中图形尺寸 */
+  resizeShapeSize,
   /** 地图保存/切换前：烘焙矢量内容但保留“矢量模式”选择，随后切图会自动重新进入 */
   exitVectorPaint: () => exitVectorMode(false),
 })
@@ -4391,6 +4489,8 @@ defineExpose({
         </span>
       </div>
     </div>
+    <!-- 图形工具拖拽创建中的实时宽高徽标 -->
+    <div v-if="liveSizeBadge" class="live-size-badge" :style="liveSizeBadge.style">{{ liveSizeBadge.text }}</div>
   </div>
 </template>
 
@@ -4518,6 +4618,21 @@ defineExpose({
   inset: 0;
   pointer-events: none;
   z-index: 13;
+}
+
+/* 图形创建中的实时宽高徽标（与角色绘制页同款胶囊样式） */
+.live-size-badge {
+  position: absolute;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: rgba(18, 20, 28, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 32;
 }
 
 .map-marker {

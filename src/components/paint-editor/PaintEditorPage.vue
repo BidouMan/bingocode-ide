@@ -140,6 +140,11 @@ function onResizeArtboard(w: number, h: number, ox: number, oy: number) {
   artboardRef.value?.resizeArtboard(w, h, ox, oy)
 }
 
+/** 顶栏改选中图形尺寸（矢量/位图由画板分派，保持中心与旋转角） */
+function onResizeShape(w: number, h: number) {
+  artboardRef.value?.resizeShape(w, h)
+}
+
 async function onClose() {
   if (store.dirty) {
     const shouldClose = await ask('画板有未保存的修改，关闭后将丢失。确定关闭吗？', {
@@ -233,6 +238,7 @@ defineExpose({ saveBeforeLeave })
       @save="onSave"
       @crop="artboardRef?.beginCrop()"
       @resize="onResizeArtboard"
+      @resize-shape="onResizeShape"
       @copy="artboardRef?.copySelection()"
       @paste="artboardRef?.pasteClipboard()"
       @delete-sel="artboardRef?.deleteSelection()"

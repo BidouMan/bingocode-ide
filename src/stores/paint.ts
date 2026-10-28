@@ -102,6 +102,12 @@ export const usePaintStore = defineStore('paint', () => {
   /** 追加模式（为现有角色画新帧）：画板尺寸锁定为目标角色帧尺寸，禁止修改 */
   const sizeForced = ref(false)
 
+  // ─── 选中图形尺寸（顶栏尺寸输入框复用：有选中时显示/编辑图形尺寸）───
+  /** 选中图形尺寸（画板逻辑像素，含描边外扩）：两引擎在选框变化时写入；null=无图形选中 */
+  const shapeSize = ref<{ w: number; h: number } | null>(null)
+  /** 图形工具拖拽创建中的实时外框（画板逻辑坐标）：overlay 显示 W×H 徽标；null=未在创建 */
+  const liveShapeSize = ref<{ x: number; y: number; w: number; h: number } | null>(null)
+
   // ─── 手动裁切（拖拽锚点调整画布尺寸，回车确认）───
   /** 裁切模式进行中（画板上的内容交互被裁切层接管） */
   const cropMode = ref(false)
@@ -302,6 +308,8 @@ export const usePaintStore = defineStore('paint', () => {
     canRedo.value = false
     dirty.value = false
     sizeForced.value = false
+    shapeSize.value = null
+    liveShapeSize.value = null
     cropMode.value = false
     cropRect.value = null
     vectorCanUndo.value = false
@@ -355,6 +363,8 @@ export const usePaintStore = defineStore('paint', () => {
     dirty,
     vectorEnabled,
     sizeForced,
+    shapeSize,
+    liveShapeSize,
     cropMode,
     cropRect,
     vectorCanUndo,

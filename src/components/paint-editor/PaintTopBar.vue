@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { usePaintStore, ARTBOARD_MAX } from '../../stores/paint'
 
 import iconClose from '../../assets/icons/关闭.svg'
@@ -27,6 +28,8 @@ const emit = defineEmits<{
   crop: []
   /** 画布尺寸变更（手动输入宽高，居中锚定；offset = 新画布左上角在原画布中的坐标） */
   resize: [w: number, h: number, offsetX: number, offsetY: number]
+  /** 选中图形尺寸变更（输入宽高，绕图形中心缩放；矢量/位图统一路由到画板） */
+  resizeShape: [w: number, h: number]
   copy: []
   paste: []
   deleteSel: []
@@ -54,14 +57,29 @@ const reshapeCurveActive = () => store.reshapeHasPointed
 const curveDisabled = () => !store.reshapeHasUncurved && !store.reshapeHasPointed
 const pointDisabled = () => false
 
-/** 手动输入画板尺寸：clamp 1~2048，失焦/回车提交（居中锚定，可随时修改） */
+/** 选中图形尺寸模式：有图形选中时，同一组输入框改为显示/修改该图形的宽高 */
+const shapeMode = computed(() => store.shapeSize !== null)
+const sizeW = computed(() => Math.round(shapeMode.value ? store.shapeSize!.w : store.artboardWidth))
+const sizeH = computed(() => Math.round(shapeMode.value ? store.shapeSize!.h : store.artboardHeight))
+
+/** 手动输入尺寸：clamp 1~2048，失焦/回车提交（画板居中锚定；选中图形绕中心缩放） */
 function commitSize(axis: 'w' | 'h', e: Event) {
   const el = e.target as HTMLInputElement
   let v = Math.round(Number(el.value))
   if (!Number.isFinite(v)) {
-    v = axis === 'w' ? store.artboardWidth : store.artboardHeight
+    v = axis === 'w' ? sizeW.value : sizeH.value
   }
   v = Math.min(ARTBOARD_MAX, Math.max(1, v))
+  // 有选中图形：输入框改的是图形尺寸（保持中心与旋转角不变）
+  if (shapeMode.value) {
+    const s = store.shapeSize!
+    // 未编辑的那一轴用原始精确值，避免四舍五入顺带改动另一方向
+    const w = axis === 'w' ? v : Math.max(1, s.w)
+    const h = axis === 'h' ? v : Math.max(1, s.h)
+    emit('resizeShape', w, h)
+    el.value = String(axis === 'w' ? (Math.round(store.shapeSize?.w ?? w)) : (Math.round(store.shapeSize?.h ?? h)))
+    return
+  }
   const w = axis === 'w' ? v : store.artboardWidth
   const h = axis === 'h' ? v : store.artboardHeight
   // 居中锚定（对齐 Photoshop「画布大小」默认锚点）：内容保持居中，四周均匀增减；
@@ -100,19 +118,25 @@ function commitSize(axis: 'w' | 'h', e: Event) {
       </button>
     </div>
 
-    <!-- 中右：画板尺寸手动输入（1~2048，随时可改；追加模式/地图图像锁定）+ 手动裁切 -->
+    <!-- 中右：尺寸输入（有选中图形时显示/编辑该图形尺寸，否则为画板尺寸）+ 手动裁切 -->
     <div
       class="size-inputs"
-      :title="store.sizeForced ? '当前模式画布尺寸已锁定，不可修改' : '画板尺寸（失焦或回车生效）'"
+      :title="
+        shapeMode
+          ? '选中图形尺寸（输入后回车生效）'
+          : store.sizeForced
+            ? '当前模式画布尺寸已锁定，不可修改'
+            : '画板尺寸（失焦或回车生效）'
+      "
     >
       <input
         class="size-input"
         type="number"
         min="1"
         :max="ARTBOARD_MAX"
-        :disabled="store.sizeForced"
-        :value="store.artboardWidth"
-        aria-label="画板宽度"
+        :disabled="!shapeMode && store.sizeForced"
+        :value="sizeW"
+        :aria-label="shapeMode ? '图形宽度' : '画板宽度'"
         @change="commitSize('w', $event)"
         @keydown.enter="commitSize('w', $event)"
       />
@@ -122,9 +146,9 @@ function commitSize(axis: 'w' | 'h', e: Event) {
         type="number"
         min="1"
         :max="ARTBOARD_MAX"
-        :disabled="store.sizeForced"
-        :value="store.artboardHeight"
-        aria-label="画板高度"
+        :disabled="!shapeMode && store.sizeForced"
+        :value="sizeH"
+        :aria-label="shapeMode ? '图形高度' : '画板高度'"
         @change="commitSize('h', $event)"
         @keydown.enter="commitSize('h', $event)"
       />
@@ -338,7 +362,8 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   -webkit-appearance: none;
   margin: 0;
 }
-.size-input:hover:not(:disabled) {
+/* 悬停时不要压过聚焦描边：否则刚点进去还是悬停色，必须先移开鼠标才变绿 */
+.size-input:hover:not(:disabled):not(:focus) {
   border-color: var(--text-muted);
 }
 .size-input:focus {

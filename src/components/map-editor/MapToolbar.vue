@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useMapStore } from '../../stores/map'
 import { useMapEditorStore } from '../../stores/mapEditor'
 import { useResourceStore } from '../../stores/resource'
+import { usePaintStore, ARTBOARD_MAX } from '../../stores/paint'
 import CustomSelect from '../common/CustomSelect.vue'
 import ImageLayerTools from './ImageLayerTools.vue'
 import DrawingLayerTools from './DrawingLayerTools.vue'
@@ -30,11 +31,32 @@ const emit = defineEmits<{
   'layer-down': []
   'switch-paint-mode': [mode: 'bitmap' | 'vector']
   'create-paint-layer': [tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse' | 'pen' | 'text' | 'reshape' | 'eyedropper']
+  'resize-shape': [w: number, h: number]
 }>()
 
 const mapStore = useMapStore()
 const mapEditorStore = useMapEditorStore()
 const resourceStore = useResourceStore()
+const paintStore = usePaintStore()
+
+// 图片图层里选中了绘制图形（位图浮动选区 / 矢量选框）时才显示尺寸输入
+const shapeSelected = computed(() => mapStore.activeMode === 'image' && paintStore.shapeSize !== null)
+const shapeW = computed(() => Math.round(paintStore.shapeSize?.w ?? 0))
+const shapeH = computed(() => Math.round(paintStore.shapeSize?.h ?? 0))
+
+/** 输入图形宽高：保持中心不变，未编辑的那一轴沿用原始精确值 */
+function commitShapeSize(axis: 'w' | 'h', e: Event) {
+  const el = e.target as HTMLInputElement
+  const s = paintStore.shapeSize
+  if (!s) return
+  let v = Math.round(Number(el.value))
+  if (!Number.isFinite(v)) v = axis === 'w' ? Math.round(s.w) : Math.round(s.h)
+  v = Math.min(ARTBOARD_MAX, Math.max(1, v))
+  const w = axis === 'w' ? v : Math.max(1, s.w)
+  const h = axis === 'h' ? v : Math.max(1, s.h)
+  emit('resize-shape', w, h)
+  el.value = String(axis === 'w' ? Math.round(paintStore.shapeSize?.w ?? w) : Math.round(paintStore.shapeSize?.h ?? h))
+}
 
 const isImageLayer = computed(() => mapStore.activeMode === 'image')
 const isCollisionLayer = computed(() => mapStore.activeMode === 'collision')
@@ -185,6 +207,35 @@ function onToolAreaWheel(e: WheelEvent) {
     >
       <img :src="iconSnapGrid" class="toolbar-icon" />
     </button>
+
+    <!-- 选中绘制图形时：显示图形宽高（与角色绘制页顶栏一致） -->
+    <template v-if="shapeSelected">
+      <div class="toolbar-separator" />
+      <div class="shape-size-inputs" title="选中图形尺寸（输入后回车生效）">
+        <input
+          class="shape-size-input"
+          type="number"
+          min="1"
+          :max="ARTBOARD_MAX"
+          :value="shapeW"
+          aria-label="图形宽度"
+          @change="commitShapeSize('w', $event)"
+          @keydown.enter="commitShapeSize('w', $event)"
+        />
+        <span class="shape-size-x">×</span>
+        <input
+          class="shape-size-input"
+          type="number"
+          min="1"
+          :max="ARTBOARD_MAX"
+          :value="shapeH"
+          aria-label="图形高度"
+          @change="commitShapeSize('h', $event)"
+          @keydown.enter="commitShapeSize('h', $event)"
+        />
+        <span class="shape-size-unit">px</span>
+      </div>
+    </template>
 
     <!-- 碰撞层：物理属性下拉 + 禁用开关 -->
     <template v-if="isCollisionLayer">
@@ -387,5 +438,57 @@ function onToolAreaWheel(e: WheelEvent) {
 .toolbar-checkbox-disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* 选中图形尺寸输入 */
+.shape-size-inputs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.shape-size-input {
+  width: 54px;
+  height: 26px;
+  padding: 0 6px;
+  font-size: 12px;
+  color: white;
+  background: rgb(40, 43, 52);
+  border: 1px solid var(--border-light);
+  border-radius: 5px;
+  outline: none;
+  text-align: center;
+  box-sizing: border-box;
+  /* 隐藏 number 上下箭头，保持紧凑 */
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.shape-size-input::-webkit-outer-spin-button,
+.shape-size-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.shape-size-input:hover {
+  background: var(--bg-panel);
+  border-color: var(--text-muted);
+}
+
+/* 激活（正在输入）时才用强调色描边 */
+.shape-size-input:focus {
+  background: var(--border-light);
+  border-color: var(--accent);
+}
+
+.shape-size-x {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.shape-size-unit {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 </style>

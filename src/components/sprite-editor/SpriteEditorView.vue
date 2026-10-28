@@ -2037,13 +2037,17 @@ onBeforeUnmount(() => {
   opacity: 0.55;
 }
 
-/* 标记手柄（标记.svg 图钉，mask 上色主题绿；图钉尖对准锚点坐标） */
+/* 标记手柄（标记.svg 图钉；图钉尖对准锚点坐标）
+   配色与地图编辑器的标记图钉一致：未选中灰白、选中红；帧覆盖仍用蓝色区分 */
 .marker-handle {
   position: absolute;
   width: 0;
   height: 0;
   cursor: default;
   z-index: 5;
+  --mk-ink: #e3e7ed;
+  --mk-red: #ff5252;
+  --mk-override: #61afef;
 }
 .marker-visual {
   position: absolute;
@@ -2051,59 +2055,57 @@ onBeforeUnmount(() => {
   top: 0;
   transform-origin: 0 0;
 }
-/* 图钉：内联 svg（fill=currentColor）；配色走 CSS 变量，图钉尖对准锚点坐标。
-   默认=标记红 rgb(234,73,66)；帧覆盖=蓝（与其他标注图层惯例一致） */
-.marker-handle {
-  --mk-color: #EA4942;
-  --mk-glow: rgba(234, 73, 66, 0.6);
-}
-.marker-handle.is-override {
-  --mk-color: #61afef;
-  --mk-glow: rgba(97, 175, 239, 0.6);
-}
 .marker-icon {
   position: absolute;
   left: -13px;
-  top: -24px;
+  top: -26px;
   width: 26px;
   height: 26px;
-  color: var(--mk-color);
-  filter: drop-shadow(0 0 4px var(--mk-glow));
+  color: var(--mk-ink);
   pointer-events: auto;
-  transition: transform 0.1s ease;
+  cursor: default;
+  transition: color 0.16s ease, transform 0.16s ease;
 }
 .marker-icon :deep(svg) {
   width: 100%;
   height: 100%;
   display: block;
+  overflow: visible;
 }
+/* 唯一的"阴影"：1px 深色描边，浅色贴图上也能看清（与地图标记同款） */
+.marker-icon :deep(path) {
+  stroke: rgba(0, 0, 0, 0.62);
+  stroke-width: 38;
+  stroke-linejoin: round;
+  paint-order: stroke fill;
+}
+/* 帧覆盖（仅当前帧）：蓝色，区别于统一值 */
+.marker-handle.is-override .marker-icon {
+  color: var(--mk-override);
+}
+/* 选中态：只让图标变红并轻微放大，标签始终深色底 */
+.marker-handle.is-selected .marker-icon {
+  color: var(--mk-red);
+  transform: scale(1.07);
+  transform-origin: 50% 88%; /* 钉尖固定，放大时不脱离锚点 */
+}
+/* 标签在图钉下方：只显示标记名（不显示坐标） */
 .marker-label {
   position: absolute;
-  left: 14px;
-  top: -24px;
-  font-size: 14px;
-  line-height: 18px;
-  color: var(--mk-color);
-  background: rgba(34, 37, 43, 0.85);
-  padding: 0 5px;
-  border-radius: 3px;
+  left: 0;
+  top: 5px;
+  transform: translateX(-50%);
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(14, 16, 20, 0.86);
+  color: #e8ebf0;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.15;
   white-space: nowrap;
   pointer-events: none;
   user-select: none;
-}
-/* 选中态：三重区分——白色描边 + 放大 + 标签反色实心（一眼定位当前编辑的标记） */
-.marker-handle.is-selected .marker-icon {
-  transform: scale(1.2);
-  transform-origin: 50% 92.5%; /* 钉尖固定，放大时不脱离锚点 */
-  filter:
-    drop-shadow(0 0 1px #fff)
-    drop-shadow(0 0 2px #fff)
-    drop-shadow(0 0 7px var(--mk-glow));
-}
-.marker-handle.is-selected .marker-label {
-  color: #10131a;
-  background: var(--mk-color);
-  font-weight: 600;
 }
 /* 标记改名输入框 */
 .marker-rename-input {

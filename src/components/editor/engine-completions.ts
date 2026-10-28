@@ -68,7 +68,7 @@ const spriteMethods: EngineCompletionItem[] = [
   { label: 'is_out_side', kind: CompletionItemKind.Method, insertText: 'is_out_side', documentation: '完全出界检测：只有当角色整体（所有像素）都离开地图边界时才返回 True', detail: 'is_out_side() -> bool' },
   { label: 'is_touch', kind: CompletionItemKind.Method, insertText: 'is_touch', documentation: '判断是否碰到另一个 Sprite、鼠标或带有指定标签的图块\n\nis_touch(target)\ntarget 可以是 Sprite、mouse 或字符串（图块标签）', detail: 'is_touch(target) -> bool' },
   { label: 'is_touch_group', kind: CompletionItemKind.Method, insertText: 'is_touch_group', documentation: '判断是否撞到了某个组里的任意成员\n如果撞到了，返回那个成员；没撞到返回 None', detail: 'is_touch_group(group_name) -> Sprite or None' },
-  { label: 'distance_to', kind: CompletionItemKind.Method, insertText: 'distance_to', documentation: '计算当前角色视觉中心点到目标（Sprite 或 mouse）的距离', detail: 'distance_to(target) -> float' },
+  { label: 'distance_to', kind: CompletionItemKind.Method, insertText: 'distance_to', documentation: '计算当前角色到目标（Sprite 或 mouse）的像素距离\n按角色位置点测距，和 goto()/look_at() 用的是同一个点', detail: 'distance_to(target) -> float' },
   { label: 'is_on_ground', kind: CompletionItemKind.Method, insertText: 'is_on_ground', documentation: '是否真正站在地面上：由物理落地接触决定，站着为 True；跳起来、下落中、从下方穿过跳板都为 False\n跳跃前用它判断能否跳', detail: 'is_on_ground() -> bool' },
 
   // 分组 / 事件

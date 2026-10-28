@@ -451,6 +451,7 @@ export function usePaperScope(
     if (store.activeTool === 'reshape') {
       selFrame = null
       store.vectorSelBox = null
+      store.shapeSize = null
       store.vectorSelectedCount = selected.size
       syncStrokeWidthFromSelection() // 选中变化 → 线宽滑条跟随对象实际描边宽
       return
@@ -458,6 +459,7 @@ export function usePaperScope(
     if (selected.size === 0) {
       selFrame = null
       store.vectorSelBox = null
+      store.shapeSize = null
       store.vectorSelectedCount = 0
       syncStrokeWidthFromSelection() // 清选复位 selectionHasStroke
       return
@@ -483,6 +485,8 @@ export function usePaperScope(
       rotateTop: topMid,
       rotateAt: { x: topMid.x + (nx / nl) * rotOff, y: topMid.y + (ny / nl) * rotOff },
     }
+    // 顶栏尺寸输入框复用：显示选中图形的本体宽高（未旋转，含描边；镜像时半尺寸可能为负，取绝对值）
+    store.shapeSize = { w: Math.abs(f.hw) * 2, h: Math.abs(f.hh) * 2 }
     store.vectorSelectedCount = selected.size
     syncStrokeWidthFromSelection() // 选中变化 → 线宽滑条跟随对象实际描边宽
   }
@@ -994,6 +998,8 @@ export function usePaperScope(
     pushHistory()
     strokeStart = p
     const start = constrain(p, shift)
+    // 顶栏实时宽高徽标（拖拽创建中）
+    store.liveShapeSize = { x: start.x, y: start.y, w: 0, h: 0 }
     if (store.activeTool === 'line') {
       const path = new scope!.Path([
         new scope!.Segment(new scope!.Point(start.x, start.y)),
@@ -1025,6 +1031,13 @@ export function usePaperScope(
   function continueShape(p: { x: number; y: number }, shift: boolean) {
     if (!strokeStart) return
     const end = constrain(p, shift)
+    // 实时宽高：按起止点轴对齐外框（每次赋新对象触发响应式）
+    store.liveShapeSize = {
+      x: Math.min(strokeStart.x, end.x),
+      y: Math.min(strokeStart.y, end.y),
+      w: Math.abs(end.x - strokeStart.x),
+      h: Math.abs(end.y - strokeStart.y),
+    }
     if (store.activeTool === 'line' && activePath) {
       activePath.lastSegment!.point = new scope!.Point(end.x, end.y)
     } else {
@@ -1061,6 +1074,7 @@ export function usePaperScope(
       }
     }
     strokeStart = null
+    store.liveShapeSize = null // 创建结束：改由顶栏「选中图形尺寸」接续
   }
 
   /**
@@ -3258,6 +3272,41 @@ export function usePaperScope(
     selOp = 'none'
   }
 
+  /**
+   * 数值修改选中图形尺寸（顶栏尺寸输入框）：绕选框中心共轭缩放，
+   * 中心与旋转角不变（与画布尺寸的居中锚定语义一致），描边随缩放同步。
+   */
+  function resizeSelectionTo(w: number, h: number) {
+    if (!scope || !selFrame || selected.size === 0) return
+    const f = selFrame
+    const curW = Math.abs(f.hw) * 2
+    const curH = Math.abs(f.hh) * 2
+    if (curW <= 0 || curH <= 0) return
+    const incX = Math.max(1, w) / curW
+    const incY = Math.max(1, h) / curH
+    if (Math.abs(incX - 1) < 1e-4 && Math.abs(incY - 1) < 1e-4) return
+    pushHistory()
+    const W = worldScaleMatrix({ x: f.cx, y: f.cy }, f.angle, incX, incY)
+    const sAvg = Math.sqrt(Math.abs(incX * incY))
+    for (const item of selected) {
+      item.transform(W)
+      scaleStrokeWidths(item, sAvg)
+    }
+    // 半尺寸随缩放更新（保留镜像符号；下限 0.5 与手势一致）
+    const keepSign = (v: number, orig: number) => {
+      const s = Math.max(Math.abs(v), 0.5)
+      return orig < 0 ? -s : s
+    }
+    f.hw = keepSign(f.hw * incX, f.hw)
+    f.hh = keepSign(f.hh * incY, f.hh)
+    markDirty()
+    syncVectorSelBox()
+    // 选中含位图代理：数值缩放同样烘回位图像素（切模式不丢）
+    bakeRasterIfTransformed()
+    syncVectorSelBox()
+    hooks.onContentChanged()
+  }
+
   // ─── 对象操作（顶栏/快捷键路由进来）───
 
   function deleteSelection() {
@@ -3862,6 +3911,8 @@ export function usePaperScope(
     beforeExport,
     clearAllForBake,
     resizeArtboard,
+    /** 顶栏尺寸输入：按数值修改选中图形尺寸（矢量） */
+    resizeSelectionTo,
     /** 画布尺寸/位图像素变化后重建位图代理（矢量模式显示位图层） */
     refreshBitmapProxy: syncBitmapRaster,
     getFrameRaster,
