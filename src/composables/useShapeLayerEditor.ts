@@ -210,6 +210,7 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
     lineWidth: number,
     withHandles: boolean,
     selected = false,
+    label = '',
   ) {
     if (points.length < 2) return
     const scale = getScale()
@@ -222,6 +223,30 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
     ctx.strokeStyle = colorCss(color, selected ? 1 : 0.9)
     ctx.lineWidth = selected ? lineWidth * 1.8 : lineWidth
     ctx.stroke()
+
+    // 标签可视化：有标签的形状在包围盒中心写名字，一眼看出感应区/触发区的用途
+    const text = label.trim()
+    if (text) {
+      const xs = points.map(p => p.x)
+      const ys = points.map(p => p.y)
+      const minX = Math.min(...xs)
+      const maxX = Math.max(...xs)
+      const minY = Math.min(...ys)
+      const maxY = Math.max(...ys)
+      // 形状在屏幕上太小时不写字，避免糊成一团
+      if ((maxX - minX) * scale >= 18 && (maxY - minY) * scale >= 12) {
+        const shown = text.length > 16 ? `${text.slice(0, 16)}…` : text
+        // 画布变换含 DPR × 缩放，字号除以缩放得到屏幕稳定的 11px
+        ctx.font = `${11 / scale}px "PingFang SC", "Microsoft YaHei", sans-serif`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.lineWidth = 3 / scale
+        ctx.strokeStyle = 'rgba(10, 12, 16, 0.75)'
+        ctx.strokeText(shown, (minX + maxX) / 2, (minY + maxY) / 2)
+        ctx.fillStyle = colorCss(color, 0.95)
+        ctx.fillText(shown, (minX + maxX) / 2, (minY + maxY) / 2)
+      }
+    }
 
     if (!withHandles) return
     const radius = 4 / scale
@@ -288,6 +313,7 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
           // 选择/加锚点/删锚点都需要看到锚点，保证增删即时可见
           isActive && editing && ['select', 'addPoint', 'deletePoint'].includes(mapEditorStore.shapeTool),
           isActive,
+          poly.tag || '',
         )
       }
     }

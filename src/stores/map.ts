@@ -953,6 +953,40 @@ export const useMapStore = defineStore('map', () => {
     shapeRevision.value++
   }
 
+  /** 批量修改形状属性：只写入传入的字段，其余保持原值 */
+  function updateShapes(
+    ids: string[],
+    patch: Partial<Pick<ShapeItem, 'kind' | 'tag' | 'collisionType' | 'disabled'>>,
+  ) {
+    const layer = activeShapeLayer.value
+    if (!layer || ids.length === 0) return
+    const wanted = new Set(ids)
+    let changed = false
+    for (const item of layer.shapes) {
+      if (!wanted.has(item.id)) continue
+      if (patch.kind !== undefined) item.kind = patch.kind
+      if (patch.tag !== undefined) item.tag = patch.tag
+      if (patch.collisionType !== undefined) item.collisionType = patch.collisionType
+      if (patch.disabled !== undefined) item.disabled = patch.disabled
+      changed = true
+    }
+    if (changed) shapeRevision.value++
+  }
+
+  /** 批量删除形状；当前选中的形状被删掉时清空选中 */
+  function removeShapes(ids: string[]) {
+    const layer = activeShapeLayer.value
+    if (!layer || ids.length === 0) return
+    const wanted = new Set(ids)
+    const before = layer.shapes.length
+    layer.shapes = layer.shapes.filter(item => !wanted.has(item.id))
+    if (layer.shapes.length === before) return
+    if (mapEditor.activeShapeId && wanted.has(mapEditor.activeShapeId)) {
+      mapEditor.setActiveShapeId(null)
+    }
+    shapeRevision.value++
+  }
+
   /** 在指定图层位置放置图片（绘制页保存返回时使用）：扁平模型下一张图一层 */
   function addImageAt(layerIndex: number, img: ImageData, name = '图片'): number {
     const layers = [...mapData.value.layers]
@@ -1066,6 +1100,8 @@ export const useMapStore = defineStore('map', () => {
     setShapeTag,
     setShapeMaterial,
     setShapeDisabled,
+    updateShapes,
+    removeShapes,
     tileRevision,
     imageRevision,
     shapeRevision,

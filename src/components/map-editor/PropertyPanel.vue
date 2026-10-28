@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { useMapStore, DEFAULT_CAMERA_SETTINGS, type ShapeKind } from '../../stores/map'
+import { useMapStore, DEFAULT_CAMERA_SETTINGS, type ShapeKind, type ShapeItem } from '../../stores/map'
 import { useEditorStore } from '../../stores/editor'
 import { useResourceStore } from '../../stores/resource'
 import { useMapEditorStore } from '../../stores/mapEditor'
@@ -20,6 +20,8 @@ const emit = defineEmits<{
   'transform-changed': []
   /** 标记管理里请求把视口居中到某个标记 */
   'focus-marker': [id: string]
+  /** 形状管理里请求把视口居中到某个形状 */
+  'focus-shape': [id: string]
 }>()
 
 const mapStore = useMapStore()
@@ -388,7 +390,7 @@ const isImageMode = computed(() => mapStore.activeMode === 'image')
 
 // ====== 形状检视器：选中判定形状时替代地图 / 图层属性 ======
 const selectedShapeItem = computed(() => mapStore.activeShape)
-const shapeFold = reactive({ basic: true, physics: true })
+const shapeFold = reactive({ basic: true, physics: true, manager: true })
 const shapeKindOptions = [
   { label: '阻挡', value: 'solid' },
   { label: '感应', value: 'sensor' },
@@ -450,6 +452,143 @@ function onCustomShapeMaterialBlur(e: Event) {
 function onShapeDisabledChange(e: Event) {
   const s = selectedShapeItem.value
   if (s) mapStore.setShapeDisabled(s.id, (e.target as HTMLInputElement).checked)
+}
+
+// ====== 形状管理：列表 / 标签筛选 / 批量设置 ======
+const SHAPE_TAG_ALL = '__all__'
+const SHAPE_TAG_EMPTY = '__empty__'
+const shapeTagFilter = ref(SHAPE_TAG_ALL)
+
+/** 全图标签统计（包含其它形状层）：代码里 is_touch("标签") 是全局查询，候选也取全图 */
+const shapeTagStats = computed(() => {
+  const counts = new Map<string, number>()
+  for (const layer of mapStore.mapData.layers) {
+    if (layer.type !== 'shape') continue
+    for (const item of layer.shapes) {
+      const tag = (item.tag || '').trim()
+      if (tag) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+    }
+  }
+  return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], 'zh-CN'))
+})
+/** 标签输入框的候选（原生 datalist），避免手打标签拼错 */
+const shapeTagSuggestions = computed(() => shapeTagStats.value.map(([tag]) => tag))
+const shapeTagFilterOptions = computed(() => [
+  { label: '全部标签', value: SHAPE_TAG_ALL },
+  { label: '未填标签', value: SHAPE_TAG_EMPTY },
+  ...shapeTagStats.value.map(([tag, count]) => ({ label: `${tag}（${count}）`, value: tag })),
+])
+
+/** 正在筛选的标签被全部删掉后，自动退回「全部标签」 */
+watch(shapeTagFilterOptions, options => {
+  if (!options.some(o => o.value === shapeTagFilter.value)) shapeTagFilter.value = SHAPE_TAG_ALL
+})
+
+/** 当前形状层按标签筛选后的列表 */
+const listedShapes = computed(() => {
+  const list = mapStore.activeShapes
+  const filter = shapeTagFilter.value
+  if (filter === SHAPE_TAG_ALL) return list
+  if (filter === SHAPE_TAG_EMPTY) return list.filter(s => !(s.tag || '').trim())
+  return list.filter(s => (s.tag || '').trim() === filter)
+})
+
+/** 批量勾选：只作用于当前形状层，切换图层 / 地图时清空 */
+const checkedShapeIds = ref<string[]>([])
+const checkedShapeCount = computed(() => checkedShapeIds.value.length)
+
+function isShapeChecked(id: string) {
+  return checkedShapeIds.value.includes(id)
+}
+function toggleShapeChecked(id: string, checked: boolean) {
+  if (checked) {
+    if (!checkedShapeIds.value.includes(id)) checkedShapeIds.value = [...checkedShapeIds.value, id]
+  } else {
+    checkedShapeIds.value = checkedShapeIds.value.filter(x => x !== id)
+  }
+}
+function selectAllShapes() {
+  checkedShapeIds.value = listedShapes.value.map(s => s.id)
+}
+function clearShapeSelection() {
+  checkedShapeIds.value = []
+}
+
+// 形状被删除 / 撤销后，勾选列表里不存在的 id 自动清理
+watch(
+  () => mapStore.activeShapes.map(s => s.id).join('|'),
+  () => {
+    const alive = new Set(mapStore.activeShapes.map(s => s.id))
+    if (checkedShapeIds.value.some(id => !alive.has(id))) {
+      checkedShapeIds.value = checkedShapeIds.value.filter(id => alive.has(id))
+    }
+  },
+)
+watch(
+  () => [mapStore.activeLayerIndex, mapStore.mapLoadCount],
+  () => { checkedShapeIds.value = [] },
+)
+
+/** 批量设置的当前值：多个形状取值不同时返回空串，让下拉显示「多个…」占位 */
+function commonValue(pick: (s: ShapeItem) => string): string {
+  const ids = new Set(checkedShapeIds.value)
+  const values = new Set(
+    mapStore.activeShapes.filter(s => ids.has(s.id)).map(s => pick(s)),
+  )
+  return values.size === 1 ? [...values][0] : ''
+}
+const checkedKindValue = computed(() => commonValue(s => s.kind || 'solid'))
+const checkedTagValue = computed(() => commonValue(s => (s.tag || '').trim()))
+const checkedMaterialValue = computed(() => commonValue(s => s.collisionType || '墙体'))
+const checkedDisabledValue = computed(() => {
+  const ids = new Set(checkedShapeIds.value)
+  const list = mapStore.activeShapes.filter(s => ids.has(s.id))
+  return list.length > 0 && list.every(s => s.disabled === true)
+})
+
+function onCheckedKindChange(val: string) {
+  mapStore.updateShapes(checkedShapeIds.value, { kind: val as ShapeKind })
+}
+function onCheckedTagInput(e: Event) {
+  mapStore.updateShapes(checkedShapeIds.value, { tag: (e.target as HTMLInputElement).value })
+}
+function onCheckedMaterialChange(val: string) {
+  mapStore.updateShapes(checkedShapeIds.value, { collisionType: val })
+}
+function onCheckedDisabledChange(e: Event) {
+  mapStore.updateShapes(checkedShapeIds.value, { disabled: (e.target as HTMLInputElement).checked })
+}
+function removeCheckedShapes() {
+  mapStore.removeShapes(checkedShapeIds.value)
+  checkedShapeIds.value = []
+}
+
+/** 点击列表行：选中画布上的形状并切回鼠标工具 */
+function selectShapeFromList(id: string) {
+  mapEditorStore.setActiveShapeId(id)
+  mapEditorStore.setShapeTool('select')
+}
+/** 双击列表行：定位到该形状 */
+function focusShapeFromList(id: string) {
+  selectShapeFromList(id)
+  emit('focus-shape', id)
+}
+
+const SHAPE_KIND_LABELS: Record<ShapeKind, string> = {
+  solid: '阻挡',
+  sensor: '感应',
+  both: '阻挡 + 感应',
+}
+const SHAPE_KIND_COLORS: Record<ShapeKind, string> = {
+  solid: '#ff5050',
+  sensor: '#e5c07b',
+  both: '#528bff',
+}
+function shapeKindLabel(kind: string) {
+  return SHAPE_KIND_LABELS[(kind || 'solid') as ShapeKind] ?? '阻挡'
+}
+function shapeKindColor(item: ShapeItem) {
+  return item.disabled ? '#888888' : SHAPE_KIND_COLORS[(item.kind || 'solid') as ShapeKind]
 }
 
 // ====== 面板信息（只读展示，用于填充属性区） ======
@@ -1034,6 +1173,7 @@ function onCollisionEnabledChange(enabled: boolean) {
               <input
                 class="att-input"
                 :value="selectedShapeItem?.tag"
+                list="shape-tag-suggestions"
                 maxlength="40"
                 placeholder="代码里用 is_touch(标签) 查询"
                 :disabled="disabled"
@@ -1609,6 +1749,125 @@ function onCollisionEnabledChange(enabled: boolean) {
       </div>
       </template>
       </template>
+
+      <!-- 形状管理：当前形状层的全部形状（标签筛选 + 批量设置），图形模式常驻 -->
+      <div v-if="isShapeMode && !selectedMarker" class="att-group marker-inspector shape-manager">
+        <div class="mi-section" :class="{ open: shapeFold.manager }">
+          <button class="mi-head" :disabled="disabled" @click="shapeFold.manager = !shapeFold.manager">
+            <img :src="iconChevron" class="mi-chevron" alt="" />
+            <span class="mi-head-title">形状管理</span>
+            <span class="mi-count">{{ mapStore.activeShapes.length }}</span>
+          </button>
+          <div v-if="shapeFold.manager" class="mi-body">
+            <!-- 标签筛选：选项来自全图的标签统计 -->
+            <CustomSelect
+              class="mi-filter"
+              :model-value="shapeTagFilter"
+              :options="shapeTagFilterOptions"
+              :disabled="disabled"
+              @update:model-value="shapeTagFilter = $event"
+            />
+            <div class="mi-list">
+              <div
+                v-for="(item, index) in listedShapes"
+                :key="item.id"
+                class="mi-list-row sm-row"
+                :class="{ 'is-selected': item.id === selectedShapeItem?.id }"
+              >
+                <input
+                  class="sm-check"
+                  type="checkbox"
+                  :checked="isShapeChecked(item.id)"
+                  :disabled="disabled"
+                  @change="toggleShapeChecked(item.id, ($event.target as HTMLInputElement).checked)"
+                />
+                <button
+                  class="sm-main"
+                  :disabled="disabled"
+                  @click="selectShapeFromList(item.id)"
+                  @dblclick="focusShapeFromList(item.id)"
+                >
+                  <span class="sm-dot" :style="{ background: shapeKindColor(item) }" />
+                  <span class="sm-index">{{ index + 1 }}</span>
+                  <span class="sm-kind">{{ shapeKindLabel(item.kind) }}</span>
+                  <span class="sm-tag" :class="{ empty: !(item.tag || '').trim() }">
+                    {{ (item.tag || '').trim() || '未填标签' }}
+                  </span>
+                </button>
+              </div>
+              <div v-if="!listedShapes.length" class="mi-list-empty">
+                {{ mapStore.activeShapes.length ? '没有这个标签的形状' : '这个形状层还没有形状' }}
+              </div>
+            </div>
+
+            <!-- 批量设置：勾选至少一个形状后出现 -->
+            <div v-if="checkedShapeCount" class="sm-batch">
+              <div class="sm-batch-head">
+                <span class="sm-batch-count">已选 {{ checkedShapeCount }} 个</span>
+                <button class="sm-batch-link" :disabled="disabled" @click="selectAllShapes">全选</button>
+                <button class="sm-batch-link" :disabled="disabled" @click="clearShapeSelection">清空</button>
+              </div>
+              <div class="att-row">
+                <span class="att-label">类型</span>
+                <CustomSelect
+                  class="att-select"
+                  :model-value="checkedKindValue"
+                  :options="shapeKindOptions"
+                  placeholder="多个类型"
+                  :disabled="disabled"
+                  @update:model-value="onCheckedKindChange"
+                />
+              </div>
+              <div class="att-row">
+                <span class="att-label">标签</span>
+                <input
+                  class="att-input"
+                  :value="checkedTagValue"
+                  list="shape-tag-suggestions"
+                  maxlength="40"
+                  :placeholder="checkedTagValue ? '批量设置标签' : '多个不同标签'"
+                  :disabled="disabled"
+                  @input="onCheckedTagInput"
+                  @keydown.enter="blurPanelInput"
+                />
+              </div>
+              <div v-if="checkedKindValue !== 'sensor'" class="att-row">
+                <span class="att-label">物理属性</span>
+                <CustomSelect
+                  class="att-select"
+                  :model-value="checkedMaterialValue"
+                  :options="shapeMaterialOptions"
+                  placeholder="多个属性"
+                  :disabled="disabled"
+                  @update:model-value="onCheckedMaterialChange"
+                />
+              </div>
+              <div class="att-row">
+                <span class="att-label">禁用</span>
+                <label class="att-checkbox">
+                  <input
+                    type="checkbox"
+                    :checked="checkedDisabledValue"
+                    :disabled="disabled"
+                    @change="onCheckedDisabledChange"
+                  />
+                  <span class="att-checkbox-text">不参与判定</span>
+                </label>
+                <button class="mi-btn mi-btn-danger sm-batch-del" :disabled="disabled" @click="removeCheckedShapes">
+                  <img :src="iconDelete" alt="" />
+                  <span>删除所选</span>
+                </button>
+              </div>
+            </div>
+            <div v-else class="sm-hint">勾选前面的方框，可以批量修改类型、标签和物理属性</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 标签候选：检视器与批量设置的标签输入框共用 -->
+      <datalist id="shape-tag-suggestions">
+        <option v-for="tag in shapeTagSuggestions" :key="tag" :value="tag" />
+      </datalist>
 
       <!-- 标记管理右键菜单：Teleport 到 body，避免被右栏滚动容器裁剪
            放在 v-if / v-else 分支之外，避免打断条件分支链 -->
@@ -2246,4 +2505,95 @@ function onCollisionEnabledChange(enabled: boolean) {
   background: rgba(95, 45, 39, 0.75);
   color: #ffb4ab;
 }
+
+/* ====== 形状管理：列表行 / 批量设置 ====== */
+.sm-row {
+  gap: 6px;
+  padding: 0 4px;
+}
+
+.sm-check {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  accent-color: #528bff;
+}
+
+.sm-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.sm-main:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.sm-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.sm-index {
+  flex-shrink: 0;
+  min-width: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  color: #8f959d;
+}
+
+.sm-kind { flex-shrink: 0; font-size: 11px; color: #cfd3d9; }
+
+.sm-tag {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: #d7dbe1;
+}
+
+.sm-tag.empty { color: #6f747c; }
+
+/* 批量设置区：勾选后展开 */
+.sm-batch {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.sm-batch-head { display: flex; align-items: center; gap: 8px; }
+
+.sm-batch-count { flex: 1; font-size: 11px; color: #9ca0a4; }
+
+.sm-batch-link {
+  height: 20px;
+  padding: 0 6px;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: #8fb8ff;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: default;
+}
+
+.sm-batch-link:hover { background: rgb(61, 64, 72); }
+.sm-batch-link:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.sm-batch-del { flex: 0 0 auto; margin-left: auto; }
+
+.sm-hint { padding: 2px 0; font-size: 11px; color: #7c818a; }
 </style>

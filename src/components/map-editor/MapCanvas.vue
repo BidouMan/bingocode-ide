@@ -4163,6 +4163,29 @@ function centerMarker(id: string) {
   app.render()
 }
 
+/** 形状管理里双击定位：把视口居中到该形状的包围盒中心 */
+function centerShape(id: string) {
+  if (!app) return
+  const layer = mapStore.activeShapeLayer
+  const shape = layer?.shapes.find(s => s.id === id)
+  if (!shape || shape.points.length === 0) return
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const [x, y] of shape.points) {
+    if (x < minX) minX = x
+    if (x > maxX) maxX = x
+    if (y < minY) minY = y
+    if (y > maxY) maxY = y
+  }
+  const scale = viewport.currentScale.value
+  app.stage.x = app.screen.width / 2 - ((minX + maxX) / 2) * scale
+  app.stage.y = app.screen.height / 2 - ((minY + maxY) / 2) * scale
+  viewport.redraw()
+  app.render()
+}
+
 /** 只渲染未隐藏的标记；临时「显示隐藏标记」时把隐藏项也带上（弱化显示，便于重新选中） */
 const visibleMarkers = computed(() =>
   mapStore.mapData.markers.filter(
@@ -4283,6 +4306,7 @@ watch(
 defineExpose({
   redraw,
   centerMarker,
+  centerShape,
   cursorGridPos,
   renderAllLayers,
   showTransformBox: transform.showTransformBox,

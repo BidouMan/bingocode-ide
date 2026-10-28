@@ -79,6 +79,11 @@ function onFocusMarker(id: string) {
   mapCanvasRef.value?.centerMarker(id)
 }
 
+/** 形状管理里双击定位：把视口居中到该形状 */
+function onFocusShape(id: string) {
+  mapCanvasRef.value?.centerShape(id)
+}
+
 const mapCanvasRef = ref<InstanceType<typeof MapCanvas>>()
 const layerPanelRef = ref<InstanceType<typeof LayerPanel>>()
 const tileResourceBarRef = ref<{ uploadLocalTiles: () => void } | null>(null)
@@ -525,6 +530,7 @@ defineExpose({ switchToMap, placeImageResource })
             :disabled="!hasMaps"
             @transform-changed="onImageTransformChanged"
             @focus-marker="onFocusMarker"
+            @focus-shape="onFocusShape"
           />
         </div>
         <!-- 图块模式的碰撞编辑器上移，底部保留与画布/图层一致的信息栏 -->
