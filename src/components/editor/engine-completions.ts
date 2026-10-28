@@ -70,6 +70,8 @@ const spriteMethods: EngineCompletionItem[] = [
   { label: 'is_touch_group', kind: CompletionItemKind.Method, insertText: 'is_touch_group', documentation: '判断是否撞到了某个组里的任意成员\n如果撞到了，返回那个成员；没撞到返回 None', detail: 'is_touch_group(group_name) -> Sprite or None' },
   { label: 'distance_to', kind: CompletionItemKind.Method, insertText: 'distance_to', documentation: '计算当前角色到目标（Sprite 或 mouse）的像素距离\n按角色位置点测距，和 goto()/look_at() 用的是同一个点', detail: 'distance_to(target) -> float' },
   { label: 'is_on_ground', kind: CompletionItemKind.Method, insertText: 'is_on_ground', documentation: '是否真正站在地面上：由物理落地接触决定，站着为 True；跳起来、下落中、从下方穿过跳板都为 False\n跳跃前用它判断能否跳', detail: 'is_on_ground() -> bool' },
+  { label: 'is_blocked', kind: CompletionItemKind.Method, insertText: 'is_blocked', documentation: '前方是否有实心地形阻挡（俯视迷宫常用）\n\nis_blocked("right")\nis_blocked("down", 8)\n只查形状层 solid、图像碰撞和实心图块；感应区域不算阻挡\n跳板只在向下且从上方靠近时算阻挡', detail: 'is_blocked(direction, distance=2) -> bool' },
+  { label: 'is_on_wall', kind: CompletionItemKind.Method, insertText: 'is_on_wall', documentation: '左右两侧是否贴着墙（基于本帧接触结果）', detail: 'is_on_wall() -> bool' },
 
   // 分组 / 事件
   { label: 'add_to_group', kind: CompletionItemKind.Method, insertText: 'add_to_group', documentation: '将角色归类，比如 "enemies", "bullets"\n\nadd_to_group(group_name)', detail: 'add_to_group(group_name)' },
@@ -144,6 +146,7 @@ const globalFunctions: EngineCompletionItem[] = [
   { label: 'load_map', kind: CompletionItemKind.Function, insertText: 'load_map', documentation: '加载并显示地图，返回地图对象\n\nmap = load_map("地图名")\npos = map.get_marker("出生点")\nfor m in map.get_markers("敌人"):\n    ...\n地图名对应 assets/maps/ 下的地图包', detail: 'load_map(map_name) -> map' },
   { label: 'get_marker', kind: CompletionItemKind.Function, insertText: 'get_marker', documentation: '按名称获取地图标记（地图编辑器里放的图钉）\n\npos = map.get_marker("出生点")\nplayer.goto(pos)              # 直接放到标记位置\nx, y = pos                    # 也可以拆包\npos.x / pos.y / pos.pos / pos.type\n找不到返回 None', detail: 'get_marker(name) -> marker' },
   { label: 'get_markers', kind: CompletionItemKind.Function, insertText: 'get_markers', documentation: '按类型获取地图标记列表（类型在属性面板里设置），可直接 for 遍历\n\nfor m in map.get_markers("敌人"):\n    enemy = Sprite("史莱姆")\n    enemy.goto(m)\n没有时返回空列表', detail: 'get_markers(type) -> list' },
+  { label: 'raycast', kind: CompletionItemKind.Function, insertText: 'raycast', documentation: '从用户坐标 (x, y) 射出射线，返回最近命中的实心地形\n\nhit = raycast(hero.x, hero.y, "right", 200)\nif hit:\n    print(hit.distance, hit.tag)\n\ndirection 支持 "left"/"right"/"up"/"down" 或角度（0右 90上）\n命中结果可读 .x/.y/.pos/.distance/.normal/.tag', detail: 'raycast(x, y, direction, distance=1000) -> hit or None' },
   { label: 'camera_follow', kind: CompletionItemKind.Function, insertText: 'camera_follow', documentation: '设置摄像机跟随指定精灵（镜头跟随）\n\ncamera_follow(hero)', detail: 'camera_follow(sprite)' },
 
   // 随机工具

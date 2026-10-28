@@ -11,6 +11,9 @@ from models.map_model import MapModel
 from models.shape_kernel import (
     ConvexPolygon, CompoundShape, polygon_shape, aabb_shape, intersects,
     overlap as shape_overlap,
+    sweep as shape_sweep,
+    point_inside,
+    raycast as shape_raycast,
 )
 from models.static_index import StaticEntry, build_world
 from models.coords import (
@@ -539,6 +542,28 @@ def _resolve_target_xy(target):
         return (target._x, target._y)
     return None
 
+def _parse_direction_world(direction):
+    """方向参数 → 世界坐标单位向量 (x 右、y 下)。
+
+    支持：
+      - 字符串："left"/"right"/"up"/"down"（以及 左/右/上/下）
+      - 数字：用户角度（0=右，90=上，180=左，270=下；逆时针为正）
+    无效返回 None。
+    """
+    if isinstance(direction, str):
+        key = direction.strip().lower()
+        table = {
+            "left": (-1.0, 0.0), "right": (1.0, 0.0),
+            "up": (0.0, -1.0), "down": (0.0, 1.0),
+            "左": (-1.0, 0.0), "右": (1.0, 0.0),
+            "上": (0.0, -1.0), "下": (0.0, 1.0),
+        }
+        return table.get(key)
+    if isinstance(direction, (int, float)):
+        rad = math.radians(float(direction))
+        return (math.cos(rad), -math.sin(rad))
+    return None
+
 __all__ = [
     "Sprite",
     "Timer",
@@ -563,6 +588,7 @@ __all__ = [
     "load_map",
     "get_marker",
     "get_markers",
+    "raycast",
     "camera_follow",
     "play_sound",
     "show_collision",
@@ -2032,6 +2058,75 @@ class Sprite:
         dx = self._x - target._x
         dy = self._y - target._y
         return math.hypot(dx, dy)
+
+    # 前方阻挡探测距离（像素）：is_blocked 默认向前探这么远
+    _BLOCK_PROBE = 2.0
+
+    def is_blocked(self, direction="down", distance=None):
+        """前方是否有实心地形阻挡（俯视迷宫常用）。
+
+        direction: "left"/"right"/"up"/"down"（或 左/右/上/下），也接受用户角度数字
+        distance: 探测距离，默认 2 像素；想查更远可以传更大值
+
+        只查静态实心地形（形状层 solid/both、图像碰撞、实心图块），
+        感应区域不算阻挡；跳板只有向下且从上方靠近时才算阻挡。
+
+        用法：
+            if not hero.is_blocked("right"):
+                hero.add_x(4)
+        """
+        if self._is_deleted or self._collision_disabled or not _CURRENT_MAP:
+            return False
+        world_dir = _parse_direction_world(direction)
+        if world_dir is None:
+            return False
+        probe = self._BLOCK_PROBE if distance is None else max(0.0, float(distance))
+        if probe <= 0.0:
+            return False
+
+        rect = self._get_hitbox_rect()
+        if not rect:
+            return False
+        dx = world_dir[0] * probe
+        dy = world_dir[1] * probe
+
+        static_world = _CURRENT_MAP.get("static_world")
+        if static_world is not None:
+            query_left = min(rect[0], rect[0] + dx)
+            query_top = min(rect[1], rect[1] + dy)
+            query_right = max(rect[2], rect[2] + dx)
+            query_bottom = max(rect[3], rect[3] + dy)
+            sprite_shape = aabb_shape(rect[0], rect[1], rect[2], rect[3])
+            for entry in static_world.solid.query_rect(
+                query_left, query_top, query_right, query_bottom
+            ):
+                if entry.collision_type == "跳板":
+                    # 跳板只在下落方向、且角色在平台上方时阻挡
+                    if world_dir[1] <= 0 or self._drop_through:
+                        continue
+                    if rect[3] > entry.bbox.top + 0.5:
+                        continue
+                if shape_sweep(sprite_shape, entry.shape, (dx, dy)) is not None:
+                    return True
+
+        # 边界碰撞开启时，地图矩形也算阻挡
+        if _CURRENT_MAP.get("boundaryCollision", _CURRENT_MAP.get("gravity", False)):
+            bounds = _playable_bounds()
+            if world_dir[0] < 0 and rect[0] + dx < bounds["left"]:
+                return True
+            if world_dir[0] > 0 and rect[2] + dx > bounds["right"]:
+                return True
+            if world_dir[1] < 0 and rect[1] + dy < bounds["top"]:
+                return True
+            if world_dir[1] > 0 and rect[3] + dy > bounds["bottom"]:
+                return True
+        return False
+
+    def is_on_wall(self):
+        """左右两侧是否贴着墙（基于本帧接触掩码）。"""
+        if self._is_deleted:
+            return False
+        return bool(self._contacts & (self._CONTACT_LEFT | self._CONTACT_RIGHT))
 
     def is_on_ground(self):
         """是否站在地面上（由物理落地接触决定）
@@ -3672,6 +3767,105 @@ def get_markers(marker_type):
     ]
 
 
+class RaycastHit:
+    """raycast() 的命中结果（没打中时 raycast 返回 None）。
+
+    坐标为用户坐标（左下角原点、y 向上），与角色 x/y 一致：
+        hit.x / hit.y / hit.pos / hit.distance / hit.normal
+    """
+    __slots__ = ("distance", "_wx", "_wy", "_nx", "_ny", "tag", "collision_type", "source")
+
+    def __init__(self, distance, world_point, world_normal, entry):
+        self.distance = float(distance)
+        self._wx = float(world_point[0])
+        self._wy = float(world_point[1])
+        self._nx = float(world_normal[0])
+        self._ny = float(world_normal[1])
+        self.tag = getattr(entry, "tag", "") or ""
+        self.collision_type = getattr(entry, "collision_type", "") or ""
+        self.source = getattr(entry, "source", "") or ""
+
+    @property
+    def x(self):
+        return to_user_x(self._wx)
+
+    @property
+    def y(self):
+        return to_user_y(self._wy)
+
+    @property
+    def pos(self):
+        return self.x, self.y
+
+    @property
+    def normal_x(self):
+        """命中表面法线的水平分量（用户坐标）"""
+        return self._nx
+
+    @property
+    def normal_y(self):
+        """命中表面法线的垂直分量（用户坐标，向上为正）"""
+        return -self._ny
+
+    @property
+    def normal(self):
+        return self.normal_x, self.normal_y
+
+    def __bool__(self):
+        return True
+
+    def __repr__(self):
+        return "<raycast 命中 (%s, %s)，距离 %s>" % (
+            round(self.x), round(self.y), round(self.distance, 1)
+        )
+
+
+def raycast(x, y, direction, distance=1000):
+    """从用户坐标 (x, y) 射出一条射线，返回最近命中的实心地形。
+
+    direction: "left"/"right"/"up"/"down"（或 左/右/上/下），
+               也可以是用户角度数字（0=右，90=上，180=左，270=下）
+    distance:  射线长度（像素），默认 1000
+
+    Returns:
+        RaycastHit（.x/.y/.pos/.distance/.normal）或 None（没打中）
+
+    用法：
+        hit = raycast(hero.x, hero.y, "right", 200)
+        if hit:
+            print(hit.distance, hit.tag)
+    """
+    if not _CURRENT_MAP:
+        return None
+    static_world = _CURRENT_MAP.get("static_world")
+    if static_world is None:
+        return None
+    world_dir = _parse_direction_world(direction)
+    if world_dir is None:
+        return None
+    max_distance = max(0.0, float(distance))
+    if max_distance <= 0.0:
+        return None
+
+    ox = to_world_x(float(x))
+    oy = to_world_y(float(y))
+    end_x = ox + world_dir[0] * max_distance
+    end_y = oy + world_dir[1] * max_distance
+    candidates = static_world.solid.query_rect(
+        min(ox, end_x), min(oy, end_y), max(ox, end_x), max(oy, end_y)
+    )
+    best = None
+    for entry in candidates:
+        hit = shape_raycast(entry.shape, (ox, oy), world_dir, max_distance)
+        if hit is None:
+            continue
+        if best is None or hit.distance < best[0]:
+            best = (hit.distance, hit, entry)
+    if best is None:
+        return None
+    return RaycastHit(best[0], best[1].point, best[1].normal, best[2])
+
+
 class _MapHandle:
     """load_map() 返回的地图对象（加载失败时返回 False）
 
@@ -3698,6 +3892,27 @@ class _MapHandle:
         if marker_type is None:
             return [MapMarkerRef(raw) for raw in _map_marker_list()]
         return get_markers(marker_type)
+
+    def is_solid(self, x, y):
+        """这个用户坐标点上是否有实心地形（形状层 solid/both、图像碰撞、实心图块）。
+
+        感应区域不算；跳板算实心地形。
+        """
+        if not _CURRENT_MAP:
+            return False
+        static_world = _CURRENT_MAP.get("static_world")
+        if static_world is None:
+            return False
+        wx = to_world_x(float(x))
+        wy = to_world_y(float(y))
+        for entry in static_world.solid.query_point(wx, wy):
+            if point_inside(entry.shape, (wx, wy)):
+                return True
+        return False
+
+    def raycast(self, x, y, direction, distance=1000):
+        """同全局 raycast(x, y, direction, distance)"""
+        return raycast(x, y, direction, distance)
 
     def __bool__(self):
         # 加载成功返回的对象在 if 判断里视为真（由原来的 True 兼容而来）
