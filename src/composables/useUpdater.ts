@@ -8,7 +8,6 @@ import { relaunch } from '@tauri-apps/plugin-process'
  */
 const SILENT_DISPLAY_VERSIONS: Record<string, string> = {
   '0.7.41': '0.7.4',
-  '0.7.51': '0.7.5',
 }
 
 /** 把内部版本号转成界面上展示的版本号 */
