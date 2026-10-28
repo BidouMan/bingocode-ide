@@ -1493,8 +1493,8 @@ function onCollisionEnabledChange(enabled: boolean) {
 .property-panel {
   display: flex;
   flex-direction: column;
-  /* 与绘制面板一致：内容区比底部信息栏(--bg-root)略亮，右侧也能分出块 */
-  background: var(--bg-base);
+  /* 与滚动内容同色：面板全部折叠后下方空白不能变成另一种颜色 */
+  background: var(--bg-root);
 }
 
 .att-frame {
