@@ -8,7 +8,10 @@ import threading
 import queue
 from PIL import Image
 from models.map_model import MapModel
-from models.shape_kernel import ConvexPolygon, CompoundShape, polygon_shape, aabb_shape, intersects
+from models.shape_kernel import (
+    ConvexPolygon, CompoundShape, polygon_shape, aabb_shape, intersects,
+    overlap as shape_overlap,
+)
 from models.static_index import StaticEntry, build_world
 from models.coords import (
     to_world_x,
@@ -945,6 +948,113 @@ class Sprite:
             return self._CONTACT_LEFT if correction > 0 else self._CONTACT_RIGHT
         return self._CONTACT_DOWN if correction < 0 else self._CONTACT_UP
 
+    def _contact_bit_from_normal(self, normal):
+        """法线方向 → 接触位（法线从阻挡指向角色）。"""
+        if abs(normal[0]) >= abs(normal[1]):
+            return self._contact_bit("x", normal[0])
+        return self._contact_bit("y", normal[1])
+
+    # depenetration：最多迭代次数 / 推出后额外留出的皮肤厚度
+    _DEPEN_MAX_ITERATIONS = 4
+    _DEPEN_SKIN = 0.01
+
+    def _depenetrate(self):
+        """把角色从静态实心几何里推出；返回是否发生过推出。
+
+        用于角色生成/传送/上一帧修正残留导致嵌墙的场景：
+          - 只查 solid 索引，感应与单向平台不参与（单向平台不能从下方顶人）
+          - 每轮取穿透最深的一组，沿法线推出 depth + 少量皮肤
+          - 迭代若干轮，处理同时嵌在两个障碍里的极端情况
+        """
+        if self._collision_disabled or not _CURRENT_MAP:
+            return False
+        static_world = _CURRENT_MAP.get("static_world")
+        if static_world is None:
+            return False
+
+        moved = False
+        for _ in range(self._DEPEN_MAX_ITERATIONS):
+            rect = self._get_hitbox_rect()
+            if not rect:
+                break
+            entries = static_world.solid.query_rect(rect[0], rect[1], rect[2], rect[3])
+            if not entries:
+                break
+            sprite_shape = aabb_shape(rect[0], rect[1], rect[2], rect[3])
+            best = None
+            for entry in entries:
+                # 单向平台只从上方承载，不能当作实心块把角色顶出去
+                if entry.collision_type == "跳板":
+                    continue
+                manifold = shape_overlap(sprite_shape, entry.shape)
+                if manifold is None or manifold.depth <= 1e-4:
+                    continue
+                if best is None or manifold.depth > best.depth:
+                    best = manifold
+            if best is None:
+                break
+            push = best.depth + self._DEPEN_SKIN
+            self._x += best.normal[0] * push
+            self._y += best.normal[1] * push
+            self._contacts |= self._contact_bit_from_normal(best.normal)
+            moved = True
+        return moved
+
+    # 单步最大位移：超过就拆分，避免一步穿过薄墙（与 move() 的 16px 子步一致）
+    _MAX_MOVE_STEP = 16.0
+
+    def move_and_slide(self, dx, dy, axis_order="xy", resolve_x=True, resolve_y=True,
+                       depenetrate=True):
+        """唯一位移入口：先 depenetrate，再按轴移动并解算碰撞。
+
+        axis_order:
+          - "xy"：先横向后纵向（角色代码 move()/add_x 等）
+          - "yx"：先纵向后横向（重力物理步，与旧行为一致）
+        resolve_x/resolve_y=False 时对应轴不移动也不解算（set_x/add_x 等单轴操作）。
+        位移超过 _MAX_MOVE_STEP 时自动拆成多个子步，避免隧道效应。
+        """
+        if self._collision_disabled or not _CURRENT_MAP:
+            if resolve_x:
+                self._x += dx
+            if resolve_y:
+                self._y += dy
+            return
+
+        total = math.hypot(dx, dy)
+        steps = 1 if total <= self._MAX_MOVE_STEP else int(math.ceil(total / self._MAX_MOVE_STEP))
+        step_dx = dx / steps
+        step_dy = dy / steps
+        for _ in range(steps):
+            self._move_and_slide_step(
+                step_dx, step_dy, axis_order, resolve_x, resolve_y, depenetrate
+            )
+
+    def _move_and_slide_step(self, dx, dy, axis_order, resolve_x, resolve_y, depenetrate):
+        """move_and_slide 的单个子步（保证每次位移不超过 _MAX_MOVE_STEP）。"""
+        if depenetrate:
+            self._depenetrate()
+
+        # 记录移动前的内容盒上下沿，供单向平台「从上方落地 / 从下方撞头」判断
+        hitbox = self._get_hitbox_rect()
+        if hitbox:
+            self._prev_bottom_y = hitbox[3]
+            self._prev_top_y = hitbox[1]
+
+        if axis_order == "yx":
+            if resolve_y:
+                self._y += dy
+                self._resolve_collision("y", _sign(dy))
+            if resolve_x:
+                self._x += dx
+                self._resolve_collision("x", _sign(dx))
+        else:
+            if resolve_x:
+                self._x += dx
+                self._resolve_collision("x", _sign(dx))
+            if resolve_y:
+                self._y += dy
+                self._resolve_collision("y", _sign(dy))
+
     def _resolve_collision(self, axis, direction=0):
         """
         处理碰撞检测和位移修正
@@ -1300,66 +1410,47 @@ class Sprite:
         self._set_xy_world(to_world_x(x), to_world_y(y))
 
     def _set_xy_world(self, x, y):
-        """按世界坐标设置位置（引擎内部用，不做任何转换）"""
+        """按世界坐标传送（不做任何转换）。
+
+        传送不是「移动」，没有运动方向：
+          - 先记录旧的上下沿，保留单向平台原有的落点判断
+          - 写入目标坐标后先 depenetrate，再按最近边兜底解算
+        """
         hitbox = self._get_hitbox_rect()
         if hitbox:
             self._prev_bottom_y = hitbox[3]
             self._prev_top_y = hitbox[1]
         self._x = x
         self._y = y
-        # 传送没有「运动方向」，按兜底解算（最近边推出）
-        self._resolve_collision("x")
-        self._resolve_collision("y")
+        if not self._collision_disabled and _CURRENT_MAP:
+            self._depenetrate()
+            self._resolve_collision("x")
+            self._resolve_collision("y")
         self._update_transform()
 
     def set_x(self, x):
         """设置 x 坐标（用户坐标：正数向右）"""
-        old_x = self._x
-        self._x = to_world_x(x)
-        self._resolve_collision("x", _sign(self._x - old_x))
+        target = to_world_x(x)
+        self.move_and_slide(target - self._x, 0.0, axis_order="xy", resolve_y=False)
         self._update_transform()
 
     def set_y(self, y):
         """设置 y 坐标（用户坐标：正数向上）"""
-        hitbox = self._get_hitbox_rect()
-        if hitbox:
-            self._prev_bottom_y = hitbox[3]
-            self._prev_top_y = hitbox[1]
-        old_y = self._y
-        self._y = to_world_y(y)
-        self._resolve_collision("y", _sign(self._y - old_y))
+        target = to_world_y(y)
+        self.move_and_slide(0.0, target - self._y, axis_order="yx", resolve_x=False)
         self._update_transform()
 
     def add_x(self, delta_x):
         """将 x 坐标增加（或减少）一定数值（用户坐标：正数向右）"""
         dx = to_world_dx(delta_x)
-        self._x += dx
-        self._resolve_collision("x", _sign(dx))
+        self.move_and_slide(dx, 0.0, axis_order="xy", resolve_y=False)
         self._update_transform()
 
     def add_y(self, delta_y):
         """将 y 坐标增加（或减少）一定数值（用户坐标：正数向上）"""
-        hitbox = self._get_hitbox_rect()
-        if hitbox:
-            self._prev_bottom_y = hitbox[3]
-            self._prev_top_y = hitbox[1]
         dy = to_world_dy(delta_y)
-        self._y += dy
-        self._resolve_collision("y", _sign(dy))
+        self.move_and_slide(0.0, dy, axis_order="yx", resolve_x=False)
         self._update_transform()
-
-    def _handle_step_move(self, dx, dy):
-        """处理单步移动和碰撞检测"""
-        hitbox = self._get_hitbox_rect()
-        if hitbox:
-            self._prev_bottom_y = hitbox[3]
-            self._prev_top_y = hitbox[1]
-
-        self._x += dx
-        self._resolve_collision("x", _sign(dx))
-
-        self._y += dy
-        self._resolve_collision("y", _sign(dy))
 
     def jump(self, power=10):
         """角色跳跃
@@ -1461,24 +1552,8 @@ class Sprite:
         dx = distance * math.cos(radians)
         dy = distance * math.sin(radians)
 
-        # 设置最大步长（防止隧道效应）
-        MAX_STEP = 16.0  # 最大步长为16像素，与图块大小一致
-
-        # 计算总位移长度
-        total_distance = math.sqrt(dx * dx + dy * dy)
-
-        # 如果位移很小，直接移动
-        if total_distance <= MAX_STEP:
-            self._handle_step_move(dx, dy)
-        else:
-            # 将大位移拆分成多个小位移
-            steps = int(math.ceil(total_distance / MAX_STEP))
-            step_dx = dx / steps
-            step_dy = dy / steps
-
-            # 执行步进移动
-            for _ in range(steps):
-                self._handle_step_move(step_dx, step_dy)
+        # 大位移的拆步与碰撞全部交给唯一入口 move_and_slide
+        self.move_and_slide(dx, dy, axis_order="xy")
 
         # 更新变换
         self._update_transform()
@@ -1486,9 +1561,10 @@ class Sprite:
     def goto_rand(self):
         """移到地图内的随机位置"""
         bounds = _playable_bounds()
-        self._x = random.randint(int(bounds["left"]), int(bounds["right"]))
-        self._y = random.randint(int(bounds["top"]), int(bounds["bottom"]))
-        self._update_transform()
+        self._set_xy_world(
+            random.randint(int(bounds["left"]), int(bounds["right"])),
+            random.randint(int(bounds["top"]), int(bounds["bottom"])),
+        )
 
     def set_angle(self, angle):
         """设置旋转角度（用户坐标：逆时针为正，0=右 90=上 180=左 270=下）"""
@@ -3761,11 +3837,6 @@ def _handle_physics_collision():
 
         sprite._on_ground = False
 
-        hitbox = sprite._get_hitbox_rect()
-        if hitbox:
-            sprite._prev_bottom_y = hitbox[3]
-            sprite._prev_top_y = hitbox[1]
-
         if _CURRENT_MAP.get("gravity", False) and sprite._gravity:
             if sprite._vy < 0:
                 if sprite._jump_cut:
@@ -3779,9 +3850,8 @@ def _handle_physics_collision():
             gravity = 0
 
         x_before = sprite._x
-        sprite._y += sprite._vy
-        sprite._resolve_collision("y", _sign(sprite._vy))
-        sprite._resolve_collision("x")
+        # 唯一入口：先纵向再横向（与旧物理步顺序一致），内部会先 depenetrate
+        sprite.move_and_slide(0.0, sprite._vy, axis_order="yx")
         # 禁止下滑：本步学生代码与自动移动都没动过 x 时，
         # 落地状态下撤销重力+碰撞推挤带来的水平漂移（即 Godot floor_stop_on_slope 语义）
         if stop_on_slope and sprite._on_ground and x_before == sprite._frame_start_x:
