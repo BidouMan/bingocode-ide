@@ -30,6 +30,19 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
   const markerPlacing = ref(false)
   const selectedMarkerId = ref<string | null>(null)
   const showHiddenMarkers = ref(false)
+  // 画布底部临时提示（如「自定义形状不能交叉」），几秒后自动消失
+  const hintMessage = ref('')
+  let hintTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** 显示一条临时提示：同一时间只保留最新一条 */
+  function showHint(text: string, duration = 3000) {
+    hintMessage.value = text
+    if (hintTimer) clearTimeout(hintTimer)
+    hintTimer = setTimeout(() => {
+      hintMessage.value = ''
+      hintTimer = null
+    }, duration)
+  }
 
   function setTool(tool: MapTool) {
     currentTool.value = tool
@@ -107,6 +120,8 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
     markerPlacing,
     selectedMarkerId,
     showHiddenMarkers,
+    hintMessage,
+    showHint,
     setImageTool,
     setPaintMode,
     toggleMarkerPlacing,

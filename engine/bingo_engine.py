@@ -59,6 +59,11 @@ _SHOW_ALL_COLLISION = False
 _PENDING_RESPONSES = []  # 监听线程→主线程的待发响应
 _USER_INPUT_QUEUE = queue.Queue()  # 用户 input() 输入队列
 _PERF_STATS = {"last_time": time.time(), "frame_count": 0}
+# 固定物理步长（60Hz）与单个渲染帧最多补算的物理步数；
+# run() 与 start_game() 共用这套常量，避免两条主循环各写一份而逐渐走偏
+_PHYSICS_DT = 1.0 / 60.0
+_MAX_FRAME_TIME = 0.05
+_MAX_PHYSICS_STEPS = 3
 _GROUPS = {}
 # 用字典包装鼠标状态：released 由输入线程累积，released_frame 是每个物理步的快照（供 mouse_up）
 _MOUSE_STATE = {"down": False, "last_down": False, "released": False, "released_frame": False, "x": 0, "y": 0}
@@ -4320,11 +4325,11 @@ def _process_sensor_events():
         for tag in touched - active:
             for t, callback in list(enter_callbacks):
                 if t == tag:
-                    callback(sprite, tag)
+                    _safe_call(callback, sprite, tag)
         for tag in active - touched:
             for t, callback in list(exit_callbacks):
                 if t == tag:
-                    callback(sprite, tag)
+                    _safe_call(callback, sprite, tag)
         sprite._sensor_active_tags = touched
 
 
@@ -4532,6 +4537,82 @@ def _render_map():
             _MAP_SPRITES[tile_data["id"]] = tile_data
 
 
+# ---------- 物理步共用实现 ----------
+# 旧式 run()（def loop()）与 while True generator 模式过去各写了一份物理步，
+# 任何碰撞/感应功能都要改两处，极易漏改。现在统一走这两个函数：
+#   _begin_physics_step：推进时间、更新动画、记录步初位置
+#   学生代码（loop() / generator）
+#   _end_physics_step：气泡计时、自动移动、触碰回调、地形碰撞、感应事件
+
+def _safe_call(callback, *args):
+    """执行用户回调；回调内出错只打印错误，不中断游戏（与 broadcast 行为一致）。
+
+    GameStop 必须继续向上抛：学生代码里调用 stop() 时依赖它结束 generator。
+    """
+    try:
+        callback(*args)
+    except GameStop:
+        raise
+    except Exception as e:
+        print(f"[错误] 回调出错: {e}")
+
+
+def _begin_physics_step():
+    """物理步开始（未暂停时）：推进游戏时间、更新动画、记录本步初始 x。"""
+    global _GAME_TIME
+    if _PAUSED:
+        return
+    _GAME_TIME += _PHYSICS_DT
+    for sprite in _SPRITES.values():
+        if getattr(sprite, "animation_state", None):
+            _update_sprite_animation(sprite)
+    if _CURRENT_MAP is not None:
+        for sprite in _SPRITES.values():
+            # 禁止下滑功能据此区分主动移动与斜面推挤下滑
+            sprite._frame_start_x = sprite._x
+
+
+def _end_physics_step():
+    """物理步收尾（未暂停时）：气泡计时、自动移动、触碰回调、地形碰撞、感应事件。"""
+    if _PAUSED:
+        return
+
+    # say 计时器：到期自动隐藏气泡
+    for sid in list(_SAY_TIMERS.keys()):
+        timer, hide_fn = _SAY_TIMERS[sid]
+        if timer.is_timeout():
+            hide_fn()
+            del _SAY_TIMERS[sid]
+
+    for sprite in list(_SPRITES.values()):
+        if sprite._is_deleted:
+            continue
+        # 持续速度自动移动
+        if sprite._speed > 0:
+            sprite.move(sprite._speed)
+        # 自动销毁
+        if sprite._auto_destroy and sprite.is_out_side():
+            sprite.delete()
+        # 分组触碰回调
+        if sprite._on_hit_callbacks:
+            for group_name, callback in list(sprite._on_hit_callbacks):
+                for other in list(_GROUPS.get(group_name, [])):
+                    if other is sprite or other._is_deleted:
+                        continue
+                    if sprite.is_touch(other):
+                        if callback:
+                            _safe_call(callback, sprite, other)
+                        else:
+                            # 不传回调：默认双方都删除
+                            sprite.delete()
+                            other.delete()
+                        break
+
+    if _CURRENT_MAP:
+        _handle_physics_collision()
+        _process_sensor_events()
+
+
 def run():
     global _PERF_STATS, _MOUSE_STATE, _SPRITES, _PENDING_RESPONSES, _GAME_TIME, _WAIT_TIMERS
     _MOUSE_STATE["down"] = False
@@ -4544,10 +4625,6 @@ def run():
     main_module = sys.modules["__main__"]
     if not hasattr(main_module, "loop"):
         return
-
-    _PHYSICS_DT = 1.0 / 60.0
-    _MAX_FRAME_TIME = 0.05
-    _MAX_PHYSICS_STEPS = 3
 
     _PERF_STATS["last_time"] = time.time()
     accumulator = 0.0
@@ -4567,93 +4644,10 @@ def run():
             # 暂停时也要同步输入快照：用户代码需要靠按键检测来调用 resume()
             _sync_input_frame()
             _promote_event_frame()
-            if not _PAUSED:
-                _GAME_TIME += _PHYSICS_DT
-                for sprite in _SPRITES.values():
-                    if hasattr(sprite, "_is_transitioning") and sprite._is_transitioning:
-                        source_state = sprite._source_animation
-                        if source_state.get("is_playing", True):
-                            t = time.time()
-                            if t - source_state["last_frame_time"] >= source_state["frame_duration"]:
-                                source_state["current_frame"] += 1
-                                if source_state["current_frame"] > source_state["end"]:
-                                    if source_state.get("loop", True):
-                                        source_state["current_frame"] = source_state["start"]
-                                    else:
-                                        source_state["current_frame"] = source_state["end"]
-                                        source_state["is_playing"] = False
-                                source_state["last_frame_time"] = t
 
-                        target_state = sprite._target_animation
-                        if target_state.get("is_playing", True):
-                            t = time.time()
-                            if t - target_state["last_frame_time"] >= target_state["frame_duration"]:
-                                target_state["current_frame"] += 1
-                                if target_state["current_frame"] > target_state["end"]:
-                                    if target_state.get("loop", True):
-                                        target_state["current_frame"] = target_state["start"]
-                                    else:
-                                        target_state["current_frame"] = target_state["end"]
-                                        target_state["is_playing"] = False
-                                target_state["last_frame_time"] = t
-
-                        sprite._update_animation_frame()
-                    elif hasattr(sprite, "animation_state") and sprite.animation_state:
-                        sprite_state = sprite.animation_state
-                        if not sprite_state.get("is_playing", True):
-                            continue
-                        t = time.time()
-                        if t - sprite_state["last_frame_time"] >= sprite_state["frame_duration"]:
-                            sprite_state["current_frame"] += 1
-                            if sprite_state["current_frame"] > sprite_state["end"]:
-                                if sprite_state.get("loop", True):
-                                    sprite_state["current_frame"] = sprite_state["start"]
-                                else:
-                                    sprite_state["current_frame"] = sprite_state["end"]
-                                    sprite_state["is_playing"] = False
-                            sprite_state["last_frame_time"] = t
-                            sprite._update_animation_frame()
-
-            # 记录本物理步学生代码执行前的 x（禁止下滑功能据此区分主动移动与推挤下滑）
-            if not _PAUSED and _CURRENT_MAP is not None:
-                for sprite in _SPRITES.values():
-                    sprite._frame_start_x = sprite._x
-
+            _begin_physics_step()
             main_module.loop()
-
-            for sid in list(_SAY_TIMERS.keys()):
-                timer, hide_fn = _SAY_TIMERS[sid]
-                if timer.is_timeout():
-                    hide_fn()
-                    del _SAY_TIMERS[sid]
-
-            if not _PAUSED:
-                for sprite in list(_SPRITES.values()):
-                    if sprite._is_deleted:
-                        continue
-                    # 运动
-                    if sprite._speed > 0:
-                        sprite.move(sprite._speed)
-                    # 自动销毁
-                    if sprite._auto_destroy and sprite.is_out_side():
-                        sprite.delete()
-                    # 碰撞回调
-                    if sprite._on_hit_callbacks:
-                        for group_name, callback in list(sprite._on_hit_callbacks):
-                            for other in list(_GROUPS.get(group_name, [])):
-                                if other is sprite or other._is_deleted:
-                                    continue
-                                if sprite.is_touch(other):
-                                    if callback:
-                                        callback(sprite, other)
-                                    else:
-                                        sprite.delete()
-                                        other.delete()
-                                    break
-
-                if _CURRENT_MAP:
-                    _handle_physics_collision()
-                    _process_sensor_events()
+            _end_physics_step()
 
             accumulator -= _PHYSICS_DT
             steps += 1
@@ -4792,9 +4786,6 @@ def start_game(project_dir=None, target_file=None):
 
     # 主循环
     _PERF_STATS["last_time"] = time.time()
-    _PHYSICS_DT = 1.0 / 60.0
-    _MAX_FRAME_TIME = 0.05
-    _MAX_PHYSICS_STEPS = 3
     accumulator = 0.0
     prev_time = time.perf_counter()
 
@@ -4816,17 +4807,7 @@ def start_game(project_dir=None, target_file=None):
             _sync_input_frame()
             _promote_event_frame()
 
-            if not _PAUSED:
-                _GAME_TIME += _PHYSICS_DT
-                # 动画更新
-                for sprite in _SPRITES.values():
-                    if hasattr(sprite, "animation_state") and sprite.animation_state:
-                        _update_sprite_animation(sprite)
-
-            # 记录本物理步学生代码执行前的 x（禁止下滑功能据此区分主动移动与推挤下滑）
-            if not _PAUSED and _CURRENT_MAP is not None:
-                for sprite in _SPRITES.values():
-                    sprite._frame_start_x = sprite._x
+            _begin_physics_step()
 
             # 执行所有 generator（每帧一次迭代）
             # 暂停时照常执行：文档约定「程序还在跑」，否则 resume() 永远不会被调用
@@ -4858,38 +4839,7 @@ def start_game(project_dir=None, target_file=None):
                     if not _has_active:
                         return
 
-                # say 计时器：到期自动隐藏气泡（与旧 run() 循环同款逻辑，
-                # start_game 主循环原先漏了这段，导致 say(text, 秒数) 永不消失）
-                for sid in list(_SAY_TIMERS.keys()):
-                    timer, hide_fn = _SAY_TIMERS[sid]
-                    if timer.is_timeout():
-                        hide_fn()
-                        del _SAY_TIMERS[sid]
-
-                # 精灵运动和碰撞
-                for sprite in list(_SPRITES.values()):
-                    if sprite._is_deleted:
-                        continue
-                    if sprite._speed > 0:
-                        sprite.move(sprite._speed)
-                    if sprite._auto_destroy and sprite.is_out_side():
-                        sprite.delete()
-                    if sprite._on_hit_callbacks:
-                        for group_name, callback in list(sprite._on_hit_callbacks):
-                            for other in list(_GROUPS.get(group_name, [])):
-                                if other is sprite or other._is_deleted:
-                                    continue
-                                if sprite.is_touch(other):
-                                    if callback:
-                                        callback(sprite, other)
-                                    else:
-                                        sprite.delete()
-                                        other.delete()
-                                    break
-
-                if _CURRENT_MAP:
-                    _handle_physics_collision()
-                    _process_sensor_events()
+            _end_physics_step()
 
             accumulator -= _PHYSICS_DT
             steps += 1

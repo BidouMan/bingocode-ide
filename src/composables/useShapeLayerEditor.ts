@@ -1,7 +1,7 @@
 import { watch } from 'vue'
 import { useMapStore, type ShapeLayer, type ShapeItem } from '../stores/map'
 import { useMapEditorStore } from '../stores/mapEditor'
-import { pointInPolygon } from '../utils/mapImageGeometry'
+import { pointInPolygon, isSelfIntersectingPolygon } from '../utils/mapImageGeometry'
 import { collectSnapLines, snapAxisValue, snapRectOffset, snapThreshold } from '../utils/smartSnap'
 import { shapeColorHex } from '../utils/shapeStyle'
 
@@ -374,6 +374,12 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
 
   function closeDraftPolygon() {
     if (draftPolygon.length >= 3) {
+      // 自交形状的三角化会退化（可能填掉凹口），闭合前拦下并保留草稿方便撤点
+      if (isSelfIntersectingPolygon(draftPolygon)) {
+        mapEditorStore.showHint('自定义形状不能交叉：请右键撤掉交叉的锚点后再闭合')
+        drawOverlay()
+        return
+      }
       mapStore.addShape('polygon', draftPolygon.map(p => [p.x, p.y]))
       // 创建后立即切到鼠标工具，让新形状处于选中可编辑状态
       mapEditorStore.setShapeTool('select')

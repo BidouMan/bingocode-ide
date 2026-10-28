@@ -121,3 +121,37 @@ export function polygonsIntersect(a: PointLike[], b: PointLike[]): boolean {
   }
   return false
 }
+
+/** 线段严格相交（端点接触不算）：自交检测用，避免相邻边共享端点被误判 */
+function segmentsCrossStrict(a: PointLike, b: PointLike, c: PointLike, d: PointLike): boolean {
+  const cross = (o: PointLike, p: PointLike, q: PointLike) =>
+    (p.x - o.x) * (q.y - o.y) - (p.y - o.y) * (q.x - o.x)
+  const d1 = cross(c, d, a)
+  const d2 = cross(c, d, b)
+  const d3 = cross(a, b, c)
+  const d4 = cross(a, b, d)
+  return d1 * d2 < 0 && d3 * d4 < 0
+}
+
+/**
+ * 多边形是否自交（蝴蝶结等交叉形状）。
+ * 自交形状在引擎里三角化会退化（可能把凹口填成碰撞区），
+ * 自定义形状闭合前用它拦一下；凹但无交叉的 L 形不算自交。
+ */
+export function isSelfIntersectingPolygon(poly: PointLike[]): boolean {
+  const n = poly.length
+  if (n < 4) return false
+  for (let i = 0; i < n; i++) {
+    const a = poly[i]
+    const b = poly[(i + 1) % n]
+    for (let j = i + 1; j < n; j++) {
+      // 相邻边共享端点，跳过（含首尾两条边）
+      if (j === i + 1) continue
+      if (i === 0 && j === n - 1) continue
+      const c = poly[j]
+      const d = poly[(j + 1) % n]
+      if (segmentsCrossStrict(a, b, c, d)) return true
+    }
+  }
+  return false
+}

@@ -511,6 +511,7 @@ defineExpose({ switchToMap, placeImageResource })
             <span class="info-label">场景大小:{{ mapStore.mapData.width * mapStore.mapData.tileSize }}×{{ mapStore.mapData.height * mapStore.mapData.tileSize }}</span>
             <span v-if="mapStore.activeMode === 'image' && imageSizeText" class="info-label">{{ imageSizeText }}</span>
             <span class="info-label">坐标:{{ cursorCoordText }}</span>
+            <span v-if="mapEditorStore.hintMessage" class="info-warn">{{ mapEditorStore.hintMessage }}</span>
             <span class="info-spacer" />
           </div>
         </div>
@@ -744,6 +745,13 @@ defineExpose({ switchToMap, placeImageResource })
 .info-label {
   font-size: 12px;
   color: rgb(156, 160, 164);
+  white-space: nowrap;
+}
+
+/* 画布临时提示（如自定义形状自交）：暖色，和常规信息区分 */
+.info-warn {
+  font-size: 12px;
+  color: #e5b36b;
   white-space: nowrap;
 }
 
