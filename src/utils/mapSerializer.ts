@@ -46,7 +46,8 @@ export interface MapSaveData {
 export interface LayerSaveData {
   id: number
   name: string
-  type: 'tilelayer' | 'imagelayer' | 'collisionlayer'
+  /** shapelayer 为新格式；collisionlayer 仅用于兼容读取旧存档 */
+  type: 'tilelayer' | 'imagelayer' | 'shapelayer' | 'collisionlayer'
   visible: boolean
   locked: boolean
   /** 游戏运行时是否渲染该图层（缺省视为 true） */
@@ -54,15 +55,22 @@ export interface LayerSaveData {
   data?: string
   images?: ImageSaveData[]
   resources?: ResourceSaveData[]
-  // 碰撞层：世界坐标碰撞多边形
-  polygons?: CollisionPolygonSaveData[]
+  // 形状层：世界坐标判定形状
+  shapes?: ShapeSaveData[]
+  // 旧存档字段名，仅用于兼容读取
+  polygons?: ShapeSaveData[]
 }
 
-export interface CollisionPolygonSaveData {
+export interface ShapeSaveData {
   id: string
   shape: 'rect' | 'circle' | 'capsule' | 'polygon'
   points: number[][]
-  collisionType: string
+  /** 能力类型：solid / sensor / both（旧存档缺省视为 solid） */
+  kind?: 'solid' | 'sensor' | 'both'
+  /** 自由标签：代码里按 tag 查询 */
+  tag?: string
+  /** 物理材质/行为：墙体 / 跳板 / 自定义（旧字段名，保留） */
+  collisionType?: string
   disabled?: boolean
 }
 
@@ -261,19 +269,21 @@ export function serializeMap(mapData: any): MapSaveData {
     const base: LayerSaveData = {
       id: layer.id,
       name: layer.name,
-      type: layer.type === 'image' ? 'imagelayer' : layer.type === 'collision' ? 'collisionlayer' : 'tilelayer',
+      type: layer.type === 'image' ? 'imagelayer' : layer.type === 'shape' ? 'shapelayer' : 'tilelayer',
       visible: layer.visible,
       locked: layer.locked,
       render: layer.render !== false,
     }
 
-    if (layer.type === 'collision') {
-      base.polygons = (layer.polygons || []).map((poly: any) => ({
-        id: poly.id,
-        shape: poly.shape,
-        points: poly.points,
-        collisionType: poly.collisionType || '墙体',
-        disabled: poly.disabled === true,
+    if (layer.type === 'shape') {
+      base.shapes = (layer.shapes || []).map((shape: any): ShapeSaveData => ({
+        id: shape.id,
+        shape: shape.shape,
+        points: shape.points,
+        kind: shape.kind || 'solid',
+        tag: shape.tag || '',
+        collisionType: shape.collisionType || '墙体',
+        disabled: shape.disabled === true,
       }))
       return base
     }
@@ -463,20 +473,26 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
       continue
     }
 
-    if (layer.type === 'collisionlayer') {
+    if (layer.type === 'shapelayer' || layer.type === 'collisionlayer') {
+      // 新格式写 shapes；旧存档只有 polygons，读取时统一成形状
+      const rawShapes: any[] = Array.isArray(layer.shapes)
+        ? layer.shapes
+        : (Array.isArray(layer.polygons) ? layer.polygons : [])
       layers.push({
         id: layer.id,
-        name: layer.name || '碰撞',
-        type: 'collision',
+        name: layer.name || '形状',
+        type: 'shape',
         visible: layer.visible,
         locked: layer.locked,
         render: layer.render !== false,
-        polygons: (layer.polygons || [])
+        shapes: rawShapes
           .filter(p => Array.isArray(p.points) && p.points.length >= 3)
           .map(p => ({
-            id: p.id || `col_${Math.random().toString(36).slice(2, 8)}`,
+            id: p.id || `shp_${Math.random().toString(36).slice(2, 8)}`,
             shape: p.shape === 'rect' || p.shape === 'circle' || p.shape === 'capsule' ? p.shape : 'polygon',
-            points: p.points.map(pt => [Number(pt[0]) || 0, Number(pt[1]) || 0]),
+            points: p.points.map((pt: any[]) => [Number(pt[0]) || 0, Number(pt[1]) || 0]),
+            kind: p.kind === 'sensor' || p.kind === 'both' ? p.kind : 'solid',
+            tag: typeof p.tag === 'string' ? p.tag : '',
             collisionType: p.collisionType || '墙体',
             disabled: p.disabled === true,
           })),
@@ -495,7 +511,7 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
     })
   }
 
-  // ====== 旧存档迁移：图片实例碰撞 → 碰撞层（世界坐标） ======
+  // ====== 旧存档迁移：图片实例碰撞 → 形状层（世界坐标） ======
   const migratedPolygons: any[] = []
   let migratedSeq = 0
   for (const l of layers) {
@@ -520,9 +536,11 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
           imageLocalToWorld(img, { x: p[0], y: p[1] })
         )
         migratedPolygons.push({
-          id: `col_mig_${migratedSeq++}`,
+          id: `shp_mig_${migratedSeq++}`,
           shape: raw.shape === 'rect' ? 'rect' : 'polygon',
           points: world.map((w: any) => [w.x, w.y]),
+          kind: 'solid',
+          tag: '',
           collisionType: img.collisionType && img.collisionType !== '图像' ? img.collisionType : '墙体',
         })
       }
@@ -535,11 +553,11 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
   if (migratedPolygons.length > 0) {
     layers.push({
       id: layers.length,
-      name: '碰撞',
-      type: 'collision',
+      name: '形状',
+      type: 'shape',
       visible: true,
       locked: false,
-      polygons: migratedPolygons,
+      shapes: migratedPolygons,
     })
   }
 

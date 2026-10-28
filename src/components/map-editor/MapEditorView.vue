@@ -63,7 +63,7 @@ const rightTab = ref<'paint' | 'props'>('props')
 
 /** 右侧底部信息栏：描述当前最下方那块面板在做什么，避免和顶部 tab 名字重复 */
 const rightInfoText = computed(() => {
-  if (mapStore.activeMode === 'tile') return '碰撞编辑'
+  if (mapStore.activeMode === 'tile') return '图块碰撞编辑'
   return rightTab.value === 'paint' ? '绘制设置' : '地图设置'
 })
 

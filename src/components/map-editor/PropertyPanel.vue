@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { useMapStore, DEFAULT_CAMERA_SETTINGS } from '../../stores/map'
+import { useMapStore, DEFAULT_CAMERA_SETTINGS, type ShapeKind } from '../../stores/map'
 import { useEditorStore } from '../../stores/editor'
 import { useResourceStore } from '../../stores/resource'
 import { useMapEditorStore } from '../../stores/mapEditor'
@@ -383,8 +383,74 @@ const collisionTypeOptions = [
   { label: '自定义', value: '自定义' },
 ]
 const isTileMode = computed(() => mapStore.activeMode === 'tile')
-const isCollisionMode = computed(() => mapStore.activeMode === 'collision')
+const isShapeMode = computed(() => mapStore.activeMode === 'shape')
 const isImageMode = computed(() => mapStore.activeMode === 'image')
+
+// ====== 形状检视器：选中判定形状时替代地图 / 图层属性 ======
+const selectedShapeItem = computed(() => mapStore.activeShape)
+const shapeFold = reactive({ basic: true, physics: true })
+const shapeKindOptions = [
+  { label: '阻挡', value: 'solid' },
+  { label: '感应', value: 'sensor' },
+  { label: '阻挡 + 感应', value: 'both' },
+]
+const shapeKindValue = computed(() => selectedShapeItem.value?.kind || 'solid')
+// 物理材质只对阻挡类形状生效；自定义材质可在本图层内复用
+const shapeMaterialOptions = computed(() => {
+  const used = new Set<string>()
+  const self = selectedShapeItem.value?.collisionType
+  for (const s of mapStore.activeShapes) {
+    const t = s.collisionType
+    if (t && t !== '墙体' && t !== '跳板' && t !== '自定义' && t !== self) used.add(t)
+  }
+  return [
+    { label: '墙体', value: '墙体' },
+    { label: '跳板', value: '跳板' },
+    ...[...used].map(t => ({ label: t, value: t })),
+    { label: '自定义', value: '自定义' },
+  ]
+})
+const shapeMaterialValue = computed(() => selectedShapeItem.value?.collisionType || '墙体')
+const isCustomShapeMaterial = computed(() => {
+  const t = selectedShapeItem.value?.collisionType
+  return !!t && t !== '墙体' && t !== '跳板'
+})
+const customShapeMaterialText = computed(() => {
+  const t = selectedShapeItem.value?.collisionType ?? ''
+  return t === '自定义' ? '' : t
+})
+/** 只有含阻挡能力的形状才需要物理材质 */
+const shapeNeedsMaterial = computed(() => shapeKindValue.value !== 'sensor')
+
+function onShapeKindChange(val: string) {
+  const s = selectedShapeItem.value
+  if (s) mapStore.setShapeKind(s.id, val as ShapeKind)
+}
+function onShapeTagInput(e: Event) {
+  const s = selectedShapeItem.value
+  if (s) mapStore.setShapeTag(s.id, (e.target as HTMLInputElement).value)
+}
+function onShapeMaterialChange(val: string) {
+  const s = selectedShapeItem.value
+  if (s) mapStore.setShapeMaterial(s.id, val)
+}
+function onCustomShapeMaterialInput(e: Event) {
+  const s = selectedShapeItem.value
+  if (!s) return
+  const raw = (e.target as HTMLInputElement).value
+  // 输入过程中保留原始值（避免中文输入法组字被打断），空值回退到「自定义」
+  mapStore.setShapeMaterial(s.id, raw.trim() ? raw : '自定义')
+}
+function onCustomShapeMaterialBlur(e: Event) {
+  const s = selectedShapeItem.value
+  if (!s) return
+  const name = (e.target as HTMLInputElement).value.trim()
+  mapStore.setShapeMaterial(s.id, name || '自定义')
+}
+function onShapeDisabledChange(e: Event) {
+  const s = selectedShapeItem.value
+  if (s) mapStore.setShapeDisabled(s.id, (e.target as HTMLInputElement).checked)
+}
 
 // ====== 面板信息（只读展示，用于填充属性区） ======
 /** 当前图块图层已绘制的瓦片数量 */
@@ -513,9 +579,9 @@ function stepMapSize(axis: 'width' | 'height', delta: number) {
   if (value >= 1) mapStore.updateMapProperty(axis, value)
 }
 
-const collisionCount = computed(() => mapStore.activeCollisionPolygons.length)
-const collisionDisabledCount = computed(
-  () => mapStore.activeCollisionPolygons.filter(p => p.disabled === true).length,
+const shapeCount = computed(() => mapStore.activeShapes.length)
+const shapeDisabledCount = computed(
+  () => mapStore.activeShapes.filter(p => p.disabled === true).length,
 )
 
 /** 图层锁定（与图层列表的锁定按钮同一状态） */
@@ -944,6 +1010,87 @@ function onCollisionEnabledChange(enabled: boolean) {
       </div>
 
       <template v-else>
+      <!-- 形状检视器：选中判定形状时替代地图 / 图层属性 -->
+      <div v-if="selectedShapeItem && isShapeMode" class="att-group marker-inspector">
+        <!-- 基本：能力类型 / 标签 -->
+        <div class="mi-section" :class="{ open: shapeFold.basic }">
+          <button class="mi-head" :disabled="disabled" @click="shapeFold.basic = !shapeFold.basic">
+            <img :src="iconChevron" class="mi-chevron" alt="" />
+            <span class="mi-head-title">基本</span>
+          </button>
+          <div v-if="shapeFold.basic" class="mi-body">
+            <div class="att-row">
+              <span class="att-label">类型</span>
+              <CustomSelect
+                class="att-select"
+                :model-value="shapeKindValue"
+                :options="shapeKindOptions"
+                :disabled="disabled"
+                @update:model-value="onShapeKindChange"
+              />
+            </div>
+            <div class="att-row">
+              <span class="att-label">标签</span>
+              <input
+                class="att-input"
+                :value="selectedShapeItem?.tag"
+                maxlength="40"
+                placeholder="代码里用 is_touch(标签) 查询"
+                :disabled="disabled"
+                @input="onShapeTagInput"
+                @keydown.enter="blurPanelInput"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- 物理：仅阻挡类形状生效 -->
+        <div class="mi-section" :class="{ open: shapeFold.physics }">
+          <button class="mi-head" :disabled="disabled" @click="shapeFold.physics = !shapeFold.physics">
+            <img :src="iconChevron" class="mi-chevron" alt="" />
+            <span class="mi-head-title">物理</span>
+          </button>
+          <div v-if="shapeFold.physics" class="mi-body">
+            <div v-if="shapeNeedsMaterial" class="att-row">
+              <span class="att-label">物理属性</span>
+              <CustomSelect
+                class="att-select"
+                :model-value="shapeMaterialValue"
+                :options="shapeMaterialOptions"
+                :disabled="disabled"
+                @update:model-value="onShapeMaterialChange"
+              />
+            </div>
+            <div v-if="shapeNeedsMaterial && isCustomShapeMaterial" class="att-row">
+              <span class="att-label">类型名</span>
+              <input
+                class="att-input"
+                :value="customShapeMaterialText"
+                maxlength="20"
+                placeholder="输入自定义类型"
+                :disabled="disabled"
+                @input="onCustomShapeMaterialInput"
+                @blur="onCustomShapeMaterialBlur"
+                @keydown.enter="blurPanelInput"
+              />
+            </div>
+            <div class="att-row">
+              <span class="att-label">禁用</span>
+              <label class="att-checkbox">
+                <input
+                  type="checkbox"
+                  :checked="selectedShapeItem?.disabled === true"
+                  :disabled="disabled"
+                  @change="onShapeDisabledChange"
+                />
+                <span class="att-checkbox-text">不参与判定</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <template v-else>
       <div class="att-group">
         <!-- 地图：名称 / 尺寸 -->
         <div class="mi-section" :class="{ open: fold.map }">
@@ -1292,7 +1439,7 @@ function onCollisionEnabledChange(enabled: boolean) {
           </label>
         </div>
 
-        <!-- 不透明度：图片图层生效（改的是图片自身透明度），图块/碰撞层后续版本支持 -->
+        <!-- 不透明度：图片图层生效（改的是图片自身透明度），图块/形状层后续版本支持 -->
         <div class="att-row">
           <span class="att-label">不透明度</span>
           <input
@@ -1343,15 +1490,15 @@ function onCollisionEnabledChange(enabled: boolean) {
           </div>
         </template>
 
-        <template v-if="isCollisionMode">
+        <template v-if="isShapeMode">
           <div class="att-row">
-            <span class="att-label">碰撞体</span>
-            <span class="att-value">{{ collisionCount }}</span>
+            <span class="att-label">形状数</span>
+            <span class="att-value">{{ shapeCount }}</span>
           </div>
 
           <div class="att-row">
             <span class="att-label">已禁用</span>
-            <span class="att-value">{{ collisionDisabledCount }}</span>
+            <span class="att-value">{{ shapeDisabledCount }}</span>
           </div>
         </template>
           </div>
@@ -1460,6 +1607,7 @@ function onCollisionEnabledChange(enabled: boolean) {
           </div>
         </div>
       </div>
+      </template>
       </template>
 
       <!-- 标记管理右键菜单：Teleport 到 body，避免被右栏滚动容器裁剪
@@ -1799,7 +1947,7 @@ function onCollisionEnabledChange(enabled: boolean) {
   font-size: 12px;
 }
 
-/* 只读信息值（瓦片数量 / 图片尺寸 / 碰撞体数量等） */
+/* 只读信息值（瓦片数量 / 图片尺寸 / 形状数量等） */
 .att-value {
   color: #d5d8dc;
   font-size: 12px;

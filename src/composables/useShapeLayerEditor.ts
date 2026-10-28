@@ -1,29 +1,30 @@
 import { watch } from 'vue'
-import { useMapStore, type CollisionLayer, type CollisionPolygon } from '../stores/map'
+import { useMapStore, type ShapeLayer, type ShapeItem } from '../stores/map'
 import { useMapEditorStore } from '../stores/mapEditor'
 import { pointInPolygon } from '../utils/mapImageGeometry'
 import { collectSnapLines, snapAxisValue, snapRectOffset, snapThreshold } from '../utils/smartSnap'
 
-interface CollisionLayerEditorOptions {
+interface ShapeLayerEditorOptions {
   getApp: () => any
   getScale: () => number
   /** 屏幕坐标叠加层 canvas：位于矢量画布之上，避免碰撞线被图像/矢量内容遮住 */
   getOverlayCanvas: () => HTMLCanvasElement | null
+  /** 每次重绘前把叠加层 canvas 对齐到 Pixi 画布（尺寸/位置/DPR），避免偏移和拉伸模糊 */
+  syncOverlay?: () => void
 }
 
 interface Point { x: number; y: number }
 
 /**
- * 碰撞层编辑：世界坐标多碰撞体，选择/整框拖动/顶点编辑/矩形/自定义钢笔。
+ * 形状层编辑：世界坐标判定形状，选择/整框拖动/顶点编辑/矩形/自定义钢笔。
  */
-export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
+export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
   const mapStore = useMapStore()
   const mapEditorStore = useMapEditorStore()
-  const { getApp, getScale, getOverlayCanvas } = options
+  const { getApp, getScale, getOverlayCanvas, syncOverlay } = options
 
-  // 锚点抓取 / 边插点的屏幕像素容差
+  // 锚点抓取的屏幕像素容差
   const VERTEX_HIT_PX = 12
-  const EDGE_HIT_PX = 5
 
   let rectStart: Point | null = null
   let rectCurrent: Point | null = null
@@ -40,15 +41,15 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
   let dragStartWorld: Point | null = null
   let lastPolygonClickAt = 0
 
-  function activeLayer(): CollisionLayer | null {
-    return mapStore.activeCollisionLayer
+  function activeLayer(): ShapeLayer | null {
+    return mapStore.activeShapeLayer
   }
 
-  function activePolygon(): CollisionPolygon | null {
-    return mapStore.activeCollisionPolygon
+  function activePolygon(): ShapeItem | null {
+    return mapStore.activeShape
   }
 
-  function pointsOf(polygon: CollisionPolygon): Point[] {
+  function pointsOf(polygon: ShapeItem): Point[] {
     return polygon.points.map(p => ({ x: p[0], y: p[1] }))
   }
 
@@ -152,7 +153,7 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
     return points
   }
 
-  function findNearestVertex(polygon: CollisionPolygon | null, world: Point, threshold: number): number {
+  function findNearestVertex(polygon: ShapeItem | null, world: Point, threshold: number): number {
     if (!polygon) return -1
     const pts = pointsOf(polygon)
     let best = -1
@@ -167,7 +168,7 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
     return best
   }
 
-  function findNearestEdge(polygon: CollisionPolygon | null, world: Point, threshold: number): number {
+  function findNearestEdge(polygon: ShapeItem | null, world: Point, threshold: number): number {
     if (!polygon) return -1
     const pts = pointsOf(polygon)
     if (pts.length < 2) return -1
@@ -183,12 +184,12 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
     return best
   }
 
-  /** 当前碰撞层中命中最上层碰撞体 */
-  function findPolygonAt(world: Point): CollisionPolygon | null {
+  /** 当前形状层中命中最上层形状 */
+  function findPolygonAt(world: Point): ShapeItem | null {
     const layer = activeLayer()
     if (!layer || layer.locked) return null
-    for (let i = layer.polygons.length - 1; i >= 0; i--) {
-      const poly = layer.polygons[i]
+    for (let i = layer.shapes.length - 1; i >= 0; i--) {
+      const poly = layer.shapes[i]
       if (poly.points.length < 3) continue
       if (pointInPolygon(world, pointsOf(poly))) return poly
     }
@@ -208,6 +209,7 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
     fillAlpha: number,
     lineWidth: number,
     withHandles: boolean,
+    selected = false,
   ) {
     if (points.length < 2) return
     const scale = getScale()
@@ -217,8 +219,8 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
     ctx.closePath()
     ctx.fillStyle = colorCss(color, fillAlpha)
     ctx.fill()
-    ctx.strokeStyle = colorCss(color, 0.9)
-    ctx.lineWidth = lineWidth
+    ctx.strokeStyle = colorCss(color, selected ? 1 : 0.9)
+    ctx.lineWidth = selected ? lineWidth * 1.8 : lineWidth
     ctx.stroke()
 
     if (!withHandles) return
@@ -240,8 +242,18 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
     })
   }
 
+  /** 形状颜色：按能力类型区分，禁用统一灰色 */
+  function shapeColor(poly: ShapeItem): number {
+    if (poly.disabled) return 0x888888
+    if (poly.kind === 'sensor') return 0xe5c07b
+    if (poly.kind === 'both') return 0x528bff
+    return 0xff5050
+  }
+
   function drawOverlay() {
     const app = getApp()
+    // 重绘前先对齐叠加层：尺寸/位置必须与 Pixi 画布完全一致，否则会出现偏移和拉伸模糊
+    syncOverlay?.()
     const canvas = getOverlayCanvas()
     if (!app || !canvas) return
     const ctx = canvas.getContext('2d')
@@ -251,27 +263,31 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
     const scale = getScale()
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.clearRect(0, 0, canvas.width, canvas.height)
-    ctx.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * (app.stage.x || 0), dpr * (app.stage.y || 0))
+    // 平移量取整到设备像素，避免整像素网格线落在半像素上发虚
+    const offsetX = Math.round(dpr * (app.stage.x || 0))
+    const offsetY = Math.round(dpr * (app.stage.y || 0))
+    ctx.setTransform(dpr * scale, 0, 0, dpr * scale, offsetX, offsetY)
 
-    const lineWidth = 1.5 / scale
+    const lineWidth = Math.max(1, Math.round(1.5 * dpr)) / (dpr * scale)
     const editingLayer = activeLayer()
-    const activeId = mapEditorStore.activeCollisionPolygonId
+    const activeId = mapEditorStore.activeShapeId
     const editing = editingLayer != null
 
     for (const layer of mapStore.mapData.layers) {
-      if (layer.type !== 'collision' || !layer.visible) continue
+      if (layer.type !== 'shape' || !layer.visible) continue
       const isActiveLayer = layer === editingLayer
-      for (const poly of layer.polygons) {
+      for (const poly of layer.shapes) {
         if (poly.points.length < 3) continue
         const isActive = isActiveLayer && poly.id === activeId
         drawPolygon(
           ctx,
           pointsOf(poly),
-          poly.disabled ? 0x888888 : 0xff5050,
+          shapeColor(poly),
           isActive ? (poly.disabled ? 0.16 : 0.26) : isActiveLayer ? 0.16 : 0.1,
           lineWidth,
           // 选择/加锚点/删锚点都需要看到锚点，保证增删即时可见
-          isActive && editing && ['select', 'addPoint', 'deletePoint'].includes(mapEditorStore.collisionLayerTool),
+          isActive && editing && ['select', 'addPoint', 'deletePoint'].includes(mapEditorStore.shapeTool),
+          isActive,
         )
       }
     }
@@ -336,9 +352,9 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
 
   function closeDraftPolygon() {
     if (draftPolygon.length >= 3) {
-      mapStore.addCollisionPolygon('polygon', draftPolygon.map(p => [p.x, p.y]))
-      // 创建完成切回选择移动（形状按钮仍常亮，创建后可立即选中/移动）
-      mapEditorStore.setCollisionLayerTool('select')
+      mapStore.addShape('polygon', draftPolygon.map(p => [p.x, p.y]))
+      // 创建后立即切到鼠标工具，让新形状处于选中可编辑状态
+      mapEditorStore.setShapeTool('select')
     }
     draftActive = false
     draftPolygon = []
@@ -352,14 +368,14 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
     const next = poly.points.map(p => [p[0], p[1]])
     next.splice(selectedVertexIndex, 1)
     selectedVertexIndex = -1
-    mapStore.updateCollisionPolygonPoints(poly.id, next)
+    mapStore.updateShapePoints(poly.id, next)
     drawOverlay()
   }
 
   function pointerDown(world: Point, button: number) {
     const layer = activeLayer()
     if (!layer || layer.locked) return
-    const tool = mapEditorStore.collisionLayerTool
+    const tool = mapEditorStore.shapeTool
     const local = snapPoint(world)
 
     if (tool === 'rect' || tool === 'circle' || tool === 'capsule') {
@@ -417,7 +433,7 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
       let selected = activePolygon()
       if (!selected) {
         selected = findPolygonAt(world)
-        if (selected) mapEditorStore.setActiveCollisionPolygonId(selected.id)
+        if (selected) mapEditorStore.setActiveShapeId(selected.id)
       }
       if (!selected) return
       const pts = pointsOf(selected)
@@ -428,7 +444,7 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
         const snapped = snapPoint(proj)
         const next = selected.points.map(p => [p[0], p[1]])
         next.splice(edge + 1, 0, [snapped.x, snapped.y])
-        mapStore.updateCollisionPolygonPoints(selected.id, next)
+        mapStore.updateShapePoints(selected.id, next)
         selectedVertexIndex = edge + 1
       }
       drawOverlay()
@@ -440,7 +456,7 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
       let selected = activePolygon()
       if (!selected) {
         selected = findPolygonAt(world)
-        if (selected) mapEditorStore.setActiveCollisionPolygonId(selected.id)
+        if (selected) mapEditorStore.setActiveShapeId(selected.id)
       }
       if (!selected) return
       const idx = findNearestVertex(selected, world, VERTEX_HIT_PX / getScale())
@@ -452,7 +468,7 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
       return
     }
 
-    // ====== 选择 / 编辑 ======
+    // ====== 鼠标选择 / 编辑 ======
     resetPolygonDrag()
     draggingVertexIndex = -1
 
@@ -469,6 +485,7 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
     if (button !== 0) return
 
     const selected = activePolygon()
+
     // 1) 锚点优先
     const vertexIdx = findNearestVertex(selected, world, VERTEX_HIT_PX / getScale())
     if (vertexIdx >= 0 && selected) {
@@ -478,23 +495,11 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
       return
     }
 
-    // 2) 靠近边 → 插入锚点并拖动（只作用于当前碰撞体）
-    const edgeIdx = findNearestEdge(selected, world, EDGE_HIT_PX / getScale())
-    if (edgeIdx >= 0 && selected) {
-      const next = selected.points.map(p => [p[0], p[1]])
-      next.splice(edgeIdx + 1, 0, [local.x, local.y])
-      mapStore.updateCollisionPolygonPoints(selected.id, next)
-      draggingVertexIndex = edgeIdx + 1
-      selectedVertexIndex = edgeIdx + 1
-      drawOverlay()
-      return
-    }
-
-    // 3) 框内 → 整框拖动；点击其他碰撞体 → 先选中再拖动
+    // 2) 点到形状 → 选中并整框拖动；点到空白 → 按当前形状标签直接新建
     const hit = findPolygonAt(world)
     if (hit) {
       if (!selected || hit.id !== selected.id) {
-        mapEditorStore.setActiveCollisionPolygonId(hit.id)
+        mapEditorStore.setActiveShapeId(hit.id)
         selectedVertexIndex = -1
       }
       draggingPolygon = true
@@ -503,9 +508,9 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
       dragStartWorld = { x: world.x, y: world.y }
     } else {
       selectedVertexIndex = -1
-      mapEditorStore.setActiveCollisionPolygonId(null)
-      // 空白处拖拽 = 按当前记忆的形状直接新建（无需再点形状按钮）
-      const shape = mapEditorStore.collisionShapeTool
+      mapEditorStore.setActiveShapeId(null)
+      // 空白处拖拽 = 按当前形状标签直接新建（无需再点形状按钮）
+      const shape = mapEditorStore.shapeDrawTool
       if (shape !== 'polygon') {
         draftShape = shape
         rectStart = local
@@ -516,7 +521,7 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
   }
 
   function pointerMove(world: Point) {
-    const tool = mapEditorStore.collisionLayerTool
+    const tool = mapEditorStore.shapeTool
     const local = snapPoint(world)
 
     if (rectStart && draftShape) {
@@ -557,7 +562,7 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
         dy += offset.dy
       }
       const next = dragStartPoints.map(p => [p[0] + dx, p[1] + dy])
-      mapStore.updateCollisionPolygonPoints(poly.id, next)
+      mapStore.updateShapePoints(poly.id, next)
       drawOverlay()
       return
     }
@@ -565,7 +570,7 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
     if (draggingVertexIndex >= 0) {
       const next = poly.points.map(p => [p[0], p[1]])
       next[draggingVertexIndex] = [local.x, local.y]
-      mapStore.updateCollisionPolygonPoints(poly.id, next)
+      mapStore.updateShapePoints(poly.id, next)
       drawOverlay()
     }
   }
@@ -581,9 +586,9 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
       rectCurrent = null
       draftShape = null
       if (x1 - x0 >= 2 && y1 - y0 >= 2) {
-        mapStore.addCollisionPolygon(shape, buildShapePoints(shape, x0, y0, x1, y1))
-        // 创建完成切回选择移动（形状按钮仍常亮，创建后可立即选中/移动）
-        mapEditorStore.setCollisionLayerTool('select')
+        mapStore.addShape(shape, buildShapePoints(shape, x0, y0, x1, y1))
+        // 创建后立即切到鼠标工具，让新形状处于选中可编辑状态
+        mapEditorStore.setShapeTool('select')
       }
       drawOverlay()
       return true
@@ -602,23 +607,24 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
   }
 
   function handleKeyDown(e: KeyboardEvent): boolean {
-    if (mapStore.activeMode !== 'collision') return false
+    if (mapStore.activeMode !== 'shape') return false
     if (e.key === 'Escape') {
       if (draftActive || rectStart) cancelDraft()
-      else if (mapEditorStore.collisionLayerTool !== 'select') mapEditorStore.setCollisionLayerTool('select')
-      else mapEditorStore.setActiveCollisionPolygonId(null)
+      else if (mapEditorStore.shapeTool !== 'select') mapEditorStore.setShapeTool('select')
+      else mapEditorStore.setActiveShapeId(null)
       drawOverlay()
       return true
     }
-    if (e.key === 'Enter' && mapEditorStore.collisionLayerTool === 'polygon' && draftActive) {
+    if (e.key === 'Enter' && mapEditorStore.shapeTool === 'polygon' && draftActive) {
       e.preventDefault()
       closeDraftPolygon()
       return true
     }
-    if ((e.key === 'Delete' || e.key === 'Backspace') && mapEditorStore.collisionLayerTool === 'select') {
+    if ((e.key === 'Delete' || e.key === 'Backspace') && mapEditorStore.shapeTool === 'select') {
       e.preventDefault()
       if (selectedVertexIndex >= 0) deleteSelectedVertex()
-      else if (activePolygon()) mapStore.removeCollisionPolygon(activePolygon()!.id)
+      else if (activePolygon()) mapStore.removeShape(activePolygon()!.id)
+      drawOverlay()
       return true
     }
     return false
@@ -642,8 +648,8 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
   }
 
   function selectPolygon(id: string) {
-    mapEditorStore.setActiveCollisionPolygonId(id)
-    mapEditorStore.setCollisionLayerTool('select')
+    mapEditorStore.setActiveShapeId(id)
+    mapEditorStore.setShapeTool('select')
     selectedVertexIndex = -1
     drawOverlay()
   }
@@ -657,9 +663,9 @@ export function useCollisionLayerEditor(options: CollisionLayerEditorOptions) {
     }
   }
 
-  watch(() => mapStore.collisionRevision, () => drawOverlay())
-  watch(() => mapEditorStore.activeCollisionPolygonId, () => drawOverlay())
-  watch(() => mapEditorStore.collisionLayerTool, () => drawOverlay())
+  watch(() => mapStore.shapeRevision, () => drawOverlay())
+  watch(() => mapEditorStore.activeShapeId, () => drawOverlay())
+  watch(() => mapEditorStore.shapeTool, () => drawOverlay())
   watch(() => mapStore.mapLoadCount, () => drawOverlay())
 
   return {

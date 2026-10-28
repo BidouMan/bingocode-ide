@@ -762,6 +762,9 @@ class Sprite:
         for poly in layer.get("polygons", []):
             if poly.get("disabled"):
                 continue
+            # 感应形状只做区域检测，不参与阻挡解算
+            if poly.get("kind", "solid") == "sensor":
+                continue
             points = poly.get("points") or []
             if len(points) < 3:
                 continue
@@ -935,8 +938,8 @@ class Sprite:
 
         # 检测所有图层中的实心图块
         for layer in _CURRENT_MAP.get("layers", []):
-            # --- 碰撞层（世界坐标多边形） ---
-            if layer.get("type") == "collision":
+            # --- 形状层（世界坐标判定形状） ---
+            if layer.get("type") == "shape":
                 correction = self._collision_layer_correction(layer, axis)
                 if correction is not None:
                     # y 轴只处理迎面（落地/撞头），且抬升距离不能大得离谱
@@ -1785,6 +1788,25 @@ class Sprite:
                                     )
                                     if tile_tag == tag:
                                         return True
+
+                # 形状层：按真实多边形判定，不再用格子范围（tag 可挂在任意能力类型上）
+                if tag:
+                    for layer in _CURRENT_MAP.get("layers", []):
+                        if layer.get("type") != "shape":
+                            continue
+                        for poly in layer.get("polygons", []):
+                            if poly.get("disabled"):
+                                continue
+                            if (poly.get("tag") or "") != tag:
+                                continue
+                            points = poly.get("points") or []
+                            if len(points) < 3:
+                                continue
+                            for part in poly.get("parts") or [points]:
+                                if len(part) < 3:
+                                    continue
+                                if _aabb_polygon_mtv(r1, part):
+                                    return True
             return False
 
         # 🚀 4. 原有的 Sprite 间碰撞逻辑
@@ -3098,10 +3120,14 @@ def load_map(map_name):
                     "tiles": {},
                     "images": images,
                 })
-            elif layer_type == "collisionlayer":
-                # 碰撞层：世界坐标多边形，与图像/图块解耦
+            elif layer_type in ("collisionlayer", "shapelayer"):
+                # 形状层：世界坐标判定形状，与图像/图块解耦
+                raw_shapes = layer_raw.get("shapes")
+                if raw_shapes is None:
+                    # 旧存档只有 polygons 字段，读取时统一成形状
+                    raw_shapes = layer_raw.get("polygons", [])
                 polygons = []
-                for poly_raw in layer_raw.get("polygons", []):
+                for poly_raw in raw_shapes:
                     pts = []
                     for p in poly_raw.get("points") or []:
                         if isinstance(p, (list, tuple)) and len(p) >= 2:
@@ -3115,11 +3141,14 @@ def load_map(map_name):
                             # 凸块：凹多边形预先三角化，供 SAT 碰撞判定使用
                             "parts": _collision_polygon_parts(pts),
                             "collisionType": poly_raw.get("collisionType", "墙体"),
+                            # 能力类型：solid=阻挡，sensor=感应，both=两者
+                            "kind": poly_raw.get("kind", "solid"),
+                            "tag": poly_raw.get("tag", "") or "",
                             "disabled": bool(poly_raw.get("disabled", False)),
                         })
                 layers.append({
-                    "name": layer_raw.get("name", "碰撞"),
-                    "type": "collision",
+                    "name": layer_raw.get("name", "形状"),
+                    "type": "shape",
                     "visible": layer_raw.get("visible", True),
                     "render": layer_raw.get("render", True),
                     "locked": layer_raw.get("locked", False),
@@ -3580,8 +3609,8 @@ def _render_map():
         if not layer.get("render", True):
             continue
 
-        # 碰撞层只参与物理判定，不参与渲染
-        if layer.get("type") == "collision":
+        # 形状层只参与物理与感应判定，不参与渲染
+        if layer.get("type") == "shape":
             continue
 
         # 处理图像图层

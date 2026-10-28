@@ -11,12 +11,20 @@ import { usePaintStore } from '../../stores/paint'
 import { rgbaCss, hexToRgba } from '../paint-editor/utils/artboardExport'
 import { useMapViewport } from '../../composables/useMapViewport'
 import { useImageTransform } from '../../composables/useImageTransform'
-import { useCollisionLayerEditor } from '../../composables/useCollisionLayerEditor'
+import { useShapeLayerEditor } from '../../composables/useShapeLayerEditor'
 import { useTilePainter } from '../../composables/useTilePainter'
 import { usePaperScope } from '../paint-editor/composables/usePaperScope'
 import { createBitmapPen } from '../paint-editor/utils/bitmapPen'
 import { ensurePaintFont } from '../paint-editor/utils/paintFont'
 import { collectSnapLines, snapAxisValue, snapRectOffset, snapThreshold } from '../../utils/smartSnap'
+import {
+  SELECTION_COLOR as VEC_SEL,
+  SELECTION_COLOR_DEEP as VEC_SEL_DEEP,
+  SELECTION_COLOR_HEX,
+  SELECTION_COLOR_DEEP_HEX,
+  SELECTION_FILL_ALPHA,
+  SELECTION_STROKE_PX,
+} from '../../utils/selectionStyle'
 import { toUserX, toUserY } from '../../utils/coords'
 import iconMarkerRaw from '../../assets/icons/标记.svg?raw'
 import {
@@ -123,6 +131,9 @@ async function initPixi() {
     autoDensity: true,
   })
   canvasRef.value.appendChild(app.canvas)
+  // Pixi 画布必须绝对定位在容器左上角：模板里前序元素/空白文本会产生行盒，
+  // inline canvas 会被往下挤，导致鼠标坐标与叠加层整体错位
+  app.canvas.classList.add('map-pixi-canvas')
 
   // 容器尺寸变化时同步渲染器尺寸并重绘网格
   resizeObserver = new ResizeObserver(() => {
@@ -264,7 +275,7 @@ function imageLayerSignature(img: any): string {
   ].join('|')
 }
 
-/** 图层内容签名：图块层按 tileRevision 整体重建，图片层按自身签名，碰撞层无内容 */
+/** 图层内容签名：图块层按 tileRevision 整体重建，图片层按自身签名，形状层无内容 */
 function layerContentKey(layer: any): string {
   if (layer.type === 'drawing') return `tiles:${mapStore.tileRevision}:${currentScaleMode}`
   if (layer.type === 'image') return `img:${imageLayerSignature(layer.image)}`
@@ -769,10 +780,10 @@ function drawSelectionOverlay() {
 
   const scale = Math.max(0.1, viewport.currentScale.value)
   const hs = 8 / scale
-  // 与矢量模式同一套选区样式：靛蓝描边 + 屏幕恒定线宽
-  const SEL = 0x818cf8
-  const SEL_DEEP = 0x6366f1
-  const strokeW = 1.4 / scale
+  // 与矢量模式 / 角色绘制页同一套选区样式：靛蓝描边 + 屏幕恒定线宽
+  const SEL = SELECTION_COLOR_HEX
+  const SEL_DEEP = SELECTION_COLOR_DEEP_HEX
+  const strokeW = SELECTION_STROKE_PX / scale
 
   if (floatCanvas) {
     const box = floatBoxWorld()
@@ -808,7 +819,7 @@ function drawSelectionOverlay() {
       imageLocalToWorld(img, { x: Math.min(x0, x1), y: Math.max(y0, y1) }),
     ].flatMap(p => [p.x, p.y])
     g.poly(pts)
-    g.fill({ color: SEL, alpha: 0.10 })
+    g.fill({ color: SEL, alpha: SELECTION_FILL_ALPHA })
     g.poly(pts)
     g.stroke({ width: strokeW, color: SEL })
   }
@@ -1178,10 +1189,10 @@ function setCollisionCursor(cursor: string) {
   if (vectorCanvasRef.value) vectorCanvasRef.value.style.cursor = cursor
 }
 
-/** 碰撞层悬停反馈：锚点=正常指针、框内=移动、其他=十字；矩形/钢笔=十字 */
+/** 形状层悬停反馈：锚点=正常指针、框内=移动、其他=十字；矩形/钢笔=十字 */
 function updateCollisionCursor(world: { x: number; y: number }) {
-  if (mapStore.activeMode !== 'collision') return
-  if (mapEditorStore.collisionLayerTool !== 'select') {
+  if (mapStore.activeMode !== 'shape') return
+  if (mapEditorStore.shapeTool !== 'select') {
     setCollisionCursor('crosshair')
     return
   }
@@ -1202,18 +1213,36 @@ function releasePointer(canvas: HTMLCanvasElement | null | undefined, pointerId:
   } catch { /* ignore */ }
 }
 
-/** 碰撞叠加层尺寸与 DPR 同步（世界坐标绘制，需要与 Pixi 视口一致） */
-function resizeCollisionOverlay() {
+/**
+ * 叠加层几何对齐：叠加层必须覆盖 Pixi 画布本身（而不是只假设与容器同尺寸/同位置）。
+ * 画布尺寸、CSS 布局或 DPR 变化后，backing store 与显示尺寸不一致会导致线条偏移、拉伸模糊。
+ */
+function syncCollisionOverlay() {
   const el = collisionOverlayRef.value
   const root = canvasRef.value
   if (!el || !root) return
+  const rootRect = root.getBoundingClientRect()
+  const pixiCanvas = app?.canvas as HTMLCanvasElement | undefined
+  const targetRect = pixiCanvas ? pixiCanvas.getBoundingClientRect() : rootRect
+  const cssW = Math.max(1, targetRect.width)
+  const cssH = Math.max(1, targetRect.height)
   const dpr = window.devicePixelRatio || 1
-  const w = Math.max(1, Math.round(root.clientWidth * dpr))
-  const h = Math.max(1, Math.round(root.clientHeight * dpr))
-  if (el.width !== w || el.height !== h) {
-    el.width = w
-    el.height = h
+  const bw = Math.max(1, Math.round(cssW * dpr))
+  const bh = Math.max(1, Math.round(cssH * dpr))
+  el.style.left = `${targetRect.left - rootRect.left}px`
+  el.style.top = `${targetRect.top - rootRect.top}px`
+  // CSS 尺寸用 backing / dpr，保证像素比严格等于 dpr，避免被浏览器二次拉伸而发虚
+  el.style.width = `${bw / dpr}px`
+  el.style.height = `${bh / dpr}px`
+  if (el.width !== bw || el.height !== bh) {
+    el.width = bw
+    el.height = bh
   }
+}
+
+/** 碰撞叠加层尺寸与 DPR 同步（世界坐标绘制，需要与 Pixi 视口一致） */
+function resizeCollisionOverlay() {
+  syncCollisionOverlay()
   collision.drawOverlay()
 }
 
@@ -2129,10 +2158,11 @@ const transform = useImageTransform({
   onRenderRequest: () => scheduleRender(),
 })
 
-const collision = useCollisionLayerEditor({
+const collision = useShapeLayerEditor({
   getApp: () => app,
   getScale: () => viewport.currentScale.value,
   getOverlayCanvas: () => collisionOverlayRef.value ?? null,
+  syncOverlay: () => syncCollisionOverlay(),
 })
 
 const painter = useTilePainter({
@@ -2655,9 +2685,7 @@ function refreshUpperLayerSnapshot() {
 }
 
 // ─── 覆盖层投影（SVG 变换框 / 塑形锚点 / 光标 / 文字框）───
-
-const VEC_SEL = '#818cf8'
-const VEC_SEL_DEEP = '#6366f1'
+// 选区主题色统一来自 utils/selectionStyle（与角色绘制页 / 形状图层共用）
 
 const vectorOverlayStyle = computed(() => {
   const m = vectorMatrix.value
@@ -2701,7 +2729,7 @@ const vectorScreenScale = computed(() => {
   if (!m) return 1
   return Math.max(0.1, Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)))
 })
-const vectorBoxStroke = computed(() => 1.4 / vectorScreenScale.value)
+const vectorBoxStroke = computed(() => SELECTION_STROKE_PX / vectorScreenScale.value)
 const vectorHandleSize = computed(() => 8 / vectorScreenScale.value)
 const vectorRotateRadius = computed(() => 4 / vectorScreenScale.value)
 const vectorPointSize = computed(() => 8 / vectorScreenScale.value)
@@ -3049,8 +3077,8 @@ function onPointerDown(e: PointerEvent) {
     }
   }
 
-  // 碰撞层：指针事件全部交给碰撞层编辑器
-  if (mapStore.activeMode === 'collision') {
+  // 形状层：指针事件全部交给形状层编辑器
+  if (mapStore.activeMode === 'shape') {
     // 清掉可能残留的平移状态，避免普通拖动带动整块画布
     viewport.endPan()
     const worldPos = viewport.screenToWorld(e)
@@ -3127,8 +3155,8 @@ function onPointerMove(e: PointerEvent) {
   const cursorWorld = viewport.screenToWorld(e)
   if (cursorWorld) emit('cursor-move', cursorWorld.x, cursorWorld.y)
   if (mapEditorStore.markerPlacing) markerGhost.value = cursorWorld
-  // 碰撞层：未按键时确保平移状态已结束，不会出现"鼠标一动整块画布跟着走"
-  if (mapStore.activeMode === 'collision' && e.buttons === 0) viewport.endPan()
+  // 形状层：未按键时确保平移状态已结束，不会出现"鼠标一动整块画布跟着走"
+  if (mapStore.activeMode === 'shape' && e.buttons === 0) viewport.endPan()
   if (viewport.handlePanMove(e.clientX, e.clientY)) {
     syncVectorGeometry()
     // 叠加层在屏幕坐标绘制，平移后需要重绘
@@ -3136,8 +3164,8 @@ function onPointerMove(e: PointerEvent) {
     return
   }
 
-  // 碰撞层：拖动顶点 / 整框移动 / 矩形 / 钢笔预览
-  if (mapStore.activeMode === 'collision') {
+  // 形状层：拖动顶点 / 整框移动 / 矩形 / 钢笔预览
+  if (mapStore.activeMode === 'shape') {
     const worldPos = viewport.screenToWorld(e)
     if (worldPos) {
       collision.pointerMove(worldPos)
@@ -3195,8 +3223,8 @@ function onPointerMove(e: PointerEvent) {
 }
 
 function onPointerUp(e: PointerEvent) {
-  // 碰撞层：收尾矩形/顶点/整框拖拽
-  if (mapStore.activeMode === 'collision') {
+  // 形状层：收尾矩形/顶点/整框拖拽
+  if (mapStore.activeMode === 'shape') {
     // 空格/中键平移的收尾也必须执行，否则平移状态会残留，之后鼠标移动一直拖动画布
     viewport.endPan()
     releasePointer(app?.canvas as HTMLCanvasElement | undefined, e.pointerId)
@@ -3257,7 +3285,7 @@ function onPointerLeave(e: PointerEvent) {
     handleSelectPointerUp()
   }
   // 松手状态下离开画布才取消未完成的碰撞草稿；拖拽中（按钮仍按下）继续由指针捕获接管
-  if (mapStore.activeMode === 'collision' && e.buttons === 0) {
+  if (mapStore.activeMode === 'shape' && e.buttons === 0) {
     collision.resetOnLeave()
   }
 }
@@ -3478,8 +3506,8 @@ function onKeyDown(e: KeyboardEvent) {
   // Tool shortcuts (only when not typing in an input)
   if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return
 
-  // 碰撞层快捷键：Esc 取消/退出，Enter 闭合多边形，Delete 删除锚点/碰撞体
-  if (mapStore.activeMode === 'collision' && collision.handleKeyDown(e)) return
+  // 形状层快捷键：Esc 取消/退出，Enter 闭合多边形，Delete 删除锚点/形状
+  if (mapStore.activeMode === 'shape' && collision.handleKeyDown(e)) return
 
   switch (e.key.toLowerCase()) {
     case 'b': mapEditorStore.setTool('draw'); break
@@ -3723,7 +3751,7 @@ watch(
   }
 )
 
-// 切到非图片图层时清除图片变换框；切到碰撞层时清理碰撞会话并刷新叠加层
+// 切到非图片图层时清除图片变换框；切到形状层时清理形状会话并刷新叠加层
 watch(
   () => mapStore.activeLayerIndex,
   (idx) => {
@@ -3732,8 +3760,8 @@ watch(
       transform.removeTransformBox()
       mapStore.clearImageSelection()
     }
-    if (layer?.type === 'collision') {
-      setCollisionCursor(mapEditorStore.collisionLayerTool === 'select' ? 'default' : 'crosshair')
+    if (layer?.type === 'shape') {
+      setCollisionCursor(mapEditorStore.shapeTool === 'select' ? 'default' : 'crosshair')
     }
     collision.cancelDraft()
     collision.drawOverlay()
@@ -3745,7 +3773,7 @@ watch(
   () => mapStore.mapData.layers.map(l => `${l.id}:${l.visible}`),
   () => {
     ensureLayerOrder()
-    // 碰撞层显隐同步叠加层
+    // 形状层显隐同步叠加层
     collision.drawOverlay()
     // 矢量模式下上方图层集合随可见性变化，快照需同步重拍
     refreshUpperLayerSnapshot()
@@ -3840,13 +3868,13 @@ watch(
   }
 )
 
-// 碰撞层工具切换：清理未完成草稿并重置光标
+// 形状层工具切换：清理未完成草稿并重置光标
 watch(
-  () => mapEditorStore.collisionLayerTool,
+  () => mapEditorStore.shapeTool,
   () => {
-    if (mapStore.activeMode !== 'collision') return
+    if (mapStore.activeMode !== 'shape') return
     collision.cancelDraft()
-    setCollisionCursor(mapEditorStore.collisionLayerTool === 'select' ? 'default' : 'crosshair')
+    setCollisionCursor(mapEditorStore.shapeTool === 'select' ? 'default' : 'crosshair')
     collision.drawOverlay()
   }
 )
@@ -4335,14 +4363,15 @@ defineExpose({
     >
       <svg class="map-vector-ui-svg">
         <g :transform="vectorUiTransform">
-        <!-- 框选矩形：矢量模式下拖拽框选对象时显示 -->
+        <!-- 框选矩形：与角色绘制页 / 形状图层统一的靛蓝实线 + 10% 填充 -->
         <rect
           v-if="paintStore.selection"
           :x="paintStore.selection.x"
           :y="paintStore.selection.y"
           :width="paintStore.selection.w"
           :height="paintStore.selection.h"
-          fill="rgba(129, 140, 248, 0.10)"
+          :fill="VEC_SEL"
+          :fill-opacity="SELECTION_FILL_ALPHA"
           :stroke="VEC_SEL"
           :stroke-width="vectorBoxStroke"
           stroke-linejoin="round"
@@ -4551,10 +4580,20 @@ defineExpose({
   touch-action: none;
 }
 
-/* 碰撞叠加层：屏幕坐标 canvas，位于矢量画布（z=10）与矢量投影层（z=11）之上 */
+/* Pixi 主画布：绝对定位贴左上角，避免 inline canvas 被模板空白文本产生的行盒挤下去 */
+.map-pixi-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+}
+
+/* 碰撞叠加层：屏幕坐标 canvas，位于矢量画布（z=10）与矢量投影层（z=11）之上
+   实际 left/top/width/height 由 syncCollisionOverlay 按 Pixi 画布实时对齐 */
 .map-collision-overlay {
   position: absolute;
-  inset: 0;
+  left: 0;
+  top: 0;
   width: 100%;
   height: 100%;
   pointer-events: none;

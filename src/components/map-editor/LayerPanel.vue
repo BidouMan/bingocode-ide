@@ -256,7 +256,7 @@ defineExpose({ setLayerThumb })
       <button class="layer-tool-btn" v-tooltip="'新建图块图层'" :disabled="disabled" @click="mapStore.addLayer('图块图层')">
         <img :src="iconAdd" class="layer-tool-icon" />
       </button>
-      <button class="layer-tool-btn" v-tooltip="'新建碰撞层'" :disabled="disabled" @click="mapStore.addCollisionLayer()">
+      <button class="layer-tool-btn" v-tooltip="'新建形状图层'" :disabled="disabled" @click="mapStore.addShapeLayer()">
         <img :src="iconCollisionType" class="layer-tool-icon" />
       </button>
       <button class="layer-tool-btn" v-tooltip="'本地上传'" :disabled="disabled" @click="emit('upload-image')">
@@ -297,11 +297,11 @@ defineExpose({ setLayerThumb })
           />
         </div>
 
-        <!-- 图层类型图标：绘制层=绘制图像按钮图标；上传/内置图片=图像图层图标；图块/碰撞=对应按钮图标 -->
+        <!-- 图层类型图标：绘制层=绘制图像按钮图标；上传/内置图片=图像图层图标；图块/形状=对应按钮图标 -->
         <img
           :src="item.layer.type === 'image'
             ? (item.layer.image?.background ? iconPaint : iconImageLayer)
-            : item.layer.type === 'collision' ? iconCollisionType : iconAdd"
+            : item.layer.type === 'shape' ? iconCollisionType : iconAdd"
           class="layer-type-icon"
           draggable="false"
         />

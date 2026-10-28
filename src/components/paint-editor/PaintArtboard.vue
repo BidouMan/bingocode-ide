@@ -5,6 +5,13 @@ import { useBitmapCanvas } from './composables/useBitmapCanvas'
 import { usePaperScope } from './composables/usePaperScope'
 import { ensurePaintFont } from './utils/paintFont'
 import { snapThreshold, type SnapInfo } from '../../utils/smartSnap'
+import {
+  SELECTION_COLOR as SEL,
+  SELECTION_COLOR_DEEP as SEL_DEEP,
+  SELECTION_COLOR_RGB,
+  SELECTION_FILL_ALPHA,
+  SELECTION_STROKE_PX,
+} from '../../utils/selectionStyle'
 import iconUndo from '../../assets/icons/undo.svg'
 import iconRedo from '../../assets/icons/redo.svg'
 import iconZoomOut from '../../assets/icons/reduce-one.svg'
@@ -553,7 +560,7 @@ const liveSizeBadge = computed(() => {
   }
 })
 
-// ─── 选区蚂蚁线（框选拖动预览；有浮动选区时改由 SVG 变换框渲染）───
+// ─── 选区框（框选拖动预览；有浮动选区时改由 SVG 变换框渲染）───
 const selectionStyle = computed(() => {
   const r = store.selection
   if (!r || r.w <= 0 || r.h <= 0) return null
@@ -562,13 +569,15 @@ const selectionStyle = computed(() => {
     top: `${r.y}px`,
     width: `${r.w}px`,
     height: `${r.h}px`,
+    background: `rgba(${SELECTION_COLOR_RGB}, ${SELECTION_FILL_ALPHA})`,
+    '--selection-color': SEL,
+    // 线宽按屏幕像素恒定：画板整体被 zoom 缩放，这里反向除以 zoom
+    '--selection-stroke': `${SELECTION_STROKE_PX / Math.max(0.1, store.zoom)}px`,
   }
 })
 
 // ─── 变换框 SVG 矢量 UI（独立图层：不碰图像像素、任意缩放平滑无锯齿）───
-// 选区主题色：在这里修改选框颜色（SEL=框线/旋转柄主色，SEL_DEEP=手柄描边；十六进制）
-const SEL = '#818cf8' // 主色：框线芯、旋转柄（rgb 129,140,248）
-const SEL_DEEP = '#6366f1' // 同系加深：手柄/旋转点描边（白底上保对比）
+// 选区主题色统一来自 utils/selectionStyle（与地图编辑器 / 形状图层共用）
 const boxStrokeInv = computed(() => 1 / Math.max(0.1, store.zoom))
 const boxHandleSize = computed(() => 7 / Math.max(0.1, store.zoom))
 const boxPoints = computed(() => {
@@ -1160,11 +1169,11 @@ defineExpose({
       :style="{ pointerEvents: store.mode === 'vector' ? 'auto' : 'none' }"
     ></canvas>
     <!-- 选区 overlay 层：与 artboard 逐像素同位同变换（复用同一 artboardStyle 计算），
-         浮于矢量画布之上——选区框/蚂蚁线必须盖住两层内容 -->
+         浮于矢量画布之上——选区框必须盖住两层内容 -->
     <div class="paint-overlay">
       <div class="paint-overlay-box" :style="artboardStyle">
-        <!-- 选区蚂蚁线（仅框选拖动中的进行态预览） -->
-        <div v-if="selectionStyle && !store.floatActive" class="selection-ants" :style="selectionStyle"></div>
+        <!-- 选区框（仅框选拖动中的进行态预览，样式与地图/形状图层统一） -->
+        <div v-if="selectionStyle && !store.floatActive" class="selection-marquee" :style="selectionStyle"></div>
         <!-- 矢量选中变换框：定向矩形（可带旋转角）+ 8 缩放手柄 + 旋转柄，
              与位图浮动选区同一 SVG overlay 方案（不走 paper.item.selected，防烙印进画布） -->
         <svg
@@ -1663,12 +1672,11 @@ defineExpose({
   pointer-events: none;
 }
 
-/* 选区蚂蚁线（框选拖动态）：深色虚线 + 蓝紫衬线（与变换框同色系） */
-.selection-ants {
+/* 选区框（框选拖动态）：与地图编辑器 / 形状图层统一的靛蓝实线 + 10% 填充 */
+.selection-marquee {
   position: absolute;
   pointer-events: none;
-  outline: 1px dashed rgba(24, 27, 50, 0.95);
-  box-shadow: 0 0 0 1px #818cf8;
+  outline: var(--selection-stroke, 1.4px) solid var(--selection-color, #818cf8);
   z-index: 5;
 }
 

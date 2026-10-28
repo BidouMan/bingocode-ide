@@ -146,13 +146,24 @@ export function useMapViewport(options: MapViewportOptions) {
 
   // --- Interaction ---
 
+  /**
+   * 画布实际显示矩形：优先取 Pixi canvas 自身的 rect。
+   * 容器与画布不一定完全重合（布局/缩放/DPR 都可能产生偏差），
+   * 所有屏幕↔世界换算必须和真正绘制内容的画布对齐，否则鼠标与选框会错位。
+   */
+  function canvasRect(): DOMRect | null {
+    const app = getApp()
+    const el = (app?.canvas as HTMLCanvasElement | undefined) ?? canvasRef.value
+    return el ? el.getBoundingClientRect() : null
+  }
+
   function onWheel(e: WheelEvent) {
     e.preventDefault()
 
     const app = getApp()
     if (!app) return
     // Zoom canvas
-    const rect = canvasRef.value?.getBoundingClientRect()
+    const rect = canvasRect()
     if (!rect) return
     const mouseX = e.clientX - rect.left
     const mouseY = e.clientY - rect.top
@@ -214,8 +225,8 @@ export function useMapViewport(options: MapViewportOptions) {
 
   function screenToGrid(e: PointerEvent): { x: number; y: number } | null {
     const app = getApp()
-    if (!canvasRef.value || !app) return null
-    const rect = canvasRef.value.getBoundingClientRect()
+    const rect = canvasRect()
+    if (!rect || !app) return null
     const sx = (e.clientX - rect.left - app.stage.x) / currentScale.value
     const sy = (e.clientY - rect.top - app.stage.y) / currentScale.value
     const tileSize = mapStore.mapData.tileSize
@@ -234,8 +245,8 @@ export function useMapViewport(options: MapViewportOptions) {
   /** 客户端屏幕坐标 → 地图世界坐标（标记拖拽等非 PointerEvent 场景使用） */
   function clientToWorld(clientX: number, clientY: number): { x: number; y: number } | null {
     const app = getApp()
-    if (!canvasRef.value || !app) return null
-    const rect = canvasRef.value.getBoundingClientRect()
+    const rect = canvasRect()
+    if (!rect || !app) return null
     return {
       x: (clientX - rect.left - app.stage.x) / currentScale.value,
       y: (clientY - rect.top - app.stage.y) / currentScale.value,
