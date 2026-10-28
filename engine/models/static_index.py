@@ -25,6 +25,9 @@ _LEAF_SIZE = 8
 # 判定外扩（像素）：让「刚好贴着边界」也算碰到。
 # 只用于 is_touch / 感应进出等查询，物理推挤仍用未外扩的 shape。
 SENSOR_EPS = 0.5
+# 离开判定的外扩量（比进入更大，形成 0.5px 缓冲带）：
+# 角色停在阈值附近轻微抖动时不会反复触发「进入 / 离开」
+SENSOR_EXIT_EPS = 1.0
 
 
 @dataclass
@@ -49,6 +52,7 @@ class StaticEntry:
     bbox: AABB = field(init=False)
     # 缓存的判定外扩形状：只做查询，不参与相等性比较
     _probe_shape: Optional[Shape] = field(default=None, init=False, repr=False, compare=False)
+    _exit_probe_shape: Optional[Shape] = field(default=None, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self.bbox = self.shape.bbox
@@ -72,6 +76,17 @@ class StaticEntry:
         if self._probe_shape is None:
             self._probe_shape = inflate(self.shape, SENSOR_EPS)
         return self._probe_shape
+
+    @property
+    def exit_probe_shape(self) -> Shape:
+        """感应「离开」判定形状：比进入再外扩一点，形成缓冲带。
+
+        进入用 SENSOR_EPS、离开用 SENSOR_EXIT_EPS：
+        角色停在阈值附近轻微抖动时，不会一帧进入、下一帧又离开地反复触发。
+        """
+        if self._exit_probe_shape is None:
+            self._exit_probe_shape = inflate(self.shape, SENSOR_EXIT_EPS)
+        return self._exit_probe_shape
 
 
 class _BVHNode:

@@ -16,7 +16,7 @@ from models.shape_kernel import (
     point_inside,
     raycast as shape_raycast,
 )
-from models.static_index import StaticEntry, build_world, SENSOR_EPS
+from models.static_index import StaticEntry, build_world, SENSOR_EPS, SENSOR_EXIT_EPS
 from models.coords import (
     to_world_x,
     to_world_y,
@@ -1602,7 +1602,12 @@ class Sprite:
         - 不传 callback：碰到后默认双方都删除
         - 传 callback：执行 callback(自己, 碰到的角色)；
           函数也可以只写 1 个参数（只接收自己）或不写参数
+        - 同一个组重复注册会覆盖上一次：写在 while True 里也不会重复执行/越积越多
         """
+        # 按组去重：重复注册只保留最后一次，避免每帧注册导致回调越积越多
+        self._on_hit_callbacks = [
+            item for item in self._on_hit_callbacks if item[0] != group
+        ]
         self._on_hit_callbacks.append((group, callback))
 
     # 兼容旧项目代码，旧名不再出现在文档与补全中
@@ -1619,17 +1624,29 @@ class Sprite:
             def 碰到水():               # 不接收信息
             def 碰到水(who):            # who = 进入的角色
             def 碰到水(who, tag):       # tag = 标签名
+
+        同一个标签重复注册会覆盖上一次：写在 while True 里也不会重复执行/越积越多。
         """
         if not callable(callback):
             print("[提示] on_sensor_enter 需要传一个函数，例如：hero.on_sensor_enter(\"水\", 碰到水)")
             return
+        # 按标签去重：重复注册只保留最后一次
+        self._sensor_enter_callbacks = [
+            item for item in self._sensor_enter_callbacks if item[0] != tag
+        ]
         self._sensor_enter_callbacks.append((tag, callback))
 
     def on_sensor_exit(self, tag, callback):
-        """离开某个感应形状时执行 callback（参数写法同 on_sensor_enter）"""
+        """离开某个感应形状时执行 callback（参数写法同 on_sensor_enter）
+
+        同一个标签重复注册会覆盖上一次。
+        """
         if not callable(callback):
             print("[提示] on_sensor_exit 需要传一个函数，例如：hero.on_sensor_exit(\"水\", 离开水)")
             return
+        self._sensor_exit_callbacks = [
+            item for item in self._sensor_exit_callbacks if item[0] != tag
+        ]
         self._sensor_exit_callbacks.append((tag, callback))
 
     def broadcast(self, event_name):
@@ -4293,10 +4310,11 @@ def _handle_physics_collision():
 def _process_sensor_events():
     """轮询注册了感应回调的角色，触发「进入 / 离开」事件。
 
-    只查感应索引（solid 不参与），每个标签的判定形状统一按 SENSOR_EPS 外扩：
-      - 从无到有 → 触发一次 on_sensor_enter
-      - 从有到无 → 触发一次 on_sensor_exit
-    外扩让「刚好贴着边界 / 贴着感应区休息」也算在内，不会因浮点误差漏判或抖动。
+    只查感应索引（solid 不参与），每个标签带缓冲带地判定：
+      - 进入：外扩 SENSOR_EPS 后相交
+      - 离开：外扩更大的 SENSOR_EXIT_EPS 后仍不相交
+      - 从无到有 → 触发一次 on_sensor_enter；从有到无 → 触发一次 on_sensor_exit
+    缓冲带让「站在阈值附近轻微抖动」不会反复触发进入/离开。
     """
     if not _CURRENT_MAP:
         return
@@ -4321,10 +4339,11 @@ def _process_sensor_events():
         if not rect:
             continue
 
-        # 感应索引宽相：查询盒按外扩量放大，保证贴着边界的感应形状也进候选
+        # 感应索引宽相：查询盒按「离开判定」的最大外扩量放大，
+        # 保证还处在缓冲带里的感应形状仍能进候选（用于判断是否真正离开）
         entries = static_world.sensors.query_rect(
-            rect[0] - SENSOR_EPS, rect[1] - SENSOR_EPS,
-            rect[2] + SENSOR_EPS, rect[3] + SENSOR_EPS,
+            rect[0] - SENSOR_EXIT_EPS, rect[1] - SENSOR_EXIT_EPS,
+            rect[2] + SENSOR_EXIT_EPS, rect[3] + SENSOR_EXIT_EPS,
         )
 
         active = sprite._sensor_active_tags
@@ -4335,7 +4354,9 @@ def _process_sensor_events():
                 tag = entry.tag
                 if tag not in wanted or tag in touched:
                     continue
-                if intersects(shape, entry.probe_shape):
+                # 已在区域内：用更大的外扩形状判断是否还留在缓冲带内
+                probe = entry.exit_probe_shape if tag in active else entry.probe_shape
+                if intersects(shape, probe):
                     touched.add(tag)
 
         for tag in touched - active:
