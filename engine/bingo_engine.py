@@ -4119,10 +4119,6 @@ class _MapHandle:
                 return True
         return False
 
-    def raycast(self, x, y, direction, distance=1000):
-        """同全局 raycast(x, y, direction, distance)"""
-        return raycast(x, y, direction, distance)
-
     def __bool__(self):
         # 加载成功返回的对象在 if 判断里视为真（由原来的 True 兼容而来）
         return True

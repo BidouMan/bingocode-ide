@@ -236,9 +236,33 @@
       "funcs": [
         {
           "label": "is_touch 碰到了吗",
-          "code": "hero.is_touch(enemy)\nhero.is_touch(mouse)",
-          "desc": "检查角色有没有碰到某个东西，可以碰另一个角色、碰鼠标。",
+          "code": "hero.is_touch(\"水\")\nhero.is_touch(enemy)\nhero.is_touch(mouse)",
+          "desc": "检查角色有没有碰到某个东西：\n- 写标签：hero.is_touch(\"水\")，「形状层」里的标签和图块标签都可以\n- 写角色：碰另一个角色\n- 写 mouse：碰鼠标\n贴边（不到半个像素）也算碰到。",
           "badgeType": "object"
+        },
+        {
+          "label": "is_blocked 前面挡住了吗",
+          "code": "if hero.is_blocked(\"right\"):\n    hero.say(\"右边是墙\")\n\nhero.is_blocked(\"down\", 8)",
+          "desc": "朝一个方向检查前面有没有实心地形（墙、地面、实心图块）。\n方向可以写 left / right / up / down，也可以写中文「左/右/上/下」。\n第二个数字是往前探多远，不写默认 2 像素。\n感应区域不算阻挡；「跳板」只有往下且从上面靠近时才算。",
+          "badgeType": "object"
+        },
+        {
+          "label": "is_on_wall 贴着墙吗",
+          "code": "if hero.is_on_wall():\n    hero.say(\"贴墙了\")",
+          "desc": "检查角色左右两边是不是正贴着墙。只在顶着墙的那一帧为 True。",
+          "badgeType": "object"
+        },
+        {
+          "label": "is_on_ceiling 头顶撞到了吗",
+          "code": "if hero.is_on_ceiling():\n    hero.stop_jump()",
+          "desc": "检查角色头顶是不是撞到了东西（天花板、墙顶、地图上边界）。\n跳跃撞头的那一帧为 True，适合配合 stop_jump() 一起用。",
+          "badgeType": "object"
+        },
+        {
+          "label": "raycast 往前打一条线",
+          "code": "hit = raycast(hero.x, hero.y, \"right\", 200)\nif hit:\n    print(hit.distance, hit.tag)",
+          "desc": "从一个点朝一个方向射出一条看不见的线，返回最近碰到的实心地形；没碰到返回 None。\n命中后可以读：hit.distance（多远）、hit.tag（标签）、hit.x / hit.y（命中点坐标）、hit.normal（表面朝向）。\n方向可以写 left / right / up / down 或角度数字（0右 90上）。",
+          "badgeType": "function"
         },
         {
           "label": "is_touch_edge 碰到边框了吗",
@@ -280,6 +304,18 @@
           "label": "on_touch_group 碰到时自动执行",
           "code": "enemy.add_to_group(\"enemies\")\nbullet.on_touch_group(\"enemies\")",
           "desc": "先将敌人加入\"enemies\"组，然后子弹创建后，注册on_touch_group，当子弹碰到敌人时，引擎会自动把子弹和敌人一起删除。\n如果碰到敌人下个播放声音、加分、扣血等，就传入一个自己写好的函数。",
+          "badgeType": "object"
+        },
+        {
+          "label": "on_sensor_enter 进入感应区",
+          "code": "def 碰到水(who, tag):\n    who.say(\"好凉快\")\n\nhero.on_sensor_enter(\"水\", 碰到水)",
+          "desc": "形状层里类型是「感应」或「阻挡 + 感应」、并且填了标签的形状，被角色进入时执行一次自己写的函数（写在循环外面注册一次即可）。\n函数有两个参数：(角色, 标签)。\n站在里面不会每帧重复触发；同一个标签的多个区域算一个整体。",
+          "badgeType": "object"
+        },
+        {
+          "label": "on_sensor_exit 离开感应区",
+          "code": "def 离开水(who, tag):\n    who.say(\"上岸了\")\n\nhero.on_sensor_exit(\"水\", 离开水)",
+          "desc": "离开感应形状时执行一次自己写的函数。\n函数有两个参数：(角色, 标签)。",
           "badgeType": "object"
         },
         
@@ -493,6 +529,12 @@
           "label": "get_markers 获取一组标记",
           "code": "for m in map.get_markers(\"敌人\"):\n    enemy = Sprite(\"史莱姆\")\n    enemy.goto(m)",
           "desc": "按类型拿到一串图钉，可以一次把同一种类型的标记都取出来，比如铺满所有敌人刷新点。",
+          "badgeType": "function"
+        },
+        {
+          "label": "map.is_solid 这个点是实心吗",
+          "code": "if map.is_solid(x, y):\n    hero.say(\"这里有地面\")",
+          "desc": "检查地图上的某个点是不是实心地面（墙、地面、实心图块）。感应区域不算。\n坐标和角色的 x / y 一样：地图左下角是原点，y 向上为正。",
           "badgeType": "function"
         }
       ]
