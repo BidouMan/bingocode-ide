@@ -1982,11 +1982,12 @@ class Sprite:
             if _CURRENT_MAP:
                 tile_size = _CURRENT_MAP.get("tile_size", 16)
 
-                # 计算精灵包围盒覆盖的图块范围
-                min_tile_x = math.floor(r1[0] // tile_size)
-                max_tile_x = math.floor(r1[2] // tile_size)
-                min_tile_y = math.floor(r1[1] // tile_size)
-                max_tile_y = math.floor(r1[3] // tile_size)
+                # 计算精灵包围盒覆盖的图块范围（按判定外扩量放大，
+                # 避免贴着图块边缘停住时因皮肤间隙漏判该图块的标签）
+                min_tile_x = math.floor((r1[0] - SENSOR_EPS) // tile_size)
+                max_tile_x = math.floor((r1[2] + SENSOR_EPS) // tile_size)
+                min_tile_y = math.floor((r1[1] - SENSOR_EPS) // tile_size)
+                max_tile_y = math.floor((r1[3] + SENSOR_EPS) // tile_size)
 
                 # 遍历所有图层
                 for layer in _CURRENT_MAP.get("layers", []):
@@ -2020,8 +2021,8 @@ class Sprite:
                     if static_world is not None:
                         sprite_shape = self._get_collision_shape()
                         for entry in static_world.tag_entries(tag):
-                            # 感应形状按 SENSOR_EPS 外扩判定（贴边也算碰到），实心形状保持原样
-                            if intersects(sprite_shape, entry.sensor_shape):
+                            # 统一用外扩 SENSOR_EPS 的判定形状：贴着墙面/地面也算碰到
+                            if intersects(sprite_shape, entry.probe_shape):
                                 return True
                     else:
                         # 索引构建失败时的兼容路径：保持原全表扫描
@@ -4319,7 +4320,7 @@ def _process_sensor_events():
                 tag = entry.tag
                 if tag not in wanted or tag in touched:
                     continue
-                if intersects(shape, entry.sensor_shape):
+                if intersects(shape, entry.probe_shape):
                     touched.add(tag)
 
         for tag in touched - active:

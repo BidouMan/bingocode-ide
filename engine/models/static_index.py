@@ -22,8 +22,8 @@ from models.shape_kernel import AABB, Shape, inflate
 # 叶子节点最多容纳的条目数
 _LEAF_SIZE = 8
 
-# 感应区判定外扩（像素）：让「刚好贴着边界」也算进入。
-# 只用于感应判定/进出事件，实心形状保持原样，物理推挤不受影响。
+# 判定外扩（像素）：让「刚好贴着边界」也算碰到。
+# 只用于 is_touch / 感应进出等查询，物理推挤仍用未外扩的 shape。
 SENSOR_EPS = 0.5
 
 
@@ -47,8 +47,8 @@ class StaticEntry:
     ref: Any = None
     origin: Any = None
     bbox: AABB = field(init=False)
-    # 缓存的感应外扩形状：只做判定，不参与相等性比较（避免 dataclass 比较性格外依赖 Shape）
-    _sensor_shape: Optional[Shape] = field(default=None, init=False, repr=False, compare=False)
+    # 缓存的判定外扩形状：只做查询，不参与相等性比较
+    _probe_shape: Optional[Shape] = field(default=None, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self.bbox = self.shape.bbox
@@ -62,17 +62,16 @@ class StaticEntry:
         return self.kind in ("solid", "both")
 
     @property
-    def sensor_shape(self) -> Shape:
-        """感应判定形状：感应类形状外扩 SENSOR_EPS，实心形状原样返回。
+    def probe_shape(self) -> Shape:
+        """判定查询用形状：向外扩 SENSOR_EPS，物理仍用未外扩的 shape。
 
-        「阻挡 + 感应」同时命中时，物理仍用未外扩的 shape，只有感应检测走这里。
-        首次访问才计算并缓存。
+        碰撞解算会把角色推到与墙面/地面刚好接触的位置（可能留 0.01~0.05px 的皮肤间隙），
+        用严格相交判定会漏掉「贴着不动」的状态（表现为被挡住但 is_touch 返回 False）。
+        所有能力类型（阻挡 / 感应 / 两者）统一外扩，查询语义保持一致。
         """
-        if self._sensor_shape is None:
-            self._sensor_shape = (
-                inflate(self.shape, SENSOR_EPS) if self.is_sensor else self.shape
-            )
-        return self._sensor_shape
+        if self._probe_shape is None:
+            self._probe_shape = inflate(self.shape, SENSOR_EPS)
+        return self._probe_shape
 
 
 class _BVHNode:
