@@ -128,7 +128,12 @@ BingoCodeIDE/
 │   └── utils/                  # 地图序列化、SVG 超采样等
 ├── src-tauri/                  # Tauri Rust 后端（文件 I/O、Python 子进程）
 ├── engine/                     # Python 游戏引擎
-│   ├── bingo_engine.py         # 引擎核心（游戏模式 API）
+│   ├── bingo_engine.py         # 引擎门面（重导出公共 API，实现在同目录各模块）
+│   ├── ENGINE_MAP.md           # 引擎模块地图（按功能查文件）
+│   ├── game_loop.py            # 主循环 / 启动 / generator 调度
+│   ├── sprite*.py              # Sprite 主类 + 物理 / 素材 / 动画
+│   ├── map_runtime.py          # 地图加载、渲染、碰撞、感应区
+│   ├── engine_state.py         # 全局共享状态
 │   ├── code_transform.py       # while True → 生成器 改写
 │   └── assets/                 # 唯一资源库（Vite publicDir 指向此处）
 │       ├── sprites/            # 按分类目录组织（characters / items / …）

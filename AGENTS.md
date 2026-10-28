@@ -57,7 +57,13 @@ src-tauri/
   src/lib.rs                    # Tauri commands (file I/O, Python process)
   src/engine.rs                 # Python subprocess management (stdout/stdin)
 engine/
-  bingo_engine.py               # Game engine (runs in Python subprocess)
+  bingo_engine.py               # 引擎门面：引导 + 重导出公共 API + __all__（只做导出，别在这里加实现）
+  game_loop.py                  # 主循环/启动/generator 调度（入口层）
+  sprite.py / sprite_physics.py / sprite_assets.py / sprite_animation.py  # Sprite 主类 + 三个 Mixin
+  map_runtime.py / markers.py   # 地图运行时 / 标记与射线
+  camera.py / input_api.py / timing.py / game_control.py / audio.py / effects.py / collision_geometry.py
+  engine_state.py               # 所有跨模块共享的可变状态（唯一存放处）
+  ENGINE_MAP.md                 # 引擎模块地图（改引擎前先查这里）
   models/                       # Data models
   assets/                       # 唯一游戏资源库（Vite publicDir 指向此处）
     sprites/                     # 按分类目录组织（目录名=库标签，自动发现）
@@ -73,6 +79,33 @@ engine/
     sounds/                     # 音效资源（.wav）
     ui/                         # UI 资源（favicon, icons）
 ```
+
+## 引擎模块地图（改引擎前必读）
+
+`engine/bingo_engine.py` 已经拆分为多个平铺模块（**不要**整目录大范围 grep，按下表直接打开）。完整版见 [engine/ENGINE_MAP.md](engine/ENGINE_MAP.md)。
+
+| 改动内容 | 打开 |
+| --- | --- |
+| 用户可调用的 API（`__all__` / 导出） | `bingo_engine.py`（新增 API 还要同步 `game_loop.py` 的 `exec_globals`） |
+| 帧循环、启动、暂停语义、generator | `game_loop.py` |
+| 角色公开方法/属性 | `sprite.py` |
+| 卡墙、穿模、斜坡、贴地、`is_touch` | `sprite_physics.py` |
+| 角色图片/bsf/bgs、碰撞盒、挂点坐标 | `sprite_assets.py` |
+| 动画播放、说话气泡 | `sprite_animation.py` |
+| 地图加载/瓦片渲染/地图碰撞/感应区 | `map_runtime.py` |
+| `get_marker(s)`、`raycast` | `markers.py` |
+| 镜头跟随 | `camera.py` |
+| 键鼠输入、`input()` | `input_api.py` |
+| 计时器、`time_passed` | `timing.py` |
+| 暂停/停止/广播/FPS | `game_control.py` |
+| 音效 | `audio.py` |
+| 文字/震动/随机数/显示碰撞 | `effects.py` |
+| 碰撞几何纯算法 | `collision_geometry.py` |
+| 跨模块共享状态（`_SPRITES`/`_STOPPED`…） | `engine_state.py` |
+
+- **共享状态只能 `import engine_state as st` + `st._X`**，禁止 `from engine_state import _X`（值拷贝不同步）。
+- **依赖单向**：`bingo_engine → game_loop → camera/map/sprite/effects → … → engine_state`；反向引用用函数内局部导入并注释原因。
+- **不要新建 `engine/` 子目录**：打包只收录 `engine/*.py` 与 `engine/models/*.py`，子目录只在打包版缺失。
 
 ## Rules
 
