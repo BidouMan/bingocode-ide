@@ -8,6 +8,8 @@ import threading
 import queue
 from PIL import Image
 from models.map_model import MapModel
+from models.shape_kernel import ConvexPolygon, CompoundShape, polygon_shape, aabb_shape, intersects
+from models.static_index import StaticEntry, build_world
 from models.coords import (
     to_world_x,
     to_world_y,
@@ -752,14 +754,31 @@ class Sprite:
         self._get_hitbox_rect()
 
     # ---------- 运动模块 ----------
-    def _collision_layer_correction(self, layer, axis):
-        """碰撞层（世界坐标多边形）对当前精灵的轴分离位移量；没有碰撞返回 None"""
+    def _collision_layer_correction(self, layer, axis, layer_index=None):
+        """形状层（世界坐标多边形）对当前精灵的轴分离位移量；没有碰撞返回 None"""
         sprite_rect = self._get_hitbox_rect()
         if not sprite_rect:
             return None
 
+        # 静态索引宽相：只有包围盒可能相交的形状才进入精确 SAT。
+        # 解算顺序仍完全沿用 layer["polygons"]，结果与全表扫描一致。
+        candidate_ids = None
+        static_world = _CURRENT_MAP.get("static_world") if _CURRENT_MAP else None
+        if static_world is not None and layer_index is not None:
+            entries = static_world.solid.query_rect(
+                sprite_rect[0], sprite_rect[1], sprite_rect[2], sprite_rect[3]
+            )
+            candidate_ids = {
+                e.ref for e in entries
+                if e.source == "shape" and e.layer_index == layer_index and e.ref is not None
+            }
+            if not candidate_ids:
+                return None
+
         best = None
         for poly in layer.get("polygons", []):
+            if candidate_ids is not None and poly.get("id") not in candidate_ids:
+                continue
             if poly.get("disabled"):
                 continue
             # 感应形状只做区域检测，不参与阻挡解算
@@ -937,10 +956,10 @@ class Sprite:
             return
 
         # 检测所有图层中的实心图块
-        for layer in _CURRENT_MAP.get("layers", []):
+        for layer_index, layer in enumerate(_CURRENT_MAP.get("layers", [])):
             # --- 形状层（世界坐标判定形状） ---
             if layer.get("type") == "shape":
-                correction = self._collision_layer_correction(layer, axis)
+                correction = self._collision_layer_correction(layer, axis, layer_index)
                 if correction is not None:
                     # y 轴只处理迎面（落地/撞头），且抬升距离不能大得离谱
                     if axis == "y" and (
@@ -1790,23 +1809,32 @@ class Sprite:
                                         return True
 
                 # 形状层：按真实多边形判定，不再用格子范围（tag 可挂在任意能力类型上）
+                # P3：优先走烘焙好的 tag 查找表，避免每次 is_touch 全表扫描
                 if tag:
-                    for layer in _CURRENT_MAP.get("layers", []):
-                        if layer.get("type") != "shape":
-                            continue
-                        for poly in layer.get("polygons", []):
-                            if poly.get("disabled"):
+                    static_world = _CURRENT_MAP.get("static_world")
+                    if static_world is not None:
+                        sprite_shape = aabb_shape(r1[0], r1[1], r1[2], r1[3])
+                        for entry in static_world.tag_entries(tag):
+                            if intersects(sprite_shape, entry.shape):
+                                return True
+                    else:
+                        # 索引构建失败时的兼容路径：保持原全表扫描
+                        for layer in _CURRENT_MAP.get("layers", []):
+                            if layer.get("type") != "shape":
                                 continue
-                            if (poly.get("tag") or "") != tag:
-                                continue
-                            points = poly.get("points") or []
-                            if len(points) < 3:
-                                continue
-                            for part in poly.get("parts") or [points]:
-                                if len(part) < 3:
+                            for poly in layer.get("polygons", []):
+                                if poly.get("disabled"):
                                     continue
-                                if _aabb_polygon_mtv(r1, part):
-                                    return True
+                                if (poly.get("tag") or "") != tag:
+                                    continue
+                                points = poly.get("points") or []
+                                if len(points) < 3:
+                                    continue
+                                for part in poly.get("parts") or [points]:
+                                    if len(part) < 3:
+                                        continue
+                                    if _aabb_polygon_mtv(r1, part):
+                                        return True
             return False
 
         # 🚀 4. 原有的 Sprite 间碰撞逻辑
@@ -3009,6 +3037,136 @@ def camera_follow(sprite):
     _AUTO_CAMERA_TARGET = None
 
 
+def _build_static_world(map_data, map_model):
+    """把地图里的静态碰撞几何烘焙成 solid / sensor 双索引。
+
+    只在地图加载时执行一次：
+      - 形状层：按 kind 进入阻挡索引 / 感应索引；tag 单独建查找表
+      - 图像碰撞：静态图像的碰撞体，进入阻挡索引
+      - 图块碰撞：实心图块，进入阻挡索引
+
+    烘焙失败（极少见的坏数据）时返回 None，碰撞路径会回退到全表扫描，不影响运行。
+    """
+    entries = []
+    tile_size = float(map_data.get("tile_size", 16) or 16)
+
+    for layer_index, layer in enumerate(map_data.get("layers", [])):
+        layer_type = layer.get("type")
+
+        if layer_type == "shape":
+            for poly in layer.get("polygons", []):
+                if poly.get("disabled"):
+                    continue
+                parts = poly.get("parts") or [poly.get("points") or []]
+                convex = []
+                for part in parts:
+                    if len(part) < 3:
+                        continue
+                    try:
+                        convex.append(ConvexPolygon(part))
+                    except (ValueError, TypeError):
+                        continue
+                if not convex:
+                    continue
+                shape = convex[0] if len(convex) == 1 else CompoundShape(convex)
+                entries.append(StaticEntry(
+                    shape=shape,
+                    source="shape",
+                    kind=poly.get("kind", "solid"),
+                    tag=poly.get("tag", "") or "",
+                    collision_type=poly.get("collisionType", "墙体"),
+                    layer_index=layer_index,
+                    ref=poly.get("id"),
+                    origin=poly,
+                ))
+            continue
+
+        if layer_type == "image":
+            for image_index, image in enumerate(layer.get("images") or []):
+                if not image.get("collisionEnabled", image.get("collision_enabled", False)):
+                    continue
+                try:
+                    polys = _image_collision_world_polygons(image)
+                except (TypeError, ValueError, KeyError):
+                    continue
+                convex = []
+                for part in polys:
+                    if len(part) < 3:
+                        continue
+                    try:
+                        convex.append(ConvexPolygon(part))
+                    except (ValueError, TypeError):
+                        continue
+                if not convex:
+                    continue
+                shape = convex[0] if len(convex) == 1 else CompoundShape(convex)
+                entries.append(StaticEntry(
+                    shape=shape,
+                    source="image",
+                    kind="solid",
+                    collision_type=image.get("collisionType", "图像"),
+                    layer_index=layer_index,
+                    ref=image_index,
+                    origin=image,
+                ))
+            continue
+
+        if layer_type != "drawing":
+            continue
+
+        for (tile_x, tile_y), tile_id in (layer.get("tiles") or {}).items():
+            try:
+                tile_id_int = int(tile_id)
+            except (TypeError, ValueError):
+                continue
+            if tile_id_int <= 0:
+                continue
+            resource_index, tile_index = _find_tileset_for_gid(
+                tile_id_int, map_data.get("tile_sets", [])
+            )
+            if not map_model.get_tile_collision(resource_index, tile_index):
+                continue
+
+            shape = None
+            collision_shape = map_model.get_tile_collision_shape(resource_index, tile_index)
+            if isinstance(collision_shape, dict) and collision_shape.get("points"):
+                # 编辑器保存的是归一化坐标(0~1)，乘以 tile_size 转世界像素
+                world_points = [
+                    (
+                        tile_x * tile_size + float(p[0]) * tile_size,
+                        tile_y * tile_size + float(p[1]) * tile_size,
+                    )
+                    for p in collision_shape["points"]
+                    if isinstance(p, (list, tuple)) and len(p) >= 2
+                ]
+                if len(world_points) >= 3:
+                    try:
+                        shape = polygon_shape(world_points)
+                    except (ValueError, TypeError):
+                        shape = None
+
+            if shape is None:
+                left = tile_x * tile_size
+                top = tile_y * tile_size
+                shape = ConvexPolygon([
+                    (left, top),
+                    (left + tile_size, top),
+                    (left + tile_size, top + tile_size),
+                    (left, top + tile_size),
+                ])
+
+            entries.append(StaticEntry(
+                shape=shape,
+                source="tile",
+                kind="solid",
+                collision_type=map_model.get_tile_collision_type(resource_index, tile_index),
+                layer_index=layer_index,
+                ref=(tile_x, tile_y),
+            ))
+
+    return build_world(entries)
+
+
 def load_map(map_name):
     """
     加载并显示地图
@@ -3137,6 +3295,8 @@ def load_map(map_name):
                                 continue
                     if len(pts) >= 3:
                         polygons.append({
+                            # 稳定 id：静态索引宽相按 id 回到原始 polygon 走原有解算
+                            "id": poly_raw.get("id") or ("shape_%d" % len(polygons)),
                             "points": pts,
                             # 凸块：凹多边形预先三角化，供 SAT 碰撞判定使用
                             "parts": _collision_polygon_parts(pts),
@@ -3203,6 +3363,13 @@ def load_map(map_name):
 
         _CURRENT_MAP = map_data
         _MAP_MODEL = MapModel(tilesets)
+
+        # P3：静态几何烘焙一次，后续碰撞/感应/射线查询共用
+        try:
+            _CURRENT_MAP["static_world"] = _build_static_world(_CURRENT_MAP, _MAP_MODEL)
+        except Exception as exc:  # 坏数据不应让整张地图打不开
+            _CURRENT_MAP["static_world"] = None
+            print("static index build failed: %s" % exc, file=sys.stderr)
 
         tile_size = _CURRENT_MAP.get("tile_size", 16)
         map_width_px = _CURRENT_MAP["width"] * tile_size
