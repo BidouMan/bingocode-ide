@@ -1,0 +1,65 @@
+/* ── 代码块样式（非 scoped，因为 v-html 渲染） ── */
+.ai-code-block {
+  margin: 2px 0 6px;
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+  overflow: hidden;
+}
+.ai-code-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 12px;
+  background: rgb(28, 28, 32);
+  border-bottom: 1px solid var(--border-light);
+}
+.ai-code-lang {
+  font-size: 11px; color: var(--text-muted);
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+}
+.ai-copy-btn {
+  font-size: 11px; padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px; color: var(--text-secondary);
+  cursor: pointer; transition: all 0.15s;
+}
+.ai-copy-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+.ai-code-block pre {
+  margin: 0; padding: 12px;
+  background: rgb(22, 22, 26);
+  overflow-x: auto;
+}
+.ai-code-block pre::-webkit-scrollbar { height: 4px; }
+.ai-code-block pre::-webkit-scrollbar-track { background: transparent; }
+.ai-code-block pre::-webkit-scrollbar-thumb { background: rgb(60, 63, 70); border-radius: 2px; }
+.ai-code-block code {
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 12px; color: rgb(156, 227, 170);
+  white-space: pre;
+}
+.ai-inline-code {
+  padding: 2px 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 12px; color: rgb(156, 227, 170);
+}
+.ai-h1 {
+  font-size: 16px; font-weight: 700; color: white;
+  margin: 10px 0 6px; line-height: 1.4;
+}
+.ai-h2 {
+  font-size: 14px; font-weight: 600; color: white;
+  margin: 8px 0 4px; line-height: 1.4;
+}
+.ai-h3 {
+  font-size: 13px; font-weight: 600; color: rgb(220, 220, 220);
+  margin: 6px 0 4px; line-height: 1.4;
+}
+.ai-list-item {
+  padding: 2px 0 2px 8px;
+  font-size: 13px; color: rgb(200, 200, 200);
+  line-height: 1.6;
+}

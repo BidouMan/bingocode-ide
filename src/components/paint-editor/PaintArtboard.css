@@ -1,0 +1,294 @@
+.paint-stage {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-root);
+  overflow: hidden;
+  position: relative;
+}
+
+/* 去掉浏览器默认焦点环（tabindex=0 聚焦时会在舞台外圈画深蓝框，与绘制内容无关） */
+.paint-stage:focus,
+.paint-stage:focus-visible {
+  outline: none;
+}
+
+/* 拾色模式：放大镜准心接管取样指示，隐藏系统光标（对齐 Scratch） */
+.paint-stage.picking,
+.paint-stage.picking canvas {
+  cursor: none !important;
+}
+
+/* ─── 拾色放大镜 ─── */
+.pick-lens {
+  position: absolute;
+  z-index: 20;
+  width: 92px;
+  height: 92px;
+  /* 以镜中心定位（left/top = 中心点） */
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.pick-lens-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  /* 双环：深色打底 + 白色内环（任何底色上可见） */
+  box-shadow:
+    0 0 0 2px rgba(18, 20, 30, 0.85),
+    0 0 0 3.5px rgba(255, 255, 255, 0.95),
+    0 4px 16px rgba(0, 0, 0, 0.35);
+  background: repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 50% / 12px 12px;
+}
+/* 中心准心十字线（贯穿镜片） */
+.pick-lens-cross-h,
+.pick-lens-cross-v {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.55);
+}
+.pick-lens-cross-h {
+  width: 18px;
+  height: 1px;
+  transform: translate(-50%, -50%);
+}
+.pick-lens-cross-v {
+  width: 1px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+}
+
+.artboard {
+  position: relative;
+  flex-shrink: 0;
+  transform-origin: center center;
+}
+
+.artboard-checker {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 50% / 16px 16px;
+  /* 用 outline 而非 border：border 会挤压 1px 布局让 canvas CSS 尺寸 ≠ 逻辑尺寸产生拉伸模糊 */
+  outline: 1px solid var(--border-light);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.artboard-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  /* 触摸操作交给 pointer 事件，禁用浏览器手势避免干扰绘制 */
+  touch-action: none;
+}
+
+/* 矢量画布：铺满舞台（Scratch 同款——不随画板 transform 拉伸，缩放走 paper view.matrix）。
+   宽高 100% 必须显式声明：canvas 是替换元素，仅 inset:0 时按内在尺寸 300×150 而非撑满 */
+.vector-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+/* 选区 overlay 层：全舞台 flex 居中复刻 artboard 布局 + 同一 artboardStyle 变换 → 逐像素同位 */
+.paint-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.paint-overlay-box {
+  position: relative;
+  transform-origin: center center;
+  pointer-events: none;
+}
+
+/* 选区框（框选拖动态）：与地图编辑器 / 形状图层统一的靛蓝实线 + 10% 填充 */
+.selection-marquee {
+  position: absolute;
+  pointer-events: none;
+  outline: var(--selection-stroke, 1.4px) solid var(--selection-color, #818cf8);
+  z-index: 5;
+}
+
+/* 变换框：独立矢量图层，随画板 transform 缩放但自身矢量渲染平滑 */
+.transform-box {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 6;
+  overflow: visible;
+}
+
+/* 钢笔首锚收尾热点：光标进入命中半径时描边脉冲，明确「点这里闭合」 */
+.pen-close-hotspot-active {
+  animation: pen-close-pulse 0.9s ease-in-out infinite;
+}
+@keyframes pen-close-pulse {
+  0%, 100% { stroke-opacity: 1; }
+  50% { stroke-opacity: 0.35; }
+}
+
+/* 画笔/橡皮自绘光标圈：0 尺寸 svg 锚定在光标逻辑坐标，overflow visible 画圆，
+   随画板 transform 缩放（任意 zoom 屏幕尺寸正确）；SVG 双圆避免阴影环亚像素断裂 */
+.brush-cursor-ring {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 7;
+}
+
+/* ─── 手动裁切 ─── */
+/* 输入层：整舞台接管指针（盖住矢量画布/overlay），光标随命中手柄方向变化 */
+.crop-capture {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  touch-action: none;
+}
+/* 操作提示：居中浮动小胶囊，不拦截指针 */
+.crop-hint {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 12px;
+  border-radius: 7px;
+  background: rgba(30, 32, 40, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 31;
+}
+
+/* 图形创建中的实时宽高徽标：深色小胶囊（不用 backdrop-filter，拖拽时每帧重排零开销） */
+.live-size-badge {
+  position: absolute;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: rgba(18, 20, 28, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 32;
+}
+
+/* ─── 浮动视图工具条（画布右下；对齐代码编辑器 ide-float-bar 胶囊风格）─── */
+.view-float-bar {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: rgba(30, 32, 40, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 4px;
+  z-index: 30;
+}
+.view-float-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 26px;
+  padding: 0 6px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.view-float-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+.view-float-btn:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+}
+.view-float-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.view-float-zoom {
+  min-width: 44px;
+  height: 26px;
+  padding: 0 4px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, background 0.15s;
+}
+.view-float-zoom:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+}
+.view-float-divider {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 4px;
+}
+
+/* ─── 文字编辑覆盖层（Scratch text-tool 同款）─── */
+.text-edit-area {
+  position: absolute;
+  pointer-events: auto;
+  z-index: 9;
+  /* 与 PointText 渲染对齐：无边框无衬距（padding/border 会偏移字形），透明底，不换行。
+     尺寸由引擎按内容 internalBounds 动态写入 width/height（对齐 Scratch resizeGuide） */
+  margin: 0;
+  padding: 0;
+  border: none;
+  outline: 1px dashed rgba(24, 27, 50, 0.7);
+  outline-offset: 2px;
+  background: transparent;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  font-family: 'HarmonyOS Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-weight: 500;
+  /* 光标跟随当前文字色（te.color = 绘制色） */
+  caret-color: currentColor;
+  box-sizing: content-box;
+  /* 合成器不拉伸：textarea 随 artboard transform 缩放，文字用逻辑字号渲染 */
+  transform-origin: 0 0;
+}
+
+/* 位图模式像素渲染：多重声明渐进回退（旧引擎认 crisp-edges，新引擎 pixelated 覆盖生效） */
+.canvas-pixelated {
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+}

@@ -15,6 +15,11 @@ dist/
 dist-ssr/
 target/
 *.local
+docs/dist/
+manual/dist/
+
+# AI/Trae 共享预览产物
+.trae-html-share-packages/
 
 # Editor directories and files
 .vscode/*

@@ -1,0 +1,723 @@
+.property-panel {
+  display: flex;
+  flex-direction: column;
+  /* 与滚动内容同色：面板全部折叠后下方空白不能变成另一种颜色 */
+  background: var(--bg-root);
+}
+
+.att-frame {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 12px 16px 16px 16px;
+  background: var(--bg-root);
+}
+
+/* 属性分组：地图 / 图层 / 变换（不显示分组标题，仅用间距区分） */
+.att-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 标签与控件之间收紧：标签只有两个字时也不会拉开一大片空白 */
+.att-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 下拉框：固定占满标签右侧剩余宽度，右边缘对齐属性区 */
+.att-select {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+}
+
+/* 子菜单：开关开启后展开的从属设置（缩进 + 左侧竖线，表明从属于上方开关） */
+.att-subgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-left: 2px;
+  padding: 2px 0 2px 12px;
+  border-left: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+/* 标签列：最长的标签是 4 个字，列宽按此收紧，控件左边缘不再离得太远 */
+.att-label {
+  color: #9ca0a4;
+  font-size: 12px;
+  min-width: 50px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* 行尾设置按钮：相机 / 下滑详细参数的入口，hover 与展开时用底色提示状态 */
+.att-gear-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: default;
+  flex-shrink: 0;
+}
+
+.att-gear-btn img {
+  width: 14px;
+  height: 14px;
+  opacity: 0.55;
+}
+
+.att-gear-btn:hover {
+  background: rgb(61, 64, 72);
+}
+
+.att-gear-btn:hover img {
+  opacity: 0.9;
+}
+
+.att-gear-btn.active {
+  background: rgb(61, 64, 72);
+}
+
+.att-gear-btn.active img {
+  opacity: 1;
+}
+
+.att-gear-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.att-input {
+  width: 100%;
+  height: 24px;
+  background: rgb(40, 43, 52);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  color: white;
+  padding: 0 6px;
+  font-size: 12px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.att-input:hover {
+  background: rgb(50, 53, 62);
+  border: 1px solid rgb(65, 69, 82);
+}
+
+.att-input:focus {
+  background: var(--border-light);
+  border: 1px solid rgb(65, 69, 82);
+  color: white;
+}
+
+/* 输入框 + 下方提示（如重名警告）的纵向容器 */
+.att-field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.att-input-warn {
+  border-color: rgb(140, 70, 60);
+}
+
+.att-warn {
+  font-size: 11px;
+  line-height: 1.2;
+  color: #e08874;
+}
+
+.att-input-no-spin::-webkit-inner-spin-button,
+.att-input-no-spin::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.att-input-no-spin[type="number"] {
+  -moz-appearance: textfield;
+}
+
+.att-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.att-checkbox input[type="checkbox"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.att-size-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+/* 同一行两个数值输入（地图尺寸等）等分剩余宽度 */
+.att-size-group .att-input {
+  flex: 1 1 0;
+  width: 100%;
+  min-width: 0;
+}
+
+/* 数字框 + 行尾上下箭头（自绘，macOS 上原生箭头不悬停不显示） */
+.att-spin {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  width: 100%;
+  min-width: 0;
+}
+
+.att-spin .att-input {
+  padding-right: 17px;
+}
+
+.att-spin-btns {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  width: 14px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 0 3px 3px 0;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.att-spin-btn {
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+
+.att-spin-btn + .att-spin-btn {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.att-spin-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.att-spin-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 复用分区标题的小箭头，转成上下两个方向 */
+.att-spin-arrow {
+  width: 8px;
+  height: 8px;
+  opacity: 0.75;
+}
+
+.att-spin-arrow.up {
+  transform: rotate(-90deg);
+}
+
+.att-spin-arrow.down {
+  transform: rotate(90deg);
+}
+
+/* X / Y 分两行：标签贴住第一行，两行输入框左边缘对齐 */
+.att-row-stacked {
+  align-items: flex-start;
+}
+
+.att-row-stacked > .att-label {
+  line-height: 24px;
+}
+
+.att-axis-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* 刻度标签与输入框的间距跟「地图尺寸」那一行保持一致（8px） */
+.att-axis-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.att-axis-row .att-input {
+  flex: 1 1 0;
+  width: 100%;
+  min-width: 0;
+}
+
+/* 缩放下方「约束比例」行：文字跟 X / Y 同列，选框紧跟其后 */
+.att-axis-lock {
+  gap: 8px;
+}
+
+/* 旋转滑条：竖排在输入框下方，按自身 3px 高度撑开，不再参与拉伸分配 */
+.att-axis-group .att-range {
+  flex: 0 0 auto;
+  width: 100%;
+  margin: 3px 0 1px;
+}
+
+.att-size-label {
+  color: #9ca0a4;
+  font-size: 12px;
+}
+
+.att-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: default;
+}
+
+.att-checkbox input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: #528bff;
+  border-radius: 3px;
+}
+
+.att-checkbox-text {
+  color: #9ca0a4;
+  font-size: 12px;
+}
+
+/* 只读信息值（瓦片数量 / 图片尺寸 / 形状数量等） */
+.att-value {
+  color: #d5d8dc;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+
+/* 占位控件：禁用态（功能开发中） */
+.att-range {
+  flex: 1;
+  min-width: 0;
+}
+
+.att-range:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ====== 标记检视器（Godot / Unity 风格的可折叠分区） ====== */
+.marker-inspector {
+  gap: 0;
+}
+
+.mi-section {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* 第一块分区不画上分割线，避免紧贴上方标签栏形成多余线条 */
+.att-frame > .att-group:first-child > .mi-section:first-child {
+  border-top: none;
+}
+
+/* 分区标题：整行可点，左侧箭头指示展开状态（参考 Godot / Unity 检视器） */
+.mi-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: calc(100% + 16px);
+  height: 30px;
+  margin: 0 -8px;
+  padding: 0 8px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: #9ea3aa;
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  cursor: default;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.mi-head:hover {
+  background: rgba(255, 255, 255, 0.045);
+  color: #e2e5e9;
+}
+
+.mi-head:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.mi-head:disabled:hover {
+  background: transparent;
+  color: #9ea3aa;
+}
+
+/* 展开中的分区标题更亮，让"当前展开哪一组"一眼可见 */
+.mi-section.open > .mi-head {
+  color: #d5d8dc;
+}
+
+/* 收起时朝右 >，展开时朝下 v；与帮助面板、素材栏的箭头保持同一套动作 */
+.mi-chevron {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  opacity: 0.5;
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+
+.mi-section.open > .mi-head .mi-chevron {
+  transform: rotate(90deg);
+  opacity: 0.8;
+}
+
+.mi-head:hover .mi-chevron {
+  opacity: 0.9;
+}
+
+.mi-head-title {
+  flex: 1;
+}
+
+.mi-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px 0 12px;
+}
+
+.mi-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* 分区标题右侧的数量（如标记个数） */
+.mi-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 15px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #a7acb4;
+  font-size: 10px;
+  line-height: 1;
+}
+
+/* 标记管理列表：当前地图的全部标记，点一行就选中对应图钉 */
+.mi-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+
+.mi-list-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.mi-list-row:hover { background: rgb(48, 51, 60); }
+.mi-list-row.is-selected {
+  background: rgb(46, 49, 58);
+  border-color: var(--border-light);
+}
+.mi-list-row.is-hidden { opacity: 0.45; }
+.mi-list-row:disabled { opacity: 0.4; }
+
+.mi-list-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #98a0aa;
+}
+.mi-list-row.is-selected .mi-list-dot { background: #ff5252; }
+
+.mi-list-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: #d7dbe1;
+}
+
+.mi-list-coord {
+  flex-shrink: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  color: #8f959d;
+}
+
+.mi-list-empty {
+  padding: 6px 2px;
+  font-size: 11px;
+  color: #7c818a;
+}
+
+.mi-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex: 1;
+  height: 26px;
+  padding: 0 8px;
+  background: rgb(48, 51, 60);
+  border: 1px solid var(--border-light);
+  border-radius: 5px;
+  color: #cfd3d9;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: default;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.mi-btn img {
+  width: 13px;
+  height: 13px;
+  opacity: 0.75;
+}
+
+.mi-btn:hover {
+  background: rgb(61, 64, 72);
+  color: #fff;
+}
+
+.mi-btn:hover img {
+  opacity: 1;
+}
+
+.mi-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.mi-btn-danger:hover {
+  background: rgba(95, 45, 39, 0.75);
+  border-color: rgba(224, 92, 78, 0.5);
+  color: #ffb4ab;
+}
+
+/* 标记管理顶部的类型筛选 */
+.mi-filter {
+  width: 100%;
+}
+
+/* 行内改名：与列表行同高，输入框占满名称位置 */
+.mi-list-row-edit {
+  background: rgb(46, 49, 58);
+  border-color: var(--border-light);
+}
+
+.mi-list-rename {
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  padding: 0 4px;
+  background: rgb(40, 43, 52);
+  border: 1px solid rgb(65, 69, 82);
+  border-radius: 3px;
+  color: #fff;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+}
+
+/* 列表右键菜单：fixed 定位在鼠标处，由 clampMarkerMenu 收进窗口内 */
+.mi-menu {
+  position: fixed;
+  z-index: 3000;
+  min-width: 148px;
+  padding: 4px;
+  background: var(--bg-root);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.mi-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: #cfd3d9;
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.mi-menu-item:hover {
+  background: rgb(61, 64, 72);
+  color: #fff;
+}
+
+.mi-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.mi-menu-danger:hover {
+  background: rgba(95, 45, 39, 0.75);
+  color: #ffb4ab;
+}
+
+/* ====== 形状管理：列表行 / 批量设置 ====== */
+.sm-row {
+  gap: 6px;
+  padding: 0 4px;
+}
+
+.sm-check {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  accent-color: #528bff;
+}
+
+.sm-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.sm-main:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.sm-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.sm-index {
+  flex-shrink: 0;
+  min-width: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  color: #8f959d;
+}
+
+.sm-kind { flex-shrink: 0; font-size: 11px; color: #cfd3d9; }
+
+.sm-tag {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: #d7dbe1;
+}
+
+.sm-tag.empty { color: #6f747c; }
+
+/* 批量设置区：勾选后展开 */
+.sm-batch {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.sm-batch-head { display: flex; align-items: center; gap: 8px; }
+
+.sm-batch-count { flex: 1; font-size: 11px; color: #9ca0a4; }
+
+.sm-batch-link {
+  height: 20px;
+  padding: 0 6px;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: #8fb8ff;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: default;
+}
+
+.sm-batch-link:hover { background: rgb(61, 64, 72); }
+.sm-batch-link:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.sm-batch-del { flex: 0 0 auto; margin-left: auto; }
+
+.sm-hint { padding: 2px 0; font-size: 11px; color: #7c818a; }
+
+/* 已有标签候选：点击直接复用，避免手打拼错（跨平台不依赖原生 datalist） */
+.tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tag-chip {
+  height: 20px;
+  padding: 0 7px;
+  background: rgb(48, 51, 60);
+  border: 1px solid var(--border-light);
+  border-radius: 999px;
+  color: #a7acb4;
+  font-size: 11px;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: default;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.tag-chip:hover { background: rgb(61, 64, 72); color: #fff; }
+.tag-chip:disabled { opacity: 0.5; cursor: not-allowed; }

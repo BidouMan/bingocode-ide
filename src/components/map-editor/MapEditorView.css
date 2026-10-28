@@ -1,0 +1,300 @@
+.map-editor-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: rgb(30, 30, 30);
+  position: relative;
+}
+
+.map-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.right-tabs {
+  display: flex;
+  height: 44px;
+  flex-shrink: 0;
+  border-bottom: 1px solid rgb(45, 45, 45);
+}
+
+.right-tab {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #9ca0a4;
+  font-size: 12px;
+  cursor: default;
+}
+
+.right-tab-active {
+  color: #fff;
+  background: rgb(46, 49, 58);
+}
+
+/* 右栏内容区：绘制（颜色）与属性共用，常驻在标签栏下方 */
+.right-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.right-body :deep(.color-panel) {
+  width: 100%;
+  height: 100%;
+  border-left: none;
+}
+
+.right-body :deep(.property-panel) {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.map-editor-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.map-editor-left {
+  display: flex;
+  flex-direction: column;
+  width: 272px;
+  min-width: 272px;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-root);
+}
+
+.map-editor-center {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.canvas-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.map-canvas-area {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ─── 浮动视图工具条（画布右下；与角色绘制页 / 代码编辑器胶囊风格一致）─── */
+.view-float-bar {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: rgba(30, 32, 40, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 4px;
+  z-index: 30;
+}
+
+.view-float-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 26px;
+  padding: 0 6px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: default;
+  transition: background 0.15s ease;
+}
+
+.view-float-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.view-float-btn:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.view-float-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.view-float-zoom {
+  min-width: 44px;
+  height: 26px;
+  padding: 0 4px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: default;
+  white-space: nowrap;
+  transition: color 0.15s, background 0.15s;
+}
+
+.view-float-zoom:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.view-float-divider {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 4px;
+}
+
+
+
+.map-info-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  gap: 20px;
+  /* 比面板更深一档 + 一条细分隔线，保证是独立的一条信息栏 */
+  background: rgb(26, 28, 33);
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  flex-shrink: 0;
+}
+
+.info-spacer {
+  flex: 1;
+}
+
+.info-label {
+  font-size: 12px;
+  color: rgb(156, 160, 164);
+  white-space: nowrap;
+}
+
+/* 画布临时提示（如自定义形状自交）：暖色，和常规信息区分 */
+.info-warn {
+  font-size: 12px;
+  color: #e5b36b;
+  white-space: nowrap;
+}
+
+.map-editor-right {
+  display: flex;
+  flex-direction: column;
+  width: 272px;
+  min-width: 272px;
+  min-height: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--border);
+  background: var(--bg-root);
+  position: relative;
+  z-index: 20;
+}
+
+/* 属性区占满剩余高度并自行滚动，碰撞编辑区因此贴在右栏底部 */
+.right-props {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.right-collision {
+  flex-shrink: 0;
+}
+
+/* 右栏底部信息栏：与画布 / 图层区域的信息栏同款 */
+.right-info-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  flex-shrink: 0;
+  /* 比面板更深一档 + 一条细分隔线，保证是独立的一条信息栏 */
+  background: rgb(26, 28, 33);
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.right-info-text {
+  font-size: 12px;
+  color: rgb(156, 160, 164);
+}
+
+.map-empty-banner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: rgba(41, 44, 52, 0.95);
+  z-index: 10;
+}
+
+.empty-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.empty-icon {
+  width: 48px;
+  height: 48px;
+  color: #3D4048;
+}
+
+.empty-text {
+  color: #8B8FA3;
+  font-size: 14px;
+  margin: 0;
+}
+
+.empty-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.empty-btn {
+  padding: 8px 24px;
+  border-radius: 6px;
+  border: 1px solid #3D4048;
+  background: #4B9B5C;
+  color: #fff;
+  font-size: 13px;
+  cursor: default;
+  transition: all 0.15s;
+}
+
+.empty-btn:hover {
+  background: #5bc772;
+  border-color: #5bc772;
+}
+
+.empty-btn-secondary {
+  background: #3D4048;
+}
+
+.empty-btn-secondary:hover {
+  background: #4D5058;
+  border-color: #4D5058;
+}
+
+.map-editor-body.disabled,
+.map-canvas-area.disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
