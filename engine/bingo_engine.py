@@ -2198,6 +2198,18 @@ class Sprite:
             return False
         return bool(self._contacts & (self._CONTACT_LEFT | self._CONTACT_RIGHT))
 
+    def is_on_ceiling(self):
+        """头顶是否撞到实体地形（基于本帧接触掩码）。
+
+        典型用法：跳跃撞到天花板时停止上升
+            if hero.is_on_ceiling():
+                hero.stop_jump()
+        也从地图上边界（开启「限制边界」时）产生接触。
+        """
+        if self._is_deleted:
+            return False
+        return bool(self._contacts & self._CONTACT_UP)
+
     def is_on_ground(self):
         """是否站在地面上（由物理落地接触决定）
 

@@ -72,6 +72,7 @@ const spriteMethods: EngineCompletionItem[] = [
   { label: 'is_on_ground', kind: CompletionItemKind.Method, insertText: 'is_on_ground', documentation: '是否真正站在地面上：由物理落地接触决定，站着为 True；跳起来、下落中、从下方穿过跳板都为 False\n跳跃前用它判断能否跳', detail: 'is_on_ground() -> bool' },
   { label: 'is_blocked', kind: CompletionItemKind.Method, insertText: 'is_blocked', documentation: '前方是否有实心地形阻挡（俯视迷宫常用）\n\nis_blocked("right")\nis_blocked("down", 8)\n只查形状层 solid、图像碰撞和实心图块；感应区域不算阻挡\n跳板只在向下且从上方靠近时算阻挡', detail: 'is_blocked(direction, distance=2) -> bool' },
   { label: 'is_on_wall', kind: CompletionItemKind.Method, insertText: 'is_on_wall', documentation: '左右两侧是否贴着墙（基于本帧接触结果）', detail: 'is_on_wall() -> bool' },
+  { label: 'is_on_ceiling', kind: CompletionItemKind.Method, insertText: 'is_on_ceiling', documentation: '头顶是否撞到实体地形（基于本帧接触结果）\n\n跳跃撞头时停止上升：\nif hero.is_on_ceiling():\n    hero.stop_jump()\n开启「限制边界」时，撞到地图上边界也算', detail: 'is_on_ceiling() -> bool' },
 
   // 分组 / 事件
   { label: 'add_to_group', kind: CompletionItemKind.Method, insertText: 'add_to_group', documentation: '将角色归类，比如 "enemies", "bullets"\n\nadd_to_group(group_name)', detail: 'add_to_group(group_name)' },
