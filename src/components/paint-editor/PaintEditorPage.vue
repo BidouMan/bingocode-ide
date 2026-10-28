@@ -135,6 +135,11 @@ function onReorderFrames(from: number, to: number) {
   artboardRef.value?.moveFrame(from, to)
 }
 
+/** 顶栏改画布尺寸（居中锚定，两引擎统一重建） */
+function onResizeArtboard(w: number, h: number, ox: number, oy: number) {
+  artboardRef.value?.resizeArtboard(w, h, ox, oy)
+}
+
 async function onClose() {
   if (store.dirty) {
     const shouldClose = await ask('画板有未保存的修改，关闭后将丢失。确定关闭吗？', {
@@ -226,7 +231,8 @@ defineExpose({ saveBeforeLeave })
       :save-title="mode === 'mapImage' ? '保存为地图图像' : (targetSprite ? '保存回角色' : undefined)"
       @close="onClose"
       @save="onSave"
-      @crop="artboardRef?.cropToContent()"
+      @crop="artboardRef?.beginCrop()"
+      @resize="onResizeArtboard"
       @copy="artboardRef?.copySelection()"
       @paste="artboardRef?.pasteClipboard()"
       @delete-sel="artboardRef?.deleteSelection()"

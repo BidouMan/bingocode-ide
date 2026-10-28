@@ -25,6 +25,8 @@ const emit = defineEmits<{
   close: []
   save: []
   crop: []
+  /** 画布尺寸变更（手动输入宽高，居中锚定；offset = 新画布左上角在原画布中的坐标） */
+  resize: [w: number, h: number, offsetX: number, offsetY: number]
   copy: []
   paste: []
   deleteSel: []
@@ -52,7 +54,7 @@ const reshapeCurveActive = () => store.reshapeHasPointed
 const curveDisabled = () => !store.reshapeHasUncurved && !store.reshapeHasPointed
 const pointDisabled = () => false
 
-/** 手动输入画板尺寸：clamp 1~2048，失焦/回车提交 */
+/** 手动输入画板尺寸：clamp 1~2048，失焦/回车提交（居中锚定，可随时修改） */
 function commitSize(axis: 'w' | 'h', e: Event) {
   const el = e.target as HTMLInputElement
   let v = Math.round(Number(el.value))
@@ -60,10 +62,18 @@ function commitSize(axis: 'w' | 'h', e: Event) {
     v = axis === 'w' ? store.artboardWidth : store.artboardHeight
   }
   v = Math.min(ARTBOARD_MAX, Math.max(1, v))
-  if (axis === 'w') store.artboardWidth = v
-  else store.artboardHeight = v
-  el.value = String(v)
-  store.resetView()
+  const w = axis === 'w' ? v : store.artboardWidth
+  const h = axis === 'h' ? v : store.artboardHeight
+  // 居中锚定（对齐 Photoshop「画布大小」默认锚点）：内容保持居中，四周均匀增减；
+  // 缩小时两侧各裁一半，扩大时两侧各加一半空边
+  emit(
+    'resize',
+    w,
+    h,
+    Math.round((store.artboardWidth - w) / 2),
+    Math.round((store.artboardHeight - h) / 2)
+  )
+  el.value = String(axis === 'w' ? store.artboardWidth : store.artboardHeight)
 }
 </script>
 
@@ -90,17 +100,17 @@ function commitSize(axis: 'w' | 'h', e: Event) {
       </button>
     </div>
 
-    <!-- 中右：画板尺寸手动输入（1~2048，开画后锁定；追加模式全程锁定）+ 一键裁切到内容 -->
+    <!-- 中右：画板尺寸手动输入（1~2048，随时可改；追加模式/地图图像锁定）+ 手动裁切 -->
     <div
       class="size-inputs"
-      :title="store.sizeForced ? '追加帧：画板尺寸与角色帧一致，不可修改' : store.dirty ? '开始绘制后不能修改画板尺寸（可用右侧裁切按钮裁掉空白）' : '画板尺寸'"
+      :title="store.sizeForced ? '当前模式画布尺寸已锁定，不可修改' : '画板尺寸（失焦或回车生效）'"
     >
       <input
         class="size-input"
         type="number"
         min="1"
         :max="ARTBOARD_MAX"
-        :disabled="store.dirty || store.sizeForced"
+        :disabled="store.sizeForced"
         :value="store.artboardWidth"
         aria-label="画板宽度"
         @change="commitSize('w', $event)"
@@ -112,7 +122,7 @@ function commitSize(axis: 'w' | 'h', e: Event) {
         type="number"
         min="1"
         :max="ARTBOARD_MAX"
-        :disabled="store.dirty || store.sizeForced"
+        :disabled="store.sizeForced"
         :value="store.artboardHeight"
         aria-label="画板高度"
         @change="commitSize('h', $event)"
@@ -122,8 +132,9 @@ function commitSize(axis: 'w' | 'h', e: Event) {
     </div>
     <button
       class="icon-btn"
-      :disabled="!store.dirty || store.mode !== 'bitmap' || store.vectorContent"
-      v-tooltip="store.vectorContent ? '存在矢量内容时不能裁切（会与矢量层错位）' : '裁切画板到内容'"
+      :class="{ 'icon-btn-active': store.cropMode }"
+      :disabled="store.sizeForced"
+      v-tooltip="store.sizeForced ? '当前模式画布尺寸已锁定' : '手动裁切画布（拖拽锚点，回车确认）'"
       @click="emit('crop')"
     >
       <img :src="iconCrop" class="icon-sm" draggable="false" />

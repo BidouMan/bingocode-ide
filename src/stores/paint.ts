@@ -102,6 +102,15 @@ export const usePaintStore = defineStore('paint', () => {
   /** 追加模式（为现有角色画新帧）：画板尺寸锁定为目标角色帧尺寸，禁止修改 */
   const sizeForced = ref(false)
 
+  // ─── 手动裁切（拖拽锚点调整画布尺寸，回车确认）───
+  /** 裁切模式进行中（画板上的内容交互被裁切层接管） */
+  const cropMode = ref(false)
+  /**
+   * 裁切框（画板逻辑坐标；x/y 可为负、可超出画板 = 向外扩边）。
+   * 确认后新画布 = 该矩形，内容整体平移 -(x,y)。
+   */
+  const cropRect = ref<{ x: number; y: number; w: number; h: number } | null>(null)
+
   // ─── 矢量模式状态（usePaperScope 写入，顶栏按钮读取）───
   /** 矢量撤销/重做可用（与位图 canUndo/canRedo 分开，顶栏按模式取值） */
   const vectorCanUndo = ref(false)
@@ -293,6 +302,8 @@ export const usePaintStore = defineStore('paint', () => {
     canRedo.value = false
     dirty.value = false
     sizeForced.value = false
+    cropMode.value = false
+    cropRect.value = null
     vectorCanUndo.value = false
     vectorCanRedo.value = false
     vectorSelectedCount.value = 0
@@ -344,6 +355,8 @@ export const usePaintStore = defineStore('paint', () => {
     dirty,
     vectorEnabled,
     sizeForced,
+    cropMode,
+    cropRect,
     vectorCanUndo,
     vectorCanRedo,
     vectorSelectedCount,

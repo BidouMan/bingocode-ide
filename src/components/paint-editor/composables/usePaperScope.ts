@@ -763,6 +763,47 @@ export function usePaperScope(
     syncVectorContentFlag()
   }
 
+  /**
+   * 画布尺寸变更（手动裁切 / 顶栏改尺寸共用）：
+   * 全部帧矢量内容整体平移 (-offsetX, -offsetY)——offset = 新画布左上角在原坐标系中的位置，
+   * 裁掉的部分随画布消失、扩出的部分留空。各帧矢量栅格缓存按【新尺寸】重建，
+   * 否则保存时旧尺寸栅格会被拉伸、内容错位。末尾重新导入活动帧保持场景一致。
+   */
+  function resizeArtboard(offsetX: number, offsetY: number) {
+    if (!scope || !store.vectorContent) {
+      frameRaster = frameRaster.map(() => null)
+      return
+    }
+    exportActiveFrame()
+    const active = currentIdx
+    const count = frameJson.length
+    const needShift = offsetX !== 0 || offsetY !== 0
+    for (let i = 0; i < count; i++) {
+      if (!frameJson[i]) {
+        frameRaster[i] = null
+        continue
+      }
+      importFrame(i) // 场景切换到该帧（清空 + 导入 JSON）
+      if (needShift) {
+        const layer = scope.project.activeLayer
+        if (layer) {
+          for (const child of [...layer.children]) {
+            // 位图代理不是矢量真源，位置由位图画布决定
+            if (child !== bitmapRaster) child.translate(new scope.Point(-offsetX, -offsetY))
+          }
+        }
+      }
+      frameJson[i] = snapshotForGesture()
+      frameRaster[i] = drawProjectToRaster()
+    }
+    importFrame(active)
+    histMap.clear()
+    undoStack = []
+    redoStack = []
+    syncHistoryFlags()
+    syncVectorContentFlag()
+  }
+
   // ─── 工具操作 ───
 
   function activeLayer(): paper.Layer | null {
@@ -3820,6 +3861,9 @@ export function usePaperScope(
     onLoadFrames,
     beforeExport,
     clearAllForBake,
+    resizeArtboard,
+    /** 画布尺寸/位图像素变化后重建位图代理（矢量模式显示位图层） */
+    refreshBitmapProxy: syncBitmapRaster,
     getFrameRaster,
     /** 按缩略图尺寸直绘矢量内容（不按全分辨率栅格化） */
     drawProjectToThumbnail,

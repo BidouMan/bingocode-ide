@@ -3,7 +3,6 @@ import { usePaintStore } from '../../../stores/paint'
 import { floodFill } from '../tools/floodFill'
 import { rgbaCss, hexToRgba } from '../utils/artboardExport'
 import { createBitmapPen } from '../utils/bitmapPen'
-import { contentBBox } from '../../../utils/bsfPacker'
 import {
   ensurePaintFont,
   PAINT_FONT_FAMILY,
@@ -682,38 +681,28 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
   }
 
   /**
-   * 一键裁切画板到内容：取【全部帧】非透明像素的联合包围盒，裁掉四周空白
-   * （每帧内容整体平移，互不裁切丢失）。尺寸变更经模板重新绑定清空 canvas，
-   * 裁出的像素在 nextTick（属性生效后）写回。
-   * @returns false = 无可裁切（全部为空或已无空白）
+   * 画布尺寸变更（手动裁切 / 顶栏改尺寸共用）：全部帧重建为新尺寸，
+   * 内容整体平移 (-offsetX, -offsetY) —— offset 即新画布左上角在原画布内的坐标，
+   * 因此裁掉的部分被裁掉、扩出的部分留透明。尺寸变更经模板重新绑定清空 canvas，
+   * 新画布在 nextTick（属性生效后）重新载入当前帧。
+   * @returns false = 尺寸与偏移均未变化（无操作）
    */
-  function cropToContent(): boolean {
-    if (store.mode !== 'bitmap') return false
-    flushActiveToPixels()
-
-    let minX = Infinity
-    let minY = Infinity
-    let maxX = -1
-    let maxY = -1
-    for (const pc of pixels) {
-      if (!pc) continue
-      const b = contentBBox(pc)
-      if (!b) continue
-      minX = Math.min(minX, b.x)
-      minY = Math.min(minY, b.y)
-      maxX = Math.max(maxX, b.x + b.w - 1)
-      maxY = Math.max(maxY, b.y + b.h - 1)
+  function resizeCanvas(w: number, h: number, offsetX: number, offsetY: number): boolean {
+    if (
+      w === store.artboardWidth &&
+      h === store.artboardHeight &&
+      offsetX === 0 &&
+      offsetY === 0
+    ) {
+      return false
     }
-    if (maxX < 0) return false
-    const w = maxX - minX + 1
-    const h = maxY - minY + 1
-    if (w === store.artboardWidth && h === store.artboardHeight && minX === 0 && minY === 0) return false
+    flushActiveToPixels()
 
     // 每帧重建为新尺寸并整体平移
     pixels = pixels.map(pc => {
       if (!pc) return null
       const nc = makeOffscreen(w, h)
-      nc.getContext('2d')!.drawImage(pc, -minX, -minY)
+      nc.getContext('2d')!.drawImage(pc, -offsetX, -offsetY)
       return nc
     })
 
@@ -731,8 +720,6 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
       for (let i = 0; i < pixels.length; i++) {
         if (pixels[i]) updateThumb(i, pixels[i]!)
       }
-      // 新画板居中复位，保证内容完整可见
-      store.resetView()
     })
     return true
   }
@@ -1587,7 +1574,7 @@ export function useBitmapCanvas(canvasRef: Ref<HTMLCanvasElement | undefined>) {
     undo,
     redo,
     clear,
-    cropToContent,
+    resizeCanvas,
     addFrame,
     removeFrame,
     moveFrame,

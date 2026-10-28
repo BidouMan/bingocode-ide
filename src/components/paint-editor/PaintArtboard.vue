@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
-import { usePaintStore } from '../../stores/paint'
+import { usePaintStore, ARTBOARD_MAX } from '../../stores/paint'
 import { useBitmapCanvas } from './composables/useBitmapCanvas'
 import { usePaperScope } from './composables/usePaperScope'
 import { ensurePaintFont } from './utils/paintFont'
@@ -18,7 +18,7 @@ const vectorCanvas = ref<HTMLCanvasElement>()
 // 位图绘制引擎（工具状态机/撤销重做/光标/多帧像素/选区），canvas 就绪后自动绑定指针事件
 // 帧操作函数取别名：下方包装器编排双引擎（矢量槽位与位图像素数组保持下标对齐）
 const {
-  undo: bitmapUndo, redo: bitmapRedo, clear: bitmapClear, cropToContent,
+  undo: bitmapUndo, redo: bitmapRedo, clear: bitmapClear, resizeCanvas: bitmapResizeCanvas,
   addFrame: bitmapAddFrame, removeFrame: bitmapRemoveFrame, moveFrame: bitmapMoveFrame,
   loadFrames: bitmapLoadFrames, getFrameCanvases: bitmapGetFrameCanvases, getFrameNames,
   copySelection, pasteClipboard, deleteSelection, flipSelection, commitAndDeselect,
@@ -230,6 +230,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('mouseup', onGlobalMouseUp)
+  cancelCrop()
 })
 
 // ─── 画板几何 ───
@@ -245,6 +246,246 @@ const artboardStyle = computed(() => {
   }
   return style
 })
+
+// ─── 手动裁切（拖拽锚点调整画布尺寸，回车确认）───
+/** 裁切框边命中方向（true = 该边跟随指针移动） */
+type CropEdges = { l: boolean; t: boolean; r: boolean; b: boolean }
+/** 拖动进行态（down 捕获；move 从起始框绝对计算，防增量漂移） */
+let cropDrag: {
+  mode: 'move' | 'resize'
+  edges: CropEdges
+  start: { x: number; y: number }
+  rect0: { x: number; y: number; w: number; h: number }
+} | null = null
+/** 裁切层光标（手柄方向/框内移动/默认） */
+const cropCursor = ref('default')
+
+/** 裁切框 8 个手柄（4 角 + 4 边中点）及各自负责的边 */
+function cropHandles(r: { x: number; y: number; w: number; h: number }) {
+  const x1 = r.x
+  const y1 = r.y
+  const x2 = r.x + r.w
+  const y2 = r.y + r.h
+  const xm = r.x + r.w / 2
+  const ym = r.y + r.h / 2
+  return [
+    { x: x1, y: y1, edges: { l: true, t: true, r: false, b: false } },
+    { x: x2, y: y1, edges: { l: false, t: true, r: true, b: false } },
+    { x: x2, y: y2, edges: { l: false, t: false, r: true, b: true } },
+    { x: x1, y: y2, edges: { l: true, t: false, r: false, b: true } },
+    { x: xm, y: y1, edges: { l: false, t: true, r: false, b: false } },
+    { x: x2, y: ym, edges: { l: false, t: false, r: true, b: false } },
+    { x: xm, y: y2, edges: { l: false, t: false, r: false, b: true } },
+    { x: x1, y: ym, edges: { l: true, t: false, r: false, b: false } },
+  ]
+}
+
+/** 裁切框命中：手柄 > 边线 > 框内移动；框外 null（无操作） */
+function cropHit(p: { x: number; y: number }): { mode: 'move' | 'resize'; edges: CropEdges } | null {
+  const r = store.cropRect
+  if (!r) return null
+  const z = Math.max(0.1, store.zoom)
+  const tol = 10 / z
+  for (const h of cropHandles(r)) {
+    if (Math.hypot(p.x - h.x, p.y - h.y) <= tol) return { mode: 'resize', edges: h.edges }
+  }
+  const edgeTol = 5 / z
+  const x2 = r.x + r.w
+  const y2 = r.y + r.h
+  const nearL = Math.abs(p.x - r.x) <= edgeTol
+  const nearR = Math.abs(p.x - x2) <= edgeTol
+  const nearT = Math.abs(p.y - r.y) <= edgeTol
+  const nearB = Math.abs(p.y - y2) <= edgeTol
+  const inY = p.y >= r.y - edgeTol && p.y <= y2 + edgeTol
+  const inX = p.x >= r.x - edgeTol && p.x <= x2 + edgeTol
+  const onV = (nearL || nearR) && inY
+  const onH = (nearT || nearB) && inX
+  if (onV || onH) {
+    return {
+      mode: 'resize',
+      edges: {
+        l: onV && nearL,
+        r: onV && nearR,
+        t: onH && nearT,
+        b: onH && nearB,
+      },
+    }
+  }
+  if (p.x > r.x && p.x < x2 && p.y > r.y && p.y < y2) return { mode: 'move', edges: { l: false, t: false, r: false, b: false } }
+  return null
+}
+
+/** 拖动时更新裁切框（边跟随指针；最小 1px、最大 2048px） */
+function applyCropDrag(p: { x: number; y: number }) {
+  const d = cropDrag
+  if (!d) return
+  if (d.mode === 'move') {
+    const nx = Math.round(d.rect0.x + (p.x - d.start.x))
+    const ny = Math.round(d.rect0.y + (p.y - d.start.y))
+    store.cropRect = { x: nx, y: ny, w: d.rect0.w, h: d.rect0.h }
+    return
+  }
+  let x1 = d.rect0.x
+  let y1 = d.rect0.y
+  let x2 = d.rect0.x + d.rect0.w
+  let y2 = d.rect0.y + d.rect0.h
+  const px = Math.round(p.x)
+  const py = Math.round(p.y)
+  const e = d.edges
+  if (e.l) x1 = Math.min(px, x2 - 1)
+  if (e.r) x2 = Math.max(px, x1 + 1)
+  if (e.t) y1 = Math.min(py, y2 - 1)
+  if (e.b) y2 = Math.max(py, y1 + 1)
+  // 画布尺寸上限（2048）从被拖动的边单侧约束
+  if (e.l) x1 = Math.max(x1, x2 - ARTBOARD_MAX)
+  if (e.r) x2 = Math.min(x2, x1 + ARTBOARD_MAX)
+  if (e.t) y1 = Math.max(y1, y2 - ARTBOARD_MAX)
+  if (e.b) y2 = Math.min(y2, y1 + ARTBOARD_MAX)
+  store.cropRect = { x: x1, y: y1, w: x2 - x1, h: y2 - y1 }
+}
+
+/** 进入手动裁切模式：裁切框从整块画板开始，可向内收窄或向外扩边；再次点击按钮 = 取消 */
+function beginCrop() {
+  if (store.sizeForced) return
+  if (store.cropMode) {
+    cancelCrop()
+    return
+  }
+  commitTextEdit()
+  commitAndDeselect()
+  bitmapPenCancel()
+  vectorEngine.penCancel()
+  vectorEngine.deselect()
+  store.cursorPos = null
+  cropDrag = null
+  cropCursor.value = 'default'
+  store.cropRect = { x: 0, y: 0, w: store.artboardWidth, h: store.artboardHeight }
+  store.cropMode = true
+  nextTick(() => focusStage())
+}
+
+function cancelCrop() {
+  store.cropMode = false
+  store.cropRect = null
+  cropDrag = null
+  cropCursor.value = 'default'
+}
+
+/** 回车确认：按裁切框重建画布（内容随框整体平移） */
+function confirmCrop() {
+  const r = store.cropRect
+  cancelCrop()
+  if (!r) return
+  resizeArtboard(
+    Math.min(ARTBOARD_MAX, Math.max(1, Math.round(r.w))),
+    Math.min(ARTBOARD_MAX, Math.max(1, Math.round(r.h))),
+    Math.round(r.x),
+    Math.round(r.y)
+  )
+}
+
+function onCropPointerDown(e: PointerEvent) {
+  if (!store.cropMode || !store.cropRect) return
+  if (e.button !== 0) return // 中键留给舞台平移
+  focusStage()
+  const p = clientToArtboard(e.clientX, e.clientY)
+  if (!p) return
+  const hit = cropHit(p)
+  if (!hit) return
+  cropDrag = {
+    mode: hit.mode,
+    edges: hit.edges,
+    start: p,
+    rect0: { ...store.cropRect },
+  }
+  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  cropCursor.value = cropCursorFor(hit)
+  e.preventDefault()
+  e.stopPropagation()
+}
+
+function onCropPointerMove(e: PointerEvent) {
+  if (!store.cropMode) return
+  const p = clientToArtboard(e.clientX, e.clientY)
+  if (!p) return
+  if (cropDrag) {
+    applyCropDrag(p)
+    return
+  }
+  const hit = cropHit(p)
+  cropCursor.value = cropCursorFor(hit)
+}
+
+function onCropPointerUp(e: PointerEvent) {
+  if (!cropDrag) return
+  cropDrag = null
+  const el = e.currentTarget as HTMLElement
+  if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId)
+  const p = clientToArtboard(e.clientX, e.clientY)
+  cropCursor.value = p ? cropCursorFor(cropHit(p)) : 'default'
+}
+
+function cropCursorFor(hit: { mode: 'move' | 'resize'; edges: CropEdges } | null): string {
+  if (!hit) return 'default'
+  if (hit.mode === 'move') return 'move'
+  const { l, t, r, b } = hit.edges
+  if ((l && t) || (r && b)) return 'nwse-resize'
+  if ((r && t) || (l && b)) return 'nesw-resize'
+  if (l || r) return 'ew-resize'
+  return 'ns-resize'
+}
+
+// 裁切框渲染几何（屏幕恒定：手柄/线宽按 1/zoom 反比）
+const cropInv = computed(() => 1 / Math.max(0.1, store.zoom))
+const cropHandleSize = computed(() => 9 / Math.max(0.1, store.zoom))
+const cropHandleList = computed(() => (store.cropRect ? cropHandles(store.cropRect) : []))
+/**
+ * 裁切框外遮罩（对齐 Photoshop「显示裁剪区域」）：画板矩形挖掉裁切框，
+ * evenodd 填充即得中间镂空、四周变暗的路径；框超出画板时镂空区域自然被外框裁掉。
+ */
+const cropShadePath = computed(() => {
+  const r = store.cropRect
+  if (!r) return ''
+  const w = store.artboardWidth
+  const h = store.artboardHeight
+  return `M 0 0 H ${w} V ${h} H 0 Z M ${r.x} ${r.y} H ${r.x + r.w} V ${r.y + r.h} H ${r.x} Z`
+})
+
+/**
+ * 画布尺寸变更（手动裁切确认 / 顶栏数值输入共用）：
+ * 位图像素与矢量内容统一按 offset 平移（offset = 新画布左上角原坐标），
+ * 两引擎各自重建缓存；nextTick 里等新尺寸 DOM 就绪后刷新代理与全部帧缩略图。
+ */
+function resizeArtboard(w: number, h: number, offsetX = 0, offsetY = 0) {
+  if (store.sizeForced) return
+  const targetW = Math.min(ARTBOARD_MAX, Math.max(1, Math.round(w)))
+  const targetH = Math.min(ARTBOARD_MAX, Math.max(1, Math.round(h)))
+  const ox = Math.round(offsetX)
+  const oy = Math.round(offsetY)
+  if (
+    targetW === store.artboardWidth &&
+    targetH === store.artboardHeight &&
+    ox === 0 &&
+    oy === 0
+  ) {
+    return
+  }
+  cancelCrop()
+  commitTextEdit()
+  commitAndDeselect() // 浮动选区先烘进像素，避免随尺寸变更错位
+  bitmapPenCancel()
+  vectorEngine.penCancel()
+  vectorEngine.deselect() // 矢量选中框随尺寸变更失效，直接收起
+  const changed = bitmapResizeCanvas(targetW, targetH, ox, oy)
+  if (!changed) return
+  vectorEngine.resizeArtboard(ox, oy)
+  nextTick(() => {
+    vectorEngine.refreshBitmapProxy()
+    for (let i = 0; i < store.frames.length; i++) regenThumb(i)
+    // 新画板居中复位，保证内容完整可见
+    store.resetView()
+  })
+}
 
 // ─── 选区蚂蚁线（框选拖动预览；有浮动选区时改由 SVG 变换框渲染）───
 const selectionStyle = computed(() => {
@@ -391,6 +632,18 @@ function onStageKeydown(e: KeyboardEvent) {
   if (store.eyedropperActive) {
     store.endEyedropper()
     e.preventDefault()
+    return
+  }
+
+  // 手动裁切：回车确认、Esc 取消；其余快捷键屏蔽（避免边调边改内容）
+  if (store.cropMode) {
+    if (e.key === 'Enter') {
+      confirmCrop()
+      e.preventDefault()
+    } else if (e.key === 'Escape') {
+      cancelCrop()
+      e.preventDefault()
+    }
     return
   }
 
@@ -772,7 +1025,10 @@ defineExpose({
   undo: undoActive,
   redo: redoActive,
   clear: clearActive,
-  cropToContent,
+  /** 画布尺寸变更（顶栏数值输入；offset 恒 0 = 内容左上对齐） */
+  resizeArtboard,
+  /** 手动裁切：进入裁切模式（拖拽锚点，回车确认） */
+  beginCrop,
   addFrame,
   removeFrame,
   moveFrame,
@@ -1091,6 +1347,56 @@ defineExpose({
           <circle :r="store.brushSize / 2" fill="none" stroke="rgba(0, 0, 0, 0.55)" :stroke-width="3 / Math.max(0.1, store.zoom)" />
           <circle :r="store.brushSize / 2" fill="none" stroke="rgba(255, 255, 255, 0.95)" :stroke-width="1.5 / Math.max(0.1, store.zoom)" />
         </svg>
+        <!-- 手动裁切框：实线外框 + 8 个锚点 + 实时尺寸；拖拽锚点调整，回车确认 -->
+        <svg
+          v-if="store.cropMode && store.cropRect"
+          class="transform-box crop-box"
+          :viewBox="`0 0 ${store.artboardWidth} ${store.artboardHeight}`"
+          preserveAspectRatio="none"
+        >
+          <!-- 框外遮罩：框内保持原样，框外变暗（提示确认后会被裁掉） -->
+          <path :d="cropShadePath" fill="rgba(10, 12, 16, 0.55)" fill-rule="evenodd" />
+          <rect
+            :x="store.cropRect.x"
+            :y="store.cropRect.y"
+            :width="store.cropRect.w"
+            :height="store.cropRect.h"
+            fill="none"
+            stroke="rgba(18, 20, 38, 0.85)"
+            :stroke-width="3 * cropInv"
+          />
+          <rect
+            :x="store.cropRect.x"
+            :y="store.cropRect.y"
+            :width="store.cropRect.w"
+            :height="store.cropRect.h"
+            fill="none"
+            stroke="#5BFB84"
+            :stroke-width="1.4 * cropInv"
+          />
+          <rect
+            v-for="(h, i) in cropHandleList"
+            :key="'crop' + i"
+            :x="h.x - cropHandleSize / 2"
+            :y="h.y - cropHandleSize / 2"
+            :width="cropHandleSize"
+            :height="cropHandleSize"
+            fill="#ffffff"
+            stroke="#3fa864"
+            :stroke-width="1.2 * cropInv"
+          />
+          <text
+            :x="store.cropRect.x + 6 * cropInv"
+            :y="store.cropRect.y + store.cropRect.h - 7 * cropInv"
+            :font-size="11 * cropInv"
+            fill="#ffffff"
+            stroke="rgba(12, 16, 14, 0.85)"
+            :stroke-width="3 * cropInv"
+            paint-order="stroke"
+          >
+            {{ store.cropRect.w }} × {{ store.cropRect.h }}
+          </text>
+        </svg>
         <!-- 文字编辑 textarea（Scratch 同款透明覆盖层）：与 PointText/栅格化文字逐字对齐，
              虚线外框示意编辑范围；pointer-events: auto 接收键鼠（父层 none 不穿透） -->
         <textarea
@@ -1119,6 +1425,19 @@ defineExpose({
       <div class="pick-lens-cross-h"></div>
       <div class="pick-lens-cross-v"></div>
     </div>
+    <!-- 手动裁切输入层：整舞台接管指针（覆盖矢量画布），拖拽锚点调框 -->
+    <div
+      v-if="store.cropMode"
+      class="crop-capture"
+      :style="{ cursor: cropCursor }"
+      @pointerdown="onCropPointerDown"
+      @pointermove="onCropPointerMove"
+      @pointerup="onCropPointerUp"
+      @pointercancel="onCropPointerUp"
+      @dblclick.stop
+    ></div>
+    <!-- 裁切操作提示（回车确认 / Esc 取消） -->
+    <div v-if="store.cropMode" class="crop-hint">拖动锚点调整画布大小 · 回车确认 · Esc 取消</div>
     <!-- 浮动视图工具条：撤销/重做/缩放（顶栏窄窗口避让，拾色时隐藏防遮挡）。
          @dblclick.stop：快速连点按钮会被浏览器判成 dblclick 冒泡到舞台触发双击复位——必须拦截 -->
     <div v-show="!store.eyedropperActive" class="view-float-bar" @dblclick.stop>
@@ -1310,6 +1629,32 @@ defineExpose({
   overflow: visible;
   pointer-events: none;
   z-index: 7;
+}
+
+/* ─── 手动裁切 ─── */
+/* 输入层：整舞台接管指针（盖住矢量画布/overlay），光标随命中手柄方向变化 */
+.crop-capture {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  touch-action: none;
+}
+/* 操作提示：居中浮动小胶囊，不拦截指针 */
+.crop-hint {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 12px;
+  border-radius: 7px;
+  background: rgba(30, 32, 40, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 31;
 }
 
 /* ─── 浮动视图工具条（画布右下；对齐代码编辑器 ide-float-bar 胶囊风格）─── */
