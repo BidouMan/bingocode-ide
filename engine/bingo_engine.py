@@ -4,6 +4,7 @@ import time
 import os
 import random
 import math
+import inspect
 import threading
 import queue
 from PIL import Image
@@ -1599,7 +1600,8 @@ class Sprite:
         """碰到指定组的成员时自动处理（注册一次即可，引擎每帧自动检测）
 
         - 不传 callback：碰到后默认双方都删除
-        - 传 callback：执行 callback(自己, 碰到的角色)，删不删由函数决定
+        - 传 callback：执行 callback(自己, 碰到的角色)；
+          函数也可以只写 1 个参数（只接收自己）或不写参数
         """
         self._on_hit_callbacks.append((group, callback))
 
@@ -1608,10 +1610,15 @@ class Sprite:
         return self.on_touch_group(group, callback)
 
     def on_sensor_enter(self, tag, callback):
-        """进入某个感应形状时执行 callback(自己, 标签)（注册一次即可，引擎每帧自动检测）
+        """进入某个感应形状时执行 callback（注册一次即可，引擎每帧自动检测）
 
         只有形状层里设成「感应」或「阻挡 + 感应」、并且填了同名标签的形状才会触发；
         同一个标签从无到有时只触发一次，站在里面不会每帧重复触发。
+
+        回调函数参数可以不写、写 1 个或写 2 个：
+            def 碰到水():               # 不接收信息
+            def 碰到水(who):            # who = 进入的角色
+            def 碰到水(who, tag):       # tag = 标签名
         """
         if not callable(callback):
             print("[提示] on_sensor_enter 需要传一个函数，例如：hero.on_sensor_enter(\"水\", 碰到水)")
@@ -1619,7 +1626,7 @@ class Sprite:
         self._sensor_enter_callbacks.append((tag, callback))
 
     def on_sensor_exit(self, tag, callback):
-        """离开某个感应形状时执行 callback(自己, 标签)（每个标签只触发一次）"""
+        """离开某个感应形状时执行 callback（参数写法同 on_sensor_enter）"""
         if not callable(callback):
             print("[提示] on_sensor_exit 需要传一个函数，例如：hero.on_sensor_exit(\"水\", 离开水)")
             return
@@ -4553,13 +4560,39 @@ def _render_map():
 #   学生代码（loop() / generator）
 #   _end_physics_step：气泡计时、自动移动、触碰回调、地形碰撞、感应事件
 
+def _supported_args(callback, args):
+    """按回调函数声明的参数个数裁剪要传的位置参数。
+
+    规则：函数能接几个就传几个（第一个参数永远是「角色自己」）。
+      - def f():             → 不传
+      - def f(who):          → 传 (角色,)
+      - def f(who, tag):     → 传 (角色, 标签) 或 (角色, 对方)
+      - def f(*args):        → 全部传
+    取不到签名（少数内置函数）时按原样全部传，不猜。
+    """
+    try:
+        positional = 0
+        varargs = False
+        for p in inspect.signature(callback).parameters.values():
+            if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD):
+                positional += 1
+            elif p.kind == p.VAR_POSITIONAL:
+                varargs = True
+        take = len(args) if varargs else min(positional, len(args))
+    except (TypeError, ValueError):
+        take = len(args)
+    return args[:take]
+
+
 def _safe_call(callback, *args):
     """执行用户回调；回调内出错只打印错误，不中断游戏（与 broadcast 行为一致）。
 
+    回调参数按函数声明的个数自动裁剪（见 _supported_args），
+    学生写 def f()、def f(who)、def f(who, tag) 都能正常使用。
     GameStop 必须继续向上抛：学生代码里调用 stop() 时依赖它结束 generator。
     """
     try:
-        callback(*args)
+        callback(*_supported_args(callback, args))
     except GameStop:
         raise
     except Exception as e:

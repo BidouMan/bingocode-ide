@@ -77,8 +77,8 @@ const spriteMethods: EngineCompletionItem[] = [
   // 分组 / 事件
   { label: 'add_to_group', kind: CompletionItemKind.Method, insertText: 'add_to_group', documentation: '将角色归类，比如 "enemies", "bullets"\n\nadd_to_group(group_name)', detail: 'add_to_group(group_name)' },
   { label: 'on_touch_group', kind: CompletionItemKind.Method, insertText: 'on_touch_group', documentation: '注册碰撞处理（对方需先 add_to_group）\n\non_touch_group("enemies") 碰到组内成员时，引擎自动删除自己和对方\non_touch_group("enemies", 函数) 自定义处理，函数参数为 (自己, 碰到的角色)', detail: 'on_touch_group(group, callback=None)' },
-  { label: 'on_sensor_enter', kind: CompletionItemKind.Method, insertText: 'on_sensor_enter', documentation: '进入某个感应形状时执行一次（形状层里把它设成「感应」或「阻挡 + 感应」并填上标签）\n\nhero.on_sensor_enter("水", 碰到水)\n函数参数为 (自己, 标签)，例如：\ndef 碰到水(who, tag):\n    who.say("好凉快")\n站在里面不会每帧重复触发', detail: 'on_sensor_enter(tag, callback)' },
-  { label: 'on_sensor_exit', kind: CompletionItemKind.Method, insertText: 'on_sensor_exit', documentation: '离开某个感应形状时执行一次\n\nhero.on_sensor_exit("水", 离开水)\n函数参数为 (自己, 标签)', detail: 'on_sensor_exit(tag, callback)' },
+  { label: 'on_sensor_enter', kind: CompletionItemKind.Method, insertText: 'on_sensor_enter', documentation: '进入某个感应形状时执行一次（形状层里把它设成「感应」或「阻挡 + 感应」并填上标签）\n\nhero.on_sensor_enter("水", 碰到水)\n函数参数可以不写、写 1 个或写 2 个：\ndef 碰到水():\ndef 碰到水(who):        # who = 进入的角色\ndef 碰到水(who, tag):   # tag = 标签\n站在里面不会每帧重复触发', detail: 'on_sensor_enter(tag, callback)' },
+  { label: 'on_sensor_exit', kind: CompletionItemKind.Method, insertText: 'on_sensor_exit', documentation: '离开某个感应形状时执行一次\n\nhero.on_sensor_exit("水", 离开水)\n函数参数写法同 on_sensor_enter（可写 0 / 1 / 2 个）', detail: 'on_sensor_exit(tag, callback)' },
   { label: 'broadcast', kind: CompletionItemKind.Method, insertText: 'broadcast', documentation: '发送广播（触发所有接收该事件的回调）\n\nbroadcast("事件名")', detail: 'broadcast(event_name)' },
   { label: 'receive', kind: CompletionItemKind.Method, insertText: 'receive', documentation: '这一帧有没有收到指定广播\n\nif enemy.receive("开始"):\n    enemy.show()\n广播发出后的下一帧返回一次 True；要写在 while True 里', detail: 'receive(event_name) -> bool' },
 
