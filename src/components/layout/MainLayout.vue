@@ -366,7 +366,7 @@ watch(() => editorStore.activeEditorMode, (mode) => {
 onMounted(loadAllMapThumbnails)
 
 // 启动时静默检查更新，只显示圆点提示，不弹窗
-// 窗口标题显示面向用户的版本号（静默补丁版本内部号更大，但界面仍显示 0.7.4）
+// 窗口标题显示面向用户的版本号（静默补丁版本内部号更大，但界面按映射后的版本展示）
 onMounted(async () => {
   try {
     const { getVersion } = await import('@tauri-apps/api/app')
