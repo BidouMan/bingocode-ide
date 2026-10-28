@@ -17,10 +17,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from models.shape_kernel import AABB, Shape
+from models.shape_kernel import AABB, Shape, inflate
 
 # 叶子节点最多容纳的条目数
 _LEAF_SIZE = 8
+
+# 感应区判定外扩（像素）：让「刚好贴着边界」也算进入。
+# 只用于感应判定/进出事件，实心形状保持原样，物理推挤不受影响。
+SENSOR_EPS = 0.5
 
 
 @dataclass
@@ -43,6 +47,7 @@ class StaticEntry:
     ref: Any = None
     origin: Any = None
     bbox: AABB = field(init=False)
+    _sensor_shape: Optional[Shape] = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.bbox = self.shape.bbox
@@ -54,6 +59,19 @@ class StaticEntry:
     @property
     def is_solid(self) -> bool:
         return self.kind in ("solid", "both")
+
+    @property
+    def sensor_shape(self) -> Shape:
+        """感应判定形状：感应类形状外扩 SENSOR_EPS，实心形状原样返回。
+
+        「阻挡 + 感应」同时命中时，物理仍用未外扩的 shape，只有感应检测走这里。
+        首次访问才计算并缓存。
+        """
+        if self._sensor_shape is None:
+            self._sensor_shape = (
+                inflate(self.shape, SENSOR_EPS) if self.is_sensor else self.shape
+            )
+        return self._sensor_shape
 
 
 class _BVHNode:

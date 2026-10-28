@@ -15,7 +15,7 @@ from models.shape_kernel import (
     point_inside,
     raycast as shape_raycast,
 )
-from models.static_index import StaticEntry, build_world
+from models.static_index import StaticEntry, build_world, SENSOR_EPS
 from models.coords import (
     to_world_x,
     to_world_y,
@@ -676,6 +676,11 @@ class Sprite:
         # 本物理步学生代码执行前的 x：用于区分主动移动与斜面碰撞推挤下滑
         self._frame_start_x = 0.0
         self._on_hit_callbacks = []
+        # 感应区进出回调：[(tag, callback)]；_sensor_active_tags 记录当前仍在区域内的标签，
+        # 用于「只在从无到有 / 从有到无时各触发一次」
+        self._sensor_enter_callbacks = []
+        self._sensor_exit_callbacks = []
+        self._sensor_active_tags = set()
         self._auto_destroy = False
         # 位置跟随目标（get_marker 挂点引用 / 另一个 Sprite）：None = 不跟随
         self._follow_ref = None
@@ -1584,6 +1589,24 @@ class Sprite:
     def on_hit(self, group, callback=None):
         return self.on_touch_group(group, callback)
 
+    def on_sensor_enter(self, tag, callback):
+        """进入某个感应形状时执行 callback(自己, 标签)（注册一次即可，引擎每帧自动检测）
+
+        只有形状层里设成「感应」或「阻挡 + 感应」、并且填了同名标签的形状才会触发；
+        同一个标签从无到有时只触发一次，站在里面不会每帧重复触发。
+        """
+        if not callable(callback):
+            print("[提示] on_sensor_enter 需要传一个函数，例如：hero.on_sensor_enter(\"水\", 碰到水)")
+            return
+        self._sensor_enter_callbacks.append((tag, callback))
+
+    def on_sensor_exit(self, tag, callback):
+        """离开某个感应形状时执行 callback(自己, 标签)（每个标签只触发一次）"""
+        if not callable(callback):
+            print("[提示] on_sensor_exit 需要传一个函数，例如：hero.on_sensor_exit(\"水\", 离开水)")
+            return
+        self._sensor_exit_callbacks.append((tag, callback))
+
     def broadcast(self, event_name):
         """发送广播（触发所有接收该事件的回调；单个回调出错不会中断游戏）"""
         broadcast(event_name)
@@ -1979,7 +2002,8 @@ class Sprite:
                     if static_world is not None:
                         sprite_shape = self._get_collision_shape()
                         for entry in static_world.tag_entries(tag):
-                            if intersects(sprite_shape, entry.shape):
+                            # 感应形状按 SENSOR_EPS 外扩判定（贴边也算碰到），实心形状保持原样
+                            if intersects(sprite_shape, entry.sensor_shape):
                                 return True
                     else:
                         # 索引构建失败时的兼容路径：保持原全表扫描
@@ -4235,6 +4259,65 @@ def _handle_physics_collision():
         sprite._update_transform()
 
 
+def _process_sensor_events():
+    """轮询注册了感应回调的角色，触发「进入 / 离开」事件。
+
+    只查感应索引（solid 不参与），每个标签的判定形状统一按 SENSOR_EPS 外扩：
+      - 从无到有 → 触发一次 on_sensor_enter
+      - 从有到无 → 触发一次 on_sensor_exit
+    外扩让「刚好贴着边界 / 贴着感应区休息」也算在内，不会因浮点误差漏判或抖动。
+    """
+    if not _CURRENT_MAP:
+        return
+    static_world = _CURRENT_MAP.get("static_world")
+    if static_world is None:
+        return
+
+    for sprite in list(_SPRITES.values()):
+        if sprite._is_deleted:
+            continue
+        enter_callbacks = sprite._sensor_enter_callbacks
+        exit_callbacks = sprite._sensor_exit_callbacks
+        if not (enter_callbacks or exit_callbacks):
+            continue
+
+        wanted = {tag for tag, _ in enter_callbacks}
+        wanted.update(tag for tag, _ in exit_callbacks)
+        if not wanted:
+            continue
+
+        rect = sprite._get_hitbox_rect()
+        if not rect:
+            continue
+
+        # 感应索引宽相：查询盒按外扩量放大，保证贴着边界的感应形状也进候选
+        entries = static_world.sensors.query_rect(
+            rect[0] - SENSOR_EPS, rect[1] - SENSOR_EPS,
+            rect[2] + SENSOR_EPS, rect[3] + SENSOR_EPS,
+        )
+
+        active = sprite._sensor_active_tags
+        touched = set()
+        if entries:
+            shape = sprite._get_collision_shape()
+            for entry in entries:
+                tag = entry.tag
+                if tag not in wanted or tag in touched:
+                    continue
+                if intersects(shape, entry.sensor_shape):
+                    touched.add(tag)
+
+        for tag in touched - active:
+            for t, callback in list(enter_callbacks):
+                if t == tag:
+                    callback(sprite, tag)
+        for tag in active - touched:
+            for t, callback in list(exit_callbacks):
+                if t == tag:
+                    callback(sprite, tag)
+        sprite._sensor_active_tags = touched
+
+
 def _render_map():
     """渲染地图 - 优化版本"""
     global _CURRENT_MAP, _MAP_SPRITES, _RENDERED_TILES, _MAP_DIR
@@ -4560,6 +4643,7 @@ def run():
 
                 if _CURRENT_MAP:
                     _handle_physics_collision()
+                    _process_sensor_events()
 
             accumulator -= _PHYSICS_DT
             steps += 1
@@ -4756,6 +4840,8 @@ def start_game(project_dir=None, target_file=None):
                         (s._speed > 0) or
                         (getattr(s, "animation_state", None) and s.animation_state.get("is_playing", False)) or
                         bool(s._on_hit_callbacks) or
+                        bool(s._sensor_enter_callbacks) or
+                        bool(s._sensor_exit_callbacks) or
                         s._follow_ref is not None
                         for s in _SPRITES.values() if not s._is_deleted
                     )
@@ -4793,6 +4879,7 @@ def start_game(project_dir=None, target_file=None):
 
                 if _CURRENT_MAP:
                     _handle_physics_collision()
+                    _process_sensor_events()
 
             accumulator -= _PHYSICS_DT
             steps += 1
