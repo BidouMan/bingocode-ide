@@ -9,7 +9,7 @@ import queue
 from PIL import Image
 from models.map_model import MapModel
 from models.shape_kernel import (
-    ConvexPolygon, CompoundShape, polygon_shape, aabb_shape, intersects,
+    ConvexPolygon, CompoundShape, polygon_shape, aabb_shape, capsule_shape, intersects,
     overlap as shape_overlap,
     sweep as shape_sweep,
     point_inside,
@@ -806,6 +806,7 @@ class Sprite:
             if not candidate_ids:
                 return None
 
+        sprite_shape = self._get_collision_shape()
         best = None
         for poly in layer.get("polygons", []):
             if candidate_ids is not None and poly.get("id") not in candidate_ids:
@@ -847,14 +848,27 @@ class Sprite:
                             best = cand
                     continue
 
+            # 凸块形状缓存：凹多边形已拆成凸块，SAT 只能对凸多边形判定
+            part_shapes = poly.get("_shape_parts")
+            if part_shapes is None:
+                part_shapes = []
+                for part in poly.get("parts") or [points]:
+                    if len(part) < 3:
+                        continue
+                    try:
+                        part_shapes.append(ConvexPolygon(part))
+                    except (ValueError, TypeError):
+                        continue
+                poly["_shape_parts"] = part_shapes
+
             part_best = None
-            # 凹多边形已拆成凸块：SAT 只能对凸多边形判定，否则凹陷空区会误判碰撞
-            for part in poly.get("parts") or [points]:
-                if len(part) < 3:
+            for part_shape in part_shapes:
+                # 角色用真实判定形状（胶囊/多边形），不再用 AABB
+                manifold = shape_overlap(sprite_shape, part_shape)
+                if manifold is None:
                     continue
-                mtv = _aabb_polygon_mtv(sprite_rect, part)
-                if not mtv:
-                    continue
+                mtv = (manifold.normal[0] * manifold.depth,
+                       manifold.normal[1] * manifold.depth)
                 if not self._mtv_axis_dominant(mtv, axis):
                     continue
                 part_correction = mtv[0] if axis == "x" else mtv[1]
@@ -918,10 +932,25 @@ class Sprite:
                             best = cand
                     continue
 
-            for poly in world_polys:
-                mtv = _aabb_polygon_mtv(sprite_rect, poly)
-                if not mtv:
+            shape_parts = image.get("_collision_world_shapes")
+            if shape_parts is None:
+                shape_parts = []
+                for poly in world_polys:
+                    if len(poly) < 3:
+                        continue
+                    try:
+                        shape_parts.append(ConvexPolygon(poly))
+                    except (ValueError, TypeError):
+                        continue
+                image["_collision_world_shapes"] = shape_parts
+
+            sprite_shape = self._get_collision_shape()
+            for part_shape in shape_parts:
+                manifold = shape_overlap(sprite_shape, part_shape)
+                if manifold is None:
                     continue
+                mtv = (manifold.normal[0] * manifold.depth,
+                       manifold.normal[1] * manifold.depth)
                 if not self._mtv_axis_dominant(mtv, axis):
                     continue
                 correction = mtv[0] if axis == "x" else mtv[1]
@@ -1006,7 +1035,7 @@ class Sprite:
             entries = static_world.solid.query_rect(rect[0], rect[1], rect[2], rect[3])
             if not entries:
                 break
-            sprite_shape = aabb_shape(rect[0], rect[1], rect[2], rect[3])
+            sprite_shape = self._get_collision_shape()
             best = None
             for entry in entries:
                 # 单向平台只从上方承载，不能当作实心块把角色顶出去
@@ -1948,7 +1977,7 @@ class Sprite:
                 if tag:
                     static_world = _CURRENT_MAP.get("static_world")
                     if static_world is not None:
-                        sprite_shape = aabb_shape(r1[0], r1[1], r1[2], r1[3])
+                        sprite_shape = self._get_collision_shape()
                         for entry in static_world.tag_entries(tag):
                             if intersects(sprite_shape, entry.shape):
                                 return True
@@ -1981,12 +2010,10 @@ class Sprite:
         if not isinstance(target, Sprite):
             return False
 
-        r2 = target._get_hitbox_rect()
-        if not r2:
-            return False
-
-        # AABB 碰撞公式保持不变
-        return not (r1[2] < r2[0] or r1[0] > r2[2] or r1[3] < r2[1] or r1[1] > r2[3])
+        # 角色间碰撞使用真实判定形状（.bsf 胶囊/多边形不再降级 AABB）
+        shape1 = self._get_collision_shape()
+        shape2 = target._get_collision_shape()
+        return shape_overlap(shape1, shape2) is not None
 
     def is_touch_group(self, group_name):
         """
@@ -2096,7 +2123,7 @@ class Sprite:
             query_top = min(rect[1], rect[1] + dy)
             query_right = max(rect[2], rect[2] + dx)
             query_bottom = max(rect[3], rect[3] + dy)
-            sprite_shape = aabb_shape(rect[0], rect[1], rect[2], rect[3])
+            sprite_shape = self._get_collision_shape()
             for entry in static_world.solid.query_rect(
                 query_left, query_top, query_right, query_bottom
             ):
@@ -2424,7 +2451,8 @@ class Sprite:
         - 引擎 (x, y) = manifest.pivot（角色所在点，见 bsf-api §4）
         - 纹理 = 帧 rect（紧致裁剪），vox/voy = pivot 相对帧纹理中心的偏移
         - 自定义碰撞（manifest collision，画布坐标）存在时覆盖 _content_bbox，
-          缺省回退帧内容框（= 自动碰撞）；胶囊/多边形运行时按其包围盒参与 AABB 判定
+          缺省回退帧内容框（= 自动碰撞）；胶囊/多边形同时记录真实顶点，
+          运行时由 _get_collision_shape 用 Shape 内核按真实轮廓判定
         """
         idx = getattr(self, "_bsf_frame_index", 0)
         if (
@@ -2452,19 +2480,67 @@ class Sprite:
         bbox = self._collision_canvas_bbox(collision)
         if bbox is None:
             self._content_bbox = (0, 0, rw, rh)
+            self._local_collision_points = None
         else:
             x0, y0, x1, y1 = bbox
             self._content_bbox = (
                 x0 - offset["x"], y0 - offset["y"],
                 x1 - offset["x"], y1 - offset["y"],
             )
+            # 真正的判定形状顶点（画布坐标 → 帧图片局部坐标），供 Shape 内核使用
+            canvas_points = self._collision_canvas_points(collision)
+            if canvas_points:
+                self._local_collision_points = tuple(
+                    (px - offset["x"], py - offset["y"]) for px, py in canvas_points
+                )
+            else:
+                self._local_collision_points = None
 
         self._cached_hitbox = [0, 0, rw, rh]
         self._cached_image = self.image
         self._cached_bsf_frame = idx
-        # 帧切换后让 _get_hitbox_rect 的帧级缓存失效（它不感知 sheet 帧变化）
+        # 帧切换后让 _get_hitbox_rect 的帧级缓存失效
+        # （_get_collision_shape 的缓存键已含帧号与 bsf 帧索引，无需额外清理）
         self._cached_rect_frame = None
         return self._cached_hitbox
+
+    def _collision_canvas_points(self, collision):
+        """自定义碰撞形状 → 画布坐标顶点列表；无有效形状返回 None。
+
+        rect:    四个角
+        capsule: 竖直胶囊采样成多边形（Godot CapsuleShape2D 语义）
+        polygon: 原始点集
+        """
+        if not isinstance(collision, dict):
+            return None
+        ctype = collision.get("type")
+        try:
+            if ctype == "rect":
+                cx, cy = float(collision.get("cx", 0)), float(collision.get("cy", 0))
+                w = max(1.0, float(collision.get("w", 1)))
+                h = max(1.0, float(collision.get("h", 1)))
+                return [
+                    (cx - w / 2.0, cy - h / 2.0),
+                    (cx + w / 2.0, cy - h / 2.0),
+                    (cx + w / 2.0, cy + h / 2.0),
+                    (cx - w / 2.0, cy + h / 2.0),
+                ]
+            if ctype == "capsule":
+                cx, cy = float(collision.get("cx", 0)), float(collision.get("cy", 0))
+                r = max(0.5, float(collision.get("radius", 1)))
+                total_h = max(2.0 * r, float(collision.get("height", 2.0 * r)))
+                half_seg = max(0.0, total_h / 2.0 - r)
+                capsule = capsule_shape((cx, cy - half_seg), (cx, cy + half_seg), r, 8)
+                return list(capsule.points)
+            if ctype == "polygon":
+                pts = []
+                for p in collision.get("points") or []:
+                    if isinstance(p, (list, tuple)) and len(p) >= 2:
+                        pts.append((float(p[0]), float(p[1])))
+                return pts if len(pts) >= 3 else None
+        except (TypeError, ValueError):
+            return None
+        return None
 
     def _collision_canvas_bbox(self, collision):
         """自定义碰撞形状 → 画布坐标系 AABB (x0, y0, x1, y1)；无有效形状返回 None。
@@ -2581,6 +2657,87 @@ class Sprite:
         self._cached_rect_angle = effective_angle
 
         return rect
+
+    def _get_collision_shape(self):
+        """当前角色的真实判定形状（世界坐标，Shape 内核对象）。
+
+        与渲染解耦：
+          - .bsf 有 manifest collision（rect / capsule / polygon）时用真实顶点
+          - 没有自定义碰撞时用帧内容框（自动碰撞）
+          - 普通图片用非透明内容框
+        形状随位置/缩放/翻转/旋转一起烘焙，不再降级成世界 AABB。
+        """
+        self._setup_hitbox()
+
+        # 局部顶点：优先自定义碰撞，否则内容框
+        points = None
+        if getattr(self, "_is_bsf", False) and getattr(self, "_local_collision_points", None):
+            points = tuple(self._local_collision_points)
+        elif hasattr(self, "_content_bbox") and self._content_bbox:
+            b = self._content_bbox
+            points = ((b[0], b[1]), (b[2], b[1]), (b[2], b[3]), (b[0], b[3]))
+
+        if not points or len(points) < 3:
+            rect = self._get_hitbox_rect()
+            return aabb_shape(rect[0], rect[1], rect[2], rect[3])
+
+        s = self._scale / 100.0
+        flip_x = getattr(self, "_display_flip", getattr(self, "_current_scale_x", 1))
+        rot_style = getattr(self, "_rotation_style", "all around")
+        if rot_style == "left_right" or rot_style == "none":
+            effective_angle = 0
+        else:
+            effective_angle = self._angle
+
+        # 帧级缓存：位置/形态不变时复用
+        cache_key = (
+            _PERF_STATS["frame_count"],
+            getattr(self, "_bsf_frame_index", 0),
+            self.image,
+        )
+        if (
+            getattr(self, "_cached_shape", None) is not None
+            and getattr(self, "_cached_shape_key", None) == cache_key
+            and abs(self._cached_shape_x - self._x) < 0.01
+            and abs(self._cached_shape_y - self._y) < 0.01
+            and self._cached_shape_scale == self._scale
+            and getattr(self, "_cached_shape_flip", 1) == flip_x
+            and getattr(self, "_cached_shape_angle", 0) == effective_angle
+        ):
+            return self._cached_shape
+
+        img_w, img_h = self._orig_w, self._orig_h
+        vox = getattr(self, "_visual_offset_x", 0.0)
+        voy = getattr(self, "_visual_offset_y", 0.0)
+        rad = math.radians(effective_angle)
+        cos_a, sin_a = math.cos(rad), math.sin(rad)
+
+        world_points = []
+        for bx, by in points:
+            lx = bx - img_w / 2.0
+            ly = by - img_h / 2.0
+            px = lx - vox
+            py = ly - voy
+            sx = px * s * flip_x
+            sy = py * s
+            rx = sx * cos_a - sy * sin_a
+            ry = sx * sin_a + sy * cos_a
+            world_points.append((self._x + rx, self._y + ry))
+
+        try:
+            shape = polygon_shape(world_points)
+        except (ValueError, TypeError):
+            rect = self._get_hitbox_rect()
+            shape = aabb_shape(rect[0], rect[1], rect[2], rect[3])
+
+        self._cached_shape = shape
+        self._cached_shape_key = cache_key
+        self._cached_shape_x = self._x
+        self._cached_shape_y = self._y
+        self._cached_shape_scale = self._scale
+        self._cached_shape_flip = flip_x
+        self._cached_shape_angle = effective_angle
+        return shape
 
     def _update_transform(self):
         """统一处理旋转、缩放和镜像逻辑"""
