@@ -3,13 +3,24 @@
 什么时候来这里改：角色卡进地形、穿过瓦片、斜坡/单向平台、碰撞抖动、接触方向判断。
 类结构：SpritePhysicsMixin 由 sprite.Sprite 继承，方法内可直接用 self 的字段。"""
 import math
-from models.shape_kernel import ConvexPolygon, intersects, overlap as shape_overlap, point_inside, sweep as shape_sweep
+from models.shape_kernel import ConvexPolygon, intersects, overlap as shape_overlap, point_inside, sweep as shape_sweep, support_center
 from models.static_index import SENSOR_EPS
 from collision_geometry import _aabb_polygon_mtv, _image_collision_world_polygons, _playable_bounds, _shape_convex_parts, _sign
 from input_api import mouse
 from map_runtime import _find_tileset_for_gid
-from markers import _parse_direction_world, raycast as _raycast
+from markers import RaycastHit, _parse_direction_world, raycast as _raycast
 import engine_state as st
+
+
+class _BoundaryHitInfo:
+    """地图边界命中的占位条目（边界没有具体的形状对象）。"""
+
+    tag = ""
+    collision_type = "边界"
+    source = "boundary"
+
+
+_BOUNDARY_INFO = _BoundaryHitInfo()
 
 
 class SpritePhysicsMixin:
@@ -785,41 +796,31 @@ class SpritePhysicsMixin:
         return None
 
 
-    def is_blocked(self, direction="down", distance=None):
-        """前方是否有实心地形阻挡（俯视迷宫常用）。
+    def _probe_solid_sweep(self, direction, probe):
+        """用角色碰撞形状沿方向扫掠 probe 像素，返回最近命中或 None。
 
-        direction: "left"/"right"/"up"/"down"（或 左/右/上/下），也接受用户角度数字
-        distance: 探测距离，默认 2 像素；想查更远可以传更大值
-
-        只查静态实心地形（形状层 solid/both、图像碰撞、实心图块），
-        感应区域不算阻挡；跳板只有向下且从上方靠近时才算阻挡。
-
-        用法：
-            if not hero.is_blocked("right"):
-                hero.add_x(4)
+        返回 (距离, 世界接触点, 世界法线, 条目)，边界命中时条目为 _BOUNDARY_INFO。
+        供 is_blocked / shapecast 共用，保证两者判定规则完全一致。
         """
         if self._is_deleted or self._collision_disabled or not st._CURRENT_MAP:
-            return False
+            return None
         world_dir = _parse_direction_world(direction)
-        if world_dir is None:
-            return False
-        probe = self._BLOCK_PROBE if distance is None else max(0.0, float(distance))
-        if probe <= 0.0:
-            return False
-
+        if world_dir is None or probe <= 0.0:
+            return None
         rect = self._get_hitbox_rect()
         if not rect:
-            return False
+            return None
         dx = world_dir[0] * probe
         dy = world_dir[1] * probe
 
+        best = None
         static_world = st._CURRENT_MAP.get("static_world")
         if static_world is not None:
+            sprite_shape = self._get_collision_shape()
             query_left = min(rect[0], rect[0] + dx)
             query_top = min(rect[1], rect[1] + dy)
             query_right = max(rect[2], rect[2] + dx)
             query_bottom = max(rect[3], rect[3] + dy)
-            sprite_shape = self._get_collision_shape()
             for entry in static_world.solid.query_rect(
                 query_left, query_top, query_right, query_bottom
             ):
@@ -829,21 +830,86 @@ class SpritePhysicsMixin:
                         continue
                     if rect[3] > entry.bbox.top + 0.5:
                         continue
-                if shape_sweep(sprite_shape, entry.shape, (dx, dy)) is not None:
-                    return True
+                hit = shape_sweep(sprite_shape, entry.shape, (dx, dy))
+                if hit is None:
+                    continue
+                dist = hit.time * probe
+                if best is None or dist < best[0]:
+                    best = (dist, hit.point, hit.normal, entry)
 
-        # 边界碰撞开启时，地图矩形也算阻挡
+        # 边界碰撞开启时，地图矩形也算阻挡（斜向时两条轴都要检查）
         if st._CURRENT_MAP.get("boundaryCollision", st._CURRENT_MAP.get("gravity", False)):
             bounds = _playable_bounds()
-            if world_dir[0] < 0 and rect[0] + dx < bounds["left"]:
-                return True
-            if world_dir[0] > 0 and rect[2] + dx > bounds["right"]:
-                return True
-            if world_dir[1] < 0 and rect[1] + dy < bounds["top"]:
-                return True
-            if world_dir[1] > 0 and rect[3] + dy > bounds["bottom"]:
-                return True
-        return False
+            cx = (rect[0] + rect[2]) / 2.0
+            cy = (rect[1] + rect[3]) / 2.0
+            limits = []
+            if world_dir[0] < 0:
+                limits.append((rect[0] - bounds["left"], (bounds["left"], cy), (1.0, 0.0)))
+            elif world_dir[0] > 0:
+                limits.append((bounds["right"] - rect[2], (bounds["right"], cy), (-1.0, 0.0)))
+            if world_dir[1] < 0:
+                limits.append((rect[1] - bounds["top"], (cx, bounds["top"]), (0.0, 1.0)))
+            elif world_dir[1] > 0:
+                limits.append((bounds["bottom"] - rect[3], (cx, bounds["bottom"]), (0.0, -1.0)))
+            for dist, point, normal in limits:
+                dist = max(0.0, dist)
+                if dist < probe and (best is None or dist < best[0]):
+                    best = (dist, point, normal, _BOUNDARY_INFO)
+        return best
+
+
+    def is_blocked(self, direction="down", distance=None):
+        """前方是否有实心地形阻挡（俯视迷宫常用）。
+
+        direction: "left"/"right"/"up"/"down"（或 左/右/上/下），也接受用户角度数字
+        distance: 探测距离，默认 2 像素；想查更远可以传更大值
+
+        只查静态实心地形（形状层 solid/both、图像碰撞、实心图块），
+        感应区域不算阻挡；跳板只有向下且从上方靠近时才算阻挡。
+
+        只要「是/否」用这个；需要命中距离、接触点、标签时用 shapecast。
+
+        用法：
+            if not hero.is_blocked("right"):
+                hero.add_x(4)
+        """
+        probe = self._BLOCK_PROBE if distance is None else max(0.0, float(distance))
+        return self._probe_solid_sweep(direction, probe) is not None
+
+
+    def shapecast(self, direction="down", distance=1000):
+        """用角色整个碰撞形状朝一个方向扫一段距离，返回最近撞到的实心地形。
+
+        和 raycast 的区别：射线是一条没有宽度的线，shapecast 用的是角色真实轮廓
+        （胶囊/多边形），所以「窄缝能不能过」「头顶净空够不够」「斜向移动会不会撞」
+        这类问题只有它能正确回答。
+
+        只查实心地形（感应区域不算）；跳板规则与移动一致；开启「限制边界」时
+        地图边界也会被命中（collision_type 为「边界」）。
+
+        Returns:
+            hit（.distance/.x/.y/.pos/.normal/.tag/.collision_type/.source）
+            或 None（整段距离都没有撞到）
+
+        用法：
+            hit = hero.shapecast("right", 64)
+            if hit:
+                hero.say("前方 %d 像素有 %s" % (hit.distance, hit.tag or "障碍"))
+        """
+        probe = max(0.0, float(distance))
+        found = self._probe_solid_sweep(direction, probe)
+        if found is None:
+            return None
+        dist, point, normal, entry = found
+        if entry is not _BOUNDARY_INFO:
+            # 接触点取接触面中心（单个支撑点可能落在多边形角上）
+            world_dir = _parse_direction_world(direction)
+            center = support_center(self._get_collision_shape(), normal)
+            point = (
+                center[0] + world_dir[0] * dist,
+                center[1] + world_dir[1] * dist,
+            )
+        return RaycastHit(dist, point, normal, entry)
 
 
     def is_on_wall(self):

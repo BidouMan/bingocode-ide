@@ -468,6 +468,30 @@ def bounds(shape: Shape) -> AABB:
     raise TypeError("不支持的形状类型: %r" % type(shape))
 
 
+def support_center(shape: Shape, normal: Vec2) -> Vec2:
+    """形状在 normal 方向上的接触面中心（同一最小投影的顶点取平均）。
+
+    扫掠命中时单个支撑点可能落在多边形的角上（例如矩形撞平面墙会返回某个角）；
+    取所有同深度支撑点的平均，得到接触面的中心，更适合放特效 / 判断撞点。
+    """
+    best = None
+    points = []
+    for part in _parts(shape):
+        for p in part.points:
+            d = _dot(p, normal)
+            if best is None or d < best - 1e-9:
+                best = d
+                points = [p]
+            elif abs(d - best) <= 1e-9:
+                points.append(p)
+    if not points:
+        return (0.0, 0.0)
+    return (
+        sum(p[0] for p in points) / len(points),
+        sum(p[1] for p in points) / len(points),
+    )
+
+
 def _center(shape: Shape) -> Vec2:
     b = bounds(shape)
     return ((b.left + b.right) * 0.5, (b.top + b.bottom) * 0.5)

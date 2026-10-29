@@ -265,6 +265,12 @@
           "badgeType": "object"
         },
         {
+          "label": "shapecast 用身体探路",
+          "code": "hit = hero.shapecast(\"right\", 100)\nif hit:\n    hero.say(\"前面 \" + str(round(hit.distance)) + \" 像素有东西\")",
+          "desc": "用角色整个身体（胶囊形或不规则轮廓）朝一个方向扫一段距离，返回最近撞到的实心地形；没撞到返回 None。\n和 raycast 的区别：射线只是一条没有宽度的线，身体扫过去才能正确判断「这条窄缝能不能过」「头顶空间够不够」「斜着走会不会撞」。\n返回的 hit 和 raycast 一样可以读 distance / x / y / tag / normal。",
+          "badgeType": "object"
+        },
+        {
           "label": "is_touch_edge 碰到边框了吗",
           "code": "hero.is_touch_edge()",
           "desc": "检查角色有没有碰到地图的边框。",

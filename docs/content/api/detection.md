@@ -176,6 +176,34 @@ hit = raycast(mouse.x, mouse.y, "down", 50)
 | `hit.collision_type` | 物理属性（墙体 / 跳板 / 图像 / 自定义） |
 | `hit.source` | 来源类型：`shape` 形状层 / `image` 图像 / `tile` 图块 |
 
+### shapecast / hero.shapecast — 用自己的身体探一段路
+
+```python
+hit = hero.shapecast("right", 100)
+if hit:
+    hero.say("前方 %d 像素有 %s" % (hit.distance, hit.tag or "障碍"))
+```
+
+和 `raycast` 的区别：射线是一条没有宽度的线，`shapecast` 用的是角色真实的碰撞轮廓（胶囊 / 多边形）。下面这些情况只有它能正确判断：
+
+- 窄缝比身体窄时，能不能过去
+- 头顶净空够不够（例如蹲着能不能站起来）
+- 斜向移动、旋转后的身体会不会撞
+- 已经贴着墙 / 嵌在墙里时（距离从 0 开始算）
+
+`hero.shapecast(direction, distance=1000)`：起点是角色位置；只查实心地形（感应不算），跳板规则与移动一致；开启「限制边界」时地图边界也会命中（`collision_type` 为「边界」）。
+
+返回字段和 `raycast` 相同：
+
+| 字段 | 说明 |
+|------|------|
+| `hit.distance` | 身体移动多少像素后碰到 |
+| `hit.x` / `hit.y` / `hit.pos` | 接触面中心坐标（用户坐标） |
+| `hit.normal` | 接触面朝向 `(x, y)`，可用于反弹 |
+| `hit.tag` / `hit.collision_type` / `hit.source` | 同 raycast |
+
+只想判断「这一步能不能迈过去」时，直接用布尔版 `is_blocked(方向, 步长)` 更省事。
+
 ### is_touch_edge — 是否碰到地图边界
 
 ```python
