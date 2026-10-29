@@ -205,6 +205,56 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
     return `rgba(${(color >> 16) & 0xff}, ${(color >> 8) & 0xff}, ${color & 0xff}, ${alpha})`
   }
 
+  /** 点到线段的最短距离（标签锚点用） */
+  function distanceToSegment(
+    px: number, py: number,
+    ax: number, ay: number,
+    bx: number, by: number,
+  ): number {
+    const dx = bx - ax
+    const dy = by - ay
+    const lenSq = dx * dx + dy * dy
+    if (lenSq <= 1e-9) return Math.hypot(px - ax, py - ay)
+    const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq))
+    return Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+  }
+
+  /** 标签锚点：保证落在形状内部。
+   * 标准形状直接用包围盒中心；L 形这类凹多边形的包围盒中心会跑到外面，
+   * 改为在包围盒内采样，找「离所有边最远」的内部点（不要求居中，只要求在里面）。 */
+  function labelAnchor(points: Point[]): Point {
+    const xs = points.map(p => p.x)
+    const ys = points.map(p => p.y)
+    const minX = Math.min(...xs)
+    const maxX = Math.max(...xs)
+    const minY = Math.min(...ys)
+    const maxY = Math.max(...ys)
+    const center = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 }
+    if (pointInPolygon(center, points)) return center
+
+    const samples = 16
+    let best = center
+    let bestDist = -1
+    for (let i = 1; i < samples; i++) {
+      for (let j = 1; j < samples; j++) {
+        const x = minX + ((maxX - minX) * i) / samples
+        const y = minY + ((maxY - minY) * j) / samples
+        if (!pointInPolygon({ x, y }, points)) continue
+        let dist = Infinity
+        for (let k = 0; k < points.length; k++) {
+          const a = points[k]
+          const b = points[(k + 1) % points.length]
+          dist = Math.min(dist, distanceToSegment(x, y, a.x, a.y, b.x, b.y))
+        }
+        if (dist > bestDist) {
+          bestDist = dist
+          best = { x, y }
+        }
+      }
+    }
+    return best
+  }
+
   function drawPolygon(
     ctx: CanvasRenderingContext2D,
     points: Point[],
@@ -244,10 +294,12 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
         ctx.lineWidth = 3 / scale
+        // 锚点保证在形状内部：L 形等凹多边形的包围盒中心可能落在外面
+        const anchor = labelAnchor(points)
         ctx.strokeStyle = 'rgba(10, 12, 16, 0.75)'
-        ctx.strokeText(shown, (minX + maxX) / 2, (minY + maxY) / 2)
+        ctx.strokeText(shown, anchor.x, anchor.y)
         ctx.fillStyle = colorCss(color, 0.95)
-        ctx.fillText(shown, (minX + maxX) / 2, (minY + maxY) / 2)
+        ctx.fillText(shown, anchor.x, anchor.y)
       }
     }
 
