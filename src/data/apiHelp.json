@@ -236,32 +236,20 @@
       "funcs": [
         {
           "label": "is_touch 碰到了吗",
-          "code": "hero.is_touch(\"水\")\nhero.is_touch(enemy)\nhero.is_touch(mouse)",
-          "desc": "检查角色有没有碰到某个东西：\n- 写标签：hero.is_touch(\"水\")，「形状层」里的标签和图块标签都可以\n- 写角色：碰另一个角色\n- 写 mouse：碰鼠标\n贴边（不到半个像素）也算碰到。",
-          "badgeType": "object"
-        },
-        {
-          "label": "sweep_test 前面挡住了吗",
-          "code": "if hero.sweep_test(\"right\"):\n    hero.say(\"右边是墙\")\n\nhero.sweep_test(\"down\", 8)",
-          "desc": "用自己的身体朝一个方向扫一下，检查前面有没有实心地形。只测试，不会移动角色。\n方向可以写 left / right / up / down，也可以写中文「左/右/上/下」。\n第二个数字是往前探多远，不写默认 2 像素。\n感应区域不算阻挡；「跳板」只有往下且从上面靠近时才算。",
+          "code": "hero.is_touch(enemy)\nhero.is_touch(mouse)\nhero.is_touch(\"大门\")",
+          "desc": "检查角色有没有碰到某个东西：\n- 检测是否碰到其他角色\n- 检测是否碰到鼠标\n- 检测是否碰到地图中的某个被设定了标签的图像",
           "badgeType": "object"
         },
         {
           "label": "is_on_wall 贴着墙吗",
           "code": "if hero.is_on_wall():\n    hero.say(\"贴墙了\")",
-          "desc": "检查角色左右两边是不是正贴着墙。只在顶着墙的那一帧为 True。",
+          "desc": "检查角色左右两边是不是正贴着墙。",
           "badgeType": "object"
         },
         {
           "label": "is_on_ceiling 头顶撞到了吗",
           "code": "if hero.is_on_ceiling():\n    hero.stop_jump()",
-          "desc": "检查角色头顶是不是撞到了东西（天花板、墙顶、地图上边界）。\n跳跃撞头的那一帧为 True，适合配合 stop_jump() 一起用。",
-          "badgeType": "object"
-        },
-        {
-          "label": "raycast 射线检测",
-          "code": "hit = hero.raycast(\"right\", 200)\nif hit:\n    print(hit.distance, hit.tag)",
-          "desc": "从角色位置朝一个方向射出一条看不见的线，返回最近碰到的实心地形；没碰到返回 None。\n命中后可以读：hit.distance（多远）、hit.tag（标签）、hit.x / hit.y（命中点坐标）、hit.normal（表面朝向）。\n方向可以写 left / right / up / down 或角度数字（0右 90上）。\n从任意点（鼠标、标记）发射用全局 raycast(x, y, 方向, 距离)。",
+          "desc": "检查角色头顶是不是撞到了东西。\n一般配合 stop_jump() 一起用。",
           "badgeType": "object"
         },
         {
@@ -298,6 +286,18 @@
           "label": "is_touch_group 碰到组了吗",
           "code": "bullet.is_touch_group(\"enemies\")",
           "desc": "将多个角色设为\"组\"，检查子弹是否碰撞其中任何一个角色。",
+          "badgeType": "object"
+        },
+        {
+          "label": "raycast 射线检测",
+          "code": "hit = hero.raycast(\"right\", 200)\nif hit:\n    print(hit.distance, hit.tag)",
+          "desc": "从角色位置朝一个方向射出一条看不见的线，返回最近碰到的实心地形；没碰到返回 None。\n命中后可以读：hit.distance（多远）、hit.tag（标签）、hit.x / hit.y（命中点坐标）、hit.normal（表面朝向）。\n方向可以写 left / right / up / down 或角度数字（0右 90上）。\n从任意点（鼠标、标记）发射用全局 raycast(x, y, 方向, 距离)。",
+          "badgeType": "object"
+        },
+        {
+          "label": "sweep_test 扫掠检测",
+          "code": "if hero.sweep_test(\"right\"):\n    hero.say(\"右边是墙\")\n\nhero.sweep_test(\"down\", 8)",
+          "desc": "用自己的身体朝一个方向扫一下，检查前面有没有实心地形。只测试，不会移动角色。\n方向可以写 left / right / up / down，也可以写中文「左/右/上/下」。\n第二个数字是往前探多远，不写默认 2 像素。\n感应区域不算阻挡；「跳板」只有往下且从上面靠近时才算。",
           "badgeType": "object"
         },
         {
