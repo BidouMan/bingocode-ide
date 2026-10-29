@@ -35,7 +35,7 @@ while True:
 ```
 
 - **角色**：移动、转向、旋转（跟随 / 左右翻转）、缩放、显隐、多造型动画
-- **边界**：`edge_bounce`（自动反弹）、`is_touch_edge`（碰到边缘）、`is_out_side`（完全出界，配合自动销毁子弹）
+- **边界**：`edge_bounce`（自动反弹）、`is_touch_edge`（碰到地图边缘）、`is_out_screen`（完全飞出画面，配合自动销毁子弹）
 - **输入**：键盘 `key_down` / `key_pressed`、鼠标位置与按键
 - **互动**：`is_touch` 碰撞检测、分组碰撞回调、广播
 - **外观**：`say` 气泡说话、计时器 `Timer`、重力与跳跃（平台模式）

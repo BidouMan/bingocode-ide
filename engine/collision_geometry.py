@@ -66,6 +66,23 @@ def _playable_bounds():
     return {"left": 0, "top": 0, "right": st._SCREEN_WIDTH, "bottom": st._SCREEN_HEIGHT}
 
 
+def _screen_bounds():
+    """当前画面在世界坐标中的矩形（固定 640×480 的窗口，中心跟着相机走）
+
+    与 _playable_bounds（地图矩形）不是一回事：地图再大，玩家也只能看到窗口这一块。
+    判断「看不看得见」（如 is_out_screen 出屏删除）必须用这一套；
+    edge_bounce / 边界碰撞这类「地图范围」限制仍用 _playable_bounds。
+    """
+    half_w = st._SCREEN_WIDTH / 2.0
+    half_h = st._SCREEN_HEIGHT / 2.0
+    return {
+        "left": st._CAMERA_X - half_w,
+        "top": st._CAMERA_Y - half_h,
+        "right": st._CAMERA_X + half_w,
+        "bottom": st._CAMERA_Y + half_h,
+    }
+
+
 # ---------- 图像实例碰撞几何（图像模式） ----------
 
 def _polygon_signed_area(points):

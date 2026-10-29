@@ -59,7 +59,7 @@ def _end_physics_step():
         if sprite._speed > 0:
             sprite.move(sprite._speed)
         # 自动销毁
-        if sprite._auto_destroy and sprite.is_out_side():
+        if sprite._auto_destroy and sprite.is_out_screen():
             sprite.delete()
         # 分组触碰回调
         if sprite._on_hit_callbacks:

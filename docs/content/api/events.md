@@ -98,7 +98,7 @@ while True:
         bullet.on_touch_group("enemies")   # 注册：子弹碰到敌人 → 两者自动消失
 
     # 子弹飞出画面后清理
-    if bullet and bullet.is_out_side():
+    if bullet and bullet.is_out_screen():
         bullet.delete()
         bullet = None
 ```

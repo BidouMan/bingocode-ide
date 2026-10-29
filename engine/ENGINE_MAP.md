@@ -94,7 +94,7 @@ bingo_engine.py            门面：sys.path 引导 + stdout 无缓冲 + 重导�
 | 文件 | 方法（44 / 19 / 13 / 3 个） |
 | --- | --- |
 | `sprite.py` | `__init__`、`goto`、`get_marker`、`follow`、`unfollow`、`set_xy`、`set_x/y`、`add_x/y`、`jump`、`stop_jump`、`cut_jump`、`smart_jump`、`drop_down`、`drop_through`、`set_speed`、`on_touch_group`、`on_hit`、`on_sensor_enter/exit`、`broadcast`、`receive`、`on_receive`、`move`、`goto_rand`、`set_angle`、`look_at`、`edge_bounce`、`set_scale`、`add_scale`、`set_rotation_mode`、`show`、`hide`、`say`*(见动画)*、`touch_group`、`add_to_group`、`delete`、`distance_to`、属性 `x/y/pos/vy/gravity/angle/scale/layer`、`_set_xy_world`、`_apply_visible`、`_send_command` |
-| `sprite_physics.py` | `_collision_layer_correction`、`_image_collision_correction`、`_mtv_axis_dominant`、`_accept_axis_correction`、`_contact_bit(_from_normal)`、`_depenetrate`、`move_and_slide`、`_move_and_slide_step`、`_resolve_collision`、`is_touch`、`is_touch_edge`、`is_touch_group`、`is_out_side`、`sweep_test`、`is_on_wall/ceiling/ground/floor` |
+| `sprite_physics.py` | `_collision_layer_correction`、`_image_collision_correction`、`_mtv_axis_dominant`、`_accept_axis_correction`、`_contact_bit(_from_normal)`、`_depenetrate`、`move_and_slide`、`_move_and_slide_step`、`_resolve_collision`、`is_touch`、`is_touch_edge`、`is_touch_group`、`is_out_screen`、`sweep_test`、`is_on_wall/ceiling/ground/floor` |
 | `sprite_assets.py` | `_load_sprite_config`、`_load_config_in_dir`、`_normalize_bsf_manifest`、`_bsf_frame_rect`、`_marker_world_xy`、`_resolve_path`、`_setup_hitbox`、`_setup_hitbox_bsf`、`_collision_canvas_points/bbox`、`_get_hitbox_rect`、`_get_collision_shape`、`_update_transform` |
 | `sprite_animation.py` | `play`、`say`、`_update_animation_frame` |
 

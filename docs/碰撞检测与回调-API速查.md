@@ -8,7 +8,7 @@
 | `is_touch(目标)` | 是否碰到某个角色 / 鼠标 | `hero.is_touch(enemy)`、`hero.is_touch(mouse)` |
 | `is_touch_group("组名")` | 是否碰到组里任意成员，返回那个成员 | `hit = bullet.is_touch_group("enemies")` |
 | `is_touch_edge()` | 是否碰到地图边界 | `hero.is_touch_edge()` |
-| `is_out_side()` | 是否整个角色都在地图外 | `bullet.is_out_side()` |
+| `is_out_screen()` | 是否整个角色都飞出游戏画面 | `bullet.is_out_screen()` |
 | `on_touch_group("组名")` | 注册碰撞处理：碰到组员时由引擎自动执行 | `bullet.on_touch_group("enemies")` |
 
 ---
@@ -133,7 +133,7 @@ while True:
         bullet.on_touch_group("enemies")    # 碰到敌人：子弹和敌人自动消失
 
     # 子弹飞出画面后清理
-    if bullet and bullet.is_out_side():
+    if bullet and bullet.is_out_screen():
         bullet.delete()
         bullet = None
 ```

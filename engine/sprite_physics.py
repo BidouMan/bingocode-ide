@@ -5,7 +5,7 @@
 import math
 from models.shape_kernel import ConvexPolygon, intersects, overlap as shape_overlap, point_inside, sweep as shape_sweep
 from models.static_index import SENSOR_EPS
-from collision_geometry import _aabb_polygon_mtv, _image_collision_world_polygons, _playable_bounds, _shape_convex_parts, _sign
+from collision_geometry import _aabb_polygon_mtv, _image_collision_world_polygons, _playable_bounds, _screen_bounds, _shape_convex_parts, _sign
 from input_api import mouse
 from map_runtime import _find_tileset_for_gid
 from markers import _parse_direction_world, raycast as _raycast
@@ -582,7 +582,7 @@ class SpritePhysicsMixin:
 
         # 地图边界碰撞检测
         # 只有开启「边界碰撞」才把地图像素矩形当隐形墙钳制；
-        # 关闭时保持自由移动，edge_bounce/is_touch_edge/is_out_side/
+        # 关闭时保持自由移动，edge_bounce/is_touch_edge/
         # 子弹出界销毁等边界 API 才能正常工作
         if not st._CURRENT_MAP.get("boundaryCollision", st._CURRENT_MAP.get("gravity", False)):
             return
@@ -641,22 +641,25 @@ class SpritePhysicsMixin:
         return False
 
 
-    def is_out_side(self):
+    def is_out_screen(self):
         """
-        完全出界检测：只有当角色整体（所有像素）都离开地图边界时才返回 True
+        完全出屏检测：只有当角色整体（所有像素）都离开 640×480 的游戏画面时才返回 True
+
+        用的是「画面」而不是「地图」：地图比画面大时，角色飞出一屏就会被判出屏，
+        不会一直飞到地图另一头才销毁；开启相机跟随时，画面中心跟着角色移动。
         """
         # 获取当前精准包围盒 [left, top, right, bottom]
         rect = self._get_hitbox_rect()
         if not rect:
             return False
 
-        bounds = _playable_bounds()
+        bounds = _screen_bounds()
 
         # 逻辑判断：
-        # rect[2] < left: 右边缘比地图左边还要小（在左侧完全出界）
-        # rect[0] > right: 左边缘比地图右边还要大（在右侧完全出界）
-        # rect[3] < top: 下边缘比地图顶边还要小（在上方完全出界）
-        # rect[1] > bottom: 上边缘比地图底边还要大（在下方完全出界）
+        # rect[2] < left: 右边缘比画面左边还小（在画面左侧完全出屏）
+        # rect[0] > right: 左边缘比画面右边还大（在画面右侧完全出屏）
+        # rect[3] < top: 下边缘比画面顶边还小（在画面上方完全出屏）
+        # rect[1] > bottom: 上边缘比画面底边还大（在画面下方完全出屏）
         if (
             rect[2] < bounds["left"]
             or rect[0] > bounds["right"]

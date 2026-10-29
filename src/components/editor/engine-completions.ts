@@ -65,7 +65,7 @@ const spriteMethods: EngineCompletionItem[] = [
 
   // 感知 / 碰撞
   { label: 'is_touch_edge', kind: CompletionItemKind.Method, insertText: 'is_touch_edge', documentation: '精准边界检测：判定角色的实际视觉边缘是否接触或越过地图边界', detail: 'is_touch_edge() -> bool' },
-  { label: 'is_out_side', kind: CompletionItemKind.Method, insertText: 'is_out_side', documentation: '完全出界检测：只有当角色整体（所有像素）都离开地图边界时才返回 True', detail: 'is_out_side() -> bool' },
+  { label: 'is_out_screen', kind: CompletionItemKind.Method, insertText: 'is_out_screen', documentation: '完全出屏检测：只有当角色整体（所有像素）都离开 640×480 的游戏画面时才返回 True', detail: 'is_out_screen() -> bool' },
   { label: 'is_touch', kind: CompletionItemKind.Method, insertText: 'is_touch', documentation: '判断是否碰到另一个 Sprite、鼠标或带有指定标签的图块 / 形状\n\nis_touch(target)\ntarget 可以是 Sprite、mouse 或字符串（图块标签或形状层里填的标签）', detail: 'is_touch(target) -> bool' },
   { label: 'is_touch_group', kind: CompletionItemKind.Method, insertText: 'is_touch_group', documentation: '判断是否撞到了某个组里的任意成员\n如果撞到了，返回那个成员；没撞到返回 None', detail: 'is_touch_group(group_name) -> Sprite or None' },
   { label: 'distance_to', kind: CompletionItemKind.Method, insertText: 'distance_to', documentation: '计算当前角色到目标（Sprite 或 mouse）的像素距离\n按角色位置点测距，和 goto()/look_at() 用的是同一个点', detail: 'distance_to(target) -> float' },

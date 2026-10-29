@@ -186,14 +186,16 @@ if hero.is_touch_edge():
 
 只要有一边碰到就返回 True。
 
-### is_out_side — 是否完全在地图外
+### is_out_screen — 是否完全飞出画面
 
 ```python
-if hero.is_out_side():
-    print("角色完全在地图外面")
+if hero.is_out_screen():
+    print("角色完全飞出画面了")
 ```
 
-只有整个角色都在地图外才返回 True。
+只有整个角色都出了 640×480 的游戏画面才返回 True。
+
+判断的是「画面」而不是「地图」：地图很长时，角色飞出一屏就会被判为出屏，不会一直飞到地图另一头；开启相机跟随时，画面中心会跟着角色移动，此时以移动后的画面为准。
 
 ### is_touch_group — 组碰撞检测
 
@@ -279,8 +281,8 @@ while True:
         bullet.goto(hero.x, hero.y)
         bullet.set_speed(10)
     
-    # 子弹碰边消失
-    if bullet and bullet.is_out_side():
+    # 子弹飞出画面后删除
+    if bullet and bullet.is_out_screen():
         bullet.delete()
         bullet = None
     

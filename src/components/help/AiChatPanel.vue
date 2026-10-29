@@ -133,7 +133,7 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 ### 侦测
 - hero.is_touch(target) — 碰撞检测。target 可以是：另一个 Sprite、mouse 对象、字符串标签。返回 True/False
 - hero.is_touch_edge() — 是否碰到地图边界
-- hero.is_out_side() — 是否整个角色都在地图外
+- hero.is_out_screen() — 是否整个角色都飞出游戏画面（地图再大也只看一屏）
 - hero.distance_to(target) — 返回到另一个 Sprite 或 mouse 的像素距离
 - bullet.is_touch_group("组名") — 检测子弹是否碰到组内成员，碰到返回那个角色，没碰到返回 None
 - hero.is_on_ground() — 是否真正站在地面上（由物理落地接触决定，上升中/从下方穿过跳板时为 False）；跳跃前用它判断

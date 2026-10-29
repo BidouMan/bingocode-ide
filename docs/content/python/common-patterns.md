@@ -193,7 +193,7 @@ while True:
     
     # 移除飞出屏幕的子弹
     for bullet in _GROUPS.get("bullets", []):
-        if bullet.is_out_side():
+        if bullet.is_out_screen():
             bullet.delete()
 ```
 

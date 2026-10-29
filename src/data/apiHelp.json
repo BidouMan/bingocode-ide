@@ -259,9 +259,9 @@
           "badgeType": "object"
         },
         {
-          "label": "is_out_side 完全出去了吗",
-          "code": "hero.is_out_side()",
-          "desc": "检查角色是不是整个都跑到地图外面去了，只有一点点出去不算，要整个都出去才行。",
+          "label": "is_out_screen 飞出屏幕了吗",
+          "code": "hero.is_out_screen()",
+          "desc": "检查角色是不是整个都飞出游戏画面了，只有一点点出去不算，要全部出去才行。地图很大时也只看这一屏。",
           "badgeType": "object"
         },
         {
@@ -291,7 +291,7 @@
         {
           "label": "raycast 射线检测",
           "code": "hit = hero.raycast(\"right\", 200)\nif hit:\n    print(hit.distance, hit.tag)",
-          "desc": "从角色位置朝一个方向射出一条看不见的线，返回最近碰到的实心地形；没碰到返回 None。\n命中后可以读：hit.distance（多远）、hit.tag（标签）、hit.x / hit.y（命中点坐标）、hit.normal（表面朝向）。\n方向可以写 left / right / up / down 或角度数字（0右 90上）。\n从任意点（鼠标、标记）发射用全局 raycast(x, y, 方向, 距离)。",
+          "desc": "从角色位置发射一根射线,检测前方碰到的东西并收集它的信息。\n收集到的信息需要保存到变量里使用。\n方向可以写 left / right / up / down 或角度数字（0右 90上）。\n从任意点（鼠标、标记）发射用全局 raycast(x, y, 方向, 距离)。",
           "badgeType": "object"
         },
         {

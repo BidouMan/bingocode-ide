@@ -133,7 +133,7 @@ while True:
     
     # 子弹击中敌人
     for bullet in _GROUPS.get("bullets", []):
-        if bullet.is_out_side():
+        if bullet.is_out_screen():
             bullet.delete()
             continue
         hit = bullet.is_touch_group("enemies")

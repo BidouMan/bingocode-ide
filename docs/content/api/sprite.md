@@ -376,15 +376,17 @@ if hero.is_touch("地面"):      # 碰到带标签的地形
 
 ```python
 if hero.is_touch_edge():
-    print("碰到画面边缘了！")
+    print("碰到地图边缘了！")
 ```
 
-### is_out_side — 完全出界检测
+### is_out_screen — 完全出屏检测
 
 ```python
-if hero.is_out_side():
-    print("角色完全在画面外")
+if hero.is_out_screen():
+    print("角色完全飞出画面了")
 ```
+
+只有整个角色都离开 640×480 的游戏画面才返回 True；开启相机跟随时以相机移动后的画面为准。
 
 ### distance_to — 距离计算
 
