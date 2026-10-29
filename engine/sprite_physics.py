@@ -690,8 +690,6 @@ class SpritePhysicsMixin:
         # 🚀 3. 如果目标是字符串，进行标签碰撞检测
         if isinstance(target, str):
             tag = target
-            # 获取精灵的位置（世界坐标：内部逻辑不经过用户空间）
-            sprite_x, sprite_y = self._x, self._y
 
             # 获取地图数据
             if st._CURRENT_MAP:
@@ -704,35 +702,40 @@ class SpritePhysicsMixin:
                 min_tile_y = math.floor((r1[1] - SENSOR_EPS) // tile_size)
                 max_tile_y = math.floor((r1[3] + SENSOR_EPS) // tile_size)
 
-                # 遍历所有图层
-                for layer in st._CURRENT_MAP.get("layers", []):
-                    tiles = layer.get("tiles", {})
+                static_world = st._CURRENT_MAP.get("static_world")
+                if static_world is not None:
+                    # 图块标签：加载地图时烘焙成 tag → 格子表，
+                    # 查询量只与「带这个标签的图块数」有关，与整张地图大小无关
+                    for tile_x, tile_y in static_world.tile_tag_cells(tag):
+                        if (
+                            min_tile_x <= tile_x <= max_tile_x
+                            and min_tile_y <= tile_y <= max_tile_y
+                        ):
+                            return True
+                elif st._MAP_MODEL and tag:
+                    # 索引构建失败时的兼容路径：仍按图块全表扫描
+                    for layer in st._CURRENT_MAP.get("layers", []):
+                        tiles = layer.get("tiles", {})
 
-                    # 检查每个图块
-                    for (tile_x, tile_y), tile_id in tiles.items():
-                        if tile_id > 0:
+                        for (tile_x, tile_y), tile_id in tiles.items():
+                            if tile_id <= 0:
+                                continue
                             # 检查图块是否在精灵包围盒内
-                            if (
+                            if not (
                                 min_tile_x <= tile_x <= max_tile_x
                                 and min_tile_y <= tile_y <= max_tile_y
                             ):
-                                # 使用Tiled标准：通过firstgid范围查找瓦片集
-                                resource_index, tile_index = _find_tileset_for_gid(
-                                    tile_id, st._CURRENT_MAP["tile_sets"]
-                                )
-
-                                # 获取图块标签
-                                if st._MAP_MODEL:
-                                    tile_tag = st._MAP_MODEL.get_tile_tag(
-                                        resource_index, tile_index
-                                    )
-                                    if tile_tag == tag:
-                                        return True
+                                continue
+                            # 使用Tiled标准：通过firstgid范围查找瓦片集
+                            resource_index, tile_index = _find_tileset_for_gid(
+                                tile_id, st._CURRENT_MAP["tile_sets"]
+                            )
+                            if st._MAP_MODEL.get_tile_tag(resource_index, tile_index) == tag:
+                                return True
 
                 # 形状层：按真实多边形判定，不再用格子范围（tag 可挂在任意能力类型上）
                 # P3：优先走烘焙好的 tag 查找表，避免每次 is_touch 全表扫描
                 if tag:
-                    static_world = st._CURRENT_MAP.get("static_world")
                     if static_world is not None:
                         sprite_shape = self._get_collision_shape()
                         for entry in static_world.tag_entries(tag):

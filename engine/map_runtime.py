@@ -26,6 +26,8 @@ def _build_static_world(map_data, map_model):
     烘焙失败（极少见的坏数据）时返回 None，碰撞路径会回退到全表扫描，不影响运行。
     """
     entries = []
+    # 图块标签：tag → 格子集合（与碰撞无关，只给 is_touch 用）
+    tile_tags = {}
     tile_size = float(map_data.get("tile_size", 16) or 16)
 
     for layer_index, layer in enumerate(map_data.get("layers", [])):
@@ -95,6 +97,13 @@ def _build_static_world(map_data, map_model):
             resource_index, tile_index = _find_tileset_for_gid(
                 tile_id_int, map_data.get("tile_sets", [])
             )
+
+            # 图块标签与碰撞无关：没有碰撞的图块也能挂「水」这类标签，
+            # 所以要在碰撞判断之前收集（同一格子出现在多个图层时去重）
+            tile_tag = map_model.get_tile_tag(resource_index, tile_index)
+            if tile_tag:
+                tile_tags.setdefault(tile_tag, set()).add((tile_x, tile_y))
+
             if not map_model.get_tile_collision(resource_index, tile_index):
                 continue
 
@@ -135,7 +144,7 @@ def _build_static_world(map_data, map_model):
                 ref=(tile_x, tile_y),
             ))
 
-    return build_world(entries)
+    return build_world(entries, tile_tags)
 
 
 def load_map(map_name):

@@ -182,9 +182,10 @@ class StaticIndex:
 class StaticWorld:
     """地图静态几何的运行时容器：阻挡索引 + 感应索引 + tag 查找表。"""
 
-    __slots__ = ("solid", "sensors", "tags", "entries")
+    __slots__ = ("solid", "sensors", "tags", "tile_tags", "entries")
 
-    def __init__(self, entries: Sequence[StaticEntry]):
+    def __init__(self, entries: Sequence[StaticEntry],
+                 tile_tags: Optional[Dict[str, Iterable[Sequence[int]]]] = None):
         self.entries = tuple(entries)
         solid = [e for e in entries if e.is_solid]
         sensors = [e for e in entries if e.is_sensor]
@@ -197,6 +198,12 @@ class StaticWorld:
         self.tags: Dict[str, Tuple[StaticEntry, ...]] = {
             k: tuple(v) for k, v in tags.items()
         }
+        # 图块标签：tag → 格子坐标 (tile_x, tile_y)。
+        # 与碰撞无关（「水」这类标签的图块可能完全没有碰撞），只用于 is_touch 查询；
+        # 单独存一份，避免每次查询遍历整张地图的图块字典。
+        self.tile_tags: Dict[str, Tuple[Tuple[int, int], ...]] = {
+            k: tuple(v) for k, v in (tile_tags or {}).items() if v
+        }
 
     def __len__(self) -> int:
         return len(self.entries)
@@ -204,14 +211,20 @@ class StaticWorld:
     def tag_entries(self, tag: str) -> Tuple[StaticEntry, ...]:
         return self.tags.get(tag, ())
 
+    def tile_tag_cells(self, tag: str) -> Tuple[Tuple[int, int], ...]:
+        """带指定标签的图块格子坐标；没有则返回空元组。"""
+        return self.tile_tags.get(tag, ())
+
     def stats(self) -> Dict[str, int]:
         return {
             "entries": len(self.entries),
             "solid": len(self.solid),
             "sensors": len(self.sensors),
             "tags": len(self.tags),
+            "tile_tags": len(self.tile_tags),
         }
 
 
-def build_world(entries: Iterable[StaticEntry]) -> StaticWorld:
-    return StaticWorld(tuple(entries))
+def build_world(entries: Iterable[StaticEntry],
+                tile_tags: Optional[Dict[str, Iterable[Sequence[int]]]] = None) -> StaticWorld:
+    return StaticWorld(tuple(entries), tile_tags)
