@@ -79,7 +79,7 @@ function onFocusMarker(id: string) {
   mapCanvasRef.value?.centerMarker(id)
 }
 
-/** 形状管理里双击定位：把视口居中到该形状 */
+/** 形状列表里双击定位：把视口居中到该形状 */
 function onFocusShape(id: string) {
   mapCanvasRef.value?.centerShape(id)
 }

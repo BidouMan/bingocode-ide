@@ -36,9 +36,10 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
   let draftPreview: Point | null = null
   let draggingVertexIndex = -1
   let selectedVertexIndex = -1
-  // 整框拖动
+  // 整框拖动（多选时一起移动）：记录每个被拖动形状的起始顶点
   let draggingPolygon = false
   let dragStartPoints: number[][] = []
+  let dragStartPointsById = new Map<string, number[][]>()
   let dragStartWorld: Point | null = null
   let lastPolygonClickAt = 0
 
@@ -291,7 +292,7 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
 
     const lineWidth = Math.max(1, Math.round(1.5 * dpr)) / (dpr * scale)
     const editingLayer = activeLayer()
-    const activeId = mapEditorStore.activeShapeId
+    const activeIds = new Set(mapEditorStore.activeShapeIds)
     const editing = editingLayer != null
 
     for (const layer of mapStore.mapData.layers) {
@@ -299,16 +300,17 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
       const isActiveLayer = layer === editingLayer
       for (const poly of layer.shapes) {
         if (poly.points.length < 3) continue
-        const isActive = isActiveLayer && poly.id === activeId
+        // 多选：所有选中的形状都高亮并显示锚点
+        const isSelected = isActiveLayer && activeIds.has(poly.id)
         drawPolygon(
           ctx,
           pointsOf(poly),
           shapeColor(poly),
-          isActive ? (poly.disabled ? 0.16 : 0.26) : isActiveLayer ? 0.16 : 0.1,
+          isSelected ? (poly.disabled ? 0.16 : 0.26) : isActiveLayer ? 0.16 : 0.1,
           lineWidth,
-          // 选择/加锚点/删锚点都需要看到锚点，保证增删即时可见
-          isActive && editing && ['select', 'addPoint', 'deletePoint'].includes(mapEditorStore.shapeTool),
-          isActive,
+          // 选择/加锚点/删锚点都需要看到锚点；多选时每个选中形状都显示
+          isSelected && editing && ['select', 'addPoint', 'deletePoint'].includes(mapEditorStore.shapeTool),
+          isSelected,
           poly.tag || '',
         )
       }
@@ -369,6 +371,7 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
   function resetPolygonDrag() {
     draggingPolygon = false
     dragStartPoints = []
+    dragStartPointsById = new Map()
     dragStartWorld = null
   }
 
@@ -400,7 +403,7 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
     drawOverlay()
   }
 
-  function pointerDown(world: Point, button: number) {
+  function pointerDown(world: Point, button: number, additive = false) {
     const layer = activeLayer()
     if (!layer || layer.locked) return
     const tool = mapEditorStore.shapeTool
@@ -512,27 +515,50 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
     }
     if (button !== 0) return
 
-    const selected = activePolygon()
-
-    // 1) 锚点优先
-    const vertexIdx = findNearestVertex(selected, world, VERTEX_HIT_PX / getScale())
-    if (vertexIdx >= 0 && selected) {
-      draggingVertexIndex = vertexIdx
-      selectedVertexIndex = vertexIdx
-      drawOverlay()
-      return
+    // 1) 锚点优先：多选时点任意选中形状的锚点，都会把主选中切过去再拖动
+    const selLayer = activeLayer()
+    if (selLayer && mapEditorStore.activeShapeIds.length) {
+      for (const id of mapEditorStore.activeShapeIds) {
+        const shape = selLayer.shapes.find(s => s.id === id)
+        if (!shape) continue
+        const idx = findNearestVertex(shape, world, VERTEX_HIT_PX / getScale())
+        if (idx < 0) continue
+        if (id !== mapEditorStore.activeShapeId) mapEditorStore.setPrimaryShape(id)
+        draggingVertexIndex = idx
+        selectedVertexIndex = idx
+        drawOverlay()
+        return
+      }
     }
 
     // 2) 点到形状 → 选中并整框拖动；点到空白 → 按当前形状标签直接新建
     const hit = findPolygonAt(world)
     if (hit) {
-      if (!selected || hit.id !== selected.id) {
+      if (additive) {
+        // 按住 Shift / Cmd / Ctrl：加入或移出多选，不触发拖动
+        mapEditorStore.selectShape(hit.id, true)
+        selectedVertexIndex = -1
+        drawOverlay()
+        return
+      }
+      // 点到已选中的形状：整组一起拖动；点到没选中的形状：先单选再拖
+      const alreadySelected = mapEditorStore.activeShapeIds.includes(hit.id)
+      if (!alreadySelected) {
         mapEditorStore.setActiveShapeId(hit.id)
+        selectedVertexIndex = -1
+      } else {
+        // 多选内点另一个形状：只把主选中换过去（锚点跟随），集合保持不变
+        mapEditorStore.setPrimaryShape(hit.id)
         selectedVertexIndex = -1
       }
       draggingPolygon = true
       dragStartPoints = hit.points.map(p => [p[0], p[1]])
-      // 整框拖动按原始指针位移计算，再由矩形吸附对齐边缘/中心（避免起点吸附造成跳动）
+      dragStartPointsById = new Map()
+      const groupIds = alreadySelected ? mapEditorStore.activeShapeIds : [hit.id]
+      for (const id of groupIds) {
+        const target = mapStore.activeShapes.find(s => s.id === id)
+        if (target) dragStartPointsById.set(id, target.points.map(p => [p[0], p[1]]))
+      }
       dragStartWorld = { x: world.x, y: world.y }
     } else {
       selectedVertexIndex = -1
@@ -589,8 +615,10 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
         dx += offset.dx
         dy += offset.dy
       }
-      const next = dragStartPoints.map(p => [p[0] + dx, p[1] + dy])
-      mapStore.updateShapePoints(poly.id, next)
+      // 多选时整组移动：每个形状按同一偏移量更新（吸附基于点中的那个形状）
+      for (const [id, startPoints] of dragStartPointsById) {
+        mapStore.updateShapePoints(id, startPoints.map(p => [p[0] + dx, p[1] + dy]))
+      }
       drawOverlay()
       return
     }
@@ -670,8 +698,12 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
   }
 
   function hoverKindAt(world: Point): 'vertex' | 'inside' | 'none' {
-    const poly = activePolygon()
-    if (poly && findNearestVertex(poly, world, VERTEX_HIT_PX / getScale()) >= 0) return 'vertex'
+    // 多选时任意选中形状的锚点都算命中，光标提示与可拖动范围保持一致
+    const layer = activeLayer()
+    for (const id of mapEditorStore.activeShapeIds) {
+      const shape = layer?.shapes.find(s => s.id === id)
+      if (shape && findNearestVertex(shape, world, VERTEX_HIT_PX / getScale()) >= 0) return 'vertex'
+    }
     return findPolygonAt(world) ? 'inside' : 'none'
   }
 
@@ -693,6 +725,7 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
 
   watch(() => mapStore.shapeRevision, () => drawOverlay())
   watch(() => mapEditorStore.activeShapeId, () => drawOverlay())
+  watch(() => mapEditorStore.activeShapeIds.join('|'), () => drawOverlay())
   watch(() => mapEditorStore.shapeTool, () => drawOverlay())
   watch(() => mapStore.mapLoadCount, () => drawOverlay())
 

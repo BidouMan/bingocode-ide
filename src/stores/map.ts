@@ -58,8 +58,13 @@ export interface ShapeItem {
   kind: ShapeKind
   // 自由标签：代码里按 tag 查询（is_touch("tag")）
   tag: string
-  // 物理材质/行为：墙体 / 跳板 / 自定义（保留旧字段名，兼容存档与引擎）
-  collisionType: string
+  // 单向碰撞（参考 Godot 的 One Way Collision）：勾选后只在「朝实心面推进」时挡住
+  oneWay?: boolean
+  // 触发碰撞的运动方向（世界坐标，y 向下）：(0,1) 下落 = 从上方踩住（默认）
+  oneWayDirX?: number
+  oneWayDirY?: number
+  // 单向碰撞的厚度容差（像素）
+  oneWayMargin?: number
   // 禁用：勾选后该形状不参与物理与感应判定
   disabled?: boolean
 }
@@ -868,7 +873,8 @@ export const useMapStore = defineStore('map', () => {
   function addShape(
     shape: ShapeDrawType,
     points: number[][],
-    options: Partial<Pick<ShapeItem, 'kind' | 'tag' | 'collisionType'>> = {},
+    options: Partial<Pick<ShapeItem,
+      'kind' | 'tag' | 'oneWay' | 'oneWayDirX' | 'oneWayDirY' | 'oneWayMargin'>> = {},
   ): string | null {
     const layer = activeShapeLayer.value
     if (!layer) return null
@@ -877,8 +883,13 @@ export const useMapStore = defineStore('map', () => {
       shape,
       points: points.map(p => [p[0], p[1]]),
       kind: options.kind ?? 'solid',
-      tag: options.tag ?? '',
-      collisionType: options.collisionType ?? '墙体',
+      // 标签默认「墙体」：新建形状开箱即用，代码里直接 is_touch("墙体") 就能查
+      tag: options.tag ?? '墙体',
+      // 默认普通碰撞（不勾单向）；勾选后默认方向为「下落时挡住」，厚度 0
+      oneWay: options.oneWay ?? false,
+      oneWayDirX: options.oneWayDirX ?? 0,
+      oneWayDirY: options.oneWayDirY ?? 1,
+      oneWayMargin: options.oneWayMargin ?? 0,
     }
     layer.shapes.push(item)
     mapEditor.setActiveShapeId(item.id)
@@ -895,6 +906,8 @@ export const useMapStore = defineStore('map', () => {
     if (mapEditor.activeShapeId === id) {
       const next = layer.shapes[Math.min(idx, layer.shapes.length - 1)] ?? null
       mapEditor.setActiveShapeId(next?.id ?? null)
+    } else if (mapEditor.activeShapeIds.includes(id)) {
+      mapEditor.setActiveShapeIds(mapEditor.activeShapeIds.filter(x => x !== id))
     }
     shapeRevision.value++
   }
@@ -913,50 +926,11 @@ export const useMapStore = defineStore('map', () => {
     shapeRevision.value++
   }
 
-  /** 设置能力类型：阻挡 / 感应 / 两者 */
-  function setShapeKind(id: string, kind: ShapeKind) {
-    const layer = activeShapeLayer.value
-    if (!layer) return
-    const item = layer.shapes.find(p => p.id === id)
-    if (!item) return
-    item.kind = kind
-    shapeRevision.value++
-  }
-
-  /** 设置自由标签（代码里按 tag 查询） */
-  function setShapeTag(id: string, tag: string) {
-    const layer = activeShapeLayer.value
-    if (!layer) return
-    const item = layer.shapes.find(p => p.id === id)
-    if (!item) return
-    item.tag = tag
-    shapeRevision.value++
-  }
-
-  /** 设置物理材质/行为：墙体 / 跳板 / 自定义 */
-  function setShapeMaterial(id: string, collisionType: string) {
-    const layer = activeShapeLayer.value
-    if (!layer) return
-    const item = layer.shapes.find(p => p.id === id)
-    if (!item) return
-    item.collisionType = collisionType
-    shapeRevision.value++
-  }
-
-  /** 禁用/启用单个形状（禁用后不参与物理与感应判定） */
-  function setShapeDisabled(id: string, disabled: boolean) {
-    const layer = activeShapeLayer.value
-    if (!layer) return
-    const item = layer.shapes.find(p => p.id === id)
-    if (!item) return
-    item.disabled = disabled
-    shapeRevision.value++
-  }
-
-  /** 批量修改形状属性：只写入传入的字段，其余保持原值 */
+  /** 批量修改形状属性：只写入传入的字段，其余保持原值（单选也是走这里，ids 传一个即可） */
   function updateShapes(
     ids: string[],
-    patch: Partial<Pick<ShapeItem, 'kind' | 'tag' | 'collisionType' | 'disabled'>>,
+    patch: Partial<Pick<ShapeItem,
+      'kind' | 'tag' | 'oneWay' | 'oneWayDirX' | 'oneWayDirY' | 'oneWayMargin' | 'disabled'>>,
   ) {
     const layer = activeShapeLayer.value
     if (!layer || ids.length === 0) return
@@ -966,7 +940,10 @@ export const useMapStore = defineStore('map', () => {
       if (!wanted.has(item.id)) continue
       if (patch.kind !== undefined) item.kind = patch.kind
       if (patch.tag !== undefined) item.tag = patch.tag
-      if (patch.collisionType !== undefined) item.collisionType = patch.collisionType
+      if (patch.oneWay !== undefined) item.oneWay = patch.oneWay
+      if (patch.oneWayDirX !== undefined) item.oneWayDirX = patch.oneWayDirX
+      if (patch.oneWayDirY !== undefined) item.oneWayDirY = patch.oneWayDirY
+      if (patch.oneWayMargin !== undefined) item.oneWayMargin = patch.oneWayMargin
       if (patch.disabled !== undefined) item.disabled = patch.disabled
       changed = true
     }
@@ -981,8 +958,12 @@ export const useMapStore = defineStore('map', () => {
     const before = layer.shapes.length
     layer.shapes = layer.shapes.filter(item => !wanted.has(item.id))
     if (layer.shapes.length === before) return
-    if (mapEditor.activeShapeId && wanted.has(mapEditor.activeShapeId)) {
-      mapEditor.setActiveShapeId(null)
+    // 从多选里剔除已删除的形状；主选中被删掉时清空
+    const alive = new Set(layer.shapes.map(item => item.id))
+    if (mapEditor.activeShapeId && !alive.has(mapEditor.activeShapeId)) {
+      mapEditor.setActiveShapeIds(mapEditor.activeShapeIds.filter(x => alive.has(x)))
+    } else if (mapEditor.activeShapeIds.some(x => !alive.has(x))) {
+      mapEditor.setActiveShapeIds(mapEditor.activeShapeIds.filter(x => alive.has(x)))
     }
     shapeRevision.value++
   }
@@ -1096,10 +1077,6 @@ export const useMapStore = defineStore('map', () => {
     addShape,
     removeShape,
     updateShapePoints,
-    setShapeKind,
-    setShapeTag,
-    setShapeMaterial,
-    setShapeDisabled,
     updateShapes,
     removeShapes,
     tileRevision,

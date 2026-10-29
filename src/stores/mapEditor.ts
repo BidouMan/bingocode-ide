@@ -21,8 +21,10 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
   const shapeTool = ref<ShapeTool>('select')
   // 当前选中的形状创建类型（标签状态）：切换选择/增删锚点工具时保持常亮
   const shapeDrawTool = ref<'rect' | 'circle' | 'capsule' | 'polygon'>('rect')
-  // 当前正在编辑的形状 id（属于当前形状层）
+  // 当前正在编辑的形状 id（属于当前形状层）；多选时它是「主选中」的那个
   const activeShapeId = ref<string | null>(null)
+  // 当前选中的形状集合（Shift / Cmd / Ctrl 多选）；始终包含 activeShapeId
+  const activeShapeIds = ref<string[]>([])
   // 像素浮动选区是否存在 / 选区剪贴板是否有内容（工具条按钮可用性）
   const hasPixelSelection = ref(false)
   const hasPaintClipboard = ref(false)
@@ -75,6 +77,40 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
 
   function setActiveShapeId(id: string | null) {
     activeShapeId.value = id
+    activeShapeIds.value = id ? [id] : []
+  }
+
+  /** 点选形状：additive = 按住 Shift / Cmd / Ctrl，加入或移出当前多选 */
+  function selectShape(id: string, additive = false) {
+    if (!additive) {
+      setActiveShapeId(id)
+      return
+    }
+    const current = activeShapeIds.value
+    if (current.includes(id)) {
+      const next = current.filter(x => x !== id)
+      activeShapeIds.value = next
+      activeShapeId.value = next.length ? next[next.length - 1] : null
+    } else {
+      activeShapeIds.value = [...current, id]
+      activeShapeId.value = id
+    }
+  }
+
+  /** 直接设置多选集合（全选 / 清空用）；主选中取最后一个 */
+  function setActiveShapeIds(ids: string[]) {
+    const next = [...new Set(ids)]
+    activeShapeIds.value = next
+    activeShapeId.value = next.length ? next[next.length - 1] : null
+  }
+
+  /** 只切换「主选中」而不改变多选集合（画布里点中已选中的另一个形状时用，锚点会跟过去） */
+  function setPrimaryShape(id: string) {
+    if (!activeShapeIds.value.includes(id)) {
+      setActiveShapeId(id)
+      return
+    }
+    activeShapeId.value = id
   }
 
   function setImageTool(tool: 'select' | 'reshape' | 'brush' | 'eraser' | 'fill' | 'text' | 'line' | 'rect' | 'ellipse' | 'pen' | 'eyedropper') {
@@ -115,6 +151,10 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
     shapeTool,
     shapeDrawTool,
     activeShapeId,
+    activeShapeIds,
+    setActiveShapeIds,
+    setPrimaryShape,
+    selectShape,
     hasPixelSelection,
     hasPaintClipboard,
     markerPlacing,

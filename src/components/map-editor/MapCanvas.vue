@@ -3085,7 +3085,7 @@ function onPointerDown(e: PointerEvent) {
     if (worldPos) {
       // 捕获指针：拖出画布/移出地图范围后仍能继续拖动，不会卡住
       capturePointer(app?.canvas as HTMLCanvasElement | undefined, e.pointerId)
-      collision.pointerDown(worldPos, e.button)
+      collision.pointerDown(worldPos, e.button, e.shiftKey || e.metaKey || e.ctrlKey)
       updateCollisionCursor(worldPos)
     }
     return
@@ -4163,7 +4163,7 @@ function centerMarker(id: string) {
   app.render()
 }
 
-/** 形状管理里双击定位：把视口居中到该形状的包围盒中心 */
+/** 形状列表里双击定位：把视口居中到该形状的包围盒中心 */
 function centerShape(id: string) {
   if (!app) return
   const layer = mapStore.activeShapeLayer

@@ -69,7 +69,15 @@ export interface ShapeSaveData {
   kind?: 'solid' | 'sensor' | 'both'
   /** 自由标签：代码里按 tag 查询 */
   tag?: string
-  /** 物理材质/行为：墙体 / 跳板 / 自定义（旧字段名，保留） */
+  /** 单向碰撞（参考 Godot One Way Collision） */
+  oneWay?: boolean
+  /** 触发碰撞的运动方向（世界坐标，y 向下）：(0,1) 下落 = 从上方踩住 */
+  oneWayDirX?: number
+  oneWayDirY?: number
+  /** 单向碰撞厚度容差（像素） */
+  oneWayMargin?: number
+  /** 碰撞类型：由 oneWay 推导（引擎用它填 raycast 等 API 的 collision_type）
+      旧存档的「跳板」表示单向碰撞，读取时会迁移成 oneWay */
   collisionType?: string
   disabled?: boolean
 }
@@ -282,7 +290,12 @@ export function serializeMap(mapData: any): MapSaveData {
         points: shape.points,
         kind: shape.kind || 'solid',
         tag: shape.tag || '',
-        collisionType: shape.collisionType || '墙体',
+        oneWay: shape.oneWay === true,
+        oneWayDirX: shape.oneWayDirX ?? 0,
+        oneWayDirY: shape.oneWayDirY ?? 1,
+        oneWayMargin: shape.oneWayMargin ?? 0,
+        // 单向形状在引擎/代码里仍报告为「跳板」，普通形状为「墙体」
+        collisionType: shape.oneWay === true ? '跳板' : '墙体',
         disabled: shape.disabled === true,
       }))
       return base
@@ -493,7 +506,15 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
             points: p.points.map((pt: any[]) => [Number(pt[0]) || 0, Number(pt[1]) || 0]),
             kind: p.kind === 'sensor' || p.kind === 'both' ? p.kind : 'solid',
             tag: typeof p.tag === 'string' ? p.tag : '',
-            collisionType: p.collisionType || '墙体',
+            // 单向碰撞：新存档读 oneWay 字段；旧存档的「跳板」类型迁移成方向向下
+            oneWay: p.oneWay === true || p.collisionType === '跳板',
+            oneWayDirX: p.oneWayDirX === undefined || p.oneWayDirX === null
+              ? 0
+              : Number(p.oneWayDirX) || 0,
+            oneWayDirY: p.oneWayDirY === undefined || p.oneWayDirY === null
+              ? 1
+              : Number(p.oneWayDirY) || 0,
+            oneWayMargin: Number(p.oneWayMargin) || 0,
             disabled: p.disabled === true,
           })),
       })
@@ -541,7 +562,10 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
           points: world.map((w: any) => [w.x, w.y]),
           kind: 'solid',
           tag: '',
-          collisionType: img.collisionType && img.collisionType !== '图像' ? img.collisionType : '墙体',
+          oneWay: img.collisionType === '跳板',
+          oneWayDirX: 0,
+          oneWayDirY: 1,
+          oneWayMargin: 0,
         })
       }
     }
