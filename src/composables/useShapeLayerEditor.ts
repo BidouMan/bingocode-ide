@@ -4,6 +4,7 @@ import { useMapEditorStore } from '../stores/mapEditor'
 import { pointInPolygon, isSelfIntersectingPolygon } from '../utils/mapImageGeometry'
 import { collectSnapLines, snapAxisValue, snapRectOffset, snapThreshold } from '../utils/smartSnap'
 import { shapeColorHex } from '../utils/shapeStyle'
+import { SELECTION_COLOR_HEX, SELECTION_FILL_ALPHA } from '../utils/selectionStyle'
 
 interface ShapeLayerEditorOptions {
   getApp: () => any
@@ -328,7 +329,8 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
       const preview = (draftShape ?? 'rect') === 'rect'
         ? [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }]
         : buildShapePoints(draftShape ?? 'rect', x0, y0, x1, y1).map(p => ({ x: p[0], y: p[1] }))
-      drawPolygon(ctx, preview, 0x5BFB84, 0.15, lineWidth, false)
+      // 框选/绘制预览：与绘制页选择工具一致的淡紫色
+      drawPolygon(ctx, preview, SELECTION_COLOR_HEX, SELECTION_FILL_ALPHA, lineWidth, false)
     }
 
     // 钢笔草稿
@@ -337,7 +339,7 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
       ctx.moveTo(draftPolygon[0].x, draftPolygon[0].y)
       for (let i = 1; i < draftPolygon.length; i++) ctx.lineTo(draftPolygon[i].x, draftPolygon[i].y)
       if (draftPreview) ctx.lineTo(draftPreview.x, draftPreview.y)
-      ctx.strokeStyle = colorCss(0x5BFB84, 0.9)
+      ctx.strokeStyle = colorCss(SELECTION_COLOR_HEX, 0.9)
       ctx.lineWidth = lineWidth
       ctx.stroke()
 

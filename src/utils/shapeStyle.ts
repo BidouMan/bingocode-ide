@@ -16,7 +16,8 @@ export const SHAPE_KIND_LABELS: Record<ShapeKind, string> = {
 /** 作用类型颜色（0xRRGGBB，画布叠加层用） */
 export const SHAPE_KIND_COLORS_HEX: Record<ShapeKind, number> = {
   solid: 0xff5050,
-  sensor: 0xe5c07b,
+  // 感应形状使用主题的强调绿（#5BFB84）
+  sensor: 0x5bfb84,
   both: 0x528bff,
 }
 
