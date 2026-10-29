@@ -7,7 +7,7 @@
       <a class="home-btn primary" href="getting-started/first-game.md">从第一个游戏开始</a>
       <a class="home-btn ghost" href="api/sprite.md">浏览 API 参考</a>
     </div>
-    <p class="home-meta">v{{VERSION}} · 25 篇文档 · 离线可读，可部署到局域网</p>
+    <p class="home-meta">v{{VERSION}} · 26 篇文档 · 离线可读，可部署到局域网</p>
   </div>
 
   <figure class="home-app">
@@ -89,4 +89,5 @@
   </ol>
 
   <p class="home-note">这份手册是纯静态页面，可以直接用浏览器打开，也可以放到局域网或服务器上给多人访问。它独立于客户端发布，不会被打包进安装程序。</p>
+  <p class="home-note">想看看每个版本改了什么、修了哪些问题，打开 <a href="changelog.md">更新日志</a>。</p>
 </section>

@@ -24,6 +24,9 @@ const DIST_DIR = join(DOCS_ROOT, 'dist')
 const STATIC_DIR = join(DOCS_ROOT, 'static')
 
 const VERSION = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf-8')).version
+// 更新日志直接生成自仓库根的 CHANGELOG_USER.md，和客户端更新弹窗展示的是同一份内容
+const CHANGELOG_PAGE = 'changelog.md'
+const CHANGELOG_SRC = join(REPO_ROOT, 'CHANGELOG_USER.md')
 // 每次构建生成新戳，给首页截图加查询参数，避免浏览器缓存旧图
 const BUILD_STAMP = Date.now().toString(36)
 
@@ -118,6 +121,7 @@ const NAV_STRUCTURE: NavItem[] = [
     ],
   },
   { title: '常见问题', path: 'faq.md' },
+  { title: '更新日志', path: CHANGELOG_PAGE },
 ]
 
 // ─── 侧边栏 HTML 生成 ───
@@ -273,10 +277,21 @@ function processLinks(html: string): string {
   })
 }
 
+// ─── 读取文档内容 ───
+// 绝大多数页面来自 content/ 目录；更新日志是虚拟页面，内容取自仓库根的 CHANGELOG_USER.md
+
+function docSourcePath(mdPath: string): string {
+  return mdPath === CHANGELOG_PAGE ? CHANGELOG_SRC : join(CONTENT_DIR, mdPath)
+}
+
+function readDoc(mdPath: string): string {
+  return readFileSync(docSourcePath(mdPath), 'utf-8')
+}
+
 // ─── 构建单个页面 ───
 
 function buildPage(mdPath: string, template: string, searchIndex: string): void {
-  const mdFullPath = join(CONTENT_DIR, mdPath)
+  const mdFullPath = docSourcePath(mdPath)
   if (!existsSync(mdFullPath)) {
     console.warn(`⚠️  跳过不存在的文件: ${mdPath}`)
     return
@@ -403,8 +418,7 @@ function collectMarkdownFiles(dir: string, prefix: string = ''): string[] {
 
 function buildSearchIndex(mdFiles: string[]): string {
   const index = mdFiles.map((mdPath) => {
-    const mdFullPath = join(CONTENT_DIR, mdPath)
-    const content = readFileSync(mdFullPath, 'utf-8')
+    const content = readDoc(mdPath)
 
     const titleMatch =
       content.match(/^#\s+(.+)/m) || content.match(/<h1[^>]*>([\s\S]*?)<\/h1>/)
@@ -444,6 +458,8 @@ function main() {
   console.log('📄 模板已加载')
 
   const mdFiles = collectMarkdownFiles(CONTENT_DIR)
+  // 更新日志挂在 content/ 之外（单一来源在仓库根），单独补进构建列表
+  if (existsSync(CHANGELOG_SRC)) mdFiles.push(CHANGELOG_PAGE)
   console.log(`📚 找到 ${mdFiles.length} 个文档文件`)
 
   const searchIndex = buildSearchIndex(mdFiles)

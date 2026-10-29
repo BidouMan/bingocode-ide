@@ -106,5 +106,7 @@ server.on('error', (error: NodeJS.ErrnoException) => {
 server.listen(PORT, () => {
   const reload = scheduleBuild()
   for (const dir of WATCH_DIRS) watch(dir, { recursive: true }, reload)
+  // 更新日志的单一来源在仓库根，改动后也要触发重建
+  watch(join(REPO_ROOT, 'CHANGELOG_USER.md'), reload)
   console.log(`[docs] 已启动 http://localhost:${PORT} （修改内容或替换截图后自动刷新）`)
 })
