@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, nextTick } from 'vue'
+import { ref, reactive, watch, computed, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import MapToolbar from './MapToolbar.vue'
 import MapCanvas from './MapCanvas.vue'
@@ -57,19 +57,38 @@ const imageSizeText = computed(() => {
   return `图片尺寸:${Math.round(img.width || 0)}×${Math.round(img.height || 0)}`
 })
 
-// ====== 场景标记：选中后由右侧属性面板展示标记检视器 ======
-/** 右栏当前页：绘制（颜色）/ 属性。标签常驻，切换只影响内容 */
-const rightTab = ref<'paint' | 'props'>('props')
+// ====== 右栏分页：属性 / 绘制 / 图块 / 形状（第二页由图层类型决定） ======
+type RightTab = 'props' | 'paint' | 'tile' | 'shape'
+
+/**
+ * 每种图层类型各自记住上次停留的分页。
+ * 切图层、切地图都不重置——面板不自己动，用户停在哪页就一直在哪页（Photoshop / Godot 的停放面板习惯）。
+ */
+const rightTabByMode = reactive<Record<'image' | 'tile' | 'shape', RightTab>>({
+  image: 'props',
+  tile: 'props',
+  shape: 'props',
+})
+
+/** 当前图层类型对应的分页（只读；切换统一走 setRightTab） */
+const rightTab = computed(() => rightTabByMode[mapStore.activeMode])
+
+/** 切分页：只改当前图层类型记住的那一格，不影响其它类型的记忆 */
+function setRightTab(tab: RightTab) {
+  rightTabByMode[mapStore.activeMode] = tab
+}
 
 /** 右侧底部信息栏：描述当前最下方那块面板在做什么，避免和顶部 tab 名字重复 */
 const rightInfoText = computed(() => {
-  if (mapStore.activeMode === 'tile') return '图块碰撞编辑'
-  return rightTab.value === 'paint' ? '绘制设置' : '地图设置'
+  if (rightTab.value === 'paint') return '绘制设置'
+  if (rightTab.value === 'tile') return '图块设置'
+  if (rightTab.value === 'shape') return '碰撞设置'
+  return '地图设置'
 })
 
 /** 双击图钉：切回属性页、选中并把焦点交给属性面板的名称输入框 */
 function onMarkerActivate(id: string) {
-  rightTab.value = 'props'
+  setRightTab('props')
   mapEditorStore.setSelectedMarkerId(id)
   nextTick(() => propertyPanelRef.value?.focusMarkerName())
 }
@@ -89,9 +108,9 @@ const layerPanelRef = ref<InstanceType<typeof LayerPanel>>()
 const tileResourceBarRef = ref<{ uploadLocalTiles: () => void } | null>(null)
 const propertyPanelRef = ref<InstanceType<typeof PropertyPanel>>()
 
-// 切换图层 / 地图后把属性面板滚回顶部：否则会停留在上一层的滚动位置，看起来像空白
+// 切换图层 / 地图 / 右栏分页后把属性面板滚回顶部：否则会停留在上一页的滚动位置，看起来像空白
 watch(
-  () => [mapStore.activeLayerIndex, mapStore.activeMode, mapStore.mapLoadCount],
+  () => [mapStore.activeLayerIndex, mapStore.activeMode, mapStore.mapLoadCount, rightTab.value],
   () => {
     nextTick(() => {
       const el = propertyPanelRef.value?.$el as HTMLElement | undefined
@@ -109,19 +128,13 @@ function onImageTransformChanged() {
 
 // ====== 图片模式：直接在画布上绘制，颜色面板复用绘制页 ======
 const mapPaint = useMapPaint()
-// 图片图层且选用了绘制工具时，右栏默认停在颜色页；其它状态默认停在属性页
-const isPainting = computed(() =>
-  mapStore.activeMode === 'image' &&
-  (mapEditorStore.paintMode === 'vector' || mapEditorStore.imageTool !== 'select')
-)
 
-// 随图层类型切到习惯的默认页：图片图层看颜色，图块等其它状态看属性
+// 形状层：选中 / 新建形状后自动切到「形状」页（选择集合每次变更都会触发，重复点同一个形状也算）
 watch(
-  isPainting,
-  (painting) => {
-    rightTab.value = painting ? 'paint' : 'props'
+  () => mapEditorStore.activeShapeIds,
+  (ids) => {
+    if (ids.length && mapStore.activeMode === 'shape') setRightTab('shape')
   },
-  { immediate: true },
 )
 
 // 浮动画布工具条：撤销/重做按当前绘制模式取可用性
@@ -163,6 +176,8 @@ async function startImagePaint(tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rec
   try {
     await mapPaint.saveMapImage(blob, w, h, mapStore.activeLayer?.id ?? -1, mapEditorStore.paintMode)
     mapEditorStore.setImageTool(tool)
+    // 新建绘制图层后直接停在「绘制」页，方便马上选颜色 / 调粗细描边
+    if (mapStore.activeMode === 'image') setRightTab('paint')
     // 矢量专属工具需要矢量模式（新建图层后进入）；钢笔两种模式都支持
     if (tool === 'text' || tool === 'reshape' || tool === 'eyedropper') {
       mapEditorStore.setPaintMode('vector')
@@ -414,6 +429,11 @@ function onSwitchPaintMode(mode: 'bitmap' | 'vector') {
   mapEditorStore.setPaintMode(mode)
 }
 
+/** 图片工具栏按下工具：单向切换——只有绘制类工具切到「绘制」页，选择工具不强制回属性 */
+function onImageToolPicked(tool: string) {
+  if (tool !== 'select' && mapStore.activeMode === 'image') setRightTab('paint')
+}
+
 /** 图块图层缩略图：只按该图层自身的瓦片数据合成 */
 function getLayerThumbnail(layerId: number): string | null | Promise<string | null> {
   return mapCanvasRef.value?.getLayerThumbnailDataUrl(layerId) ?? null
@@ -456,6 +476,7 @@ defineExpose({ switchToMap, placeImageResource })
             @layer-down="mapCanvasRef?.layerDownActive()"
             @switch-paint-mode="onSwitchPaintMode"
             @create-paint-layer="startImagePaint"
+            @tool-picked="onImageToolPicked"
             @resize-shape="(w, h) => mapCanvasRef?.resizeShapeSize(w, h)"
           />
           <div class="canvas-stage">
@@ -517,26 +538,46 @@ defineExpose({ switchToMap, placeImageResource })
         </div>
       </div>
       <div class="map-editor-right">
-        <!-- 右侧面板常驻「绘制 / 属性」切换：任何工具状态下都显示，结构保持一致 -->
+        <!-- 右侧面板分页：属性常驻；第二页跟着图层类型走（图片=绘制，图块=图块，碰撞层=碰撞） -->
         <div class="right-tabs">
-          <button class="right-tab" :class="{ 'right-tab-active': rightTab === 'paint' }" @click="rightTab = 'paint'">绘制</button>
-          <button class="right-tab" :class="{ 'right-tab-active': rightTab === 'props' }" @click="rightTab = 'props'">属性</button>
+          <button class="right-tab" :class="{ 'right-tab-active': rightTab === 'props' }" @click="setRightTab('props')">属性</button>
+          <button
+            v-if="mapStore.activeMode === 'shape'"
+            class="right-tab"
+            :class="{ 'right-tab-active': rightTab === 'shape' }"
+            @click="setRightTab('shape')"
+          >碰撞</button>
+          <button
+            v-else-if="mapStore.activeMode === 'tile'"
+            class="right-tab"
+            :class="{ 'right-tab-active': rightTab === 'tile' }"
+            @click="setRightTab('tile')"
+          >图块</button>
+          <button
+            v-else
+            class="right-tab"
+            :class="{ 'right-tab-active': rightTab === 'paint' }"
+            @click="setRightTab('paint')"
+          >绘制</button>
         </div>
         <div class="right-body">
           <PaintColorPanel v-show="rightTab === 'paint'" />
           <PropertyPanel
-            v-show="rightTab === 'props'"
+            v-show="rightTab !== 'paint'"
             ref="propertyPanelRef"
             class="right-props"
             :disabled="!hasMaps"
+            :shape-page="rightTab === 'shape'"
+            :tile-page="rightTab === 'tile'"
             @transform-changed="onImageTransformChanged"
             @focus-marker="onFocusMarker"
             @focus-shape="onFocusShape"
           />
         </div>
-        <!-- 图块模式的碰撞编辑器上移，底部保留与画布/图层一致的信息栏 -->
+        <!-- 图块碰撞编辑器只在「图块」分页显示；v-show 保活，切分页不重新加载素材 -->
         <template v-if="mapStore.activeMode === 'tile'">
           <TileCollisionPanel
+            v-show="rightTab === 'tile'"
             :key="`${mapStore.currentMapPath}-${mapStore.activeLayer?.id ?? -1}`"
             class="right-collision"
           />

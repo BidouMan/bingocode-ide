@@ -493,7 +493,7 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
         : (Array.isArray(layer.polygons) ? layer.polygons : [])
       layers.push({
         id: layer.id,
-        name: layer.name || '形状',
+        name: layer.name || '碰撞',
         type: 'shape',
         visible: layer.visible,
         locked: layer.locked,
@@ -577,7 +577,7 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
   if (migratedPolygons.length > 0) {
     layers.push({
       id: layers.length,
-      name: '形状',
+      name: '碰撞',
       type: 'shape',
       visible: true,
       locked: false,

@@ -14,6 +14,10 @@ import iconDelete from '../../assets/icons/选中删除.svg'
 
 defineProps<{
   disabled?: boolean
+  /** 顶部已切到「形状」分页时为 true：显示形状检视器 + 形状列表，否则显示地图 / 图层属性 */
+  shapePage?: boolean
+  /** 顶部已切到「图块」分页时为 true：只显示图块设置（碰撞编辑器在右栏底部） */
+  tilePage?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -235,7 +239,7 @@ onBeforeUnmount(() => {
 })
 
 /** 地图 / 图层检视器分区折叠状态（与标记检视器共用同一套外观） */
-const fold = reactive({ map: true, scene: true, layer: true, transform: true })
+const fold = reactive({ map: true, scene: true, layer: true, transform: true, tile: true })
 
 /** 标记类型：内置常用的几种，最后一项可输入自定义类型 */
 const MARKER_TYPE_PRESETS = [
@@ -389,26 +393,9 @@ const isTileMode = computed(() => mapStore.activeMode === 'tile')
 const isShapeMode = computed(() => mapStore.activeMode === 'shape')
 const isImageMode = computed(() => mapStore.activeMode === 'image')
 
-// ====== 形状检视器：选中判定形状时替代地图 / 图层属性 ======
+// ====== 形状检视器：顶部切到「形状」分页时，和形状列表一起展示 ======
 const selectedShapeItem = computed(() => mapStore.activeShape)
 const shapeFold = reactive({ basic: true, manager: true })
-
-// ====== 形状图层分页：属性 / 形状 ======
-/** 选中形状图层后右侧面板出现分页：默认「形状」，可点「属性」切回地图 / 图层设置 */
-const shapePanelTab = ref<'props' | 'shapes'>('shapes')
-
-// 切换图层 / 重新加载地图后回到默认的「形状」页
-watch(
-  () => [mapStore.activeLayerIndex, mapStore.mapLoadCount],
-  () => { if (isShapeMode.value) shapePanelTab.value = 'shapes' },
-  { immediate: true },
-)
-
-// 在画布上选中形状时自动切到「形状」页：形状属性只在这一页显示
-watch(
-  () => mapEditorStore.activeShapeId,
-  (id) => { if (id && isShapeMode.value) shapePanelTab.value = 'shapes' },
-)
 const shapeKindOptions = [
   { label: '碰撞', value: 'solid' },
   { label: '感应', value: 'sensor' },
@@ -1143,25 +1130,9 @@ function onCollisionEnabledChange(enabled: boolean) {
       </div>
 
       <template v-else>
-      <!-- 形状图层分页：选中形状图层后出现，默认「形状」页 -->
-      <div v-if="isShapeMode" class="shape-tabs">
-        <button
-          class="shape-tab"
-          :class="{ active: shapePanelTab === 'props' }"
-          :disabled="disabled"
-          @click="shapePanelTab = 'props'"
-        >属性</button>
-        <button
-          class="shape-tab"
-          :class="{ active: shapePanelTab === 'shapes' }"
-          :disabled="disabled"
-          @click="shapePanelTab = 'shapes'"
-        >形状</button>
-      </div>
-
       <!-- 形状页：形状检视器 + 形状列表 -->
-      <template v-if="isShapeMode && shapePanelTab === 'shapes'">
-      <!-- 形状检视器：选中判定形状时替代地图 / 图层属性 -->
+      <template v-if="isShapeMode && shapePage">
+      <!-- 形状检视器：选中形状时显示在「形状」页顶部 -->
       <div v-if="selectedShapeItem" class="att-group marker-inspector">
         <!-- 基本：能力类型 / 标签 -->
         <div class="mi-section" :class="{ open: shapeFold.basic }">
@@ -1248,8 +1219,8 @@ function onCollisionEnabledChange(enabled: boolean) {
       </div>
       </template>
 
-      <!-- 属性页 / 其它模式：地图与图层属性 -->
-      <template v-if="!isShapeMode || shapePanelTab === 'props'">
+      <!-- 属性页 / 其它模式：地图与图层属性（图块页、形状页各自独立） -->
+      <template v-if="(!isShapeMode || !shapePage) && (!isTileMode || !tilePage)">
       <div class="att-group">
         <!-- 地图：名称 / 尺寸 -->
         <div class="mi-section" :class="{ open: fold.map }">
@@ -1614,41 +1585,6 @@ function onCollisionEnabledChange(enabled: boolean) {
           <span class="att-value">{{ layerOpacityPercent }}%</span>
         </div>
 
-        <template v-if="isTileMode">
-          <div class="att-row">
-            <span class="att-label">物理属性</span>
-            <CustomSelect class="att-select" :model-value="collisionTypeValue" :options="collisionTypeOptions" :disabled="disabled" @update:model-value="onCollisionTypeChange" />
-          </div>
-
-          <div v-if="collisionTypeValue === '自定义'" class="att-row">
-            <span class="att-label"></span>
-            <input class="att-input" :value="customCollisionType" :disabled="disabled" @input="onCustomCollisionTypeChange(($event.target as HTMLInputElement).value)" placeholder="输入自定义类型" />
-          </div>
-
-          <div class="att-row">
-            <span class="att-label">碰撞</span>
-            <label class="att-checkbox">
-              <input
-                type="checkbox"
-                :checked="collisionEnabledValue"
-                :disabled="disabled"
-                @change="onCollisionEnabledChange(($event.target as HTMLInputElement).checked)"
-              />
-              <span class="att-checkbox-text">{{ collisionEnabledValue ? '启用' : '禁用' }}</span>
-            </label>
-          </div>
-
-          <div class="att-row">
-            <span class="att-label">瓦片数量</span>
-            <span class="att-value">{{ tileCount }}</span>
-          </div>
-
-          <div class="att-row">
-            <span class="att-label">图块集</span>
-            <span class="att-value">{{ tileSetCount }}</span>
-          </div>
-        </template>
-
         <template v-if="isShapeMode">
           <div class="att-row">
             <span class="att-label">形状数</span>
@@ -1767,14 +1703,60 @@ function onCollisionEnabledChange(enabled: boolean) {
         </div>
       </div>
       </template>
+
+      <!-- 图块页：图块设置（右栏底部同时显示图块碰撞编辑区） -->
+      <template v-if="isTileMode && tilePage">
+      <div class="att-group">
+        <div class="mi-section" :class="{ open: fold.tile }">
+          <button class="mi-head" :disabled="disabled" @click="fold.tile = !fold.tile">
+            <img :src="iconChevron" class="mi-chevron" alt="" />
+            <span class="mi-head-title">图块</span>
+          </button>
+          <div v-if="fold.tile" class="mi-body">
+            <div class="att-row">
+              <span class="att-label">物理属性</span>
+              <CustomSelect class="att-select" :model-value="collisionTypeValue" :options="collisionTypeOptions" :disabled="disabled" @update:model-value="onCollisionTypeChange" />
+            </div>
+
+            <div v-if="collisionTypeValue === '自定义'" class="att-row">
+              <span class="att-label"></span>
+              <input class="att-input" :value="customCollisionType" :disabled="disabled" @input="onCustomCollisionTypeChange(($event.target as HTMLInputElement).value)" placeholder="输入自定义类型" />
+            </div>
+
+            <div class="att-row">
+              <span class="att-label">碰撞</span>
+              <label class="att-checkbox">
+                <input
+                  type="checkbox"
+                  :checked="collisionEnabledValue"
+                  :disabled="disabled"
+                  @change="onCollisionEnabledChange(($event.target as HTMLInputElement).checked)"
+                />
+                <span class="att-checkbox-text">{{ collisionEnabledValue ? '启用' : '禁用' }}</span>
+              </label>
+            </div>
+
+            <div class="att-row">
+              <span class="att-label">瓦片数量</span>
+              <span class="att-value">{{ tileCount }}</span>
+            </div>
+
+            <div class="att-row">
+              <span class="att-label">图块集</span>
+              <span class="att-value">{{ tileSetCount }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      </template>
       </template>
 
       <!-- 形状列表：当前形状层的全部形状（按类型筛选 + 底部按钮），只在「形状」页显示 -->
-      <div v-if="isShapeMode && shapePanelTab === 'shapes' && !selectedMarker" class="att-group marker-inspector shape-manager">
+      <div v-if="isShapeMode && shapePage && !selectedMarker" class="att-group marker-inspector shape-manager">
         <div class="mi-section" :class="{ open: shapeFold.manager }">
           <button class="mi-head" :disabled="disabled" @click="shapeFold.manager = !shapeFold.manager">
             <img :src="iconChevron" class="mi-chevron" alt="" />
-            <span class="mi-head-title">形状列表</span>
+            <span class="mi-head-title">碰撞列表</span>
             <span class="mi-count">{{ mapStore.activeShapes.length }}</span>
           </button>
           <div v-if="shapeFold.manager" class="mi-body">
@@ -1807,7 +1789,7 @@ function onCollisionEnabledChange(enabled: boolean) {
                 </button>
               </div>
               <div v-if="!listedShapes.length" class="mi-list-empty">
-                {{ mapStore.activeShapes.length ? '没有这个类型的形状' : '这个形状层还没有形状' }}
+                {{ mapStore.activeShapes.length ? '没有这个类型的碰撞体' : '这个碰撞层还没有碰撞体' }}
               </div>
             </div>
 
@@ -1881,47 +1863,6 @@ function onCollisionEnabledChange(enabled: boolean) {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-/* ====== 形状图层分页：属性 / 形状 ====== */
-/* 与工具栏「矢量|位图」分段按钮同一套视觉：深色轨道 + 绿色高亮当前页 */
-.shape-tabs {
-  display: flex;
-  align-items: center;
-  background: var(--bg-panel);
-  border-radius: 6px;
-  padding: 2px;
-  gap: 2px;
-  flex-shrink: 0;
-}
-
-.shape-tab {
-  flex: 1;
-  padding: 4px 12px;
-  font-size: 12px;
-  font-family: inherit;
-  color: var(--text-muted);
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  cursor: default;
-  white-space: nowrap;
-  transition: background 0.15s, color 0.15s;
-}
-
-.shape-tab:hover:not(:disabled):not(.active) {
-  color: var(--text-secondary);
-}
-
-.shape-tab.active {
-  background: var(--accent);
-  color: #16201a;
-  font-weight: 600;
-}
-
-.shape-tab:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
 }
 
 /* 标签与控件之间收紧：标签只有两个字时也不会拉开一大片空白 */

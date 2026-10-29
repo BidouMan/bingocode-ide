@@ -38,6 +38,8 @@ const emit = defineEmits<{
   'layer-down': []
   'switch-paint-mode': [mode: 'bitmap' | 'vector']
   'create-layer': [tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse' | 'pen' | 'text' | 'reshape' | 'eyedropper']
+  /** 工具栏工具被按下（含重复点击同一个工具）：上层据此切换右侧分页 */
+  'tool-picked': [tool: 'select' | 'reshape' | 'brush' | 'eraser' | 'fill' | 'text' | 'line' | 'rect' | 'ellipse' | 'pen' | 'eyedropper']
 }>()
 
 const mapStore = useMapStore()
@@ -118,6 +120,8 @@ function switchMode(mode: 'bitmap' | 'vector') {
 }
 
 function setTool(tool: typeof mapEditorStore.imageTool) {
+  // 先通知上层：按下任何跟颜色 / 粗细 / 描边相关的绘制工具都要切到「绘制」页
+  emit('tool-picked', tool)
   if (tool !== 'select') {
     // 没有选中图片时自动选中当前图片图层；连图片图层都没有就新建一张
     if (!mapStore.selectedImage && mapStore.activeLayer?.type === 'image') {

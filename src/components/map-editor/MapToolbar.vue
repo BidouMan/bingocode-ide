@@ -32,6 +32,8 @@ const emit = defineEmits<{
   'switch-paint-mode': [mode: 'bitmap' | 'vector']
   'create-paint-layer': [tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse' | 'pen' | 'text' | 'reshape' | 'eyedropper']
   'resize-shape': [w: number, h: number]
+  /** 图片工具被按下（含重复点击）：上层据此切换右侧分页 */
+  'tool-picked': [tool: 'select' | 'reshape' | 'brush' | 'eraser' | 'fill' | 'text' | 'line' | 'rect' | 'ellipse' | 'pen' | 'eyedropper']
 }>()
 
 const mapStore = useMapStore()
@@ -114,6 +116,7 @@ function onToolAreaWheel(e: WheelEvent) {
         @layer-down="emit('layer-down')"
         @switch-paint-mode="(mode) => emit('switch-paint-mode', mode)"
         @create-layer="(tool) => emit('create-paint-layer', tool)"
+        @tool-picked="(tool) => emit('tool-picked', tool)"
       />
       <ShapeLayerTools v-else-if="isShapeLayer" :disabled="disabled" />
       <DrawingLayerTools v-else :disabled="disabled" />

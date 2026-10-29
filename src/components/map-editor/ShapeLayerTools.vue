@@ -91,7 +91,7 @@ function removeActiveShape() {
     <button
       class="toolbar-btn"
       :disabled="disabled || !mapStore.activeShape"
-      v-tooltip="'删除当前形状'"
+      v-tooltip="'删除当前碰撞体'"
       @click="removeActiveShape"
     >
       <img :src="iconDelete" class="toolbar-icon" />

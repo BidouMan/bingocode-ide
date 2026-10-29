@@ -850,7 +850,7 @@ export const useMapStore = defineStore('map', () => {
   }
 
   /** 新建形状层并选中 */
-  function addShapeLayer(name = '形状'): number {
+  function addShapeLayer(name = '碰撞'): number {
     const layers = mapData.value.layers
     const id = layers.length > 0 ? Math.max(...layers.map(l => l.id)) + 1 : 0
     const used = new Set(layers.map(l => l.name))

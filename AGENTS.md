@@ -117,10 +117,10 @@ engine/
 | `src/components/layout/MainLayout.vue` | ~2750（样式已抽到 `MainLayout.css`） | `图片作为地图导入`、更新检查、菜单命令、项目操作 | 素材导入 / 更新检查 → `composables/` |
 | `src/components/paint-editor/composables/usePaperScope.ts` | ~4050 | 单个 `usePaperScope()`（工具/历史/快捷键全在一起） | 按工具分组拆子 composable，再组合 |
 | `src/components/sprite-editor/SpriteEditorView.vue` | ~1840（样式已抽到 `SpriteEditorView.css`） | `标记放置`、帧列表、预览 | 标记/碰撞标注 → composable |
-| `src/components/map-editor/PropertyPanel.vue` | ~1910（样式已抽到 `PropertyPanel.css`） | `场景标记检视器`、`形状检视器`、`形状列表`、`图像变换`、`相机跟随`、`图块模式` | 每块一个子组件（props/emit 直连 store） |
+| `src/components/map-editor/PropertyPanel.vue` | ~1910（样式已抽到 `PropertyPanel.css`） | `场景标记检视器`、`碰撞检视器`、`碰撞列表`、`图像变换`、`相机跟随`、`图块模式` | 每块一个子组件（props/emit 直连 store） |
 | `src/components/paint-editor/composables/useBitmapCanvas.ts` | ~1690 | 单个 `useBitmapCanvas()` | 画笔/填充/选区拆子 composable |
 | `src/components/canvas/GameCanvas.vue` | ~1200 | `getTexture`/`getCachedSpriteTextureSync`/`syncDrawTexts`/`syncHitboxes`/`gameLoop` | 纹理缓存、协议同步拆 `utils/render*` |
-| `src/stores/map.ts` | ~1110 | `图块笔刷调色板`、`场景标记`、`图层 / 图像选中`、`形状层` | 纯计算挪 `utils/map*`，store 只留状态/action |
+| `src/stores/map.ts` | ~1110 | `图块笔刷调色板`、`场景标记`、`图层 / 图像选中`、`碰撞层` | 纯计算挪 `utils/map*`，store 只留状态/action |
 | `src/components/file-explorer/FileExplorer.vue` | ~560（样式已抽到 `FileExplorer.css`） | 树渲染 / 右键菜单 / 拖拽 | 右键菜单拆子组件 |
 | `src-tauri/src/*.rs` | 已拆分 | `lib.rs` 只留状态与注册；命令按域在 `fs_ops/project/python_env/pack/media/pip.rs` | 新增命令请加到对应域文件并注册到 `run()` |
 
