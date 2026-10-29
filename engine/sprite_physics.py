@@ -7,7 +7,7 @@ from models.shape_kernel import ConvexPolygon, intersects, overlap as shape_over
 from models.static_index import SENSOR_EPS
 from collision_geometry import _aabb_polygon_mtv, _image_collision_world_polygons, _playable_bounds, _screen_bounds, _shape_convex_parts, _sign
 from input_api import mouse
-from map_runtime import _find_tileset_for_gid
+from map_runtime import _find_tileset_for_gid, _shape_one_way
 from markers import _parse_direction_world, raycast as _raycast
 import engine_state as st
 
@@ -17,10 +17,15 @@ class SpritePhysicsMixin:
 
     # ---------- 运动模块 ----------
     def _collision_layer_correction(self, layer, axis, layer_index=None):
-        """形状层（世界坐标多边形）对当前精灵的轴分离位移量；没有碰撞返回 None"""
+        """形状层（世界坐标多边形）对当前精灵的轴分离位移量。
+
+        返回 (correction, is_one_way)：correction 为 None 表示没有碰撞。
+        单向形状的修正不做「抬升距离上限」限制（只要确实是从实心面靠近），
+        否则下落速度超过 _MAX_CONTACT_SNAP 时会直接穿过单向平台。
+        """
         sprite_rect = self._get_hitbox_rect()
         if not sprite_rect:
-            return None
+            return None, False
 
         # 静态索引宽相：只有包围盒可能相交的形状才进入精确 SAT。
         # 解算顺序仍完全沿用 layer["polygons"]，结果与全表扫描一致。
@@ -35,10 +40,11 @@ class SpritePhysicsMixin:
                 if e.source == "shape" and e.layer_index == layer_index and e.ref is not None
             }
             if not candidate_ids:
-                return None
+                return None, False
 
         sprite_shape = self._get_collision_shape()
         best = None
+        best_one_way = False
         for poly in layer.get("polygons", []):
             if candidate_ids is not None and poly.get("id") not in candidate_ids:
                 continue
@@ -51,33 +57,17 @@ class SpritePhysicsMixin:
             if len(points) < 3:
                 continue
 
-            col_type = poly.get("collisionType", "墙体")
-            is_one_way = col_type == "跳板"
-            if is_one_way and axis == "x":
-                continue
-            if is_one_way and self._drop_through:
-                continue
-
-            if is_one_way:
-                poly_top = min(p[1] for p in points)
-                poly_bottom = max(p[1] for p in points)
-                if self._prev_bottom_y > poly_top:
+            one_way, ow_dx, ow_dy, ow_margin = _shape_one_way(poly)
+            if one_way:
+                if self._drop_through:
                     continue
-                if axis == "y":
-                    # 必须先和平台横向重叠，否则远处的跳板会把角色"吸"上去
-                    if (
-                        sprite_rect[2] <= min(p[0] for p in points)
-                        or sprite_rect[0] >= max(p[0] for p in points)
-                    ):
-                        continue
-                    # 单向平台只需落回顶面：薄多边形用 SAT 求 MTV 会残留穿透，
-                    # 下一帧就会被误判成"从下方穿过"而整块掉下去
-                    # 必须真正与平台竖直方向交叠：角色整体在平台下方时不能被"吸"上去
-                    if sprite_rect[3] > poly_top and sprite_rect[1] < poly_bottom:
-                        cand = poly_top - sprite_rect[3] - 0.05
-                        if best is None or abs(cand) > abs(best):
-                            best = cand
-                    continue
+                cand = self._one_way_face_correction(
+                    sprite_rect, points, axis, ow_dx, ow_dy, ow_margin
+                )
+                if cand is not None and (best is None or abs(cand) > abs(best)):
+                    best = cand
+                    best_one_way = True
+                continue
 
             # 凸块形状缓存：凹多边形已拆成凸块，SAT 只能对凸多边形判定
             part_shapes = _shape_convex_parts(poly)
@@ -101,8 +91,76 @@ class SpritePhysicsMixin:
                 continue
             if best is None or abs(part_best) > abs(best):
                 best = part_best
+                best_one_way = False
 
-        return best
+        return best, best_one_way
+
+
+    def _one_way_face_correction(self, sprite_rect, points, axis, dir_x, dir_y, margin):
+        """单向形状在指定轴上的修正量（只从实心面挡住，另一侧可以穿过）。
+
+        dir 是「触发碰撞的运动方向」（世界坐标，y 向下）：
+          (0, 1)  下落时挡住 = 从上方踩住（默认）
+          (0, -1) 上升时挡住 = 从下方顶住
+          (1, 0)  向右走时挡住 = 从左侧挡住
+          (-1, 0) 向左走时挡住 = 从右侧挡住
+        返回裸修正量（不含 0.05 皮肤），由调用方统一补。
+        """
+        xs = [p[0] for p in points]
+        ys = [p[1] for p in points]
+        left, right = min(xs), max(xs)
+        top, bottom = min(ys), max(ys)
+        rect_left, rect_top, rect_right, rect_bottom = sprite_rect
+
+        if dir_y > 0:
+            if axis != "y":
+                return None
+            # 下落：脚原本在顶面之上（含厚度容差）才算踩住
+            if self._prev_bottom_y > top + margin:
+                return None
+            if rect_right <= left or rect_left >= right:
+                return None
+            if rect_bottom <= top or rect_top >= bottom:
+                return None
+            return top - rect_bottom
+
+        if dir_y < 0:
+            if axis != "y":
+                return None
+            # 上升：头原本在底面之下才算顶住
+            if self._prev_top_y < bottom - margin:
+                return None
+            if rect_right <= left or rect_left >= right:
+                return None
+            if rect_bottom <= top or rect_top >= bottom:
+                return None
+            return bottom - rect_top
+
+        if dir_x > 0:
+            if axis != "x":
+                return None
+            # 向右移动时从左侧挡住
+            if self._prev_right_x > left + margin:
+                return None
+            if rect_bottom <= top or rect_top >= bottom:
+                return None
+            if rect_right <= left or rect_left >= right:
+                return None
+            return left - rect_right
+
+        if dir_x < 0:
+            if axis != "x":
+                return None
+            # 向左移动时从右侧挡住
+            if self._prev_left_x < right - margin:
+                return None
+            if rect_bottom <= top or rect_top >= bottom:
+                return None
+            if rect_right <= left or rect_left >= right:
+                return None
+            return right - rect_left
+
+        return None
 
 
     def _image_collision_correction(self, layer, axis):
@@ -243,8 +301,8 @@ class SpritePhysicsMixin:
             sprite_shape = self._get_collision_shape()
             best = None
             for entry in entries:
-                # 单向平台只从上方承载，不能当作实心块把角色顶出去
-                if entry.collision_type == "跳板":
+                # 单向碰撞只从实心面承载，不能当作实心块把角色顶出去
+                if entry.one_way:
                     continue
                 manifold = shape_overlap(sprite_shape, entry.shape)
                 if manifold is None or manifold.depth <= 1e-4:
@@ -293,11 +351,13 @@ class SpritePhysicsMixin:
         if depenetrate:
             self._depenetrate()
 
-        # 记录移动前的内容盒上下沿，供单向平台「从上方落地 / 从下方撞头」判断
+        # 记录移动前的内容盒四边，供单向碰撞方向判断（上/下/左/右）使用
         hitbox = self._get_hitbox_rect()
         if hitbox:
             self._prev_bottom_y = hitbox[3]
             self._prev_top_y = hitbox[1]
+            self._prev_left_x = hitbox[0]
+            self._prev_right_x = hitbox[2]
 
         if axis_order == "yx":
             if resolve_y:
@@ -376,11 +436,18 @@ class SpritePhysicsMixin:
         for layer_index, layer in enumerate(st._CURRENT_MAP.get("layers", [])):
             # --- 形状层（世界坐标判定形状） ---
             if layer.get("type") == "shape":
-                correction = self._collision_layer_correction(layer, axis, layer_index)
+                correction, one_way_correction = self._collision_layer_correction(
+                    layer, axis, layer_index
+                )
                 if correction is None:
                     continue
-                # y 轴只处理迎面（落地/撞头），且抬升距离不能大得离谱
-                if axis == "y" and abs(correction) > self._MAX_CONTACT_SNAP:
+                # y 轴只处理迎面（落地/撞头），且抬升距离不能大得离谱；
+                # 单向形状不限（方向判定已经保证是从实心面靠近，限了会高速穿平台）
+                if (
+                    axis == "y"
+                    and not one_way_correction
+                    and abs(correction) > self._MAX_CONTACT_SNAP
+                ):
                     continue
                 margin = 0.05 if correction > 0 else -0.05
                 effect = None
@@ -511,7 +578,7 @@ class SpritePhysicsMixin:
                 bbox = entry.bbox
                 apply_tile(
                     bbox.left, bbox.top, bbox.right, bbox.bottom,
-                    entry.collision_type == "跳板",
+                    entry.one_way,
                 )
         elif st._MAP_MODEL:
             # 索引构建失败时的兼容路径：仍按 MapModel 直接查图块（行为与旧版一致）
@@ -837,11 +904,23 @@ class SpritePhysicsMixin:
             for entry in static_world.solid.query_rect(
                 query_left, query_top, query_right, query_bottom
             ):
-                if entry.collision_type == "跳板":
-                    # 跳板只在下落方向、且角色在平台上方时阻挡
-                    if world_dir[1] <= 0 or self._drop_through:
+                if entry.one_way:
+                    # 单向碰撞：只有「朝实心面推进」时才挡；另一侧可以穿过
+                    if self._drop_through:
                         continue
-                    if rect[3] > entry.bbox.top + 0.5:
+                    ow_x, ow_y = entry.one_way_dir
+                    if ow_x * world_dir[0] + ow_y * world_dir[1] <= 0:
+                        continue
+                    margin = entry.one_way_margin
+                    bbox = entry.bbox
+                    # 角色必须还停在实心面这一侧（含厚度容差）
+                    if ow_y > 0 and rect[3] > bbox.top + margin:
+                        continue
+                    if ow_y < 0 and rect[1] < bbox.bottom - margin:
+                        continue
+                    if ow_x > 0 and rect[2] > bbox.left + margin:
+                        continue
+                    if ow_x < 0 and rect[0] < bbox.right - margin:
                         continue
                 if shape_sweep(sprite_shape, entry.shape, (dx, dy)) is not None:
                     return True

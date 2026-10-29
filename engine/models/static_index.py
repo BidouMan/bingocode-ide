@@ -46,6 +46,13 @@ class StaticEntry:
     kind: str = "solid"
     tag: str = ""
     collision_type: str = "墙体"
+    # 单向碰撞（参考 Godot 的 One Way Collision）：
+    #   one_way_dir 是「触发碰撞的运动方向」（世界坐标，y 向下）。
+    #   默认 (0, 1) = 下落时挡住，也就是只能从上方踩住。
+    #   margin 是判定厚度容差（像素）。
+    one_way: bool = False
+    one_way_dir: Tuple[float, float] = (0.0, 1.0)
+    one_way_margin: float = 0.0
     layer_index: int = -1
     ref: Any = None
     origin: Any = None

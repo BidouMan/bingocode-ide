@@ -15,6 +15,53 @@ from markers import MapMarkerRef, _map_marker_list, get_marker, get_markers
 import engine_state as st
 
 
+def _shape_one_way(raw):
+    """形状的单向碰撞参数 → (one_way, dir_x, dir_y, margin)。
+
+    dir 是「触发碰撞的运动方向」（世界坐标，y 向下）：
+      (0, 1)  下落时挡住 = 只能从上方踩住（默认）
+      (0, -1) 上升时挡住 = 只能从下方顶住
+      (1, 0)  向右走时挡住 = 从左侧挡住
+      (-1, 0) 向左走时挡住 = 从右侧挡住
+
+    旧存档没有 oneWay 字段时，兼容 collisionType == "跳板"（等价于方向向下、margin 0）。
+    结果缓存到 poly 上，避免每帧重复解析。
+    """
+    cached = raw.get("_one_way")
+    if cached is not None:
+        return cached
+
+    flag = raw.get("oneWay")
+    if flag is None:
+        flag = raw.get("collisionType") == "跳板"
+
+    if not flag:
+        result = (False, 0.0, 1.0, 0.0)
+    else:
+        try:
+            dx = float(raw.get("oneWayDirX") or 0.0)
+            dy = float(raw.get("oneWayDirY") or 0.0)
+        except (TypeError, ValueError):
+            dx, dy = 0.0, 0.0
+        if dx == 0.0 and dy == 0.0:
+            dx, dy = 0.0, 1.0
+        # 只支持轴对齐：取绝对值大的分量，另一轴归零
+        if abs(dx) >= abs(dy):
+            dx = 1.0 if dx > 0 else -1.0
+            dy = 0.0
+        else:
+            dx = 0.0
+            dy = 1.0 if dy > 0 else -1.0
+        try:
+            margin = max(0.0, float(raw.get("oneWayMargin") or 0.0))
+        except (TypeError, ValueError):
+            margin = 0.0
+        result = (True, dx, dy, margin)
+
+    raw["_one_way"] = result
+    return result
+
+
 def _build_static_world(map_data, map_model):
     """把地图里的静态碰撞几何烘焙成 solid / sensor 双索引。
 
@@ -42,12 +89,17 @@ def _build_static_world(map_data, map_model):
                 if not shape_parts:
                     continue
                 shape = shape_parts[0] if len(shape_parts) == 1 else CompoundShape(shape_parts)
+                one_way, ow_dx, ow_dy, ow_margin = _shape_one_way(poly)
                 entries.append(StaticEntry(
                     shape=shape,
                     source="shape",
                     kind=poly.get("kind", "solid"),
                     tag=poly.get("tag", "") or "",
-                    collision_type=poly.get("collisionType", "墙体"),
+                    # 单向形状对外仍报告「跳板」，保持 raycast 等 API 的既有语义
+                    collision_type="跳板" if one_way else poly.get("collisionType", "墙体"),
+                    one_way=one_way,
+                    one_way_dir=(ow_dx, ow_dy),
+                    one_way_margin=ow_margin,
                     layer_index=layer_index,
                     ref=poly.get("id"),
                     origin=poly,
@@ -73,11 +125,16 @@ def _build_static_world(map_data, map_model):
                 if not convex:
                     continue
                 shape = convex[0] if len(convex) == 1 else CompoundShape(convex)
+                image_type = image.get("collisionType", "图像")
                 entries.append(StaticEntry(
                     shape=shape,
                     source="image",
                     kind="solid",
-                    collision_type=image.get("collisionType", "图像"),
+                    collision_type=image_type,
+                    # 图像沿用的「跳板」类型：等价于只能从上方踩住
+                    one_way=(image_type == "跳板"),
+                    one_way_dir=(0.0, 1.0),
+                    one_way_margin=0.0,
                     layer_index=layer_index,
                     ref=image_index,
                     origin=image,
@@ -135,11 +192,16 @@ def _build_static_world(map_data, map_model):
                     (left, top + tile_size),
                 ])
 
+            tile_type = map_model.get_tile_collision_type(resource_index, tile_index)
             entries.append(StaticEntry(
                 shape=shape,
                 source="tile",
                 kind="solid",
-                collision_type=map_model.get_tile_collision_type(resource_index, tile_index),
+                collision_type=tile_type,
+                # 图块的「跳板」类型：等价于只能从上方踩住，沿用原来的 0.5px 容差
+                one_way=(tile_type == "跳板"),
+                one_way_dir=(0.0, 1.0),
+                one_way_margin=0.5,
                 layer_index=layer_index,
                 ref=(tile_x, tile_y),
             ))
@@ -273,6 +335,7 @@ def load_map(map_name):
                             except (TypeError, ValueError):
                                 continue
                     if len(pts) >= 3:
+                        one_way, ow_dx, ow_dy, ow_margin = _shape_one_way(poly_raw)
                         polygons.append({
                             # 稳定 id：静态索引宽相按 id 回到原始 polygon 走原有解算
                             "id": poly_raw.get("id") or ("shape_%d" % len(polygons)),
@@ -283,6 +346,11 @@ def load_map(map_name):
                             # 能力类型：solid=阻挡，sensor=感应，both=两者
                             "kind": poly_raw.get("kind", "solid"),
                             "tag": poly_raw.get("tag", "") or "",
+                            # 单向碰撞：方向 + 厚度（旧存档的「跳板」在这里统一成方向向下）
+                            "oneWay": one_way,
+                            "oneWayDirX": ow_dx,
+                            "oneWayDirY": ow_dy,
+                            "oneWayMargin": ow_margin,
                             "disabled": bool(poly_raw.get("disabled", False)),
                         })
                 layers.append({

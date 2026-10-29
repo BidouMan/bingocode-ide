@@ -69,6 +69,9 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
         self._prev_bottom_y = 0
         # 本步移动前的内容盒上沿：与 _prev_bottom_y 一起判断「从上方落地 / 从下方撞头」
         self._prev_top_y = 0
+        # 本步移动前的内容盒左右沿：单向碰撞方向为「左/右」时判断是否从实心面靠近
+        self._prev_left_x = 0
+        self._prev_right_x = 0
         self._jump_cut = False
         # smart_jump：active=正在由 smart_jump 控制的跳跃；called=本帧是否被调用过
         # 目标写法是 if key_down("w"): smart_jump()，按键松开后就不会再被调用，
