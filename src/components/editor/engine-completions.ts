@@ -74,7 +74,6 @@ const spriteMethods: EngineCompletionItem[] = [
   { label: 'is_on_wall', kind: CompletionItemKind.Method, insertText: 'is_on_wall', documentation: '左右两侧是否贴着墙（基于本帧接触结果）', detail: 'is_on_wall() -> bool' },
   { label: 'is_on_ceiling', kind: CompletionItemKind.Method, insertText: 'is_on_ceiling', documentation: '头顶是否撞到实体地形（基于本帧接触结果）\n\n跳跃撞头时停止上升：\nif hero.is_on_ceiling():\n    hero.stop_jump()\n开启「限制边界」时，撞到地图上边界也算', detail: 'is_on_ceiling() -> bool' },
   { label: 'raycast', kind: CompletionItemKind.Method, insertText: 'raycast', documentation: '从角色所在点朝一个方向打一条射线，返回最近命中的实心地形；没打中返回 None\n\nhit = hero.raycast("right", 200)\nif hit:\n    print(hit.distance, hit.tag)\n方向支持 "left"/"right"/"up"/"down" 或角度（0右 90上）\n从任意点（鼠标、标记）发射用全局 raycast(x, y, 方向, 距离)', detail: 'raycast(direction, distance=1000) -> hit or None' },
-  { label: 'shapecast', kind: CompletionItemKind.Method, insertText: 'shapecast', documentation: '用角色整个身体朝一个方向扫一段距离，返回最近撞到的实心地形；没撞到返回 None\n\nhit = hero.shapecast("right", 100)\nif hit:\n    print(hit.distance, hit.tag)\n和 raycast 的区别：射线是一条没有宽度的线，shapecast 用的是角色真实轮廓（胶囊/多边形），能正确判断窄缝能不能过、头顶空间够不够、斜向会不会撞\n只查实心地形（感应不算）；跳板规则与移动一致', detail: 'shapecast(direction, distance=1000) -> hit or None' },
 
   // 分组 / 事件
   { label: 'add_to_group', kind: CompletionItemKind.Method, insertText: 'add_to_group', documentation: '将角色归类，比如 "enemies", "bullets"\n\nadd_to_group(group_name)', detail: 'add_to_group(group_name)' },
