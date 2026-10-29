@@ -395,7 +395,7 @@ const isImageMode = computed(() => mapStore.activeMode === 'image')
 
 // ====== 形状检视器：顶部切到「形状」分页时，和形状列表一起展示 ======
 const selectedShapeItem = computed(() => mapStore.activeShape)
-const shapeFold = reactive({ basic: true, manager: true })
+const shapeFold = reactive({ basic: true, transform: true, manager: true })
 const shapeKindOptions = [
   { label: '碰撞', value: 'solid' },
   { label: '感应', value: 'sensor' },
@@ -533,6 +533,110 @@ function selectAllShapes() {
 }
 function clearShapeSelection() {
   mapEditorStore.setActiveShapeIds([])
+}
+
+// ====== 碰撞体变换（位置 / 大小 / 旋转） ======
+// 碰撞体没有独立的变换节点，点集就是几何本身，所以这里的输入都是直接改写顶点：
+// 位置=整体平移，大小=绕整体包围盒中心缩放，旋转=绕包围盒中心旋转
+const shapeTransformDisabled = computed(
+  () => !selectedShapeItem.value || mapStore.activeLayer?.locked === true,
+)
+
+/** 参与变换的碰撞体：多选时一起变（以整体包围盒为参照） */
+const transformShapes = computed(() => {
+  const ids = new Set(selectedShapeIds.value)
+  return mapStore.activeShapes.filter(s => ids.has(s.id))
+})
+
+/** 选中碰撞体的整体包围盒（世界坐标）；位置与大小都读它 */
+const shapeBox = computed(() => {
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const item of transformShapes.value) {
+    for (const p of item.points) {
+      if (p[0] < minX) minX = p[0]
+      if (p[0] > maxX) maxX = p[0]
+      if (p[1] < minY) minY = p[1]
+      if (p[1] > maxY) maxY = p[1]
+    }
+  }
+  if (!Number.isFinite(minX)) return null
+  return { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, w: maxX - minX, h: maxY - minY }
+})
+
+/** 位置显示的是包围盒中心点，按用户坐标（原点左下、y 向上） */
+const shapePosX = computed(() =>
+  shapeBox.value ? Math.round(toUserX(shapeBox.value.cx)) : 0,
+)
+const shapePosY = computed(() =>
+  shapeBox.value ? Math.round(toUserY(shapeBox.value.cy)) : 0,
+)
+/** 大小 = 包围盒宽高（像素），保留一位小数：旋转过的碰撞体不再落在整数上 */
+const round1 = (n: number) => Math.round(n * 10) / 10
+const shapeSizeW = computed(() => (shapeBox.value ? round1(shapeBox.value.w) : 0))
+const shapeSizeH = computed(() => (shapeBox.value ? round1(shapeBox.value.h) : 0))
+/** 约束比例：勾选后改宽高时另一轴按同一比例跟随 */
+const shapeScaleLocked = ref(true)
+
+/** 已旋转角度（度，逆时针为正）：碰撞体本身不存旋转，这里累计「本次选中期间」转过的角度 */
+const shapeRotation = ref(0)
+watch(() => selectedShapeIds.value.join(','), () => { shapeRotation.value = 0 })
+
+/** 按回调批量改写所有选中碰撞体的顶点 */
+function mapShapePoints(fn: (p: number[]) => [number, number]) {
+  for (const item of transformShapes.value) {
+    mapStore.updateShapePoints(item.id, item.points.map(fn))
+  }
+}
+
+/** 位置：输入的是包围盒中心点，换算成整体平移量 */
+function setShapePosition(axis: 0 | 1, e: Event) {
+  const box = shapeBox.value
+  const value = Number((e.target as HTMLInputElement).value)
+  if (!box || !Number.isFinite(value)) return
+  const target = axis === 0 ? toWorldX(value) : toWorldY(value)
+  const delta = target - (axis === 0 ? box.cx : box.cy)
+  if (!delta) return
+  mapShapePoints(p => (axis === 0 ? [p[0] + delta, p[1]] : [p[0], p[1] + delta]))
+}
+
+/** 大小：输入的是像素宽/高，绕整体包围盒中心缩放；约束比例时另一轴同步 */
+function setShapeSize(axis: 'w' | 'h', e: Event) {
+  const box = shapeBox.value
+  const value = Number((e.target as HTMLInputElement).value)
+  if (!box || !Number.isFinite(value)) return
+  const current = axis === 'w' ? box.w : box.h
+  // 退化成一条线（宽或高为 0）时无法按比例缩放
+  if (current < 0.01) return
+  // 最小 1%，避免把碰撞体缩成一条线
+  const ratio = Math.max(0.01, Math.abs(value) / current)
+  const sx = axis === 'w' || shapeScaleLocked.value ? ratio : 1
+  const sy = axis === 'h' || shapeScaleLocked.value ? ratio : 1
+  mapShapePoints(p => [
+    box.cx + (p[0] - box.cx) * sx,
+    box.cy + (p[1] - box.cy) * sy,
+  ])
+}
+
+/** 旋转：输入用户角度（逆时针为正），按与上次输入的角度差绕包围盒中心旋转 */
+function setShapeRotation(e: Event) {
+  const box = shapeBox.value
+  const value = Number((e.target as HTMLInputElement).value)
+  if (!box || !Number.isFinite(value)) return
+  const delta = value - shapeRotation.value
+  shapeRotation.value = value
+  if (!delta) return
+  // 世界坐标 y 向下，取负号才是视觉上的逆时针
+  const rad = (-delta * Math.PI) / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
+  mapShapePoints(p => {
+    const dx = p[0] - box.cx
+    const dy = p[1] - box.cy
+    return [box.cx + dx * cos - dy * sin, box.cy + dx * sin + dy * cos]
+  })
 }
 
 // 切换图层 / 重新加载地图时清空选中
@@ -1214,6 +1318,106 @@ function onCollisionEnabledChange(enabled: boolean) {
                 />
               </div>
             </template>
+          </div>
+        </div>
+
+        <!-- 变换：位置 / 大小 / 旋转，数值直接改写碰撞体顶点 -->
+        <div class="mi-section" :class="{ open: shapeFold.transform }">
+          <button class="mi-head" :disabled="disabled" @click="shapeFold.transform = !shapeFold.transform">
+            <img :src="iconChevron" class="mi-chevron" alt="" />
+            <span class="mi-head-title">变换</span>
+          </button>
+          <div v-if="shapeFold.transform" class="mi-body">
+            <!-- 位置：包围盒中心点，X / Y 上下两行 -->
+            <div class="att-row att-row-stacked">
+              <span class="att-label">位置</span>
+              <div class="att-axis-group">
+                <div class="att-axis-row">
+                  <span class="att-size-label">X</span>
+                  <input
+                    class="att-input att-input-no-spin"
+                    type="number"
+                    :value="shapePosX"
+                    :disabled="disabled || shapeTransformDisabled"
+                    @change="setShapePosition(0, $event)"
+                  />
+                </div>
+                <div class="att-axis-row">
+                  <span class="att-size-label">Y</span>
+                  <input
+                    class="att-input att-input-no-spin"
+                    type="number"
+                    :value="shapePosY"
+                    :disabled="disabled || shapeTransformDisabled"
+                    @change="setShapePosition(1, $event)"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <!-- 大小：包围盒宽高（像素），绕中心缩放，可勾选约束比例 -->
+            <div class="att-row att-row-stacked">
+              <span class="att-label">大小</span>
+              <div class="att-axis-group">
+                <div class="att-axis-row">
+                  <span class="att-size-label">宽</span>
+                  <input
+                    class="att-input att-input-no-spin"
+                    type="number"
+                    step="1"
+                    :value="shapeSizeW"
+                    :disabled="disabled || shapeTransformDisabled"
+                    @change="setShapeSize('w', $event)"
+                  />
+                </div>
+                <div class="att-axis-row">
+                  <span class="att-size-label">高</span>
+                  <input
+                    class="att-input att-input-no-spin"
+                    type="number"
+                    step="1"
+                    :value="shapeSizeH"
+                    :disabled="disabled || shapeTransformDisabled"
+                    @change="setShapeSize('h', $event)"
+                  />
+                </div>
+                <div class="att-axis-row att-axis-lock">
+                  <span class="att-size-label">约束比例</span>
+                  <label class="att-checkbox">
+                    <input
+                      type="checkbox"
+                      v-model="shapeScaleLocked"
+                      :disabled="disabled || shapeTransformDisabled"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- 旋转：数字框在上、滑条在下（单位是度，不写 °） -->
+            <div class="att-row att-row-stacked">
+              <span class="att-label">旋转</span>
+              <div class="att-axis-group">
+                <input
+                  class="att-input att-input-no-spin"
+                  type="number"
+                  step="1"
+                  :value="shapeRotation"
+                  :disabled="disabled || shapeTransformDisabled"
+                  @change="setShapeRotation"
+                />
+                <input
+                  class="att-range"
+                  type="range"
+                  min="-180"
+                  max="180"
+                  step="1"
+                  :value="shapeRotation"
+                  :disabled="disabled || shapeTransformDisabled"
+                  @input="setShapeRotation"
+                />
+              </div>
+            </div>
           </div>
         </div>
       </div>
