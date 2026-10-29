@@ -114,22 +114,23 @@ if hero.is_touch("水"):
 |------|------|------|
 | `target` | 精灵/字符串/mouse | 另一个精灵、标签字符串或 mouse 对象 |
 
-### is_blocked — 前方是否有实心地形
+### sweep_test — 用身体扫一下，前方是否被挡住
 
 ```python
-if hero.is_blocked("right"):
+if hero.sweep_test("right"):
     hero.say("右边是墙")
 
 # 往前探 8 像素
-if hero.is_blocked("down", 8):
+if hero.sweep_test("down", 8):
     hero.say("前面要掉下去了")
 ```
 
-朝一个方向检查前方是否有实心地形（形状层 `阻挡` / `阻挡 + 感应`、图像碰撞、实心图块），适合做俯视迷宫、方向探测。
+用自己的身体形状朝一个方向做一次**扫掠测试**：只测试、不移动（对应 Godot 的 `test_move`、Bullet 的 `convexSweepTest`）。适合做俯视迷宫、下一步能不能迈、方向探测。
 
 - **感应区域不算阻挡**
 - 「跳板」只有向下、并且从上方靠近时才算阻挡
 - 不受角色当前速度和朝向影响，只看你给的方向
+- 和 `raycast` 的区别：`raycast` 是一条没有宽度的线，`sweep_test` 用的是整个身体，窄缝、头顶空间这类问题更准
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
@@ -162,7 +163,7 @@ hit = raycast(mouse.x, mouse.y, "down", 50)
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | `x` / `y` | 数字 | 仅全局版需要：起点（用户坐标：地图左下角为原点，y 向上） |
-| `direction` | 字符串/数字 | 同 `is_blocked` 的方向写法 |
+| `direction` | 字符串/数字 | 同 `sweep_test` 的方向写法 |
 | `distance` | 数字（可选） | 射线长度，默认 1000 像素 |
 
 命中结果可以读：

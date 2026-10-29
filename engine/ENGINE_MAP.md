@@ -53,7 +53,7 @@ bingo_engine.py            门面：sys.path 引导 + stdout 无缓冲 + 重导�
 | `bingo_engine.py` | ~115 | 门面：引导、重导出、`__all__` | 新增公共 API 时补导出 |
 | `game_loop.py` | ~365 | `run()`/`start_game()`、物理步、每帧调度、generator 注册、FPS 上报、动画推进 | 帧率、步长、启动/重启、调度顺序 |
 | `sprite.py` | ~800 | `Sprite` 主类 + 公开方法 + 属性 + 类常量 | 用户 API、属性语义 |
-| `sprite_physics.py` | ~880 | 碰撞解算、`move_and_slide`、`is_touch`/`is_blocked`/贴地 | 卡墙、穿模、斜坡、抖动 |
+| `sprite_physics.py` | ~880 | 碰撞解算、`move_and_slide`、`is_touch`/`sweep_test`/贴地 | 卡墙、穿模、斜坡、抖动 |
 | `sprite_assets.py` | ~610 | bsf/bgs/单图解析、hitbox、标记点、变换同步 | 图片错位、碰撞盒偏移、挂点坐标 |
 | `sprite_animation.py` | ~170 | `play()`、`say()`、逐帧推进 | 动画不播/卡帧、气泡时长 |
 | `map_runtime.py` | ~890 | `load_map`/清理/瓦片渲染/地图物理/感应区 | 地图不显示、图层、碰撞层、sensor |
@@ -94,7 +94,7 @@ bingo_engine.py            门面：sys.path 引导 + stdout 无缓冲 + 重导�
 | 文件 | 方法（44 / 19 / 13 / 3 个） |
 | --- | --- |
 | `sprite.py` | `__init__`、`goto`、`get_marker`、`follow`、`unfollow`、`set_xy`、`set_x/y`、`add_x/y`、`jump`、`stop_jump`、`cut_jump`、`smart_jump`、`drop_down`、`drop_through`、`set_speed`、`on_touch_group`、`on_hit`、`on_sensor_enter/exit`、`broadcast`、`receive`、`on_receive`、`move`、`goto_rand`、`set_angle`、`look_at`、`edge_bounce`、`set_scale`、`add_scale`、`set_rotation_mode`、`show`、`hide`、`say`*(见动画)*、`touch_group`、`add_to_group`、`delete`、`distance_to`、属性 `x/y/pos/vy/gravity/angle/scale/layer`、`_set_xy_world`、`_apply_visible`、`_send_command` |
-| `sprite_physics.py` | `_collision_layer_correction`、`_image_collision_correction`、`_mtv_axis_dominant`、`_accept_axis_correction`、`_contact_bit(_from_normal)`、`_depenetrate`、`move_and_slide`、`_move_and_slide_step`、`_resolve_collision`、`is_touch`、`is_touch_edge`、`is_touch_group`、`is_out_side`、`is_blocked`、`is_on_wall/ceiling/ground/floor` |
+| `sprite_physics.py` | `_collision_layer_correction`、`_image_collision_correction`、`_mtv_axis_dominant`、`_accept_axis_correction`、`_contact_bit(_from_normal)`、`_depenetrate`、`move_and_slide`、`_move_and_slide_step`、`_resolve_collision`、`is_touch`、`is_touch_edge`、`is_touch_group`、`is_out_side`、`sweep_test`、`is_on_wall/ceiling/ground/floor` |
 | `sprite_assets.py` | `_load_sprite_config`、`_load_config_in_dir`、`_normalize_bsf_manifest`、`_bsf_frame_rect`、`_marker_world_xy`、`_resolve_path`、`_setup_hitbox`、`_setup_hitbox_bsf`、`_collision_canvas_points/bbox`、`_get_hitbox_rect`、`_get_collision_shape`、`_update_transform` |
 | `sprite_animation.py` | `play`、`say`、`_update_animation_frame` |
 

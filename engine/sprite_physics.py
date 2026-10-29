@@ -785,9 +785,10 @@ class SpritePhysicsMixin:
         return None
 
 
-    def is_blocked(self, direction="down", distance=None):
-        """前方是否有实心地形阻挡（俯视迷宫常用）。
+    def sweep_test(self, direction="down", distance=None):
+        """用身体朝一个方向做一次扫掠测试：前方是否有实心地形阻挡。
 
+        只测试、不移动（对应 Godot 的 test_move / Bullet 的 convexSweepTest）。
         direction: "left"/"right"/"up"/"down"（或 左/右/上/下），也接受用户角度数字
         distance: 探测距离，默认 2 像素；想查更远可以传更大值
 
@@ -795,7 +796,7 @@ class SpritePhysicsMixin:
         感应区域不算阻挡；跳板只有向下且从上方靠近时才算阻挡。
 
         用法：
-            if not hero.is_blocked("right"):
+            if not hero.sweep_test("right"):
                 hero.add_x(4)
         """
         if self._is_deleted or self._collision_disabled or not st._CURRENT_MAP:

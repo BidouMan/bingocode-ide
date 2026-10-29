@@ -47,7 +47,7 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
     # 单步最大位移：超过就拆分，避免一步穿过薄墙（与 move() 的 16px 子步一致）
     _MAX_MOVE_STEP = 16.0
 
-    # 前方阻挡探测距离（像素）：is_blocked 默认向前探这么远
+    # 前方阻挡探测距离（像素）：sweep_test 默认向前探这么远
     _BLOCK_PROBE = 2.0
 
     def __init__(self, filename):

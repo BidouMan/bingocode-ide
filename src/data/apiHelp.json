@@ -241,9 +241,9 @@
           "badgeType": "object"
         },
         {
-          "label": "is_blocked 前面挡住了吗",
-          "code": "if hero.is_blocked(\"right\"):\n    hero.say(\"右边是墙\")\n\nhero.is_blocked(\"down\", 8)",
-          "desc": "朝一个方向检查前面有没有实心地形（墙、地面、实心图块）。\n方向可以写 left / right / up / down，也可以写中文「左/右/上/下」。\n第二个数字是往前探多远，不写默认 2 像素。\n感应区域不算阻挡；「跳板」只有往下且从上面靠近时才算。",
+          "label": "sweep_test 前面挡住了吗",
+          "code": "if hero.sweep_test(\"right\"):\n    hero.say(\"右边是墙\")\n\nhero.sweep_test(\"down\", 8)",
+          "desc": "用自己的身体朝一个方向扫一下，检查前面有没有实心地形。只测试，不会移动角色。\n方向可以写 left / right / up / down，也可以写中文「左/右/上/下」。\n第二个数字是往前探多远，不写默认 2 像素。\n感应区域不算阻挡；「跳板」只有往下且从上面靠近时才算。",
           "badgeType": "object"
         },
         {

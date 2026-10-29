@@ -4,7 +4,7 @@
 为什么需要：
   - 地图里的形状层 / 图像碰撞 / 图块碰撞都是静态的，每帧全表扫描既慢又会限制后续能力。
   - P3 先做「行为不变」的宽相：碰撞解算仍走原有逻辑，但先用索引剔除不可能相交的候选。
-  - 后续 P4/P5/P6 的 Contact、move_and_slide、is_blocked、raycast 直接复用这里的索引。
+  - 后续 P4/P5/P6 的 Contact、move_and_slide、sweep_test、raycast 直接复用这里的索引。
 
 索引结构：静态 AABB 树（BVH）。
   - 每个 StaticEntry 持有 shape_kernel 的 Shape，构建时一次性算好包围盒。
