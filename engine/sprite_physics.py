@@ -372,7 +372,7 @@ class SpritePhysicsMixin:
                 best_mag = magnitude
                 best_effect = effect
 
-        # 检测所有图层中的实心图块
+        # 检测所有图层中的形状层与图像碰撞（图块在下方统一走 static_world）
         for layer_index, layer in enumerate(st._CURRENT_MAP.get("layers", [])):
             # --- 形状层（世界坐标判定形状） ---
             if layer.get("type") == "shape":
@@ -410,151 +410,158 @@ class SpritePhysicsMixin:
                 consider(correction + margin, correction, effect)
                 continue
 
-            tiles = layer.get("tiles", {})
-
-            # 计算精灵覆盖的图块范围
+        # --- 图块碰撞 ---
+        # 几何统一取自 static_world（与 depenetrate / sweep_test / raycast 同源），
+        # 不再直接读 MapModel：否则同一块图块在两处各算一套，解算与推出可能互相打架。
+        if axis == "x":
             # X 轴探测盒上下各缩进 1 像素：脚正好贴地/头正好贴天花板时不算横向碰撞，
             # 同时避免缩进过大导致「只压到墙边一条」时 x 轴看不见墙
+            probe_rect = [
+                sprite_rect[0],
+                sprite_rect[1] + 1,
+                sprite_rect[2],
+                sprite_rect[3] - 1,
+            ]
+        else:
+            # Y 轴探测盒左右各多 2 像素：x 轴修正把角色往外推一点点后也不会「踩空」
+            probe_rect = [
+                sprite_rect[0] - 2,
+                sprite_rect[1],
+                sprite_rect[2] + 2,
+                sprite_rect[3],
+            ]
+
+        def apply_tile(tile_left, tile_top, tile_right, tile_bottom, is_one_way):
+            """单个图块的轴向修正（索引路径与 MapModel 回退路径共用）。"""
+            nonlocal sprite_rect
+            if is_one_way and axis == "x":
+                return
+            if is_one_way and self._drop_through:
+                return
+
+            overlap_left = max(sprite_rect[0], tile_left)
+            overlap_top = max(sprite_rect[1], tile_top)
+            overlap_right = min(sprite_rect[2], tile_right)
+            overlap_bottom = min(sprite_rect[3], tile_bottom)
+            if overlap_right - overlap_left <= 0 or overlap_bottom - overlap_top <= 0:
+                return
+
+            if is_one_way and axis == "y":
+                # 单向平台：只有从上方落下来才踩得住
+                if self._prev_bottom_y <= tile_top:
+                    rect = self._get_hitbox_rect()
+                    if rect:
+                        delta = tile_top - rect[3] - 0.05
+                        consider(delta, delta, "ground")
+                return
+
             if axis == "x":
-                check_rect = [
-                    sprite_rect[0],
-                    sprite_rect[1] + 1,
-                    sprite_rect[2],
-                    sprite_rect[3] - 1,
-                ]
-                min_tile_x = math.floor(check_rect[0] / tile_size)
-                max_tile_x = math.floor(check_rect[2] / tile_size)
-                min_tile_y = math.floor(check_rect[1] / tile_size)
-                max_tile_y = math.floor(check_rect[3] / tile_size)
+                # 台阶自动上台：站在地面时，抬升不超过 _MAX_STEP_UP 的台阶直接踩上去
+                step_up = sprite_rect[3] - tile_top
+                if self._on_ground and 0 < step_up <= self._MAX_STEP_UP:
+                    self._y = tile_top - (sprite_rect[3] - self._y) - 0.05
+                    # 抬脚后必须刷新碰撞盒，否则一排相邻台阶会被连续抬多次
+                    sprite_rect = self._get_hitbox_rect() or sprite_rect
+                    return
+
+                dist_to_right = abs(sprite_rect[0] - tile_right)
+                dist_to_left = abs(sprite_rect[2] - tile_left)
+                if dist_to_right < dist_to_left:
+                    correction = tile_right - sprite_rect[0] + 0.05
+                else:
+                    correction = tile_left - sprite_rect[2] - 0.05
+                consider(correction, correction)
+                return
+
+            # y 轴
+            rect = self._get_hitbox_rect()
+            if not rect:
+                return
+
+            if direction > 0:
+                # 下落：脚原本在顶面之上才算落地。
+                # 从侧面蹭到墙/墙顶时这里直接跳过，交给 x 轴推出，
+                # 避免把正在上升的角色「吸」到墙顶并误判成着地
+                if self._prev_bottom_y > tile_top + 0.5:
+                    return
+                delta = tile_top - rect[3] - 0.05
+                consider(delta, delta, "ground")
+            elif direction < 0:
+                # 上升：头原本在底面之下才算撞天花板。
+                # 从侧面蹭到墙时跳过，跳跃不会被墙角打断
+                if self._prev_top_y < tile_bottom - 0.5:
+                    return
+                delta = tile_bottom - rect[1] + 0.05
+                consider(delta, delta, "ceiling")
             else:
-                # Y轴探测使用完整碰撞盒
-                # 策略：稍微加宽 Y 轴的探测范围（左右各多出 2 像素）
-                # 这样即使 X 轴修正把角色往外推了一点点，也不会导致"踩空"
-                min_tile_x = math.floor((sprite_rect[0] - 2) / tile_size)
-                max_tile_x = math.floor((sprite_rect[2] + 2) / tile_size)
+                # 本步没有上下移动（兜底）：按最近边推出，但不判定落地
+                overlap_up = tile_bottom - rect[1]
+                overlap_down = rect[3] - tile_top
+                if overlap_up < overlap_down:
+                    delta = tile_bottom - rect[1] + 0.05
+                else:
+                    delta = tile_top - rect[3] - 0.05
+                consider(delta, delta)
 
-                # 保持原有的 Y 范围不变
-                min_tile_y = math.floor(sprite_rect[1] / tile_size)
-                max_tile_y = math.floor(sprite_rect[3] / tile_size)
-
-            # 检查范围内的每个图块（需要 _MAP_MODEL 提供瓦片碰撞数据）
-            if st._MAP_MODEL:
+        static_world = st._CURRENT_MAP.get("static_world")
+        if static_world is not None:
+            for entry in static_world.solid.query_rect(*probe_rect):
+                if entry.source != "tile":
+                    continue
+                bbox = entry.bbox
+                apply_tile(
+                    bbox.left, bbox.top, bbox.right, bbox.bottom,
+                    entry.collision_type == "跳板",
+                )
+        elif st._MAP_MODEL:
+            # 索引构建失败时的兼容路径：仍按 MapModel 直接查图块（行为与旧版一致）
+            min_tile_x = math.floor(probe_rect[0] / tile_size)
+            max_tile_x = math.floor(probe_rect[2] / tile_size)
+            min_tile_y = math.floor(probe_rect[1] / tile_size)
+            max_tile_y = math.floor(probe_rect[3] / tile_size)
+            for layer in st._CURRENT_MAP.get("layers", []):
+                tiles = layer.get("tiles") or {}
                 for tile_x in range(min_tile_x, max_tile_x + 1):
                     for tile_y in range(min_tile_y, max_tile_y + 1):
-                        tile_pos = (tile_x, tile_y)
-                        if tile_pos not in tiles:
+                        tile_id = tiles.get((tile_x, tile_y))
+                        if not tile_id or tile_id <= 0:
                             continue
-                        tile_id = tiles[tile_pos]
-                        if tile_id <= 0:
-                            continue
-                        # 使用Tiled标准：通过firstgid范围查找瓦片集
-                        tile_id_int = int(tile_id)
                         resource_index, tile_index = _find_tileset_for_gid(
-                            tile_id_int, st._CURRENT_MAP["tile_sets"]
+                            int(tile_id), st._CURRENT_MAP["tile_sets"]
                         )
-
-                        # 获取图块碰撞状态
                         if not st._MAP_MODEL.get_tile_collision(resource_index, tile_index):
                             continue
-                        col_type = st._MAP_MODEL.get_tile_collision_type(
-                            resource_index, tile_index
+                        is_one_way = (
+                            st._MAP_MODEL.get_tile_collision_type(resource_index, tile_index)
+                            == "跳板"
                         )
-                        is_one_way = col_type == "跳板"
-
-                        if is_one_way and axis == "x":
-                            continue
-                        if is_one_way and self._drop_through:
-                            continue
-
                         collision_shape = st._MAP_MODEL.get_tile_collision_shape(
                             resource_index, tile_index
                         )
-
                         if collision_shape and "points" in collision_shape:
-                            points = collision_shape["points"]
                             # 编辑器保存的是归一化坐标(0~1)，需乘以 tile_size 转为像素
                             world_points = [
                                 (
                                     tile_x * tile_size + p[0] * tile_size,
                                     tile_y * tile_size + p[1] * tile_size,
                                 )
-                                for p in points
+                                for p in collision_shape["points"]
                             ]
-                            tile_left = min(p[0] for p in world_points)
-                            tile_top = min(p[1] for p in world_points)
-                            tile_right = max(p[0] for p in world_points)
-                            tile_bottom = max(p[1] for p in world_points)
+                            apply_tile(
+                                min(p[0] for p in world_points),
+                                min(p[1] for p in world_points),
+                                max(p[0] for p in world_points),
+                                max(p[1] for p in world_points),
+                                is_one_way,
+                            )
                         else:
-                            tile_left = tile_x * tile_size
-                            tile_top = tile_y * tile_size
-                            tile_right = tile_left + tile_size
-                            tile_bottom = tile_top + tile_size
-
-                        overlap_left = max(sprite_rect[0], tile_left)
-                        overlap_top = max(sprite_rect[1], tile_top)
-                        overlap_right = min(sprite_rect[2], tile_right)
-                        overlap_bottom = min(sprite_rect[3], tile_bottom)
-
-                        overlap_x = overlap_right - overlap_left
-                        overlap_y = overlap_bottom - overlap_top
-                        if overlap_x <= 0 or overlap_y <= 0:
-                            continue
-
-                        if is_one_way and axis == "y":
-                            if self._prev_bottom_y <= tile_top:
-                                rect = self._get_hitbox_rect()
-                                if rect:
-                                    delta = tile_top - rect[3] - 0.05
-                                    consider(delta, delta, "ground")
-                            continue
-
-                        if axis == "x":
-                            # 台阶自动上台：站在地面时，抬升不超过 _MAX_STEP_UP 的台阶直接踩上去
-                            step_up = sprite_rect[3] - tile_top
-                            if self._on_ground and 0 < step_up <= self._MAX_STEP_UP:
-                                self._y = tile_top - (sprite_rect[3] - self._y) - 0.05
-                                # 抬脚后必须刷新碰撞盒，否则一排相邻台阶会被连续抬多次
-                                sprite_rect = self._get_hitbox_rect() or sprite_rect
-                                continue
-
-                            dist_to_right = abs(sprite_rect[0] - tile_right)
-                            dist_to_left = abs(sprite_rect[2] - tile_left)
-
-                            if dist_to_right < dist_to_left:
-                                correction = tile_right - sprite_rect[0] + 0.05
-                            else:
-                                correction = tile_left - sprite_rect[2] - 0.05
-                            consider(correction, correction)
-
-                        elif axis == "y":
-                            rect = self._get_hitbox_rect()
-                            if not rect:
-                                continue
-
-                            if direction > 0:
-                                # 下落：脚原本在顶面之上才算落地。
-                                # 从侧面蹭到墙/墙顶时这里直接跳过，交给 x 轴推出，
-                                # 避免把正在上升的角色「吸」到墙顶并误判成着地
-                                if self._prev_bottom_y > tile_top + 0.5:
-                                    continue
-                                delta = tile_top - rect[3] - 0.05
-                                consider(delta, delta, "ground")
-                            elif direction < 0:
-                                # 上升：头原本在底面之下才算撞天花板。
-                                # 从侧面蹭到墙时跳过，跳跃不会被墙角打断
-                                if self._prev_top_y < tile_bottom - 0.5:
-                                    continue
-                                delta = tile_bottom - rect[1] + 0.05
-                                consider(delta, delta, "ceiling")
-                            else:
-                                # 本步没有上下移动（兜底）：按最近边推出，但不判定落地
-                                overlap_up = tile_bottom - rect[1]
-                                overlap_down = rect[3] - tile_top
-                                if overlap_up < overlap_down:
-                                    delta = tile_bottom - rect[1] + 0.05
-                                else:
-                                    delta = tile_top - rect[3] - 0.05
-                                consider(delta, delta)
+                            apply_tile(
+                                tile_x * tile_size,
+                                tile_y * tile_size,
+                                (tile_x + 1) * tile_size,
+                                (tile_y + 1) * tile_size,
+                                is_one_way,
+                            )
 
         # 应用本轴最合理的唯一修正
         self._contacts |= encounter_mask
