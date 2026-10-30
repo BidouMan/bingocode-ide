@@ -731,8 +731,8 @@ const paletteItems = computed<PaletteItem[]>(() => {
 })
 
 /** 按原图排布：每套图块集独立成块，保留原始列数与空格子 */
-/** 块间距取整格宽度，保证每套图块的格子始终压在网格线上 */
-const PALETTE_BLOCK_GAP = PALETTE_CELL
+/** 块与块之间不留空隙：新上传的图块集紧挨着排在右边 */
+const PALETTE_BLOCK_GAP = 0
 interface PaletteLayoutItem {
   item: PaletteItem
   left: number

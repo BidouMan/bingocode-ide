@@ -251,7 +251,6 @@ const fold = reactive({
   layer: true,
   transform: true,
   tileBasic: true,
-  tileTransform: true,
   tileSets: true,
 })
 
@@ -1070,6 +1069,26 @@ function onTileOneWayMarginInput(e: Event) {
   const raw = Number((e.target as HTMLInputElement).value)
   const margin = Number.isFinite(raw) ? Math.min(8, Math.max(0, raw)) : 0
   patchSelectedTile({ oneWayMargin: margin })
+}
+
+// ====== 碰撞层级（参考 Unity 的 Physics Layers；当前只做界面，尚未接入运行时） ======
+/** 勾选后才在下方展开设置 */
+const tilePhysicsEnabled = ref(false)
+const tileCollisionLayer = ref(1)
+const tileCollisionMask = reactive(new Set<number>([1]))
+const tilePhysicsMaterialOptions = [
+  { label: '默认', value: 'default' },
+  { label: '弹性', value: 'bouncy' },
+  { label: '粗糙', value: 'friction' },
+]
+
+function onTilePhysicsToggle(e: Event) {
+  tilePhysicsEnabled.value = (e.target as HTMLInputElement).checked
+}
+
+function toggleTileCollisionMask(n: number) {
+  if (tileCollisionMask.has(n)) tileCollisionMask.delete(n)
+  else tileCollisionMask.add(n)
 }
 
 // ====== 图块尺寸 ======
@@ -2102,57 +2121,59 @@ const tileSetGroups = computed(() => {
                 @update:model-value="onTileSizeChange"
               />
             </div>
-          </div>
-        </div>
 
-        <!-- 变换：整个图块图层一起位移 / 缩放 / 旋转（渲染接入前先占位） -->
-        <div class="mi-section" :class="{ open: fold.tileTransform }">
-          <button class="mi-head" :disabled="disabled" @click="fold.tileTransform = !fold.tileTransform">
-            <img :src="iconChevron" class="mi-chevron" alt="" />
-            <span class="mi-head-title">变换</span>
-          </button>
-          <div v-if="fold.tileTransform" class="mi-body">
-            <div class="att-row att-row-stacked">
-              <span class="att-label">位置</span>
-              <div class="att-axis-group">
-                <div class="att-axis-row">
-                  <span class="att-size-label">X</span>
-                  <input class="att-input att-input-no-spin" type="number" value="0" disabled />
-                </div>
-                <div class="att-axis-row">
-                  <span class="att-size-label">Y</span>
-                  <input class="att-input att-input-no-spin" type="number" value="0" disabled />
+            <!-- 碰撞层级：勾选后在下方展开设置（和单向碰撞一样的内联展开） -->
+            <div class="att-row">
+              <span class="att-label">碰撞层级</span>
+              <label class="att-checkbox">
+                <input
+                  type="checkbox"
+                  :checked="tilePhysicsEnabled"
+                  :disabled="disabled"
+                  @change="onTilePhysicsToggle"
+                />
+                <span class="att-checkbox-text">启用</span>
+              </label>
+            </div>
+            <template v-if="tilePhysicsEnabled">
+              <div class="layer-block">
+                <span class="layer-block-name">碰撞层</span>
+                <div class="layer-grid">
+                  <button
+                    v-for="n in 8"
+                    :key="`layer-${n}`"
+                    class="layer-cell"
+                    :class="{ 'layer-cell-active': tileCollisionLayer === n }"
+                    :disabled="disabled"
+                    @click="tileCollisionLayer = n"
+                  >{{ n }}</button>
                 </div>
               </div>
-            </div>
 
-            <div class="att-row att-row-stacked">
-              <span class="att-label">缩放</span>
-              <div class="att-axis-group">
-                <div class="att-axis-row">
-                  <span class="att-size-label">X</span>
-                  <input class="att-input att-input-no-spin" type="number" value="100" disabled />
-                </div>
-                <div class="att-axis-row">
-                  <span class="att-size-label">Y</span>
-                  <input class="att-input att-input-no-spin" type="number" value="100" disabled />
-                </div>
-                <div class="att-axis-row att-axis-lock">
-                  <span class="att-size-label">约束比例</span>
-                  <label class="att-checkbox">
-                    <input type="checkbox" checked disabled />
-                  </label>
+              <div class="layer-block">
+                <span class="layer-block-name">碰撞掩码</span>
+                <div class="layer-grid">
+                  <button
+                    v-for="n in 8"
+                    :key="`mask-${n}`"
+                    class="layer-cell"
+                    :class="{ 'layer-cell-active': tileCollisionMask.has(n) }"
+                    :disabled="disabled"
+                    @click="toggleTileCollisionMask(n)"
+                  >{{ n }}</button>
                 </div>
               </div>
-            </div>
 
-            <div class="att-row att-row-stacked">
-              <span class="att-label">旋转</span>
-              <div class="att-axis-group">
-                <input class="att-input att-input-no-spin" type="number" value="0" disabled />
-                <input class="att-range" type="range" min="-180" max="180" step="1" value="0" disabled />
+              <div class="att-row">
+                <span class="att-label">碰撞材质</span>
+                <CustomSelect
+                  class="att-select"
+                  model-value="default"
+                  :options="tilePhysicsMaterialOptions"
+                  disabled
+                />
               </div>
-            </div>
+            </template>
           </div>
         </div>
 
@@ -3008,5 +3029,52 @@ const tileSetGroups = computed(() => {
   min-width: 0;
   justify-content: center;
   padding: 0 4px;
+}
+
+/* ====== 碰撞层级（勾选后在面板内展开，和单向碰撞一致） ====== */
+.layer-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.layer-block-name {
+  color: #9ca0a4;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.layer-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+
+.layer-cell {
+  height: 26px;
+  background: rgb(34, 37, 43);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  color: #b9bdc2;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  cursor: default;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.layer-cell:hover:not(:disabled):not(.layer-cell-active) {
+  background: var(--border-light);
+}
+
+.layer-cell-active {
+  background: rgba(91, 251, 132, 0.16);
+  border-color: rgba(91, 251, 132, 0.6);
+  color: #e8eaec;
+  box-shadow: inset 0 0 0 1px rgba(91, 251, 132, 0.25);
+}
+
+.layer-cell:disabled {
+  opacity: 0.5;
 }
 </style>
