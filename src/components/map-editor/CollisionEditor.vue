@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted, nextTick } from 'vue'
+import { ref, watch, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { useMapStore, type MapResource } from '../../stores/map'
 import { useMapEditorStore } from '../../stores/mapEditor'
@@ -46,6 +46,10 @@ async function resolveImagePath(path: string): Promise<string> {
 }
 
 const canvasRef = ref<HTMLCanvasElement>()
+const editorRef = ref<HTMLDivElement>()
+/** 画布在界面上的显示边长：随下方工作区拖拽自适应，内部坐标仍是 tileSize */
+const canvasSize = ref(256)
+let resizeObserver: ResizeObserver | null = null
 let ctx: CanvasRenderingContext2D | null = null
 const collisionPoints = ref<{ x: number; y: number }[]>([])
 const draggingIndex = ref(-1)
@@ -115,14 +119,7 @@ function render() {
   const canvas = canvasRef.value
   ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-  // Checkerboard background
-  const checkSize = 16
-  for (let y = 0; y < tileSize; y += checkSize) {
-    for (let x = 0; x < tileSize; x += checkSize) {
-      ctx.fillStyle = ((x / checkSize + y / checkSize) % 2 === 0) ? '#2a2a2a' : '#3a3a3a'
-      ctx.fillRect(x, y, checkSize, checkSize)
-    }
-  }
+  // 棋盘格由外层容器 CSS 铺满，画布保持透明；图形和碰撞网格画在透明画布上
 
   // Draw tile/image
   const resource = mapStore.selectedResource
@@ -208,8 +205,15 @@ function defaultCollisionFromRect(rect: { x: number; y: number; w: number; h: nu
   ]
 }
 
-function saveCollision(target?: MapResource | null) {
-  const resource = target ?? mapStore.selectedResource
+/**
+ * 保存碰撞到指定图块 / 图片。
+ * 必须显式传 tileIndex：切换图块时 store 里已经是"新图块"，
+ * 若沿用 store 的值会把上一块的结果写到新块上（碰撞时有时无的元凶）。
+ */
+function saveCollision(
+  resource = mapStore.selectedResource,
+  tileIndex = mapStore.selectedTileIndex,
+) {
   if (!resource) return
   const isImageLayer = mapStore.activeLayer?.type === 'image'
 
@@ -218,31 +222,32 @@ function saveCollision(target?: MapResource | null) {
       points: collisionPoints.value.map(p => [p.x / tileSize, p.y / tileSize])
     }
     resource.collisionEnabled = collisionPoints.value.length > 0
-  } else {
-    const tileIndex = mapStore.selectedTileIndex
-    if (tileIndex < 0) return
-    const tileSet = mapStore.getTileSetForResource(resource)
-    if (!tileSet) return
-    while (tileSet.tiles.length <= tileIndex) {
-      tileSet.tiles.push({ collision: false, tag: '', collisionType: '图像' })
-    }
-    tileSet.tiles[tileIndex].collision = collisionPoints.value.length > 0
-    tileSet.tiles[tileIndex].collisionShape = {
-      points: collisionPoints.value.map(p => [
-        (p.x - contentOffset) / contentSize,
-        (p.y - contentOffset) / contentSize,
-      ])
-    }
+    return
+  }
+
+  if (tileIndex < 0) return
+  const tileSet = mapStore.getTileSetForResource(resource)
+  if (!tileSet) return
+  while (tileSet.tiles.length <= tileIndex) {
+    tileSet.tiles.push({ collision: false, tag: '', collisionType: '图像' })
+  }
+  tileSet.tiles[tileIndex].collision = collisionPoints.value.length > 0
+  tileSet.tiles[tileIndex].collisionShape = {
+    points: collisionPoints.value.map(p => [
+      (p.x - contentOffset) / contentSize,
+      (p.y - contentOffset) / contentSize,
+    ])
   }
 }
 
 function loadCollision() {
   const resource = mapStore.selectedResource
   if (!resource) { collisionPoints.value = []; return }
-  if (resource.collisionType === '图像') { collisionPoints.value = []; return }
 
   const isImageLayer = mapStore.activeLayer?.type === 'image'
   if (isImageLayer) {
+    // 图片图层：碰撞类型为「图像」等于没开碰撞
+    if (resource.collisionType === '图像') { collisionPoints.value = []; return }
     if (resource.collisionShape?.points?.length) {
       collisionPoints.value = resource.collisionShape.points.map(
         (p: number[]) => ({ x: p[0] * tileSize, y: p[1] * tileSize })
@@ -256,22 +261,25 @@ function loadCollision() {
         { x: contentOffset, y: contentOffset + contentSize },
       ]
     }
+    return
+  }
+
+  // 图块：只看这一块图块自己的碰撞数据，不受图块集整体 collisionType 影响
+  const tileIndex = mapStore.selectedTileIndex
+  if (tileIndex < 0) { collisionPoints.value = []; return }
+  const tileSet = mapStore.getTileSetForResource(resource)
+  const points = tileSet?.tiles[tileIndex]?.collisionShape?.points
+  if (points?.length) {
+    collisionPoints.value = points.map(
+      (p: number[]) => ({ x: p[0] * contentSize + contentOffset, y: p[1] * contentSize + contentOffset })
+    )
   } else {
-    const tileIndex = mapStore.selectedTileIndex
-    if (tileIndex < 0) { collisionPoints.value = []; return }
-    const tileSet = mapStore.getTileSetForResource(resource)
-    if (tileSet && tileSet.tiles[tileIndex]?.collisionShape?.points) {
-      collisionPoints.value = tileSet.tiles[tileIndex].collisionShape!.points.map(
-        (p: number[]) => ({ x: p[0] * contentSize + contentOffset, y: p[1] * contentSize + contentOffset })
-      )
-    } else {
-      collisionPoints.value = [
-        { x: contentOffset, y: contentOffset },
-        { x: contentOffset + contentSize, y: contentOffset },
-        { x: contentOffset + contentSize, y: contentOffset + contentSize },
-        { x: contentOffset, y: contentOffset + contentSize },
-      ]
-    }
+    collisionPoints.value = [
+      { x: contentOffset, y: contentOffset },
+      { x: contentOffset + contentSize, y: contentOffset },
+      { x: contentOffset + contentSize, y: contentOffset + contentSize },
+      { x: contentOffset, y: contentOffset + contentSize },
+    ]
   }
 }
 
@@ -292,7 +300,10 @@ function snapValue(val: number): number {
 function getCanvasPos(e: MouseEvent): { x: number; y: number } {
   if (!canvasRef.value) return { x: 0, y: 0 }
   const rect = canvasRef.value.getBoundingClientRect()
-  return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+  // 画布内部坐标固定为 tileSize，界面尺寸会随工作区高度缩放，这里换算回内部坐标
+  const scaleX = rect.width > 0 ? canvasRef.value.width / rect.width : 1
+  const scaleY = rect.height > 0 ? canvasRef.value.height / rect.height : 1
+  return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY }
 }
 
 function findAnchor(pos: { x: number; y: number }): number {
@@ -334,10 +345,11 @@ function onMouseDown(e: MouseEvent) {
       }
     }
     collisionPoints.value.push({ x: snapValue(pos.x), y: snapValue(pos.y) })
+    dirty = true
     saveCollision(); render()
   } else if (mapEditorStore.collisionTool === 'delete') {
     const idx = findAnchor(pos)
-    if (idx >= 0) { collisionPoints.value.splice(idx, 1); saveCollision(); render() }
+    if (idx >= 0) { collisionPoints.value.splice(idx, 1); dirty = true; saveCollision(); render() }
   } else if (mapEditorStore.collisionTool === 'move') {
     const idx = findAnchor(pos)
     if (idx >= 0) draggingIndex.value = idx
@@ -348,6 +360,7 @@ function onMouseMove(e: MouseEvent) {
   if (draggingIndex.value >= 0) {
     const pos = getCanvasPos(e)
     collisionPoints.value[draggingIndex.value] = { x: snapValue(pos.x), y: snapValue(pos.y) }
+    dirty = true
     render()
   }
 }
@@ -375,10 +388,28 @@ async function resetCollision() {
     ]
   }
   saveCollision()
+  dirty = false
   render()
 }
 
-let lastResource: MapResource | null = null
+/** 上一次正在编辑的目标：切走时把改动写回"这一块"，而不是新选中的那一块 */
+let lastTarget: { resource: MapResource; tileIndex: number } | null = null
+/** 当前这块是否被改动过：只有改过才在切换时回写，避免把默认整格误存成碰撞 */
+let dirty = false
+
+function currentTarget() {
+  const resource = mapStore.selectedResource
+  if (!resource) return null
+  const tileIndex = mapStore.activeLayer?.type === 'image' ? -1 : mapStore.selectedTileIndex
+  return { resource, tileIndex }
+}
+
+/** 切换选中前，把上一块的编辑结果写回上一块 */
+function flushPendingSave() {
+  if (!dirty || !lastTarget) return
+  saveCollision(lastTarget.resource, lastTarget.tileIndex)
+  dirty = false
+}
 
 // 当前碰撞是否启用（响应式，用于触发重绘）
 const currentCollisionEnabled = computed(() => {
@@ -399,13 +430,13 @@ watch(
     mapStore.selectedResourceIndex,
     mapStore.selectedTileIndex,
     mapStore.activeLayerIndex,
-    mapStore.selectedResource?.collisionType,
-    mapStore.selectedResource?.collisionEnabled,
+    mapStore.mapLoadCount,
   ],
   async () => {
-    if (lastResource && collisionPoints.value.length > 0) saveCollision(lastResource)
-    lastResource = mapStore.selectedResource ?? null
+    // 先把上一块的改动写回上一块，再加载新的一块
+    flushPendingSave()
     await preloadImage()
+    lastTarget = currentTarget()
     loadCollision()
     nextTick(render)
   }
@@ -419,23 +450,40 @@ watch(currentCollisionEnabled, () => {
 onMounted(async () => {
   if (canvasRef.value) {
     ctx = canvasRef.value.getContext('2d')
-    lastResource = mapStore.selectedResource ?? null
     await preloadImage()
+    lastTarget = currentTarget()
+    loadCollision()
     render()
   }
+  // 工作区可以拖拽改高度：画布取“可用宽高较小值”作为显示边长
+  if (editorRef.value && typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect
+      if (!box) return
+      const size = Math.max(80, Math.floor(Math.min(box.width, box.height)))
+      if (size !== canvasSize.value) canvasSize.value = size
+    })
+    resizeObserver.observe(editorRef.value)
+  }
+})
+
+onBeforeUnmount(() => {
+  flushPendingSave()
+  resizeObserver?.disconnect()
+  resizeObserver = null
 })
 
 defineExpose({ resetCollision })
 </script>
 
 <template>
-  <div class="col-editor">
+  <div ref="editorRef" class="col-editor">
     <canvas
       ref="canvasRef"
       :width="tileSize"
       :height="tileSize"
       class="col-canvas"
-      :style="{ imageRendering: imageRenderingStyle }"
+      :style="{ width: `${canvasSize}px`, height: `${canvasSize}px`, imageRendering: imageRenderingStyle }"
       @mousedown="onMouseDown"
       @mousemove="onMouseMove"
       @mouseup="onMouseUp"
@@ -446,21 +494,21 @@ defineExpose({ resetCollision })
 
 <style scoped>
 .col-editor {
+  flex: 1;
+  min-height: 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
+  justify-content: center;
+  padding: 0;
+  /* 棋盘格铺满整个碰撞预览区，画布只负责画图形与碰撞点 */
+  background: repeating-conic-gradient(#2a2a2a 0% 25%, #3a3a3a 0% 50%) 0 0 / 32px 32px;
 }
 
 .col-canvas {
-  width: 256px;
-  height: 256px;
-  min-width: 256px;
-  min-height: 256px;
-  background: rgb(30, 30, 30);
-  border: 1px solid var(--border-light);
-  border-radius: 4px;
+  display: block;
+  background: transparent;
+  border: none;
+  border-radius: 0;
   cursor: crosshair;
 }
 </style>

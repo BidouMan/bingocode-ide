@@ -82,8 +82,10 @@ export function useTilePainter(options: TilePainterOptions) {
   function handlePaintPointerDown(e: PointerEvent, pos: { x: number; y: number }) {
     // 绘制工具：左键绘制，右键擦除
     if (mapEditorStore.currentTool === 'draw' && mapStore.activeLayer && mapStore.activeLayer.type === 'drawing') {
-      if (e.button === 0 && mapStore.selectedTileIndex >= 0) {
-        const tileId = encodeTileId(mapStore.activeLayer.id, mapStore.selectedResourceIndex, mapStore.selectedTileIndex)
+      if (e.button === 0) {
+        const brush = mapStore.pickBrush()
+        if (brush.tileIndex < 0) return
+        const tileId = encodeTileId(mapStore.activeLayer.id, brush.resourceIndex, brush.tileIndex)
         mapStore.setTile(pos.x, pos.y, tileId)
         lastPaintedKey = `${pos.x},${pos.y}`
         updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
@@ -99,8 +101,10 @@ export function useTilePainter(options: TilePainterOptions) {
       lastPaintedKey = `${pos.x},${pos.y}`
       updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
       options.onTileErased(pos.x, pos.y)
-    } else if (mapEditorStore.currentTool === 'fill' && mapStore.selectedTileIndex >= 0 && mapStore.activeLayer) {
-      const tileId = encodeTileId(mapStore.activeLayer.id, mapStore.selectedResourceIndex, mapStore.selectedTileIndex)
+    } else if (mapEditorStore.currentTool === 'fill' && mapStore.activeLayer) {
+      const brush = mapStore.pickBrush()
+      if (brush.tileIndex < 0) return
+      const tileId = encodeTileId(mapStore.activeLayer.id, brush.resourceIndex, brush.tileIndex)
       floodFill(pos.x, pos.y, tileId)
     } else if (mapEditorStore.currentTool === 'move') {
       const layer = mapStore.activeLayer
@@ -162,11 +166,14 @@ export function useTilePainter(options: TilePainterOptions) {
             if (e.buttons === 2) {
               mapStore.setTile(pos.x, pos.y, 0)
               updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
-            } else if (mapStore.selectedTileIndex >= 0) {
-              const tileId = encodeTileId(mapStore.activeLayer.id, mapStore.selectedResourceIndex, mapStore.selectedTileIndex)
-              mapStore.setTile(pos.x, pos.y, tileId)
-              updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
-              options.onTilePainted(pos.x, pos.y, tileId)
+            } else {
+              const brush = mapStore.pickBrush()
+              if (brush.tileIndex >= 0) {
+                const tileId = encodeTileId(mapStore.activeLayer.id, brush.resourceIndex, brush.tileIndex)
+                mapStore.setTile(pos.x, pos.y, tileId)
+                updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
+                options.onTilePainted(pos.x, pos.y, tileId)
+              }
             }
           } else if (mapEditorStore.currentTool === 'erase') {
             mapStore.setTile(pos.x, pos.y, 0)

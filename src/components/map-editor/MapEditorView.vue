@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, watch, computed, nextTick } from 'vue'
+import { ref, reactive, watch, computed, nextTick, onBeforeUnmount } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import MapToolbar from './MapToolbar.vue'
 import MapCanvas from './MapCanvas.vue'
@@ -105,8 +105,53 @@ function onFocusShape(id: string) {
 
 const mapCanvasRef = ref<InstanceType<typeof MapCanvas>>()
 const layerPanelRef = ref<InstanceType<typeof LayerPanel>>()
-const tileResourceBarRef = ref<{ uploadLocalTiles: () => void } | null>(null)
+const tileResourceBarRef = ref<{
+  uploadLocalTiles: () => void
+  deleteSelectedTile: () => void
+  clearTiles: () => void
+} | null>(null)
 const propertyPanelRef = ref<InstanceType<typeof PropertyPanel>>()
+
+// ====== 画布下方图块工作区：可拖拽高度 ======
+/** 工作区高度：默认约为原来的 2/3，拖动顶部横条可调整 */
+const tileWorkspaceHeight = ref(204)
+const TILE_WORKSPACE_MIN_HEIGHT = 140
+const TILE_WORKSPACE_MAX_HEIGHT = 620
+let resizingTileWorkspace = false
+let resizeStartY = 0
+let resizeStartHeight = 0
+
+function onTileWorkspaceResizeStart(e: PointerEvent) {
+  if (e.button !== 0) return
+  e.preventDefault()
+  resizingTileWorkspace = true
+  resizeStartY = e.clientY
+  resizeStartHeight = tileWorkspaceHeight.value
+  document.body.style.cursor = 'row-resize'
+  window.addEventListener('pointermove', onTileWorkspaceResizeMove)
+  window.addEventListener('pointerup', onTileWorkspaceResizeEnd)
+}
+
+function onTileWorkspaceResizeMove(e: PointerEvent) {
+  if (!resizingTileWorkspace) return
+  const next = resizeStartHeight + (resizeStartY - e.clientY)
+  tileWorkspaceHeight.value = Math.min(
+    TILE_WORKSPACE_MAX_HEIGHT,
+    Math.max(TILE_WORKSPACE_MIN_HEIGHT, Math.round(next)),
+  )
+}
+
+function onTileWorkspaceResizeEnd() {
+  if (!resizingTileWorkspace) return
+  resizingTileWorkspace = false
+  document.body.style.cursor = ''
+  window.removeEventListener('pointermove', onTileWorkspaceResizeMove)
+  window.removeEventListener('pointerup', onTileWorkspaceResizeEnd)
+}
+
+onBeforeUnmount(() => {
+  onTileWorkspaceResizeEnd()
+})
 
 // 切换图层 / 地图 / 右栏分页后把属性面板滚回顶部：否则会停留在上一页的滚动位置，看起来像空白
 watch(
@@ -519,14 +564,33 @@ defineExpose({ switchToMap, placeImageResource })
               </button>
             </div>
           </div>
-          <!-- 图块模式：素材面板从画布下方展开 -->
-          <TileResourceBar
+          <!-- 图块模式：画布下方的图块工作区（左调色板 / 右碰撞预览，高度可拖拽） -->
+          <div
             v-if="mapStore.activeMode === 'tile'"
-            ref="tileResourceBarRef"
-            :disabled="!hasMaps"
-            @open-library="onOpenLibrary"
-            @select-tile="(rIdx, tIdx) => mapStore.selectTile(rIdx, tIdx)"
-          />
+            class="tile-workspace"
+            :style="{ height: `${tileWorkspaceHeight}px` }"
+          >
+            <div
+              class="tile-workspace-resizer"
+              v-tooltip="'拖动调整高度'"
+              @pointerdown="onTileWorkspaceResizeStart"
+            />
+            <div class="tile-workspace-body">
+              <div class="tile-workspace-palette">
+                <TileResourceBar
+                  ref="tileResourceBarRef"
+                  :disabled="!hasMaps"
+                  @open-library="onOpenLibrary"
+                  @select-tile="(rIdx, tIdx) => mapStore.selectTile(rIdx, tIdx)"
+                />
+              </div>
+              <div class="tile-workspace-collision">
+                <TileCollisionPanel
+                  :key="`${mapStore.currentMapPath}-${mapStore.activeLayer?.id ?? -1}`"
+                />
+              </div>
+            </div>
+          </div>
           <div class="map-info-bar">
             <span class="info-spacer" />
             <span class="info-label">场景大小:{{ mapStore.mapData.width * mapStore.mapData.tileSize }}×{{ mapStore.mapData.height * mapStore.mapData.tileSize }}</span>
@@ -572,16 +636,13 @@ defineExpose({ switchToMap, placeImageResource })
             @transform-changed="onImageTransformChanged"
             @focus-marker="onFocusMarker"
             @focus-shape="onFocusShape"
+            @open-tile-library="onOpenLibrary"
+            @new-tileset-group="mapStore.addTilesetGroup()"
+            @upload-tile-files="tileResourceBarRef?.uploadLocalTiles()"
+            @delete-tile-brush="tileResourceBarRef?.deleteSelectedTile()"
+            @clear-tile-brushes="tileResourceBarRef?.clearTiles()"
           />
         </div>
-        <!-- 图块碰撞编辑器只在「图块」分页显示；v-show 保活，切分页不重新加载素材 -->
-        <template v-if="mapStore.activeMode === 'tile'">
-          <TileCollisionPanel
-            v-show="rightTab === 'tile'"
-            :key="`${mapStore.currentMapPath}-${mapStore.activeLayer?.id ?? -1}`"
-            class="right-collision"
-          />
-        </template>
         <!-- 底部信息栏常驻，和左侧「图层管理」、画布「坐标」保持同一结构 -->
         <div class="right-info-bar">
           <span class="right-info-text">{{ rightInfoText }}</span>
@@ -692,6 +753,91 @@ defineExpose({ switchToMap, placeImageResource })
 .map-canvas-area {
   flex: 1;
   min-height: 0;
+}
+
+/* 画布下方的图块工作区：左调色板 + 右碰撞预览，顶部两排工具栏拼成一条顶栏 */
+.tile-workspace {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+  background: var(--bg-root);
+}
+
+/* 拖拽条：压在上边界上，不占布局高度（否则会多出一条空带） */
+.tile-workspace-resizer {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 6px;
+  z-index: 10;
+  cursor: row-resize;
+}
+
+.tile-workspace-resizer::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 2px;
+  height: 2px;
+  background: transparent;
+  transition: background 0.12s;
+}
+
+.tile-workspace-resizer:hover::before {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.tile-workspace-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.tile-workspace-palette {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.tile-workspace-palette :deep(.tile-resource-bar) {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: auto;
+  border-top: none;
+}
+
+/* 调色板工具栏与碰撞工具栏对齐成同一条顶栏：与顶部工具栏同高 44px */
+.tile-workspace-palette :deep(.bar-toolbar) {
+  height: 44px;
+  padding: 0 8px;
+  background: rgb(26, 28, 33);
+  border-bottom: 1px solid var(--border);
+}
+
+/* 收起按钮在图中工作区里不再使用：调色板始终占满左侧 */
+.tile-workspace-palette :deep(.collapse-btn) {
+  display: none;
+}
+
+.tile-workspace-collision :deep(.col-toolbar) {
+  height: 44px;
+  padding: 0 8px;
+  background: rgb(26, 28, 33);
+  border-bottom: 1px solid var(--border);
+}
+
+/* 碰撞预览宽度：4 个按钮不挤，和左侧调色板比例更协调 */
+.tile-workspace-collision {
+  width: 200px;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
 }
 
 /* ─── 浮动视图工具条（画布右下；与角色绘制页 / 代码编辑器胶囊风格一致）─── */
@@ -814,10 +960,6 @@ defineExpose({ switchToMap, placeImageResource })
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-}
-
-.right-collision {
-  flex-shrink: 0;
 }
 
 /* 右栏底部信息栏：与画布 / 图层区域的信息栏同款 */

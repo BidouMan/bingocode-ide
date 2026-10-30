@@ -8,7 +8,7 @@ import iconDelAnchor from '../../assets/icons/删除锚点.svg'
 import iconResetAnchor from '../../assets/icons/重置锚点.svg'
 
 /**
- * 图块模式的素材碰撞编辑区：工具条 + 256×256 编辑画布。
+ * 图块模式的素材碰撞编辑区：工具条 + 自适应碰撞画布（内部坐标 256×256）。
  * 图像模式不使用该区域（图片碰撞在画布上按实例编辑）。
  */
 const mapEditorStore = useMapEditorStore()
@@ -55,7 +55,8 @@ const collisionEditorRef = ref<InstanceType<typeof CollisionEditor>>()
 .tile-collision-panel {
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
+  flex: 1 1 auto;
+  min-height: 0;
   /* 与绘制/属性面板一致，底部信息栏才是更深的一整条 */
   background: var(--bg-base);
 }
@@ -63,7 +64,7 @@ const collisionEditorRef = ref<InstanceType<typeof CollisionEditor>>()
 .col-toolbar {
   display: flex;
   align-items: center;
-  height: 40px;
+  height: 44px;
   padding: 0 8px;
   gap: 6px;
   flex-shrink: 0;
@@ -74,22 +75,35 @@ const collisionEditorRef = ref<InstanceType<typeof CollisionEditor>>()
   align-items: center;
   justify-content: center;
   flex: 1;
-  height: 24px;
-  background: rgb(40, 43, 52);
-  border: none;
+  height: 28px;
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 4px;
   cursor: default;
   padding: 2px;
-  transition: background 0.15s;
+  transition: background 0.15s, border-color 0.15s;
 }
 
 .col-tool-btn:hover {
-  background: var(--bg-hover);
+  background: rgba(255, 255, 255, 0.07);
 }
 
 .col-tool-active {
-  background: var(--border-light);
-  border: 1px solid rgb(65, 69, 82);
+  position: relative;
+  background: rgb(46, 49, 58);
+  border-color: var(--border-light);
+}
+
+/* 选中指示：绿色小条（与绘制图层工具栏一致，画在按钮外侧下沿） */
+.col-tool-active::before {
+  content: '';
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  bottom: -6px;
+  height: 2.5px;
+  border-radius: 1.25px;
+  background: var(--accent);
 }
 
 .col-tool-icon {

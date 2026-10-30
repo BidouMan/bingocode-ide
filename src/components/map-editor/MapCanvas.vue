@@ -4151,21 +4151,34 @@ const markerIconSvg = computed(() =>
     .replace(/fill:white/gi, 'fill="currentColor"'),
 )
 
+/**
+ * 把视口居中到某个世界坐标点。
+ * 碰撞叠加层、选区、画笔光标、矢量层都按屏幕坐标绘制，视口一动手动重绘它们，
+ * 否则会出现「碰撞体停留在旧位置、点一下画布才对齐」的错位。
+ */
+function centerOnWorld(x: number, y: number) {
+  if (!app) return
+  const scale = viewport.currentScale.value
+  app.stage.x = app.screen.width / 2 - x * scale
+  app.stage.y = app.screen.height / 2 - y * scale
+  viewport.redraw()
+  collision.drawOverlay()
+  drawSelectionOverlay()
+  redrawBrushCursor()
+  syncVectorGeometry()
+  scheduleUpperSnapshotRefresh()
+  app.render()
+}
+
 /** 标记管理里双击 / 定位：把视口居中到该标记 */
 function centerMarker(id: string) {
-  if (!app) return
   const marker = mapStore.mapData.markers.find(m => m.id === id)
   if (!marker) return
-  const scale = viewport.currentScale.value
-  app.stage.x = app.screen.width / 2 - marker.x * scale
-  app.stage.y = app.screen.height / 2 - marker.y * scale
-  viewport.redraw()
-  app.render()
+  centerOnWorld(marker.x, marker.y)
 }
 
 /** 形状列表里双击定位：把视口居中到该形状的包围盒中心 */
 function centerShape(id: string) {
-  if (!app) return
   const layer = mapStore.activeShapeLayer
   const shape = layer?.shapes.find(s => s.id === id)
   if (!shape || shape.points.length === 0) return
@@ -4179,11 +4192,7 @@ function centerShape(id: string) {
     if (y < minY) minY = y
     if (y > maxY) maxY = y
   }
-  const scale = viewport.currentScale.value
-  app.stage.x = app.screen.width / 2 - ((minX + maxX) / 2) * scale
-  app.stage.y = app.screen.height / 2 - ((minY + maxY) / 2) * scale
-  viewport.redraw()
-  app.render()
+  centerOnWorld((minX + maxX) / 2, (minY + maxY) / 2)
 }
 
 /** 只渲染未隐藏的标记；临时「显示隐藏标记」时把隐藏项也带上（弱化显示，便于重新选中） */

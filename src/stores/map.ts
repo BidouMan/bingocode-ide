@@ -23,6 +23,15 @@ export interface TileSet {
   tiles: TileData[]
 }
 
+/**
+ * 图块集分组：界面上的一张「图块集」。
+ * 同一画布上传的图块默认都归入第一个分组，只有用户手动新建才会产生新分组。
+ */
+export interface TilesetGroup {
+  id: string
+  name: string
+}
+
 interface MapLayerBase {
   id: number
   name: string
@@ -114,6 +123,8 @@ export interface MapResource {
   collisionType: string
   collisionEnabled: boolean
   collisionShape?: { points: number[][] }
+  /** 所属图块集分组（缺省视为第一个分组，兼容旧地图） */
+  groupId?: string
 }
 
 // 新增素材时 id/firstgid 由 store 统一分配
@@ -182,6 +193,8 @@ export interface MapData {
   resources: MapResource[]
   layers: MapLayer[]
   tileSets: TileSet[]
+  // 图块集分组：界面上的图块集列表；缺省时视为只有一个分组
+  tilesetGroups?: TilesetGroup[]
   // 图块笔刷调色板：每个图块一个独立条目（顺序=界面显示顺序），缺省时由资源自动生成
   tilePalette?: TilePaletteEntry[]
   // 相机设置（缺省视为未启用）
@@ -193,6 +206,9 @@ export interface MapData {
 export interface TilePaletteEntry {
   resourceId: string
   tileIndex: number
+  /** 移动工具固化后的格子坐标（列 / 行）；缺省时按原图自动排列 */
+  col?: number
+  row?: number
 }
 
 export type MapTool = 'move' | 'select' | 'draw' | 'erase' | 'fill'
@@ -312,6 +328,38 @@ export const useMapStore = defineStore('map', () => {
 
   function createResourceId(): string {
     return `res_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+  }
+
+  // ====== 图块集分组 ======
+  /** 保证至少有第一个图块集：旧地图与新建地图都从「图块集 1」开始 */
+  function ensureTilesetGroups(): TilesetGroup[] {
+    if (!mapData.value.tilesetGroups || mapData.value.tilesetGroups.length === 0) {
+      mapData.value.tilesetGroups = [{ id: createResourceId(), name: '图块集 1' }]
+    }
+    return mapData.value.tilesetGroups
+  }
+
+  /** 用户手动新建图块集：之后的图块上传都会进入这个新分组 */
+  function addTilesetGroup(name?: string): string {
+    const groups = mapData.value.tilesetGroups ?? []
+    const group: TilesetGroup = {
+      id: createResourceId(),
+      name: (name ?? '').trim() || `图块集 ${groups.length + 1}`,
+    }
+    mapData.value.tilesetGroups = [...groups, group]
+    return group.id
+  }
+
+  function renameTilesetGroup(id: string, name: string) {
+    const group = mapData.value.tilesetGroups?.find(g => g.id === id)
+    if (group && name.trim()) group.name = name.trim()
+  }
+
+  /** 素材所属图块集：旧地图没有 groupId 时视为第一个分组 */
+  function tilesetGroupIdOf(resource: MapResource | null): string {
+    if (!resource) return ''
+    if (resource.groupId) return resource.groupId
+    return mapData.value.tilesetGroups?.[0]?.id ?? ''
   }
 
   function setMapPath(path: string) {
@@ -572,6 +620,11 @@ export const useMapStore = defineStore('map', () => {
       id: input.id || createResourceId(),
       firstgid: input.firstgid ?? nextFirstgid,
     }
+    // 图块素材默认并入最后一个图块集（同一画布上传的图块都算同一集）
+    if (resource.resourceType !== 'image' && !resource.groupId) {
+      const groups = ensureTilesetGroups()
+      resource.groupId = groups[groups.length - 1].id
+    }
     mapData.value.resources.push(resource)
     mapData.value.tileSets.push({
       id: resource.id,
@@ -604,7 +657,19 @@ export const useMapStore = defineStore('map', () => {
   }
 
   function setTilePalette(entries: TilePaletteEntry[]) {
-    mapData.value.tilePalette = entries.map(e => ({ resourceId: e.resourceId, tileIndex: e.tileIndex }))
+    // 重建调色板时保留已有的格子坐标，否则用户摆好的位置会被打回自动排列
+    const prev = new Map(
+      (mapData.value.tilePalette ?? []).map(e => [`${e.resourceId}:${e.tileIndex}`, e]),
+    )
+    mapData.value.tilePalette = entries.map(e => {
+      const old = prev.get(`${e.resourceId}:${e.tileIndex}`)
+      return {
+        resourceId: e.resourceId,
+        tileIndex: e.tileIndex,
+        col: e.col ?? old?.col,
+        row: e.row ?? old?.row,
+      }
+    })
   }
 
   function movePaletteEntry(from: number, to: number) {
@@ -615,6 +680,65 @@ export const useMapStore = defineStore('map', () => {
     const [item] = arr.splice(from, 1)
     arr.splice(clamped, 0, item)
     mapData.value.tilePalette = arr
+  }
+
+  /** 把当前自动排列固化成格子坐标（移动工具第一次拖动时调用，避免其余图块重新排列） */
+  function setPaletteCells(cells: { resourceId: string; tileIndex: number; col: number; row: number }[]) {
+    const list = mapData.value.tilePalette
+    if (!list?.length) return
+    const byKey = new Map(cells.map(c => [`${c.resourceId}:${c.tileIndex}`, c]))
+    for (const entry of list) {
+      const cell = byKey.get(`${entry.resourceId}:${entry.tileIndex}`)
+      if (!cell) continue
+      entry.col = cell.col
+      entry.row = cell.row
+    }
+  }
+
+  /** 单个图块挪到指定格子（移动 / 交换时由界面调用） */
+  function setPaletteEntryCell(resourceId: string, tileIndex: number, col: number, row: number) {
+    const entry = mapData.value.tilePalette?.find(
+      e => e.resourceId === resourceId && e.tileIndex === tileIndex,
+    )
+    if (!entry) return
+    entry.col = col
+    entry.row = row
+  }
+
+  // ====== 随机绘制（参照 Godot 的随机绘制） ======
+  /** 开启后画布上每一格都从随机池里挑一块画 */
+  const randomBrushEnabled = ref(false)
+  const randomBrushPool = ref<{ resourceId: string; tileIndex: number }[]>([])
+  /** 散布（同 Godot 的 Scattering）：0~100，越大越可能这一格干脆不画 */
+  const randomBrushScatter = ref(0)
+
+  function setRandomBrush(enabled: boolean, pool: { resourceId: string; tileIndex: number }[] = []) {
+    randomBrushEnabled.value = enabled
+    randomBrushPool.value = enabled ? pool : []
+  }
+
+  function setRandomBrushScatter(percent: number) {
+    randomBrushScatter.value = Math.max(0, Math.min(100, Math.round(percent)))
+  }
+
+  /** 当前该画的图块：随机模式下从池子里随机取一块，否则用当前画笔；散布命中时这一格不画 */
+  function pickBrush(): { resourceIndex: number; tileIndex: number } {
+    const pool = randomBrushPool.value
+    if (randomBrushEnabled.value) {
+      // 散布：按概率整格留空，形成自然的稀疏效果
+      if (randomBrushScatter.value > 0 && Math.random() * 100 < randomBrushScatter.value) {
+        return { resourceIndex: -1, tileIndex: -1 }
+      }
+      if (pool.length > 1) {
+        const pick = pool[Math.floor(Math.random() * pool.length)]
+        const index = activeLayerResources.value.findIndex(r => r.id === pick.resourceId)
+        if (index >= 0) return { resourceIndex: index, tileIndex: pick.tileIndex }
+      }
+    }
+    return {
+      resourceIndex: selectedResourceIndex.value,
+      tileIndex: selectedTileIndex.value,
+    }
   }
 
   function removePaletteEntry(index: number) {
@@ -987,7 +1111,12 @@ export const useMapStore = defineStore('map', () => {
     return id
   }
 
-  function setTileCollision(tileSetIndex: number, tileIndex: number, collision: boolean) {
+  function setTileCollision(
+    tileSetIndex: number,
+    tileIndex: number,
+    collision: boolean,
+    defaultShape?: { points: number[][] },
+  ) {
     const tileSet = mapData.value.tileSets[tileSetIndex]
     if (!tileSet) return
     while (tileSet.tiles.length <= tileIndex) {
@@ -997,7 +1126,12 @@ export const useMapStore = defineStore('map', () => {
         collisionType: '图像',
       })
     }
-    tileSet.tiles[tileIndex].collision = collision
+    const tile = tileSet.tiles[tileIndex]
+    tile.collision = collision
+    // 开启碰撞时没有形状就补一个默认的整块矩形，碰撞编辑器里可以直接微调
+    if (collision && !tile.collisionShape && defaultShape) {
+      tile.collisionShape = defaultShape
+    }
   }
 
   function setTileCollisionType(tileSetIndex: number, tileIndex: number, collisionType: string) {
@@ -1014,6 +1148,20 @@ export const useMapStore = defineStore('map', () => {
     tileSet.tiles[tileIndex].collision = collisionType !== '图像'
   }
 
+  /** 图块分类（= 图块 tag，代码里 is_touch("分类名") 用） */
+  function setTileTag(tileSetIndex: number, tileIndex: number, tag: string) {
+    const tileSet = mapData.value.tileSets[tileSetIndex]
+    if (!tileSet) return
+    while (tileSet.tiles.length <= tileIndex) {
+      tileSet.tiles.push({
+        collision: false,
+        tag: '',
+        collisionType: '图像',
+      })
+    }
+    tileSet.tiles[tileIndex].tag = tag
+  }
+
   return {
     currentMapPath,
     mapData,
@@ -1026,6 +1174,10 @@ export const useMapStore = defineStore('map', () => {
     selectedResource,
     getTileSetForResource,
     tileSetIndexOfResource,
+    ensureTilesetGroups,
+    addTilesetGroup,
+    renameTilesetGroup,
+    tilesetGroupIdOf,
     setMapPath,
     loadMap,
     newMap,
@@ -1046,6 +1198,14 @@ export const useMapStore = defineStore('map', () => {
     addResource,
     addPaletteEntries,
     setTilePalette,
+    setPaletteCells,
+    setPaletteEntryCell,
+    randomBrushEnabled,
+    randomBrushPool,
+    randomBrushScatter,
+    setRandomBrush,
+    setRandomBrushScatter,
+    pickBrush,
     movePaletteEntry,
     removePaletteEntry,
     removeResource,
@@ -1065,6 +1225,7 @@ export const useMapStore = defineStore('map', () => {
     removeMarker,
     setTileCollision,
     setTileCollisionType,
+    setTileTag,
     selectedImageLayerId,
     selectedImage,
     activeShapeLayer,

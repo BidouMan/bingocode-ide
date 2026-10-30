@@ -243,6 +243,8 @@ function onToolAreaWheel(e: WheelEvent) {
   background: rgb(72, 75, 82);
 }
 
+/* 常驻开关（标记 / 网格 / 吸附等）只保留选中底色，不画绿线：
+   绿线专门表示"当前正在使用的工具"，避免和工具切换混淆 */
 .toolbar-btn-active {
   background: rgb(46, 49, 58);
   border: 1px solid var(--border-light);

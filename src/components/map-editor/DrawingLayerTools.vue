@@ -51,6 +51,23 @@ const drawingTools: { id: MapTool; icon: string; label: string }[] = [
 .toolbar-btn:disabled:hover { background: transparent; }
 .toolbar-btn:active { background: rgb(72, 75, 82); }
 .toolbar-btn-active { background: rgb(46, 49, 58); border: 1px solid var(--border-light); }
+
+/* 选中指示：绿色小条（与绘制图像图层的工具栏一致，画在按钮外侧下沿） */
+.toolbar-btn-active {
+  position: relative;
+}
+
+.toolbar-btn-active::before {
+  content: '';
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  bottom: -6px;
+  height: 2.5px;
+  border-radius: 1.25px;
+  background: var(--accent);
+}
+
 .toolbar-btn-active:hover { background: var(--border-light); }
 .toolbar-icon { width: 20px; height: 20px; flex-shrink: 0; }
 </style>

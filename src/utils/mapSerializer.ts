@@ -18,8 +18,10 @@ export interface MapSaveData {
   resources?: ResourceSaveData[]
   layers: LayerSaveData[]
   tilesets: TilesetSaveData[]
-  // 图块笔刷调色板（顺序=界面显示顺序）
-  tilePalette?: { resourceId: string; tileIndex: number }[]
+  // 图块集分组：界面上的图块集列表（缺省视为只有一个）
+  tilesetGroups?: { id: string; name: string }[]
+  // 图块笔刷调色板（顺序=界面显示顺序；col/row 为移动工具摆好的格子坐标）
+  tilePalette?: { resourceId: string; tileIndex: number; col?: number; row?: number }[]
   // 相机设置（引擎运行时读取）
   camera?: {
     enabled: boolean
@@ -94,6 +96,8 @@ export interface ResourceSaveData {
   collisionType: string
   collisionEnabled: boolean
   collisionShape?: { points: number[][] }
+  /** 所属图块集分组 */
+  groupId?: string
 }
 
 export interface ImageSaveData {
@@ -144,7 +148,8 @@ export interface MapLoadData {
   resources: any[]
   layers: any[]
   tileSets: any[]
-  tilePalette?: { resourceId: string; tileIndex: number }[]
+  tilesetGroups?: { id: string; name: string }[]
+  tilePalette?: { resourceId: string; tileIndex: number; col?: number; row?: number }[]
   camera?: {
     enabled: boolean
     target?: string
@@ -229,6 +234,7 @@ export function serializeMap(mapData: any): MapSaveData {
     collisionType: r.collisionType || '图像',
     collisionEnabled: r.collisionEnabled || false,
     collisionShape: r.collisionShape,
+    groupId: r.groupId || undefined,
   })
 
   const mapResources = (mapData.resources || []).map(serializeResource)
@@ -333,6 +339,7 @@ export function serializeMap(mapData: any): MapSaveData {
     resources: mapResources,
     layers,
     tilesets,
+    tilesetGroups: mapData.tilesetGroups?.map((g: any) => ({ id: g.id, name: g.name })),
     tilePalette: mapData.tilePalette,
     camera: mapData.camera,
     markers: (mapData.markers || []).map((m: any) => ({
@@ -437,6 +444,7 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
       collisionType: r.collisionType || '图像',
       collisionEnabled: r.collisionEnabled || false,
       collisionShape: r.collisionShape,
+      groupId: r.groupId,
     }
   }
 
@@ -604,6 +612,9 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
     resources,
     layers,
     tileSets,
+    tilesetGroups: Array.isArray(data.tilesetGroups)
+      ? data.tilesetGroups.map(g => ({ id: String(g.id), name: String(g.name || '图块集') }))
+      : undefined,
     tilePalette: data.tilePalette,
     camera: data.camera
       ? {

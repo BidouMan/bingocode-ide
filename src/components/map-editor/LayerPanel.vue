@@ -13,7 +13,7 @@ import iconPaint from '../../assets/icons/创建绘制图层.svg'
 import iconImageLayer from '../../assets/icons/图像图层.svg'
 import iconLibrary from '../../assets/icons/图片库.svg'
 import iconUpload from '../../assets/icons/上传本地图片资源.svg'
-import iconCollisionType from '../../assets/icons/hitbox.svg'
+import iconCollisionType from '../../assets/icons/重置锚点.svg'
 
 const props = defineProps<{
   disabled?: boolean

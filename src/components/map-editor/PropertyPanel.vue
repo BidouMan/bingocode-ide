@@ -16,7 +16,7 @@ defineProps<{
   disabled?: boolean
   /** 顶部已切到「形状」分页时为 true：显示形状检视器 + 形状列表，否则显示地图 / 图层属性 */
   shapePage?: boolean
-  /** 顶部已切到「图块」分页时为 true：只显示图块设置（碰撞编辑器在右栏底部） */
+  /** 顶部已切到「图块」分页时为 true：只显示图块设置（碰撞编辑器在画布下方） */
   tilePage?: boolean
 }>()
 
@@ -27,6 +27,12 @@ const emit = defineEmits<{
   'focus-marker': [id: string]
   /** 形状列表里请求把视口居中到某个形状 */
   'focus-shape': [id: string]
+  /** 图块页里的图块集操作：新建图块集 / 本地上传 / 删除选中 / 清空 */
+  'open-tile-library': []
+  'new-tileset-group': []
+  'upload-tile-files': []
+  'delete-tile-brush': []
+  'clear-tile-brushes': []
 }>()
 
 const mapStore = useMapStore()
@@ -239,7 +245,15 @@ onBeforeUnmount(() => {
 })
 
 /** 地图 / 图层检视器分区折叠状态（与标记检视器共用同一套外观） */
-const fold = reactive({ map: true, scene: true, layer: true, transform: true, tile: true })
+const fold = reactive({
+  map: true,
+  scene: true,
+  layer: true,
+  transform: true,
+  tileBasic: true,
+  tileTransform: true,
+  tileSets: true,
+})
 
 /** 标记类型：内置常用的几种，最后一项可输入自定义类型 */
 const MARKER_TYPE_PRESETS = [
@@ -383,12 +397,6 @@ const showSlopeSettings = ref(false)
 /** 图层视差：后续版本实现，先占位展示设置项 */
 const showParallaxSettings = ref(false)
 
-const collisionTypeOptions = [
-  { label: '墙体', value: '墙体' },
-  { label: '跳板', value: '跳板' },
-  { label: '图像', value: '图像' },
-  { label: '自定义', value: '自定义' },
-]
 const isTileMode = computed(() => mapStore.activeMode === 'tile')
 const isShapeMode = computed(() => mapStore.activeMode === 'shape')
 const isImageMode = computed(() => mapStore.activeMode === 'image')
@@ -676,16 +684,6 @@ function focusShapeFromList(id: string) {
   emit('focus-shape', id)
 }
 
-// ====== 面板信息（只读展示，用于填充属性区） ======
-/** 当前图块图层已绘制的瓦片数量 */
-const tileCount = computed(() => {
-  const layer = mapStore.activeLayer
-  if (!layer || layer.type !== 'drawing') return 0
-  return Object.keys(layer.tiles).length
-})
-const tileSetCount = computed(() => mapStore.mapData.tileSets.length)
-
-
 // ====== 图像变换（位置 / 旋转 / 缩放） ======
 // 位置与旋转按用户坐标显示：原点在地图左下角、y 向上为正、角度逆时针为正；
 // 内部仍以世界坐标（左上原点、y 向下）存储，只在显示/输入时换算。
@@ -926,95 +924,110 @@ const selectedTileData = computed(() => {
   return tileSet.tiles[mapStore.selectedTileIndex] ?? null
 })
 
-const collisionTypeValue = computed(() => {
-  const tileData = selectedTileData.value
-  if (tileData) return tileData.collisionType || '图像'
-  const resource = mapStore.selectedResource
-  if (resource) return resource.collisionType || '图像'
-  return mapStore.mapData.collisionType || '图像'
+// ====== 图块基础设置：类型（= 图块 tag）+ 尺寸 ======
+const TILE_CATEGORY_CUSTOM = '自定义'
+const tileCategoryCustomMode = ref(false)
+watch(
+  () => [mapStore.activeLayerIndex, mapStore.selectedResourceIndex, mapStore.selectedTileIndex],
+  () => { tileCategoryCustomMode.value = false },
+)
+
+const tileCategoryStats = computed(() => {
+  const counts = new Map<string, number>()
+  for (const tileSet of mapStore.mapData.tileSets) {
+    for (const tile of tileSet.tiles) {
+      const tag = (tile.tag || '').trim()
+      if (tag) counts.set(tag, (counts.get(tag) ?? 0) + 1)
+    }
+  }
+  return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], 'zh-CN'))
 })
-
-const collisionEnabledValue = computed(() => {
-  if (mapStore.selectedTileIndex >= 0) {
-    const layer = mapStore.activeLayer
-    if (layer?.type === 'drawing') {
-      const tileSet = mapStore.getTileSetForResource(mapStore.selectedResource)
-      if (tileSet && tileSet.tiles[mapStore.selectedTileIndex]) {
-        return tileSet.tiles[mapStore.selectedTileIndex].collision
-      }
-    }
-  }
-  const resource = mapStore.selectedResource
-  if (resource) {
-    if (resource.collisionType === '图像') return false
-    return resource.collisionEnabled
-  }
-  if (mapStore.mapData.collisionType === '图像') return false
-  return mapStore.mapData.collisionEnabled
+const tileCategoryExtraOptions = computed(() => {
+  const used = tileCategoryStats.value.map(([tag]) => tag)
+  return [...new Set(used)].filter(tag => !SHAPE_TAG_PRESETS.includes(tag))
 })
+const tileCategoryOptions = computed(() => [
+  ...SHAPE_TAG_PRESETS.map(tag => ({ label: tag, value: tag })),
+  ...tileCategoryExtraOptions.value.map(tag => ({ label: tag, value: tag })),
+  { label: '自定义…', value: TILE_CATEGORY_CUSTOM },
+])
+const tileCategoryValue = computed(() =>
+  tileCategoryCustomMode.value ? TILE_CATEGORY_CUSTOM : (selectedTileData.value?.tag || '').trim(),
+)
 
-function onCollisionTypeChange(val: string) {
-  // 如果选中了单个瓦片，只更新该瓦片的碰撞类型
-  if (selectedTileData.value && mapStore.selectedTileIndex >= 0) {
-    const layer = mapStore.activeLayer
-    if (layer?.type === 'drawing') {
-      const tileSetIndex = mapStore.tileSetIndexOfResource(mapStore.selectedResource)
-      if (tileSetIndex >= 0) {
-        mapStore.setTileCollisionType(tileSetIndex, mapStore.selectedTileIndex, val)
-      }
-      return
-    }
+/** 写入选中图块的类型（没有选中图块时忽略） */
+function setSelectedTileCategory(tag: string) {
+  if (!selectedTileData.value) return
+  const tileSetIndex = mapStore.tileSetIndexOfResource(mapStore.selectedResource)
+  if (tileSetIndex < 0) return
+  mapStore.setTileTag(tileSetIndex, mapStore.selectedTileIndex, tag)
+}
+function onTileCategorySelect(val: string) {
+  if (val === TILE_CATEGORY_CUSTOM) {
+    tileCategoryCustomMode.value = true
+    setSelectedTileCategory('')
+    return
   }
-
-  // 否则更新图块集/资源级别的碰撞类型
-  mapStore.updateMapProperty('collisionType', val)
-  const resource = mapStore.selectedResource
-  if (resource) {
-    resource.collisionType = val
-    resource.collisionEnabled = val !== '图像'
-    const ts = mapStore.getTileSetForResource(resource)
-    if (ts) {
-      ts.collisionType = val
-      ts.collisionEnabled = val !== '图像'
-      if (val === '图像') {
-        for (const tile of ts.tiles) {
-          tile.collision = false
-        }
-      }
-    }
-    if (val !== '图像') {
-      resource.collisionShape = undefined
-    }
-  }
-  mapStore.updateMapProperty('collisionEnabled', val !== '图像')
+  tileCategoryCustomMode.value = false
+  setSelectedTileCategory(val)
+}
+const customTileCategoryText = computed(() => selectedTileData.value?.tag || '')
+function onCustomTileCategoryInput(e: Event) {
+  setSelectedTileCategory((e.target as HTMLInputElement).value)
+}
+function onCustomTileCategoryBlur(e: Event) {
+  const name = (e.target as HTMLInputElement).value.trim()
+  setSelectedTileCategory(name)
+  if (!name) tileCategoryCustomMode.value = false
 }
 
-const customCollisionType = computed(() => mapStore.mapData.collisionType || '')
-function onCustomCollisionTypeChange(val: string) {
-  mapStore.updateMapProperty('collisionType', val)
+/** 作用：碰撞 / 感应 / 碰撞 + 感应（引擎接入前先作为界面占位） */
+const tileKindOptions = [
+  { label: '碰撞', value: 'solid' },
+  { label: '感应', value: 'sensor' },
+  { label: '碰撞 + 感应', value: 'both' },
+]
+
+// ====== 图块尺寸 ======
+const tileSizeOptions = [
+  { label: '16x16', value: '16x16' },
+  { label: '32x32', value: '32x32' },
+  { label: '64x64', value: '64x64' },
+]
+const tileSizeValue = computed(() => `${mapStore.mapData.tileSize}x${mapStore.mapData.tileSize}`)
+function onTileSizeChange(val: string) {
+  const newSize = Number(val.split('x')[0])
+  if (Number.isFinite(newSize) && newSize > 0) mapStore.updateTileSize(newSize)
 }
 
-function onCollisionEnabledChange(enabled: boolean) {
-  // 如果选中了单个瓦片，更新该瓦片的碰撞状态
-  if (selectedTileData.value && mapStore.selectedTileIndex >= 0) {
-    const layer = mapStore.activeLayer
-    if (layer?.type === 'drawing') {
-      const tileSet = mapStore.getTileSetForResource(mapStore.selectedResource)
-      if (tileSet && tileSet.tiles[mapStore.selectedTileIndex]) {
-        tileSet.tiles[mapStore.selectedTileIndex].collision = enabled
-      }
-      return
+/** 当前图块层正在使用的图块集 */
+const tileSetResources = computed(() =>
+  mapStore.activeLayerResources.filter(r => r.resourceType !== 'image'),
+)
+
+/**
+ * 图块集列表：同一画布上传的图块都归在同一个图块集里，
+ * 只有用户手动「新建」才会出现第二行。
+ */
+const tileSetGroups = computed(() => {
+  const resources = tileSetResources.value
+  const groups = mapStore.mapData.tilesetGroups ?? []
+  // 旧地图还没有分组：全部素材都算第一个图块集
+  const effective = groups.length ? groups : [{ id: '', name: '图块集 1' }]
+  const paletteCount = new Map<string, number>()
+  for (const entry of mapStore.mapData.tilePalette ?? []) {
+    paletteCount.set(entry.resourceId, (paletteCount.get(entry.resourceId) ?? 0) + 1)
+  }
+  return effective.map(group => {
+    const owned = resources.filter(r => (r.groupId || effective[0].id) === group.id)
+    return {
+      id: group.id,
+      name: group.name,
+      resourceCount: owned.length,
+      tileCount: owned.reduce((sum, r) => sum + (paletteCount.get(r.id) ?? 0), 0),
     }
-  }
-  // 否则更新图块集/地图级别
-  mapStore.updateMapProperty('collisionEnabled', enabled)
-  const resource = mapStore.selectedResource
-  if (resource) {
-    resource.collisionEnabled = enabled
-    const ts = mapStore.getTileSetForResource(resource)
-    if (ts) ts.collisionEnabled = enabled
-  }
-}
+  })
+})
 
 </script>
 
@@ -1908,46 +1921,144 @@ function onCollisionEnabledChange(enabled: boolean) {
       </div>
       </template>
 
-      <!-- 图块页：图块设置（右栏底部同时显示图块碰撞编辑区） -->
+      <!-- 图块页：基础设置 / 变换 / 图块集列表 -->
       <template v-if="isTileMode && tilePage">
       <div class="att-group">
-        <div class="mi-section" :class="{ open: fold.tile }">
-          <button class="mi-head" :disabled="disabled" @click="fold.tile = !fold.tile">
+
+        <!-- 基础设置 -->
+        <div class="mi-section" :class="{ open: fold.tileBasic }">
+          <button class="mi-head" :disabled="disabled" @click="fold.tileBasic = !fold.tileBasic">
             <img :src="iconChevron" class="mi-chevron" alt="" />
-            <span class="mi-head-title">图块</span>
+            <span class="mi-head-title">基础设置</span>
           </button>
-          <div v-if="fold.tile" class="mi-body">
+          <div v-if="fold.tileBasic" class="mi-body">
             <div class="att-row">
-              <span class="att-label">物理属性</span>
-              <CustomSelect class="att-select" :model-value="collisionTypeValue" :options="collisionTypeOptions" :disabled="disabled" @update:model-value="onCollisionTypeChange" />
-            </div>
-
-            <div v-if="collisionTypeValue === '自定义'" class="att-row">
-              <span class="att-label"></span>
-              <input class="att-input" :value="customCollisionType" :disabled="disabled" @input="onCustomCollisionTypeChange(($event.target as HTMLInputElement).value)" placeholder="输入自定义类型" />
+              <span class="att-label">作用</span>
+              <CustomSelect class="att-select" model-value="solid" :options="tileKindOptions" disabled />
             </div>
 
             <div class="att-row">
-              <span class="att-label">碰撞</span>
+              <span class="att-label">类型</span>
+              <CustomSelect
+                class="att-select"
+                :model-value="tileCategoryValue"
+                :options="tileCategoryOptions"
+                placeholder="未分类"
+                :disabled="disabled || !selectedTileData"
+                @update:model-value="onTileCategorySelect"
+              />
+            </div>
+
+            <div v-if="tileCategoryCustomMode" class="att-row">
+              <span class="att-label">类型名</span>
+              <input
+                class="att-input"
+                :value="customTileCategoryText"
+                maxlength="20"
+                placeholder="设置类型名"
+                :disabled="disabled"
+                @input="onCustomTileCategoryInput"
+                @blur="onCustomTileCategoryBlur"
+                @keydown.enter="blurPanelInput"
+              />
+            </div>
+
+            <div class="att-row">
+              <span class="att-label">单向碰撞</span>
               <label class="att-checkbox">
-                <input
-                  type="checkbox"
-                  :checked="collisionEnabledValue"
-                  :disabled="disabled"
-                  @change="onCollisionEnabledChange(($event.target as HTMLInputElement).checked)"
-                />
-                <span class="att-checkbox-text">{{ collisionEnabledValue ? '启用' : '禁用' }}</span>
+                <input type="checkbox" disabled />
+                <span class="att-checkbox-text">启用</span>
               </label>
             </div>
 
             <div class="att-row">
-              <span class="att-label">瓦片数量</span>
-              <span class="att-value">{{ tileCount }}</span>
+              <span class="att-label">尺寸</span>
+              <CustomSelect
+                class="att-select"
+                :model-value="tileSizeValue"
+                :options="tileSizeOptions"
+                :disabled="disabled"
+                @update:model-value="onTileSizeChange"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- 变换：整个图块图层一起位移 / 缩放 / 旋转（渲染接入前先占位） -->
+        <div class="mi-section" :class="{ open: fold.tileTransform }">
+          <button class="mi-head" :disabled="disabled" @click="fold.tileTransform = !fold.tileTransform">
+            <img :src="iconChevron" class="mi-chevron" alt="" />
+            <span class="mi-head-title">变换</span>
+          </button>
+          <div v-if="fold.tileTransform" class="mi-body">
+            <div class="att-row att-row-stacked">
+              <span class="att-label">位置</span>
+              <div class="att-axis-group">
+                <div class="att-axis-row">
+                  <span class="att-size-label">X</span>
+                  <input class="att-input att-input-no-spin" type="number" value="0" disabled />
+                </div>
+                <div class="att-axis-row">
+                  <span class="att-size-label">Y</span>
+                  <input class="att-input att-input-no-spin" type="number" value="0" disabled />
+                </div>
+              </div>
             </div>
 
-            <div class="att-row">
-              <span class="att-label">图块集</span>
-              <span class="att-value">{{ tileSetCount }}</span>
+            <div class="att-row att-row-stacked">
+              <span class="att-label">缩放</span>
+              <div class="att-axis-group">
+                <div class="att-axis-row">
+                  <span class="att-size-label">X</span>
+                  <input class="att-input att-input-no-spin" type="number" value="100" disabled />
+                </div>
+                <div class="att-axis-row">
+                  <span class="att-size-label">Y</span>
+                  <input class="att-input att-input-no-spin" type="number" value="100" disabled />
+                </div>
+                <div class="att-axis-row att-axis-lock">
+                  <span class="att-size-label">约束比例</span>
+                  <label class="att-checkbox">
+                    <input type="checkbox" checked disabled />
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="att-row att-row-stacked">
+              <span class="att-label">旋转</span>
+              <div class="att-axis-group">
+                <input class="att-input att-input-no-spin" type="number" value="0" disabled />
+                <input class="att-range" type="range" min="-180" max="180" step="1" value="0" disabled />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 图块集列表 -->
+        <div class="mi-section" :class="{ open: fold.tileSets }">
+          <button class="mi-head" :disabled="disabled" @click="fold.tileSets = !fold.tileSets">
+            <img :src="iconChevron" class="mi-chevron" alt="" />
+            <span class="mi-head-title">图块集列表</span>
+            <span class="mi-count">{{ tileSetGroups.length }}</span>
+          </button>
+          <div v-if="fold.tileSets" class="mi-body">
+            <div class="tileset-list">
+              <div v-for="group in tileSetGroups" :key="group.id || 'default'" class="tileset-row">
+                <span class="tileset-name">{{ group.name }}</span>
+                <span class="tileset-size">{{ group.tileCount }} 个图块</span>
+                <label class="tileset-disable">
+                  <input type="checkbox" disabled />
+                  <span>禁用</span>
+                </label>
+              </div>
+            </div>
+            <div class="tileset-actions">
+              <button class="mi-btn" :disabled="disabled" @click="emit('open-tile-library')">资源库</button>
+              <button class="mi-btn" :disabled="disabled" @click="emit('new-tileset-group')">新建</button>
+              <button class="mi-btn" :disabled="disabled" @click="emit('upload-tile-files')">上传</button>
+              <button class="mi-btn" :disabled="disabled" @click="emit('delete-tile-brush')">删除</button>
+              <button class="mi-btn" :disabled="disabled" @click="emit('clear-tile-brushes')">清空</button>
             </div>
           </div>
         </div>
@@ -2718,6 +2829,63 @@ function onCollisionEnabledChange(enabled: boolean) {
 /* 面板较窄时四个按钮平分宽度，不靠内容撑开 */
 .sm-actions .mi-btn {
   min-width: 0;
+  padding: 0 4px;
+}
+
+/* ====== 图块集列表 ====== */
+.tileset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tileset-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tileset-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #d5d8dc;
+  font-size: 12px;
+  text-align: left;
+}
+
+.tileset-size {
+  flex-shrink: 0;
+  color: #9ca0a4;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.tileset-disable {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  color: #9ca0a4;
+  font-size: 11px;
+}
+
+.tileset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tileset-actions .mi-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: center;
   padding: 0 4px;
 }
 </style>
