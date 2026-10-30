@@ -62,7 +62,6 @@ pub fn run() {
             fs_ops::create_dir,
             fs_ops::delete_path,
             fs_ops::path_exists,
-            fs_ops::get_project_root,
             fs_ops::open_file_in_browser,
             fs_ops::rename_path,
             fs_ops::copy_file,

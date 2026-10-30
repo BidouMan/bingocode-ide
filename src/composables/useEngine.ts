@@ -415,7 +415,37 @@ export function useEngine() {
       }
     }
 
-    // 如果文件未保存，弹窗让用户保存后即止（不运行）
+    // 游戏模式：新文件直接落到项目 code/ 目录，不弹「另存为」。
+    // 否则学生把文件存到桌面/别处后，运行既不会开始，外部文件还会被当成项目代码反复带进来
+    if (!tab.path && editorStore.isGameMode) {
+      const projectRoot = projectStore.root
+      if (!projectRoot) {
+        terminalStore.appendLine('\x1b[31m项目目录还没准备好，请稍后再试\x1b[0m')
+        editorStore.setRunning(false)
+        return
+      }
+      const codeDir = `${projectRoot}/code`
+      await invoke('create_dir', { path: codeDir }).catch(() => {})
+      let finalName = tab.name || '游戏脚本.py'
+      if (!finalName.endsWith('.py')) finalName += '.py'
+      const stem = finalName.slice(0, -3)
+      let counter = 1
+      // 同名文件已存在时自动加序号，避免覆盖别的标签页的代码
+      while (await invoke<boolean>('path_exists', { path: `${codeDir}/${finalName}` })) {
+        finalName = `${stem}_${counter}.py`
+        counter++
+      }
+      tab.path = `${codeDir}/${finalName}`
+      tab.name = finalName
+      // 同步更新资源管理器
+      const resource = resourceStore.codes.find(c => c.id === tab.id)
+      if (resource) {
+        resource.path = tab.path
+        resource.name = finalName
+      }
+    }
+
+    // 代码模式：文件未保存，弹窗让用户保存后即止（不运行）
     if (!tab.path) {
       const filePath = await save({
         title: '保存 Python 文件',
@@ -539,7 +569,16 @@ export function useEngine() {
           await invoke('write_file', { path: filePath, content })
         }
 
-        // 不传 scriptPath，让 discover_and_merge 扫描 code/ 目录运行所有文件
+        // 写入本次运行的代码清单：引擎只执行清单里的文件，
+        // code/ 目录里残留的其它 .py（旧项目包带进来的、手动拷进来的）不再被拼接执行
+        if (codeDir) {
+          await invoke('write_file', {
+            path: `${codeDir}/.bingo_run_files`,
+            content: Array.from(usedFileNames).join('\n'),
+          })
+        }
+
+        // 不传 scriptPath，让 discover_and_merge 按清单运行 code/ 目录里的项目代码
         await invoke('run_script', {
           workingDir: env.working_dir,
           pythonPath: env.python_path,

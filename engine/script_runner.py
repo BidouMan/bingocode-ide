@@ -12,6 +12,11 @@ def _is_valid_identifier(name: str) -> bool:
     return name.isidentifier() and not keyword.iskeyword(name)
 
 
+# 运行清单：IDE 每次运行前写入，列出本次项目真正要执行的 .py 文件名（每行一个）。
+# 目录里残留的其它 .py（旧项目包带入的、手动拷进来的）不再参与运行。
+_RUN_MANIFEST = '.bingo_run_files'
+
+
 def _list_py_files(directory: str) -> list:
     """列出目录下所有 .py 文件，忽略隐藏文件和临时文件"""
     files = []
@@ -22,6 +27,18 @@ def _list_py_files(directory: str) -> list:
             continue
         files.append(f)
     return files
+
+
+def _read_run_manifest(directory: str):
+    """读取运行清单；没有清单时返回 None（兼容旧项目，保持原有全量扫描行为）"""
+    path = os.path.join(directory, _RUN_MANIFEST)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, 'r', encoding='utf-8') as fh:
+            return [line.strip() for line in fh if line.strip()]
+    except OSError:
+        return None
 
 
 def discover_and_merge(project_dir: str, target_file: str = None) -> str:
@@ -63,6 +80,13 @@ def discover_and_merge(project_dir: str, target_file: str = None) -> str:
 
     # 查找所有 .py 文件
     py_files = _list_py_files(search_dir)
+
+    # 有运行清单时只执行清单里的文件：避免目录里的杂项 .py 被拼进来导致游戏跑不动
+    manifest = _read_run_manifest(search_dir)
+    if manifest is not None:
+        available = set(py_files)
+        py_files = [name for name in manifest if name in available]
+
     if not py_files:
         return ''
 

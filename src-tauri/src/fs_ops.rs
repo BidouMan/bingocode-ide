@@ -123,18 +123,6 @@ pub(crate) fn path_exists(path: String) -> bool {
 }
 
 #[tauri::command]
-pub(crate) fn get_project_root() -> Result<String, String> {
-    let cwd = std::env::current_dir()
-        .map_err(|e| format!("Failed to get current dir: {}", e))?;
-    // src-tauri 目录下需要向上一级到项目根目录
-    let project_root = cwd.parent()
-        .unwrap_or(&cwd)
-        .to_string_lossy()
-        .to_string();
-    Ok(project_root)
-}
-
-#[tauri::command]
 pub(crate) fn open_file_in_browser(path: String) -> Result<String, String> {
     // 检查文件是否存在
     let path_obj = std::path::Path::new(&path);

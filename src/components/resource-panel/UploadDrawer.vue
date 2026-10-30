@@ -121,7 +121,31 @@ async function handleAction(key: string) {
           console.error('[UploadDrawer] 读取图片文件失败:', e)
         }
       } else if (props.type === 'code') {
-        const idx = editorStore.createTab(result.name, result.name, result.content || '')
+        // 代码文件必须立刻落到项目 code/ 目录：标签页路径始终指向项目内的真实文件，
+        // 避免把本地任意位置的 .py（桌面/作业目录）带进项目
+        const projectRoot = projectStore.root
+        let fileName = result.name
+        let targetPath = ''
+        if (projectRoot) {
+          try {
+            const codeDir = `${projectRoot}/code`
+            await invoke('create_dir', { path: codeDir }).catch(() => {})
+            const stem = fileName.endsWith('.py') ? fileName.slice(0, -3) : fileName
+            const ext = fileName.endsWith('.py') ? '.py' : ''
+            let counter = 1
+            // 同名文件已存在时自动加序号，不覆盖学生已有的代码
+            while (await invoke<boolean>('path_exists', { path: `${codeDir}/${fileName}` })) {
+              fileName = `${stem}_${counter}${ext}`
+              counter++
+            }
+            targetPath = `${codeDir}/${fileName}`
+            await invoke('write_file', { path: targetPath, content: result.content || '' })
+          } catch (e) {
+            console.error('[UploadDrawer] 写入代码文件失败:', e)
+            targetPath = ''
+          }
+        }
+        const idx = editorStore.createTab(fileName, targetPath, result.content || '')
         const tab = editorStore.currentTabs[idx]
         if (tab) {
           resourceStore.addItem(
@@ -129,7 +153,7 @@ async function handleAction(key: string) {
             tab.id,
           )
         }
-        emit('uploaded', 'code', result.name, result.content || undefined)
+        emit('uploaded', 'code', fileName, result.content || undefined)
       } else {
         // 声音文件：复制到项目目录
         if (props.type === 'sound') {

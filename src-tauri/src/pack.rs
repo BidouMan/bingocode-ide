@@ -101,8 +101,41 @@ pub(crate) fn unpack_bingo(bingo_path: String, target_dir: String) -> Result<(),
         }
     }
 
-    archive.extract(target)
-        .map_err(|e| format!("解压 .bc 文件失败: {}", e))?;
+    // 只解压项目结构内的条目（code/、assets/）：.bc 本质是 zip，
+    // 旧版本或异常打包可能把根目录的散装文件（比如外部 .py）打进来，
+    // 直接全量解压会让这些文件混进项目，进而被资源管理器扫到、被运行逻辑执行
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| format!("读取 .bc 条目失败: {}", e))?;
+        let raw_name = entry.name().replace('\\', "/");
+        let rel_name = raw_name.trim_start_matches("./");
+        // 旧版项目把代码放在根目录，这类散装 .py 统一收进 code/ 保留下来
+        let is_root_py = !rel_name.contains('/') && rel_name.ends_with(".py");
+        let allowed = rel_name.starts_with("code/") || rel_name.starts_with("assets/");
+        if !allowed && !is_root_py {
+            continue;
+        }
+        // enclosed_name 会拒绝 .. 之类的越权路径
+        let out_path = match entry.enclosed_name() {
+            Some(p) => {
+                if is_root_py { target.join("code").join(p) } else { target.join(p) }
+            }
+            None => continue,
+        };
+        if entry.is_dir() || rel_name.ends_with('/') {
+            let _ = std::fs::create_dir_all(&out_path);
+            continue;
+        }
+        if let Some(parent) = out_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("创建目录失败: {}", e))?;
+        }
+        let mut out_file = std::fs::File::create(&out_path)
+            .map_err(|e| format!("解压 .bc 文件失败: {}", e))?;
+        std::io::copy(&mut entry, &mut out_file)
+            .map_err(|e| format!("解压 .bc 文件失败: {}", e))?;
+    }
 
     Ok(())
 }

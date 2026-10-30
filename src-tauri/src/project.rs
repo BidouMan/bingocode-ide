@@ -8,10 +8,8 @@ pub(crate) fn init_default_project() -> Result<String, String> {
     // 跨平台默认项目目录
     // Mac: ~/BingoCodeIDE/Projects/default
     // Windows: %USERPROFILE%\BingoCodeIDE\Projects\default
-    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"))
-        .map_err(|_| "Cannot find home directory".to_string())?;
-    let project_root = std::path::PathBuf::from(&home)
-        .join("BingoCodeIDE").join("Projects").join("default");
+    let home = user_home_dir()?;
+    let project_root = home.join("BingoCodeIDE").join("Projects").join("default");
 
     // 启动时清理默认项目目录中的旧资源（保留目录结构）
     let _ = clean_default_project_assets(&project_root);
@@ -27,6 +25,29 @@ pub(crate) fn init_default_project() -> Result<String, String> {
     std::fs::create_dir_all(&code_dir).map_err(|e| e.to_string())?;
 
     Ok(project_root.to_string_lossy().to_string())
+}
+
+/// 用户主目录。
+/// Windows 上优先 USERPROFILE：HOME 可能被 Git 等工具设成空串或 /c/Users/... 形式，
+/// 空串会让项目目录退化成「相对当前工作目录」，跑到安装目录或桌面附近去。
+fn user_home_dir() -> Result<std::path::PathBuf, String> {
+    let keys: &[&str] = if cfg!(windows) {
+        &["USERPROFILE", "HOME"]
+    } else {
+        &["HOME"]
+    };
+    for key in keys {
+        let Ok(value) = std::env::var(key) else { continue };
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        let path = std::path::PathBuf::from(value);
+        if path.is_absolute() {
+            return Ok(path);
+        }
+    }
+    Err("Cannot find home directory".to_string())
 }
 
 fn clean_default_project_assets(project_root: &std::path::Path) -> Result<(), String> {

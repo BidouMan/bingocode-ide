@@ -12,7 +12,6 @@ import { useRenderStore } from '../../stores/render'
 import { useTerminalStore } from '../../stores/terminal'
 import { useEngine } from '../../composables/useEngine'
 import { useUpdater, toDisplayVersion } from '../../composables/useUpdater'
-import { useFileDialog } from '../../composables/useFileDialog'
 import GameCanvas from '../canvas/GameCanvas.vue'
 import CodeEditor from '../editor/CodeEditor.vue'
 import SpriteEditorView from '../sprite-editor/SpriteEditorView.vue'
@@ -76,7 +75,6 @@ const terminalStore = useTerminalStore()
 const themeStore = useThemeStore()
 const fileExplorerStore = useFileExplorerStore()
 const engine = useEngine()
-const fileDialog = useFileDialog()
 
 // loading进度
 const loadingProgress = computed(() => {
@@ -847,31 +845,6 @@ function toggleShowCollision() {
 }
 function toggleShowStats() {
   renderStore.showStats = !renderStore.showStats
-}
-
-async function uploadResource(type: 'sprite' | 'map' | 'sound' | 'code') {
-  const acceptMap: Record<string, string> = {
-    sprite: '.bgs,.bsf,.png,.jpg,.gif',
-    map: '.bgm,.json,.info',
-    sound: '.wav,.mp3,.ogg',
-    code: '.py',
-  }
-  const file = await fileDialog.openFile(acceptMap[type])
-  if (!file) return
-
-  if (type === 'code') {
-    // 先建标签再建资源项，并复用标签 id，保证重命名/删除联动
-    const idx = editorStore.createTab(file.name, file.name, file.content)
-    const tab = editorStore.currentTabs[idx]
-    if (tab) {
-      resourceStore.addItem(
-        { name: tab.name, type: 'code', path: tab.path, content: tab.content },
-        tab.id,
-      )
-    }
-  } else {
-    resourceStore.addItem({ name: file.name, type, path: file.name })
-  }
 }
 
 async function openResource(item: { id: string; name: string; type: string; content?: string; path?: string }) {
