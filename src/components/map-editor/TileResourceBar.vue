@@ -526,6 +526,21 @@ watch(
   () => syncRandomBrushPool(),
 )
 
+/** 把调色板的选择同步给 store，右侧面板据此批量改类型 / 作用 / 单向碰撞 */
+watch(
+  () => [...paletteSelection].sort().join('|'),
+  () => {
+    const list: { resourceId: string; tileIndex: number }[] = []
+    for (const key of paletteSelection) {
+      const sep = key.lastIndexOf(':')
+      if (sep <= 0) continue
+      list.push({ resourceId: key.slice(0, sep), tileIndex: Number(key.slice(sep + 1)) })
+    }
+    mapStore.setTileBrushSelection(list)
+  },
+  { immediate: true },
+)
+
 function onPalettePointerMove(e: PointerEvent) {
   if (!panning) return
   panX.value = panStartPanX + (e.clientX - panStartX)

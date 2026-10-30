@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { useMapStore, DEFAULT_CAMERA_SETTINGS, type ShapeKind, type ShapeItem } from '../../stores/map'
+import { useMapStore, DEFAULT_CAMERA_SETTINGS, type ShapeKind, type ShapeItem, type TileData } from '../../stores/map'
 import { useEditorStore } from '../../stores/editor'
 import { useResourceStore } from '../../stores/resource'
 import { useMapEditorStore } from '../../stores/mapEditor'
@@ -952,15 +952,17 @@ const tileCategoryOptions = computed(() => [
   { label: '自定义…', value: TILE_CATEGORY_CUSTOM },
 ])
 const tileCategoryValue = computed(() =>
-  tileCategoryCustomMode.value ? TILE_CATEGORY_CUSTOM : (selectedTileData.value?.tag || '').trim(),
+  tileCategoryCustomMode.value
+    ? TILE_CATEGORY_CUSTOM
+    // 没设过类型时默认按「墙体」显示（与碰撞图层新建时的默认一致）
+    : (selectedTileData.value?.tag || '').trim() || '墙体',
 )
 
 /** 写入选中图块的类型（没有选中图块时忽略） */
 function setSelectedTileCategory(tag: string) {
-  if (!selectedTileData.value) return
-  const tileSetIndex = mapStore.tileSetIndexOfResource(mapStore.selectedResource)
-  if (tileSetIndex < 0) return
-  mapStore.setTileTag(tileSetIndex, mapStore.selectedTileIndex, tag)
+  for (const target of tileEditTargets.value) {
+    mapStore.setTileTag(target.tileSetIndex, target.tileIndex, tag)
+  }
 }
 function onTileCategorySelect(val: string) {
   if (val === TILE_CATEGORY_CUSTOM) {
@@ -981,12 +983,94 @@ function onCustomTileCategoryBlur(e: Event) {
   if (!name) tileCategoryCustomMode.value = false
 }
 
-/** 作用：碰撞 / 感应 / 碰撞 + 感应（引擎接入前先作为界面占位） */
+/** 作用：碰撞 / 感应 / 碰撞 + 感应（与碰撞图层同一套语义） */
 const tileKindOptions = [
   { label: '碰撞', value: 'solid' },
   { label: '感应', value: 'sensor' },
   { label: '碰撞 + 感应', value: 'both' },
 ]
+
+/** 当前图块所属图块集下标；没有选中图块时为 -1 */
+const selectedTileSetIndex = computed(() =>
+  mapStore.tileSetIndexOfResource(mapStore.selectedResource),
+)
+
+/** 面板要改的图块：调色板里选中的全部优先，没多选时退回当前画笔那一块 */
+const tileEditTargets = computed(() => {
+  const targets: { tileSetIndex: number; tileIndex: number }[] = []
+  const resources = mapStore.activeLayerResources
+  for (const sel of mapStore.tileBrushSelection) {
+    const resource = resources.find(r => r.id === sel.resourceId)
+    if (!resource) continue
+    const tileSetIndex = mapStore.tileSetIndexOfResource(resource)
+    if (tileSetIndex < 0) continue
+    targets.push({ tileSetIndex, tileIndex: sel.tileIndex })
+  }
+  if (targets.length === 0 && selectedTileSetIndex.value >= 0 && mapStore.selectedTileIndex >= 0) {
+    targets.push({
+      tileSetIndex: selectedTileSetIndex.value,
+      tileIndex: mapStore.selectedTileIndex,
+    })
+  }
+  return targets
+})
+
+/** 有可编辑的图块（还没碰撞数据也可以，写入时自动补） */
+const tileEditable = computed(() => tileEditTargets.value.length > 0)
+
+const tileKindValue = computed(() => selectedTileData.value?.kind || 'solid')
+/** 感应图块没有物理阻挡：单向碰撞控件保留但禁用 */
+const tilePhysicsDisabled = computed(() => tileKindValue.value === 'sensor')
+
+const tileOneWayEnabled = computed(() => selectedTileData.value?.oneWay === true)
+/** 方向四选一，和碰撞图层共用一份定义 */
+const tileOneWayDirValue = computed(() => {
+  const tile = selectedTileData.value
+  const dx = tile?.oneWayDirX ?? 0
+  const dy = tile?.oneWayDirY ?? 1
+  if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? '1,0' : '-1,0'
+  return dy < 0 ? '0,-1' : '0,1'
+})
+const tileOneWayMarginValue = computed(() => selectedTileData.value?.oneWayMargin ?? 0)
+
+function patchSelectedTile(
+  patch: Partial<Pick<TileData, 'kind' | 'oneWay' | 'oneWayDirX' | 'oneWayDirY' | 'oneWayMargin'>>,
+) {
+  // 一次改掉所有选中的图块；面板显示的是最后选中的那一块
+  for (const target of tileEditTargets.value) {
+    mapStore.updateTile(target.tileSetIndex, target.tileIndex, patch)
+  }
+}
+
+/** 设置作用 / 单向碰撞时顺带打开碰撞，否则这些设置不生效 */
+function ensureTileCollision() {
+  for (const target of tileEditTargets.value) {
+    mapStore.setTileCollision(target.tileSetIndex, target.tileIndex, true, {
+      points: [[0, 0], [1, 0], [1, 1], [0, 1]],
+    })
+  }
+}
+
+function onTileKindChange(val: string) {
+  if (!tileEditable.value) return
+  ensureTileCollision()
+  patchSelectedTile({ kind: val as ShapeKind })
+}
+function onTileOneWayToggle(e: Event) {
+  if (!tileEditable.value) return
+  const checked = (e.target as HTMLInputElement).checked
+  if (checked) ensureTileCollision()
+  patchSelectedTile({ oneWay: checked })
+}
+function onTileOneWayDirChange(val: string) {
+  const [dx, dy] = val.split(',').map(Number)
+  patchSelectedTile({ oneWayDirX: dx, oneWayDirY: dy })
+}
+function onTileOneWayMarginInput(e: Event) {
+  const raw = Number((e.target as HTMLInputElement).value)
+  const margin = Number.isFinite(raw) ? Math.min(8, Math.max(0, raw)) : 0
+  patchSelectedTile({ oneWayMargin: margin })
+}
 
 // ====== 图块尺寸 ======
 const tileSizeOptions = [
@@ -1934,7 +2018,13 @@ const tileSetGroups = computed(() => {
           <div v-if="fold.tileBasic" class="mi-body">
             <div class="att-row">
               <span class="att-label">作用</span>
-              <CustomSelect class="att-select" model-value="solid" :options="tileKindOptions" disabled />
+              <CustomSelect
+                class="att-select"
+                :model-value="tileKindValue"
+                :options="tileKindOptions"
+                :disabled="disabled || !tileEditable"
+                @update:model-value="onTileKindChange"
+              />
             </div>
 
             <div class="att-row">
@@ -1944,7 +2034,7 @@ const tileSetGroups = computed(() => {
                 :model-value="tileCategoryValue"
                 :options="tileCategoryOptions"
                 placeholder="未分类"
-                :disabled="disabled || !selectedTileData"
+                :disabled="disabled || !tileEditable"
                 @update:model-value="onTileCategorySelect"
               />
             </div>
@@ -1963,16 +2053,47 @@ const tileSetGroups = computed(() => {
               />
             </div>
 
+            <!-- 单向碰撞（参考 Godot 的 One Way Collision）：勾选后只从「方向」那一侧挡住 -->
             <div class="att-row">
               <span class="att-label">单向碰撞</span>
               <label class="att-checkbox">
-                <input type="checkbox" disabled />
+                <input
+                  type="checkbox"
+                  :checked="tileOneWayEnabled"
+                  :disabled="disabled || !tileEditable || tilePhysicsDisabled"
+                  @change="onTileOneWayToggle"
+                />
                 <span class="att-checkbox-text">启用</span>
               </label>
             </div>
+            <template v-if="tileOneWayEnabled">
+              <div class="att-row">
+                <span class="att-label">方向</span>
+                <CustomSelect
+                  class="att-select"
+                  :model-value="tileOneWayDirValue"
+                  :options="ONE_WAY_DIRECTIONS"
+                  :disabled="disabled || !tileEditable || tilePhysicsDisabled"
+                  @update:model-value="onTileOneWayDirChange"
+                />
+              </div>
+              <div class="att-row">
+                <span class="att-label">厚度</span>
+                <input
+                  class="att-input att-input-no-spin"
+                  type="number"
+                  min="0"
+                  max="8"
+                  step="0.5"
+                  :value="tileOneWayMarginValue"
+                  :disabled="disabled || !tileEditable || tilePhysicsDisabled"
+                  @change="onTileOneWayMarginInput"
+                />
+              </div>
+            </template>
 
             <div class="att-row">
-              <span class="att-label">尺寸</span>
+              <span class="att-label">图块尺寸</span>
               <CustomSelect
                 class="att-select"
                 :model-value="tileSizeValue"

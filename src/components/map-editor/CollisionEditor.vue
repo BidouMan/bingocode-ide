@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, watch, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
-import { useMapStore, type MapResource } from '../../stores/map'
+import { useMapStore, type MapResource, type ShapeKind } from '../../stores/map'
+import { SHAPE_KIND_COLORS_HEX } from '../../utils/shapeStyle'
 import { useMapEditorStore } from '../../stores/mapEditor'
 import { useProjectStore } from '../../stores/project'
 import { useEditorStore } from '../../stores/editor'
@@ -144,7 +145,7 @@ function render() {
     }
   }
 
-  // Collision polygon — 仅在碰撞启用时绘制
+  // Collision polygon — 仅在碰撞启用时绘制（颜色按作用类型，和碰撞图层一致）
   if (currentCollisionEnabled.value && collisionPoints.value.length >= 2) {
     ctx.beginPath()
     ctx.moveTo(collisionPoints.value[0].x, collisionPoints.value[0].y)
@@ -152,9 +153,9 @@ function render() {
       ctx.lineTo(collisionPoints.value[i].x, collisionPoints.value[i].y)
     }
     ctx.closePath()
-    ctx.fillStyle = 'rgba(255, 80, 80, 0.2)'
+    ctx.fillStyle = `rgba(${previewColorRgb.value}, 0.2)`
     ctx.fill()
-    ctx.strokeStyle = 'rgba(255, 80, 80, 0.8)'
+    ctx.strokeStyle = `rgba(${previewColorRgb.value}, 0.8)`
     ctx.lineWidth = 1
     ctx.stroke()
   }
@@ -425,6 +426,21 @@ const currentCollisionEnabled = computed(() => {
   return ts?.collisionEnabled ?? false
 })
 
+/** 当前预览对象的作用（图片层没有作用，统一按碰撞色处理） */
+const previewKind = computed<ShapeKind>(() => {
+  if (mapStore.activeLayer?.type === 'image') return 'solid'
+  const tileIndex = mapStore.selectedTileIndex
+  if (tileIndex < 0) return 'solid'
+  const ts = mapStore.getTileSetForResource(mapStore.selectedResource)
+  return (ts?.tiles[tileIndex]?.kind as ShapeKind) || 'solid'
+})
+
+/** 碰撞预览颜色（与碰撞图层共用一套） */
+const previewColorRgb = computed(() => {
+  const hex = SHAPE_KIND_COLORS_HEX[previewKind.value] ?? SHAPE_KIND_COLORS_HEX.solid
+  return `${(hex >> 16) & 0xff}, ${(hex >> 8) & 0xff}, ${hex & 0xff}`
+})
+
 watch(
   () => [
     mapStore.selectedResourceIndex,
@@ -444,6 +460,11 @@ watch(
 
 // 实时监听碰撞启用状态变化，重绘画布
 watch(currentCollisionEnabled, () => {
+  if (ctx) nextTick(render)
+})
+
+// 作用类型变了（碰撞 / 感应 / 碰撞 + 感应）：换颜色重绘
+watch(previewKind, () => {
   if (ctx) nextTick(render)
 })
 

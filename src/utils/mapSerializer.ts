@@ -130,7 +130,20 @@ export interface TilesetSaveData {
   tileHeight: number
   collisionType: string
   collisionEnabled: boolean
-  tiles?: { id: number; collision: string; tag?: string; collisionType?: string; collisionShape?: { points: number[][] } }[]
+  tiles?: {
+    id: number
+    collision: string
+    tag?: string
+    collisionType?: string
+    collisionShape?: { points: number[][] }
+    /** 作用：solid / sensor / both（缺省视为 solid） */
+    kind?: 'solid' | 'sensor' | 'both'
+    /** 单向碰撞（参考 Godot One Way Collision） */
+    oneWay?: boolean
+    oneWayDirX?: number
+    oneWayDirY?: number
+    oneWayMargin?: number
+  }[]
 }
 
 export interface MapLoadData {
@@ -257,6 +270,11 @@ export function serializeMap(mapData: any): MapSaveData {
         collisionType: t.collisionType || '图像',
         tag: t.tag || undefined,
         collisionShape: t.collisionShape,
+        kind: t.kind || undefined,
+        oneWay: t.oneWay === true,
+        oneWayDirX: t.oneWayDirX ?? 0,
+        oneWayDirY: t.oneWayDirY ?? 1,
+        oneWayMargin: t.oneWayMargin ?? 0,
       })),
     }
   })
@@ -375,6 +393,11 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
       tag: t.tag || '',
       collisionType: t.collisionType || '图像',
       collisionShape: t.collisionShape,
+      kind: t.kind === 'sensor' || t.kind === 'both' ? t.kind : 'solid',
+      oneWay: t.oneWay === true,
+      oneWayDirX: Number(t.oneWayDirX) || 0,
+      oneWayDirY: t.oneWayDirY === undefined || t.oneWayDirY === null ? 1 : Number(t.oneWayDirY) || 0,
+      oneWayMargin: Number(t.oneWayMargin) || 0,
     })) || [],
   }))
 

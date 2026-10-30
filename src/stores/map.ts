@@ -8,6 +8,13 @@ export interface TileData {
   tag: string
   collisionType: string
   collisionShape?: { points: number[][] }
+  /** 作用：碰撞 / 感应 / 碰撞 + 感应（缺省视为碰撞） */
+  kind?: ShapeKind
+  /** 单向碰撞（参考 Godot One Way Collision） */
+  oneWay?: boolean
+  oneWayDirX?: number
+  oneWayDirY?: number
+  oneWayMargin?: number
 }
 
 export interface TileSet {
@@ -705,6 +712,14 @@ export const useMapStore = defineStore('map', () => {
     entry.row = row
   }
 
+  // ====== 调色板里选中的图块（供右侧面板批量设置） ======
+  /** 图块面板点选 / 框选的结果，右侧面板按它批量改类型、作用、单向碰撞 */
+  const tileBrushSelection = ref<{ resourceId: string; tileIndex: number }[]>([])
+
+  function setTileBrushSelection(list: { resourceId: string; tileIndex: number }[]) {
+    tileBrushSelection.value = list
+  }
+
   // ====== 随机绘制（参照 Godot 的随机绘制） ======
   /** 开启后画布上每一格都从随机池里挑一块画 */
   const randomBrushEnabled = ref(false)
@@ -1132,6 +1147,10 @@ export const useMapStore = defineStore('map', () => {
     if (collision && !tile.collisionShape && defaultShape) {
       tile.collisionShape = defaultShape
     }
+    // 类型默认是「墙体」（和碰撞图层新建时一致）
+    if (collision && !(tile.tag || '').trim()) {
+      tile.tag = '墙体'
+    }
   }
 
   function setTileCollisionType(tileSetIndex: number, tileIndex: number, collisionType: string) {
@@ -1160,6 +1179,31 @@ export const useMapStore = defineStore('map', () => {
       })
     }
     tileSet.tiles[tileIndex].tag = tag
+  }
+
+  /** 修改某个图块的属性（作用 / 单向碰撞等） */
+  function updateTile(
+    tileSetIndex: number,
+    tileIndex: number,
+    patch: Partial<Pick<TileData,
+      'kind' | 'tag' | 'oneWay' | 'oneWayDirX' | 'oneWayDirY' | 'oneWayMargin'>>,
+  ) {
+    const tileSet = mapData.value.tileSets[tileSetIndex]
+    if (!tileSet) return
+    while (tileSet.tiles.length <= tileIndex) {
+      tileSet.tiles.push({
+        collision: false,
+        tag: '',
+        collisionType: '图像',
+      })
+    }
+    const tile = tileSet.tiles[tileIndex]
+    if (patch.kind !== undefined) tile.kind = patch.kind
+    if (patch.tag !== undefined) tile.tag = patch.tag
+    if (patch.oneWay !== undefined) tile.oneWay = patch.oneWay
+    if (patch.oneWayDirX !== undefined) tile.oneWayDirX = patch.oneWayDirX
+    if (patch.oneWayDirY !== undefined) tile.oneWayDirY = patch.oneWayDirY
+    if (patch.oneWayMargin !== undefined) tile.oneWayMargin = patch.oneWayMargin
   }
 
   return {
@@ -1203,6 +1247,8 @@ export const useMapStore = defineStore('map', () => {
     randomBrushEnabled,
     randomBrushPool,
     randomBrushScatter,
+    tileBrushSelection,
+    setTileBrushSelection,
     setRandomBrush,
     setRandomBrushScatter,
     pickBrush,
@@ -1226,6 +1272,7 @@ export const useMapStore = defineStore('map', () => {
     setTileCollision,
     setTileCollisionType,
     setTileTag,
+    updateTile,
     selectedImageLayerId,
     selectedImage,
     activeShapeLayer,
