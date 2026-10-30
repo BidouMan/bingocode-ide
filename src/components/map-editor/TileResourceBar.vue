@@ -1003,10 +1003,7 @@ watch(() => mapStore.activeLayerIndex, () => {
   refreshAll()
 })
 watch(() => currentResources.value.length, refreshAll)
-watch(() => mapStore.mapData.tileSize, () => {
-  globalTileCache.clear()
-  refreshAll()
-})
+// 改「图块尺寸」只影响地图网格，图块集仍按自己的原始尺寸切片，调色板不需要重建
 watch(() => mapStore.mapLoadCount, () => {
   // 载入地图后以当前素材为基线，避免把已删除的图块重新展开
   paletteSelection.clear()

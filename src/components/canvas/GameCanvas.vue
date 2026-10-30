@@ -528,8 +528,10 @@ async function syncTiles() {
         displayObj.zIndex = tileData.layer
       }
       // 视口裁剪：只渲染相机视口内的瓦片，减少 GPU 负担
-      // 图块按格子大小判定；图像按贴图实际尺寸判定（大背景图左上角可能在视口外，但仍覆盖视口）
-      const cellSize = tileData.tileSize || renderStore.tileGridSize
+      // 图块按「素材原始尺寸」判定（图块永远按图集切片大小绘制，不随网格缩放）
+      const cellSize = tileData.type === 'tile'
+        ? (tileData.tileSize || renderStore.tileGridSize)
+        : (renderStore.tileGridSize || 16)
       const isImageTile = tileData.type === 'image'
       const cullW = isImageTile ? (displayObj.width || 1) : cellSize
       const cullH = isImageTile ? (displayObj.height || 1) : cellSize

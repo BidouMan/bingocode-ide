@@ -348,18 +348,20 @@ async function renderTile(layerId: number, x: number, y: number, tileId: number)
   let sprite = tileSprites.get(key)
   const tileSize = mapStore.mapData.tileSize
 
-  if (sprite) {
-    sprite.texture = texture
-  } else {
+  if (!sprite) {
     sprite = new PIXI.Sprite(texture)
-    sprite.x = x * tileSize
-    sprite.y = y * tileSize
-    sprite.width = tileSize
-    sprite.height = tileSize
     const container = getOrCreateLayerContainer(layerId)
     container.addChild(sprite)
     tileSprites.set(key, sprite)
+  } else if (sprite.texture !== texture) {
+    sprite.texture = texture
   }
+  // 位置跟着网格走；尺寸永远是素材自己的切片大小，不随网格拉伸
+  // （同 Tiled / Unity 的网格模型；SVG 2x 超采样纹理也在这里压回逻辑尺寸）
+  sprite.x = x * tileSize
+  sprite.y = y * tileSize
+  sprite.width = resource.tileWidth
+  sprite.height = resource.tileHeight
 }
 
 function removeTile(layerId: number, x: number, y: number) {

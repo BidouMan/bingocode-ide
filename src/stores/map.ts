@@ -853,16 +853,40 @@ export const useMapStore = defineStore('map', () => {
     mapData.value.camera = { ...DEFAULT_CAMERA_SETTINGS, ...(mapData.value.camera ?? {}), ...patch }
   }
 
+  /**
+   * 修改图块尺寸：保持地图的「世界像素尺寸」不变。
+   * 例：40×30 @16px（640×480）改成 32px → 变成 20×15，仍然 640×480，
+   * 游戏窗口能看到的范围不变；瓦片坐标按比例同步换算。
+   */
   function updateTileSize(newSize: number) {
+    const oldSize = mapData.value.tileSize
+    if (!Number.isFinite(newSize) || newSize <= 0 || newSize === oldSize) return
+    const k = newSize / oldSize
+    const mapCoord = (v: number) => Math.max(0, Math.round(v / k))
+    const newWidth = Math.max(1, Math.round(mapData.value.width / k))
+    const newHeight = Math.max(1, Math.round(mapData.value.height / k))
+
+    // 瓦片按格子坐标存储：换算到新的格子空间（缩小时同一格的后写入者胜出）
+    for (const layer of mapData.value.layers) {
+      if (layer.type !== 'drawing') continue
+      const next: Record<string, number> = {}
+      for (const [key, gid] of Object.entries(layer.tiles)) {
+        const [x, y] = key.split(',').map(Number)
+        const nx = mapCoord(x)
+        const ny = mapCoord(y)
+        if (nx >= newWidth || ny >= newHeight) continue
+        next[`${nx},${ny}`] = gid
+      }
+      layer.tiles = next
+    }
+
+    mapData.value.width = newWidth
+    mapData.value.height = newHeight
     mapData.value.tileSize = newSize
-    for (const resource of mapData.value.resources) {
-      resource.tileWidth = newSize
-      resource.tileHeight = newSize
-    }
-    for (const ts of mapData.value.tileSets) {
-      ts.tileWidth = newSize
-      ts.tileHeight = newSize
-    }
+
+    // 图块集保留自己的切片尺寸：换网格不会重新切图，已画的图块外观不丢，
+    // 渲染时按「原图尺寸 → 当前格子」等比缩放（编辑器与游戏窗口一致）
+    tileRevision.value++
   }
 
   // ====== 场景标记 ======
