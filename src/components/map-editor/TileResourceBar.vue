@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
-import { useMapStore, type MapResource } from '../../stores/map'
+import { useMapStore, type MapResource, type TilePaletteEntry } from '../../stores/map'
 import { useProjectStore } from '../../stores/project'
 import { useTileAssetImport } from '../../composables/useTileAssetImport'
 import CustomSelect from '../common/CustomSelect.vue'
@@ -657,7 +657,7 @@ async function uploadLocalTiles() {
   }
 
   for (const src of paths) {
-    // 尺寸不同（16 ↔ 32）时自动换算；空地图会直接跟随素材尺寸
+    // 单图块按整数倍缩放适配；多格图集只按当前格子切（切错了改尺寸重切）
     const imported = await importTileImage(src, { fileName: src.split(/[\\/]/).pop() })
     if (!imported) continue
     const resourceId = mapStore.addResource({
@@ -670,8 +670,9 @@ async function uploadLocalTiles() {
       collisionEnabled: false,
       originPath: imported.originPath,
       nativeTileSize: imported.nativeTileSize,
+      assetKind: imported.assetKind,
     })
-    expandedResources.add(resourceId)
+    expandedSlices.set(resourceId, `${imported.path}:${imported.tileWidth}x${imported.tileHeight}`)
     // 按图块尺寸切块并全部加入调色板（全透明块会在刷新时自动剔除）
     try {
       const img = await loadImage(await getResourceUrl(imported.path))
@@ -709,10 +710,9 @@ function onTileSizeChange(val: string) {
   const newSize = Number(val.split('x')[0])
   if (!Number.isFinite(newSize) || newSize <= 0) return
   if (newSize === mapStore.mapData.tileSize) return
-  const oldSize = mapStore.mapData.tileSize
   mapStore.updateTileSize(newSize, true)
-  // 已有图块集按新格子重新换算（从导入时的原图出发，避免反复缩放）
-  void refitTilesetsToGrid(newSize, oldSize)
+  // 图集从原图按新格子重新切；单图块按整数倍重新缩放
+  void refitTilesetsToGrid(newSize)
 }
 
 // ====== 全局缓存 ======
@@ -726,8 +726,14 @@ const tileCols = ref<Map<string, number>>(new Map())
 const tileThumbs = ref<Map<string, string>>(new Map())
 // 空格子（整块全透明）标记：不进入笔刷调色板
 const tileEmpty = ref<Map<string, boolean>>(new Map())
-// 已经展开进调色板的素材（避免刷新时重复追加/复活已删除的图块）
-let expandedResources = new Set<string>()
+// 已经展开进调色板的素材：记录切片签名（图片 + 图块尺寸）。
+// 尺寸一变说明图块要重新切，必须重建成员，否则只会显示旧切片剩下的那几个。
+let expandedSlices = new Map<string, string>()
+
+/** 切片签名：图片路径或图块尺寸变化时，这套素材需要重新展开进调色板 */
+function slicingKey(res: MapResource): string {
+  return `${res.path}:${res.tileWidth}x${res.tileHeight}`
+}
 
 const paletteEntries = computed(() => mapStore.mapData.tilePalette ?? [])
 
@@ -997,14 +1003,16 @@ async function generateTileThumbnails() {
   syncPaletteWithResources(batchCounts, batchEmpty)
 }
 
-/** 把新素材的非空图块按顺序展开进调色板；已存在的素材不重复追加 */
+/** 把新素材的非空图块按顺序展开进调色板；切片尺寸变化时重建该素材的成员 */
 function syncPaletteWithResources(
   counts: Map<string, number>,
   empty: Map<string, boolean>
 ) {
   const resources = tileResources.value
+
+  // 首次生成调色板
   if (mapStore.mapData.tilePalette === undefined) {
-    const entries: { resourceId: string; tileIndex: number }[] = []
+    const entries: TilePaletteEntry[] = []
     for (const res of resources) {
       const count = counts.get(res.id) ?? 0
       for (let t = 0; t < count; t++) {
@@ -1013,29 +1021,49 @@ function syncPaletteWithResources(
       }
     }
     mapStore.setTilePalette(entries)
-    expandedResources = new Set(
-      resources.filter(r => (counts.get(r.id) ?? 0) > 0).map(r => r.id)
+    expandedSlices = new Map(
+      resources
+        .filter(r => (counts.get(r.id) ?? 0) > 0)
+        .map(r => [r.id, slicingKey(r)]),
     )
     return
   }
 
-  // 旧存档里可能已经包含空图块：顺手清掉
+  // 清理空图块 / 超出当前切片数量的旧条目（只处理当前可见的图块集，别误删其它集合的条目）
+  const visibleIds = new Set(resources.map(r => r.id))
   const existing = mapStore.mapData.tilePalette ?? []
-  const cleaned = existing.filter(e => !empty.get(`${e.resourceId}:${e.tileIndex}`))
+  const cleaned = existing.filter(e => {
+    if (!visibleIds.has(e.resourceId)) return true
+    const count = counts.get(e.resourceId) ?? 0
+    if (e.tileIndex < 0 || e.tileIndex >= count) return false
+    return !empty.get(`${e.resourceId}:${e.tileIndex}`)
+  })
   if (cleaned.length !== existing.length) mapStore.setTilePalette(cleaned)
 
-  const newEntries: { resourceId: string; tileIndex: number }[] = []
+  // 新素材，或者切片尺寸变了（重新切图）→ 重建这套素材在调色板里的成员
+  let palette = mapStore.mapData.tilePalette ?? []
+  let paletteChanged = false
   for (const res of resources) {
-    if (expandedResources.has(res.id)) continue
+    const key = slicingKey(res)
+    if (expandedSlices.get(res.id) === key) continue
     const count = counts.get(res.id) ?? 0
     if (count <= 0) continue // 加载失败时保留，下次刷新重试
+
+    const added: TilePaletteEntry[] = []
     for (let t = 0; t < count; t++) {
       if (empty.get(`${res.id}:${t}`)) continue
-      newEntries.push({ resourceId: res.id, tileIndex: t })
+      added.push({ resourceId: res.id, tileIndex: t })
     }
-    expandedResources.add(res.id)
+    // 在原位置替换，避免整套素材被挪到调色板末尾
+    const insertAt = palette.findIndex(e => e.resourceId === res.id)
+    const others = palette.filter(e => e.resourceId !== res.id)
+    palette = insertAt >= 0
+      ? [...others.slice(0, insertAt), ...added, ...others.slice(insertAt)]
+      : [...others, ...added]
+    expandedSlices.set(res.id, key)
+    paletteChanged = true
   }
-  if (newEntries.length > 0) mapStore.addPaletteEntries(newEntries)
+  if (paletteChanged) mapStore.setTilePalette(palette)
 }
 
 async function refreshAll() {
@@ -1055,12 +1083,12 @@ watch(
 // 载入地图后以当前素材为基线，避免把已删除的图块重新展开
 watch(() => mapStore.mapLoadCount, () => {
   paletteSelection.clear()
-  expandedResources = new Set(tileResources.value.map(r => r.id))
+  expandedSlices = new Map(tileResources.value.map(r => [r.id, slicingKey(r)]))
   refreshAll()
 })
 
 onMounted(() => {
-  expandedResources = new Set(tileResources.value.map(r => r.id))
+  expandedSlices = new Map(tileResources.value.map(r => [r.id, slicingKey(r)]))
   refreshAll()
   window.addEventListener('keydown', onPaletteWindowKeydown)
 })
@@ -1169,7 +1197,7 @@ function onClearResources() {
       <div class="bar-spacer" />
       <div
         class="bar-tile-size"
-        v-tooltip="'地图的图块格子尺寸（整张地图统一，修改后已有图块会自动换算）'"
+        v-tooltip="'地图的图块格子尺寸（整张地图统一，修改后图块集按新格子重新切）'"
       >
         <span class="bar-tile-size-label">图块尺寸</span>
         <CustomSelect

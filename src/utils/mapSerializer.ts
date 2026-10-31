@@ -121,8 +121,10 @@ export interface ResourceSaveData {
   groupId?: string
   /** 导入时的原始图片（相对路径）：改格子尺寸时从这里重新换算 */
   originPath?: string
-  /** 素材自带的图块尺寸；缺省表示未知 */
+  /** 素材自带的图块尺寸；只有单图块才有 */
   nativeTileSize?: number
+  /** 素材类型：tile=单图块 / tileset=多格图集（缺省视为图集） */
+  assetKind?: 'tile' | 'tileset'
 }
 
 export interface ImageSaveData {
@@ -277,6 +279,7 @@ export function serializeMap(mapData: any): MapSaveData {
     groupId: r.groupId || undefined,
     originPath: r.originPath || undefined,
     nativeTileSize: r.nativeTileSize || undefined,
+    assetKind: r.assetKind || undefined,
   })
 
   const mapResources = (mapData.resources || []).map(serializeResource)
@@ -511,6 +514,7 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
       groupId: r.groupId,
       originPath: r.originPath,
       nativeTileSize: r.nativeTileSize,
+      assetKind: r.assetKind,
     }
   }
 

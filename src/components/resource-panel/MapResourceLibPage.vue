@@ -9,8 +9,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'close': []
-  /** 第二个参数：素材自带的图块尺寸（图集才有，单图块缺省时由导入方按图片边长判断） */
-  'imported': [path: string, nativeTileSize?: number]
+  /** 第二个参数：素材类型（tiles=单图块 / tilesets=图集；图像模式不传） */
+  'imported': [path: string, kind?: 'tile' | 'tileset']
 }>()
 
 const store = useMapResourceLibStore()
@@ -64,7 +64,7 @@ const filteredResources = computed(() => {
         v-for="res in filteredResources"
         :key="res.path"
         class="lib-card"
-        @click="emit('imported', res.path, res.nativeTileSize)"
+        @click="emit('imported', res.path, res.category === 'tilesets' ? 'tileset' : res.category === 'tiles' ? 'tile' : undefined)"
       >
         <div class="lib-card-thumb">
           <img :src="res.thumbnail" />

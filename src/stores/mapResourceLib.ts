@@ -7,13 +7,6 @@ export interface MapResourceItem {
   path: string
   category: 'images' | 'tiles' | 'tilesets'
   thumbnail: string
-  /**
-   * 素材自带的图块尺寸（格子边长的像素值）。
-   * - tiles/ 下的单张图块：缺省，导入时按图片边长自动判断
-   * - tilesets/<尺寸>/ 下的图集：目录名即尺寸
-   * - tilesets/ 根目录下的图集：缺省，导入时按当前地图格子切
-   */
-  nativeTileSize?: number
 }
 
 // 支持的图片扩展名（自动扫描时过滤）
@@ -36,60 +29,30 @@ export const useMapResourceLibStore = defineStore('mapResourceLib', () => {
     const engineDir = await invoke<string>('get_engine_assets_dir')
 
     // 自动扫描 maps/images、maps/tiles、maps/tilesets 三个目录
-    // list_dir 对子目录返回 "name/" 后缀
+    // tiles = 单图块；tilesets = 多格图集（尺寸不标注，导入时按当前地图格子切）
     const categories: MapResourceItem['category'][] = ['images', 'tiles', 'tilesets']
     const results: MapResourceItem[] = []
 
-    /**
-     * 扫描一个分类目录。tilesets 允许一层子目录，目录名即图块尺寸：
-     * tilesets/16/*.png、tilesets/32/*.png。根目录下的旧图集按 16 处理。
-     */
-    async function scanCategory(
-      category: MapResourceItem['category'],
-      dirPath: string,
-      urlPrefix: string,
-      nativeTileSize?: number,
-      allowSubDir = true,
-    ) {
-      let files: string[]
-      try {
-        files = await invoke<string[]>('list_dir', { path: dirPath })
-      } catch (e) {
-        console.warn(`[MapResourceLib] 扫描 ${dirPath} 失败:`, e)
-        return
-      }
-      for (const file of files) {
-        if (file.endsWith('/')) {
-          if (!allowSubDir || category !== 'tilesets') continue
-          const dirName = file.slice(0, -1)
-          const declared = Number(dirName)
-          await scanCategory(
-            category,
-            joinPath(dirPath, dirName),
-            `${urlPrefix}/${dirName}`,
-            Number.isFinite(declared) && declared > 0 ? declared : nativeTileSize,
-            false,
-          )
-          continue
-        }
-        if (!IMAGE_EXTS.test(file)) continue
-        results.push({
-          name: file.replace(IMAGE_EXTS, ''),
-          path: `${urlPrefix}/${file}`,
-          category,
-          // 缩略图直接用文件 URL 交给 <img>：WebView 按需异步解码并自带缓存，
-          // 不做 base64 全量读取，图片再多也不卡主线程。
-          // URL 追加时间戳破坏缓存：用户替换同名图片后重扫能立即看到新图
-          thumbnail: `${convertFileSrc(joinPath(dirPath, file))}?t=${Date.now()}`,
-          nativeTileSize,
-        })
-      }
-    }
-
     for (const category of categories) {
-      // 根目录下的图集没有尺寸标记：导入时按「当前地图格子」切（与本地导入一致），
-      // 需要固定尺寸就放进 tilesets/<尺寸>/ 子目录
-      await scanCategory(category, joinPath(engineDir, 'maps', category), `/maps/${category}`)
+      try {
+        const dirPath = joinPath(engineDir, 'maps', category)
+        const files = await invoke<string[]>('list_dir', { path: dirPath })
+        for (const file of files) {
+          if (file.endsWith('/')) continue
+          if (!IMAGE_EXTS.test(file)) continue
+          results.push({
+            name: file.replace(IMAGE_EXTS, ''),
+            path: `/maps/${category}/${file}`,
+            category,
+            // 缩略图直接用文件 URL 交给 <img>：WebView 按需异步解码并自带缓存，
+            // 不做 base64 全量读取，图片再多也不卡主线程。
+            // URL 追加时间戳破坏缓存：用户替换同名图片后重扫能立即看到新图
+            thumbnail: `${convertFileSrc(joinPath(dirPath, file))}?t=${Date.now()}`,
+          })
+        }
+      } catch (e) {
+        console.warn(`[MapResourceLib] 扫描 ${category} 目录失败:`, e)
+      }
     }
 
     // 按名称排序，分类间保持 images -> tiles -> tilesets

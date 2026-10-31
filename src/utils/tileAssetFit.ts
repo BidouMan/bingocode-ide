@@ -46,8 +46,9 @@ export interface FittedTileSheet {
 
 /**
  * 把整张图块图按整数倍缩放到目标格子尺寸。
- * 缩的是「整张图」，切片仍按目标格子尺寸走，因此切出来的图块数量不变。
- * 无法整除时返回 null（调用方保持原样，避免切出一半的图块）。
+ * 只缩放「完整图块」覆盖的区域，切片仍按目标格子尺寸走，因此切出来的图块数量不变。
+ * 真实图集常有 1px 边角（如 191×192），这里把凑不满一格的残余裁掉，和原本按格切片的结果一致。
+ * 无法整数倍换算时返回 null（调用方保持原样）。
  */
 export async function fitTileSheet(
   dataUrl: string,
@@ -58,13 +59,13 @@ export async function fitTileSheet(
 
   const img = await loadImageElement(dataUrl)
   if (img.width <= 0 || img.height <= 0) return null
-  if (img.width % nativeTileSize !== 0 || img.height % nativeTileSize !== 0) return null
 
-  const scale = gridSize / nativeTileSize
-  const width = Math.round(img.width * scale)
-  const height = Math.round(img.height * scale)
-  if (width <= 0 || height <= 0) return null
+  const cols = Math.floor(img.width / nativeTileSize)
+  const rows = Math.floor(img.height / nativeTileSize)
+  if (cols <= 0 || rows <= 0) return null
 
+  const width = cols * gridSize
+  const height = rows * gridSize
   const canvas = document.createElement('canvas')
   canvas.width = width
   canvas.height = height
@@ -73,7 +74,8 @@ export async function fitTileSheet(
 
   // 最近邻：像素风整数倍缩放的唯一正确做法（关掉浏览器默认的双线性平滑）
   ctx.imageSmoothingEnabled = false
-  ctx.drawImage(img, 0, 0, width, height)
+  // 源区域只取完整图块覆盖的范围，避免把右侧/底部的残余像素也缩放进来
+  ctx.drawImage(img, 0, 0, cols * nativeTileSize, rows * nativeTileSize, 0, 0, width, height)
 
   return { dataUrl: canvas.toDataURL('image/png'), width, height }
 }

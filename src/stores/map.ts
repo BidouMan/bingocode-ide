@@ -165,10 +165,17 @@ export interface MapResource {
   collisionShape?: { points: number[][] }
   /** 所属图块集分组（缺省视为第一个分组，兼容旧地图） */
   groupId?: string
-  /** 导入时的原始图片（项目内相对路径）：改格子尺寸时从这里重新换算，避免反复缩放糊掉 */
+  /** 导入时的原始图片（项目内相对路径）：改格子尺寸时从这里重新切图 */
   originPath?: string
-  /** 素材自带的图块尺寸（16 / 32 …）；缺省表示未知，不参与自动换算 */
+  /** 素材自带的图块尺寸（16 / 32 …）；只有单图块才有，图集不推断 */
   nativeTileSize?: number
+  /**
+   * 素材类型：
+   * - tile：单张图块（图片边长就是图块尺寸，可以自动缩放）
+   * - tileset：多格图集（尺寸未知，只能按当前地图格子切，改尺寸时重新切，绝不缩放）
+   * 缺省时按 tileset 处理（兼容旧数据）
+   */
+  assetKind?: 'tile' | 'tileset'
 }
 
 // 新增素材时 id/firstgid 由 store 统一分配
@@ -1097,7 +1104,8 @@ export const useMapStore = defineStore('map', () => {
       tileHeight: number
       /** 首次换算老素材时补登记的原始图片 / 原始尺寸 */
       originPath?: string
-      nativeTileSize?: number
+      /** 传 null 表示清掉旧版本猜出来的尺寸 */
+      nativeTileSize?: number | null
     },
   ) {
     const resource = mapData.value.resources.find(r => r.id === id)
@@ -1106,7 +1114,8 @@ export const useMapStore = defineStore('map', () => {
     resource.tileWidth = patch.tileWidth
     resource.tileHeight = patch.tileHeight
     if (patch.originPath !== undefined) resource.originPath = patch.originPath
-    if (patch.nativeTileSize !== undefined) resource.nativeTileSize = patch.nativeTileSize
+    if (patch.nativeTileSize === null) delete resource.nativeTileSize
+    else if (patch.nativeTileSize !== undefined) resource.nativeTileSize = patch.nativeTileSize
     const tileSet = mapData.value.tileSets.find(ts => ts.id === id)
       ?? mapData.value.tileSets.find(ts => ts.firstgid === resource.firstgid)
     if (tileSet) {

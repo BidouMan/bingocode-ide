@@ -1239,7 +1239,7 @@ async function onMapLibImportedImage(engineRelPath: string) {
   await createImageMapProject(fileName, { srcPath: absPath })
 }
 
-async function onResLibImported(path: string, nativeTileSize?: number) {
+async function onResLibImported(path: string, kind?: 'tile' | 'tileset') {
   const fileName = path.split('/').pop() || 'resource.png'
   const name = fileName.split('.')[0] || '资源'
   // 图层面板打开的资源库固定按图像导入；图块面板打开时才作为图块集
@@ -1279,9 +1279,9 @@ async function onResLibImported(path: string, nativeTileSize?: number) {
     return
   }
 
-  // 图块模式：统一走导入适配（按当前地图格子尺寸缩放，空地图直接跟随素材尺寸）
+  // 图块模式：单图块会按整数倍缩放适配，图集只按当前格子切（不缩放）
   const engineDir = await invoke<string>('get_engine_assets_dir')
-  const imported = await importTileImage(`${engineDir}${path}`, { fileName, nativeTileSize })
+  const imported = await importTileImage(`${engineDir}${path}`, { fileName, kind })
   if (!imported) return
   mapStore.addResource({
     name,
@@ -1293,6 +1293,7 @@ async function onResLibImported(path: string, nativeTileSize?: number) {
     collisionEnabled: false,
     originPath: imported.originPath,
     nativeTileSize: imported.nativeTileSize,
+    assetKind: imported.assetKind,
   })
   editorStore.setActiveEditorMode('map')
   editorStore.setResourceTab('map')
