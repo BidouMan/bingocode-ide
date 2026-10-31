@@ -117,6 +117,10 @@ export interface ResourceSaveData {
   collisionShape?: { points: number[][] }
   /** 所属图块集分组 */
   groupId?: string
+  /** 导入时的原始图片（相对路径）：改格子尺寸时从这里重新换算 */
+  originPath?: string
+  /** 素材自带的图块尺寸；缺省表示未知 */
+  nativeTileSize?: number
 }
 
 export interface ImageSaveData {
@@ -267,6 +271,8 @@ export function serializeMap(mapData: any): MapSaveData {
     collisionEnabled: r.collisionEnabled || false,
     collisionShape: r.collisionShape,
     groupId: r.groupId || undefined,
+    originPath: r.originPath || undefined,
+    nativeTileSize: r.nativeTileSize || undefined,
   })
 
   const mapResources = (mapData.resources || []).map(serializeResource)
@@ -498,6 +504,8 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
       collisionEnabled: r.collisionEnabled || false,
       collisionShape: r.collisionShape,
       groupId: r.groupId,
+      originPath: r.originPath,
+      nativeTileSize: r.nativeTileSize,
     }
   }
 

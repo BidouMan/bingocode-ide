@@ -7,6 +7,7 @@ import { useMapEditorStore } from '../../stores/mapEditor'
 import CustomSelect from '../common/CustomSelect.vue'
 import { toUserX, toWorldX, toUserY, toWorldY, toUserAngle, toWorldAngle, toUserDeltaY, toWorldDeltaY } from '../../utils/coords'
 import { shapeColorCss, shapeKindLabel } from '../../utils/shapeStyle'
+import { useTileAssetImport } from '../../composables/useTileAssetImport'
 import iconChevron from '../../assets/icons/right_arrow.svg'
 import iconSettings from '../../assets/icons/icon--settings.svg'
 import iconCopy from '../../assets/icons/copy.svg'
@@ -35,6 +36,7 @@ const mapStore = useMapStore()
 const editorStore = useEditorStore()
 const resourceStore = useResourceStore()
 const mapEditorStore = useMapEditorStore()
+const { refitTilesetsToGrid } = useTileAssetImport()
 
 // ====== 场景标记检视器 ======
 /** 选中的图钉：选中时属性面板整体切换为该标记的检视器 */
@@ -1164,7 +1166,11 @@ const tileSizeOptions = [
 const tileSizeValue = computed(() => `${mapStore.mapData.tileSize}x${mapStore.mapData.tileSize}`)
 function onTileSizeChange(val: string) {
   const newSize = Number(val.split('x')[0])
-  if (Number.isFinite(newSize) && newSize > 0) mapStore.updateTileSize(newSize)
+  if (!Number.isFinite(newSize) || newSize <= 0) return
+  if (newSize === mapStore.mapData.tileSize) return
+  mapStore.updateTileSize(newSize)
+  // 已有图块集按新格子重新换算（从导入时的原图出发，避免反复缩放）
+  void refitTilesetsToGrid(newSize)
 }
 
 /**

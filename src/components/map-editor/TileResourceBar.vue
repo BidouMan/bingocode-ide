@@ -3,6 +3,7 @@ import { ref, reactive, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { useMapStore, type MapResource } from '../../stores/map'
 import { useProjectStore } from '../../stores/project'
+import { useTileAssetImport } from '../../composables/useTileAssetImport'
 import iconLibrary from '../../assets/icons/图片库.svg'
 import iconUpload from '../../assets/icons/上传本地图片资源.svg'
 import iconDelete from '../../assets/icons/icon--delete.svg'
@@ -30,6 +31,7 @@ const emit = defineEmits<{
 
 const mapStore = useMapStore()
 const projectStore = useProjectStore()
+const { importTileImage } = useTileAssetImport()
 const collapsed = ref(false)
 
 // ====== Unity 风格无限网格画布：图块按 16 列排布，可自由平移 / 缩放 ======
@@ -637,7 +639,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onPaletteWindowKeydown)
 })
 
-/** 打开系统窗口多选图片，全部按当前图块尺寸切块导入调色板 */
+/** 打开系统窗口多选图片：统一换算成当前图块尺寸后导入调色板 */
 async function uploadLocalTiles() {
   if (props.disabled) return
   let paths: string[] = []
@@ -653,30 +655,27 @@ async function uploadLocalTiles() {
     await generateTileThumbnails()
   }
 
-  const tw = Math.max(1, mapStore.mapData.tileSize)
   for (const src of paths) {
-    let relativePath: string
-    try {
-      relativePath = await copyResourceToMapDir(src)
-    } catch (e) {
-      console.error('复制资源到项目目录失败:', e)
-      continue
-    }
+    // 尺寸不同（16 ↔ 32）时自动换算；空地图会直接跟随素材尺寸
+    const imported = await importTileImage(src, { fileName: src.split(/[\\/]/).pop() })
+    if (!imported) continue
     const resourceId = mapStore.addResource({
-      name: src.split('/').pop()?.split('.')[0] || '图块',
-      path: relativePath,
+      name: (src.split(/[\\/]/).pop() || '图块').split('.')[0] || '图块',
+      path: imported.path,
       resourceType: 'tileset',
-      tileWidth: tw,
-      tileHeight: tw,
+      tileWidth: imported.tileWidth,
+      tileHeight: imported.tileHeight,
       collisionType: '图像',
       collisionEnabled: false,
+      originPath: imported.originPath,
+      nativeTileSize: imported.nativeTileSize,
     })
     expandedResources.add(resourceId)
     // 按图块尺寸切块并全部加入调色板（全透明块会在刷新时自动剔除）
     try {
-      const img = await loadImage(await getResourceUrl(relativePath))
-      const cols = Math.floor(img.width / tw)
-      const rows = Math.floor(img.height / tw)
+      const img = await loadImage(await getResourceUrl(imported.path))
+      const cols = Math.floor(img.width / imported.tileWidth)
+      const rows = Math.floor(img.height / imported.tileHeight)
       const entries: { resourceId: string; tileIndex: number }[] = []
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
@@ -1030,10 +1029,13 @@ watch(() => mapStore.activeLayerIndex, () => {
   refreshAll()
 })
 // 切换图块集（资源仓库）时素材整批变化，需要重新生成缩略图与调色板
-watch(() => currentResources.value.map(r => r.id).join(','), refreshAll)
-// 改「图块尺寸」只影响地图网格，图块集仍按自己的原始尺寸切片，调色板不需要重建
+// 路径 / 切片尺寸也纳入 key：改地图格子尺寸后素材会被换成新的适配图
+watch(
+  () => currentResources.value.map(r => `${r.id}:${r.path}:${r.tileWidth}x${r.tileHeight}`).join(','),
+  refreshAll,
+)
+// 载入地图后以当前素材为基线，避免把已删除的图块重新展开
 watch(() => mapStore.mapLoadCount, () => {
-  // 载入地图后以当前素材为基线，避免把已删除的图块重新展开
   paletteSelection.clear()
   expandedResources = new Set(tileResources.value.map(r => r.id))
   refreshAll()
@@ -1066,31 +1068,6 @@ function onDeleteSelected() {
 function onClearResources() {
   mapStore.clearResources()
   refreshAll()
-}
-
-// 将资源文件复制到当前地图目录，返回相对路径
-async function copyResourceToMapDir(srcPath: string): Promise<string> {
-  const projectRoot = projectStore.root
-  const mapName = mapStore.mapData.name
-  if (!projectRoot || !mapName) throw new Error('地图未就绪')
-  // 同名文件重复导入时不能覆盖已有素材（否则图层/图块会串图）
-  const rawName = srcPath.split('/').pop() || 'resource.png'
-  const dot = rawName.lastIndexOf('.')
-  const base = dot > 0 ? rawName.slice(0, dot) : rawName
-  const ext = dot > 0 ? rawName.slice(dot) : ''
-  const used = new Set(
-    mapStore.mapData.resources.map(r => r.path.split('/').pop() || ''),
-  )
-  let fileName = rawName
-  let seq = 2
-  while (used.has(fileName)) fileName = `${base}-${seq++}${ext}`
-  const relativePath = `assets/maps/${mapName}/images/${fileName}`
-  await invoke<string>('copy_file_to_project', {
-    src: srcPath,
-    projectRoot,
-    relativePath,
-  })
-  return relativePath
 }
 </script>
 

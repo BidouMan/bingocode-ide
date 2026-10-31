@@ -9,7 +9,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'close': []
-  'imported': [path: string]
+  /** 第二个参数：素材自带的图块尺寸（图集才有，单图块缺省时由导入方按图片边长判断） */
+  'imported': [path: string, nativeTileSize?: number]
 }>()
 
 const store = useMapResourceLibStore()
@@ -63,7 +64,7 @@ const filteredResources = computed(() => {
         v-for="res in filteredResources"
         :key="res.path"
         class="lib-card"
-        @click="emit('imported', res.path)"
+        @click="emit('imported', res.path, res.nativeTileSize)"
       >
         <div class="lib-card-thumb">
           <img :src="res.thumbnail" />

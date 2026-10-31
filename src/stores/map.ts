@@ -164,6 +164,10 @@ export interface MapResource {
   collisionShape?: { points: number[][] }
   /** 所属图块集分组（缺省视为第一个分组，兼容旧地图） */
   groupId?: string
+  /** 导入时的原始图片（项目内相对路径）：改格子尺寸时从这里重新换算，避免反复缩放糊掉 */
+  originPath?: string
+  /** 素材自带的图块尺寸（16 / 32 …）；缺省表示未知，不参与自动换算 */
+  nativeTileSize?: number
 }
 
 // 新增素材时 id/firstgid 由 store 统一分配
@@ -1077,6 +1081,33 @@ export const useMapStore = defineStore('map', () => {
     return resource.id
   }
 
+  /**
+   * 更新某个图块素材的实际图片与切片尺寸（导入适配 / 改格子尺寸时用）。
+   * 素材与对应图块集同步，避免两处路径不一致。
+   */
+  function setResourceAsset(
+    id: string,
+    patch: { path: string; tileWidth: number; tileHeight: number },
+  ) {
+    const resource = mapData.value.resources.find(r => r.id === id)
+    if (!resource) return
+    resource.path = patch.path
+    resource.tileWidth = patch.tileWidth
+    resource.tileHeight = patch.tileHeight
+    const tileSet = mapData.value.tileSets.find(ts => ts.id === id)
+      ?? mapData.value.tileSets.find(ts => ts.firstgid === resource.firstgid)
+    if (tileSet) {
+      tileSet.imagePath = patch.path
+      tileSet.tileWidth = patch.tileWidth
+      tileSet.tileHeight = patch.tileHeight
+    }
+  }
+
+  /** 图块素材批量换图后统一通知画布重绘（避免每个素材各触发一次全量重建） */
+  function notifyTileAssetsChanged() {
+    tileRevision.value++
+  }
+
   // ====== 图块笔刷调色板 ======
   function addPaletteEntries(entries: TilePaletteEntry[]) {
     if (entries.length === 0) return
@@ -1338,8 +1369,8 @@ export const useMapStore = defineStore('map', () => {
     mapData.value.height = newHeight
     mapData.value.tileSize = newSize
 
-    // 图块集保留自己的切片尺寸：换网格不会重新切图，已画的图块外观不丢，
-    // 渲染时按「原图尺寸 → 当前格子」等比缩放（编辑器与游戏窗口一致）
+    // 图块集保留自己的切片尺寸：换网格不会在这里重新切图。
+    // 已有素材的尺寸换算由 useTileAssetImport().refitTilesetsToGrid 异步完成（从导入时的原图重新缩放）。
     tileRevision.value++
   }
 
@@ -1750,6 +1781,8 @@ export const useMapStore = defineStore('map', () => {
     movePaletteEntry,
     removePaletteEntry,
     removeResource,
+    setResourceAsset,
+    notifyTileAssetsChanged,
     clearResources,
     updateMapProperty,
     updateCameraSettings,

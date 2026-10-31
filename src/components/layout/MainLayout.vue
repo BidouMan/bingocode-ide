@@ -25,6 +25,7 @@ import SoundLibPage from '../resource-panel/SoundLibPage.vue'
 import PaintEditorPage from '../paint-editor/PaintEditorPage.vue'
 import FramePickerPage from '../resource-panel/FramePickerPage.vue'
 import { appendFramesToSprite } from '../../composables/appendSpriteFrames'
+import { useTileAssetImport } from '../../composables/useTileAssetImport'
 import HelpPanel from '../help/HelpPanel.vue'
 import PythonHelpPanel from '../help/PythonHelpPanel.vue'
 import AiChatPanel from '../help/AiChatPanel.vue'
@@ -76,6 +77,7 @@ const terminalStore = useTerminalStore()
 const themeStore = useThemeStore()
 const fileExplorerStore = useFileExplorerStore()
 const engine = useEngine()
+const { importTileImage } = useTileAssetImport()
 
 // loading进度
 const loadingProgress = computed(() => {
@@ -1227,46 +1229,64 @@ async function onMapLibImportedImage(engineRelPath: string) {
   await createImageMapProject(fileName, { srcPath: absPath })
 }
 
-async function onResLibImported(path: string) {
-  const name = path.split('/').pop()?.split('.')[0] || '资源'
-  const tileSize = mapStore.mapData.tileSize
+async function onResLibImported(path: string, nativeTileSize?: number) {
+  const fileName = path.split('/').pop() || 'resource.png'
+  const name = fileName.split('.')[0] || '资源'
   // 图层面板打开的资源库固定按图像导入；图块面板打开时才作为图块集
   const isImageLayer = mapResLibScope.value === 'image'
 
-  // 复制资源文件到项目地图目录
-  let relativePath = path
-  try {
-    const engineDir = await invoke<string>('get_engine_assets_dir')
-    const fullSrc = `${engineDir}${path}`
-    const projectRoot = projectStore.root
-    const mapName = mapStore.mapData.name || '未命名地图'
-    const fileName = path.split('/').pop() || 'resource.png'
-    relativePath = `assets/maps/${mapName}/images/${fileName}`
-    await invoke<string>('copy_file_to_project', {
-      src: fullSrc,
-      projectRoot,
-      relativePath,
+  if (isImageLayer) {
+    // 图像模式：复制资源文件到项目地图目录
+    let relativePath = path
+    try {
+      const engineDir = await invoke<string>('get_engine_assets_dir')
+      const fullSrc = `${engineDir}${path}`
+      const projectRoot = projectStore.root
+      const mapName = mapStore.mapData.name || '未命名地图'
+      relativePath = `assets/maps/${mapName}/images/${fileName}`
+      await invoke<string>('copy_file_to_project', {
+        src: fullSrc,
+        projectRoot,
+        relativePath,
+      })
+    } catch (e) {
+      console.error('复制资源到项目目录失败:', e)
+    }
+
+    mapStore.addResource({
+      name,
+      path: relativePath,
+      resourceType: 'image',
+      tileWidth: 64,
+      tileHeight: 64,
+      collisionType: '图像',
+      collisionEnabled: false,
     })
-  } catch (e) {
-    console.error('复制资源到项目目录失败:', e)
+    editorStore.setActiveEditorMode('map')
+    editorStore.setResourceTab('map')
+    currentPage.value = 0
+    await mapEditorRef.value?.placeImageResource(relativePath)
+    return
   }
 
+  // 图块模式：统一走导入适配（按当前地图格子尺寸缩放，空地图直接跟随素材尺寸）
+  const engineDir = await invoke<string>('get_engine_assets_dir')
+  const imported = await importTileImage(`${engineDir}${path}`, { fileName, nativeTileSize })
+  if (!imported) return
   mapStore.addResource({
     name,
-    path: relativePath,
-    resourceType: isImageLayer ? 'image' : 'tileset',
-    tileWidth: isImageLayer ? 64 : tileSize,
-    tileHeight: isImageLayer ? 64 : tileSize,
+    path: imported.path,
+    resourceType: 'tileset',
+    tileWidth: imported.tileWidth,
+    tileHeight: imported.tileHeight,
     collisionType: '图像',
     collisionEnabled: false,
+    originPath: imported.originPath,
+    nativeTileSize: imported.nativeTileSize,
   })
   editorStore.setActiveEditorMode('map')
   editorStore.setResourceTab('map')
   currentPage.value = 0
-  // 图像模式：内置资源选图后直接生成一个图片图层
-  if (isImageLayer) {
-    await mapEditorRef.value?.placeImageResource(relativePath)
-  }
 }
 
 function editorUndo() {
