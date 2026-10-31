@@ -37,6 +37,7 @@ import LearnPanel from '../sidebar/LearnPanel.vue'
 import SearchPanel from '../sidebar/SearchPanel.vue'
 import OutlinePanel from '../sidebar/OutlinePanel.vue'
 import { useFileExplorerStore } from '../../stores/fileExplorer'
+import { isProjectCodePath, samePath, baseName, isUnderPath } from '../../utils/projectPath'
 import iconLogo from '../../assets/icons/logo.svg'
 import iconFile from '../../assets/icons/icon--file.svg'
 import iconCodeEdit from '../../assets/icons/代码编辑.svg'
@@ -122,6 +123,33 @@ watch(() => editorStore.isGameMode, () => {
     engine.stop()
   }
 })
+
+/**
+ * 顶部模式开关。两种模式严格隔离：标签互不共享，只通过磁盘传递内容。
+ * 离开当前模式前先把项目代码的修改写盘；切换后让新模式按磁盘刷新。
+ */
+let _switchingMode = false
+async function onToggleGameMode() {
+  if (_switchingMode) return
+  _switchingMode = true
+  try {
+    const root = projectStore.root
+    await editorStore.flushCurrentModeProjectTabs(root)
+    editorStore.toggleGameMode()
+    await nextTick()
+    // 磁盘为准：先刷新已有标签的内容/清理已删文件，再补齐新模式还没有的项目文件
+    await editorStore.refreshCurrentModeProjectTabs(root)
+    const ws = fileExplorerStore.workspaceFolder
+    // 游戏模式始终显示项目代码；代码模式只有在工作区就是项目目录（或未打开文件夹）时才补，
+    // 避免把项目代码混进学生自己打开的其他作业文件夹
+    const codeModeShowsProject = !ws || samePath(ws, root) || isUnderPath(ws, root)
+    if (editorStore.isGameMode || codeModeShowsProject) {
+      await editorStore.loadProjectCodeTabsInto(editorStore.isGameMode ? 'game' : 'code', root)
+    }
+  } finally {
+    _switchingMode = false
+  }
+}
 const canvasOffsetX = ref(0)
 const consoleExpanded = ref(true)
 const fileMenuVisible = ref(false)
@@ -251,28 +279,16 @@ async function loadProjectResources(root: string) {
   // 加载期间工作区被切换（新建/再打开项目）时立即终止，避免旧项目资源混进新项目
   const epoch = workspaceEpoch
   const stale = () => epoch !== workspaceEpoch
-  // 先切到代码模式再建标签，确保 createTab 把代码文件放进 codeTabs（与本函数结尾的最终状态一致）
+  // 把游戏模式切到「代码编辑」子页面
   editorStore.setActiveEditorMode('code')
   editorStore.setResourceTab('sprite')
 
   // ── 预加载代码文件 ──
+  // 项目代码归游戏模式所有：游戏模式先建标签（资源列表由 gameTabs 监听自动同步），
+  // 代码模式随后从磁盘读一份自己独立的标签，两边互不共享对象
   try {
-    const files = await invoke<string[]>('list_dir', { path: `${root}/code` })
-    for (const file of files) {
-      if (stale()) return
-      if (file.endsWith('.py')) {
-        const content = await invoke<string>('read_file', { path: `${root}/code/${file}` })
-        if (stale()) return
-        const idx = editorStore.createTab(file, `${root}/code/${file}`, content)
-        const tab = editorStore.currentTabs[idx]
-        if (tab) {
-          resourceStore.addItem(
-            { name: tab.name, type: 'code', path: tab.path, content: tab.content },
-            tab.id,
-          )
-        }
-      }
-    }
+    await editorStore.loadProjectCodeTabsInto('game', root)
+    if (!stale()) await editorStore.loadProjectCodeTabsInto('code', root)
   } catch { /* code 目录可能不存在 */ }
 
   // ── 预加载地图资源 ──
@@ -404,20 +420,15 @@ onMounted(async () => {
   editorStore.codeActiveTabIndex = 0
 
   // 创建默认空代码文件（与"新建项目"一致，只保留一个 游戏脚本_1.py）
+  // 两套模式各持一份独立标签（互不共享对象）：游戏模式先建，代码模式从磁盘读
   if (projectStore.root) {
     const projectRoot = projectStore.root
     const name = '游戏脚本_1.py'
     editorStore.setActiveEditorMode('code')
     await invoke('create_dir', { path: `${projectRoot}/code` })
     await invoke('write_file', { path: `${projectRoot}/code/${name}`, content: '' })
-    const idx = editorStore.createTab(name, `${projectRoot}/code/${name}`, '')
-    const tab = editorStore.currentTabs[idx]
-    if (tab) {
-      resourceStore.addItem(
-        { name: tab.name, type: 'code', path: tab.path, content: tab.content },
-        tab.id,
-      )
-    }
+    await editorStore.loadProjectCodeTabsInto('game', projectRoot)
+    await editorStore.loadProjectCodeTabsInto('code', projectRoot)
   }
   console.log(`[Perf] Startup: ${(performance.now() - t0).toFixed(0)}ms`)
 })
@@ -464,6 +475,9 @@ appWindow.onCloseRequested(async (e) => {
     e.preventDefault()
     const shouldSave = await ask('有未保存的代码，是否保存？', { title: '未保存的代码', kind: 'warning' })
     if (shouldSave) {
+      // 游戏模式里「+」新建但还没运行过的标签没有路径，先落到项目 code/ 再保存其余文件，
+      // 否则这类标签的内容会随窗口关闭直接丢掉
+      await projectStore.flushCodeTabs().catch(() => {})
       await editorStore.saveAllModifiedTabs()
     }
   }
@@ -701,21 +715,34 @@ function openSettingsSubmenu(name: string) {
 async function fileMenuAction(action: string) {
   closeFileMenu()
 
-  // 切换项目前：有未保存代码时提示保存
-  if ((action === 'new' || action === 'open') && editorStore.hasUnsavedTabs) {
-    const shouldSave = await ask('有未保存的代码，是否保存？', { title: '未保存的代码', kind: 'warning' })
-    if (shouldSave) {
-      await editorStore.saveAllModifiedTabs()
+  // 任何项目操作都先停止运行
+  if (editorStore.isRunning) {
+    if (action === 'new' || action === 'open') {
+      // 新建/打开项目会清空并重写工作目录：先等停止请求真正发到后端，
+      // Windows 上文件被运行中的 Python 占用时会删除失败，导致旧项目文件残留
+      await engine.stop()
+      renderStore.clearAll()
+    } else {
+      // 保存/另存为只是写文件 + 打包，保留最后一帧定格，
+      // 与学生点「停止」按钮的体验一致（原先无条件 clearAll，导致运行中保存时画布被清空）。
+      engine.stop()
     }
   }
 
-  // 任何项目操作都先停止运行（不等待后端返回）
-  if (editorStore.isRunning) {
-    engine.stop()
-    // 只有新建/打开项目才清场：它们会切换整个工作区，旧画面不能带过去。
-    // 保存/另存为只是写文件 + 打包，保留最后一帧定格，
-    // 与学生点「停止」按钮的体验一致（原先无条件 clearAll，导致运行中保存时画布被清空）。
-    if (action === 'new' || action === 'open') renderStore.clearAll()
+  // 切换项目前：新建/打开会用新的工作区整体替换当前项目（同一目录会被清空），
+  // 因此不能“先保存到项目目录再清空”——那样保存的代码马上就会被删掉。
+  // 已经保存过 .bc 的项目（bingoPath 有值）先写回该文件再继续，避免丢失；
+  // 从未保存过的项目无法自动保存，明确提示后由用户决定是否继续。
+  if ((action === 'new' || action === 'open') && editorStore.hasUnsavedTabs) {
+    if (projectStore.bingoPath) {
+      await projectStore.saveProject()
+    } else {
+      const proceed = await ask('新建 / 打开项目会替换当前项目，未保存的代码会丢失。是否继续？', {
+        title: '切换项目',
+        kind: 'warning',
+      })
+      if (!proceed) return
+    }
   }
 
   switch (action) {
@@ -731,19 +758,14 @@ async function fileMenuAction(action: string) {
       editorStore.gameActiveTabIndex = 0
       editorStore.codeActiveTabIndex = 0
       await nextTick()
-      // 创建新项目默认代码文件（先切代码模式，确保 createTab 加入 codeTabs）
+      // 创建新项目默认代码文件
+      // 两套模式各持一份独立标签（互不共享对象）：游戏模式先建，代码模式从磁盘读
       const name = '游戏脚本_1.py'
       await invoke('create_dir', { path: `${projectRoot}/code` })
       await invoke('write_file', { path: `${projectRoot}/code/${name}`, content: '' })
       editorStore.setActiveEditorMode('code')
-      const idx = editorStore.createTab(name, `${projectRoot}/code/${name}`, '')
-      const tab = editorStore.currentTabs[idx]
-      if (tab) {
-        resourceStore.addItem(
-          { name: tab.name, type: 'code', path: tab.path, content: tab.content },
-          tab.id,
-        )
-      }
+      await editorStore.loadProjectCodeTabsInto('game', projectRoot)
+      await editorStore.loadProjectCodeTabsInto('code', projectRoot)
       editorStore.setResourceTab('sprite')
       currentPage.value = 0
       break
@@ -852,7 +874,7 @@ async function openResource(item: { id: string; name: string; type: string; cont
     // 优先按 id 查找，其次按 path 查找
     let idx = editorStore.gameTabs.findIndex(t => t.id === item.id)
     if (idx < 0 && item.path) {
-      idx = editorStore.gameTabs.findIndex(t => t.path === item.path)
+      idx = editorStore.gameTabs.findIndex(t => t.path && samePath(t.path, item.path!))
     }
     if (idx < 0) {
       // 标签已关闭，重新创建；复用资源 id，保持重命名/删除联动
@@ -1741,7 +1763,7 @@ watch(() => [...editorStore.gameTabs], (tabs, oldTabs) => {
 
   // 新增或更新
   for (const tab of tabs) {
-    const existing = resourceStore.codes.find(c => c.id === tab.id || (tab.path && c.path === tab.path))
+    const existing = resourceStore.codes.find(c => c.id === tab.id || (tab.path && c.path && samePath(c.path, tab.path)))
     if (!existing) {
       resourceStore.codes.push({ id: tab.id, name: tab.name, type: 'code', path: tab.path, content: tab.content })
     } else {
@@ -1793,7 +1815,7 @@ function startCodeRename(id: string) {
 }
 
 async function migrateCodeFile(oldPath: string, newPath: string) {
-  if (!oldPath || !newPath || oldPath === newPath) return
+  if (!oldPath || !newPath || samePath(oldPath, newPath)) return
   try {
     const exists = await invoke<boolean>('path_exists', { path: oldPath })
     if (!exists) return
@@ -1815,11 +1837,12 @@ async function confirmCodeRename() {
 
   const oldPath = tab.path || item.path || ''
   const projectRoot = projectStore.root || ''
-  const isInsideProject = projectRoot && oldPath.startsWith(projectRoot)
+  // 用统一的路径比较：Windows 上反斜杠、大小写差异不能让项目内文件被当成外部文件
+  const isInsideProject = isProjectCodePath(oldPath, projectRoot)
   const newPath = projectRoot ? `${projectRoot}/code/${nameWithPy}` : nameWithPy
 
   // 如果新旧路径相同，只更新显示名
-  if (oldPath === newPath) {
+  if (samePath(oldPath, newPath)) {
     tab.name = nameWithPy
     item.name = nameWithPy
     codeRenameId.value = null
@@ -1866,10 +1889,8 @@ async function ideOpenFolder() {
       await editorStore.saveAllModifiedTabs()
     }
   }
-  // 清空旧标签页
-  editorStore.gameTabs.splice(0, editorStore.gameTabs.length)
+  // 清空代码模式的旧标签页（严格隔离：不影响游戏模式的项目代码标签）
   editorStore.codeTabs.splice(0, editorStore.codeTabs.length)
-  editorStore.gameActiveTabIndex = 0
   editorStore.codeActiveTabIndex = 0
   const path = await open({
     title: '打开文件夹',
@@ -1939,8 +1960,8 @@ async function ideSaveFileAs() {
   
   try {
     await invoke('write_file', { path, content: tab.content })
-    // 更新标签的路径和名称
-    const fileName = path.split('/').pop() || tab.name
+    // 更新标签的路径和名称（Windows 路径是反斜杠，必须用 baseName 取文件名）
+    const fileName = baseName(path) || tab.name
     tab.path = path
     tab.name = fileName
     tab.modified = false
@@ -2002,7 +2023,7 @@ async function confirmTabRename() {
       const lastSlash = oldPath.lastIndexOf('/')
       const dir = lastSlash >= 0 ? oldPath.substring(0, lastSlash) : ''
       const newPath = dir ? `${dir}/${nameWithPy}` : nameWithPy
-      if (oldPath !== newPath) {
+      if (!samePath(oldPath, newPath)) {
         await migrateCodeFile(oldPath, newPath)
       }
       editorStore.renameTab(tabId, nameWithPy, newPath)
@@ -2023,7 +2044,7 @@ async function confirmTabRename() {
   const projectRoot = projectStore.root || ''
   const newPath = projectRoot ? `${projectRoot}/code/${nameWithPy}` : nameWithPy
 
-  if (oldPath === newPath) {
+  if (samePath(oldPath, newPath)) {
     editorStore.renameTab(tabId, nameWithPy)
     const item = resourceStore.codes.find(c => c.id === tabId)
     if (item) item.name = nameWithPy
@@ -2241,7 +2262,7 @@ function spriteDisplayName(name: string) {
       <!-- 模式切换 -->
       <div class="mode-switch">
         <span class="mode-label">{{ editorStore.isGameMode ? '游戏模式' : '代码模式' }}</span>
-        <button class="toggle-switch" :class="{ 'toggle-on': editorStore.isGameMode }" @click="editorStore.toggleGameMode()">
+        <button class="toggle-switch" :class="{ 'toggle-on': editorStore.isGameMode }" @click="onToggleGameMode">
           <div class="toggle-knob"></div>
         </button>
       </div>

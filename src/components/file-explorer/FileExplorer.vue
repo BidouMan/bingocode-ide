@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { useFileExplorerStore, type FileTreeNode } from '../../stores/fileExplorer'
 import { useEditorStore } from '../../stores/editor'
 import { useResourceStore } from '../../stores/resource'
+import { isUnderPath, samePath } from '../../utils/projectPath'
 import FileTreeNodeItem from './FileTreeNodeItem.vue'
 
 const fileExplorerStore = useFileExplorerStore()
@@ -61,10 +62,8 @@ async function openFolderPicker() {
       await editorStore.saveAllModifiedTabs()
     }
   }
-  // 清空旧标签页
-  editorStore.gameTabs.splice(0, editorStore.gameTabs.length)
+  // 清空代码模式的旧标签页（严格隔离：代码模式的标签和游戏模式的标签互不影响）
   editorStore.codeTabs.splice(0, editorStore.codeTabs.length)
-  editorStore.gameActiveTabIndex = 0
   editorStore.codeActiveTabIndex = 0
   const path = await open({
     title: '打开文件夹',
@@ -84,7 +83,7 @@ async function onNodeClick(node: FileTreeNode) {
 }
 
 async function openFileInTab(node: FileTreeNode) {
-  const existing = editorStore.currentTabs.find(t => t.path === node.path)
+  const existing = editorStore.currentTabs.find(t => t.path && samePath(t.path, node.path))
   if (existing) {
     const idx = editorStore.currentTabs.indexOf(existing)
     editorStore.setActiveTab(idx)
@@ -185,7 +184,7 @@ async function confirmRename() {
     try {
       await fileExplorerStore.renameNode(node, newName)
       // 同步更新已打开的标签页
-      const tab = editorStore.currentTabs.find(t => t.path === oldPath)
+      const tab = editorStore.currentTabs.find(t => t.path && samePath(t.path, oldPath))
       if (tab) {
         const parentPath = fileExplorerStore.getParentPath(oldPath)
         const newPath = `${parentPath}/${newName}`
@@ -213,7 +212,7 @@ async function deleteNode(node: FileTreeNode) {
   try {
     await fileExplorerStore.deleteNode(node)
     // 关闭已打开的标签页
-    const openTabs = editorStore.currentTabs.filter(t => t.path.startsWith(node.path))
+    const openTabs = editorStore.currentTabs.filter(t => t.path && isUnderPath(t.path, node.path))
     for (const tab of openTabs) {
       const idx = editorStore.currentTabs.indexOf(tab)
       if (idx >= 0) editorStore.closeTab(idx)
@@ -231,10 +230,8 @@ async function switchToRecent(folder: string) {
       await editorStore.saveAllModifiedTabs()
     }
   }
-  // 清空旧标签页
-  editorStore.gameTabs.splice(0, editorStore.gameTabs.length)
+  // 清空代码模式的旧标签页（严格隔离：代码模式的标签和游戏模式的标签互不影响）
   editorStore.codeTabs.splice(0, editorStore.codeTabs.length)
-  editorStore.gameActiveTabIndex = 0
   editorStore.codeActiveTabIndex = 0
   showRecent.value = false
   await fileExplorerStore.openFolder(folder)
@@ -367,21 +364,21 @@ function onNodeClickGuard(node: FileTreeNode) {
 async function handleDropInto(sourcePath: string, targetDir: string) {
   // 防止拖到自身父目录
   const sourceParent = sourcePath.substring(0, sourcePath.lastIndexOf('/'))
-  if (sourceParent === targetDir) return
+  if (samePath(sourceParent, targetDir)) return
   // 防止拖到自身或自身子节点
-  if (targetDir.startsWith(sourcePath)) return
+  if (isUnderPath(targetDir, sourcePath)) return
 
   try {
     const newPath = await fileExplorerStore.moveNode(sourcePath, targetDir)
     if (newPath) {
       // 同步更新已打开的标签页
-      const tabs = editorStore.currentTabs.filter(t => t.path === sourcePath || t.path.startsWith(sourcePath + '/'))
+      const tabs = editorStore.currentTabs.filter(t => t.path && isUnderPath(t.path, sourcePath))
       for (const tab of tabs) {
         const relativePath = tab.path.substring(sourceParent.length)
         tab.path = targetDir + relativePath
       }
       const sourceName = sourcePath.split('/').pop() || ''
-      const resources = resourceStore.codes.filter(c => c.path === sourcePath || c.path?.startsWith(sourcePath + '/'))
+      const resources = resourceStore.codes.filter(c => c.path && isUnderPath(c.path, sourcePath))
       for (const res of resources) {
         const relativePath = res.path?.substring(sourceParent.length) || ''
         res.path = targetDir + relativePath

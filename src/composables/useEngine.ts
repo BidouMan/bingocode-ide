@@ -9,6 +9,7 @@ import { useProjectStore } from '../stores/project'
 import { useResourceStore } from '../stores/resource'
 import { waitForGameCanvasReady } from '../utils/gameCanvasReady'
 import { invalidateGameTextures } from '../utils/gameTextures'
+import { baseName, dirName } from '../utils/projectPath'
 import type { AnyEngineCommand } from '../types/engine'
 
 let unlisteners: (() => void)[] = []
@@ -458,7 +459,7 @@ export function useEngine() {
       // 保存文件
       await invoke('write_file', { path: filePath, content: tab.content })
       tab.path = filePath
-      tab.name = filePath.split('/').pop() || tab.name
+      tab.name = baseName(filePath) || tab.name
       // 同步更新资源管理器
       const resource = resourceStore.codes.find(c => c.id === tab.id)
       if (resource) {
@@ -607,11 +608,10 @@ export function useEngine() {
         })
 
         // 如果源文件有路径，用其目录作为 working_dir（让相对 import 正确）
+        // 用 dirName 而不是 split('/')：Windows 返回的是反斜杠路径
         let runWorkingDir = env.working_dir
         if (tab.path) {
-          const pathParts = tab.path.split('/')
-          pathParts.pop()
-          const fileDir = pathParts.join('/')
+          const fileDir = dirName(tab.path)
           if (fileDir) {
             // 确保目录可访问
             try {

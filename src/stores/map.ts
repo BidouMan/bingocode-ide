@@ -250,7 +250,7 @@ export interface TilePaletteEntry {
   row?: number
 }
 
-export type MapTool = 'move' | 'select' | 'draw' | 'line' | 'rect' | 'erase' | 'fill'
+export type MapTool = 'move' | 'select' | 'draw' | 'line' | 'rect' | 'fill'
 export type CollisionTool = 'move' | 'add' | 'delete' | 'reset'
 // 形状层编辑工具：select=选择/拖动，rect/circle/capsule/polygon=形状，addPoint/deletePoint=锚点增删
 export type ShapeTool = 'select' | 'rect' | 'circle' | 'capsule' | 'polygon' | 'addPoint' | 'deletePoint'

@@ -1,5 +1,7 @@
 //! 工程打包/解包（.bingo 文件）。
 
+use crate::fs_ops::remove_path_retry;
+
 
 #[tauri::command]
 pub(crate) fn pack_bingo(workspace_dir: String, output_path: String) -> Result<(), String> {
@@ -94,11 +96,8 @@ pub(crate) fn unpack_bingo(bingo_path: String, target_dir: String) -> Result<(),
         .map_err(|e| format!("读取目标目录失败: {}", e))?;
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
-            let _ = std::fs::remove_dir_all(&path);
-        } else {
-            let _ = std::fs::remove_file(&path);
-        }
+        // Windows 上旧进程可能短暂占用文件：重试删除，避免旧项目资源残留
+        remove_path_retry(&path);
     }
 
     // 只解压项目结构内的条目（code/、assets/）：.bc 本质是 zip，

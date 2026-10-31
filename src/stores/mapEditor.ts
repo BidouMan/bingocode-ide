@@ -11,6 +11,8 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
   // 智能吸附开关：开启时吸附像素/网格/图像边缘与中心；关闭后完全自由（无任何吸附）
   const smartSnap = ref(true)
   const currentTool = ref<MapTool>('select')
+  // 擦除模式开关（同 Godot）：开启后画笔/直线/矩形都改为擦除，工具本身保持当前选择
+  const eraseMode = ref(false)
   const collisionTool = ref<CollisionTool>('move')
   const cursorX = ref<number | null>(null)
   const cursorY = ref<number | null>(null)
@@ -48,6 +50,15 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
 
   function setTool(tool: MapTool) {
     currentTool.value = tool
+  }
+
+  /** 切换擦除模式：只影响绘制行为，不改变当前工具 */
+  function toggleEraseMode() {
+    eraseMode.value = !eraseMode.value
+  }
+
+  function setEraseMode(on: boolean) {
+    eraseMode.value = on
   }
 
   function toggleGrid() {
@@ -143,6 +154,7 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
     showGrid,
     smartSnap,
     currentTool,
+    eraseMode,
     collisionTool,
     cursorX,
     cursorY,
@@ -171,6 +183,8 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
     setShapeTool,
     setActiveShapeId,
     setTool,
+    toggleEraseMode,
+    setEraseMode,
     toggleGrid,
     toggleSmartSnap,
     setCollisionTool,

@@ -117,6 +117,29 @@ pub(crate) fn path_exists_impl(p: &std::path::Path) -> bool {
     }
 }
 
+/// 尽力删除文件/目录（不存在也算成功）。
+/// Windows 上刚结束的 Python 进程或杀毒软件可能短暂占用项目文件，
+/// 一次删除可能失败；重试几次再放弃，避免新建/打开项目时残留旧文件。
+pub(crate) fn remove_path_retry(path: &std::path::Path) {
+    let attempts = if cfg!(windows) { 5 } else { 1 };
+    for attempt in 0..attempts {
+        let result = if path.is_dir() {
+            std::fs::remove_dir_all(path)
+        } else {
+            std::fs::remove_file(path)
+        };
+        match result {
+            Ok(_) => return,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+            Err(_) => {
+                if attempt + 1 < attempts {
+                    std::thread::sleep(std::time::Duration::from_millis(80));
+                }
+            }
+        }
+    }
+}
+
 #[tauri::command]
 pub(crate) fn path_exists(path: String) -> bool {
     path_exists_impl(std::path::Path::new(&path))

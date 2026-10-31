@@ -3,7 +3,7 @@ import { useMapEditorStore } from '../../stores/mapEditor'
 import type { MapTool } from '../../stores/map'
 import iconMove from '../../assets/icons/移动工具.svg'
 import iconPaint from '../../assets/icons/icon--paint.svg'
-import iconErase from '../../assets/icons/清空.svg'
+import iconEraseRaw from '../../assets/icons/清空.svg?raw'
 import iconLine from '../../assets/icons/直线工具.svg'
 import iconRect from '../../assets/icons/矩形_rectangle.svg'
 
@@ -15,9 +15,15 @@ const drawingTools: { id: MapTool; icon: string; label: string }[] = [
   { id: 'draw', icon: iconPaint, label: '绘制' },
   { id: 'line', icon: iconLine, label: '直线' },
   { id: 'rect', icon: iconRect, label: '矩形' },
-  { id: 'erase', icon: iconErase, label: '擦除' },
-  { id: 'move', icon: iconMove, label: '移动' },
 ]
+const moveTool: { id: MapTool; icon: string; label: string } = {
+  id: 'move',
+  icon: iconMove,
+  label: '移动',
+}
+
+// 擦除图标原来是白色填充，改成 currentColor 才能随激活状态换色（保留原图标外形）
+const eraseIconSvg = iconEraseRaw.replace(/fill:\s*white/g, 'fill:currentColor')
 </script>
 
 <template>
@@ -31,6 +37,31 @@ const drawingTools: { id: MapTool; icon: string; label: string }[] = [
     @click="mapEditorStore.setTool(tool.id)"
   >
     <img :src="tool.icon" class="toolbar-icon" />
+  </button>
+
+  <!-- 擦除是开关而不是工具：开启后画笔/直线/矩形都改为擦除 -->
+  <button
+    class="toolbar-btn"
+    :class="{ 'erase-btn-active': mapEditorStore.eraseMode }"
+    :disabled="disabled"
+    v-tooltip="mapEditorStore.eraseMode ? '关闭擦除模式' : '擦除模式（开启后画笔 / 直线 / 矩形都会擦除）'"
+    @click="mapEditorStore.toggleEraseMode()"
+  >
+    <span
+      class="erase-icon"
+      :class="{ 'erase-icon-active': mapEditorStore.eraseMode }"
+      v-html="eraseIconSvg"
+    />
+  </button>
+
+  <button
+    class="toolbar-btn"
+    :class="{ 'toolbar-btn-active': mapEditorStore.currentTool === moveTool.id }"
+    :disabled="disabled"
+    v-tooltip="moveTool.label"
+    @click="mapEditorStore.setTool(moveTool.id)"
+  >
+    <img :src="moveTool.icon" class="toolbar-icon" />
   </button>
 </template>
 
@@ -73,5 +104,34 @@ const drawingTools: { id: MapTool; icon: string; label: string }[] = [
 }
 
 .toolbar-btn-active:hover { background: var(--border-light); }
+
+/* 擦除开关：只保留按下底色，不画「当前工具」的绿线 */
+.erase-btn-active {
+  background: rgb(46, 49, 58);
+  border: 1px solid var(--border-light);
+}
+
+.erase-btn-active:hover { background: var(--border-light); }
+
+/* 擦除图标：保留原图标外形，只把填充色换成主题绿，不会填满整个按钮 */
+.erase-icon {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  color: #fff;
+  transition: color 0.15s;
+}
+
+.erase-icon :deep(svg) {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.erase-icon-active {
+  color: var(--accent);
+}
+
 .toolbar-icon { width: 20px; height: 20px; flex-shrink: 0; }
 </style>

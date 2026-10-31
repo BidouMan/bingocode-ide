@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useFileExplorerStore } from '../../stores/fileExplorer'
 import { useEditorStore } from '../../stores/editor'
+import { samePath } from '../../utils/projectPath'
 
 const fileExplorerStore = useFileExplorerStore()
 const editorStore = useEditorStore()
@@ -75,7 +76,7 @@ async function doSearch() {
 
 async function openResult(result: { path: string; name: string; line: number }) {
   // 打开文件并跳转到行
-  const existing = editorStore.currentTabs.find(t => t.path === result.path)
+  const existing = editorStore.currentTabs.find(t => t.path && samePath(t.path, result.path))
   if (existing) {
     const idx = editorStore.currentTabs.indexOf(existing)
     editorStore.setActiveTab(idx)

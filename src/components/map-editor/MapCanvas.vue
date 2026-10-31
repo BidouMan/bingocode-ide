@@ -3647,7 +3647,7 @@ function onKeyDown(e: KeyboardEvent) {
 
   switch (e.key.toLowerCase()) {
     case 'b': mapEditorStore.setTool('draw'); break
-    case 'e': mapEditorStore.setTool('erase'); break
+    case 'e': mapEditorStore.toggleEraseMode(); break
     case 'g': mapEditorStore.toggleGrid(); break
     case 'm': mapEditorStore.setTool('move'); break
     case 'v': mapEditorStore.setTool('select'); break
@@ -3870,10 +3870,16 @@ watch(
   (tool) => {
     // 切换工具时丢弃未完成的直线/矩形拖拽
     painter.resetShapeStroke()
-    if (tool !== 'draw' && tool !== 'erase' && tool !== 'fill' && tool !== 'line' && tool !== 'rect') {
+    if (tool !== 'draw' && tool !== 'fill' && tool !== 'line' && tool !== 'rect') {
       painter.hidePreview()
     }
   }
+)
+
+// 擦除模式切换：之前的画笔幽灵预览要立即收掉
+watch(
+  () => mapEditorStore.eraseMode,
+  () => painter.hidePreview(),
 )
 
 // 切换地图时清理选中状态并重置视角

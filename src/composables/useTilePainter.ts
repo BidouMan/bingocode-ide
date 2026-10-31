@@ -34,6 +34,8 @@ export function useTilePainter(options: TilePainterOptions) {
   /** 已加载的图块纹理（按 资源id:图块序号 缓存，多图块图章共用） */
   const previewTextures = new Map<string, any>()
   const previewLoading = new Set<string>()
+  /** 当前预览是否表示擦除（红色半透明） */
+  let previewErase = false
 
   // Move tool state
   let moveStartPos: { x: number; y: number } | null = null
@@ -142,6 +144,8 @@ export function useTilePainter(options: TilePainterOptions) {
         sprite.texture = tex
       }
       sprite.alpha = PREVIEW_ALPHA
+      // 擦除预览用红色着色，和绘制预览区分开
+      sprite.tint = previewErase ? 0xff6b6b : 0xffffff
       // 与真实图块完全相同的摆放方式（锚点居中 + 整层缩放/旋转/镜像）
       const st = tileSpriteTransform(transform, target.x, target.y, tileSize, target.resource.tileWidth, target.resource.tileHeight)
       sprite.x = st.x
@@ -184,6 +188,38 @@ export function useTilePainter(options: TilePainterOptions) {
   }
 
   /**
+   * 擦除预览：图章的完整覆盖范围（不是图案平铺），因为擦除是逐格清空。
+   * 多图块图章时忽略随机开关，按整组足迹预览。
+   */
+  function buildFootprintTargets(
+    baseCells: { x: number; y: number }[],
+    brush: { resourceIndex: number; tileIndex: number } | null,
+  ) {
+    const targets = new Map<string, { x: number; y: number; resource: MapResource; tileIndex: number }>()
+    const resources = mapStore.activeLayerResources
+    const entries = stampEntries(true)
+    if (entries) {
+      for (const base of baseCells) {
+        for (const entry of entries) {
+          const resource = resources[entry.resourceIndex]
+          if (!resource) continue
+          const x = base.x + entry.dx
+          const y = base.y + entry.dy
+          targets.set(`${x},${y}`, { x, y, resource, tileIndex: entry.tileIndex })
+        }
+      }
+      return targets
+    }
+    if (!brush) return targets
+    const resource = resources[brush.resourceIndex]
+    if (!resource) return targets
+    for (const base of baseCells) {
+      targets.set(`${base.x},${base.y}`, { x: base.x, y: base.y, resource, tileIndex: brush.tileIndex })
+    }
+    return targets
+  }
+
+  /**
    * 把锚点格子展开成预览内容。
    * 多图块图章：按调色板里的相对位置整组显示；普通画笔：每个锚点都显示同一块。
    */
@@ -218,16 +254,28 @@ export function useTilePainter(options: TilePainterOptions) {
     return targets
   }
 
-  function showPreview(targets: Map<string, { x: number; y: number; resource: MapResource; tileIndex: number }>) {
+  function showPreview(
+    targets: Map<string, { x: number; y: number; resource: MapResource; tileIndex: number }>,
+    erase = false,
+  ) {
     previewTargets = targets
+    previewErase = erase
     ensurePreviewTextures()
     layoutPreview()
   }
 
   function updatePreview(pos: { x: number; y: number } | null) {
-    // 橡皮不画幽灵预览
-    if (!pos || mapEditorStore.currentTool === 'erase') {
+    if (!pos) {
       hidePreview()
+      return
+    }
+    if (mapEditorStore.eraseMode) {
+      // 擦除模式：红色半透明显示要擦掉的范围（油漆桶不显示预览）
+      if (mapEditorStore.currentTool === 'fill') {
+        hidePreview()
+      } else {
+        showPreview(buildFootprintTargets([pos], previewBrush()), true)
+      }
       return
     }
     // 多图块图章：悬停就显示整组（油漆桶仍是单块填充，预览也用单块）
@@ -281,9 +329,13 @@ export function useTilePainter(options: TilePainterOptions) {
     return mapEditorStore.currentTool === 'line' ? lineCells(start, end) : rectCells(start, end)
   }
 
-  /** 多图块图章的图块（相对偏移 + 当前图层的资源下标）；不生效时返回 null */
-  function stampEntries() {
-    if (!isStampActive()) return null
+  /**
+   * 多图块图章的图块（相对偏移 + 当前图层的资源下标）；不生效时返回 null。
+   * ignoreRandom=true 用于擦除预览：随机开关不影响擦除足迹。
+   */
+  function stampEntries(ignoreRandom = false) {
+    if (mapStore.tileBrushStamp.length <= 1) return null
+    if (!ignoreRandom && !isStampActive()) return null
     const result: { dx: number; dy: number; resourceIndex: number; tileIndex: number }[] = []
     for (const entry of mapStore.tileBrushStamp) {
       const resourceIndex = mapStore.activeLayerResources.findIndex(r => r.id === entry.resourceId)
@@ -454,21 +506,28 @@ export function useTilePainter(options: TilePainterOptions) {
     if (mapEditorStore.currentTool === 'draw' && mapStore.activeLayer && mapStore.activeLayer.type === 'drawing') {
       const layer = mapStore.activeLayer
       if (e.button === 0) {
-        // 多图块图章：一次贴出整组；普通画笔：只贴当前一块
-        const stampCells = expandStamp([pos])
-        let tileId = 0
-        if (stampCells.length) {
-          paintStampCells(layer.id, stampCells)
-          tileId = encodeTileId(layer.id, stampCells[0].resourceIndex, stampCells[0].tileIndex)
+        if (mapEditorStore.eraseMode) {
+          // 擦除模式：画笔左键也改为擦除
+          eraseStampAt(pos)
+          lastPaintedKey = `${pos.x},${pos.y}`
+          options.onTileErased(pos.x, pos.y)
         } else {
-          const brush = mapStore.pickBrush()
-          if (brush.tileIndex < 0) return
-          tileId = encodeTileId(layer.id, brush.resourceIndex, brush.tileIndex)
-          mapStore.setTile(pos.x, pos.y, tileId)
-          updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
+          // 多图块图章：一次贴出整组；普通画笔：只贴当前一块
+          const stampCells = expandStamp([pos])
+          let tileId = 0
+          if (stampCells.length) {
+            paintStampCells(layer.id, stampCells)
+            tileId = encodeTileId(layer.id, stampCells[0].resourceIndex, stampCells[0].tileIndex)
+          } else {
+            const brush = mapStore.pickBrush()
+            if (brush.tileIndex < 0) return
+            tileId = encodeTileId(layer.id, brush.resourceIndex, brush.tileIndex)
+            mapStore.setTile(pos.x, pos.y, tileId)
+            updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
+          }
+          lastPaintedKey = `${pos.x},${pos.y}`
+          options.onTilePainted(pos.x, pos.y, tileId)
         }
-        lastPaintedKey = `${pos.x},${pos.y}`
-        options.onTilePainted(pos.x, pos.y, tileId)
       } else if ((e.button as number) === 2) {
         eraseStampAt(pos)
         lastPaintedKey = `${pos.x},${pos.y}`
@@ -479,11 +538,12 @@ export function useTilePainter(options: TilePainterOptions) {
       && (e.button === 0 || (e.button as number) === 2)
       && mapStore.activeLayer && mapStore.activeLayer.type === 'drawing'
     ) {
-      // 直线/矩形：先记起点，拖动时只做预览，抬起时才真正落笔（右键拖出 = 擦除）
-      shapeErase = (e.button as number) === 2
+      // 直线/矩形：先记起点，拖动时只做预览，抬起时才真正落笔（右键拖出 / 擦除模式 = 擦除）
+      shapeErase = (e.button as number) === 2 || mapEditorStore.eraseMode
       if (shapeErase) {
-        shapeBrush = null
-        hidePreview()
+        // 擦除时画笔只用于红色足迹预览（落笔走擦除逻辑，不看画笔）
+        shapeBrush = previewBrush()
+        showPreview(buildFootprintTargets([pos], shapeBrush), true)
       } else if (isStampActive()) {
         // 多图块图章：不需要单块画笔，直接用整组预览
         shapeBrush = null
@@ -497,15 +557,15 @@ export function useTilePainter(options: TilePainterOptions) {
       }
       shapeStart = pos
       shapeEnd = pos
-    } else if (mapEditorStore.currentTool === 'erase') {
-      eraseStampAt(pos)
-      lastPaintedKey = `${pos.x},${pos.y}`
-      options.onTileErased(pos.x, pos.y)
     } else if (mapEditorStore.currentTool === 'fill' && mapStore.activeLayer) {
-      const brush = mapStore.pickBrush()
-      if (brush.tileIndex < 0) return
-      const tileId = encodeTileId(mapStore.activeLayer.id, brush.resourceIndex, brush.tileIndex)
-      floodFill(pos.x, pos.y, tileId)
+      if (mapEditorStore.eraseMode) {
+        floodFill(pos.x, pos.y, 0)
+      } else {
+        const brush = mapStore.pickBrush()
+        if (brush.tileIndex < 0) return
+        const tileId = encodeTileId(mapStore.activeLayer.id, brush.resourceIndex, brush.tileIndex)
+        floodFill(pos.x, pos.y, tileId)
+      }
     } else if (mapEditorStore.currentTool === 'move') {
       const layer = mapStore.activeLayer
       if (layer && layer.type === 'drawing') {
@@ -566,7 +626,7 @@ export function useTilePainter(options: TilePainterOptions) {
       if (pos) {
         shapeEnd = pos
         if (shapeErase) {
-          hidePreview()
+          showPreview(buildFootprintTargets(shapeCells(shapeStart, shapeEnd), shapeBrush), true)
         } else {
           showPreview(buildPreviewTargets(shapeCells(shapeStart, shapeEnd), shapeBrush))
         }
@@ -574,17 +634,18 @@ export function useTilePainter(options: TilePainterOptions) {
       return
     }
 
-    if (mapEditorStore.currentTool === 'draw' || mapEditorStore.currentTool === 'erase' || mapEditorStore.currentTool === 'fill') {
+    if (mapEditorStore.currentTool === 'draw' || mapEditorStore.currentTool === 'fill') {
       updatePreview(pos)
 
       if (pos && (e.buttons === 1 || e.buttons === 2)) {
         const key = `${pos.x},${pos.y}`
         if (key !== lastPaintedKey) {
-          // 绘制工具：左键绘制，右键擦除
+          // 绘制工具：右键擦除；擦除模式下左键也擦除
           if (mapEditorStore.currentTool === 'draw' && mapStore.activeLayer && mapStore.activeLayer.type === 'drawing') {
             const layer = mapStore.activeLayer
-            if (e.buttons === 2) {
+            if (e.buttons === 2 || mapEditorStore.eraseMode) {
               eraseStampAt(pos)
+              options.onTileErased(pos.x, pos.y)
             } else {
               const stampCells = expandStamp([pos])
               if (stampCells.length) {
@@ -604,9 +665,6 @@ export function useTilePainter(options: TilePainterOptions) {
                 }
               }
             }
-          } else if (mapEditorStore.currentTool === 'erase') {
-            eraseStampAt(pos)
-            options.onTileErased(pos.x, pos.y)
           }
           lastPaintedKey = key
         }

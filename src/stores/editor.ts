@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import type { RenderMode } from '../utils/renderMode'
+import { isProjectCodePath, samePath } from '../utils/projectPath'
 
 export type EditorMode = 'code' | 'sprite' | 'map'
 export type ResourceTab = 'sprite' | 'map' | 'sound' | 'code'
@@ -171,6 +172,122 @@ export const useEditorStore = defineStore('editor', () => {
     }
   }
 
+  // ─── 模式隔离：两套标签互不共享，磁盘是唯一真相 ───
+  // 游戏模式和代码模式共用同一个项目目录（<项目>/code/*.py），但两套标签页各自持有独立对象：
+  // 关闭、重命名、删除、编辑都只在当前模式生效，绝不复制/联动另一模式。
+  // 两者交换内容的唯一通道是磁盘：离开模式前写盘，进入模式后按磁盘刷新。
+  type TabMode = 'game' | 'code'
+
+  function tabsOfMode(mode: TabMode): Tab[] {
+    return mode === 'game' ? gameTabs.value : codeTabs.value
+  }
+
+  function activeIndexOfMode(mode: TabMode) {
+    return mode === 'game' ? gameActiveTabIndex : codeActiveTabIndex
+  }
+
+  /** 把「当前模式」里项目代码的未保存修改写回磁盘（切换模式前调用） */
+  async function flushCurrentModeProjectTabs(projectRoot: string): Promise<number> {
+    if (!projectRoot) return 0
+    let saved = 0
+    for (const tab of currentTabs.value) {
+      if (!tab.modified || !tab.path) continue
+      if (!isProjectCodePath(tab.path, projectRoot)) continue
+      try {
+        await invoke('write_file', { path: tab.path, content: tab.content })
+        tab.modified = false
+        saved++
+      } catch (e) {
+        console.error(`[Editor] 切换模式前保存 ${tab.name} 失败:`, e)
+      }
+    }
+    return saved
+  }
+
+  /**
+   * 把磁盘上的项目代码读成指定模式的标签（每个模式各自独立的对象）。
+   * 只补该模式还没有的文件，不删除、不覆盖已有标签。返回本次新建的标签。
+   */
+  async function loadProjectCodeTabsInto(mode: TabMode, projectRoot: string): Promise<Tab[]> {
+    if (!projectRoot) return []
+    const created: Tab[] = []
+    let files: string[] = []
+    try {
+      files = await invoke<string[]>('list_dir', { path: `${projectRoot}/code` })
+    } catch {
+      return created
+    }
+    const tabs = tabsOfMode(mode)
+    const indexRef = activeIndexOfMode(mode)
+    for (const file of files) {
+      if (!file.endsWith('.py')) continue
+      const filePath = `${projectRoot}/code/${file}`
+      if (tabs.some(t => t.path && samePath(t.path, filePath))) continue
+      // 同名但还没有路径的标签（启动占位 tab、游戏模式「+」新建的 tab）直接认领这个磁盘文件，
+      // 避免同一个文件出现两个标签
+      const pathless = tabs.find(t => !t.path && t.name === file)
+      if (pathless) {
+        pathless.path = filePath
+        if (!pathless.modified) {
+          try {
+            pathless.content = await invoke<string>('read_file', { path: filePath })
+          } catch {}
+        }
+        continue
+      }
+      let content = ''
+      try {
+        content = await invoke<string>('read_file', { path: filePath })
+      } catch {
+        continue
+      }
+      const tab: Tab = {
+        id: `tab-${++tabIdCounter}`,
+        name: file,
+        path: filePath,
+        content,
+        modified: false,
+      }
+      tabs.push(tab)
+      created.push(tab)
+    }
+    if (indexRef.value < 0 && tabs.length > 0) indexRef.value = 0
+    if (mode === 'code') saveCodeTabsState()
+    return created
+  }
+
+  /**
+   * 切换模式后调用：让当前模式的项目代码标签与磁盘保持一致。
+   * - 磁盘上已不存在的项目文件 → 关闭对应标签
+   * - 磁盘内容变化且标签没有未保存修改 → 用磁盘内容刷新
+   */
+  async function refreshCurrentModeProjectTabs(projectRoot: string): Promise<void> {
+    if (!projectRoot) return
+    const tabs = currentTabs.value
+    const indexRef = activeTabIndex
+
+    for (const tab of [...tabs]) {
+      if (!tab.path || !isProjectCodePath(tab.path, projectRoot)) continue
+      if (tab.modified) continue
+      let exists = true
+      try {
+        exists = await invoke<boolean>('path_exists', { path: tab.path })
+      } catch {}
+      if (!exists) {
+        const idx = tabs.indexOf(tab)
+        if (idx >= 0) tabs.splice(idx, 1)
+        continue
+      }
+      try {
+        const content = await invoke<string>('read_file', { path: tab.path })
+        if (content !== tab.content) tab.content = content
+      } catch {}
+    }
+
+    if (tabs.length === 0) indexRef.value = -1
+    else if (indexRef.value < 0 || indexRef.value >= tabs.length) indexRef.value = 0
+  }
+
   function setActiveEditorMode(mode: EditorMode) {
     activeEditorMode.value = mode
   }
@@ -192,7 +309,8 @@ export const useEditorStore = defineStore('editor', () => {
 
   function createTab(name: string, path: string, content = '', id?: string): number {
     const tabs = currentTabs.value
-    const existing = tabs.findIndex((t) => t.path === path && path !== '')
+    // Windows 上同一文件可能因分隔符/大小写不同而路径字符串不一致，统一比较后再去重
+    const existing = tabs.findIndex((t) => path !== '' && t.path !== '' && samePath(t.path, path))
     if (existing >= 0) {
       activeTabIndex.value = existing
       saveCodeTabsState()
@@ -225,6 +343,7 @@ export const useEditorStore = defineStore('editor', () => {
     } else if (activeTabIndex.value > index) {
       activeTabIndex.value--
     }
+    // 关闭只作用于当前模式：另一模式的标签是独立对象，不联动
     saveCodeTabsState()
   }
 
@@ -372,6 +491,9 @@ export const useEditorStore = defineStore('editor', () => {
     currentTab,
     setGameMode,
     toggleGameMode,
+    flushCurrentModeProjectTabs,
+    loadProjectCodeTabsInto,
+    refreshCurrentModeProjectTabs,
     setActiveEditorMode,
     setResourceTab,
     setRenderMode,

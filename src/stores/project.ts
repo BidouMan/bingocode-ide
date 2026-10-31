@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { isProjectCodePath, baseName, normalizeComparePath } from '../utils/projectPath'
 
 export interface ProjectState {
   root: string
@@ -62,16 +63,28 @@ export const useProjectStore = defineStore('project', () => {
     const codeDir = `${root.value}/code`
     await invoke('create_dir', { path: codeDir })
 
-    // 收集所有标签（去重，同名只保留最新的）
-    const allTabs = [...editor.gameTabs, ...editor.codeTabs]
-    const seen = new Set<string>()
-    for (const tab of allTabs) {
-      if (tab.name && !seen.has(tab.name)) {
-        seen.add(tab.name)
-        await invoke('write_file', {
-          path: `${codeDir}/${tab.name}`,
-          content: tab.content,
-        })
+    // 只写项目自己的代码：代码模式里打开的其它文件夹文件、代码片段等不能混进项目 code/，
+    // 否则保存项目时会被一起打包，下次打开项目还会多出莫名其妙的文件
+    //
+    // 项目代码归游戏模式所有：以 gameTabs 为准写盘，代码模式的标签只是它自己的视图，
+    // 不能反过来覆盖（否则会把另一侧的旧内容写回磁盘）。同一路径只写一次。
+    const written = new Set<string>()
+
+    for (const list of [editor.gameTabs, editor.codeTabs]) {
+      for (const tab of [...list]) {
+        if (!tab.name) continue
+        let targetPath = tab.path
+        if (targetPath) {
+          if (!isProjectCodePath(targetPath, root.value)) continue
+        } else {
+          // 无路径的标签只有游戏模式会产出（项目内的新代码文件）
+          if (!editor.gameTabs.includes(tab)) continue
+          targetPath = `${codeDir}/${tab.name}`
+        }
+        const key = normalizeComparePath(targetPath)
+        if (written.has(key)) continue
+        written.add(key)
+        await invoke('write_file', { path: targetPath, content: tab.content })
       }
     }
   }
@@ -104,7 +117,8 @@ export const useProjectStore = defineStore('project', () => {
         outputPath,
       })
       bingoPath.value = outputPath
-      const fileName = outputPath.split('/').pop()?.replace(/\.bc$/, '') || '未命名项目'
+      // Windows 路径是反斜杠，不能 split('/') 取文件名
+      const fileName = baseName(outputPath).replace(/\.bc$/, '') || '未命名项目'
       name.value = fileName
       codeDirty.value = false
       resourceDirty.value = false
@@ -127,7 +141,8 @@ export const useProjectStore = defineStore('project', () => {
       // 关键：解包完成后必须把工作目录写回 root，否则 MainLayout 拿空 root 直接中断
       root.value = projectRoot
       bingoPath.value = bingoFilePath
-      const fileName = bingoFilePath.split('/').pop()?.replace(/\.bc$/, '') || '未命名项目'
+      // Windows 路径是反斜杠，不能 split('/') 取文件名
+      const fileName = baseName(bingoFilePath).replace(/\.bc$/, '') || '未命名项目'
       name.value = fileName
       codeDirty.value = false
       resourceDirty.value = false

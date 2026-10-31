@@ -1,6 +1,6 @@
 //! 项目相关命令：默认项目初始化、素材导入项目、临时脚本、引擎资源目录。
 
-use crate::fs_ops::{normalize_path_string, path_exists_impl};
+use crate::fs_ops::{normalize_path_string, path_exists_impl, remove_path_retry};
 use tauri::Manager;
 
 #[tauri::command]
@@ -57,17 +57,13 @@ fn clean_default_project_assets(project_root: &std::path::Path) -> Result<(), St
             if let Ok(entries) = std::fs::read_dir(&dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if path.is_dir() {
-                        let _ = std::fs::remove_dir_all(&path);
-                    } else {
-                        let _ = std::fs::remove_file(&path);
-                    }
+                    remove_path_retry(&path);
                 }
             }
         }
     }
     // 清理临时脚本文件
-    let _ = std::fs::remove_file(project_root.join(".temp_run.py"));
+    remove_path_retry(&project_root.join(".temp_run.py"));
     Ok(())
 }
 
