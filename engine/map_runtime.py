@@ -3,6 +3,7 @@
 什么时候来这里改：load_map 失败、地图不显示、瓦片图层/视差、地图碰撞、sensor 进出触发。
 标记与射线查询不在这里，见 markers.py。"""
 import json
+import math
 import os
 import sys
 from models.coords import set_user_origin_y, to_world_x, to_world_y
@@ -60,6 +61,47 @@ def _shape_one_way(raw):
 
     raw["_one_way"] = result
     return result
+
+
+def _number(value, default):
+    """宽松地把存档里的数字转成 float（坏值回退默认值）"""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _layer_transform(layer, map_data, tile_size):
+    """图块层的整层变换参数：以地图中心为基准缩放，再旋转，最后位移。
+
+    与前端 src/utils/tileLayerTransform.ts 的算法保持完全一致。
+    """
+    width = _number(map_data.get("width", 0), 0)
+    height = _number(map_data.get("height", 0), 0)
+    return {
+        "pivot_x": width * tile_size / 2.0,
+        "pivot_y": height * tile_size / 2.0,
+        "scale_x": _number(layer.get("scaleX", 1), 1),
+        "scale_y": _number(layer.get("scaleY", 1), 1),
+        "rotation": _number(layer.get("rotation", 0), 0),
+        "offset_x": _number(layer.get("offsetX", 0), 0),
+        "offset_y": _number(layer.get("offsetY", 0), 0),
+    }
+
+
+def _transform_point(transform, x, y):
+    """正向变换：原始世界坐标 → 变换后世界坐标"""
+    dx = (x - transform["pivot_x"]) * transform["scale_x"]
+    dy = (y - transform["pivot_y"]) * transform["scale_y"]
+    if transform["rotation"]:
+        rad = math.radians(transform["rotation"])
+        cos_r = math.cos(rad)
+        sin_r = math.sin(rad)
+        dx, dy = dx * cos_r - dy * sin_r, dx * sin_r + dy * cos_r
+    return (
+        transform["pivot_x"] + dx + transform["offset_x"],
+        transform["pivot_y"] + dy + transform["offset_y"],
+    )
 
 
 def _build_static_world(map_data, map_model):
@@ -144,6 +186,9 @@ def _build_static_world(map_data, map_model):
         if layer_type != "drawing":
             continue
 
+        # 图块层的整层变换（位置 / 缩放 / 旋转）：渲染、碰撞、标签格子共用同一套
+        transform = _layer_transform(layer, map_data, tile_size)
+
         for (tile_x, tile_y), tile_id in (layer.get("tiles") or {}).items():
             try:
                 tile_id_int = int(tile_id)
@@ -157,9 +202,17 @@ def _build_static_world(map_data, map_model):
 
             # 图块标签与碰撞无关：没有碰撞的图块也能挂「水」这类标签，
             # 所以要在碰撞判断之前收集（同一格子出现在多个图层时去重）
+            # 有整层变换时按变换后的世界位置换算格子坐标，is_touch 才对得上
             tile_tag = map_model.get_tile_tag(resource_index, tile_index)
             if tile_tag:
-                tile_tags.setdefault(tile_tag, set()).add((tile_x, tile_y))
+                tag_world_x, tag_world_y = _transform_point(
+                    transform,
+                    (tile_x + 0.5) * tile_size,
+                    (tile_y + 0.5) * tile_size,
+                )
+                tile_tags.setdefault(tile_tag, set()).add(
+                    (int(tag_world_x // tile_size), int(tag_world_y // tile_size))
+                )
 
             if not map_model.get_tile_collision(resource_index, tile_index):
                 continue
@@ -169,7 +222,8 @@ def _build_static_world(map_data, map_model):
             if isinstance(collision_shape, dict) and collision_shape.get("points"):
                 # 编辑器保存的是归一化坐标(0~1)，乘以 tile_size 转世界像素
                 world_points = [
-                    (
+                    _transform_point(
+                        transform,
                         tile_x * tile_size + float(p[0]) * tile_size,
                         tile_y * tile_size + float(p[1]) * tile_size,
                     )
@@ -183,13 +237,14 @@ def _build_static_world(map_data, map_model):
                         shape = None
 
             if shape is None:
-                left = tile_x * tile_size
-                top = tile_y * tile_size
+                corners = [
+                    (tile_x * tile_size, tile_y * tile_size),
+                    (tile_x * tile_size + tile_size, tile_y * tile_size),
+                    (tile_x * tile_size + tile_size, tile_y * tile_size + tile_size),
+                    (tile_x * tile_size, tile_y * tile_size + tile_size),
+                ]
                 shape = ConvexPolygon([
-                    (left, top),
-                    (left + tile_size, top),
-                    (left + tile_size, top + tile_size),
-                    (left, top + tile_size),
+                    _transform_point(transform, cx, cy) for cx, cy in corners
                 ])
 
             tile_type = map_model.get_tile_collision_type(resource_index, tile_index)
@@ -287,6 +342,12 @@ def load_map(map_name):
                     "locked": layer_raw.get("locked", False),
                     "tiles": tiles,
                     "images": layer_raw.get("images", []),
+                    # 整层变换：渲染、碰撞、标签格子共用（缺省为不变换）
+                    "offsetX": layer_raw.get("offsetX", 0) or 0,
+                    "offsetY": layer_raw.get("offsetY", 0) or 0,
+                    "scaleX": layer_raw.get("scaleX", 1),
+                    "scaleY": layer_raw.get("scaleY", 1),
+                    "rotation": layer_raw.get("rotation", 0) or 0,
                 })
             elif layer_type == "imagelayer":
                 # 兼容两种格式：images（带位置）和 resources（资源引用，无位置）
@@ -427,12 +488,22 @@ def load_map(map_name):
         set_user_origin_y(map_height_px)
 
         # 计算地图的世界像素边界（world_bounds）
+        # 图块按整层变换后的格子四角取包围盒：缩放/旋转后可能超出原网格范围
         all_tile_positions = []
         all_image_bounds = []
         for layer in st._CURRENT_MAP.get("layers", []):
-            for (x, y), tile_id in layer.get("tiles", {}).items():
-                if tile_id > 0:
-                    all_tile_positions.append((x, y))
+            tiles = layer.get("tiles", {})
+            if tiles:
+                tile_transform = _layer_transform(layer, st._CURRENT_MAP, tile_size)
+                for (x, y), tile_id in tiles.items():
+                    if tile_id <= 0:
+                        continue
+                    x0, y0 = x * tile_size, y * tile_size
+                    x1, y1 = x0 + tile_size, y0 + tile_size
+                    for corner_x, corner_y in ((x0, y0), (x1, y1)):
+                        all_tile_positions.append(
+                            _transform_point(tile_transform, corner_x, corner_y)
+                        )
             if layer.get("type") == "image" and "images" in layer:
                 for image in layer["images"]:
                     pos = image.get("position", [0, 0])
@@ -441,14 +512,10 @@ def load_map(map_name):
                     all_image_bounds.append((pos[0], pos[1], pos[0] + w, pos[1] + h))
 
         if all_tile_positions:
-            min_gx = min(p[0] for p in all_tile_positions)
-            max_gx = max(p[0] for p in all_tile_positions)
-            min_gy = min(p[1] for p in all_tile_positions)
-            max_gy = max(p[1] for p in all_tile_positions)
-            tile_bounds_left = min_gx * tile_size
-            tile_bounds_top = min_gy * tile_size
-            tile_bounds_right = (max_gx + 1) * tile_size
-            tile_bounds_bottom = (max_gy + 1) * tile_size
+            tile_bounds_left = min(p[0] for p in all_tile_positions)
+            tile_bounds_top = min(p[1] for p in all_tile_positions)
+            tile_bounds_right = max(p[0] for p in all_tile_positions)
+            tile_bounds_bottom = max(p[1] for p in all_tile_positions)
         else:
             tile_bounds_left = 0
             tile_bounds_top = 0
@@ -870,6 +937,8 @@ def _render_map():
 
         # 处理绘制图层的瓦片
         if "tiles" in layer:
+            # 图块层的整层变换（位置 / 缩放 / 旋转），与编辑器画布算法一致
+            transform = _layer_transform(layer, st._CURRENT_MAP, tile_size)
             # 遍历图层中的所有瓦片（静态图层烘焙模式下渲染所有瓦片）
             for (x, y), tile_id in layer["tiles"].items():
                 if tile_id <= 0:
@@ -889,30 +958,33 @@ def _render_map():
                 tile_key = (layer_idx, x, y)
 
                 # 获取瓦片集的具体瓦片大小（图块实际大小）
-                tile_set_size = tile_size  # 默认使用地图的全局tile_size
+                tile_set_size_w = tile_size  # 默认使用地图的全局tile_size
+                tile_set_size_h = tile_size
                 if resource_index < len(st._CURRENT_MAP["tile_sets"]):
                     tile_set = st._CURRENT_MAP["tile_sets"][resource_index]
-                    tile_set_size = tile_set.get("tile_width", tile_size)
+                    tile_set_size_w = tile_set.get("tile_width", tile_size)
+                    tile_set_size_h = tile_set.get("tile_height", tile_size)
 
-                # 计算瓦片在世界坐标中的位置 - 左上角定位
-                # 与编辑器画布一致：setPos(x * tile_size, y * tile_size)
-                world_x = x * tile_size
-                world_y = y * tile_size
+                # 计算瓦片在世界坐标中的位置：先算出图块中心，再做整层变换。
+                # 与编辑器画布一致（锚点 0.5，缩放/旋转都绕图块中心）
+                img_cx = x * tile_size + tile_set_size_w / 2.0
+                img_cy = y * tile_size + tile_set_size_h / 2.0
+                world_x, world_y = _transform_point(transform, img_cx, img_cy)
 
                 # 添加到批量渲染列表
                 tile_data = {
                     "id": sprite_id,
                     "x": world_x,
                     "y": world_y,
-                    "angle": 0,
+                    "angle": transform["rotation"],
                     "scale": 1.0,
-                    "scale_x": 1.0,
-                    "scale_y": 1.0,
+                    "scale_x": transform["scale_x"],
+                    "scale_y": transform["scale_y"],
                     "type": "tile",
                     "tile_id": actual_tile_index + 1,  # 恢复为从1开始的索引
                     "tile_set_index": resource_index,
                     "layer": layer_idx,
-                    "tile_size": tile_set_size,
+                    "tile_size": tile_set_size_w,
                 }
 
                 batch_commands.append(tile_data)

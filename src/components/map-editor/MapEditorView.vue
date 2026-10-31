@@ -107,8 +107,6 @@ const mapCanvasRef = ref<InstanceType<typeof MapCanvas>>()
 const layerPanelRef = ref<InstanceType<typeof LayerPanel>>()
 const tileResourceBarRef = ref<{
   uploadLocalTiles: () => void
-  deleteSelectedTile: () => void
-  clearTiles: () => void
 } | null>(null)
 const propertyPanelRef = ref<InstanceType<typeof PropertyPanel>>()
 
@@ -182,17 +180,23 @@ watch(
   },
 )
 
-// 浮动画布工具条：撤销/重做按当前绘制模式取可用性
-const canUndo = computed(() =>
-  mapEditorStore.paintMode === 'vector'
+// 浮动画布工具条：撤销/重做按当前编辑模式取可用性
+const canUndo = computed(() => {
+  const mode = mapStore.activeMode
+  if (mode === 'tile') return mapStore.canUndoTile
+  if (mode === 'shape') return false
+  return mapEditorStore.paintMode === 'vector'
     ? paintStore.vectorCanUndo
     : (mapCanvasRef.value?.canUndoPaint ?? false)
-)
-const canRedo = computed(() =>
-  mapEditorStore.paintMode === 'vector'
+})
+const canRedo = computed(() => {
+  const mode = mapStore.activeMode
+  if (mode === 'tile') return mapStore.canRedoTile
+  if (mode === 'shape') return false
+  return mapEditorStore.paintMode === 'vector'
     ? paintStore.vectorCanRedo
     : (mapCanvasRef.value?.canRedoPaint ?? false)
-)
+})
 
 // 位图模式与全局绘制 store 对齐；矢量专属工具名切回位图时回退画笔
 watch(
@@ -636,11 +640,7 @@ defineExpose({ switchToMap, placeImageResource })
             @transform-changed="onImageTransformChanged"
             @focus-marker="onFocusMarker"
             @focus-shape="onFocusShape"
-            @open-tile-library="onOpenLibrary"
-            @new-tileset-group="mapStore.addTilesetGroup()"
-            @upload-tile-files="tileResourceBarRef?.uploadLocalTiles()"
-            @delete-tile-brush="tileResourceBarRef?.deleteSelectedTile()"
-            @clear-tile-brushes="tileResourceBarRef?.clearTiles()"
+            @new-tileset-group="mapStore.addTilesetGroupToActiveLayer()"
           />
         </div>
         <!-- 底部信息栏常驻，和左侧「图层管理」、画布「坐标」保持同一结构 -->

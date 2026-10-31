@@ -51,3 +51,13 @@ export function toUserAngle(angleWorld: number): number {
 export function toWorldAngle(angleUser: number): number {
   return -angleUser
 }
+
+/** 世界 y 增量 → 用户 y 增量（位移只翻符号，和原点在哪无关） */
+export function toUserDeltaY(dyWorld: number): number {
+  return -dyWorld
+}
+
+/** 用户 y 增量 → 世界 y 增量（位移只翻符号，和原点在哪无关） */
+export function toWorldDeltaY(dyUser: number): number {
+  return -dyUser
+}

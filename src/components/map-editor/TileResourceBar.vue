@@ -526,20 +526,37 @@ watch(
   () => syncRandomBrushPool(),
 )
 
-/** 把调色板的选择同步给 store，右侧面板据此批量改类型 / 作用 / 单向碰撞 */
-watch(
-  () => [...paletteSelection].sort().join('|'),
-  () => {
-    const list: { resourceId: string; tileIndex: number }[] = []
-    for (const key of paletteSelection) {
-      const sep = key.lastIndexOf(':')
-      if (sep <= 0) continue
-      list.push({ resourceId: key.slice(0, sep), tileIndex: Number(key.slice(sep + 1)) })
-    }
-    mapStore.setTileBrushSelection(list)
-  },
-  { immediate: true },
-)
+/** 把调色板的选择同步给 store：右侧面板批量改属性 + 画布多图块图章 */
+function syncPaletteSelection() {
+  const list: { resourceId: string; tileIndex: number }[] = []
+  for (const key of paletteSelection) {
+    const sep = key.lastIndexOf(':')
+    if (sep <= 0) continue
+    list.push({ resourceId: key.slice(0, sep), tileIndex: Number(key.slice(sep + 1)) })
+  }
+  mapStore.setTileBrushSelection(list)
+
+  // 多选时按调色板里的相对位置生成图章：选中一个则退回普通单块画笔
+  const selectedItems = paletteLayout.value.items.filter(entry =>
+    paletteSelection.has(tileKey(entry.item.resource.id, entry.item.tileIndex))
+  )
+  if (selectedItems.length <= 1) {
+    mapStore.setTileBrushStamp([])
+    return
+  }
+  let minCol = Infinity
+  let minRow = Infinity
+  for (const entry of selectedItems) {
+    minCol = Math.min(minCol, tileGlobalCol(entry))
+    minRow = Math.min(minRow, tileGlobalRow(entry))
+  }
+  mapStore.setTileBrushStamp(selectedItems.map(entry => ({
+    resourceId: entry.item.resource.id,
+    tileIndex: entry.item.tileIndex,
+    dx: tileGlobalCol(entry) - minCol,
+    dy: tileGlobalRow(entry) - minRow,
+  })))
+}
 
 function onPalettePointerMove(e: PointerEvent) {
   if (!panning) return
@@ -676,8 +693,6 @@ async function uploadLocalTiles() {
 
 defineExpose({
   uploadLocalTiles,
-  deleteSelectedTile: () => onDeleteSelected(),
-  clearTiles: () => onClearResources(),
 })
 
 const currentResources = computed(() => mapStore.activeLayerResources)
@@ -818,6 +833,18 @@ const paletteLayout = computed<{
   }
   return { items: placed, width, height }
 })
+
+// 选择变化、图块移动/重排后都要重算图章位置（放在 paletteLayout 定义之后，immediate 才能安全取值）
+watch(
+  () => [
+    [...paletteSelection].sort().join('|'),
+    paletteLayout.value.items
+      .map(entry => `${tileKey(entry.item.resource.id, entry.item.tileIndex)}@${tileGlobalCol(entry)},${tileGlobalRow(entry)}`)
+      .join('|'),
+  ],
+  () => syncPaletteSelection(),
+  { immediate: true },
+)
 
 const selectedPaletteIndex = computed(() => {
   if (mapStore.selectedResourceIndex < 0) return -1

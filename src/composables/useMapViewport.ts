@@ -223,19 +223,6 @@ export function useMapViewport(options: MapViewportOptions) {
     if (!isPanning) setCursor('default')
   }
 
-  function screenToGrid(e: PointerEvent): { x: number; y: number } | null {
-    const app = getApp()
-    const rect = canvasRect()
-    if (!rect || !app) return null
-    const sx = (e.clientX - rect.left - app.stage.x) / currentScale.value
-    const sy = (e.clientY - rect.top - app.stage.y) / currentScale.value
-    const tileSize = mapStore.mapData.tileSize
-    return {
-      x: Math.floor(sx / tileSize),
-      y: Math.floor(sy / tileSize),
-    }
-  }
-
   function screenToWorld(e: PointerEvent | DragEvent): { x: number; y: number } | null {
     const clientX = 'clientX' in e ? e.clientX : 0
     const clientY = 'clientY' in e ? e.clientY : 0
@@ -275,7 +262,6 @@ export function useMapViewport(options: MapViewportOptions) {
     onSpaceDown,
     onSpaceUp,
     setCursor,
-    screenToGrid,
     screenToWorld,
     clientToWorld,
   }

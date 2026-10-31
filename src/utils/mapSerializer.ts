@@ -19,7 +19,7 @@ export interface MapSaveData {
   layers: LayerSaveData[]
   tilesets: TilesetSaveData[]
   // 图块集分组：界面上的图块集列表（缺省视为只有一个）
-  tilesetGroups?: { id: string; name: string }[]
+  tilesetGroups?: TilesetGroupSaveData[]
   // 图块笔刷调色板（顺序=界面显示顺序；col/row 为移动工具摆好的格子坐标）
   tilePalette?: { resourceId: string; tileIndex: number; col?: number; row?: number }[]
   // 相机设置（引擎运行时读取）
@@ -54,6 +54,17 @@ export interface LayerSaveData {
   locked: boolean
   /** 游戏运行时是否渲染该图层（缺省视为 true） */
   render?: boolean
+  /** 整层位移（世界像素，仅图块层） */
+  offsetX?: number
+  offsetY?: number
+  /** 整层缩放（以地图中心为基准，缺省 1）与旋转（世界角度，顺时针为正，单位度） */
+  scaleX?: number
+  scaleY?: number
+  rotation?: number
+  /** 该图块层包含的图块集（一个图块层可以有多个图块集） */
+  groupIds?: string[]
+  /** 旧存档字段：单个图块集，读取时迁移成 groupIds */
+  groupId?: string
   data?: string
   images?: ImageSaveData[]
   resources?: ResourceSaveData[]
@@ -61,6 +72,14 @@ export interface LayerSaveData {
   shapes?: ShapeSaveData[]
   // 旧存档字段名，仅用于兼容读取
   polygons?: ShapeSaveData[]
+}
+
+/** 图块集分组：名称 + 锁定 / 禁用状态 */
+export interface TilesetGroupSaveData {
+  id: string
+  name: string
+  locked?: boolean
+  disabled?: boolean
 }
 
 export interface ShapeSaveData {
@@ -161,7 +180,7 @@ export interface MapLoadData {
   resources: any[]
   layers: any[]
   tileSets: any[]
-  tilesetGroups?: { id: string; name: string }[]
+  tilesetGroups?: TilesetGroupSaveData[]
   tilePalette?: { resourceId: string; tileIndex: number; col?: number; row?: number }[]
   camera?: {
     enabled: boolean
@@ -327,6 +346,12 @@ export function serializeMap(mapData: any): MapSaveData {
 
     if (layer.type === 'drawing') {
       base.data = compressTileData(layer.tiles, mapData.width, mapData.height)
+      base.offsetX = layer.offsetX || 0
+      base.offsetY = layer.offsetY || 0
+      base.scaleX = layer.scaleX ?? 1
+      base.scaleY = layer.scaleY ?? 1
+      base.rotation = layer.rotation || 0
+      base.groupIds = Array.isArray(layer.groupIds) ? [...layer.groupIds] : undefined
     }
 
     // 扁平模型：一个图片图层只对应一张图片，仍然写成标准 imagelayer
@@ -357,7 +382,12 @@ export function serializeMap(mapData: any): MapSaveData {
     resources: mapResources,
     layers,
     tilesets,
-    tilesetGroups: mapData.tilesetGroups?.map((g: any) => ({ id: g.id, name: g.name })),
+    tilesetGroups: mapData.tilesetGroups?.map((g: any) => ({
+      id: g.id,
+      name: g.name,
+      ...(g.locked ? { locked: true } : {}),
+      ...(g.disabled ? { disabled: true } : {}),
+    })),
     tilePalette: mapData.tilePalette,
     camera: mapData.camera,
     markers: (mapData.markers || []).map((m: any) => ({
@@ -560,6 +590,15 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
       locked: layer.locked,
       render: layer.render !== false,
       tiles: layer.data ? decompressTileData(layer.data, data.width, data.height) : {},
+      offsetX: Number(layer.offsetX) || 0,
+      offsetY: Number(layer.offsetY) || 0,
+      scaleX: layer.scaleX == null ? 1 : Number(layer.scaleX),
+      scaleY: layer.scaleY == null ? 1 : Number(layer.scaleY),
+      rotation: Number(layer.rotation) || 0,
+      // 新存档写数组；上一版存档的单个 groupId 读取时转成数组
+      groupIds: Array.isArray(layer.groupIds)
+        ? layer.groupIds.map((id: unknown) => String(id))
+        : (typeof layer.groupId === 'string' ? [layer.groupId] : undefined),
     })
   }
 
@@ -636,7 +675,12 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
     layers,
     tileSets,
     tilesetGroups: Array.isArray(data.tilesetGroups)
-      ? data.tilesetGroups.map(g => ({ id: String(g.id), name: String(g.name || '图块集') }))
+      ? data.tilesetGroups.map(g => ({
+          id: String(g.id),
+          name: String(g.name || '图块集合'),
+          locked: g.locked === true,
+          disabled: g.disabled === true,
+        }))
       : undefined,
     tilePalette: data.tilePalette,
     camera: data.camera

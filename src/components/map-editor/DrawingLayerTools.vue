@@ -4,6 +4,8 @@ import type { MapTool } from '../../stores/map'
 import iconMove from '../../assets/icons/移动工具.svg'
 import iconPaint from '../../assets/icons/icon--paint.svg'
 import iconErase from '../../assets/icons/清空.svg'
+import iconLine from '../../assets/icons/直线工具.svg'
+import iconRect from '../../assets/icons/矩形_rectangle.svg'
 
 defineProps<{ disabled?: boolean }>()
 
@@ -11,6 +13,8 @@ const mapEditorStore = useMapEditorStore()
 
 const drawingTools: { id: MapTool; icon: string; label: string }[] = [
   { id: 'draw', icon: iconPaint, label: '绘制' },
+  { id: 'line', icon: iconLine, label: '直线' },
+  { id: 'rect', icon: iconRect, label: '矩形' },
   { id: 'erase', icon: iconErase, label: '擦除' },
   { id: 'move', icon: iconMove, label: '移动' },
 ]

@@ -5,7 +5,7 @@ import { useEditorStore } from '../../stores/editor'
 import { useResourceStore } from '../../stores/resource'
 import { useMapEditorStore } from '../../stores/mapEditor'
 import CustomSelect from '../common/CustomSelect.vue'
-import { toUserX, toWorldX, toUserY, toWorldY, toUserAngle, toWorldAngle } from '../../utils/coords'
+import { toUserX, toWorldX, toUserY, toWorldY, toUserAngle, toWorldAngle, toUserDeltaY, toWorldDeltaY } from '../../utils/coords'
 import { shapeColorCss, shapeKindLabel } from '../../utils/shapeStyle'
 import iconChevron from '../../assets/icons/right_arrow.svg'
 import iconSettings from '../../assets/icons/icon--settings.svg'
@@ -27,12 +27,8 @@ const emit = defineEmits<{
   'focus-marker': [id: string]
   /** 形状列表里请求把视口居中到某个形状 */
   'focus-shape': [id: string]
-  /** 图块页里的图块集操作：新建图块集 / 本地上传 / 删除选中 / 清空 */
-  'open-tile-library': []
+  /** 图块页里的图块集操作：新建图块集 */
   'new-tileset-group': []
-  'upload-tile-files': []
-  'delete-tile-brush': []
-  'clear-tile-brushes': []
 }>()
 
 const mapStore = useMapStore()
@@ -225,13 +221,16 @@ function runMarkerMenu(action: MarkerMenuAction) {
 
 /** 点菜单以外的地方关闭（菜单内点击由 click 处理，不能提前关） */
 function onWindowPointerDownCloseMenu(e: PointerEvent) {
-  if (!markerMenu.value) return
+  if (!markerMenu.value && !tilesetMenu.value) return
   if ((e.target as HTMLElement | null)?.closest('.mi-menu')) return
   markerMenu.value = null
+  tilesetMenu.value = null
 }
 
 function onWindowKeydownCloseMenu(e: KeyboardEvent) {
-  if (e.key === 'Escape' && markerMenu.value) markerMenu.value = null
+  if (e.key !== 'Escape') return
+  markerMenu.value = null
+  tilesetMenu.value = null
 }
 
 onMounted(() => {
@@ -251,6 +250,7 @@ const fold = reactive({
   layer: true,
   transform: true,
   tileBasic: true,
+  tileTransform: true,
   tileSets: true,
 })
 
@@ -1091,6 +1091,70 @@ function toggleTileCollisionMask(n: number) {
   else tileCollisionMask.add(n)
 }
 
+// ====== 变换：整层位移 / 缩放 / 旋转 ======
+/** 变换作用在整个图块图层上 */
+const activeDrawingLayer = computed(() => {
+  const layer = mapStore.activeLayer
+  return layer && layer.type === 'drawing' ? layer : null
+})
+const tileLayerOffsetX = computed(() => Math.round(activeDrawingLayer.value?.offsetX ?? 0))
+// 面板显示用户坐标（y 向上），存的是世界坐标（y 向下），位移只翻符号
+const tileLayerOffsetY = computed(() => Math.round(toUserDeltaY(activeDrawingLayer.value?.offsetY ?? 0)))
+/** 缩放按百分比展示（100 = 原尺寸） */
+const tileLayerScaleX = computed(() => Math.round((activeDrawingLayer.value?.scaleX ?? 1) * 100))
+const tileLayerScaleY = computed(() => Math.round((activeDrawingLayer.value?.scaleY ?? 1) * 100))
+/** 旋转面板显示用户角度（逆时针为正），存的是世界角度（顺时针为正） */
+const tileLayerRotation = computed(() =>
+  Math.round(toUserAngle(activeDrawingLayer.value?.rotation ?? 0) * 10) / 10,
+)
+/** 约束比例：勾选后改 X 时 Y 按同一倍率跟随 */
+const tileScaleLocked = ref(true)
+
+function onTileLayerOffsetChange(axis: 'x' | 'y', e: Event) {
+  const layer = activeDrawingLayer.value
+  if (!layer) return
+  const raw = Number((e.target as HTMLInputElement).value)
+  const value = Number.isFinite(raw) ? Math.round(raw) : 0
+  mapStore.setLayerTransform(layer.id, axis === 'x'
+    ? { offsetX: value }
+    : { offsetY: toWorldDeltaY(value) })
+}
+
+/** 缩放：输入百分比，0 会导致矩阵退化，最小保留 1%（负值=镜像） */
+function applyTileLayerScale(axis: 'x' | 'y', percent: number) {
+  const layer = activeDrawingLayer.value
+  if (!layer) return
+  const clamped = Math.abs(percent) < 1 ? (percent < 0 ? -1 : 1) : percent
+  const value = clamped / 100
+  const oldX = layer.scaleX ?? 1
+  const oldY = layer.scaleY ?? 1
+  const round = (n: number) => Math.round(n * 10000) / 10000
+  if (axis === 'x') {
+    const patch: { scaleX: number; scaleY?: number } = { scaleX: value }
+    if (tileScaleLocked.value && oldX !== 0) patch.scaleY = round(oldY * (value / oldX))
+    mapStore.setLayerTransform(layer.id, patch)
+  } else {
+    const patch: { scaleX?: number; scaleY: number } = { scaleY: value }
+    if (tileScaleLocked.value && oldY !== 0) patch.scaleX = round(oldX * (value / oldY))
+    mapStore.setLayerTransform(layer.id, patch)
+  }
+}
+
+function onTileLayerScaleChange(axis: 'x' | 'y', e: Event) {
+  const value = Number((e.target as HTMLInputElement).value)
+  if (!Number.isFinite(value)) return
+  applyTileLayerScale(axis, value)
+}
+
+/** 输入的是用户角度（逆时针为正），写回前换算成世界角度 */
+function onTileLayerRotationChange(e: Event) {
+  const layer = activeDrawingLayer.value
+  if (!layer) return
+  const value = Number((e.target as HTMLInputElement).value)
+  if (!Number.isFinite(value)) return
+  mapStore.setLayerTransform(layer.id, { rotation: toWorldAngle(value) })
+}
+
 // ====== 图块尺寸 ======
 const tileSizeOptions = [
   { label: '16x16', value: '16x16' },
@@ -1103,34 +1167,165 @@ function onTileSizeChange(val: string) {
   if (Number.isFinite(newSize) && newSize > 0) mapStore.updateTileSize(newSize)
 }
 
-/** 当前图块层正在使用的图块集 */
-const tileSetResources = computed(() =>
-  mapStore.activeLayerResources.filter(r => r.resourceType !== 'image'),
-)
-
 /**
- * 图块集列表：同一画布上传的图块都归在同一个图块集里，
- * 只有用户手动「新建」才会出现第二行。
+ * 图块集列表：只列出当前图块层包含的图块集，每行 = 状态圆点 + 名称 + 图块尺寸。
+ * 一个图块层可以包含多个图块集，点下方「新建」会往当前图层里再加一个。
  */
 const tileSetGroups = computed(() => {
-  const resources = tileSetResources.value
+  const resources = mapStore.mapData.resources.filter(r => r.resourceType !== 'image')
   const groups = mapStore.mapData.tilesetGroups ?? []
-  // 旧地图还没有分组：全部素材都算第一个图块集
-  const effective = groups.length ? groups : [{ id: '', name: '图块集 1' }]
-  const paletteCount = new Map<string, number>()
-  for (const entry of mapStore.mapData.tilePalette ?? []) {
-    paletteCount.set(entry.resourceId, (paletteCount.get(entry.resourceId) ?? 0) + 1)
-  }
-  return effective.map(group => {
-    const owned = resources.filter(r => (r.groupId || effective[0].id) === group.id)
-    return {
-      id: group.id,
-      name: group.name,
-      resourceCount: owned.length,
-      tileCount: owned.reduce((sum, r) => sum + (paletteCount.get(r.id) ?? 0), 0),
-    }
-  })
+  const ownedIds = mapStore.activeTileGroupIds
+  return ownedIds
+    .map(id => groups.find(g => g.id === id))
+    .filter((group): group is NonNullable<typeof group> => group != null)
+    .map(group => {
+      const owned = resources.filter(r => r.groupId === group.id)
+      const first = owned[0]
+      return {
+        id: group.id,
+        name: group.name || '图块集合',
+        // 图块尺寸取该图块集里第一个素材的切片尺寸，没有素材时按地图格子尺寸显示
+        tileWidth: first?.tileWidth ?? mapStore.mapData.tileSize,
+        tileHeight: first?.tileHeight ?? mapStore.mapData.tileSize,
+        locked: group.locked === true,
+        disabled: group.disabled === true,
+      }
+    })
 })
+
+/** 列表中选中的图块集：没选过或选中项被删除时退回第一个 */
+const selectedTilesetRow = computed(() =>
+  tileSetGroups.value.find(g => g.id === mapStore.selectedTilesetGroupId)
+  ?? tileSetGroups.value[0]
+  ?? null,
+)
+
+/** 列表里选中的图块集不可删除：锁定或全图只剩这一个图块集 */
+const canDeleteTileset = computed(() =>
+  !!selectedTilesetRow.value
+  && !selectedTilesetRow.value.locked
+  && (mapStore.mapData.tilesetGroups?.length ?? 0) > 1,
+)
+
+function selectTilesetRow(id: string) {
+  mapStore.selectTilesetGroup(id)
+}
+
+function onTilesetDelete() {
+  const row = selectedTilesetRow.value
+  if (!row) return
+  mapStore.deleteTilesetGroup(row.id)
+}
+
+function onTilesetToggleDisabled() {
+  const row = selectedTilesetRow.value
+  if (!row || row.locked) return
+  mapStore.setTilesetGroupFlags(row.id, { disabled: !row.disabled })
+}
+
+/** 复制选中的图块集：分组、图块素材、碰撞和调色板条目一起复制 */
+function onTilesetDuplicate() {
+  const row = selectedTilesetRow.value
+  if (!row) return
+  mapStore.duplicateTilesetGroup(row.id)
+}
+
+// ====== 图块集行内改名（右键菜单里的「重命名」） ======
+const renamingTilesetId = ref<string | null>(null)
+const tilesetRenameDraft = ref('')
+const tilesetRenameInputRef = ref<HTMLInputElement | null>(null)
+
+function setTilesetRenameInput(el: unknown) {
+  if (el) tilesetRenameInputRef.value = el as HTMLInputElement
+}
+
+/** 进入改名：展开图块集分区、选中该行并聚焦输入框 */
+function startTilesetRename(id: string) {
+  const row = tileSetGroups.value.find(g => g.id === id) ?? tileSetGroups.value[0]
+  if (!row) return
+  fold.tileSets = true
+  mapStore.selectTilesetGroup(row.id)
+  renamingTilesetId.value = row.id
+  tilesetRenameDraft.value = row.name
+  nextTick(() => {
+    tilesetRenameInputRef.value?.focus()
+    tilesetRenameInputRef.value?.select()
+  })
+}
+
+/** 提交改名：去空格；空名保持原名 */
+function commitTilesetRename(id: string) {
+  if (renamingTilesetId.value !== id) return
+  const text = tilesetRenameDraft.value.trim()
+  if (text) mapStore.renameTilesetGroup(id, text)
+  renamingTilesetId.value = null
+  tilesetRenameDraft.value = ''
+}
+
+function cancelTilesetRename() {
+  renamingTilesetId.value = null
+  tilesetRenameDraft.value = ''
+}
+
+// ====== 图块集右键菜单（重命名 / 复制 / 隐藏 / 锁定 / 删除） ======
+const tilesetMenu = ref<{ id: string; x: number; y: number } | null>(null)
+const tilesetMenuRef = ref<HTMLElement | null>(null)
+
+/** 菜单对应的图块集：行被删掉时菜单自动失效 */
+const menuTileset = computed(() => {
+  const menu = tilesetMenu.value
+  if (!menu) return null
+  return tileSetGroups.value.find(g => g.id === menu.id) ?? null
+})
+
+function openTilesetMenu(id: string, e: MouseEvent) {
+  e.preventDefault()
+  // 右键同时也选中该行，和文件管理器的习惯一致
+  mapStore.selectTilesetGroup(id)
+  tilesetMenu.value = { id, x: e.clientX, y: e.clientY }
+  nextTick(() => clampTilesetMenu())
+}
+
+/** 菜单贴边时往回收，避免超出窗口 */
+function clampTilesetMenu() {
+  const el = tilesetMenuRef.value
+  const menu = tilesetMenu.value
+  if (!el || !menu) return
+  const margin = 8
+  menu.x = Math.max(margin, Math.min(menu.x, window.innerWidth - el.offsetWidth - margin))
+  menu.y = Math.max(margin, Math.min(menu.y, window.innerHeight - el.offsetHeight - margin))
+}
+
+type TilesetMenuAction =
+  | 'rename'
+  | 'duplicate'
+  | 'toggle-hidden'
+  | 'toggle-locked'
+  | 'delete'
+
+function runTilesetMenu(action: TilesetMenuAction) {
+  const row = menuTileset.value
+  tilesetMenu.value = null
+  if (!row) return
+  switch (action) {
+    case 'rename':
+      startTilesetRename(row.id)
+      break
+    case 'duplicate':
+      mapStore.duplicateTilesetGroup(row.id)
+      break
+    case 'toggle-hidden':
+      // 锁定后不能隐藏（与底部「禁用」按钮的规则一致）
+      if (!row.locked) mapStore.setTilesetGroupFlags(row.id, { disabled: !row.disabled })
+      break
+    case 'toggle-locked':
+      mapStore.setTilesetGroupFlags(row.id, { locked: !row.locked })
+      break
+    case 'delete':
+      mapStore.deleteTilesetGroup(row.id)
+      break
+  }
+}
 
 </script>
 
@@ -2111,17 +2306,6 @@ const tileSetGroups = computed(() => {
               </div>
             </template>
 
-            <div class="att-row">
-              <span class="att-label">图块尺寸</span>
-              <CustomSelect
-                class="att-select"
-                :model-value="tileSizeValue"
-                :options="tileSizeOptions"
-                :disabled="disabled"
-                @update:model-value="onTileSizeChange"
-              />
-            </div>
-
             <!-- 碰撞层级：勾选后在下方展开设置（和单向碰撞一样的内联展开） -->
             <div class="att-row">
               <span class="att-label">碰撞层级</span>
@@ -2174,6 +2358,114 @@ const tileSetGroups = computed(() => {
                 />
               </div>
             </template>
+
+            <div class="att-row">
+              <span class="att-label">图块尺寸</span>
+              <CustomSelect
+                class="att-select"
+                :model-value="tileSizeValue"
+                :options="tileSizeOptions"
+                :disabled="disabled"
+                @update:model-value="onTileSizeChange"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- 变换：整个图块图层一起位移 / 缩放 / 旋转 -->
+        <div class="mi-section" :class="{ open: fold.tileTransform }">
+          <button class="mi-head" :disabled="disabled" @click="fold.tileTransform = !fold.tileTransform">
+            <img :src="iconChevron" class="mi-chevron" alt="" />
+            <span class="mi-head-title">变换</span>
+          </button>
+          <div v-if="fold.tileTransform" class="mi-body">
+            <div class="att-row att-row-stacked">
+              <span class="att-label">位置</span>
+              <div class="att-axis-group">
+                <div class="att-axis-row">
+                  <span class="att-size-label">X</span>
+                  <input
+                    class="att-input att-input-no-spin"
+                    type="number"
+                    :value="tileLayerOffsetX"
+                    :disabled="disabled || !activeDrawingLayer"
+                    @change="onTileLayerOffsetChange('x', $event)"
+                  />
+                </div>
+                <div class="att-axis-row">
+                  <span class="att-size-label">Y</span>
+                  <input
+                    class="att-input att-input-no-spin"
+                    type="number"
+                    :value="tileLayerOffsetY"
+                    :disabled="disabled || !activeDrawingLayer"
+                    @change="onTileLayerOffsetChange('y', $event)"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div class="att-row att-row-stacked">
+              <span class="att-label">缩放</span>
+              <div class="att-axis-group">
+                <div class="att-axis-row">
+                  <span class="att-size-label">X</span>
+                  <input
+                    class="att-input att-input-no-spin"
+                    type="number"
+                    step="1"
+                    :value="tileLayerScaleX"
+                    :disabled="disabled || !activeDrawingLayer"
+                    @change="onTileLayerScaleChange('x', $event)"
+                  />
+                </div>
+                <div class="att-axis-row">
+                  <span class="att-size-label">Y</span>
+                  <input
+                    class="att-input att-input-no-spin"
+                    type="number"
+                    step="1"
+                    :value="tileLayerScaleY"
+                    :disabled="disabled || !activeDrawingLayer"
+                    @change="onTileLayerScaleChange('y', $event)"
+                  />
+                </div>
+                <div class="att-axis-row att-axis-lock">
+                  <span class="att-size-label">约束比例</span>
+                  <label class="att-checkbox">
+                    <input
+                      type="checkbox"
+                      v-model="tileScaleLocked"
+                      :disabled="disabled || !activeDrawingLayer"
+                    />
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="att-row att-row-stacked">
+              <span class="att-label">旋转</span>
+              <div class="att-axis-group">
+                <input
+                  class="att-input att-input-no-spin"
+                  type="number"
+                  step="1"
+                  :value="tileLayerRotation"
+                  :disabled="disabled || !activeDrawingLayer"
+                  @change="onTileLayerRotationChange"
+                />
+                <input
+                  class="att-range"
+                  type="range"
+                  min="-180"
+                  max="180"
+                  step="1"
+                  :value="tileLayerRotation"
+                  :disabled="disabled || !activeDrawingLayer"
+                  @input="onTileLayerRotationChange"
+                />
+              </div>
+            </div>
           </div>
         </div>
 
@@ -2185,22 +2477,63 @@ const tileSetGroups = computed(() => {
             <span class="mi-count">{{ tileSetGroups.length }}</span>
           </button>
           <div v-if="fold.tileSets" class="mi-body">
-            <div class="tileset-list">
-              <div v-for="group in tileSetGroups" :key="group.id || 'default'" class="tileset-row">
-                <span class="tileset-name">{{ group.name }}</span>
-                <span class="tileset-size">{{ group.tileCount }} 个图块</span>
-                <label class="tileset-disable">
-                  <input type="checkbox" disabled />
-                  <span>禁用</span>
-                </label>
+            <div class="mi-list">
+              <template v-for="group in tileSetGroups" :key="group.id || 'default'">
+                <!-- 行内改名：右键菜单触发后原地变成输入框 -->
+                <div
+                  v-if="renamingTilesetId === group.id"
+                  class="mi-list-row mi-list-row-edit tileset-row"
+                  :class="{ 'is-selected': group.id === selectedTilesetRow?.id }"
+                >
+                  <span class="mi-list-dot tileset-dot" />
+                  <input
+                    :ref="setTilesetRenameInput"
+                    v-model="tilesetRenameDraft"
+                    class="mi-list-rename"
+                    maxlength="20"
+                    :disabled="disabled"
+                    @keydown.enter.prevent="commitTilesetRename(group.id)"
+                    @keydown.esc.prevent="cancelTilesetRename"
+                    @blur="commitTilesetRename(group.id)"
+                  />
+                </div>
+                <button
+                  v-else
+                  class="mi-list-row tileset-row"
+                  :class="{
+                    'is-selected': group.id === selectedTilesetRow?.id,
+                    'is-off': group.disabled,
+                  }"
+                  :disabled="disabled"
+                  @click="selectTilesetRow(group.id)"
+                  @contextmenu="openTilesetMenu(group.id, $event)"
+                >
+                  <span class="mi-list-dot tileset-dot" />
+                  <span class="mi-list-name">{{ group.name }}</span>
+                  <span class="tileset-size">{{ group.tileWidth }}x{{ group.tileHeight }}</span>
+                </button>
+              </template>
+              <div v-if="!tileSetGroups.length" class="mi-list-empty">
+                这个图块层还没有图块集，点下方「新建」加一个
               </div>
             </div>
             <div class="tileset-actions">
-              <button class="mi-btn" :disabled="disabled" @click="emit('open-tile-library')">资源库</button>
               <button class="mi-btn" :disabled="disabled" @click="emit('new-tileset-group')">新建</button>
-              <button class="mi-btn" :disabled="disabled" @click="emit('upload-tile-files')">上传</button>
-              <button class="mi-btn" :disabled="disabled" @click="emit('delete-tile-brush')">删除</button>
-              <button class="mi-btn" :disabled="disabled" @click="emit('clear-tile-brushes')">清空</button>
+              <button
+                class="mi-btn mi-btn-danger"
+                :disabled="disabled || !canDeleteTileset"
+                @click="onTilesetDelete"
+              >删除</button>
+              <button
+                class="mi-btn"
+                :disabled="disabled || !selectedTilesetRow"
+                @click="onTilesetDuplicate"
+              >复制</button>
+              <button
+                class="mi-btn"
+                :disabled="disabled || !selectedTilesetRow || selectedTilesetRow.locked"
+                @click="onTilesetToggleDisabled"
+              >{{ selectedTilesetRow?.disabled ? '启用' : '禁用' }}</button>
             </div>
           </div>
         </div>
@@ -2292,6 +2625,34 @@ const tileSetGroups = computed(() => {
           </button>
           <div class="mi-menu-sep" />
           <button class="mi-menu-item mi-menu-danger" @click="runMarkerMenu('delete')">删除标记</button>
+        </div>
+      </Teleport>
+
+      <!-- 图块集右键菜单：重命名 / 复制 / 隐藏 / 锁定 / 删除 -->
+      <Teleport to="body">
+        <div
+          v-if="tilesetMenu"
+          ref="tilesetMenuRef"
+          class="mi-menu"
+          :style="{ left: `${tilesetMenu.x}px`, top: `${tilesetMenu.y}px` }"
+        >
+          <button class="mi-menu-item" @click="runTilesetMenu('rename')">重命名</button>
+          <button class="mi-menu-item" @click="runTilesetMenu('duplicate')">复制图块集</button>
+          <div class="mi-menu-sep" />
+          <button
+            class="mi-menu-item"
+            :disabled="menuTileset?.locked === true"
+            @click="runTilesetMenu('toggle-hidden')"
+          >{{ menuTileset?.disabled ? '显示图块集' : '隐藏图块集' }}</button>
+          <button class="mi-menu-item" @click="runTilesetMenu('toggle-locked')">
+            {{ menuTileset?.locked ? '解锁' : '锁定' }}
+          </button>
+          <div class="mi-menu-sep" />
+          <button
+            class="mi-menu-item mi-menu-danger"
+            :disabled="!canDeleteTileset"
+            @click="runTilesetMenu('delete')"
+          >删除图块集</button>
         </div>
       </Teleport>
     </div>
@@ -2903,6 +3264,16 @@ const tileSetGroups = computed(() => {
   color: #fff;
 }
 
+/* 不可用的菜单项（如锁定后不能隐藏 / 删除） */
+.mi-menu-item:disabled {
+  opacity: 0.4;
+}
+
+.mi-menu-item:disabled:hover {
+  background: transparent;
+  color: #cfd3d9;
+}
+
 .mi-menu-sep {
   height: 1px;
   margin: 4px 6px;
@@ -2975,31 +3346,13 @@ const tileSetGroups = computed(() => {
 }
 
 /* ====== 图块集列表 ====== */
-.tileset-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+/* 行结构：圆点（选中=主题绿，未选中=灰） + 名称 + 图块尺寸 + 锁定状态 */
+.tileset-dot {
+  background: #98a0aa;
 }
 
-.tileset-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 26px;
-  padding: 0 6px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.tileset-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #d5d8dc;
-  font-size: 12px;
-  text-align: left;
+.tileset-row.is-selected .tileset-dot {
+  background: #5BFB84;
 }
 
 .tileset-size {
@@ -3009,23 +3362,19 @@ const tileSetGroups = computed(() => {
   font-family: 'JetBrains Mono', monospace;
 }
 
-.tileset-disable {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-  color: #9ca0a4;
-  font-size: 11px;
+/* 已禁用的图块集：名称与圆点变淡，一眼能区分 */
+.tileset-row.is-off .mi-list-name,
+.tileset-row.is-off .tileset-dot {
+  opacity: 0.5;
 }
 
 .tileset-actions {
   display: flex;
-  flex-wrap: wrap;
   gap: 6px;
 }
 
 .tileset-actions .mi-btn {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
   justify-content: center;
   padding: 0 4px;

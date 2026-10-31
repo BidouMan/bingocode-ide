@@ -493,7 +493,8 @@ async function syncTiles() {
           const texture = await getTileFrame(tileData.tileSetIndex, tileData.tileId)
           if (texture) {
             displayObj = new PIXI.Sprite(texture)
-            displayObj.anchor = { x: 0, y: 0 }
+            // 图块锚点居中：引擎发送的是变换后的图块中心（缩放/旋转都以中心为基准）
+            displayObj.anchor = { x: 0.5, y: 0.5 }
           }
         }
       } catch (e) {
@@ -528,22 +529,24 @@ async function syncTiles() {
         displayObj.zIndex = tileData.layer
       }
       // 视口裁剪：只渲染相机视口内的瓦片，减少 GPU 负担
-      // 图块按「素材原始尺寸」判定（图块永远按图集切片大小绘制，不随网格缩放）
+      // 尺寸取精灵当前显示尺寸（已包含整层缩放），图块锚点在中心，裁剪框从中心向两侧展开
       const cellSize = tileData.type === 'tile'
         ? (tileData.tileSize || renderStore.tileGridSize)
         : (renderStore.tileGridSize || 16)
       const isImageTile = tileData.type === 'image'
-      const cullW = isImageTile ? (displayObj.width || 1) : cellSize
-      const cullH = isImageTile ? (displayObj.height || 1) : cellSize
+      const cullW = displayObj.width || cellSize
+      const cullH = displayObj.height || cellSize
+      const halfW = isImageTile ? 0 : cullW / 2
+      const halfH = isImageTile ? 0 : cullH / 2
       const cam = renderStore.camera
       const viewLeft = cam.x - LOGIC_W / 2 - cellSize
       const viewRight = cam.x + LOGIC_W / 2 + cellSize
       const viewTop = cam.y - LOGIC_H / 2 - cellSize
       const viewBottom = cam.y + LOGIC_H / 2 + cellSize
-      displayObj.visible = tileData.x + cullW > viewLeft
-        && tileData.x < viewRight
-        && tileData.y + cullH > viewTop
-        && tileData.y < viewBottom
+      displayObj.visible = tileData.x + halfW + cullW > viewLeft
+        && tileData.x - halfW < viewRight
+        && tileData.y + halfH + cullH > viewTop
+        && tileData.y - halfH < viewBottom
     }
   }
 

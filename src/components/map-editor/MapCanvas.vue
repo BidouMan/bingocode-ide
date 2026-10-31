@@ -26,6 +26,12 @@ import {
   SELECTION_STROKE_PX,
 } from '../../utils/selectionStyle'
 import { toUserX, toUserY } from '../../utils/coords'
+import {
+  createLayerTransform,
+  tileSpriteTransform,
+  worldToTile,
+  type TileLayerTransform,
+} from '../../utils/tileLayerTransform'
 import iconMarkerRaw from '../../assets/icons/标记.svg?raw'
 import {
   createMapVectorViewport,
@@ -275,9 +281,21 @@ function imageLayerSignature(img: any): string {
   ].join('|')
 }
 
-/** 图层内容签名：图块层按 tileRevision 整体重建，图片层按自身签名，形状层无内容 */
+/** 图块层整层变换签名：位置 / 缩放 / 旋转变化时整体重建 */
+function layerTransformKey(layer: any): string {
+  return [
+    layer.offsetX ?? 0, layer.offsetY ?? 0,
+    layer.scaleX ?? 1, layer.scaleY ?? 1,
+    layer.rotation ?? 0,
+    mapStore.mapData.width, mapStore.mapData.height, mapStore.mapData.tileSize,
+  ].join(',')
+}
+
+/** 图层内容签名：图块层按 tileRevision + 整层变换整体重建，图片层按自身签名，形状层无内容 */
 function layerContentKey(layer: any): string {
-  if (layer.type === 'drawing') return `tiles:${mapStore.tileRevision}:${currentScaleMode}`
+  if (layer.type === 'drawing') {
+    return `tiles:${mapStore.tileRevision}:${currentScaleMode}:${layerTransformKey(layer)}`
+  }
   if (layer.type === 'image') return `img:${imageLayerSignature(layer.image)}`
   return ''
 }
@@ -350,18 +368,26 @@ async function renderTile(layerId: number, x: number, y: number, tileId: number)
 
   if (!sprite) {
     sprite = new PIXI.Sprite(texture)
+    sprite.anchor.set(0.5)
     const container = getOrCreateLayerContainer(layerId)
     container.addChild(sprite)
     tileSprites.set(key, sprite)
   } else if (sprite.texture !== texture) {
     sprite.texture = texture
   }
-  // 位置跟着网格走；尺寸永远是素材自己的切片大小，不随网格拉伸
+  // 位置按整层变换后的图块中心摆放（锚点 0.5），尺寸永远是素材自己的切片大小 × 整层缩放
   // （同 Tiled / Unity 的网格模型；SVG 2x 超采样纹理也在这里压回逻辑尺寸）
-  sprite.x = x * tileSize
-  sprite.y = y * tileSize
-  sprite.width = resource.tileWidth
-  sprite.height = resource.tileHeight
+  const t = layerTileTransform(layerId)
+  const st = tileSpriteTransform(t, x, y, tileSize, resource.tileWidth, resource.tileHeight)
+  sprite.anchor.set(0.5)
+  sprite.x = st.x
+  sprite.y = st.y
+  sprite.rotation = st.rotation
+  sprite.width = resource.tileWidth * Math.abs(st.scaleX)
+  sprite.height = resource.tileHeight * Math.abs(st.scaleY)
+  // 负缩放实现镜像
+  if (st.scaleX < 0) sprite.scale.x = -Math.abs(sprite.scale.x)
+  if (st.scaleY < 0) sprite.scale.y = -Math.abs(sprite.scale.y)
 }
 
 function removeTile(layerId: number, x: number, y: number) {
@@ -2985,11 +3011,19 @@ function onVectorWheel(e: WheelEvent) {
 // ─── 工具栏统一入口（按当前模式路由到位图/矢量）───
 
 function undoActive() {
+  if (mapStore.activeMode === 'tile') {
+    mapStore.undoTile()
+    return
+  }
   if (vectorActive.value && paintStore.mode === 'vector') vectorEngine.undo()
   else undoPaint()
 }
 
 function redoActive() {
+  if (mapStore.activeMode === 'tile') {
+    mapStore.redoTile()
+    return
+  }
   if (vectorActive.value && paintStore.mode === 'vector') vectorEngine.redo()
   else redoPaint()
 }
@@ -3034,6 +3068,34 @@ function layerDownActive() {
 }
 
 // --- Interaction ---
+
+/** 图块层的整层变换（位置 / 缩放 / 旋转），渲染与输入反算共用 */
+function layerTileTransform(layerId: number): TileLayerTransform {
+  const layer = mapStore.mapData.layers.find(l => l.id === layerId)
+  return createLayerTransform(
+    mapStore.mapData.width,
+    mapStore.mapData.height,
+    mapStore.mapData.tileSize,
+    layer && layer.type === 'drawing' ? layer : null,
+  )
+}
+
+function activeTileTransform(): TileLayerTransform {
+  const layer = mapStore.activeLayer
+  return createLayerTransform(
+    mapStore.mapData.width,
+    mapStore.mapData.height,
+    mapStore.mapData.tileSize,
+    layer && layer.type === 'drawing' ? layer : null,
+  )
+}
+
+/** 指针位置 → 图块格子（先反算整层变换，再落到网格） */
+function pointerToTile(e: PointerEvent | DragEvent): { x: number; y: number } | null {
+  const world = viewport.screenToWorld(e)
+  if (!world) return null
+  return worldToTile(activeTileTransform(), world.x, world.y, mapStore.mapData.tileSize)
+}
 
 function onPointerDown(e: PointerEvent) {
   if (e.button === 1 || (e.button === 0 && viewport.isSpacePressed()) || (e.button === 0 && e.altKey)) {
@@ -3147,8 +3209,25 @@ function onPointerDown(e: PointerEvent) {
     }
 
     // 图片模式选择工具只做像素框选，不再做整图点选（位图/矢量模式行为一致）
-    const pos = viewport.screenToGrid(e)
-    if (pos) painter.handlePaintPointerDown(e, pos)
+    const pos = pointerToTile(e)
+    if (pos) {
+      // 捕获指针：拖到画布外也能收到 pointerup，直线/矩形不会因为快速松开而丢笔
+      capturePointer(app?.canvas as HTMLCanvasElement | undefined, e.pointerId)
+      painter.handlePaintPointerDown(e, pos)
+    }
+  }
+
+  // 图块模式：直线/矩形支持右键起笔，拖出要擦除的范围
+  if (
+    e.button === 2
+    && mapStore.activeMode === 'tile'
+    && (mapEditorStore.currentTool === 'line' || mapEditorStore.currentTool === 'rect')
+  ) {
+    const pos = pointerToTile(e)
+    if (pos) {
+      capturePointer(app?.canvas as HTMLCanvasElement | undefined, e.pointerId)
+      painter.handlePaintPointerDown(e, pos)
+    }
   }
 }
 
@@ -3213,7 +3292,17 @@ function onPointerMove(e: PointerEvent) {
     return
   }
 
-  const gridPos = viewport.screenToGrid(e)
+  let gridPos = pointerToTile(e)
+  // 指针捕获后可能拖到画布外：按画布边界裁掉，保持和未捕获时一样不会画出画布
+  if (gridPos && (e.buttons & 7) !== 0) {
+    const el = app?.canvas as HTMLCanvasElement | undefined
+    if (el) {
+      const r = el.getBoundingClientRect()
+      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) {
+        gridPos = null
+      }
+    }
+  }
   if (gridPos) {
     cursorGridPos.value = gridPos
     emit('cursor-move', gridPos.x, gridPos.y)
@@ -3265,6 +3354,7 @@ function onPointerUp(e: PointerEvent) {
 
   // Move tool: drop tile at new position
   painter.handlePointerUp(cursorGridPos.value)
+  releasePointer(app?.canvas as HTMLCanvasElement | undefined, e.pointerId)
 
   viewport.endPan()
   painter.resetPaintKey()
@@ -3274,6 +3364,12 @@ function onPointerUp(e: PointerEvent) {
 function onPointerLeave(e: PointerEvent) {
   viewport.endPan()
   painter.resetPaintKey()
+  // 图块绘制中离开画布：结束当前笔画，避免后续拖动被并进同一步历史
+  if (mapStore.activeMode === 'tile' && e.buttons === 0) {
+    // 按住按键时只是短暂移出画布（已捕获指针，pointerup 还会回到画布），不要打断当前笔画
+    painter.resetShapeStroke()
+    mapStore.endTileStroke()
+  }
   cursorGridPos.value = null
   markerGhost.value = null
   // 鼠标离开画布时清空信息栏坐标，避免残留上一次的位置
@@ -3292,6 +3388,26 @@ function onPointerLeave(e: PointerEvent) {
   }
 }
 
+/** 系统取消指针（触摸板手势被接管等）：图块绘制按正常松开收尾，避免笔划悬空 */
+function onPointerCancel(e: PointerEvent) {
+  if (mapStore.activeMode === 'tile') onPointerUp(e)
+}
+
+/**
+ * 全局 pointerup 兜底：指针捕获失效或事件没送到画布时（快速松开、触摸板手势），
+ * 仍然提交当前直线/矩形笔划。画布已处理过时内部状态已清空，这里不会有副作用。
+ */
+function onWindowPointerUp(e: PointerEvent) {
+  if (mapStore.activeMode !== 'tile') return
+  // 画布的 pointerup 没收到时才会留下未提交的笔划；正常松手这里不会重复提交
+  if (!painter.hasActiveShapeStroke()) return
+  // 终点用最后一次有效移动位置，避免在画布外松手时按屏幕坐标算出越界格子
+  painter.handlePointerUp(null)
+  releasePointer(app?.canvas as HTMLCanvasElement | undefined, e.pointerId)
+  viewport.endPan()
+  painter.resetPaintKey()
+}
+
 function setupInteraction() {
   if (!app || !app.canvas) return
   const canvas = app.canvas as HTMLCanvasElement
@@ -3300,6 +3416,7 @@ function setupInteraction() {
   canvas.addEventListener('pointerdown', onPointerDown)
   canvas.addEventListener('pointermove', onPointerMove)
   canvas.addEventListener('pointerup', onPointerUp)
+  canvas.addEventListener('pointercancel', onPointerCancel)
   canvas.addEventListener('pointerleave', onPointerLeave)
   canvas.addEventListener('contextmenu', onContextMenu)
   // Scratch 风格拖拽：监听自定义事件
@@ -3350,7 +3467,7 @@ function onDrop(e: DragEvent) {
     return
   }
 
-  const pos = viewport.screenToGrid(e as any)
+  const pos = pointerToTile(e as any)
   if (!pos) return
 
   try {
@@ -3366,6 +3483,23 @@ function onDrop(e: DragEvent) {
 function onKeyDown(e: KeyboardEvent) {
   const tag = (e.target as HTMLElement).tagName
   const typing = tag === 'INPUT' || tag === 'TEXTAREA'
+  // 撤销/重做快捷键：Ctrl/⌘+Z 撤销，Shift+Ctrl/⌘+Z 或 Ctrl/⌘+Y 重做
+  // 地图编辑器用 v-show 常驻，切到代码页时必须让出快捷键
+  const mapEditing = editorStore.isGameMode && editorStore.activeEditorMode === 'map'
+  if (!typing && mapEditing && (e.ctrlKey || e.metaKey)) {
+    const key = e.key.toLowerCase()
+    if (key === 'z') {
+      e.preventDefault()
+      if (e.shiftKey) redoActive()
+      else undoActive()
+      return
+    }
+    if (key === 'y') {
+      e.preventDefault()
+      redoActive()
+      return
+    }
+  }
   // 标记：Esc 退出放置 / 取消选中；Delete 删除选中
   if (e.key === 'Escape') {
     if (mapEditorStore.markerPlacing) {
@@ -3734,7 +3868,9 @@ watch(
 watch(
   () => mapEditorStore.currentTool,
   (tool) => {
-    if (tool !== 'draw' && tool !== 'erase' && tool !== 'fill') {
+    // 切换工具时丢弃未完成的直线/矩形拖拽
+    painter.resetShapeStroke()
+    if (tool !== 'draw' && tool !== 'erase' && tool !== 'fill' && tool !== 'line' && tool !== 'rect') {
       painter.hidePreview()
     }
   }
@@ -3964,6 +4100,8 @@ onMounted(() => {
   })
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
+  // 指针松开兜底：即使 pointerup 没送到画布（快速松开/捕获失效）也能提交图块笔划
+  window.addEventListener('pointerup', onWindowPointerUp)
   // 在 document 上注册 drop 事件，确保能接收拖放
   document.addEventListener('dragover', onDragOver)
   document.addEventListener('drop', onDrop)
@@ -3990,6 +4128,7 @@ onBeforeUnmount(() => {
   resizeObserver = null
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
+  window.removeEventListener('pointerup', onWindowPointerUp)
   window.removeEventListener('mousemove', onMarkerDragMove)
   document.removeEventListener('dragover', onDragOver)
   document.removeEventListener('drop', onDrop)
