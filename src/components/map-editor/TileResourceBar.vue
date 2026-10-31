@@ -4,6 +4,7 @@ import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { useMapStore, type MapResource } from '../../stores/map'
 import { useProjectStore } from '../../stores/project'
 import { useTileAssetImport } from '../../composables/useTileAssetImport'
+import CustomSelect from '../common/CustomSelect.vue'
 import iconLibrary from '../../assets/icons/图片库.svg'
 import iconUpload from '../../assets/icons/上传本地图片资源.svg'
 import iconDelete from '../../assets/icons/icon--delete.svg'
@@ -31,7 +32,7 @@ const emit = defineEmits<{
 
 const mapStore = useMapStore()
 const projectStore = useProjectStore()
-const { importTileImage } = useTileAssetImport()
+const { importTileImage, refitTilesetsToGrid } = useTileAssetImport()
 const collapsed = ref(false)
 
 // ====== Unity 风格无限网格画布：图块按 16 列排布，可自由平移 / 缩放 ======
@@ -697,6 +698,23 @@ defineExpose({
 const currentResources = computed(() => mapStore.activeLayerResources)
 const tileResources = computed(() => currentResources.value.filter(r => r.resourceType !== 'image'))
 
+// ====== 图块尺寸（整张地图统一） ======
+const tileSizeOptions = [
+  { label: '16x16', value: '16x16' },
+  { label: '32x32', value: '32x32' },
+  { label: '64x64', value: '64x64' },
+]
+const tileSizeValue = computed(() => `${mapStore.mapData.tileSize}x${mapStore.mapData.tileSize}`)
+function onTileSizeChange(val: string) {
+  const newSize = Number(val.split('x')[0])
+  if (!Number.isFinite(newSize) || newSize <= 0) return
+  if (newSize === mapStore.mapData.tileSize) return
+  const oldSize = mapStore.mapData.tileSize
+  mapStore.updateTileSize(newSize, true)
+  // 已有图块集按新格子重新换算（从导入时的原图出发，避免反复缩放）
+  void refitTilesetsToGrid(newSize, oldSize)
+}
+
 // ====== 全局缓存 ======
 const globalUrlCache = new Map<string, string>()
 const globalTileCache = new Map<string, { count: number; cols: number; thumbnails: string[]; empty: boolean[] }>()
@@ -1149,6 +1167,21 @@ function onClearResources() {
         <span class="bar-scatter-unit">%</span>
       </div>
       <div class="bar-spacer" />
+      <div
+        class="bar-tile-size"
+        v-tooltip="'地图的图块格子尺寸（整张地图统一，修改后已有图块会自动换算）'"
+      >
+        <span class="bar-tile-size-label">图块尺寸</span>
+        <CustomSelect
+          class="bar-tile-size-select"
+          placement="up"
+          :model-value="tileSizeValue"
+          :options="tileSizeOptions"
+          :disabled="disabled"
+          @update:model-value="onTileSizeChange"
+        />
+      </div>
+      <div class="bar-tool-sep" />
       <button
         class="bar-tool-btn collapse-btn"
         :class="{ 'collapse-rotated': !collapsed }"
@@ -1375,6 +1408,27 @@ function onClearResources() {
 
 .bar-spacer {
   flex: 1;
+}
+
+/* 右侧：整张地图统一的图块尺寸 */
+.bar-tile-size {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  color: #9ca0a4;
+  font-size: 11px;
+}
+
+.bar-tile-size-label {
+  white-space: nowrap;
+}
+
+.bar-tile-size-select {
+  width: 68px;
+  height: 22px;
+  flex-shrink: 0;
+  font-size: 11px;
 }
 
 .collapse-btn img {

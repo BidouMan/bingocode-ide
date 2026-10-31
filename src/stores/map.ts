@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { useMapEditorStore } from './mapEditor'
+import { useSettingsStore } from './settings'
 import { setUserOriginY } from '../utils/coords'
 
 export interface TileData {
@@ -225,6 +226,8 @@ export interface MapData {
   width: number
   height: number
   tileSize: number
+  /** 格子尺寸是否由用户手动设定；设定后导入素材时不再自动跟随素材尺寸 */
+  tileSizeExplicit?: boolean
   gravity: boolean
   /** 边界碰撞：勾选后角色被地图矩形（地图尺寸）挡住，不能离开可玩区域 */
   boundaryCollision: boolean
@@ -260,13 +263,14 @@ export type CollisionTool = 'move' | 'add' | 'delete' | 'reset'
 export type ShapeTool = 'select' | 'rect' | 'circle' | 'capsule' | 'polygon' | 'addPoint' | 'deletePoint'
 
 export const useMapStore = defineStore('map', () => {
+  const settingsStore = useSettingsStore()
   const currentMapPath = ref('')
   const mapData = ref<MapData>({
     name: '未命名地图',
     version: 5,
     width: 40,
     height: 30,
-    tileSize: 16,
+    tileSize: settingsStore.defaultTileSize,
     gravity: false,
     boundaryCollision: false,
     stopOnSlope: true,
@@ -677,7 +681,7 @@ export const useMapStore = defineStore('map', () => {
       version: 5,
       width: 40,
       height: 30,
-      tileSize: 16,
+      tileSize: settingsStore.defaultTileSize,
       gravity: false,
       boundaryCollision: false,
       stopOnSlope: true,
@@ -1087,13 +1091,22 @@ export const useMapStore = defineStore('map', () => {
    */
   function setResourceAsset(
     id: string,
-    patch: { path: string; tileWidth: number; tileHeight: number },
+    patch: {
+      path: string
+      tileWidth: number
+      tileHeight: number
+      /** 首次换算老素材时补登记的原始图片 / 原始尺寸 */
+      originPath?: string
+      nativeTileSize?: number
+    },
   ) {
     const resource = mapData.value.resources.find(r => r.id === id)
     if (!resource) return
     resource.path = patch.path
     resource.tileWidth = patch.tileWidth
     resource.tileHeight = patch.tileHeight
+    if (patch.originPath !== undefined) resource.originPath = patch.originPath
+    if (patch.nativeTileSize !== undefined) resource.nativeTileSize = patch.nativeTileSize
     const tileSet = mapData.value.tileSets.find(ts => ts.id === id)
       ?? mapData.value.tileSets.find(ts => ts.firstgid === resource.firstgid)
     if (tileSet) {
@@ -1342,10 +1355,14 @@ export const useMapStore = defineStore('map', () => {
    * 修改图块尺寸：保持地图的「世界像素尺寸」不变。
    * 例：40×30 @16px（640×480）改成 32px → 变成 20×15，仍然 640×480，
    * 游戏窗口能看到的范围不变；瓦片坐标按比例同步换算。
+   * @param explicit 是否是用户手动设定：是则标记为「已指定」，导入素材时不再自动改回素材尺寸
    */
-  function updateTileSize(newSize: number) {
+  function updateTileSize(newSize: number, explicit = false) {
     const oldSize = mapData.value.tileSize
-    if (!Number.isFinite(newSize) || newSize <= 0 || newSize === oldSize) return
+    if (!Number.isFinite(newSize) || newSize <= 0 || newSize === oldSize) {
+      if (explicit) mapData.value.tileSizeExplicit = true
+      return
+    }
     const k = newSize / oldSize
     const mapCoord = (v: number) => Math.max(0, Math.round(v / k))
     const newWidth = Math.max(1, Math.round(mapData.value.width / k))
@@ -1368,6 +1385,7 @@ export const useMapStore = defineStore('map', () => {
     mapData.value.width = newWidth
     mapData.value.height = newHeight
     mapData.value.tileSize = newSize
+    if (explicit) mapData.value.tileSizeExplicit = true
 
     // 图块集保留自己的切片尺寸：换网格不会在这里重新切图。
     // 已有素材的尺寸换算由 useTileAssetImport().refitTilesetsToGrid 异步完成（从导入时的原图重新缩放）。

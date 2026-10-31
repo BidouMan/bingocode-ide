@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { useMapStore } from '../stores/map'
 import { useProjectStore } from '../stores/project'
 import {
+  canFitTileSize,
   dataUrlToBytes,
   derivedTilePath,
   detectSingleTileSize,
@@ -38,9 +39,10 @@ export function useTileAssetImport() {
   const mapStore = useMapStore()
   const projectStore = useProjectStore()
 
-  /** 空地图才允许自动改网格：已经有图块素材或画过图块时必须保持网格不变 */
+  /** 空地图才允许自动改网格：用户手动指定过格子尺寸、已有图块素材或画过图块时都必须保持网格不变 */
   function canAutoSwitchGrid(): boolean {
     const data = mapStore.mapData
+    if (data.tileSizeExplicit) return false
     if (data.resources.some(r => r.resourceType !== 'image')) return false
     return !data.layers.some(l => l.type === 'drawing' && Object.keys(l.tiles ?? {}).length > 0)
   }
@@ -139,19 +141,28 @@ export function useTileAssetImport() {
     }
   }
 
-  /** 改格子尺寸后，把已有素材按新的网格重新换算（始终从原图出发，反复切换也不会变糊） */
-  async function refitTilesetsToGrid(targetGrid: number): Promise<void> {
+  /**
+   * 改格子尺寸后，把已有素材按新的网格重新换算（始终从原图出发，反复切换也不会变糊）。
+   * @param previousGrid 改动前的格子尺寸：老素材没有登记原始尺寸时，用它作为原始尺寸补登记
+   */
+  async function refitTilesetsToGrid(targetGrid: number, previousGrid?: number): Promise<void> {
     const projectRoot = projectStore.root
     if (!projectRoot || !Number.isFinite(targetGrid) || targetGrid <= 0) return
 
-    const resources = mapStore.mapData.resources.filter(
-      r => r.resourceType !== 'image' && r.originPath && r.nativeTileSize,
-    )
+    const resources = mapStore.mapData.resources.filter(r => r.resourceType !== 'image')
 
     let changed = false
     for (const resource of resources) {
-      const native = resource.nativeTileSize as number
-      const originPath = resource.originPath as string
+      let native = resource.nativeTileSize
+      let originPath = resource.originPath
+
+      // 老素材（本次改动前导入）没有登记原图与尺寸：把当前图当作原图，按旧格子尺寸补登记
+      if ((!native || !originPath) && previousGrid && resource.tileWidth === previousGrid) {
+        native = previousGrid
+        originPath = resource.path
+      }
+      if (!native || !originPath) continue
+      if (!canFitTileSize(native, targetGrid)) continue
 
       // 回到原始尺寸：直接指回原图，不需要派生文件
       if (targetGrid === native) {
@@ -159,6 +170,8 @@ export function useTileAssetImport() {
           path: originPath,
           tileWidth: native,
           tileHeight: native,
+          originPath,
+          nativeTileSize: native,
         })
         changed = true
         continue
@@ -188,6 +201,8 @@ export function useTileAssetImport() {
         path: derivedPath,
         tileWidth: targetGrid,
         tileHeight: targetGrid,
+        originPath,
+        nativeTileSize: native,
       })
       changed = true
     }

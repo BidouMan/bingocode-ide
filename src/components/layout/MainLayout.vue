@@ -66,6 +66,7 @@ import iconCodeFormat from '../../assets/icons/code_fomat.svg'
 import iconAddOne from '../../assets/icons/add-one.svg'
 import iconReduceOne from '../../assets/icons/reduce-one.svg'
 import { useThemeStore } from '../../stores/theme'
+import { useSettingsStore } from '../../stores/settings'
 import { normalizeSpriteThumb } from '../../utils/spriteThumb'
 
 const editorStore = useEditorStore()
@@ -75,6 +76,7 @@ const mapStore = useMapStore()
 const renderStore = useRenderStore()
 const terminalStore = useTerminalStore()
 const themeStore = useThemeStore()
+const settingsStore = useSettingsStore()
 const fileExplorerStore = useFileExplorerStore()
 const engine = useEngine()
 const { importTileImage } = useTileAssetImport()
@@ -157,6 +159,8 @@ const consoleExpanded = ref(true)
 const fileMenuVisible = ref(false)
 const settingsMenuVisible = ref(false)
 const settingsSubmenu = ref<string | null>(null)
+/** 引擎设置内的二级菜单（默认图块尺寸） */
+const engineSubmenu = ref<string | null>(null)
 const selectedResource = ref<string | null>(null)
 const helpVisible = ref(false)
 const aiChatVisible = ref(false)
@@ -553,11 +557,13 @@ function closeFileMenu() {
 function toggleSettingsMenu() {
   settingsMenuVisible.value = !settingsMenuVisible.value
   settingsSubmenu.value = null
+  engineSubmenu.value = null
 }
 
 function closeSettingsMenu() {
   settingsMenuVisible.value = false
   settingsSubmenu.value = null
+  engineSubmenu.value = null
 }
 
 // 侧边栏拖拽调整宽度
@@ -712,7 +718,11 @@ async function checkUpdate() {
 
 function openSettingsSubmenu(name: string) {
   settingsSubmenu.value = name
+  engineSubmenu.value = null
 }
+
+// ====== 引擎设置：新建地图的默认图块尺寸 ======
+const defaultTileSizeChoices = [16, 32, 64]
 
 async function fileMenuAction(action: string) {
   closeFileMenu()
@@ -989,7 +999,7 @@ async function onCreateMap() {
     version: 5,
     width: 40,
     height: 30,
-    tileSize: 16,
+    tileSize: settingsStore.defaultTileSize,
     gravity: false,
     boundaryCollision: false,
     stopOnSlope: true,
@@ -1126,7 +1136,7 @@ async function createImageMapProject(fileName: string, opts: { bytes?: number[];
     name: mapName,
     width: 40,
     height: 30,
-    tileSize: 16,
+    tileSize: settingsStore.defaultTileSize,
     gravity: false,
     boundaryCollision: false,
     stopOnSlope: true,
@@ -2254,6 +2264,26 @@ function spriteDisplayName(name: string) {
             <div v-show="settingsSubmenu === 'engine'" class="settings-submenu">
               <button class="file-menu-item settings-item-disabled">Python 路径</button>
               <button class="file-menu-item settings-item-disabled">引擎参数</button>
+              <!-- 默认图块尺寸：二级菜单，当前选中项显示为绿色 -->
+              <div
+                class="settings-item-group"
+                @mouseenter="engineSubmenu = 'tileSize'"
+                @mouseleave="engineSubmenu = null"
+              >
+                <div class="file-menu-item settings-menu-item">
+                  <span>默认图块尺寸</span>
+                  <span class="settings-arrow">›</span>
+                </div>
+                <div v-show="engineSubmenu === 'tileSize'" class="settings-submenu">
+                  <button
+                    v-for="size in defaultTileSizeChoices"
+                    :key="size"
+                    class="file-menu-item"
+                    :class="{ 'settings-item-active': settingsStore.defaultTileSize === size }"
+                    @click="settingsStore.setDefaultTileSize(size); closeSettingsMenu()"
+                  >{{ size }}x{{ size }}</button>
+                </div>
+              </div>
               <div class="file-menu-item settings-menu-item" @click="editorStore.setFocusMode(!editorStore.focusMode)">
                 <span>专注模式</span>
                 <span class="settings-toggle" :class="{ 'settings-toggle-on': editorStore.focusMode }">

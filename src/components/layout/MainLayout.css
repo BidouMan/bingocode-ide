@@ -176,6 +176,7 @@
 .settings-item-disabled:hover {
   background: transparent;
 }
+
 .settings-divider {
   height: 1px;
   background: var(--border);

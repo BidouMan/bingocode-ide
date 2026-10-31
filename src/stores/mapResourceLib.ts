@@ -11,7 +11,7 @@ export interface MapResourceItem {
    * 素材自带的图块尺寸（格子边长的像素值）。
    * - tiles/ 下的单张图块：缺省，导入时按图片边长自动判断
    * - tilesets/<尺寸>/ 下的图集：目录名即尺寸
-   * - tilesets/ 根目录下的图集：按 16 处理（兼容旧素材）
+   * - tilesets/ 根目录下的图集：缺省，导入时按当前地图格子切
    */
   nativeTileSize?: number
 }
@@ -87,9 +87,9 @@ export const useMapResourceLibStore = defineStore('mapResourceLib', () => {
     }
 
     for (const category of categories) {
-      // 根目录下的图集是历史素材，按 16 处理；新素材放 tilesets/<尺寸>/ 即可自动识别
-      const defaultSize = category === 'tilesets' ? 16 : undefined
-      await scanCategory(category, joinPath(engineDir, 'maps', category), `/maps/${category}`, defaultSize)
+      // 根目录下的图集没有尺寸标记：导入时按「当前地图格子」切（与本地导入一致），
+      // 需要固定尺寸就放进 tilesets/<尺寸>/ 子目录
+      await scanCategory(category, joinPath(engineDir, 'maps', category), `/maps/${category}`)
     }
 
     // 按名称排序，分类间保持 images -> tiles -> tilesets

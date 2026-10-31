@@ -7,7 +7,6 @@ import { useMapEditorStore } from '../../stores/mapEditor'
 import CustomSelect from '../common/CustomSelect.vue'
 import { toUserX, toWorldX, toUserY, toWorldY, toUserAngle, toWorldAngle, toUserDeltaY, toWorldDeltaY } from '../../utils/coords'
 import { shapeColorCss, shapeKindLabel } from '../../utils/shapeStyle'
-import { useTileAssetImport } from '../../composables/useTileAssetImport'
 import iconChevron from '../../assets/icons/right_arrow.svg'
 import iconSettings from '../../assets/icons/icon--settings.svg'
 import iconCopy from '../../assets/icons/copy.svg'
@@ -36,7 +35,6 @@ const mapStore = useMapStore()
 const editorStore = useEditorStore()
 const resourceStore = useResourceStore()
 const mapEditorStore = useMapEditorStore()
-const { refitTilesetsToGrid } = useTileAssetImport()
 
 // ====== 场景标记检视器 ======
 /** 选中的图钉：选中时属性面板整体切换为该标记的检视器 */
@@ -1155,22 +1153,6 @@ function onTileLayerRotationChange(e: Event) {
   const value = Number((e.target as HTMLInputElement).value)
   if (!Number.isFinite(value)) return
   mapStore.setLayerTransform(layer.id, { rotation: toWorldAngle(value) })
-}
-
-// ====== 图块尺寸 ======
-const tileSizeOptions = [
-  { label: '16x16', value: '16x16' },
-  { label: '32x32', value: '32x32' },
-  { label: '64x64', value: '64x64' },
-]
-const tileSizeValue = computed(() => `${mapStore.mapData.tileSize}x${mapStore.mapData.tileSize}`)
-function onTileSizeChange(val: string) {
-  const newSize = Number(val.split('x')[0])
-  if (!Number.isFinite(newSize) || newSize <= 0) return
-  if (newSize === mapStore.mapData.tileSize) return
-  mapStore.updateTileSize(newSize)
-  // 已有图块集按新格子重新换算（从导入时的原图出发，避免反复缩放）
-  void refitTilesetsToGrid(newSize)
 }
 
 /**
@@ -2361,17 +2343,6 @@ function runTilesetMenu(action: TilesetMenuAction) {
                 />
               </div>
             </template>
-
-            <div class="att-row">
-              <span class="att-label">图块尺寸</span>
-              <CustomSelect
-                class="att-select"
-                :model-value="tileSizeValue"
-                :options="tileSizeOptions"
-                :disabled="disabled"
-                @update:model-value="onTileSizeChange"
-              />
-            </div>
           </div>
         </div>
 

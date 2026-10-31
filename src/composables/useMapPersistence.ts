@@ -4,6 +4,7 @@ import type { MapData } from '../stores/map'
 import { useMapStore } from '../stores/map'
 import { useResourceStore } from '../stores/resource'
 import { useProjectStore } from '../stores/project'
+import { useSettingsStore } from '../stores/settings'
 import { serializeMap, deserializeMap } from '../utils/mapSerializer'
 
 interface MapPersistenceOptions {
@@ -21,6 +22,7 @@ export function useMapPersistence(options: MapPersistenceOptions) {
   const mapStore = useMapStore()
   const resourceStore = useResourceStore()
   const projectStore = useProjectStore()
+  const settingsStore = useSettingsStore()
 
   function mapDirPath(mapName: string): string {
     return `${projectStore.root}/assets/maps/${mapName}`
@@ -162,7 +164,7 @@ export function useMapPersistence(options: MapPersistenceOptions) {
       version: 5,
       width: 40,
       height: 30,
-      tileSize: 16,
+      tileSize: settingsStore.defaultTileSize,
       gravity: false,
       boundaryCollision: false,
       stopOnSlope: true,
