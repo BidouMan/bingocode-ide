@@ -73,8 +73,8 @@ interface MapLayerBase {
 export interface DrawingLayer extends MapLayerBase {
   type: 'drawing'
   tiles: Record<string, number>
-  /** 该图层使用的图块集（一个图块层可以包含多个图块集） */
-  groupIds?: string[]
+  /** 该图层当前使用的图块集（集合是独立资源仓库，切换集合只影响左侧资源列表） */
+  groupId?: string
   /** 整层位移（世界像素）：图块渲染 / 碰撞 / 绘制输入都跟着偏移 */
   offsetX?: number
   offsetY?: number
@@ -308,28 +308,24 @@ export const useMapStore = defineStore('map', () => {
     const type = activeLayer.value?.type
     return type === 'drawing' ? 'tile' : type === 'shape' ? 'shape' : 'image'
   })
-  // 当前图块层包含的图块集：一个图块层可以有多个图块集，切换图层时素材列表跟着换
-  const activeTileGroupIds = computed<string[]>(() => {
+  // 当前图块层正在使用的图块集（集合 = 左侧资源列表的仓库，切换集合时列表跟着换）
+  const activeTileGroupId = computed(() => {
     const layer = activeLayer.value
-    return layer && layer.type === 'drawing' ? (layer.groupIds ?? []) : []
+    return layer && layer.type === 'drawing' ? (layer.groupId ?? '') : ''
   })
-  // 当前模式可用的素材：图像模式只看图像素材；图块模式只取当前图层包含的图块集；
+  // 当前模式可用的素材：图像模式只看图像素材；图块模式只取当前图层当前图块集里的素材；
   // 形状层不需要素材。「禁用」的图块集不进入调色板（画布上已经画好的图块不受影响）
   const activeLayerResources = computed(() => {
     if (activeMode.value === 'shape') return []
     if (activeMode.value === 'image') {
       return mapData.value.resources.filter(r => r.resourceType === 'image')
     }
-    const groupIds = new Set(activeTileGroupIds.value)
-    if (groupIds.size === 0) return []
-    const disabledGroups = new Set(
-      (mapData.value.tilesetGroups ?? []).filter(g => g.disabled).map(g => g.id),
-    )
+    const groupId = activeTileGroupId.value
+    if (!groupId) return []
+    const group = (mapData.value.tilesetGroups ?? []).find(g => g.id === groupId)
+    if (group?.disabled) return []
     return mapData.value.resources.filter(
-      r => r.resourceType !== 'image'
-        && r.groupId != null
-        && groupIds.has(r.groupId)
-        && !disabledGroups.has(r.groupId),
+      r => r.resourceType !== 'image' && r.groupId === groupId,
     )
   })
   const selectedResource = computed(() => activeLayerResources.value[selectedResourceIndex.value] ?? null)
@@ -419,13 +415,19 @@ export const useMapStore = defineStore('map', () => {
     return group.id
   }
 
-  /** 给当前图块层新建一个图块集（不新建图层，一个图层可以包含多个图块集） */
+  /** 给当前图块层新建一个空的图块集，并自动选中 / 切换左侧资源列表 */
   function addTilesetGroupToActiveLayer(): string | null {
-    const layer = activeLayer.value
-    if (!layer || layer.type !== 'drawing') return null
     const id = addTilesetGroup()
-    layer.groupIds = [...(layer.groupIds ?? []), id]
+    const layer = activeLayer.value
+    if (layer && layer.type === 'drawing') layer.groupId = id
     return id
+  }
+
+  /** 选中一个图块集：左侧资源列表跟着切换（集合是独立资源仓库，不切图层） */
+  function useTilesetGroupForActiveLayer(id: string) {
+    selectedTilesetGroupId.value = id
+    const layer = activeLayer.value
+    if (layer && layer.type === 'drawing') layer.groupId = id
   }
 
   function renameTilesetGroup(id: string, name: string) {
@@ -502,14 +504,16 @@ export const useMapStore = defineStore('map', () => {
       }
     }
 
-    // 从各图块层包含的图块集里移除它（一个图层可以包含多个图块集）
+    // 正在使用这个图块集的图块层：删掉后回落到剩下的第一集（没有就空着，之后可再新建）
+    const restGroups = groups.filter(g => g.id !== target.id)
+    const nextGroupId = restGroups[0]?.id ?? ''
     for (const layer of mapData.value.layers) {
-      if (layer.type !== 'drawing' || !layer.groupIds) continue
-      layer.groupIds = layer.groupIds.filter(groupId => groupId !== target.id)
+      if (layer.type !== 'drawing' || layer.groupId !== target.id) continue
+      layer.groupId = nextGroupId
     }
-    mapData.value.tilesetGroups = groups.filter(g => g.id !== target.id)
+    mapData.value.tilesetGroups = restGroups
     if (selectedTilesetGroupId.value === target.id) {
-      selectedTilesetGroupId.value = activeTileGroupIds.value[0] ?? ''
+      selectedTilesetGroupId.value = activeTileGroupId.value
     }
     // 当前选中的图块被删掉时清空选中，避免继续画已删除的图块
     const picked = activeLayerResources.value[selectedResourceIndex.value]
@@ -586,10 +590,10 @@ export const useMapStore = defineStore('map', () => {
       mapData.value.tilePalette = [...(mapData.value.tilePalette ?? []), ...paletteCopies]
     }
 
-    // 副本直接归到当前图块层（不新建图层），图层可以有多个图块集
+    // 副本直接给当前图块层使用（集合是独立资源仓库，不新建图层）
     const active = activeLayer.value
     if (active && active.type === 'drawing') {
-      active.groupIds = [...(active.groupIds ?? []), group.id]
+      active.groupId = group.id
     }
     selectedTilesetGroupId.value = group.id
     selectedResourceIndex.value = -1
@@ -609,31 +613,27 @@ export const useMapStore = defineStore('map', () => {
   }
 
   /**
-   * 旧地图迁移：把图块层的图块集绑定统一成数组（一个图层可以包含多个图块集）。
-   * 旧存档没有绑定关系（素材是全局共用的），统一绑到第一个图块集，画面与素材都不会丢。
+   * 旧地图迁移：图块层统一记录「当前使用的图块集」。
+   * 旧存档的数组绑定取第一个；完全没有绑定的统一用第一个图块集，画面与素材都不会丢。
    */
   function migrateLayerTilesets() {
     const drawingLayers = mapData.value.layers.filter(l => l.type === 'drawing')
     if (drawingLayers.length === 0) return
-    // 只有旧存档（层没有 groupIds 数组 / 素材没有 groupId）才需要补一个默认图块集
-    const needsDefault = drawingLayers.some(l => !Array.isArray(l.groupIds))
+    // 只有旧存档（层没有 groupId / 素材没有 groupId）才需要补一个默认图块集
+    const needsDefault = drawingLayers.some(l => typeof l.groupId !== 'string')
       || mapData.value.resources.some(r => r.resourceType !== 'image' && !r.groupId)
     const groups = needsDefault
       ? ensureTilesetGroups()
       : (mapData.value.tilesetGroups ?? [])
     const fallback = groups[0]
     for (const layer of drawingLayers) {
-      // 新结构：数组里只保留仍然存在的图块集（可能被别的图层删除过）
-      if (Array.isArray(layer.groupIds)) {
-        layer.groupIds = layer.groupIds.filter(id => groups.some(g => g.id === id))
+      const legacyArray = (layer as { groupIds?: string[] }).groupIds
+      const legacyId = Array.isArray(legacyArray) ? legacyArray[0] : layer.groupId
+      if (legacyId && groups.some(g => g.id === legacyId)) {
+        layer.groupId = legacyId
         continue
       }
-      // 上一版存档的单个 groupId / 更旧的存档完全没有绑定
-      const legacyId = (layer as { groupId?: string }).groupId
-      const targetId = legacyId && groups.some(g => g.id === legacyId)
-        ? legacyId
-        : (fallback?.id ?? '')
-      layer.groupIds = targetId ? [targetId] : []
+      layer.groupId = fallback?.id ?? ''
     }
     // 旧素材没有分组：归到第一个图块集，之后按新结构保存
     for (const r of mapData.value.resources) {
@@ -852,10 +852,10 @@ export const useMapStore = defineStore('map', () => {
     const id = mapData.value.layers.length > 0
       ? Math.max(...mapData.value.layers.map(l => l.id)) + 1
       : 0
-    // 新建图块层时自动带一个图块集；之后还可以在同一图层里再新建更多图块集
-    const groupId = addTilesetGroup()
+    // 新图层默认用第一个图块集（用户可以在右侧列表里切换或新建）
+    const groupId = mapData.value.tilesetGroups?.[0]?.id ?? ''
     const newLayer: MapLayer = {
-      id, name, type: 'drawing', visible: true, locked: false, tiles: {}, groupIds: [groupId],
+      id, name, type: 'drawing', visible: true, locked: false, tiles: {}, groupId,
     }
     mapData.value.layers.push(newLayer)
     activeLayerIndex.value = mapData.value.layers.length - 1
@@ -892,32 +892,7 @@ export const useMapStore = defineStore('map', () => {
     } else if (activeLayerIndex.value >= mapData.value.layers.length) {
       activeLayerIndex.value = mapData.value.layers.length - 1
     }
-    // 删掉的图块层独占的图块集一并清理，避免留下看不见的孤立素材
-    if (removed && removed.type === 'drawing' && (removed.groupIds?.length ?? 0) > 0) {
-      const stillUsed = new Set<string>()
-      for (const layer of mapData.value.layers) {
-        if (layer.type !== 'drawing') continue
-        for (const groupId of layer.groupIds ?? []) stillUsed.add(groupId)
-      }
-      for (const groupId of removed.groupIds ?? []) {
-        if (stillUsed.has(groupId)) continue
-        const doomedIds = new Set(
-          mapData.value.resources
-            .filter(r => r.resourceType !== 'image' && r.groupId === groupId)
-            .map(r => r.id),
-        )
-        if (doomedIds.size > 0) {
-          mapData.value.resources = mapData.value.resources.filter(r => !doomedIds.has(r.id))
-          mapData.value.tileSets = mapData.value.tileSets.filter(ts => !doomedIds.has(ts.id))
-          if (mapData.value.tilePalette) {
-            mapData.value.tilePalette = mapData.value.tilePalette
-              .filter(e => !doomedIds.has(e.resourceId))
-          }
-        }
-        mapData.value.tilesetGroups = (mapData.value.tilesetGroups ?? [])
-          .filter(g => g.id !== groupId)
-      }
-    }
+    // 图块集是独立的资源仓库：删图层不删图块集，其它图层随时可以切过去继续用
     syncToolWithLayer()
     imageRevision.value++
   }
@@ -1015,8 +990,19 @@ export const useMapStore = defineStore('map', () => {
     } else {
       mapEditor.setTool('draw')
       selectedImageLayerId.value = -1
-      // 切换图层时选中该层包含的第一个图块集（左右两侧一起切换）
-      selectedTilesetGroupId.value = (layer.groupIds ?? [])[0] ?? ''
+      // 切换图层时恢复该层上次使用的图块集（没有就用第一个），左侧资源列表跟着切
+      const groups = mapData.value.tilesetGroups ?? []
+      const current = layer.groupId && groups.some(g => g.id === layer.groupId)
+        ? layer.groupId
+        : ''
+      if (current) {
+        selectedTilesetGroupId.value = current
+      } else if (groups[0]) {
+        layer.groupId = groups[0].id
+        selectedTilesetGroupId.value = groups[0].id
+      } else {
+        selectedTilesetGroupId.value = ''
+      }
       const palette = mapData.value.tilePalette
       const first = palette?.find(e =>
         activeLayerResources.value.some(r => r.id === e.resourceId)
@@ -1058,19 +1044,17 @@ export const useMapStore = defineStore('map', () => {
       id: input.id || createResourceId(),
       firstgid: input.firstgid ?? nextFirstgid,
     }
-    // 图块素材进当前图块层里选中的图块集（没有就新建一个，不会串到别的图层）
+    // 图块素材进当前图层正在使用的图块集（没有就新建一个，不会串到别的集合）
     if (resource.resourceType !== 'image' && !resource.groupId) {
       const layer = mapData.value.layers[activeLayerIndex.value]
       let groupId = ''
       if (layer && layer.type === 'drawing') {
-        const owned = layer.groupIds ?? []
-        const selected = selectedTilesetGroupId.value
-        groupId = selected && owned.includes(selected)
-          ? selected
-          : (owned[owned.length - 1] ?? '')
-        if (!groupId) {
+        const exists = (mapData.value.tilesetGroups ?? []).some(g => g.id === layer.groupId)
+        if (layer.groupId && exists) {
+          groupId = layer.groupId
+        } else {
           groupId = addTilesetGroup()
-          layer.groupIds = [...owned, groupId]
+          layer.groupId = groupId
         }
       } else {
         groupId = ensureTilesetGroups()[0].id
@@ -1707,7 +1691,7 @@ export const useMapStore = defineStore('map', () => {
     selectedResourceIndex,
     selectedTileIndex,
     activeLayerResources,
-    activeTileGroupIds,
+    activeTileGroupId,
     activeLayer,
     activeMode,
     selectedResource,
@@ -1716,6 +1700,7 @@ export const useMapStore = defineStore('map', () => {
     ensureTilesetGroups,
     addTilesetGroup,
     addTilesetGroupToActiveLayer,
+    useTilesetGroupForActiveLayer,
     renameTilesetGroup,
     selectedTilesetGroupId,
     selectTilesetGroup,

@@ -1029,7 +1029,8 @@ watch(() => mapStore.activeLayerIndex, () => {
   paletteSelection.clear()
   refreshAll()
 })
-watch(() => currentResources.value.length, refreshAll)
+// 切换图块集（资源仓库）时素材整批变化，需要重新生成缩略图与调色板
+watch(() => currentResources.value.map(r => r.id).join(','), refreshAll)
 // 改「图块尺寸」只影响地图网格，图块集仍按自己的原始尺寸切片，调色板不需要重建
 watch(() => mapStore.mapLoadCount, () => {
   // 载入地图后以当前素材为基线，避免把已删除的图块重新展开

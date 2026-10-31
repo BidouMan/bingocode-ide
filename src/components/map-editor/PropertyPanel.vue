@@ -1168,29 +1168,25 @@ function onTileSizeChange(val: string) {
 }
 
 /**
- * 图块集列表：只列出当前图块层包含的图块集，每行 = 状态圆点 + 名称 + 图块尺寸。
- * 一个图块层可以包含多个图块集，点下方「新建」会往当前图层里再加一个。
+ * 图块集列表：每个图块集就是一个独立的资源仓库。
+ * 每行 = 状态圆点 + 名称 + 图块尺寸；点某一行即选中该集，左侧资源列表跟着切换。
  */
 const tileSetGroups = computed(() => {
   const resources = mapStore.mapData.resources.filter(r => r.resourceType !== 'image')
   const groups = mapStore.mapData.tilesetGroups ?? []
-  const ownedIds = mapStore.activeTileGroupIds
-  return ownedIds
-    .map(id => groups.find(g => g.id === id))
-    .filter((group): group is NonNullable<typeof group> => group != null)
-    .map(group => {
-      const owned = resources.filter(r => r.groupId === group.id)
-      const first = owned[0]
-      return {
-        id: group.id,
-        name: group.name || '图块集合',
-        // 图块尺寸取该图块集里第一个素材的切片尺寸，没有素材时按地图格子尺寸显示
-        tileWidth: first?.tileWidth ?? mapStore.mapData.tileSize,
-        tileHeight: first?.tileHeight ?? mapStore.mapData.tileSize,
-        locked: group.locked === true,
-        disabled: group.disabled === true,
-      }
-    })
+  return groups.map(group => {
+    const owned = resources.filter(r => r.groupId === group.id)
+    const first = owned[0]
+    return {
+      id: group.id,
+      name: group.name || '图块集合',
+      // 图块尺寸取该图块集里第一个素材的切片尺寸，没有素材时按地图格子尺寸显示
+      tileWidth: first?.tileWidth ?? mapStore.mapData.tileSize,
+      tileHeight: first?.tileHeight ?? mapStore.mapData.tileSize,
+      locked: group.locked === true,
+      disabled: group.disabled === true,
+    }
+  })
 })
 
 /** 列表中选中的图块集：没选过或选中项被删除时退回第一个 */
@@ -1204,11 +1200,12 @@ const selectedTilesetRow = computed(() =>
 const canDeleteTileset = computed(() =>
   !!selectedTilesetRow.value
   && !selectedTilesetRow.value.locked
-  && (mapStore.mapData.tilesetGroups?.length ?? 0) > 1,
+  && tileSetGroups.value.length > 1,
 )
 
+/** 选中图块集：左侧资源列表切到该集的资源仓库（不切图层） */
 function selectTilesetRow(id: string) {
-  mapStore.selectTilesetGroup(id)
+  mapStore.useTilesetGroupForActiveLayer(id)
 }
 
 function onTilesetDelete() {
@@ -2514,7 +2511,7 @@ function runTilesetMenu(action: TilesetMenuAction) {
                 </button>
               </template>
               <div v-if="!tileSetGroups.length" class="mi-list-empty">
-                这个图块层还没有图块集，点下方「新建」加一个
+                还没有图块集，点下方「新建」建一个空的
               </div>
             </div>
             <div class="tileset-actions">

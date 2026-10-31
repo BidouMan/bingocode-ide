@@ -61,10 +61,10 @@ export interface LayerSaveData {
   scaleX?: number
   scaleY?: number
   rotation?: number
-  /** 该图块层包含的图块集（一个图块层可以有多个图块集） */
-  groupIds?: string[]
-  /** 旧存档字段：单个图块集，读取时迁移成 groupIds */
+  /** 该图块层当前使用的图块集（集合是独立资源仓库，只影响左侧资源列表） */
   groupId?: string
+  /** 过渡期存档字段：上一版按图层记录的多个图块集，读取时取第一个 */
+  groupIds?: string[]
   data?: string
   images?: ImageSaveData[]
   resources?: ResourceSaveData[]
@@ -351,7 +351,7 @@ export function serializeMap(mapData: any): MapSaveData {
       base.scaleX = layer.scaleX ?? 1
       base.scaleY = layer.scaleY ?? 1
       base.rotation = layer.rotation || 0
-      base.groupIds = Array.isArray(layer.groupIds) ? [...layer.groupIds] : undefined
+      base.groupId = layer.groupId || undefined
     }
 
     // 扁平模型：一个图片图层只对应一张图片，仍然写成标准 imagelayer
@@ -595,10 +595,12 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
       scaleX: layer.scaleX == null ? 1 : Number(layer.scaleX),
       scaleY: layer.scaleY == null ? 1 : Number(layer.scaleY),
       rotation: Number(layer.rotation) || 0,
-      // 新存档写数组；上一版存档的单个 groupId 读取时转成数组
-      groupIds: Array.isArray(layer.groupIds)
-        ? layer.groupIds.map((id: unknown) => String(id))
-        : (typeof layer.groupId === 'string' ? [layer.groupId] : undefined),
+      // 新存档写单个 groupId；过渡期存档的 groupIds 数组读取时取第一个
+      groupId: typeof layer.groupId === 'string'
+        ? layer.groupId
+        : (Array.isArray(layer.groupIds) && layer.groupIds.length > 0
+          ? String(layer.groupIds[0])
+          : undefined),
     })
   }
 
