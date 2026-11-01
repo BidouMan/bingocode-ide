@@ -16,6 +16,10 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    watch: {
+      // 忽略 Rust 构建产物目录，避免 cargo 编译时 .exe 被锁定导致 Vite 监视崩溃（EBUSY）
+      ignored: ['**/src-tauri/target/**'],
+    },
   },
   envPrefix: ['VITE_', 'TAURI_'],
   build: {
