@@ -50,18 +50,64 @@ let panStartY = 0
 let panStartPanX = 0
 let panStartPanY = 0
 
-/** 网格背景铺在视口上：尺寸/位置跟随缩放和平移，形成无限延伸的格子 */
-const paletteViewportStyle = computed(() => {
-  const size = PALETTE_CELL * zoom.value
-  return {
-    backgroundSize: `${size}px ${size}px, ${size}px ${size}px`,
-    backgroundPosition: `${panX.value}px ${panY.value}px, ${panX.value}px ${panY.value}px`,
-  }
-})
-
 const palettePlaneStyle = computed(() => ({
   transform: `translate(${panX.value}px, ${panY.value}px) scale(${zoom.value})`,
 }))
+
+/** 网格层：独立画布，按设备像素对齐描 1px 线，不参与图块的缩放/渲染 */
+const gridCanvasRef = ref<HTMLCanvasElement>()
+let gridFrame = 0
+let gridObserver: ResizeObserver | null = null
+
+function drawPaletteGrid() {
+  const canvas = gridCanvasRef.value
+  const vp = viewportRef.value
+  if (!canvas || !vp) return
+  const w = vp.clientWidth
+  const h = vp.clientHeight
+  if (w <= 0 || h <= 0) return
+
+  const dpr = window.devicePixelRatio || 1
+  const bw = Math.round(w * dpr)
+  const bh = Math.round(h * dpr)
+  if (canvas.width !== bw || canvas.height !== bh) {
+    canvas.width = bw
+    canvas.height = bh
+  }
+
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.clearRect(0, 0, bw, bh)
+
+  const size = PALETTE_CELL * zoom.value
+  if (size <= 0.5) return
+
+  // 线宽固定 1 个 CSS 像素（按设备像素取整），任何缩放下都不会变粗或发虚
+  const lineWidth = Math.max(1, Math.round(dpr))
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.07)'
+
+  let startX = panX.value % size
+  if (startX < 0) startX += size
+  for (let x = startX; x < w; x += size) {
+    ctx.fillRect(Math.round(x * dpr), 0, lineWidth, bh)
+  }
+  let startY = panY.value % size
+  if (startY < 0) startY += size
+  for (let y = startY; y < h; y += size) {
+    ctx.fillRect(0, Math.round(y * dpr), bw, lineWidth)
+  }
+}
+
+function scheduleGridDraw() {
+  if (gridFrame) return
+  gridFrame = requestAnimationFrame(() => {
+    gridFrame = 0
+    drawPaletteGrid()
+  })
+}
+
+watch([panX, panY, zoom], scheduleGridDraw)
 
 const paletteHovered = ref(false)
 
@@ -110,10 +156,10 @@ function localPointToViewport(x: number, y: number) {
 
 /** 图块左上角换算成整张网格的列 / 行 */
 function tileGlobalCol(entry: PaletteLayoutItem) {
-  return Math.floor((entry.left - 1) / PALETTE_CELL)
+  return Math.floor(entry.left / PALETTE_CELL)
 }
 function tileGlobalRow(entry: PaletteLayoutItem) {
-  return Math.floor((entry.top - 1) / PALETTE_CELL)
+  return Math.floor(entry.top / PALETTE_CELL)
 }
 
 /** 框选矩形按整格吸附：只覆盖被选中的格子，不会碰巧带上边上的图块 */
@@ -217,8 +263,8 @@ function paletteHitAt(clientX: number, clientY: number): PaletteLayoutItem | nul
   const rect = vp.getBoundingClientRect()
   const local = viewportPointToLocal(clientX - rect.left, clientY - rect.top)
   return paletteLayout.value.items.find(entry =>
-    local.x >= entry.left && local.x <= entry.left + 38
-    && local.y >= entry.top && local.y <= entry.top + 38
+    local.x >= entry.left && local.x <= entry.left + PALETTE_CELL
+    && local.y >= entry.top && local.y <= entry.top + PALETTE_CELL
   ) ?? null
 }
 
@@ -302,14 +348,13 @@ const moveDrag = ref<{
 const moveGhost = computed(() => {
   const drag = moveDrag.value
   if (!drag || !drag.moved) return []
-  const cell = PALETTE_CELL * zoom.value
-  const size = 38 * zoom.value
+  const size = PALETTE_CELL * zoom.value
   return drag.items.map(({ entry, relCol, relRow }) => ({
     key: tileKey(entry.item.resource.id, entry.item.tileIndex),
     item: entry.item,
     size,
-    left: drag.pointerX - drag.grabOffsetX + relCol * cell,
-    top: drag.pointerY - drag.grabOffsetY + relRow * cell,
+    left: drag.pointerX - drag.grabOffsetX + relCol * size,
+    top: drag.pointerY - drag.grabOffsetY + relRow * size,
   }))
 })
 
@@ -331,8 +376,8 @@ function materializePaletteCells() {
     .map(entry => ({
       resourceId: entry.item.resource.id,
       tileIndex: entry.item.tileIndex,
-      col: Math.floor((entry.left - 1) / PALETTE_CELL),
-      row: Math.floor((entry.top - 1) / PALETTE_CELL),
+      col: Math.floor(entry.left / PALETTE_CELL),
+      row: Math.floor(entry.top / PALETTE_CELL),
     }))
   if (cells.length) mapStore.setPaletteCells(cells)
 }
@@ -368,8 +413,8 @@ function beginPaletteMove(hit: PaletteLayoutItem, e: PointerEvent) {
 
   const rect = vp.getBoundingClientRect()
   const local = viewportPointToLocal(e.clientX - rect.left, e.clientY - rect.top)
-  const anchorLeft = anchorCell.col * PALETTE_CELL + 1
-  const anchorTop = anchorCell.row * PALETTE_CELL + 1
+  const anchorLeft = anchorCell.col * PALETTE_CELL
+  const anchorTop = anchorCell.row * PALETTE_CELL
   moveDrag.value = {
     items,
     anchorCol: anchorCell.col,
@@ -433,8 +478,8 @@ function applyGroupMove(items: PaletteLayoutItem[], dCol: number, dRow: number) 
   const keyOf = (entry: PaletteLayoutItem) =>
     tileKey(entry.item.resource.id, entry.item.tileIndex)
   const cellOf = (entry: PaletteLayoutItem) => ({
-    col: Math.floor((entry.left - 1) / PALETTE_CELL),
-    row: Math.floor((entry.top - 1) / PALETTE_CELL),
+    col: Math.floor(entry.left / PALETTE_CELL),
+    row: Math.floor(entry.top / PALETTE_CELL),
   })
 
   const movingKeys = new Set(items.map(keyOf))
@@ -638,6 +683,10 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointermove', onPaletteMoveMove)
   window.removeEventListener('pointerup', onPaletteMoveEnd)
   window.removeEventListener('keydown', onPaletteWindowKeydown)
+  gridObserver?.disconnect()
+  gridObserver = null
+  if (gridFrame) cancelAnimationFrame(gridFrame)
+  gridFrame = 0
 })
 
 /** 打开系统窗口多选图片：统一换算成当前图块尺寸后导入调色板 */
@@ -795,8 +844,8 @@ const paletteLayout = computed<{
     }
     placed.push({
       item,
-      left: entry.col * PALETTE_CELL + 1,
-      top: entry.row * PALETTE_CELL + 1,
+      left: entry.col * PALETTE_CELL,
+      top: entry.row * PALETTE_CELL,
     })
     if (entry.col > maxPlacedCol) maxPlacedCol = entry.col
   }
@@ -838,8 +887,8 @@ const paletteLayout = computed<{
       const row = Math.floor(item.tileIndex / cols)
       placed.push({
         item,
-        left: blockX + (col - minCol) * PALETTE_CELL + 1,
-        top: (row - minRow) * PALETTE_CELL + 1,
+        left: blockX + (col - minCol) * PALETTE_CELL,
+        top: (row - minRow) * PALETTE_CELL,
       })
     }
 
@@ -1091,6 +1140,12 @@ onMounted(() => {
   expandedSlices = new Map(tileResources.value.map(r => [r.id, slicingKey(r)]))
   refreshAll()
   window.addEventListener('keydown', onPaletteWindowKeydown)
+  // 视口尺寸变化（收起/展开、窗口缩放）时重画网格
+  if (viewportRef.value) {
+    gridObserver = new ResizeObserver(() => scheduleGridDraw())
+    gridObserver.observe(viewportRef.value)
+  }
+  scheduleGridDraw()
 })
 
 function onDeleteSelected() {
@@ -1224,7 +1279,6 @@ function onClearResources() {
       ref="viewportRef"
       class="palette-viewport"
       :class="{ 'select-mode': paletteSelectMode, 'move-mode': paletteMoveMode, 'move-dragging': moveGhost.length > 0 }"
-      :style="paletteViewportStyle"
       @pointerdown="onPalettePointerDown"
       @mousedown.middle.prevent
       @dblclick="onPaletteDblClick"
@@ -1247,6 +1301,8 @@ function onClearResources() {
           :style="[{ left: `${entry.left}px`, top: `${entry.top}px` }, paletteCellBackground(entry.item)]"
         />
       </div>
+      <!-- 网格独立成层：画在图块之上，永远按屏幕像素清晰渲染 -->
+      <canvas ref="gridCanvasRef" class="palette-grid" />
       <div
         v-if="paletteBoxRect"
         class="palette-box-select"
@@ -1468,7 +1524,7 @@ function onClearResources() {
   transform: rotate(90deg);
 }
 
-/* Unity 风格调色板：视口负责无限网格背景与裁剪，平面负责平移/缩放 */
+/* Unity 风格调色板：视口负责裁剪，平面负责平移/缩放，网格单独一层 */
 .palette-viewport {
   position: relative;
   flex: 1;
@@ -1476,10 +1532,16 @@ function onClearResources() {
   overflow: hidden;
   cursor: grab;
   background-color: rgb(30, 30, 30);
-  background-image:
-    linear-gradient(to right, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
-  background-repeat: repeat;
+}
+
+/* 网格层：铺在视口上、盖在图块上，按屏幕像素独立绘制，不随图块缩放 */
+.palette-grid {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 4;
 }
 
 .palette-viewport:active {
@@ -1549,10 +1611,11 @@ function onClearResources() {
   transform-origin: 0 0;
 }
 
+/* 图块占满整格（与网格线严丝合缝，不再留 1px 缝隙） */
 .tile-cell {
   position: absolute;
-  width: 38px;
-  height: 38px;
+  width: 40px;
+  height: 40px;
   box-sizing: border-box;
   background-color: transparent;
   border: none;
@@ -1578,6 +1641,7 @@ function onClearResources() {
 .resource-empty {
   position: absolute;
   inset: 0;
+  z-index: 6;
   display: flex;
   align-items: center;
   justify-content: center;

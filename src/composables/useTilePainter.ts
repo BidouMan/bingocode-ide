@@ -67,8 +67,9 @@ export function useTilePainter(options: TilePainterOptions) {
     await options.renderTile(layer.id, x, y, tileId)
   }
 
-  function previewKey(resourceId: string, tileIndex: number) {
-    return `${resourceId}:${tileIndex}`
+  /** 预览纹理缓存键：必须带上图片路径与切片尺寸，改图块尺寸后不能复用旧切片 */
+  function previewKey(resource: MapResource, tileIndex: number) {
+    return `${resource.id}:${resource.path}:${resource.tileWidth}x${resource.tileHeight}:${tileIndex}`
   }
 
   /** 删除缓存里的幽灵图块 */
@@ -90,7 +91,7 @@ export function useTilePainter(options: TilePainterOptions) {
   /** 为当前预览里还没缓存的图块加载纹理 */
   function ensurePreviewTextures() {
     for (const target of previewTargets.values()) {
-      const key = previewKey(target.resource.id, target.tileIndex)
+      const key = previewKey(target.resource, target.tileIndex)
       if (previewTextures.has(key) || previewLoading.has(key)) continue
       previewLoading.add(key)
       options.getTileTexture(target.resource, target.tileIndex).then(tex => {
@@ -131,7 +132,7 @@ export function useTilePainter(options: TilePainterOptions) {
     const wanted = new Set<string>()
 
     for (const [cellKey, target] of previewTargets) {
-      const tex = previewTextures.get(previewKey(target.resource.id, target.tileIndex))
+      const tex = previewTextures.get(previewKey(target.resource, target.tileIndex))
       if (!tex) continue
       wanted.add(cellKey)
       let sprite = previewSprites.get(cellKey)
