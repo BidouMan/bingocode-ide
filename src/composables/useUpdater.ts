@@ -8,6 +8,8 @@ import { relaunch } from '@tauri-apps/plugin-process'
  */
 const SILENT_DISPLAY_VERSIONS: Record<string, string> = {
   '0.7.41': '0.7.4',
+  // 0.7.6 的热修复：内部号用合法的三段预发布版本（能正常收到后续更新），界面仍显示 0.7.6.1
+  '0.7.7-beta.1': '0.7.6.1',
 }
 
 /** 把内部版本号转成界面上展示的版本号 */

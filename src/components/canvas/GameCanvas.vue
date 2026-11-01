@@ -116,6 +116,12 @@ async function initPixi() {
 }
 
 let resizeTicking = false
+// 启动阶段 MainLayout 还是加载屏（display:none），容器尺寸为 0；
+// 此时不能 resize 到 0×0，改为按帧重试，等界面真正显示后自动完成首次尺寸校准。
+// 否则画布会一直停留在 Pixi 的默认尺寸，运行后画面像是「没反应」，
+// 必须重新挂载（切模式）才会正常。
+let resizeRetryFrames = 0
+const MAX_RESIZE_RETRY_FRAMES = 240
 
 /** resize 后立即同步渲染，避免 WebGL buffer 重置导致的空帧闪烁，使用 RAF 防抖 */
 function handleResize() {
@@ -129,7 +135,15 @@ function handleResize() {
     // 全屏页/预览页用 v-show 隐藏时容器尺寸为 0：此时绝不能 resize 到 0×0，
     // 否则 WebGL 帧缓冲变成 0 尺寸，重新显示时旧画面会残留在画布上（表现为
     // 「最大化后窗口还是很久以前那个程序」）。等重新显示时 ResizeObserver 再触发。
-    if (vp.clientWidth === 0 || vp.clientHeight === 0) return
+    if (vp.clientWidth === 0 || vp.clientHeight === 0) {
+      // 窗口隐藏时 rAF 会暂停，恢复后这条重试链继续执行，不需要额外监听 show 事件
+      if (resizeRetryFrames < MAX_RESIZE_RETRY_FRAMES) {
+        resizeRetryFrames++
+        handleResize()
+      }
+      return
+    }
+    resizeRetryFrames = 0
     app.renderer.resize(vp.clientWidth, vp.clientHeight)
     fitStage()
     app.renderer.render(app.stage)
@@ -881,7 +895,12 @@ watch(
   () => editorStore.isRunning,
   (running) => {
     if (running) {
-      nextTick(addGameListeners)
+      nextTick(() => {
+        // 运行时再校准一次尺寸：画布可能是在启动加载屏（隐藏）期间初始化的，
+        // 这里补上尺寸和缩放，画面立即正常，不需要切模式重新挂载
+        handleResize()
+        addGameListeners()
+      })
     } else {
       removeGameListeners()
     }

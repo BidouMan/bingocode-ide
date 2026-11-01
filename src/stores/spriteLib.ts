@@ -57,7 +57,10 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
       // 逐分类扫描 packages/*（.bgs / .bsf 包文件）与 images/*
       for (const { dir: cat } of SPRITE_CATEGORIES) {
         // 精灵包文件：.bgs（逐帧）与 .bsf（sheet 图集）
+        // 老版本内置的是 .bgs，新版本换成了同名 .bsf。Windows 覆盖安装不会删除旧文件，
+        // 安装目录里会同时存在两份 → 按「文件名主干」去重并优先 .bsf，避免同一角色显示两遍
         const packagesDir = joinPath(spritesRoot, cat, 'packages')
+        const packages = new Map<string, { file: string; type: SpriteLibType; name: string }>()
         try {
           const files = await invoke<string[]>('list_dir', { path: packagesDir })
           for (const f of files) {
@@ -67,11 +70,19 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
             if (lower.endsWith('.bgs')) { type = 'bgs'; name = f.slice(0, -4) }
             else if (lower.endsWith('.bsf')) { type = 'bsf'; name = f.slice(0, -4) }
             if (!type) continue
-            const filePath = joinPath(packagesDir, f)
-            found.set(filePath, { name, filePath, type, thumbUrl: '', loaded: false, category: cat })
+            const key = name.toLowerCase()
+            const prev = packages.get(key)
+            // 同名时 .bsf 优先（新版格式），旧的 .bgs 直接忽略
+            if (!prev || (prev.type === 'bgs' && type === 'bsf')) {
+              packages.set(key, { file: f, type, name })
+            }
           }
         } catch (_e) {
           // packages 目录可能为空或不存在，静默处理
+        }
+        for (const pkg of packages.values()) {
+          const filePath = joinPath(packagesDir, pkg.file)
+          found.set(filePath, { name: pkg.name, filePath, type: pkg.type, thumbUrl: '', loaded: false, category: cat })
         }
 
         // 常规图片文件
@@ -83,6 +94,8 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
             return IMAGE_EXTS.some(ext => lower.endsWith(ext))
           })) {
             const name = filename.replace(/\.[^.]+$/, '')
+            // 与精灵包同名的图片属于同一个角色，已由包文件展示，跳过避免重复
+            if (packages.has(name.toLowerCase())) continue
             const filePath = joinPath(imagesDir, filename)
             found.set(filePath, { name, filePath, type: 'image', thumbUrl: '', loaded: false, category: cat })
           }
