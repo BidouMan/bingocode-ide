@@ -306,6 +306,11 @@ export const useMapStore = defineStore('map', () => {
   // 图像实例选中状态（画布选中图像后，属性面板/工具栏共用）
   const selectedImageLayerId = ref(-1)
 
+  /** 手动打“脏”标记：给少数直接改 mapData 的组件（图片变换、画布重排）用 */
+  function markMapDataDirty() {
+    mapDataRevision.value++
+  }
+
   // Revision counters for cheap watcher dependency tracking (avoid expensive JSON.stringify in watcher getters)
   const tileRevision = ref(0)
   const imageRevision = ref(0)
@@ -313,6 +318,9 @@ export const useMapStore = defineStore('map', () => {
   const shapeRevision = ref(0)
   // 完整地图加载计数器（loadMap 时递增，用于素材面板/图层缩略图刷新）
   const mapLoadCount = ref(0)
+  // 地图数据“脏”计数器：任何会写进存档的修改都会递增一次。
+  // 自动保存只监听这个廉价计数器，不再对整张地图做深度序列化（参考 Unreal 的脏包标记）。
+  const mapDataRevision = ref(0)
 
   const activeLayer = computed(() => {
     const layer = mapData.value.layers[activeLayerIndex.value] ?? null
@@ -1013,7 +1021,11 @@ export const useMapStore = defineStore('map', () => {
       if (current) {
         selectedTilesetGroupId.value = current
       } else if (groups[0]) {
-        layer.groupId = groups[0].id
+        // 图层换了图块集属于存档变化，要打脏标记（选择类操作本身不该触发保存）
+        if (layer.groupId !== groups[0].id) {
+          layer.groupId = groups[0].id
+          mapDataRevision.value++
+        }
         selectedTilesetGroupId.value = groups[0].id
       } else {
         selectedTilesetGroupId.value = ''
@@ -1742,7 +1754,7 @@ export const useMapStore = defineStore('map', () => {
     if (patch.oneWayMargin !== undefined) tile.oneWayMargin = patch.oneWayMargin
   }
 
-  return {
+  const actions = {
     currentMapPath,
     mapData,
     activeLayerIndex,
@@ -1846,5 +1858,38 @@ export const useMapStore = defineStore('map', () => {
     imageRevision,
     shapeRevision,
     mapLoadCount,
+    mapDataRevision,
+    markMapDataDirty,
   }
+
+  // 所有会写进存档的操作统一打“脏”标记（Unreal/Godot 的 dirty package 思路）。
+  // 在这里集中包一层，避免每个 action 里手写、也避免漏掉某个修改入口。
+  const MUTATING_ACTIONS = [
+    'setTile', 'undoTile', 'redoTile',
+    'addTilesetGroup', 'addTilesetGroupToActiveLayer', 'useTilesetGroupForActiveLayer',
+    'renameTilesetGroup', 'setTilesetGroupFlags', 'deleteTilesetGroup', 'duplicateTilesetGroup',
+    'addLayer', 'addImageLayer', 'addImageAt', 'removeLayer',
+    'moveLayerUp', 'moveLayerDown', 'moveLayerTo',
+    'toggleLayerVisibility', 'toggleLayerLock', 'renameLayer',
+    'addResource', 'addPaletteEntries', 'setTilePalette', 'setPaletteCells', 'setPaletteEntryCell',
+    'setLayerTransform', 'movePaletteEntry', 'removePaletteEntry', 'removeResource',
+    'setResourceAsset', 'clearResources',
+    'updateMapProperty', 'updateCameraSettings', 'updateTileSize',
+    'addMarker', 'renameMarker', 'setMarkerType', 'setMarkerVisible', 'setMarkerLocked',
+    'setMarkerLabelVisible', 'updateMarkerPosition', 'duplicateMarker', 'removeMarker',
+    'setTileCollision', 'setTileCollisionType', 'setTileTag', 'updateTile',
+    'addShapeLayer', 'addShape', 'removeShape', 'updateShapePoints', 'updateShapes', 'removeShapes',
+  ] as const
+
+  for (const name of MUTATING_ACTIONS) {
+    const original = (actions as any)[name]
+    if (typeof original !== 'function') continue
+    ;(actions as any)[name] = (...args: any[]) => {
+      const result = original(...args)
+      mapDataRevision.value++
+      return result
+    }
+  }
+
+  return actions
 })

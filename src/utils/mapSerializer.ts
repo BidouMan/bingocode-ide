@@ -213,6 +213,19 @@ export interface MapLoadData {
   }[]
 }
 
+/** Uint8Array → base64：分块处理，避免大图时 String.fromCharCode(...) 参数过多爆栈 */
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = ''
+  const CHUNK = 0x8000
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+  }
+  return btoa(binary)
+}
+
+/** 空白图块层的压缩结果缓存（按网格尺寸复用，多图层/大图时避免每层重复压全图） */
+const emptyTileDataCache = new Map<string, string>()
+
 /**
  * 将稀疏瓦片字典压缩为 base64+zlib 字符串
  * 瓦片值已经是GID格式（firstgid + localTileIndex）
@@ -222,6 +235,17 @@ export function compressTileData(
   width: number,
   height: number,
 ): string {
+  // 空白层直接复用缓存：新建的图块层、还没画东西的图层都是这种情况
+  if (Object.keys(tiles).length === 0) {
+    const key = `${width}x${height}`
+    let cached = emptyTileDataCache.get(key)
+    if (!cached) {
+      cached = bytesToBase64(pako.deflate(new Uint32Array(width * height).buffer))
+      emptyTileDataCache.set(key, cached)
+    }
+    return cached
+  }
+
   const flatArray = new Uint32Array(width * height)
 
   for (const [key, gid] of Object.entries(tiles)) {
@@ -231,8 +255,7 @@ export function compressTileData(
     }
   }
 
-  const compressed = pako.deflate(flatArray.buffer)
-  return btoa(String.fromCharCode(...compressed))
+  return bytesToBase64(pako.deflate(flatArray.buffer))
 }
 
 /**

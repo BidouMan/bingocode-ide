@@ -5,7 +5,8 @@ import { useMapStore } from '../stores/map'
 import { useResourceStore } from '../stores/resource'
 import { useProjectStore } from '../stores/project'
 import { useSettingsStore } from '../stores/settings'
-import { serializeMap, deserializeMap } from '../utils/mapSerializer'
+import { deserializeMap } from '../utils/mapSerializer'
+import { serializeMapAsync } from '../utils/mapSaveAsync'
 
 interface MapPersistenceOptions {
   /** 画布缩略图（保存 map.json 时一并写入 thumbnail.png） */
@@ -49,8 +50,19 @@ export function useMapPersistence(options: MapPersistenceOptions) {
     const dirPath = mapDirPath(name)
     const savePath = mapJsonPath(name)
     try {
-      const saveData = serializeMap(mapStore.mapData)
-      await invoke('write_file', { path: savePath, content: JSON.stringify(saveData) })
+      // 大图 / 多图层时序列化很重：交给 Worker，主线程保持流畅
+      const json = await serializeMapAsync(mapStore.mapData)
+      // 原子写入（参考 Blender / Unreal 的写临时文件再替换）：
+      // 先写 .tmp，再重命名覆盖正式文件，避免写盘途中崩溃导致 map.json 损坏
+      const tmpPath = `${savePath}.tmp`
+      await invoke('write_file', { path: tmpPath, content: json })
+      try {
+        await invoke('rename_path', { oldPath: tmpPath, newPath: savePath })
+      } catch (renameError) {
+        // 极少数情况（权限 / 跨盘）重命名失败时退回直接写，保证不会保存失败
+        console.warn('[MapEditor] 原子替换失败，改为直接写入:', renameError)
+        await invoke('write_file', { path: savePath, content: json })
+      }
 
       // 同时生成 thumbnail.png 快照（等待画面重建完成后再截图）
       const thumbDataUrl = await options.getThumbnailDataUrl()

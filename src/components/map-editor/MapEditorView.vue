@@ -149,6 +149,7 @@ function onTileWorkspaceResizeEnd() {
 
 onBeforeUnmount(() => {
   onTileWorkspaceResizeEnd()
+  cancelAutoSave()
 })
 
 // 切换图层 / 地图 / 右栏分页后把属性面板滚回顶部：否则会停留在上一页的滚动位置，看起来像空白
@@ -246,7 +247,7 @@ const emit = defineEmits<{
 // ====== 持久化：map.json 读写、.bgm 修复、路径解析 ======
 const {
   mapDirPath,
-  saveMapToProject,
+  saveMapToProject: persistMap,
   loadMapFromProject,
   resolveRelativePaths,
   createEmptyMapData,
@@ -254,6 +255,78 @@ const {
   getThumbnailDataUrl: async () => (await mapCanvasRef.value?.getThumbnailDataUrl()) ?? null,
   onThumbnailUpdated: (itemId, dataUrl) => emit('map-thumbnail-updated', itemId, dataUrl),
 })
+
+// ====== 自动保存：脏标记 + 防抖 + 空闲执行 ======
+// 行业做法（Unreal / Godot / Blender）：编辑时只打脏标记，用定时器在空闲时保存；
+// 不在每次数据变化时序列化整张地图。这里监听 store 的廉价 mapDataRevision。
+let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
+let autoSaveIdleHandle: number | null = null
+/** 地图刚加载完的短暂窗口内不立刻触发自动保存 */
+let autoSaveSuppressUntil = 0
+/** 最近一次成功保存时的数据签名：没变就跳过，避免打开地图后立刻无意义回写 */
+let lastSavedSignal = ''
+
+/** 廉价数据签名（只拼计数器，不做任何序列化） */
+function dataSignal() {
+  return [
+    mapStore.mapDataRevision,
+    mapStore.tileRevision,
+    mapStore.imageRevision,
+    mapStore.shapeRevision,
+  ].join(':')
+}
+
+function cancelAutoSave() {
+  if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer)
+    autoSaveTimer = null
+  }
+  if (autoSaveIdleHandle != null) {
+    const cancelIdle = (window as any).cancelIdleCallback as ((handle: number) => void) | undefined
+    if (cancelIdle) cancelIdle(autoSaveIdleHandle)
+    autoSaveIdleHandle = null
+  }
+}
+
+/** 统一保存入口：先取消待执行的自动保存，避免同一次改动重复写盘 */
+async function saveMapToProject(mapName?: string) {
+  cancelAutoSave()
+  // 先记下本次保存覆盖的数据版本；保存期间新产生的修改不应被视为已保存
+  const savedSignal = dataSignal()
+  await persistMap(mapName)
+  lastSavedSignal = savedSignal
+}
+
+function runAutoSave() {
+  autoSaveIdleHandle = null
+  // 数据没变（例如刚打开地图、载入过程顺带 bump 了计数器）就跳过
+  const signal = dataSignal()
+  if (signal === lastSavedSignal) return
+  lastSavedSignal = signal
+  // 自动保存只写地图结构；矢量内容会在切图层 / 退出矢量模式时烘焙，避免打断编辑
+  void persistMap()
+}
+
+function scheduleAutoSave() {
+  if (!mapStore.currentMapPath) return
+  if (autoSaveTimer) clearTimeout(autoSaveTimer)
+  autoSaveTimer = setTimeout(() => {
+    autoSaveTimer = null
+    // 放到浏览器空闲时段做序列化 + 写盘，尽量不打断用户操作
+    const requestIdle = (window as any).requestIdleCallback as
+      | ((cb: () => void, opts?: { timeout: number }) => number)
+      | undefined
+    if (requestIdle) autoSaveIdleHandle = requestIdle(runAutoSave, { timeout: 4000 })
+    else runAutoSave()
+    // 加载地图后的短时间窗口内不立刻回写（避免刚打开就产生一次无意义保存）
+  }, Math.max(1500, autoSaveSuppressUntil - Date.now() + 200))
+}
+
+// 脏标记 + 画布/图片/形状的廉价计数器都视为“需要保存”
+watch(
+  () => [mapStore.mapDataRevision, mapStore.tileRevision, mapStore.imageRevision, mapStore.shapeRevision],
+  scheduleAutoSave,
+)
 
 // ====== 统一入口：currentMapPath 变化时自动保存当前 + 加载目标 ======
 // 新建地图时设此标志跳过 watcher 的加载流程
@@ -274,6 +347,8 @@ watch(() => mapStore.currentMapPath, async (newPath, oldPath) => {
   if (!newPath || newPath === oldPath) return
   if (skipNextPathWatch) { skipNextPathWatch = false; return }
   if (!resourceStore.maps.find(m => m.id === newPath)) return
+  // 加载/切换地图期间产生的 revision 变化不应立刻回写
+  autoSaveSuppressUntil = Date.now() + 1500
 
   if (oldPath) {
     // 根据 UUID 找到旧地图的名称，用名称路径保存（名称可能已被重命名）
@@ -296,31 +371,15 @@ watch(() => mapStore.currentMapPath, async (newPath, oldPath) => {
     }
   }
   if (mapReady) await ensureDefaultLayer()
-})
-
-// ====== 自动保存（编辑时防抖保存到项目目录） ======
-let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
-let savingItemId = ''
-watch(() => JSON.stringify(mapStore.mapData), () => {
-  if (autoSaveTimer) clearTimeout(autoSaveTimer)
-  savingItemId = mapStore.currentMapPath
-  autoSaveTimer = setTimeout(() => {
-    if (mapStore.currentMapPath && mapStore.currentMapPath === savingItemId) {
-      // 自动保存只写地图结构；矢量内容会在退出矢量模式/切图层时烘焙，避免打断编辑
-      saveMapToProject()
-    }
-  }, 2000)
+  // 载入流程本身会 bump 各 revision，这里把签名对齐，避免刚打开就触发一次自动保存
+  lastSavedSignal = dataSignal()
 })
 
 // 地图资源被清空（新建/打开项目、删除最后一张地图）时清掉编辑器内存残留：
 // 否则空状态横幅下方仍会渲染上一个项目的场景，旧的自动保存还会把旧地图写回新项目目录
 watch(hasMaps, (has) => {
   if (has) return
-  if (autoSaveTimer) {
-    clearTimeout(autoSaveTimer)
-    autoSaveTimer = null
-  }
-  savingItemId = ''
+  cancelAutoSave()
   mapStore.newMap()
 }, { immediate: true })
 

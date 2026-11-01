@@ -1633,6 +1633,8 @@ async function startPaintSession(): Promise<boolean> {
       img.scaleX = 1
       img.scaleY = 1
       img.scale = 1
+      // 画板尺寸重排直接改了 mapData，通知自动保存机制“脏了”
+      mapStore.markMapDataDirty()
     }
     const texture = PIXI_.Texture.from(canvas)
     texture.source.scaleMode = currentScaleMode
@@ -2092,6 +2094,8 @@ async function flushPaintSave(session: ImagePaintSession, finalize: boolean) {
         // 图层改指向新的绘制文件，旧路径的解析缓存要丢弃，避免切回时读到旧图
         resolvedPathCache.delete(layer.image.imagePath)
         layer.image.imagePath = session.savePath
+        // 直接改了 mapData，通知自动保存机制“脏了”
+        mapStore.markMapDataDirty()
         // 路径变了但画面仍是这块会话画布：同步签名，避免重渲染时从磁盘重载出现闪烁
         syncLayerRenderKey(session.layerId)
       }

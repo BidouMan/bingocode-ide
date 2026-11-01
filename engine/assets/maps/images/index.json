@@ -1,0 +1,550 @@
+{
+  "version": 1,
+  "tagPool": [
+    "森林",
+    "秋天",
+    "树林",
+    "篮球",
+    "球场",
+    "运动",
+    "海滩",
+    "酒吧",
+    "海边",
+    "风景",
+    "天空",
+    "蓝天",
+    "背景",
+    "木板",
+    "走道",
+    "城堡",
+    "山丘",
+    "演唱会",
+    "舞台",
+    "音乐",
+    "赛博",
+    "城市",
+    "未来",
+    "黑暗",
+    "夜晚",
+    "沙漠",
+    "废墟",
+    "遗迹",
+    "沙地",
+    "空地",
+    "小路",
+    "河流",
+    "银河",
+    "星空",
+    "宇宙",
+    "幽灵",
+    "墓地",
+    "恐怖",
+    "鬼屋",
+    "房子",
+    "冰川",
+    "岛屿",
+    "冰雪",
+    "丛林",
+    "热带",
+    "侏罗纪",
+    "恐龙",
+    "远古",
+    "月球",
+    "太空",
+    "山脉",
+    "山",
+    "星云",
+    "霓虹",
+    "街道",
+    "隧道",
+    "夜景",
+    "海底",
+    "海洋",
+    "像素",
+    "植物",
+    "僵尸",
+    "怪物",
+    "草坪",
+    "星球",
+    "红色",
+    "草原",
+    "学校",
+    "校园",
+    "建筑",
+    "鱼",
+    "雪地",
+    "平台",
+    "足球",
+    "灯光",
+    "草地",
+    "阳光",
+    "水下",
+    "墙",
+    "砖墙",
+    "码头",
+    "港口",
+    "坐标",
+    "网格",
+    "参考"
+  ],
+  "entries": {
+    "autumn_forest.png": {
+      "name": "秋日森林",
+      "tags": [
+        "森林",
+        "秋天",
+        "树林"
+      ],
+      "py": "qiurisenlin",
+      "pyi": "qrsl"
+    },
+    "basketball.svg": {
+      "name": "篮球场",
+      "tags": [
+        "篮球",
+        "球场",
+        "运动"
+      ],
+      "py": "lanqiuchang",
+      "pyi": "lqc"
+    },
+    "beach_bar.png": {
+      "name": "海滩酒吧",
+      "tags": [
+        "海滩",
+        "酒吧",
+        "海边"
+      ],
+      "py": "haitanjiuba",
+      "pyi": "htjb"
+    },
+    "beach_rio.png": {
+      "name": "里约海滩",
+      "tags": [
+        "海滩",
+        "海边",
+        "风景"
+      ],
+      "py": "liyuehaitan",
+      "pyi": "lyht"
+    },
+    "blue_sky.svg": {
+      "name": "蓝天",
+      "tags": [
+        "天空",
+        "蓝天",
+        "背景"
+      ],
+      "py": "lantian",
+      "pyi": "lt"
+    },
+    "boardwalk.png": {
+      "name": "木板路",
+      "tags": [
+        "木板",
+        "走道",
+        "海边"
+      ],
+      "py": "mubanlu",
+      "pyi": "mbl"
+    },
+    "castle_hill.png": {
+      "name": "城堡山丘",
+      "tags": [
+        "城堡",
+        "山丘",
+        "风景"
+      ],
+      "py": "chengbaoshanqiu",
+      "pyi": "cbsq"
+    },
+    "concert.png": {
+      "name": "演唱会",
+      "tags": [
+        "演唱会",
+        "舞台",
+        "音乐"
+      ],
+      "py": "yanchanghui",
+      "pyi": "ych"
+    },
+    "cyber_1.png": {
+      "name": "赛博城市",
+      "tags": [
+        "赛博",
+        "城市",
+        "未来"
+      ],
+      "py": "saibochengshi",
+      "pyi": "sbcs"
+    },
+    "dark_forest.png": {
+      "name": "黑暗森林",
+      "tags": [
+        "森林",
+        "黑暗",
+        "夜晚"
+      ],
+      "py": "heiansenlin",
+      "pyi": "hasl"
+    },
+    "desert_ruins.png": {
+      "name": "沙漠废墟",
+      "tags": [
+        "沙漠",
+        "废墟",
+        "遗迹"
+      ],
+      "py": "shamofeixu",
+      "pyi": "smfx"
+    },
+    "desert.png": {
+      "name": "沙漠",
+      "tags": [
+        "沙漠",
+        "沙地"
+      ],
+      "py": "shamo",
+      "pyi": "sm"
+    },
+    "forest_1.png": {
+      "name": "森林",
+      "tags": [
+        "森林",
+        "树林"
+      ],
+      "py": "senlin",
+      "pyi": "sl"
+    },
+    "forest_clearing.png": {
+      "name": "森林空地",
+      "tags": [
+        "森林",
+        "空地",
+        "树林"
+      ],
+      "py": "senlinkongdi",
+      "pyi": "slkd"
+    },
+    "forest_path.png": {
+      "name": "森林小路",
+      "tags": [
+        "森林",
+        "小路",
+        "树林"
+      ],
+      "py": "senlinxiaolu",
+      "pyi": "slxl"
+    },
+    "forest_river.png": {
+      "name": "森林河流",
+      "tags": [
+        "森林",
+        "河流",
+        "树林"
+      ],
+      "py": "senlinheliu",
+      "pyi": "slhl"
+    },
+    "galaxy.png": {
+      "name": "银河",
+      "tags": [
+        "银河",
+        "星空",
+        "宇宙"
+      ],
+      "py": "yinhe",
+      "pyi": "yh"
+    },
+    "ghost_graveyard.png": {
+      "name": "幽灵墓地",
+      "tags": [
+        "幽灵",
+        "墓地",
+        "恐怖"
+      ],
+      "py": "youlingmudi",
+      "pyi": "ylmd"
+    },
+    "haunted_house.png": {
+      "name": "鬼屋",
+      "tags": [
+        "鬼屋",
+        "恐怖",
+        "房子"
+      ],
+      "py": "guiwu",
+      "pyi": "gw"
+    },
+    "ice_islands.png": {
+      "name": "冰川岛屿",
+      "tags": [
+        "冰川",
+        "岛屿",
+        "冰雪"
+      ],
+      "py": "bingchuandaoyu",
+      "pyi": "bcdy"
+    },
+    "jungle.png": {
+      "name": "丛林",
+      "tags": [
+        "丛林",
+        "热带",
+        "树林"
+      ],
+      "py": "conglin",
+      "pyi": "cl"
+    },
+    "jurassic.svg": {
+      "name": "侏罗纪",
+      "tags": [
+        "侏罗纪",
+        "恐龙",
+        "远古"
+      ],
+      "py": "zhuluoji",
+      "pyi": "zlj"
+    },
+    "moon.png": {
+      "name": "月球",
+      "tags": [
+        "月球",
+        "太空",
+        "宇宙"
+      ],
+      "py": "yueqiu",
+      "pyi": "yq"
+    },
+    "mountain.png": {
+      "name": "山脉",
+      "tags": [
+        "山脉",
+        "山",
+        "风景"
+      ],
+      "py": "shanmai",
+      "pyi": "sm"
+    },
+    "nebula.png": {
+      "name": "星云",
+      "tags": [
+        "星云",
+        "星空",
+        "宇宙"
+      ],
+      "py": "xingyun",
+      "pyi": "xy"
+    },
+    "neon_city.png": {
+      "name": "霓虹城市",
+      "tags": [
+        "霓虹",
+        "城市",
+        "夜晚"
+      ],
+      "py": "nihongchengshi",
+      "pyi": "nhcs"
+    },
+    "neon_street.png": {
+      "name": "霓虹街道",
+      "tags": [
+        "霓虹",
+        "街道",
+        "夜晚"
+      ],
+      "py": "nihongjiedao",
+      "pyi": "nhjd"
+    },
+    "neon_tunnel.png": {
+      "name": "霓虹隧道",
+      "tags": [
+        "霓虹",
+        "隧道",
+        "夜晚"
+      ],
+      "py": "nihongsuidao",
+      "pyi": "nhsd"
+    },
+    "night_city.png": {
+      "name": "夜晚城市",
+      "tags": [
+        "城市",
+        "夜晚",
+        "夜景"
+      ],
+      "py": "yewanchengshi",
+      "pyi": "ywcs"
+    },
+    "ocean_ruins.png": {
+      "name": "海底遗迹",
+      "tags": [
+        "海底",
+        "遗迹",
+        "海洋"
+      ],
+      "py": "haidiyiji",
+      "pyi": "hdyj"
+    },
+    "pixel_street.png": {
+      "name": "像素街道",
+      "tags": [
+        "像素",
+        "街道",
+        "城市"
+      ],
+      "py": "xiangsujiedao",
+      "pyi": "xsjd"
+    },
+    "plant_zombie.png": {
+      "name": "植物僵尸",
+      "tags": [
+        "植物",
+        "僵尸",
+        "怪物"
+      ],
+      "py": "zhiwujiangshi",
+      "pyi": "zwjs"
+    },
+    "playing_field.png": {
+      "name": "运动场",
+      "tags": [
+        "运动",
+        "球场",
+        "草坪"
+      ],
+      "py": "yundongchang",
+      "pyi": "ydc"
+    },
+    "red_planet.png": {
+      "name": "红色星球",
+      "tags": [
+        "星球",
+        "太空",
+        "红色"
+      ],
+      "py": "hongsexingqiu",
+      "pyi": "hsxq"
+    },
+    "savanna.png": {
+      "name": "热带草原",
+      "tags": [
+        "草原",
+        "热带",
+        "风景"
+      ],
+      "py": "redaicaoyuan",
+      "pyi": "rdcy"
+    },
+    "school.png": {
+      "name": "学校",
+      "tags": [
+        "学校",
+        "校园",
+        "建筑"
+      ],
+      "py": "xuexiao",
+      "pyi": "xx"
+    },
+    "seabed.png": {
+      "name": "海底",
+      "tags": [
+        "海底",
+        "海洋",
+        "鱼"
+      ],
+      "py": "haidi",
+      "pyi": "hd"
+    },
+    "snow_platform.png": {
+      "name": "雪地平台",
+      "tags": [
+        "雪地",
+        "平台",
+        "冰雪"
+      ],
+      "py": "xuedipingtai",
+      "pyi": "xdpt"
+    },
+    "soccer.png": {
+      "name": "足球场",
+      "tags": [
+        "足球",
+        "球场",
+        "运动"
+      ],
+      "py": "zuqiuchang",
+      "pyi": "zqc"
+    },
+    "spotlight.png": {
+      "name": "舞台灯光",
+      "tags": [
+        "舞台",
+        "灯光",
+        "音乐"
+      ],
+      "py": "wutaidengguang",
+      "pyi": "wtdg"
+    },
+    "stars.png": {
+      "name": "星空",
+      "tags": [
+        "星空",
+        "宇宙",
+        "夜晚"
+      ],
+      "py": "xingkong",
+      "pyi": "xk"
+    },
+    "sunny_meadow.png": {
+      "name": "阳光草地",
+      "tags": [
+        "草地",
+        "阳光",
+        "草原"
+      ],
+      "py": "yangguangcaodi",
+      "pyi": "ygcd"
+    },
+    "underwater.png": {
+      "name": "水下世界",
+      "tags": [
+        "水下",
+        "海洋",
+        "海底"
+      ],
+      "py": "shuixiashijie",
+      "pyi": "sxsj"
+    },
+    "wall.png": {
+      "name": "墙",
+      "tags": [
+        "墙",
+        "砖墙",
+        "建筑"
+      ],
+      "py": "qiang",
+      "pyi": "q"
+    },
+    "wharf.png": {
+      "name": "码头",
+      "tags": [
+        "码头",
+        "港口",
+        "海边"
+      ],
+      "py": "matou",
+      "pyi": "mt"
+    },
+    "xy.svg": {
+      "name": "坐标图",
+      "tags": [
+        "坐标",
+        "网格",
+        "参考"
+      ],
+      "py": "zuobiaotu",
+      "pyi": "zbt"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "tagPool": [
+    "骑士",
+    "角色",
+    "图集",
+    "森林"
+  ],
+  "entries": {
+    "knight.png": {
+      "name": "骑士图集",
+      "tags": [
+        "骑士",
+        "角色",
+        "图集",
+        "森林"
+      ],
+      "py": "qishituji",
+      "pyi": "qstj"
+    }
+  }
+}
