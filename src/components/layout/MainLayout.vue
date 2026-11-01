@@ -38,7 +38,7 @@ import LearnPanel from '../sidebar/LearnPanel.vue'
 import SearchPanel from '../sidebar/SearchPanel.vue'
 import OutlinePanel from '../sidebar/OutlinePanel.vue'
 import { useFileExplorerStore } from '../../stores/fileExplorer'
-import { isProjectCodePath, samePath, baseName, isUnderPath } from '../../utils/projectPath'
+import { isProjectCodePath, samePath, baseName } from '../../utils/projectPath'
 import iconLogo from '../../assets/icons/logo.svg'
 import iconFile from '../../assets/icons/icon--file.svg'
 import iconCodeEdit from '../../assets/icons/代码编辑.svg'
@@ -129,30 +129,12 @@ watch(() => editorStore.isGameMode, () => {
 })
 
 /**
- * 顶部模式开关。两种模式严格隔离：标签互不共享，只通过磁盘传递内容。
- * 离开当前模式前先把项目代码的修改写盘；切换后让新模式按磁盘刷新。
+ * 顶部模式开关。两种模式完全隔离：切换时不做任何跨模式的标签读写、磁盘刷新或
+ * 项目代码补加载，各自保留自己的标签与状态，绝不互相污染。
+ * 运行中的程序会在 isGameMode 变化时自动停止。
  */
-let _switchingMode = false
-async function onToggleGameMode() {
-  if (_switchingMode) return
-  _switchingMode = true
-  try {
-    const root = projectStore.root
-    await editorStore.flushCurrentModeProjectTabs(root)
-    editorStore.toggleGameMode()
-    await nextTick()
-    // 磁盘为准：先刷新已有标签的内容/清理已删文件，再补齐新模式还没有的项目文件
-    await editorStore.refreshCurrentModeProjectTabs(root)
-    const ws = fileExplorerStore.workspaceFolder
-    // 游戏模式始终显示项目代码；代码模式只有在工作区就是项目目录（或未打开文件夹）时才补，
-    // 避免把项目代码混进学生自己打开的其他作业文件夹
-    const codeModeShowsProject = !ws || samePath(ws, root) || isUnderPath(ws, root)
-    if (editorStore.isGameMode || codeModeShowsProject) {
-      await editorStore.loadProjectCodeTabsInto(editorStore.isGameMode ? 'game' : 'code', root)
-    }
-  } finally {
-    _switchingMode = false
-  }
+function onToggleGameMode() {
+  editorStore.toggleGameMode()
 }
 const canvasOffsetX = ref(0)
 const consoleExpanded = ref(true)
@@ -290,11 +272,11 @@ async function loadProjectResources(root: string) {
   editorStore.setResourceTab('sprite')
 
   // ── 预加载代码文件 ──
-  // 项目代码归游戏模式所有：游戏模式先建标签（资源列表由 gameTabs 监听自动同步），
-  // 代码模式随后从磁盘读一份自己独立的标签，两边互不共享对象
+  // 项目代码只归游戏模式：代码模式是独立 IDE，只显示它自己打开的工作区文件，
+  // 打开 / 新建项目绝不能把项目代码灌进代码模式的标签页。
+  // 只按项目清单载入，不扫描目录，避免代码模式写进 code/ 的文件被当成游戏代码
   try {
-    await editorStore.loadProjectCodeTabsInto('game', root)
-    if (!stale()) await editorStore.loadProjectCodeTabsInto('code', root)
+    await editorStore.loadGameProjectTabs(root)
   } catch { /* code 目录可能不存在 */ }
 
   // ── 预加载地图资源 ──
@@ -414,27 +396,29 @@ onMounted(async () => {
   themeStore.initTheme()
   await projectStore.initProject()
 
-  // 启动永远是全新默认项目：清空编辑器残留状态。
+  // 启动永远是全新默认项目：清空游戏模式的残留状态。
   // default 目录每次启动都会被 init_default_project 清空，
   // localStorage 里恢复的旧标签都是指向已删文件的幽灵，全部丢弃。
+  // 代码模式是独立 IDE，启动时保持空白，不受项目初始化影响。
   resourceStore.clearAllResources()
   resetEditorWorkspaces()
   renderStore.clearAll()
   editorStore.gameTabs.splice(0, editorStore.gameTabs.length)
-  editorStore.codeTabs.splice(0, editorStore.codeTabs.length)
   editorStore.gameActiveTabIndex = 0
-  editorStore.codeActiveTabIndex = 0
 
   // 创建默认空代码文件（与"新建项目"一致，只保留一个 游戏脚本_1.py）
-  // 两套模式各持一份独立标签（互不共享对象）：游戏模式先建，代码模式从磁盘读
+  // 该文件只属于游戏模式；代码模式是独立 IDE，未打开文件夹时保持空白，
+  // 不能在这里把游戏模式的默认项目代码读进代码模式
   if (projectStore.root) {
     const projectRoot = projectStore.root
     const name = '游戏脚本_1.py'
     editorStore.setActiveEditorMode('code')
     await invoke('create_dir', { path: `${projectRoot}/code` })
     await invoke('write_file', { path: `${projectRoot}/code/${name}`, content: '' })
-    await editorStore.loadProjectCodeTabsInto('game', projectRoot)
-    await editorStore.loadProjectCodeTabsInto('code', projectRoot)
+    // 只给默认文件挂上路径，绝不扫描 code/ 目录：那里可能残留上一个会话、
+    // 代码模式或旧项目包写进去的文件，一旦被扫描进来就会被游戏运行一起执行
+    editorStore.resetGameTabsToDefault(projectRoot, name)
+    await editorStore.writeGameManifest(projectRoot)
   }
   console.log(`[Perf] Startup: ${(performance.now() - t0).toFixed(0)}ms`)
 })
@@ -745,7 +729,7 @@ async function fileMenuAction(action: string) {
   // 因此不能“先保存到项目目录再清空”——那样保存的代码马上就会被删掉。
   // 已经保存过 .bc 的项目（bingoPath 有值）先写回该文件再继续，避免丢失；
   // 从未保存过的项目无法自动保存，明确提示后由用户决定是否继续。
-  if ((action === 'new' || action === 'open') && editorStore.hasUnsavedTabs) {
+  if ((action === 'new' || action === 'open') && editorStore.hasUnsavedGameTabs) {
     if (projectStore.bingoPath) {
       await projectStore.saveProject()
     } else {
@@ -761,23 +745,23 @@ async function fileMenuAction(action: string) {
     case 'new': {
       const projectRoot = await projectStore.newProject()
       if (!projectRoot) break
-      // 清空所有旧数据（两套标签页都要清）
+      // 清空游戏模式的旧数据；代码模式的标签属于独立 IDE，保持原样
       resourceStore.clearAllResources()
       resetEditorWorkspaces()
       renderStore.clearAll()
       editorStore.gameTabs.splice(0, editorStore.gameTabs.length)
-      editorStore.codeTabs.splice(0, editorStore.codeTabs.length)
       editorStore.gameActiveTabIndex = 0
-      editorStore.codeActiveTabIndex = 0
       await nextTick()
       // 创建新项目默认代码文件
-      // 两套模式各持一份独立标签（互不共享对象）：游戏模式先建，代码模式从磁盘读
+      // 默认项目代码只进游戏模式；代码模式不接收项目文件
       const name = '游戏脚本_1.py'
       await invoke('create_dir', { path: `${projectRoot}/code` })
       await invoke('write_file', { path: `${projectRoot}/code/${name}`, content: '' })
       editorStore.setActiveEditorMode('code')
-      await editorStore.loadProjectCodeTabsInto('game', projectRoot)
-      await editorStore.loadProjectCodeTabsInto('code', projectRoot)
+      // 不扫描 code/：新项目目录已经在 init_default_project 里清空，
+      // 这里只挂一个默认文件，避免任何残留文件被当成游戏代码
+      editorStore.resetGameTabsToDefault(projectRoot, name)
+      await editorStore.writeGameManifest(projectRoot)
       editorStore.setResourceTab('sprite')
       currentPage.value = 0
       break
@@ -795,14 +779,12 @@ async function fileMenuAction(action: string) {
       const root = projectStore.root
       if (!root) break
 
-      // 清空全部旧数据（两套标签页都要清）
+      // 清空游戏模式的旧数据；代码模式的标签属于独立 IDE，保持原样
       resourceStore.clearAllResources()
       resetEditorWorkspaces()
       renderStore.clearAll()
       editorStore.gameTabs.splice(0, editorStore.gameTabs.length)
-      editorStore.codeTabs.splice(0, editorStore.codeTabs.length)
       editorStore.gameActiveTabIndex = 0
-      editorStore.codeActiveTabIndex = 0
       await nextTick()
 
       // 预加载项目资源（代码/地图/精灵/声音）
@@ -1913,11 +1895,11 @@ function cancelCodeRename() {
 
 // 打开文件夹（IDE 模式）
 async function ideOpenFolder() {
-  // 切换前：有未保存代码时提示保存
-  if (editorStore.hasUnsavedTabs) {
+  // 切换前：代码模式有未保存代码时提示保存（只看代码模式自己的标签）
+  if (editorStore.hasUnsavedCodeTabs) {
     const shouldSave = await ask('有未保存的代码，是否保存？', { title: '未保存的代码', kind: 'warning' })
     if (shouldSave) {
-      await editorStore.saveAllModifiedTabs()
+      await editorStore.saveCurrentModeModifiedTabs()
     }
   }
   // 清空代码模式的旧标签页（严格隔离：不影响游戏模式的项目代码标签）
@@ -1996,12 +1978,7 @@ async function ideSaveFileAs() {
     tab.path = path
     tab.name = fileName
     tab.modified = false
-    // 同步更新资源管理器
-    const resource = resourceStore.codes.find(c => c.id === tab.id)
-    if (resource) {
-      resource.path = path
-      resource.name = fileName
-    }
+    // 代码模式是独立 IDE：只改自己的标签，不同步游戏模式的资源列表
   } catch (e) {
     console.error('[IDE] 另存为失败:', e)
   }

@@ -9,7 +9,7 @@ import { useProjectStore } from '../stores/project'
 import { useResourceStore } from '../stores/resource'
 import { waitForGameCanvasReady } from '../utils/gameCanvasReady'
 import { invalidateGameTextures } from '../utils/gameTextures'
-import { baseName, dirName } from '../utils/projectPath'
+import { baseName, dirName, isProjectCodePath } from '../utils/projectPath'
 import type { AnyEngineCommand } from '../types/engine'
 
 let unlisteners: (() => void)[] = []
@@ -405,11 +405,18 @@ export function useEngine() {
       await projectStore.initProject()
     }
 
-    let tab = editorStore.currentTab
+    // 点击运行的那一刻固定住模式：准备阶段（等画布、挂监听）里就算切了模式，
+    // 也只能运行点击时那个模式的标签，绝不能读到另一模式的标签
+    const runMode: 'game' | 'code' = editorStore.isGameMode ? 'game' : 'code'
+    let tab = runMode === 'game'
+      ? (editorStore.gameTabs[editorStore.gameActiveTabIndex] ?? null)
+      : (editorStore.codeTabs[editorStore.codeActiveTabIndex] ?? null)
     if (!tab) {
       // 可能是 newProject 期间的竞态，等待下一次事件循环再重试
       await new Promise(r => setTimeout(r, 50))
-      tab = editorStore.currentTab
+      tab = runMode === 'game'
+        ? (editorStore.gameTabs[editorStore.gameActiveTabIndex] ?? null)
+        : (editorStore.codeTabs[editorStore.codeActiveTabIndex] ?? null)
       if (!tab) {
         terminalStore.appendLine('\x1b[31m没有打开的文件\x1b[0m')
         return
@@ -418,7 +425,7 @@ export function useEngine() {
 
     // 游戏模式：新文件直接落到项目 code/ 目录，不弹「另存为」。
     // 否则学生把文件存到桌面/别处后，运行既不会开始，外部文件还会被当成项目代码反复带进来
-    if (!tab.path && editorStore.isGameMode) {
+    if (!tab.path && runMode === 'game') {
       const projectRoot = projectStore.root
       if (!projectRoot) {
         terminalStore.appendLine('\x1b[31m项目目录还没准备好，请稍后再试\x1b[0m')
@@ -471,8 +478,8 @@ export function useEngine() {
       return
     }
 
-    // 运行前自动保存所有修改过的文件
-    await editorStore.saveAllModifiedTabs()
+    // 运行前自动保存「当前模式」修改过的文件；绝不写另一模式的文件
+    await editorStore.saveCurrentModeModifiedTabs()
 
     renderStore.clearAll()
     // 纹理缓存按文件路径做 key，而磁盘文件在两次运行间可能变化（角色改名顶替旧名、
@@ -490,7 +497,7 @@ export function useEngine() {
     // 等待 GameCanvas 挂载并完成 PixiJS 初始化
     // 确保引擎发送渲染指令时 PixiJS 已就绪
     // 仅在 GameCanvas 会挂载时才等待（游戏模式 + 代码编辑器）
-    const canvasWillMount = editorStore.isGameMode && editorStore.activeEditorMode === 'code'
+    const canvasWillMount = runMode === 'game' && editorStore.activeEditorMode === 'code'
     if (canvasWillMount) {
       await nextTick() // 让 Vue 处理 DOM 更新，触发 GameCanvas 挂载
       await waitForGameCanvasReady()
@@ -507,7 +514,6 @@ export function useEngine() {
       }
 
       // 先写入临时文件获取路径（resolve_engine_env 需要）
-      const tab = editorStore.currentTab
       const tempScriptPath = await invoke<string>('save_temp_script', {
         projectDir,
         content: tab?.content || '',
@@ -521,8 +527,8 @@ export function useEngine() {
       }>('resolve_engine_env', { scriptPath: tempScriptPath, projectRoot: projectDir || undefined })
 
       // 根据模式决定如何运行
-      if (editorStore.isGameMode) {
-        // ═══ 游戏模式：保存所有 tab 到 code/ 目录，引擎自动发现并运行 ═══
+      if (runMode === 'game') {
+        // ═══ 游戏模式：只把游戏模式自己的项目代码写进 code/，引擎按清单运行 ═══
         const gameKeywords = ['run()', 'Sprite(', 'load_map(', 'key_down(', 'key_pressed(', 'key_up(', 'Timer(', 'mouse', 'time_passed(']
         const codeDir = projectDir ? `${projectDir}/code` : ''
 
@@ -535,8 +541,14 @@ export function useEngine() {
         const usedFileNames = new Set<string>()
 
         // 保存每个 tab 为独立 .py 文件
-        for (const t of editorStore.currentTabs) {
+        for (const t of editorStore.gameTabs) {
           if (!t.content.trim()) continue
+          // 硬隔离：只允许项目 code/ 下的文件（或还没落盘的新标签）。
+          // 任何指向项目目录之外的文件都绝不写进 code/、绝不参与本次运行
+          if (t.path && !isProjectCodePath(t.path, projectDir)) {
+            console.warn(`[Run] 跳过非项目代码文件：${t.path}`)
+            continue
+          }
           // 检查是否需要引擎
           const hasImport = t.content.includes('from bingo_engine import') || t.content.includes('import bingo_engine')
           if (!hasImport && gameKeywords.some(kw => t.content.includes(kw))) {
@@ -577,6 +589,9 @@ export function useEngine() {
             path: `${codeDir}/.bingo_run_files`,
             content: Array.from(usedFileNames).join('\n'),
           })
+          // 同步项目清单：项目里“哪些文件是游戏代码”由清单声明，
+          // 之后打开项目只按清单载入，不会再扫描目录捞进无关的 .py
+          await editorStore.writeGameManifest(projectDir).catch(() => {})
         }
 
         // 不传 scriptPath，让 discover_and_merge 按清单运行 code/ 目录里的项目代码
@@ -594,8 +609,8 @@ export function useEngine() {
           return
         }
 
-        // 运行前一键保存全部修改过的代码
-        const savedCount = await editorStore.saveAllModifiedTabs()
+        // 运行前一键保存当前模式修改过的代码（不触碰另一模式的文件）
+        const savedCount = await editorStore.saveCurrentModeModifiedTabs()
         if (savedCount > 0) {
           terminalStore.appendLine(`\x1b[32m已自动保存 ${savedCount} 个文件\x1b[0m`)
         }

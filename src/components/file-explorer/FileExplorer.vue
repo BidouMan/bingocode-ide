@@ -4,13 +4,11 @@ import { open, ask } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { useFileExplorerStore, type FileTreeNode } from '../../stores/fileExplorer'
 import { useEditorStore } from '../../stores/editor'
-import { useResourceStore } from '../../stores/resource'
 import { isUnderPath, samePath } from '../../utils/projectPath'
 import FileTreeNodeItem from './FileTreeNodeItem.vue'
 
 const fileExplorerStore = useFileExplorerStore()
 const editorStore = useEditorStore()
-const resourceStore = useResourceStore()
 
 // 右键菜单
 const contextMenu = ref<{ show: boolean; x: number; y: number; node: FileTreeNode | null }>({
@@ -55,11 +53,11 @@ onMounted(() => {
 })
 
 async function openFolderPicker() {
-  // 切换前：有未保存代码时提示保存
-  if (editorStore.hasUnsavedTabs) {
+  // 切换前：有未保存代码时提示保存（只看代码模式自己的标签）
+  if (editorStore.hasUnsavedCodeTabs) {
     const shouldSave = await ask('有未保存的代码，是否保存？', { title: '未保存的代码', kind: 'warning' })
     if (shouldSave) {
-      await editorStore.saveAllModifiedTabs()
+      await editorStore.saveCurrentModeModifiedTabs()
     }
   }
   // 清空代码模式的旧标签页（严格隔离：代码模式的标签和游戏模式的标签互不影响）
@@ -191,8 +189,7 @@ async function confirmRename() {
         tab.name = newName
         tab.path = newPath
         tab.modified = false
-        const res = resourceStore.codes.find(c => c.id === tab.id)
-        if (res) { res.name = newName; res.path = newPath }
+        // 代码模式是独立 IDE：只更新自己的标签，不动游戏模式的资源列表
       }
     } catch (e) {
       console.error('[FileExplorer] 重命名失败:', e)
@@ -223,11 +220,11 @@ async function deleteNode(node: FileTreeNode) {
 }
 
 async function switchToRecent(folder: string) {
-  // 切换前：有未保存代码时提示保存
-  if (editorStore.hasUnsavedTabs) {
+  // 切换前：有未保存代码时提示保存（只看代码模式自己的标签）
+  if (editorStore.hasUnsavedCodeTabs) {
     const shouldSave = await ask('有未保存的代码，是否保存？', { title: '未保存的代码', kind: 'warning' })
     if (shouldSave) {
-      await editorStore.saveAllModifiedTabs()
+      await editorStore.saveCurrentModeModifiedTabs()
     }
   }
   // 清空代码模式的旧标签页（严格隔离：代码模式的标签和游戏模式的标签互不影响）
@@ -377,15 +374,7 @@ async function handleDropInto(sourcePath: string, targetDir: string) {
         const relativePath = tab.path.substring(sourceParent.length)
         tab.path = targetDir + relativePath
       }
-      const sourceName = sourcePath.split('/').pop() || ''
-      const resources = resourceStore.codes.filter(c => c.path && isUnderPath(c.path, sourcePath))
-      for (const res of resources) {
-        const relativePath = res.path?.substring(sourceParent.length) || ''
-        res.path = targetDir + relativePath
-        if (res.name === sourceName && res.path === newPath) {
-          // 顶层资源名不变，路径已更新
-        }
-      }
+      // 代码模式是独立 IDE：只更新自己的标签，不动游戏模式的资源列表
     }
   } catch (e) {
     console.error('[FileExplorer] 移动失败:', e)

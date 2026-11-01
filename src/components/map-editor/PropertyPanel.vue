@@ -865,7 +865,7 @@ const spriteTargetOptions = computed(() => {
     let match: RegExpExecArray | null
     while ((match = re.exec(text)) !== null) names.add(match[1])
   }
-  for (const tab of [...editorStore.gameTabs, ...editorStore.codeTabs]) scan(tab.content)
+  for (const tab of editorStore.gameTabs) scan(tab.content)
   for (const item of resourceStore.codes) if (item.content) scan(item.content)
   return [...names].map(name => ({ label: name, value: name }))
 })
