@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { normalizeSpriteThumb } from '../utils/spriteThumb'
+import { loadBuiltinAssetManifest, isBuiltinAsset } from '../utils/builtinAssets'
 
 export type SpriteLibType = 'bgs' | 'bsf' | 'image'
 
@@ -49,6 +50,8 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
     try {
       const engineDir = await invoke<string>('get_engine_assets_dir')
       const spritesRoot = joinPath(engineDir, 'sprites')
+      // 正式包按清单过滤：覆盖安装残留的旧素材（发布包里已删除的）不再显示
+      const manifest = await loadBuiltinAssetManifest()
       const found = new Map<string, SpriteLibItem>()
 
       // 分类来自显式配置，不扫描目录（避免误将内部结构目录当作分类）
@@ -70,6 +73,7 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
             if (lower.endsWith('.bgs')) { type = 'bgs'; name = f.slice(0, -4) }
             else if (lower.endsWith('.bsf')) { type = 'bsf'; name = f.slice(0, -4) }
             if (!type) continue
+            if (!isBuiltinAsset(manifest, `sprites/${cat}/packages/${f}`)) continue
             const key = name.toLowerCase()
             const prev = packages.get(key)
             // 同名时 .bsf 优先（新版格式），旧的 .bgs 直接忽略
@@ -94,6 +98,7 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
             return IMAGE_EXTS.some(ext => lower.endsWith(ext))
           })) {
             const name = filename.replace(/\.[^.]+$/, '')
+            if (!isBuiltinAsset(manifest, `sprites/${cat}/images/${filename}`)) continue
             // 与精灵包同名的图片属于同一个角色，已由包文件展示，跳过避免重复
             if (packages.has(name.toLowerCase())) continue
             const filePath = joinPath(imagesDir, filename)

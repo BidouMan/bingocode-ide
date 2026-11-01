@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { loadBuiltinAssetManifest, isBuiltinAsset } from '../utils/builtinAssets'
 
 export interface MapLibItem {
   name: string
@@ -29,10 +30,12 @@ export const useMapLibStore = defineStore('mapLib', () => {
       const engineDir = await invoke<string>('get_engine_assets_dir')
       const packagesDir = joinPath(engineDir, 'maps', 'packages')
       const files = await invoke<string[]>('list_dir', { path: packagesDir })
+      // 正式包按清单过滤：覆盖安装残留的旧素材（发布包里已删除的）不再显示
+      const manifest = await loadBuiltinAssetManifest()
 
       // 过滤出 .bgm 文件，去掉扩展名作为名称
       const mapNames = files
-        .filter(f => f.endsWith('.bgm'))
+        .filter(f => f.endsWith('.bgm') && isBuiltinAsset(manifest, `maps/packages/${f}`))
         .map(f => f.replace(/\.bgm$/, ''))
 
       for (const name of mapNames) {

@@ -25,6 +25,7 @@ pnpm tauri dev    # Desktop app (Tauri)
 - **应用内 UI 图标唯一存放处：`src/assets/icons/`**（svg，前端直接 import）。不要在其它目录放应用图标的副本——改图标只改这里
 - 游戏资源（精灵/地图/音效/字体）唯一存放处：`engine/assets/`（详见 Architecture 一节）
 - **内置图块约定**：`maps/tiles/*.png` 是单张图块（尺寸 = 图片边长，16/32 自动识别，导入时可整数倍缩放适配地图格子）；`maps/tilesets/*.png` 是多格图集，**不标注、也不推断格子尺寸**，一律按当前地图格子切；切错了就改地图的「图块尺寸」，会从原图重新切（图集永不缩放）。资源库不要按尺寸再分类。
+- **内置素材清单（覆盖安装清理）**：打包前 `beforeBuildCommand` 会自动执行 `pnpm assets:manifest`，生成 `engine/assets/manifest.json`（已 gitignore，**不要手写或提交**）。正式包只显示清单里的素材，并在启动后后台清理安装目录里清单外的残留文件——这样发布包里删掉的素材，用户覆盖升级后不会继续出现。dev 模式不读清单、也绝不删除源码树文件。
 
 ## Architecture
 
@@ -140,6 +141,21 @@ engine/
   - CI（`.github/workflows/release.yml`）会自动从 `CHANGELOG_USER.md` 提取当前版本的内容写入 `latest.json` 的 `notes` 字段，客户端检查更新弹窗直接展示该内容。因此日志的措辞直接决定用户看到的更新说明，务必认真写。
   - 同步更新 README 顶部「功能特性」中的当前版本号，并在 README「更新日志」一节刷新"当前最新版本"一句话摘要。
   - 纯内部修复的静默版本可以不新增日志条目：CI（`release.yml` 的 awk）与客户端（`MainLayout.vue` 的 `extractChangelogNotes`）都会自动沿用最新一条日志，用户看到的仍是上一版的说明。
+
+## 版本号与发版
+
+Tauri 更新器按 **semver（严格三段）** 比较版本：只有 `latest.json` 里的版本大于用户已装版本才会推送。历史踩坑：`0.7.41` 实际比 `0.7.5` 大、`0.7.6.1` 是非法版本，都会让后续版本推不出去。
+
+- **常规功能版**：三段递增 —— `0.7.7` → `0.7.8` …
+- **测试版 / bug 修复版**：用预发布号 —— `0.7.8-beta.1`、`0.7.8-beta.2` …
+  - 界面**原样显示**这个版本号，不要再做「显示成 0.7.6.1」之类的隐藏映射（`toDisplayVersion` 现在就是原样返回）
+  - 比较顺序 `0.7.6 < 0.7.8-beta.1 < 0.7.8`，所以用户既能收到补丁，也能收到后续正式版
+- **禁止**：四段号（`0.7.6.1`）、补位号（`0.7.51`）——semver 不合法，或会把后面的版本全部挡住
+- 发版步骤：
+  1. `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` 四处版本号一致
+  2. `CHANGELOG_USER.md` 标题与 tag **完全一致**（CI 用 `## v<tag>` 匹配提取更新说明）
+  3. 更新 README 顶部当前版本号 + 「更新日志」摘要
+  4. 打 tag 推送 `v<版本号>`（如 `v0.7.8-beta.1`），CI 自动构建并发布
 
 ## Key quirks
 

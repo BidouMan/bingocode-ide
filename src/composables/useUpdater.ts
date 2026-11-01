@@ -3,19 +3,12 @@ import { check } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
 
 /**
- * 静默补丁版本映射：安装包内部版本号必须比已装版本大，更新器才会推送；
- * 但界面上仍按面向用户的版本展示，和学生看到的版本保持一致。
+ * 版本号展示：内部版本号（含 `-beta.N` 预发布号）原样展示给用户，
+ * 不再做 `0.7.6.1` 这类隐藏映射——四段号不是合法 semver，会把后续更新挡住。
  */
-const SILENT_DISPLAY_VERSIONS: Record<string, string> = {
-  '0.7.41': '0.7.4',
-  // 0.7.6 的热修复：内部号用合法的三段预发布版本（能正常收到后续更新），界面仍显示 0.7.6.1
-  '0.7.7-beta.1': '0.7.6.1',
-}
-
-/** 把内部版本号转成界面上展示的版本号 */
 export function toDisplayVersion(version?: string | null): string {
   const raw = String(version || '').replace(/^v/, '')
-  return SILENT_DISPLAY_VERSIONS[raw] || raw || '未知'
+  return raw || '未知'
 }
 
 export function useUpdater() {

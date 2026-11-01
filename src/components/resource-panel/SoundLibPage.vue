@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { useResourceStore } from '../../stores/resource'
 import { useProjectStore } from '../../stores/project'
+import { loadBuiltinAssetManifest, isBuiltinAsset } from '../../utils/builtinAssets'
 
 import iconSoundIcon from '../../assets/icons/sound_icon.svg'
 import iconSoundPlay from '../../assets/icons/sound_play.svg'
@@ -46,12 +47,14 @@ async function loadBuiltinSounds() {
   try {
     const engineAssetsDir = await invoke<string>('get_engine_assets_dir')
     const soundsDir = `${engineAssetsDir}/sounds`
+    // 正式包按清单过滤：覆盖安装残留的旧素材（发布包里已删除的）不再显示
+    const manifest = await loadBuiltinAssetManifest()
 
     // 根目录下的声音文件（category = null，等同于 "全部"）
     try {
       const rootFiles = await invoke<string[]>('list_dir', { path: soundsDir })
       for (const file of rootFiles) {
-        if (!file.endsWith('/') && /\.(wav|mp3|ogg|flac|m4a|aac|wma)$/i.test(file)) {
+        if (!file.endsWith('/') && /\.(wav|mp3|ogg|flac|m4a|aac|wma)$/i.test(file) && isBuiltinAsset(manifest, `sounds/${file}`)) {
           soundItems.value.push({
             name: file.replace(/\.\w+$/, ''),
             path: `${soundsDir}/${file}`,
@@ -65,7 +68,7 @@ async function loadBuiltinSounds() {
     try {
       const effectFiles = await invoke<string[]>('list_dir', { path: `${soundsDir}/effects` })
       for (const file of effectFiles) {
-        if (!file.endsWith('/') && /\.(wav|mp3|ogg|flac|m4a|aac|wma)$/i.test(file)) {
+        if (!file.endsWith('/') && /\.(wav|mp3|ogg|flac|m4a|aac|wma)$/i.test(file) && isBuiltinAsset(manifest, `sounds/effects/${file}`)) {
           soundItems.value.push({
             name: file.replace(/\.\w+$/, ''),
             path: `${soundsDir}/effects/${file}`,
@@ -79,7 +82,7 @@ async function loadBuiltinSounds() {
     try {
       const loopFiles = await invoke<string[]>('list_dir', { path: `${soundsDir}/loop` })
       for (const file of loopFiles) {
-        if (!file.endsWith('/') && /\.(wav|mp3|ogg|flac|m4a|aac|wma)$/i.test(file)) {
+        if (!file.endsWith('/') && /\.(wav|mp3|ogg|flac|m4a|aac|wma)$/i.test(file) && isBuiltinAsset(manifest, `sounds/loop/${file}`)) {
           soundItems.value.push({
             name: file.replace(/\.\w+$/, ''),
             path: `${soundsDir}/loop/${file}`,

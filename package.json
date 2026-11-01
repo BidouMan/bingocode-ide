@@ -11,6 +11,7 @@
     "prepare": "git config core.hooksPath .githooks",
     "engine:setup": "cd engine && bash setup.sh",
     "engine:portable": "bash scripts/setup-portable-python.sh",
+    "assets:manifest": "node scripts/gen-assets-manifest.mjs",
     "docs:build": "tsx docs/build.ts",
     "docs:dev": "tsx docs/dev.ts",
     "docs:preview": "open docs/dist/index.html",

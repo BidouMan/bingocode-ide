@@ -45,6 +45,9 @@ engine/**/*.pyc
 engine/tests/
 engine/test_projects/
 
+# 打包期生成的内置素材清单（pnpm assets:manifest），不要提交
+engine/assets/manifest.json
+
 # PyInstaller build outputs
 engine/dist/
 

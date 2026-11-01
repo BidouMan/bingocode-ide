@@ -12,6 +12,7 @@ import { useRenderStore } from '../../stores/render'
 import { useTerminalStore } from '../../stores/terminal'
 import { useEngine } from '../../composables/useEngine'
 import { useUpdater, toDisplayVersion } from '../../composables/useUpdater'
+import { cleanStaleBuiltinAssets } from '../../utils/builtinAssets'
 import GameCanvas from '../canvas/GameCanvas.vue'
 import CodeEditor from '../editor/CodeEditor.vue'
 import SpriteEditorView from '../sprite-editor/SpriteEditorView.vue'
@@ -421,6 +422,9 @@ onMounted(async () => {
     await editorStore.writeGameManifest(projectRoot)
   }
   console.log(`[Perf] Startup: ${(performance.now() - t0).toFixed(0)}ms`)
+
+  // 后台清理覆盖安装残留的旧内置素材（不阻塞启动，无写权限时静默跳过）
+  void cleanStaleBuiltinAssets()
 })
 
 // 代码编辑器右键菜单事件

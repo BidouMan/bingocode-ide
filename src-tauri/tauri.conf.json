@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build"
+    "beforeDevCommand": "pnpm assets:manifest && pnpm dev",
+    "beforeBuildCommand": "pnpm assets:manifest && pnpm build"
   },
   "app": {
     "windows": [
@@ -55,6 +55,7 @@
     "resources": [
       "../engine/*.py",
       "../engine/models/*.py",
+      "../engine/assets/manifest.json",
       "../engine/assets/maps/**/*",
       "../engine/assets/sprites/**/*",
       "../engine/assets/sounds/**/*",
