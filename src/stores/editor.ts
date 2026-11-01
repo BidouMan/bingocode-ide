@@ -159,16 +159,30 @@ export const useEditorStore = defineStore('editor', () => {
     return null
   }
 
-  /** 把当前游戏模式的项目代码文件名写成清单（不含代码模式的标签，也不含项目目录外的文件） */
+  /**
+   * 用当前游戏标签刷新项目代码清单。
+   * 只收「已经落盘 + 位于项目 code/ 下」的文件：还没运行/保存过的新标签没有真实文件，
+   * 写进清单只会变成下次打开读不到的幽灵条目。
+   * 清单里已经声明、磁盘上也还存在的文件继续保留：关掉标签只是关掉视图，
+   * 不能把项目代码从项目里悄悄删掉（要删请用资源列表的删除，那会连同文件一起删）。
+   */
   async function writeGameManifest(projectRoot: string): Promise<void> {
     if (!projectRoot) return
     const files: string[] = []
+    const add = (name: string) => {
+      if (!name || !name.endsWith('.py') || files.includes(name)) return
+      files.push(name)
+    }
+    const previous = await readGameManifest(projectRoot)
+    for (const name of previous || []) {
+      try {
+        const exists = await invoke<boolean>('path_exists', { path: `${projectRoot}/code/${name}` })
+        if (exists) add(name)
+      } catch { /* 查不到就当已删除 */ }
+    }
     for (const tab of gameTabs.value) {
-      if (!tab.name) continue
-      if (tab.path && !isProjectCodePath(tab.path, projectRoot)) continue
-      const name = tab.path ? baseName(tab.path) : tab.name
-      if (!name) continue
-      if (!files.includes(name)) files.push(name)
+      if (!tab.path || !isProjectCodePath(tab.path, projectRoot)) continue
+      add(baseName(tab.path))
     }
     try {
       await invoke('create_dir', { path: `${projectRoot}/code` })
@@ -181,32 +195,18 @@ export const useEditorStore = defineStore('editor', () => {
     }
   }
 
-  // 游戏代码特征：项目里的 .py 必须真的用到引擎 API 才算游戏代码。
-  // 代码模式写的练习代码（turtle、input/print、random 猜数字等）一条都不命中，
-  // 就算被旧项目包错误地打进 code/ 目录，也绝不会被载入游戏模式。
-  const GAME_CODE_MARKERS = [
-    'Sprite(', 'run()', 'load_map(', 'key_down(', 'key_pressed(', 'key_up(',
-    'Timer(', 'bingo_engine', 'play_sound(', 'play_music(', 'set_background(',
-    'time_passed(', 'mouse',
-  ]
-
-  function looksLikeGameCode(content: string): boolean {
-    if (!content.trim()) return false
-    // 明确是代码模式的教学/练习代码（turtle 画图），永远不算游戏代码
-    if (/\bimport\s+turtle\b/.test(content) || /\bturtle\./.test(content)) return false
-    return GAME_CODE_MARKERS.some(marker => content.includes(marker))
-  }
   /**
    * 打开项目后载入游戏模式的项目代码。
-   * 只载入清单里声明的文件；旧项目包没有清单时扫描出来的候选文件还要过一遍游戏代码校验，
-   * 任何不含引擎 API 的 .py（代码模式的 turtle/练习代码）一律不载入，也不会写进清单。
-   * 这样即便旧项目包里被打进了代码模式的文件，也永远进不了游戏模式、更不会被运行。
+   * 清单是唯一真相：只载入清单声明的文件，绝不按目录扫描、也不按代码内容猜测，
+   * 所以代码模式另存进来的练习文件、旧残留都进不了游戏模式。
+   * 声明的文件这次读不到（被占用 / 已手工删除）时不建标签，但绝不因此重写清单，
+   * 避免一次读取失败就把项目代码从清单里永久删掉。
+   * 只有完全没有清单（清单写入失败等异常情况）才扫一次目录兜底，并补写清单。
    */
   async function loadGameProjectTabs(projectRoot: string): Promise<Tab[]> {
     if (!projectRoot) return []
     const created: Tab[] = []
     const manifest = await readGameManifest(projectRoot)
-    const fromManifest = manifest !== null
     let names = manifest
     if (!names) {
       let entries: string[] = []
@@ -224,11 +224,7 @@ export const useEditorStore = defineStore('editor', () => {
       try {
         content = await invoke<string>('read_file', { path: filePath })
       } catch {
-        continue
-      }
-      // 旧包/无清单：必须像游戏代码；有清单：至少不能是 turtle 之类的教学代码
-      if (!fromManifest ? !looksLikeGameCode(content) : (!content.trim() || /\bimport\s+turtle\b/.test(content))) {
-        console.warn(`[Editor] 跳过非游戏代码文件：${name}`)
+        console.warn(`[Editor] 读取项目代码失败，本次跳过：${name}`)
         continue
       }
       // 同名但还没有路径的标签（启动占位 tab、游戏模式「+」新建的 tab）直接认领这个磁盘文件，
@@ -250,7 +246,7 @@ export const useEditorStore = defineStore('editor', () => {
       created.push(tab)
     }
     if (gameActiveTabIndex.value < 0 && gameTabs.value.length > 0) gameActiveTabIndex.value = 0
-    await writeGameManifest(projectRoot)
+    if (!manifest) await writeGameManifest(projectRoot)
     return created
   }
 

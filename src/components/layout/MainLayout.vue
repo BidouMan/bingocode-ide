@@ -729,9 +729,11 @@ async function fileMenuAction(action: string) {
   // 因此不能“先保存到项目目录再清空”——那样保存的代码马上就会被删掉。
   // 已经保存过 .bc 的项目（bingoPath 有值）先写回该文件再继续，避免丢失；
   // 从未保存过的项目无法自动保存，明确提示后由用户决定是否继续。
-  if ((action === 'new' || action === 'open') && editorStore.hasUnsavedGameTabs) {
+  if ((action === 'new' || action === 'open') && editorStore.hasUnsavedTabs) {
     if (projectStore.bingoPath) {
       await projectStore.saveProject()
+      // 代码模式的未保存文件不属于项目包，也各自存回自己的路径，避免切换项目时丢掉
+      await editorStore.saveAllModifiedTabs()
     } else {
       const proceed = await ask('新建 / 打开项目会替换当前项目，未保存的代码会丢失。是否继续？', {
         title: '切换项目',

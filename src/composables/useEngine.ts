@@ -580,6 +580,11 @@ export function useEngine() {
           }
 
           await invoke('write_file', { path: filePath, content })
+          // 落盘后回填路径：清单只收有真实路径的文件，不回填的话下次打开这个文件就没了
+          if (!t.path) {
+            t.path = filePath
+            t.name = finalName
+          }
         }
 
         // 写入本次运行的代码清单：引擎只执行清单里的文件，

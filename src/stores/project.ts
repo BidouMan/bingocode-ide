@@ -70,8 +70,23 @@ export const useProjectStore = defineStore('project', () => {
 
     for (const tab of [...editor.gameTabs]) {
       if (!tab.name) continue
-      const targetPath = tab.path || `${codeDir}/${tab.name}`
       if (tab.path && !isProjectCodePath(tab.path, root.value)) continue
+      let targetPath = tab.path
+      if (!targetPath) {
+        // 还没落盘的新标签：挑一个不冲突的文件名并回填路径。
+        // 不回填的话，首次运行会再按“同名文件已存在”生成 xxx_1.py，项目里多出重复文件
+        const fileName = tab.name.endsWith('.py') ? tab.name : `${tab.name}.py`
+        const stem = fileName.slice(0, -3)
+        let finalName = fileName
+        let counter = 1
+        while (await invoke<boolean>('path_exists', { path: `${codeDir}/${finalName}` })) {
+          finalName = `${stem}_${counter}.py`
+          counter++
+        }
+        targetPath = `${codeDir}/${finalName}`
+        tab.path = targetPath
+        tab.name = finalName
+      }
       const key = normalizeComparePath(targetPath)
       if (written.has(key)) continue
       written.add(key)
