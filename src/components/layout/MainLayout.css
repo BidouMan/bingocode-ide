@@ -450,6 +450,14 @@
   z-index: 100;
 }
 
+/* 加载页淡出：快电脑上不会「啪」地瞬间消失，避免被看成闪烁 */
+.loading-fade-leave-active {
+  transition: opacity 0.15s ease;
+}
+.loading-fade-leave-to {
+  opacity: 0;
+}
+
 .loading-content {
   text-align: center;
   color: white;

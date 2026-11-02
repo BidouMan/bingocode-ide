@@ -78,6 +78,9 @@ export interface TileSetInfo {
   tileHeight: number
 }
 
+/** 启动加载页最短显示时间：快电脑上避免一闪而过（慢电脑实际耗时更长，不受影响） */
+const MIN_STARTUP_MS = 500
+
 export const useRenderStore = defineStore('render', () => {
   const sprites = ref<Map<string, SpriteData>>(new Map())
   const tiles = ref<Map<string, RenderTileData>>(new Map())
@@ -119,9 +122,11 @@ export const useRenderStore = defineStore('render', () => {
   const textureLoaded = ref(0)
   const isLoadingTextures = ref(false)
   // 启动加载：点击运行就立即显示加载页，避免先露出默认背景色再闪一下加载页；
-  // 结束条件 = 引擎初始化完成（GAME_READY）+ 贴图全部就绪 + 帧循环已同步场景
+  // 结束条件 = 引擎初始化完成（GAME_READY）+ 贴图全部就绪 + 帧循环已同步场景，
+  // 且加载页至少显示 MIN_STARTUP_MS，避免快电脑上一闪而过被看成故障闪烁
   const startupPending = ref(false)
   const engineReady = ref(false)
+  let startupStartedAt = 0
 
   function createSprite(id: string, data: Partial<SpriteData>) {
     sprites.value.set(id, {
@@ -235,6 +240,7 @@ export const useRenderStore = defineStore('render', () => {
     textureLoaded.value = 0
     engineReady.value = false
     startupPending.value = true
+    startupStartedAt = performance.now()
     isLoadingTextures.value = true
   }
 
@@ -245,13 +251,15 @@ export const useRenderStore = defineStore('render', () => {
 
   /**
    * 启动加载收尾：由 GameCanvas 在每帧同步完场景后调用。
-   * 三个条件都满足才隐藏覆盖层：引擎就绪、贴图全部加载完、本帧已完成场景同步。
+   * 条件都满足才隐藏覆盖层：引擎就绪、贴图全部加载完、本帧已完成场景同步，
+   * 并且加载页已显示满 MIN_STARTUP_MS（快电脑也别一闪而过；慢电脑本来就超过，不受影响）。
    * 放在帧末而不是贴图计数回调里，避免「最后一张贴图刚解码完、还没贴到显示对象上」
    * 就提前撤销覆盖层，露出占位画面。
    */
   function tryFinishStartup() {
     if (!startupPending.value || !engineReady.value) return
     if (textureTotal.value > 0 && textureLoaded.value < textureTotal.value) return
+    if (performance.now() - startupStartedAt < MIN_STARTUP_MS) return
     startupPending.value = false
     isLoadingTextures.value = false
   }
@@ -377,6 +385,7 @@ export const useRenderStore = defineStore('render', () => {
     textureTotal,
     textureLoaded,
     isLoadingTextures,
+    startupPending,
     createSprite,
     updateSprite,
     deleteSprite,

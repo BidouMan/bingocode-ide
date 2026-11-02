@@ -867,6 +867,8 @@ let _toggling = false
 let _lastToggleTime = 0
 const TOGGLE_COOLDOWN_MS = 400
 async function toggleRun() {
+  // 启动加载期间忽略运行点击（停止按钮不受影响）：防止还没准备好就反复重启
+  if (renderStore.startupPending) return
   // 防抖 + 冷却：小学生狂点时只生效一次，避免反复杀进程/重启把界面拖垮
   const now = Date.now()
   if (_toggling || now - _lastToggleTime < TOGGLE_COOLDOWN_MS) return
@@ -2401,20 +2403,22 @@ function spriteDisplayName(name: string) {
               <div class="game-preview-container">
                 <GameCanvas class="game-preview-canvas" />
                 <!-- Loading覆盖层 -->
-                <div v-if="renderStore.isLoadingTextures" class="loading-overlay">
-                  <div class="loading-content">
-                    <div class="loading-balls">
-                      <div class="ball ball-1"></div>
-                      <div class="ball ball-2"></div>
-                      <div class="ball ball-3"></div>
-                    </div>
-                    <div class="loading-text">加载资源中...</div>
-                    <div class="loading-progress">{{ loadingProgress }}%</div>
-                    <div class="loading-bar">
-                      <div class="loading-bar-fill" :style="{ width: loadingProgress + '%' }"></div>
+                <Transition name="loading-fade">
+                  <div v-if="renderStore.isLoadingTextures" class="loading-overlay">
+                    <div class="loading-content">
+                      <div class="loading-balls">
+                        <div class="ball ball-1"></div>
+                        <div class="ball ball-2"></div>
+                        <div class="ball ball-3"></div>
+                      </div>
+                      <div class="loading-text">加载资源中...</div>
+                      <div class="loading-progress">{{ loadingProgress }}%</div>
+                      <div class="loading-bar">
+                        <div class="loading-bar-fill" :style="{ width: loadingProgress + '%' }"></div>
+                      </div>
                     </div>
                   </div>
-                </div>
+                </Transition>
               </div>
             </div>
             <div class="outline-tabs">
@@ -2707,20 +2711,22 @@ function spriteDisplayName(name: string) {
         <div class="fullscreen-stage-area">
           <GameCanvas v-show="currentPage === 1" @offset-update="canvasOffsetX = $event" />
           <!-- Loading覆盖层（全屏运行同样先显示加载页，避免闪默认背景色） -->
-          <div v-if="renderStore.isLoadingTextures" class="loading-overlay">
-            <div class="loading-content">
-              <div class="loading-balls">
-                <div class="ball ball-1"></div>
-                <div class="ball ball-2"></div>
-                <div class="ball ball-3"></div>
-              </div>
-              <div class="loading-text">加载资源中...</div>
-              <div class="loading-progress">{{ loadingProgress }}%</div>
-              <div class="loading-bar">
-                <div class="loading-bar-fill" :style="{ width: loadingProgress + '%' }"></div>
+          <Transition name="loading-fade">
+            <div v-if="renderStore.isLoadingTextures" class="loading-overlay">
+              <div class="loading-content">
+                <div class="loading-balls">
+                  <div class="ball ball-1"></div>
+                  <div class="ball ball-2"></div>
+                  <div class="ball ball-3"></div>
+                </div>
+                <div class="loading-text">加载资源中...</div>
+                <div class="loading-progress">{{ loadingProgress }}%</div>
+                <div class="loading-bar">
+                  <div class="loading-bar-fill" :style="{ width: loadingProgress + '%' }"></div>
+                </div>
               </div>
             </div>
-          </div>
+          </Transition>
         </div>
       </div>
 
