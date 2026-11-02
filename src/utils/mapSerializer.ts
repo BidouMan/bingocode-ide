@@ -1,4 +1,5 @@
 import * as pako from 'pako'
+import type { TilePaletteEntry } from '../stores/map'
 import { imageLocalToWorld } from './mapImageGeometry'
 
 export interface MapSaveData {
@@ -22,8 +23,8 @@ export interface MapSaveData {
   tilesets: TilesetSaveData[]
   // 图块集分组：界面上的图块集列表（缺省视为只有一个）
   tilesetGroups?: TilesetGroupSaveData[]
-  // 图块笔刷调色板（顺序=界面显示顺序；col/row 为移动工具摆好的格子坐标）
-  tilePalette?: { resourceId: string; tileIndex: number; col?: number; row?: number }[]
+  // 图块笔刷调色板（顺序=界面显示顺序；col/row 为移动工具摆好的格子坐标；flipH/flipV 为图块自身朝向）
+  tilePalette?: TilePaletteEntry[]
   // 相机设置（引擎运行时读取）
   camera?: {
     enabled: boolean
@@ -191,7 +192,7 @@ export interface MapLoadData {
   layers: any[]
   tileSets: any[]
   tilesetGroups?: TilesetGroupSaveData[]
-  tilePalette?: { resourceId: string; tileIndex: number; col?: number; row?: number }[]
+  tilePalette?: TilePaletteEntry[]
   camera?: {
     enabled: boolean
     target?: string

@@ -93,6 +93,9 @@ importers:
       marked:
         specifier: ^18.0.6
         version: 18.0.6
+      pinyin-pro:
+        specifier: ^3.29.5
+        version: 3.29.5
       tailwindcss:
         specifier: ^4.3.1
         version: 4.3.1
@@ -938,6 +941,9 @@ packages:
       typescript:
         optional: true
 
+  pinyin-pro@3.29.5:
+    resolution: {integrity: sha512-Fk5YoRmtdHqJWqAuzYVG/NzvzeCbaG+ZEwbY6Nbps3QAIrvQQEtcm49frcyCM8i2b5najnzPDtYqrHRYTTiuwQ==}
+
   pixi.js@8.19.0:
     resolution: {integrity: sha512-pq1O6emA/GFjjeF+8d3Pb5t7knD8FsnfWGqQcRjYjsqFZ7QdzG1XgjLDUu0DFJRbafjV5+g8iNLFBx0b9649lg==}
 
@@ -1734,6 +1740,8 @@ snapshots:
       vue: 3.5.38(typescript@6.0.3)
     optionalDependencies:
       typescript: 6.0.3
+
+  pinyin-pro@3.29.5: {}
 
   pixi.js@8.19.0:
     dependencies:

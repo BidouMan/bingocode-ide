@@ -18,7 +18,13 @@ export default defineConfig({
     strictPort: true,
     watch: {
       // 忽略 Rust 构建产物目录，避免 cargo 编译时 .exe 被锁定导致 Vite 监视崩溃（EBUSY）
-      ignored: ['**/src-tauri/target/**'],
+      ignored: [
+        '**/src-tauri/target/**',
+        // publicDir 指向 engine/assets，dev 模式下素材整理工具会写 index.json、改名/移动文件，
+        // Vite 默认把这些变更当成静态资源更新并整页刷新，导致编辑素材时页面反复重启。
+        // 忽略 maps 目录即可保持编辑连续；图片仍由静态服务按需读取，不受影响。
+        '**/engine/assets/maps/**',
+      ],
     },
   },
   envPrefix: ['VITE_', 'TAURI_'],

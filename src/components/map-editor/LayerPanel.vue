@@ -79,14 +79,21 @@ async function resolveThumbUrl(path: string): Promise<string> {
   return url
 }
 
-async function refreshThumbs() {
+async function refreshThumbs(onlyMissing = false, imagesOnly = false) {
   // 图片可能被内联绘制原地覆盖，清空 URL 缓存以拿到最新内容
   urlCache.clear()
   const next = new Map<number, string>()
+  const prevThumbs = thumbUrls.value
   for (const layer of mapStore.mapData.layers) {
+    const cached = prevThumbs.get(layer.id)
+    // 仅补齐新增图层 / 只刷新图片图层时，已有图块缩略图继续复用，避免整张地图反复重绘
+    if (cached && (onlyMissing || (imagesOnly && layer.type === 'drawing'))) {
+      next.set(layer.id, cached)
+      continue
+    }
     if (layer.type === 'image' && layer.image?.imagePath) {
       next.set(layer.id, await resolveThumbUrl(layer.image.imagePath))
-    } else if (layer.type === 'drawing' && props.getLayerThumbnail) {
+    } else if (!imagesOnly && layer.type === 'drawing' && props.getLayerThumbnail) {
       // 图块图层：只取该图层自身渲染结果；未绘制图块时为空（不显示占位图）
       const url = await props.getLayerThumbnail(layer.id)
       if (url) next.set(layer.id, url)
@@ -115,7 +122,8 @@ function setLayerThumb(layerId: number, dataUrl: string) {
   thumbUrls.value = next
 }
 
-watch(() => mapStore.imageRevision, refreshThumbs)
+// 图片内容变化只刷新图片图层缩略图：图块图层没变，不必按整张地图尺寸重画
+watch(() => mapStore.imageRevision, () => refreshThumbs(false, true))
 // 地图载入后 Pixi 渲染有延迟，稍后再补一次图块缩略图
 let loadThumbTimer: ReturnType<typeof setTimeout> | null = null
 watch(() => mapStore.mapLoadCount, () => {
@@ -126,8 +134,8 @@ watch(() => mapStore.mapLoadCount, () => {
     refreshThumbs()
   }, 300)
 })
-// 图层增删后补齐缩略图
-watch(() => mapStore.mapData.layers.length, () => refreshThumbs())
+// 图层增删后补齐缩略图：只算新增图层的，已有图层不用重画整张地图
+watch(() => mapStore.mapData.layers.length, () => refreshThumbs(true))
 // 图块绘制后等 Pixi 渲染完成再取该图层缩略图
 let tileThumbTimer: ReturnType<typeof setTimeout> | null = null
 watch(() => mapStore.tileRevision, () => {

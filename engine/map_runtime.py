@@ -16,6 +16,25 @@ from markers import MapMarkerRef, _map_marker_list, get_marker, get_markers
 import engine_state as st
 
 
+# 图块镜像标志位（Tiled 标准）：GID 高位表示水平 / 垂直翻转
+_TILE_FLIP_H = 0x80000000
+_TILE_FLIP_V = 0x40000000
+_TILE_GID_MASK = 0x1FFFFFFF
+
+
+def _split_tile_gid(gid):
+    """把带镜像标志的 GID 拆成 (基础 GID, 水平翻转, 垂直翻转)。
+
+    翻转标志存在 GID 高位（与前端 src/utils/tileGid.ts 完全一致），
+    基础 GID 取低 29 位，用于查图块集 / 图块属性。
+    """
+    try:
+        value = int(gid)
+    except (TypeError, ValueError):
+        return 0, False, False
+    return value & _TILE_GID_MASK, bool(value & _TILE_FLIP_H), bool(value & _TILE_FLIP_V)
+
+
 def _shape_one_way(raw):
     """形状的单向碰撞参数 → (one_way, dir_x, dir_y, margin)。
 
@@ -196,6 +215,8 @@ def _build_static_world(map_data, map_model):
                 continue
             if tile_id_int <= 0:
                 continue
+            # 拆出镜像标志：碰撞盒要跟着图块一起镜像
+            tile_id_int, flip_h, flip_v = _split_tile_gid(tile_id_int)
             resource_index, tile_index = _find_tileset_for_gid(
                 tile_id_int, map_data.get("tile_sets", [])
             )
@@ -220,16 +241,24 @@ def _build_static_world(map_data, map_model):
             shape = None
             collision_shape = map_model.get_tile_collision_shape(resource_index, tile_index)
             if isinstance(collision_shape, dict) and collision_shape.get("points"):
-                # 编辑器保存的是归一化坐标(0~1)，乘以 tile_size 转世界像素
-                world_points = [
-                    _transform_point(
-                        transform,
-                        tile_x * tile_size + float(p[0]) * tile_size,
-                        tile_y * tile_size + float(p[1]) * tile_size,
+                # 编辑器保存的是归一化坐标(0~1)，先按图块镜像换算，再乘 tile_size 转世界像素
+                world_points = []
+                for p in collision_shape["points"]:
+                    if not isinstance(p, (list, tuple)) or len(p) < 2:
+                        continue
+                    nx = float(p[0])
+                    ny = float(p[1])
+                    if flip_h:
+                        nx = 1.0 - nx
+                    if flip_v:
+                        ny = 1.0 - ny
+                    world_points.append(
+                        _transform_point(
+                            transform,
+                            tile_x * tile_size + nx * tile_size,
+                            tile_y * tile_size + ny * tile_size,
+                        )
                     )
-                    for p in collision_shape["points"]
-                    if isinstance(p, (list, tuple)) and len(p) >= 2
-                ]
                 if len(world_points) >= 3:
                     try:
                         shape = polygon_shape(world_points)
@@ -638,6 +667,8 @@ def _find_tileset_for_gid(gid, tile_sets):
     使用二分查找优化（tile_sets按firstgid升序排列）
     返回 (tileset_index, local_tile_index)，未找到返回 (0, 0)
     """
+    # GID 高位是镜像标志，查表前先剥掉
+    gid, _flip_h, _flip_v = _split_tile_gid(gid)
     if not tile_sets:
         return 0, gid
     # 二分查找：找到最后一个 firstgid <= gid 的瓦片集
@@ -945,6 +976,8 @@ def _render_map():
                     continue
 
                 tile_id_int = int(tile_id)
+                # 拆出镜像标志：图块自身的左右 / 上下镜像
+                tile_id_int, flip_h, flip_v = _split_tile_gid(tile_id_int)
 
                 # 使用Tiled标准：通过firstgid范围查找瓦片集
                 resource_index, actual_tile_index = _find_tileset_for_gid(
@@ -978,8 +1011,9 @@ def _render_map():
                     "y": world_y,
                     "angle": transform["rotation"],
                     "scale": 1.0,
-                    "scale_x": transform["scale_x"],
-                    "scale_y": transform["scale_y"],
+                    # 整层缩放方向 × 图块镜像标志：负缩放由前端按镜像绘制
+                    "scale_x": transform["scale_x"] * (-1.0 if flip_h else 1.0),
+                    "scale_y": transform["scale_y"] * (-1.0 if flip_v else 1.0),
                     "type": "tile",
                     "tile_id": actual_tile_index + 1,  # 恢复为从1开始的索引
                     "tile_set_index": resource_index,

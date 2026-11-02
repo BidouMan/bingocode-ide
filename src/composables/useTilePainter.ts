@@ -2,6 +2,7 @@ import type { MapResource } from '../stores/map'
 import { useMapStore } from '../stores/map'
 import { useMapEditorStore } from '../stores/mapEditor'
 import { createLayerTransform, tileSpriteTransform } from '../utils/tileLayerTransform'
+import { tileBaseGid, tileFlipFlags, withTileFlip } from '../utils/tileGid'
 
 interface TilePainterOptions {
   getApp: () => any
@@ -29,8 +30,16 @@ export function useTilePainter(options: TilePainterOptions) {
   const PREVIEW_ALPHA = 0.5
   let previewContainer: any = null
   const previewSprites = new Map<string, any>()
-  /** 当前预览内容：格子 → 要显示的图块（多图块图章会包含多种图块） */
-  let previewTargets = new Map<string, { x: number; y: number; resource: MapResource; tileIndex: number }>()
+  /** 当前预览内容：格子 → 要显示的图块（多图块图章会包含多种图块，每块带自己的朝向） */
+  type PreviewTarget = {
+    x: number
+    y: number
+    resource: MapResource
+    tileIndex: number
+    flipH: boolean
+    flipV: boolean
+  }
+  let previewTargets = new Map<string, PreviewTarget>()
   /** 已加载的图块纹理（按 资源id:图块序号 缓存，多图块图章共用） */
   const previewTextures = new Map<string, any>()
   const previewLoading = new Set<string>()
@@ -42,22 +51,34 @@ export function useTilePainter(options: TilePainterOptions) {
   let moveTileId = 0
   let moveStartSprite: any = null
   let moveDragSprite: any = null
+  // 正在拖动的图块自身的镜像状态（移动时原样保留）
+  let moveFlipH = false
+  let moveFlipV = false
 
   // 直线/矩形工具：按住拖动的起点与当前终点（抬起时一次性落笔）
   let shapeStart: { x: number; y: number } | null = null
   let shapeEnd: { x: number; y: number } | null = null
   // 本次直线/矩形是否用右键拖出（擦除）
   let shapeErase = false
+  /** 单块画笔：资源下标 + 图块序号 + 该图块自己的朝向 */
+  type TileBrush = { resourceIndex: number; tileIndex: number; flipH: boolean; flipV: boolean }
   // 本次直线/矩形使用的画笔（固定一块，拖动过程中不随随机画笔变化）
-  let shapeBrush: { resourceIndex: number; tileIndex: number } | null = null
+  let shapeBrush: TileBrush | null = null
 
   // 编码 tileId: 使用Tiled标准，GID = firstgid + tileIndex
   // firstgid 由 tileSets 数组中的瓦片集确定
-  function encodeTileId(_layerId: number, localRIdx: number, tileIndex: number): number {
+  function encodeTileId(
+    _layerId: number,
+    localRIdx: number,
+    tileIndex: number,
+    flipH = false,
+    flipV = false,
+  ): number {
     // 直接用素材自己的 firstgid，不再依赖图层顺序偏移
     const resource = mapStore.activeLayerResources[localRIdx]
-    if (resource) return resource.firstgid + tileIndex
-    return tileIndex + 1
+    const baseGid = resource ? resource.firstgid + tileIndex : tileIndex + 1
+    // 图块朝向：翻转标志写进 GID 高位，随格子一起保存 / 移动 / 撤销
+    return withTileFlip(baseGid, flipH, flipV)
   }
 
   async function updateTileAt(layerIndex: number, x: number, y: number) {
@@ -154,8 +175,11 @@ export function useTilePainter(options: TilePainterOptions) {
       sprite.rotation = st.rotation
       sprite.width = target.resource.tileWidth * Math.abs(st.scaleX)
       sprite.height = target.resource.tileHeight * Math.abs(st.scaleY)
-      if (st.scaleX < 0) sprite.scale.x = -Math.abs(sprite.scale.x)
-      if (st.scaleY < 0) sprite.scale.y = -Math.abs(sprite.scale.y)
+      // 整层缩放方向 × 图块自身朝向 = 最终缩放方向（预览与落笔结果保持一致）
+      const sx = (st.scaleX < 0 ? -1 : 1) * (target.flipH ? -1 : 1)
+      const sy = (st.scaleY < 0 ? -1 : 1) * (target.flipV ? -1 : 1)
+      sprite.scale.x = Math.abs(sprite.scale.x) * sx
+      sprite.scale.y = Math.abs(sprite.scale.y) * sy
     }
 
     for (const [cellKey, sprite] of previewSprites) {
@@ -178,11 +202,18 @@ export function useTilePainter(options: TilePainterOptions) {
   }
 
   /** 悬停预览用的画笔：随机画笔固定取池子第一块，避免鼠标移动时预览图块乱跳 */
-  function previewBrush() {
+  function previewBrush(): TileBrush | null {
     if (isRandomActive()) {
       const first = mapStore.randomBrushPool[0]
       const index = mapStore.activeLayerResources.findIndex(r => r.id === first.resourceId)
-      if (index >= 0) return { resourceIndex: index, tileIndex: first.tileIndex }
+      if (index >= 0) {
+        return {
+          resourceIndex: index,
+          tileIndex: first.tileIndex,
+          flipH: first.flipH,
+          flipV: first.flipV,
+        }
+      }
     }
     const brush = mapStore.pickBrush()
     return brush.tileIndex >= 0 ? brush : null
@@ -194,9 +225,9 @@ export function useTilePainter(options: TilePainterOptions) {
    */
   function buildFootprintTargets(
     baseCells: { x: number; y: number }[],
-    brush: { resourceIndex: number; tileIndex: number } | null,
+    brush: TileBrush | null,
   ) {
-    const targets = new Map<string, { x: number; y: number; resource: MapResource; tileIndex: number }>()
+    const targets = new Map<string, PreviewTarget>()
     const resources = mapStore.activeLayerResources
     const entries = stampEntries(true)
     if (entries) {
@@ -206,7 +237,14 @@ export function useTilePainter(options: TilePainterOptions) {
           if (!resource) continue
           const x = base.x + entry.dx
           const y = base.y + entry.dy
-          targets.set(`${x},${y}`, { x, y, resource, tileIndex: entry.tileIndex })
+          targets.set(`${x},${y}`, {
+            x,
+            y,
+            resource,
+            tileIndex: entry.tileIndex,
+            flipH: entry.flipH,
+            flipV: entry.flipV,
+          })
         }
       }
       return targets
@@ -215,7 +253,14 @@ export function useTilePainter(options: TilePainterOptions) {
     const resource = resources[brush.resourceIndex]
     if (!resource) return targets
     for (const base of baseCells) {
-      targets.set(`${base.x},${base.y}`, { x: base.x, y: base.y, resource, tileIndex: brush.tileIndex })
+      targets.set(`${base.x},${base.y}`, {
+        x: base.x,
+        y: base.y,
+        resource,
+        tileIndex: brush.tileIndex,
+        flipH: brush.flipH,
+        flipV: brush.flipV,
+      })
     }
     return targets
   }
@@ -226,10 +271,10 @@ export function useTilePainter(options: TilePainterOptions) {
    */
   function buildPreviewTargets(
     baseCells: { x: number; y: number }[],
-    brush: { resourceIndex: number; tileIndex: number } | null,
+    brush: TileBrush | null,
     useStamp = true,
   ) {
-    const targets = new Map<string, { x: number; y: number; resource: MapResource; tileIndex: number }>()
+    const targets = new Map<string, PreviewTarget>()
 
     if (useStamp && isStampActive()) {
       const resources = mapStore.activeLayerResources
@@ -241,6 +286,8 @@ export function useTilePainter(options: TilePainterOptions) {
           y: cell.y,
           resource,
           tileIndex: cell.tileIndex,
+          flipH: cell.flipH,
+          flipV: cell.flipV,
         })
       }
       return targets
@@ -250,15 +297,19 @@ export function useTilePainter(options: TilePainterOptions) {
     const resource = mapStore.activeLayerResources[brush.resourceIndex]
     if (!resource) return targets
     for (const base of baseCells) {
-      targets.set(`${base.x},${base.y}`, { x: base.x, y: base.y, resource, tileIndex: brush.tileIndex })
+      targets.set(`${base.x},${base.y}`, {
+        x: base.x,
+        y: base.y,
+        resource,
+        tileIndex: brush.tileIndex,
+        flipH: brush.flipH,
+        flipV: brush.flipV,
+      })
     }
     return targets
   }
 
-  function showPreview(
-    targets: Map<string, { x: number; y: number; resource: MapResource; tileIndex: number }>,
-    erase = false,
-  ) {
+  function showPreview(targets: Map<string, PreviewTarget>, erase = false) {
     previewTargets = targets
     previewErase = erase
     ensurePreviewTextures()
@@ -331,17 +382,31 @@ export function useTilePainter(options: TilePainterOptions) {
   }
 
   /**
-   * 多图块图章的图块（相对偏移 + 当前图层的资源下标）；不生效时返回 null。
+   * 多图块图章的图块（相对偏移 + 当前图层的资源下标 + 每块自己的朝向）；不生效时返回 null。
    * ignoreRandom=true 用于擦除预览：随机开关不影响擦除足迹。
    */
   function stampEntries(ignoreRandom = false) {
     if (mapStore.tileBrushStamp.length <= 1) return null
     if (!ignoreRandom && !isStampActive()) return null
-    const result: { dx: number; dy: number; resourceIndex: number; tileIndex: number }[] = []
+    const result: {
+      dx: number
+      dy: number
+      resourceIndex: number
+      tileIndex: number
+      flipH: boolean
+      flipV: boolean
+    }[] = []
     for (const entry of mapStore.tileBrushStamp) {
       const resourceIndex = mapStore.activeLayerResources.findIndex(r => r.id === entry.resourceId)
       if (resourceIndex < 0) continue
-      result.push({ dx: entry.dx, dy: entry.dy, resourceIndex, tileIndex: entry.tileIndex })
+      result.push({
+        dx: entry.dx,
+        dy: entry.dy,
+        resourceIndex,
+        tileIndex: entry.tileIndex,
+        flipH: entry.flipH,
+        flipV: entry.flipV,
+      })
     }
     return result.length ? result : null
   }
@@ -362,14 +427,21 @@ export function useTilePainter(options: TilePainterOptions) {
         y: base.y + e.dy,
         resourceIndex: e.resourceIndex,
         tileIndex: e.tileIndex,
+        flipH: e.flipH,
+        flipV: e.flipV,
       }))
     }
 
     const width = Math.max(...entries.map(e => e.dx)) + 1
     const height = Math.max(...entries.map(e => e.dy)) + 1
-    const lookup = new Map<string, { resourceIndex: number; tileIndex: number }>()
+    const lookup = new Map<string, { resourceIndex: number; tileIndex: number; flipH: boolean; flipV: boolean }>()
     for (const entry of entries) {
-      lookup.set(`${entry.dx},${entry.dy}`, { resourceIndex: entry.resourceIndex, tileIndex: entry.tileIndex })
+      lookup.set(`${entry.dx},${entry.dy}`, {
+        resourceIndex: entry.resourceIndex,
+        tileIndex: entry.tileIndex,
+        flipH: entry.flipH,
+        flipV: entry.flipV,
+      })
     }
     // 用形状左上角做图案锚点：反向拖拽也不会把图案镜像过来
     let minX = Infinity
@@ -379,21 +451,42 @@ export function useTilePainter(options: TilePainterOptions) {
       if (base.y < minY) minY = base.y
     }
     const anchor = { x: minX, y: minY }
-    const cells: { x: number; y: number; resourceIndex: number; tileIndex: number }[] = []
+    const cells: {
+      x: number
+      y: number
+      resourceIndex: number
+      tileIndex: number
+      flipH: boolean
+      flipV: boolean
+    }[] = []
     for (const base of baseCells) {
       const px = (((base.x - anchor.x) % width) + width) % width
       const py = (((base.y - anchor.y) % height) + height) % height
       const hit = lookup.get(`${px},${py}`)
       if (!hit) continue
-      cells.push({ x: base.x, y: base.y, resourceIndex: hit.resourceIndex, tileIndex: hit.tileIndex })
+      cells.push({
+        x: base.x,
+        y: base.y,
+        resourceIndex: hit.resourceIndex,
+        tileIndex: hit.tileIndex,
+        flipH: hit.flipH,
+        flipV: hit.flipV,
+      })
     }
     return cells
   }
 
   /** 把展开后的图章格子写入图层 */
-  function paintStampCells(layerId: number, cells: { x: number; y: number; resourceIndex: number; tileIndex: number }[]) {
+  function paintStampCells(
+    layerId: number,
+    cells: { x: number; y: number; resourceIndex: number; tileIndex: number; flipH: boolean; flipV: boolean }[],
+  ) {
     for (const cell of cells) {
-      mapStore.setTile(cell.x, cell.y, encodeTileId(layerId, cell.resourceIndex, cell.tileIndex))
+      mapStore.setTile(
+        cell.x,
+        cell.y,
+        encodeTileId(layerId, cell.resourceIndex, cell.tileIndex, cell.flipH, cell.flipV),
+      )
       updateTileAt(mapStore.activeLayerIndex, cell.x, cell.y)
     }
   }
@@ -456,15 +549,21 @@ export function useTilePainter(options: TilePainterOptions) {
         const picked = mapStore.pickBrush()
         // 散布把这一格留空：保持原样，不擦除
         if (picked.tileIndex < 0) continue
-        plan(base.x, base.y, encodeTileId(layer.id, picked.resourceIndex, picked.tileIndex))
+        plan(base.x, base.y, encodeTileId(
+          layer.id, picked.resourceIndex, picked.tileIndex, picked.flipH, picked.flipV,
+        ))
       }
     } else if (stampCells.length) {
       for (const cell of stampCells) {
-        plan(cell.x, cell.y, encodeTileId(layer.id, cell.resourceIndex, cell.tileIndex))
+        plan(cell.x, cell.y, encodeTileId(
+          layer.id, cell.resourceIndex, cell.tileIndex, cell.flipH, cell.flipV,
+        ))
       }
     } else {
       for (const base of cells) {
-        plan(base.x, base.y, encodeTileId(layer.id, brush!.resourceIndex, brush!.tileIndex))
+        plan(base.x, base.y, encodeTileId(
+          layer.id, brush!.resourceIndex, brush!.tileIndex, brush!.flipH, brush!.flipV,
+        ))
       }
     }
     for (const cell of planned.values()) {
@@ -491,8 +590,11 @@ export function useTilePainter(options: TilePainterOptions) {
     moveDragSprite.rotation = st.rotation
     moveDragSprite.width = tex.width * Math.abs(st.scaleX)
     moveDragSprite.height = tex.height * Math.abs(st.scaleY)
-    if (st.scaleX < 0) moveDragSprite.scale.x = -Math.abs(moveDragSprite.scale.x)
-    if (st.scaleY < 0) moveDragSprite.scale.y = -Math.abs(moveDragSprite.scale.y)
+    // 整层缩放方向 × 图块自身的镜像状态 = 最终缩放方向
+    const sx = (st.scaleX < 0 ? -1 : 1) * (moveFlipH ? -1 : 1)
+    const sy = (st.scaleY < 0 ? -1 : 1) * (moveFlipV ? -1 : 1)
+    moveDragSprite.scale.x = Math.abs(moveDragSprite.scale.x) * sx
+    moveDragSprite.scale.y = Math.abs(moveDragSprite.scale.y) * sy
   }
 
   function resetPaintKey() {
@@ -518,11 +620,14 @@ export function useTilePainter(options: TilePainterOptions) {
           let tileId = 0
           if (stampCells.length) {
             paintStampCells(layer.id, stampCells)
-            tileId = encodeTileId(layer.id, stampCells[0].resourceIndex, stampCells[0].tileIndex)
+            tileId = encodeTileId(
+              layer.id, stampCells[0].resourceIndex, stampCells[0].tileIndex,
+              stampCells[0].flipH, stampCells[0].flipV,
+            )
           } else {
             const brush = mapStore.pickBrush()
             if (brush.tileIndex < 0) return
-            tileId = encodeTileId(layer.id, brush.resourceIndex, brush.tileIndex)
+            tileId = encodeTileId(layer.id, brush.resourceIndex, brush.tileIndex, brush.flipH, brush.flipV)
             mapStore.setTile(pos.x, pos.y, tileId)
             updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
           }
@@ -564,7 +669,9 @@ export function useTilePainter(options: TilePainterOptions) {
       } else {
         const brush = mapStore.pickBrush()
         if (brush.tileIndex < 0) return
-        const tileId = encodeTileId(mapStore.activeLayer.id, brush.resourceIndex, brush.tileIndex)
+        const tileId = encodeTileId(
+          mapStore.activeLayer.id, brush.resourceIndex, brush.tileIndex, brush.flipH, brush.flipV,
+        )
         floodFill(pos.x, pos.y, tileId)
       }
     } else if (mapEditorStore.currentTool === 'move') {
@@ -574,6 +681,11 @@ export function useTilePainter(options: TilePainterOptions) {
         if (tileId !== 0) {
           moveStartPos = pos
           moveTileId = tileId
+          // 拖动时保留图块自身的镜像状态（GID 高位）
+          const flags = tileFlipFlags(tileId)
+          moveFlipH = flags.flipH
+          moveFlipV = flags.flipV
+          const baseGid = tileBaseGid(tileId)
           const spriteKey = `${layer.id}:${pos.x},${pos.y}`
           moveStartSprite = options.getTileSprite(spriteKey) ?? null
           if (moveStartSprite) moveStartSprite.visible = false
@@ -583,9 +695,9 @@ export function useTilePainter(options: TilePainterOptions) {
           const tileSets = mapStore.mapData.tileSets
           let matchedTs: any = null
           for (let i = tileSets.length - 1; i >= 0; i--) {
-            if (tileId >= tileSets[i].firstgid) { matchedTs = tileSets[i]; break }
+            if (baseGid >= tileSets[i].firstgid) { matchedTs = tileSets[i]; break }
           }
-          const tIdx = matchedTs ? tileId - matchedTs.firstgid : 0
+          const tIdx = matchedTs ? baseGid - matchedTs.firstgid : 0
           const texRes = matchedTs
             ? mapStore.mapData.resources.find((r: MapResource) => r.firstgid === matchedTs.firstgid)
               ?? mapStore.mapData.resources.find((r: MapResource) => r.path === matchedTs.imagePath)
@@ -654,12 +766,17 @@ export function useTilePainter(options: TilePainterOptions) {
                 options.onTilePainted(
                   pos.x,
                   pos.y,
-                  encodeTileId(layer.id, stampCells[0].resourceIndex, stampCells[0].tileIndex),
+                  encodeTileId(
+                    layer.id, stampCells[0].resourceIndex, stampCells[0].tileIndex,
+                    stampCells[0].flipH, stampCells[0].flipV,
+                  ),
                 )
               } else {
                 const brush = mapStore.pickBrush()
                 if (brush.tileIndex >= 0) {
-                  const tileId = encodeTileId(layer.id, brush.resourceIndex, brush.tileIndex)
+                  const tileId = encodeTileId(
+                    layer.id, brush.resourceIndex, brush.tileIndex, brush.flipH, brush.flipV,
+                  )
                   mapStore.setTile(pos.x, pos.y, tileId)
                   updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
                   options.onTilePainted(pos.x, pos.y, tileId)
@@ -696,6 +813,8 @@ export function useTilePainter(options: TilePainterOptions) {
       moveStartPos = null
       moveTileId = 0
       moveStartSprite = null
+      moveFlipH = false
+      moveFlipV = false
       if (moveDragSprite) {
         const app = getApp()
         app?.stage.removeChild(moveDragSprite)
@@ -754,6 +873,8 @@ export function useTilePainter(options: TilePainterOptions) {
   function resetMoveState() {
     moveStartPos = null
     moveTileId = 0
+    moveFlipH = false
+    moveFlipV = false
     resetShapeStroke()
     hidePreview()
     if (moveDragSprite) {

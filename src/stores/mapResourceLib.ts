@@ -1,19 +1,53 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
+import { loadBuiltinAssetManifest, isBuiltinAsset } from '../utils/builtinAssets'
+
+export type ResourceCategory = 'images' | 'tiles' | 'tilesets'
 
 export interface MapResourceItem {
+  /** 显示名：索引里的中文名，未登记时回退为文件名 */
   name: string
+  /** 导入用路径：/maps/<category>/<相对路径> */
   path: string
-  category: 'images' | 'tiles' | 'tilesets'
+  category: ResourceCategory
   thumbnail: string
+  /** 分类：由子目录名自动推导；根目录下的文件为「未分类」 */
+  group: string
+  tags: string[]
+  /** 预计算拼音（全拼 / 首字母），由整理工具写入索引，运行时无需拼音库 */
+  py: string
+  pyi: string
+  /** 文件名（含扩展名） */
+  file: string
+  /** 分类目录内的相对路径，也是索引条目的 key */
+  rel: string
 }
 
+/** 索引条目的字段（可选，缺省时回退文件名） */
+export interface IndexEntry {
+  name?: string
+  tags?: string[]
+  py?: string
+  pyi?: string
+}
+
+/** 每个分类一份 index.json：分类目录名即分类标签，索引只存名字/标签/拼音 */
+export interface CategoryIndex {
+  version: number
+  tagPool: string[]
+  entries: Record<string, IndexEntry>
+}
+
+export const UNGROUPED = '未分类'
+export const INDEX_FILE = 'index.json'
+export const RESOURCE_CATEGORIES: ResourceCategory[] = ['images', 'tiles', 'tilesets']
+
 // 支持的图片扩展名（自动扫描时过滤）
-const IMAGE_EXTS = /\.(png|jpe?g|gif|webp|bmp|svg)$/i
+export const IMAGE_EXTS = /\.(png|jpe?g|gif|webp|bmp|svg)$/i
 
 // 路径拼接：兼容 Windows（反斜杠）和 Unix（正斜杠）
-function joinPath(base: string, ...parts: string[]): string {
+export function joinPath(base: string, ...parts: string[]): string {
   const sep = base.includes('\\') && !base.includes('/') ? '\\' : '/'
   const cleanBase = base.replace(/[\\/]+$/, '')
   const cleanParts = parts.map(p => p.replace(/^[\\/]+/, '').replace(/[\\/]+$/, ''))
@@ -22,48 +56,120 @@ function joinPath(base: string, ...parts: string[]): string {
 
 export const useMapResourceLibStore = defineStore('mapResourceLib', () => {
   const items = ref<MapResourceItem[]>([])
+  /** 引擎素材根目录（绝对路径），整理工具复用 */
+  const engineDir = ref('')
+
+  function categoryDir(category: ResourceCategory): string {
+    return joinPath(engineDir.value, 'maps', category)
+  }
+
+  function indexFilePath(category: ResourceCategory): string {
+    return joinPath(categoryDir(category), INDEX_FILE)
+  }
+
+  /** 读索引：缺失或损坏时静默退化为纯文件名检索，绝不影响资源列表 */
+  async function readCategoryIndex(category: ResourceCategory): Promise<CategoryIndex> {
+    try {
+      const raw = await invoke<string>('read_file', { path: indexFilePath(category) })
+      const data = JSON.parse(raw)
+      return {
+        version: typeof data.version === 'number' ? data.version : 1,
+        tagPool: Array.isArray(data.tagPool) ? data.tagPool : [],
+        entries: data.entries && typeof data.entries === 'object' ? data.entries : {},
+      }
+    } catch {
+      return { version: 1, tagPool: [], entries: {} }
+    }
+  }
+
+  /** 扫描分类目录：根目录文件 + 一级子目录（子目录名即分类标签） */
+  async function scanCategory(category: ResourceCategory): Promise<Array<{ rel: string; file: string; group: string }>> {
+    const dirPath = categoryDir(category)
+    const found: Array<{ rel: string; file: string; group: string }> = []
+    let top: string[]
+    try {
+      top = await invoke<string[]>('list_dir', { path: dirPath })
+    } catch (e) {
+      console.warn(`[MapResourceLib] 扫描 ${category} 目录失败:`, e)
+      return found
+    }
+    for (const entry of top) {
+      if (entry.endsWith('/')) {
+        const group = entry.replace(/\/+$/, '')
+        let sub: string[]
+        try {
+          sub = await invoke<string[]>('list_dir', { path: joinPath(dirPath, group) })
+        } catch {
+          continue
+        }
+        for (const f of sub) {
+          if (f.endsWith('/') || !IMAGE_EXTS.test(f)) continue
+          found.push({ rel: `${group}/${f}`, file: f, group })
+        }
+      } else if (IMAGE_EXTS.test(entry)) {
+        found.push({ rel: entry, file: entry, group: '' })
+      }
+    }
+    return found
+  }
 
   async function loadBuiltinResources() {
     // 每次打开面板都重新扫描：read_dir 为微秒级操作，缩略图走 WebView 缓存的文件 URL，
     // 重扫零负担；这样才能让用户新放入的图片无需重启即被看到
-    const engineDir = await invoke<string>('get_engine_assets_dir')
+    engineDir.value = await invoke<string>('get_engine_assets_dir')
+    // 正式包按清单过滤：覆盖安装残留的旧素材（发布包里已删除的）不再显示
+    const manifest = await loadBuiltinAssetManifest()
 
-    // 自动扫描 maps/images、maps/tiles、maps/tilesets 三个目录
-    // tiles = 单图块；tilesets = 多格图集（尺寸不标注，导入时按当前地图格子切）
-    const categories: MapResourceItem['category'][] = ['images', 'tiles', 'tilesets']
     const results: MapResourceItem[] = []
+    const stamp = Date.now()
 
-    for (const category of categories) {
-      try {
-        const dirPath = joinPath(engineDir, 'maps', category)
-        const files = await invoke<string[]>('list_dir', { path: dirPath })
-        for (const file of files) {
-          if (file.endsWith('/')) continue
-          if (!IMAGE_EXTS.test(file)) continue
-          results.push({
-            name: file.replace(IMAGE_EXTS, ''),
-            path: `/maps/${category}/${file}`,
-            category,
-            // 缩略图直接用文件 URL 交给 <img>：WebView 按需异步解码并自带缓存，
-            // 不做 base64 全量读取，图片再多也不卡主线程。
-            // URL 追加时间戳破坏缓存：用户替换同名图片后重扫能立即看到新图
-            thumbnail: `${convertFileSrc(joinPath(dirPath, file))}?t=${Date.now()}`,
-          })
-        }
-      } catch (e) {
-        console.warn(`[MapResourceLib] 扫描 ${category} 目录失败:`, e)
+    for (const category of RESOURCE_CATEGORIES) {
+      const dirPath = categoryDir(category)
+      const index = await readCategoryIndex(category)
+
+      for (const entry of await scanCategory(category)) {
+        if (!isBuiltinAsset(manifest, `maps/${category}/${entry.rel}`)) continue
+        const meta = index.entries[entry.rel] ?? {}
+        results.push({
+          name: meta.name || entry.file.replace(IMAGE_EXTS, ''),
+          path: `/maps/${category}/${entry.rel}`,
+          category,
+          // 缩略图直接用文件 URL 交给 <img>：WebView 按需异步解码并自带缓存，
+          // 不做 base64 全量读取，图片再多也不卡主线程。
+          // URL 带时间戳破坏缓存：替换同名图片后重扫能立即看到新图
+          thumbnail: `${convertFileSrc(joinPath(dirPath, entry.rel))}?t=${stamp}`,
+          group: entry.group || UNGROUPED,
+          tags: Array.isArray(meta.tags) ? meta.tags : [],
+          py: meta.py ?? '',
+          pyi: meta.pyi ?? '',
+          file: entry.file,
+          rel: entry.rel,
+        })
       }
     }
 
-    // 按名称排序，分类间保持 images -> tiles -> tilesets
-    results.sort((a, b) =>
-      a.category === b.category
-        ? a.name.localeCompare(b.name)
-        : categories.indexOf(a.category) - categories.indexOf(b.category)
-    )
+    // 分类间保持 images -> tiles -> tilesets；分类内「未分类」垫底，其余按中文名排序
+    results.sort((a, b) => {
+      if (a.category !== b.category) {
+        return RESOURCE_CATEGORIES.indexOf(a.category) - RESOURCE_CATEGORIES.indexOf(b.category)
+      }
+      if (a.group !== b.group) {
+        if (a.group === UNGROUPED) return 1
+        if (b.group === UNGROUPED) return -1
+        return a.group.localeCompare(b.group, 'zh-CN')
+      }
+      return a.name.localeCompare(b.name, 'zh-CN', { numeric: true })
+    })
 
     items.value = results
   }
 
-  return { items, loadBuiltinResources }
+  return {
+    items,
+    engineDir,
+    categoryDir,
+    indexFilePath,
+    readCategoryIndex,
+    loadBuiltinResources,
+  }
 })

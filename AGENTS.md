@@ -25,6 +25,7 @@ pnpm tauri dev    # Desktop app (Tauri)
 - **应用内 UI 图标唯一存放处：`src/assets/icons/`**（svg，前端直接 import）。不要在其它目录放应用图标的副本——改图标只改这里
 - 游戏资源（精灵/地图/音效/字体）唯一存放处：`engine/assets/`（详见 Architecture 一节）
 - **内置图块约定**：`maps/tiles/*.png` 是单张图块（尺寸 = 图片边长，16/32 自动识别，导入时可整数倍缩放适配地图格子）；`maps/tilesets/*.png` 是多格图集，**不标注、也不推断格子尺寸**，一律按当前地图格子切；切错了就改地图的「图块尺寸」，会从原图重新切（图集永不缩放）。资源库不要按尺寸再分类。
+- **素材库分类与索引**：分类 = 一级子目录（`maps/tiles/地面/grass.png`），目录名就是资源库里的分类标签，根目录散放的文件显示为「未分类」。每个分类目录里放一份 `index.json`（`{version, tagPool, entries}`，`entries` key = 分类目录内的相对路径），存中文显示名 `name`、`tags`、预计算拼音 `py`/`pyi`；未登记的条目自动回退为文件名。**内置素材只靠索引改中文名，批量移动/改名用 dev 模式的「开发模式 → 素材整理」工具，不要手写 json。**
 - **内置素材清单（覆盖安装清理）**：打包前 `beforeBuildCommand` 会自动执行 `pnpm assets:manifest`，生成 `engine/assets/manifest.json`（已 gitignore，**不要手写或提交**）。正式包只显示清单里的素材，并在启动后后台清理安装目录里清单外的残留文件——这样发布包里删掉的素材，用户覆盖升级后不会继续出现。dev 模式不读清单、也绝不删除源码树文件。
 
 ## Architecture
@@ -75,9 +76,9 @@ engine/
       items/                     # 道具分类（显示名"道具"，结构同上）
     maps/
       packages/                 # .bgm 地图包文件（JSON格式）
-      images/                   # 地图图像素材
-      tiles/                    # 单张瓦片图片
-      tilesets/                 # 瓦片集图片
+      images/                   # 地图图像素材（可含分类子目录 + index.json）
+      tiles/                    # 单张瓦片图片（可含分类子目录 + index.json）
+      tilesets/                 # 瓦片集图片（可含分类子目录 + index.json）
     sounds/                     # 音效资源（.wav）
     ui/                         # UI 资源（favicon, icons）
 ```
@@ -156,6 +157,21 @@ Tauri 更新器按 **semver（严格三段）** 比较版本：只有 `latest.js
   2. `CHANGELOG_USER.md` 标题与 tag **完全一致**（CI 用 `## v<tag>` 匹配提取更新说明）
   3. 更新 README 顶部当前版本号 + 「更新日志」摘要
   4. 打 tag 推送 `v<版本号>`（如 `v0.7.8-beta.1`），CI 自动构建并发布
+
+## 开发者工具（dev-only）规矩
+
+顶部工具栏「开发模式」按钮（[MainLayout.vue](src/components/layout/MainLayout.vue)，`v-if="isDevMode"`）下的二级菜单集中放所有开发者工具。新增工具只加菜单项，不要在各处散落入口。
+
+正式包必须完全不含工具代码——**这不是自动的**，按下面做：
+
+- **组件/工具代码**：只在 `if (import.meta.env.DEV) { await import('./Xxx.vue') }` 分支里**动态** import；禁止在文件顶部静态 import（静态 import 会把组件连同它的 `<style scoped>` 一起打进正式包）
+- **样式**：只写在工具组件自己的 scoped 样式里，不要写进 `MainLayout.css` 等全局样式表
+- **npm 依赖**：一律 `pnpm add -D`（devDependencies 天然不进包，放 dependencies 会进）
+- **Rust 命令**：用 `#[cfg(debug_assertions)]` 包住函数本身和 `run()` 里的注册项
+- **数据文件**：dev 专用数据放 `src/` 下按需 import；`engine/assets/**` 会被 tauri resources 全量打包，只放产品运行时需要的数据（例如素材索引 `index.json`）
+- **验证**：`pnpm build` 后确认 `dist/assets` 里没有该工具的 chunk、grep 不到组件名；必要时再检查 `.app` 内的 `engine/assets`
+
+现有示例：`resource-panel/AssetStudioPage.vue`（素材整理，独立页 page 8）+ `pinyin-pro`（仅 devDependency，拼音在保存时预计算写入索引，运行时不加载拼音库）。
 
 ## Key quirks
 

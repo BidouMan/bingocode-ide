@@ -644,7 +644,7 @@ defineExpose({ switchToMap, placeImageResource })
                   ref="tileResourceBarRef"
                   :disabled="!hasMaps"
                   @open-library="onOpenLibrary"
-                  @select-tile="(rIdx, tIdx) => mapStore.selectTile(rIdx, tIdx)"
+                  @select-tile="(rIdx, tIdx, entry) => mapStore.selectTile(rIdx, tIdx, entry)"
                 />
               </div>
               <div class="tile-workspace-collision">

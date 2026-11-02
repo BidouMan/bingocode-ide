@@ -26,6 +26,7 @@ import {
   SELECTION_STROKE_PX,
 } from '../../utils/selectionStyle'
 import { toUserX, toUserY } from '../../utils/coords'
+import { tileBaseGid, tileFlipFlags } from '../../utils/tileGid'
 import {
   createLayerTransform,
   tileSpriteTransform,
@@ -111,8 +112,12 @@ let sourceImageCache: Map<string, any> = new Map() // "resourcePath" -> HTMLImag
 // ─── 增量渲染状态（切层/重渲染不再清空全部容器，避免画面闪烁、图层"打架"）───
 /** 图层 id → 已渲染内容签名；签名未变则复用现有精灵 */
 const layerRenderKeys = new Map<number, string>()
-/** 上次渲染的图层结构（地图 + id/类型/顺序），变化时必须全量重建 */
+/** 上次渲染的图层结构（地图 + id/类型/顺序） */
 let lastRenderStructureKey = ''
+/** 上次渲染时的图层 id 集合：结构变化（增删图层）时只重建新出现的图层 */
+let lastStructureLayerIds = new Set<number>()
+/** 上次渲染的地图序号：换图时即使图层 id 相同也必须全部重建 */
+let lastRenderMapLoadCount = -1
 
 // ─── 矢量模式：当前矢量图层「之上」图层的快照（保证画布始终按图层顺序显示）───
 const upperSnapshotRef = ref<HTMLCanvasElement>()
@@ -329,7 +334,7 @@ function ensureLayerOrder() {
       container.visible = layers[i].visible
     }
   }
-  tileContainer.sortChildren()
+  tileContainer?.sortChildren()
 }
 
 async function renderTile(layerId: number, x: number, y: number, tileId: number) {
@@ -340,17 +345,21 @@ async function renderTile(layerId: number, x: number, y: number, tileId: number)
 
   const key = `${layerId}:${x},${y}`
 
+  // GID 高位是图块镜像标志，查图块集前先剥掉
+  const baseGid = tileBaseGid(tileId)
+  const flags = tileFlipFlags(tileId)
+
   // 通过 firstgid 范围找到对应的 tileSet
   const tileSets = mapStore.mapData.tileSets
   let matchedTileSet: any = null
   for (let i = tileSets.length - 1; i >= 0; i--) {
-    if (tileId >= tileSets[i].firstgid) {
+    if (baseGid >= tileSets[i].firstgid) {
       matchedTileSet = tileSets[i]
       break
     }
   }
   if (!matchedTileSet) return
-  const tileIndex = tileId - matchedTileSet.firstgid
+  const tileIndex = baseGid - matchedTileSet.firstgid
 
   // 在地图级素材库中优先按 firstgid 精确匹配，回退到路径匹配
   const resource: MapResource | null = mapStore.mapData.resources.find(
@@ -385,9 +394,11 @@ async function renderTile(layerId: number, x: number, y: number, tileId: number)
   sprite.rotation = st.rotation
   sprite.width = resource.tileWidth * Math.abs(st.scaleX)
   sprite.height = resource.tileHeight * Math.abs(st.scaleY)
-  // 负缩放实现镜像
-  if (st.scaleX < 0) sprite.scale.x = -Math.abs(sprite.scale.x)
-  if (st.scaleY < 0) sprite.scale.y = -Math.abs(sprite.scale.y)
+  // 负缩放实现镜像：整层缩放方向 × 图块自身的镜像标志
+  const sx = (st.scaleX < 0 ? -1 : 1) * (flags.flipH ? -1 : 1)
+  const sy = (st.scaleY < 0 ? -1 : 1) * (flags.flipV ? -1 : 1)
+  sprite.scale.x = Math.abs(sprite.scale.x) * sx
+  sprite.scale.y = Math.abs(sprite.scale.y) * sy
 }
 
 function removeTile(layerId: number, x: number, y: number) {
@@ -405,12 +416,16 @@ async function renderAllLayers() {
 
   const layers = mapStore.mapData.layers
 
-  // 地图切换 / 图层增删 / 顺序变化：必须全量重建（图层 id 可能被复用，不能沿用旧内容）
+  // 地图切换 / 图层增删 / 顺序变化会影响图层 id 的复用，需要判断哪些容器必须重建
   const structureKey = `${mapStore.mapLoadCount}:${layers.map(l => `${l.id}:${l.type}`).join(',')}`
   const structureChanged = structureKey !== lastRenderStructureKey
+  const mapLoadCount = mapStore.mapLoadCount
+  const mapChanged = mapLoadCount !== lastRenderMapLoadCount
+  const previousLayerIds = lastStructureLayerIds
   if (structureChanged) {
     lastRenderStructureKey = structureKey
-    layerRenderKeys.clear()
+    lastStructureLayerIds = new Set(layers.map(l => l.id))
+    lastRenderMapLoadCount = mapLoadCount
   }
 
   // 移除不再存在的图层容器
@@ -430,7 +445,12 @@ async function renderAllLayers() {
     const container = getOrCreateLayerContainer(layer.id)
     container.zIndex = i
     container.visible = layer.visible
-    if (structureChanged) clearLayerContainer(layer.id)
+    // 只清理真正需要重建的图层：换图时全部清理；增删图层时只清理新出现的 id。
+    // 已有图层保留精灵和内容签名，新增一个图层不会把整张地图的图块全部重画。
+    if (structureChanged && (mapChanged || !previousLayerIds.has(layer.id))) {
+      clearLayerContainer(layer.id)
+      layerRenderKeys.delete(layer.id)
+    }
   }
 
   // 逐图层增量重建：签名未变则保留现有内容（切图/切层不再出现空画布闪烁）
@@ -3886,6 +3906,14 @@ watch(
   () => painter.hidePreview(),
 )
 
+// 图块朝向 / 图章变化：鼠标停在画布上时立即刷新幽灵预览，不用再挪一下才看到朝向变化
+watch(
+  () => [mapStore.selectedTileFlipH, mapStore.selectedTileFlipV, mapStore.tileBrushStamp],
+  () => {
+    if (cursorGridPos.value) painter.updatePreview(cursorGridPos.value)
+  },
+)
+
 // 切换地图时清理选中状态并重置视角
 watch(
   () => mapStore.currentMapPath,
@@ -4176,9 +4204,10 @@ async function getLayerThumbnailDataUrl(layerId: number): Promise<string | null>
   if (mapW <= 0 || mapH <= 0) return null
 
   const tilesets = mapStore.mapData.tileSets
-  // GID → 图块集 → 素材（同一素材图片只加载一次）
+  // GID → 图块集 → 素材（同一素材图片只加载一次）；高位镜像标志在这里一并解出
   const imageCache = new Map<string, HTMLImageElement | null>()
-  const resolveTile = (gid: number) => {
+  const resolveTile = (rawGid: number) => {
+    const gid = tileBaseGid(rawGid)
     let matched: any = null
     for (let i = tilesets.length - 1; i >= 0; i--) {
       if (gid >= tilesets[i].firstgid) { matched = tilesets[i]; break }
@@ -4187,7 +4216,7 @@ async function getLayerThumbnailDataUrl(layerId: number): Promise<string | null>
     const resource = mapStore.mapData.resources.find(r => r.firstgid === matched.firstgid)
       ?? mapStore.mapData.resources.find(r => r.path === matched.imagePath)
     if (!resource) return null
-    return { resource, tileIndex: gid - matched.firstgid }
+    return { resource, tileIndex: gid - matched.firstgid, ...tileFlipFlags(rawGid) }
   }
 
   const canvas = document.createElement('canvas')
@@ -4212,12 +4241,19 @@ async function getLayerThumbnailDataUrl(layerId: number): Promise<string | null>
     const cols = Math.max(1, Math.floor(iw / hit.resource.tileWidth))
     const col = hit.tileIndex % cols
     const row = Math.floor(hit.tileIndex / cols)
+    // 图块自身的镜像：把目标矩形翻到对应方向再画
+    const flipH = hit.flipH === true
+    const flipV = hit.flipV === true
+    ctx.save()
+    ctx.translate(x * ts + (flipH ? ts : 0), y * ts + (flipV ? ts : 0))
+    ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1)
     ctx.drawImage(
       img,
       col * hit.resource.tileWidth, row * hit.resource.tileHeight,
       hit.resource.tileWidth, hit.resource.tileHeight,
-      x * ts, y * ts, ts, ts,
+      0, 0, ts, ts,
     )
+    ctx.restore()
   }
   return canvas.toDataURL('image/png')
 }

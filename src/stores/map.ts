@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import { useMapEditorStore } from './mapEditor'
 import { useSettingsStore } from './settings'
 import { setUserOriginY } from '../utils/coords'
+import { tileBaseGid } from '../utils/tileGid'
 
 export interface TileData {
   collision: boolean
@@ -257,11 +258,21 @@ export interface MapData {
 }
 
 export interface TilePaletteEntry {
+  /** 稳定标识：同一图块可以复制出多条（朝向不同），复制出来的条目会分配新 id */
+  id?: string
   resourceId: string
   tileIndex: number
+  /** 图块自身朝向（缺省 false）：调色板显示和落笔都按它来 */
+  flipH?: boolean
+  flipV?: boolean
   /** 移动工具固化后的格子坐标（列 / 行）；缺省时按原图自动排列 */
   col?: number
   row?: number
+}
+
+/** 调色板条目的唯一键；旧存档没有 id 时按资源 + 图块序号兜底 */
+export function tilePaletteEntryKey(entry: TilePaletteEntry): string {
+  return entry.id || `${entry.resourceId}:${entry.tileIndex}`
 }
 
 export type MapTool = 'move' | 'select' | 'draw' | 'line' | 'rect' | 'fill'
@@ -523,7 +534,9 @@ export const useMapStore = defineStore('map', () => {
     for (const layer of mapData.value.layers) {
       if (layer.type !== 'drawing') continue
       for (const [key, gid] of Object.entries(layer.tiles)) {
-        if (ranges.some(([lo, hi]) => gid >= lo && gid < hi)) delete layer.tiles[key]
+        // 先去掉镜像高位，否则翻转过的图块会漏删
+        const baseGid = tileBaseGid(gid)
+        if (ranges.some(([lo, hi]) => baseGid >= lo && baseGid < hi)) delete layer.tiles[key]
       }
     }
 
@@ -603,7 +616,12 @@ export const useMapStore = defineStore('map', () => {
       // 调色板里属于该素材的条目，按同样顺序追加到末尾
       for (const entry of mapData.value.tilePalette ?? []) {
         if (entry.resourceId === res.id) {
-          paletteCopies.push({ resourceId: copyId, tileIndex: entry.tileIndex })
+          paletteCopies.push({
+            resourceId: copyId,
+            tileIndex: entry.tileIndex,
+            flipH: entry.flipH === true,
+            flipV: entry.flipV === true,
+          })
         }
       }
       nextFirstgid += 10000
@@ -1052,13 +1070,30 @@ export const useMapStore = defineStore('map', () => {
     activeLayerIndex.value = index
     selectedResourceIndex.value = -1
     selectedTileIndex.value = -1
+    // 切图层后画笔要重新选，朝向状态不能残留
+    selectedTileEntryKey.value = ''
+    selectedTileFlipH.value = false
+    selectedTileFlipV.value = false
     clearImageSelection()
     syncToolWithLayer()
   }
 
-  function selectTile(resourceIndex: number, tileIndex: number) {
+  // ====== 当前画笔：对应的调色板条目与图块朝向 ======
+  /** 当前画笔对应的调色板条目键（同一图块可以复制出多条，靠它区分各自朝向） */
+  const selectedTileEntryKey = ref('')
+  const selectedTileFlipH = ref(false)
+  const selectedTileFlipV = ref(false)
+
+  function selectTile(
+    resourceIndex: number,
+    tileIndex: number,
+    entry?: { key: string; flipH: boolean; flipV: boolean },
+  ) {
     selectedResourceIndex.value = resourceIndex
     selectedTileIndex.value = tileIndex
+    selectedTileEntryKey.value = entry?.key ?? ''
+    selectedTileFlipH.value = entry?.flipH === true
+    selectedTileFlipV.value = entry?.flipV === true
   }
 
   function addResource(input: MapResourceInput): string {
@@ -1158,15 +1193,19 @@ export const useMapStore = defineStore('map', () => {
   }
 
   function setTilePalette(entries: TilePaletteEntry[]) {
-    // 重建调色板时保留已有的格子坐标，否则用户摆好的位置会被打回自动排列
+    // 重建调色板时保留已有的格子坐标与朝向，否则用户摆好的位置 / 翻转会被打回原样
     const prev = new Map(
-      (mapData.value.tilePalette ?? []).map(e => [`${e.resourceId}:${e.tileIndex}`, e]),
+      (mapData.value.tilePalette ?? []).map(e => [tilePaletteEntryKey(e), e]),
     )
     mapData.value.tilePalette = entries.map(e => {
-      const old = prev.get(`${e.resourceId}:${e.tileIndex}`)
+      const old = prev.get(tilePaletteEntryKey(e))
       return {
+        id: e.id,
         resourceId: e.resourceId,
         tileIndex: e.tileIndex,
+        // 新条目没带朝向时沿用旧条目的朝向（切片尺寸变化重建后翻转不能丢）
+        flipH: e.flipH === true || old?.flipH === true,
+        flipV: e.flipV === true || old?.flipV === true,
         col: e.col ?? old?.col,
         row: e.row ?? old?.row,
       }
@@ -1181,19 +1220,6 @@ export const useMapStore = defineStore('map', () => {
     const [item] = arr.splice(from, 1)
     arr.splice(clamped, 0, item)
     mapData.value.tilePalette = arr
-  }
-
-  /** 把当前自动排列固化成格子坐标（移动工具第一次拖动时调用，避免其余图块重新排列） */
-  function setPaletteCells(cells: { resourceId: string; tileIndex: number; col: number; row: number }[]) {
-    const list = mapData.value.tilePalette
-    if (!list?.length) return
-    const byKey = new Map(cells.map(c => [`${c.resourceId}:${c.tileIndex}`, c]))
-    for (const entry of list) {
-      const cell = byKey.get(`${entry.resourceId}:${entry.tileIndex}`)
-      if (!cell) continue
-      entry.col = cell.col
-      entry.row = cell.row
-    }
   }
 
   /** 整层变换（位移 / 缩放 / 旋转）：渲染、碰撞、绘制输入一起跟着变 */
@@ -1211,16 +1237,6 @@ export const useMapStore = defineStore('map', () => {
     tileRevision.value++
   }
 
-  /** 单个图块挪到指定格子（移动 / 交换时由界面调用） */
-  function setPaletteEntryCell(resourceId: string, tileIndex: number, col: number, row: number) {
-    const entry = mapData.value.tilePalette?.find(
-      e => e.resourceId === resourceId && e.tileIndex === tileIndex,
-    )
-    if (!entry) return
-    entry.col = col
-    entry.row = row
-  }
-
   // ====== 调色板里选中的图块（供右侧面板批量设置） ======
   /** 图块面板点选 / 框选的结果，右侧面板按它批量改类型、作用、单向碰撞 */
   const tileBrushSelection = ref<{ resourceId: string; tileIndex: number }[]>([])
@@ -1233,20 +1249,82 @@ export const useMapStore = defineStore('map', () => {
    * 多图块图章：框选多个图块时按调色板里的相对位置整体绘制。
    * dx/dy 相对选区左上角，绘制时以鼠标所在格子为锚点整体贴上去。
    */
-  const tileBrushStamp = ref<{ resourceId: string; tileIndex: number; dx: number; dy: number }[]>([])
+  const tileBrushStamp = ref<{
+    resourceId: string
+    tileIndex: number
+    flipH: boolean
+    flipV: boolean
+    dx: number
+    dy: number
+  }[]>([])
 
-  function setTileBrushStamp(list: { resourceId: string; tileIndex: number; dx: number; dy: number }[]) {
+  function setTileBrushStamp(list: {
+    resourceId: string
+    tileIndex: number
+    flipH: boolean
+    flipV: boolean
+    dx: number
+    dy: number
+  }[]) {
     tileBrushStamp.value = list
+  }
+
+  // ====== 图块朝向：每块调色板图块自带左右 / 上下翻转（复制出来的条目各自独立） ======
+  /** 写入某条调色板图块的朝向；正好是当前画笔时同步画笔状态 */
+  function setPaletteEntryFlip(key: string, flipH: boolean, flipV: boolean) {
+    const entry = mapData.value.tilePalette?.find(e => tilePaletteEntryKey(e) === key)
+    if (!entry) return
+    entry.flipH = flipH
+    entry.flipV = flipV
+    if (selectedTileEntryKey.value === key) {
+      selectedTileFlipH.value = flipH
+      selectedTileFlipV.value = flipV
+    }
+  }
+
+  /** 把一组调色板条目的格子坐标一次性写入（按条目键，支持同一图块的多条副本） */
+  function setPaletteCellsByKey(cells: { key: string; col: number; row: number }[]) {
+    const list = mapData.value.tilePalette
+    if (!list?.length) return
+    const byKey = new Map(cells.map(c => [c.key, c]))
+    for (const entry of list) {
+      const cell = byKey.get(tilePaletteEntryKey(entry))
+      if (!cell) continue
+      entry.col = cell.col
+      entry.row = cell.row
+    }
+  }
+
+  /** 新增一批调色板条目副本（复制图块用）：统一分配新 id，朝向原样保留 */
+  function addPaletteEntryCopies(
+    copies: { resourceId: string; tileIndex: number; flipH: boolean; flipV: boolean; col: number; row: number }[],
+  ): string[] {
+    if (copies.length === 0) return []
+    const existing = mapData.value.tilePalette ?? []
+    const added = copies.map(copy => ({
+      ...copy,
+      id: `pal_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+    }))
+    mapData.value.tilePalette = [...existing, ...added]
+    return added.map(entry => tilePaletteEntryKey(entry))
   }
 
   // ====== 随机绘制（参照 Godot 的随机绘制） ======
   /** 开启后画布上每一格都从随机池里挑一块画 */
   const randomBrushEnabled = ref(false)
-  const randomBrushPool = ref<{ resourceId: string; tileIndex: number }[]>([])
+  const randomBrushPool = ref<{
+    resourceId: string
+    tileIndex: number
+    flipH: boolean
+    flipV: boolean
+  }[]>([])
   /** 散布（同 Godot 的 Scattering）：0~100，越大越可能这一格干脆不画 */
   const randomBrushScatter = ref(0)
 
-  function setRandomBrush(enabled: boolean, pool: { resourceId: string; tileIndex: number }[] = []) {
+  function setRandomBrush(
+    enabled: boolean,
+    pool: { resourceId: string; tileIndex: number; flipH: boolean; flipV: boolean }[] = [],
+  ) {
     randomBrushEnabled.value = enabled
     randomBrushPool.value = enabled ? pool : []
   }
@@ -1256,22 +1334,26 @@ export const useMapStore = defineStore('map', () => {
   }
 
   /** 当前该画的图块：随机模式下从池子里随机取一块，否则用当前画笔；散布命中时这一格不画 */
-  function pickBrush(): { resourceIndex: number; tileIndex: number } {
+  function pickBrush(): { resourceIndex: number; tileIndex: number; flipH: boolean; flipV: boolean } {
     const pool = randomBrushPool.value
     if (randomBrushEnabled.value) {
       // 散布：按概率整格留空，形成自然的稀疏效果
       if (randomBrushScatter.value > 0 && Math.random() * 100 < randomBrushScatter.value) {
-        return { resourceIndex: -1, tileIndex: -1 }
+        return { resourceIndex: -1, tileIndex: -1, flipH: false, flipV: false }
       }
       if (pool.length > 1) {
         const pick = pool[Math.floor(Math.random() * pool.length)]
         const index = activeLayerResources.value.findIndex(r => r.id === pick.resourceId)
-        if (index >= 0) return { resourceIndex: index, tileIndex: pick.tileIndex }
+        if (index >= 0) {
+          return { resourceIndex: index, tileIndex: pick.tileIndex, flipH: pick.flipH, flipV: pick.flipV }
+        }
       }
     }
     return {
       resourceIndex: selectedResourceIndex.value,
       tileIndex: selectedTileIndex.value,
+      flipH: selectedTileFlipH.value,
+      flipV: selectedTileFlipV.value,
     }
   }
 
@@ -1279,13 +1361,20 @@ export const useMapStore = defineStore('map', () => {
     const arr = [...(mapData.value.tilePalette ?? [])]
     if (index < 0 || index >= arr.length) return
     const removed = arr[index]
+    const removedKey = tilePaletteEntryKey(removed)
     arr.splice(index, 1)
     mapData.value.tilePalette = arr
-    // 当前选中的笔刷被移除时清空选择
-    const rIdx = activeLayerResources.value.findIndex(r => r.id === removed.resourceId)
-    if (rIdx === selectedResourceIndex.value && removed.tileIndex === selectedTileIndex.value) {
+    // 当前选中的笔刷被移除时清空选择（同图块的其他副本不受影响）
+    const sameEntry = selectedTileEntryKey.value
+      ? selectedTileEntryKey.value === removedKey
+      : activeLayerResources.value.findIndex(r => r.id === removed.resourceId) === selectedResourceIndex.value
+        && removed.tileIndex === selectedTileIndex.value
+    if (sameEntry) {
       selectedResourceIndex.value = -1
       selectedTileIndex.value = -1
+      selectedTileEntryKey.value = ''
+      selectedTileFlipH.value = false
+      selectedTileFlipV.value = false
     }
   }
 
@@ -1319,7 +1408,8 @@ export const useMapStore = defineStore('map', () => {
       for (const l of mapData.value.layers) {
         if (l.type !== 'drawing') continue
         for (const key of Object.keys(l.tiles)) {
-          const gid = l.tiles[key]
+          // 先去掉镜像高位，否则翻转过的图块会漏删
+          const gid = tileBaseGid(l.tiles[key])
           if (gid >= removedTileSet.firstgid && gid < nextFirstgid) {
             delete l.tiles[key]
             tilesChanged = true
@@ -1804,16 +1894,20 @@ export const useMapStore = defineStore('map', () => {
     addResource,
     addPaletteEntries,
     setTilePalette,
-    setPaletteCells,
-    setPaletteEntryCell,
     setLayerTransform,
     randomBrushEnabled,
     randomBrushPool,
     randomBrushScatter,
     tileBrushSelection,
     tileBrushStamp,
+    selectedTileEntryKey,
+    selectedTileFlipH,
+    selectedTileFlipV,
     setTileBrushSelection,
     setTileBrushStamp,
+    setPaletteEntryFlip,
+    setPaletteCellsByKey,
+    addPaletteEntryCopies,
     setRandomBrush,
     setRandomBrushScatter,
     pickBrush,
@@ -1871,7 +1965,8 @@ export const useMapStore = defineStore('map', () => {
     'addLayer', 'addImageLayer', 'addImageAt', 'removeLayer',
     'moveLayerUp', 'moveLayerDown', 'moveLayerTo',
     'toggleLayerVisibility', 'toggleLayerLock', 'renameLayer',
-    'addResource', 'addPaletteEntries', 'setTilePalette', 'setPaletteCells', 'setPaletteEntryCell',
+    'addResource', 'addPaletteEntries', 'setTilePalette',
+    'setPaletteEntryFlip', 'setPaletteCellsByKey', 'addPaletteEntryCopies',
     'setLayerTransform', 'movePaletteEntry', 'removePaletteEntry', 'removeResource',
     'setResourceAsset', 'clearResources',
     'updateMapProperty', 'updateCameraSettings', 'updateTileSize',

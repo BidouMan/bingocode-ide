@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useMapResourceLibStore } from '../../stores/mapResourceLib'
+import type { MapResourceItem, ResourceCategory } from '../../stores/mapResourceLib'
+import { searchItems } from '../../utils/assetSearch'
+import { fitPixelThumb, THUMB_SIZE } from '../../utils/thumbFit'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   /** 打开范围：图层面板=图像，图块面板=图块（不跟随当前图层类型） */
   scope?: 'image' | 'tile'
-}>()
+}>(), { scope: 'image' })
 
 const emit = defineEmits<{
   'close': []
@@ -19,13 +22,40 @@ const searchQuery = ref('')
 // 只按打开来源过滤分类：图层面板打开时只显示图像，图块面板打开时只显示图块/集合
 const isImageMode = computed(() => props.scope === 'image')
 
-const activeCategory = ref<'images' | 'tiles' | 'tilesets'>(isImageMode.value ? 'images' : 'tiles')
+const ALL_CATEGORIES: Array<{ id: ResourceCategory; label: string }> = [
+  { id: 'images', label: '图像' },
+  { id: 'tiles', label: '图块' },
+  { id: 'tilesets', label: '集合' },
+]
 
 const categories = computed(() =>
   isImageMode.value
-    ? [{ id: 'images' as const, label: '图像' }]
-    : [{ id: 'tiles' as const, label: '图块' }, { id: 'tilesets' as const, label: '集合' }]
+    ? ALL_CATEGORIES.filter(c => c.id === 'images')
+    : ALL_CATEGORIES.filter(c => c.id !== 'images')
 )
+
+const activeCategory = ref<ResourceCategory>(isImageMode.value ? 'images' : 'tiles')
+
+/** 分类 chips：由子目录名自动推导，不额外维护词表 */
+const groupOptions = computed(() => {
+  const groups: string[] = []
+  for (const item of store.items) {
+    if (item.category !== activeCategory.value) continue
+    if (!groups.includes(item.group)) groups.push(item.group)
+  }
+  return groups
+})
+
+const activeGroup = ref<string | null>(null)
+
+watch(activeCategory, () => {
+  activeGroup.value = null
+})
+
+// 目录被移空/改名后，已选中的分类 chip 跟着失效
+watch(groupOptions, groups => {
+  if (activeGroup.value && !groups.includes(activeGroup.value)) activeGroup.value = null
+})
 
 onMounted(() => {
   store.loadBuiltinResources()
@@ -33,16 +63,17 @@ onMounted(() => {
 
 const filteredResources = computed(() => {
   let list = store.items.filter(r => r.category === activeCategory.value)
-  if (searchQuery.value) {
-    const q = searchQuery.value.toLowerCase()
-    list = list.filter(r => r.name.toLowerCase().includes(q))
-  }
-  return list
+  if (activeGroup.value) list = list.filter(r => r.group === activeGroup.value)
+  return searchItems(list, searchQuery.value)
 })
+
+function onCardClick(res: MapResourceItem) {
+  emit('imported', res.path, res.category === 'tilesets' ? 'tileset' : res.category === 'tiles' ? 'tile' : undefined)
+}
 </script>
 
 <template>
-  <div class="map-res-lib-page">
+  <div class="map-res-lib-page" :style="{ '--thumb-size': `${THUMB_SIZE}px` }">
     <div class="lib-toolbar">
       <input v-model="searchQuery" class="lib-search" placeholder="搜索素材..." />
       <div style="width:10px" />
@@ -59,19 +90,36 @@ const filteredResources = computed(() => {
       <div style="width:120px" />
       <button class="lib-return-btn" @click="emit('close')">返回</button>
     </div>
+
+    <!-- 分类筛选：只有存在多个分类时才占一行，避免空条 -->
+    <div v-if="groupOptions.length > 1" class="lib-groups">
+      <button class="lib-group-btn" :class="{ 'lib-group-active': activeGroup === null }" @click="activeGroup = null">全部</button>
+      <button
+        v-for="group in groupOptions"
+        :key="group"
+        class="lib-group-btn"
+        :class="{ 'lib-group-active': activeGroup === group }"
+        @click="activeGroup = activeGroup === group ? null : group"
+      >
+        {{ group }}
+      </button>
+    </div>
+
     <div class="lib-grid">
       <div
         v-for="res in filteredResources"
         :key="res.path"
         class="lib-card"
-        @click="emit('imported', res.path, res.category === 'tilesets' ? 'tileset' : res.category === 'tiles' ? 'tile' : undefined)"
+        @click="onCardClick(res)"
       >
         <div class="lib-card-thumb">
-          <img :src="res.thumbnail" />
+          <img class="thumb-img" :src="res.thumbnail" @load="fitPixelThumb" />
         </div>
         <div class="lib-card-name">{{ res.name }}</div>
       </div>
-      <div v-if="filteredResources.length === 0" class="lib-empty">暂无素材</div>
+      <div v-if="filteredResources.length === 0" class="lib-empty">
+        {{ searchQuery || activeGroup ? '没有找到素材' : '暂无素材' }}
+      </div>
     </div>
   </div>
 </template>
@@ -150,6 +198,49 @@ const filteredResources = computed(() => {
   color: white;
 }
 
+/* 分类 chips：独立一行，横向滚动，视觉规格与 tab 按钮一致 */
+.lib-groups {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 5px;
+  gap: 4px;
+  flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.lib-groups::-webkit-scrollbar {
+  display: none;
+}
+
+.lib-group-btn {
+  height: 24px;
+  padding: 0 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #9ca0a4;
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.lib-group-btn:hover {
+  background: var(--bg-hover);
+  color: white;
+}
+
+.lib-group-active {
+  background: rgb(46, 49, 58);
+  border-color: var(--border-light);
+  color: white;
+}
+
 .lib-return-btn {
   width: 80px;
   min-width: 80px;
@@ -197,10 +288,10 @@ const filteredResources = computed(() => {
 }
 
 .lib-card-thumb {
-  width: 100%;
-  height: 120px;
+  width: var(--thumb-size);
+  height: var(--thumb-size);
   flex: none;
-  margin: 0 0 8px;
+  margin: 0 auto 8px;
   border-radius: 4px;
   display: flex;
   align-items: center;

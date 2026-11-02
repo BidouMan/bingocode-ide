@@ -7,7 +7,7 @@ from models.shape_kernel import ConvexPolygon, intersects, overlap as shape_over
 from models.static_index import SENSOR_EPS
 from collision_geometry import _aabb_polygon_mtv, _image_collision_world_polygons, _playable_bounds, _screen_bounds, _shape_convex_parts, _sign
 from input_api import mouse
-from map_runtime import _find_tileset_for_gid, _shape_one_way
+from map_runtime import _find_tileset_for_gid, _shape_one_way, _split_tile_gid
 from markers import _parse_direction_world, raycast as _raycast
 import engine_state as st
 
@@ -593,8 +593,10 @@ class SpritePhysicsMixin:
                         tile_id = tiles.get((tile_x, tile_y))
                         if not tile_id or tile_id <= 0:
                             continue
+                        # 拆出镜像标志：碰撞盒要跟着图块一起镜像
+                        tile_gid, flip_h, flip_v = _split_tile_gid(int(tile_id))
                         resource_index, tile_index = _find_tileset_for_gid(
-                            int(tile_id), st._CURRENT_MAP["tile_sets"]
+                            tile_gid, st._CURRENT_MAP["tile_sets"]
                         )
                         if not st._MAP_MODEL.get_tile_collision(resource_index, tile_index):
                             continue
@@ -606,14 +608,18 @@ class SpritePhysicsMixin:
                             resource_index, tile_index
                         )
                         if collision_shape and "points" in collision_shape:
-                            # 编辑器保存的是归一化坐标(0~1)，需乘以 tile_size 转为像素
-                            world_points = [
-                                (
-                                    tile_x * tile_size + p[0] * tile_size,
-                                    tile_y * tile_size + p[1] * tile_size,
+                            # 编辑器保存的是归一化坐标(0~1)，先按图块镜像换算，再乘 tile_size 转为像素
+                            world_points = []
+                            for p in collision_shape["points"]:
+                                if not isinstance(p, (list, tuple)) or len(p) < 2:
+                                    continue
+                                nx = 1.0 - float(p[0]) if flip_h else float(p[0])
+                                ny = 1.0 - float(p[1]) if flip_v else float(p[1])
+                                world_points.append(
+                                    (tile_x * tile_size + nx * tile_size, tile_y * tile_size + ny * tile_size)
                                 )
-                                for p in collision_shape["points"]
-                            ]
+                            if not world_points:
+                                continue
                             apply_tile(
                                 min(p[0] for p in world_points),
                                 min(p[1] for p in world_points),

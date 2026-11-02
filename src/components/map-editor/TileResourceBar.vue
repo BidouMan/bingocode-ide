@@ -1,18 +1,27 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
-import { useMapStore, type MapResource, type TilePaletteEntry } from '../../stores/map'
+import {
+  useMapStore,
+  tilePaletteEntryKey,
+  type MapResource,
+  type TilePaletteEntry,
+} from '../../stores/map'
 import { useProjectStore } from '../../stores/project'
+import { useEditorStore } from '../../stores/editor'
 import { useTileAssetImport } from '../../composables/useTileAssetImport'
 import CustomSelect from '../common/CustomSelect.vue'
 import iconLibrary from '../../assets/icons/图片库.svg'
 import iconUpload from '../../assets/icons/上传本地图片资源.svg'
 import iconDelete from '../../assets/icons/icon--delete.svg'
+import iconCopy from '../../assets/icons/copy.svg'
 import iconReset from '../../assets/icons/重置.svg'
 import iconChevron from '../../assets/icons/right_arrow.svg'
 import iconClickSelect from '../../assets/icons/选择箭头.svg'
 import iconMove from '../../assets/icons/移动工具.svg'
 import iconRandom from '../../assets/icons/随机.svg'
+import iconFlipH from '../../assets/icons/水平翻转.svg'
+import iconFlipV from '../../assets/icons/垂直翻转.svg'
 import iconCollisionOn from '../../assets/icons/重置锚点.svg'
 import iconCollisionOff from '../../assets/icons/hitbox.svg'
 
@@ -27,11 +36,16 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'open-library': []
-  'select-tile': [resourceIndex: number, tileIndex: number]
+  'select-tile': [
+    resourceIndex: number,
+    tileIndex: number,
+    entry?: { key: string; flipH: boolean; flipV: boolean },
+  ]
 }>()
 
 const mapStore = useMapStore()
 const projectStore = useProjectStore()
+const editorStore = useEditorStore()
 const { importTileImage, refitTilesetsToGrid } = useTileAssetImport()
 const collapsed = ref(false)
 
@@ -129,8 +143,10 @@ let boxAdditive = false
 let boxRange = { minCol: 0, maxCol: 0, minRow: 0, maxRow: 0 }
 let boxAnchorEntry: PaletteLayoutItem | null = null
 
-function tileKey(resourceId: string, tileIndex: number) {
-  return `${resourceId}:${tileIndex}`
+/** 调色板条目唯一键：复制出来的同图块副本靠它区分 */
+function paletteEntryKeyOf(item: PaletteItem) {
+  const entry = paletteEntries.value[item.paletteIndex]
+  return entry ? tilePaletteEntryKey(entry) : `${item.resource.id}:${item.tileIndex}`
 }
 
 /** 切换工具：两个工具互斥，点哪个就一直是哪个 */
@@ -207,18 +223,18 @@ function onPaletteBoxEnd() {
   if (!boxDragged) {
     // 没有跨格：只处理起点那一块，并把它设为当前画笔
     if (boxAnchorEntry) {
-      const key = tileKey(boxAnchorEntry.item.resource.id, boxAnchorEntry.item.tileIndex)
+      const key = paletteEntryKeyOf(boxAnchorEntry.item)
       // Shift 点已选中的格子：取消它（加选的常规手感）
       if (boxAdditive && paletteSelection.has(key)) {
         paletteSelection.delete(key)
         // 取消后画笔交给剩下最后一块，没有剩余就保持不动
         const fallback = [...paletteLayout.value.items].reverse().find(entry =>
-          paletteSelection.has(tileKey(entry.item.resource.id, entry.item.tileIndex))
+          paletteSelection.has(paletteEntryKeyOf(entry.item))
         )
-        if (fallback) emit('select-tile', fallback.item.resourceIndex, fallback.item.tileIndex)
+        if (fallback) emitSelectItem(fallback.item)
       } else {
         paletteSelection.add(key)
-        emit('select-tile', boxAnchorEntry.item.resourceIndex, boxAnchorEntry.item.tileIndex)
+        emitSelectItem(boxAnchorEntry.item)
       }
     }
     boxAnchorEntry = null
@@ -234,17 +250,17 @@ function onPaletteBoxEnd() {
       col >= boxRange.minCol && col <= boxRange.maxCol
       && row >= boxRange.minRow && row <= boxRange.maxRow
     ) {
-      paletteSelection.add(tileKey(entry.item.resource.id, entry.item.tileIndex))
+      paletteSelection.add(paletteEntryKeyOf(entry.item))
       lastHit = entry
     }
   }
 
   // 多选后当前画笔始终取最后一个：碰撞预览显示的就是它
-  if (lastHit) emit('select-tile', lastHit.item.resourceIndex, lastHit.item.tileIndex)
+  if (lastHit) emitSelectItem(lastHit.item)
   boxAnchorEntry = null
 }
 
-function paletteCellBackground(item: PaletteItem) {
+function paletteCellBackground(item: PaletteItem): Record<string, string> {
   return item.thumb
     ? {
         backgroundImage: `url(${item.thumb})`,
@@ -254,6 +270,34 @@ function paletteCellBackground(item: PaletteItem) {
         imageRendering: 'pixelated',
       }
     : {}
+}
+
+/** 图块自身朝向：调色板里直接按翻转后的样子显示（所见即所得） */
+function paletteCellTransform(item: PaletteItem): Record<string, string> {
+  if (!item.flipH && !item.flipV) return {}
+  return { transform: `scale(${item.flipH ? -1 : 1}, ${item.flipV ? -1 : 1})` }
+}
+
+/** 图块图像的完整样式：缩略图 + 朝向 */
+function paletteCellStyle(item: PaletteItem): Record<string, string> {
+  return { ...paletteCellBackground(item), ...paletteCellTransform(item) }
+}
+
+/** 把某块图块设为当前画笔（带上它自己的朝向与条目键） */
+function emitSelectItem(item: PaletteItem) {
+  emit('select-tile', item.resourceIndex, item.tileIndex, {
+    key: paletteEntryKeyOf(item),
+    flipH: item.flipH,
+    flipV: item.flipV,
+  })
+}
+
+/** 这块图块是不是当前画笔（同图块有副本时按条目键精确匹配） */
+function isCurrentBrush(item: PaletteItem) {
+  if (item.resourceIndex !== mapStore.selectedResourceIndex) return false
+  if (item.tileIndex !== mapStore.selectedTileIndex) return false
+  const key = mapStore.selectedTileEntryKey
+  return key ? key === paletteEntryKeyOf(item) : true
 }
 
 /** 屏幕坐标命中的图块（考虑平移 / 缩放） */
@@ -350,7 +394,7 @@ const moveGhost = computed(() => {
   if (!drag || !drag.moved) return []
   const size = PALETTE_CELL * zoom.value
   return drag.items.map(({ entry, relCol, relRow }) => ({
-    key: tileKey(entry.item.resource.id, entry.item.tileIndex),
+    key: paletteEntryKeyOf(entry.item),
     item: entry.item,
     size,
     left: drag.pointerX - drag.grabOffsetX + relCol * size,
@@ -374,12 +418,11 @@ function materializePaletteCells() {
   const cells = paletteLayout.value.items
     .filter(entry => !cellOfItem(entry.item))
     .map(entry => ({
-      resourceId: entry.item.resource.id,
-      tileIndex: entry.item.tileIndex,
+      key: paletteEntryKeyOf(entry.item),
       col: Math.floor(entry.left / PALETTE_CELL),
       row: Math.floor(entry.top / PALETTE_CELL),
     }))
-  if (cells.length) mapStore.setPaletteCells(cells)
+  if (cells.length) mapStore.setPaletteCellsByKey(cells)
 }
 
 function beginPaletteMove(hit: PaletteLayoutItem, e: PointerEvent) {
@@ -388,11 +431,11 @@ function beginPaletteMove(hit: PaletteLayoutItem, e: PointerEvent) {
   materializePaletteCells()
 
   // 拖的是已选中的图块 → 整组一起移动；否则只拖这一块
-  const anchorKey = tileKey(hit.item.resource.id, hit.item.tileIndex)
+  const anchorKey = paletteEntryKeyOf(hit.item)
   let group: PaletteLayoutItem[]
   if (paletteSelection.has(anchorKey) && paletteSelection.size > 1) {
     group = paletteLayout.value.items.filter(entry =>
-      paletteSelection.has(tileKey(entry.item.resource.id, entry.item.tileIndex)),
+      paletteSelection.has(paletteEntryKeyOf(entry.item)),
     )
   } else {
     paletteSelection.clear()
@@ -475,8 +518,7 @@ function onPaletteMoveEnd() {
  * 占位的比要移动的还多就放弃这次移动。
  */
 function applyGroupMove(items: PaletteLayoutItem[], dCol: number, dRow: number) {
-  const keyOf = (entry: PaletteLayoutItem) =>
-    tileKey(entry.item.resource.id, entry.item.tileIndex)
+  const keyOf = (entry: PaletteLayoutItem) => paletteEntryKeyOf(entry.item)
   const cellOf = (entry: PaletteLayoutItem) => ({
     col: Math.floor(entry.left / PALETTE_CELL),
     row: Math.floor(entry.top / PALETTE_CELL),
@@ -494,22 +536,22 @@ function applyGroupMove(items: PaletteLayoutItem[], dCol: number, dRow: number) 
   if (occupants.length > sourceCells.length) return
 
   const vacated = [...sourceCells].sort((a, b) => a.row - b.row || a.col - b.col)
+  const cells: { key: string; col: number; row: number }[] = []
   occupants.forEach((o, i) => {
-    mapStore.setPaletteEntryCell(
-      o.entry.item.resource.id,
-      o.entry.item.tileIndex,
-      vacated[i].col,
-      vacated[i].row,
-    )
+    cells.push({
+      key: keyOf(o.entry),
+      col: vacated[i].col,
+      row: vacated[i].row,
+    })
   })
   items.forEach((entry, i) => {
-    mapStore.setPaletteEntryCell(
-      entry.item.resource.id,
-      entry.item.tileIndex,
-      targetCells[i].col,
-      targetCells[i].row,
-    )
+    cells.push({
+      key: keyOf(entry),
+      col: targetCells[i].col,
+      row: targetCells[i].row,
+    })
   })
+  mapStore.setPaletteCellsByKey(cells)
 }
 
 // ====== 随机绘制：在选中的多个图块里随机挑一个来画（同 Godot） ======
@@ -522,8 +564,13 @@ function syncRandomBrushPool() {
     return
   }
   const pool = paletteLayout.value.items
-    .filter(entry => paletteSelection.has(tileKey(entry.item.resource.id, entry.item.tileIndex)))
-    .map(entry => ({ resourceId: entry.item.resource.id, tileIndex: entry.item.tileIndex }))
+    .filter(entry => paletteSelection.has(paletteEntryKeyOf(entry.item)))
+    .map(entry => ({
+      resourceId: entry.item.resource.id,
+      tileIndex: entry.item.tileIndex,
+      flipH: entry.item.flipH,
+      flipV: entry.item.flipV,
+    }))
   mapStore.setRandomBrush(true, pool)
 }
 
@@ -543,12 +590,9 @@ function onScatterChange(e: Event) {
 // ====== 批量给选中的图块加 / 去碰撞 ======
 /** 选中的图块；没有多选时退回当前画笔 */
 function selectedTileTargets(): { resourceId: string; tileIndex: number }[] {
-  const targets: { resourceId: string; tileIndex: number }[] = []
-  for (const key of paletteSelection) {
-    const sep = key.lastIndexOf(':')
-    if (sep < 0) continue
-    targets.push({ resourceId: key.slice(0, sep), tileIndex: Number(key.slice(sep + 1)) })
-  }
+  const targets = paletteItems.value
+    .filter(item => paletteSelection.has(paletteEntryKeyOf(item)))
+    .map(item => ({ resourceId: item.resource.id, tileIndex: item.tileIndex }))
   const brush = mapStore.selectedResource
   if (targets.length === 0 && brush && mapStore.selectedTileIndex >= 0) {
     targets.push({ resourceId: brush.id, tileIndex: mapStore.selectedTileIndex })
@@ -568,42 +612,198 @@ function setSelectedTilesCollision(enabled: boolean) {
   }
 }
 
-// 选择变化 / 切换图层后，随机池跟着更新
-watch(
-  () => [randomBrushOn.value, [...paletteSelection].sort().join('|')],
-  () => syncRandomBrushPool(),
-)
+/** 选中图块朝向的签名：翻转后要重新同步给画笔 / 图章 / 随机池 */
+function paletteFlipSignature() {
+  return paletteItems.value
+    .map(item => `${paletteEntryKeyOf(item)}:${item.flipH ? 1 : 0}${item.flipV ? 1 : 0}`)
+    .join('|')
+}
+
+// 注意：这个 watcher 必须放在 paletteItems / paletteLayout 定义之后。
+// watch 的 getter 在组件 setup 阶段就会执行一次（用于记录旧值），
+// 若在 paletteItems 声明之前调用 paletteFlipSignature 会触发 TDZ 报错，
+// 导致 TileResourceBar setup 失败、Vue 更新队列卡死（新建图块图层时整页卡顿）。
 
 /** 把调色板的选择同步给 store：右侧面板批量改属性 + 画布多图块图章 */
 function syncPaletteSelection() {
-  const list: { resourceId: string; tileIndex: number }[] = []
-  for (const key of paletteSelection) {
-    const sep = key.lastIndexOf(':')
-    if (sep <= 0) continue
-    list.push({ resourceId: key.slice(0, sep), tileIndex: Number(key.slice(sep + 1)) })
-  }
-  mapStore.setTileBrushSelection(list)
+  const selectedItems = paletteItems.value.filter(item => paletteSelection.has(paletteEntryKeyOf(item)))
+  mapStore.setTileBrushSelection(
+    selectedItems.map(item => ({ resourceId: item.resource.id, tileIndex: item.tileIndex })),
+  )
 
   // 多选时按调色板里的相对位置生成图章：选中一个则退回普通单块画笔
-  const selectedItems = paletteLayout.value.items.filter(entry =>
-    paletteSelection.has(tileKey(entry.item.resource.id, entry.item.tileIndex))
+  const selectedLayout = paletteLayout.value.items.filter(entry =>
+    paletteSelection.has(paletteEntryKeyOf(entry.item))
   )
-  if (selectedItems.length <= 1) {
+  if (selectedLayout.length <= 1) {
     mapStore.setTileBrushStamp([])
     return
   }
   let minCol = Infinity
   let minRow = Infinity
-  for (const entry of selectedItems) {
+  for (const entry of selectedLayout) {
     minCol = Math.min(minCol, tileGlobalCol(entry))
     minRow = Math.min(minRow, tileGlobalRow(entry))
   }
-  mapStore.setTileBrushStamp(selectedItems.map(entry => ({
+  mapStore.setTileBrushStamp(selectedLayout.map(entry => ({
     resourceId: entry.item.resource.id,
     tileIndex: entry.item.tileIndex,
+    flipH: entry.item.flipH,
+    flipV: entry.item.flipV,
     dx: tileGlobalCol(entry) - minCol,
     dy: tileGlobalRow(entry) - minRow,
   })))
+}
+
+// ====== 图块翻转 / 复制：每块图块的朝向独立，复制后可各自翻转 ======
+/** 当前要翻转的图块：优先用框选/多选，否则作用于当前画笔 */
+function flipTargets(): PaletteItem[] {
+  const selected = paletteItems.value.filter(item => paletteSelection.has(paletteEntryKeyOf(item)))
+  if (selected.length) return selected
+  const current = paletteItems.value.find(item => isCurrentBrush(item))
+  return current ? [current] : []
+}
+
+const flipTargetCount = computed(() => flipTargets().length)
+const flipHOn = computed(() => {
+  const targets = flipTargets()
+  return targets.length > 0 && targets.every(item => item.flipH)
+})
+const flipVOn = computed(() => {
+  const targets = flipTargets()
+  return targets.length > 0 && targets.every(item => item.flipV)
+})
+
+/** 多选翻转时把整组图块的排列也镜像（大物件镜像后不会碎成散块） */
+function mirrorSelectionCells(targets: PaletteItem[], axis: 'h' | 'v') {
+  if (targets.length <= 1) return
+  materializePaletteCells()
+  const layout = paletteLayout.value.items.filter(entry =>
+    targets.some(item => item.key === paletteEntryKeyOf(entry.item))
+  )
+  if (layout.length <= 1) return
+
+  let minCol = Infinity
+  let maxCol = -1
+  let minRow = Infinity
+  let maxRow = -1
+  const cells = layout.map(entry => {
+    const col = tileGlobalCol(entry)
+    const row = tileGlobalRow(entry)
+    if (col < minCol) minCol = col
+    if (col > maxCol) maxCol = col
+    if (row < minRow) minRow = row
+    if (row > maxRow) maxRow = row
+    return { key: paletteEntryKeyOf(entry.item), col, row }
+  })
+  const targetCells = cells.map(cell => ({
+    key: cell.key,
+    col: axis === 'h' ? minCol + maxCol - cell.col : cell.col,
+    row: axis === 'v' ? minRow + maxRow - cell.row : cell.row,
+  }))
+
+  // 目标格被未选中的图块占着时，把占用者换到腾出来的格子，避免重叠
+  const occupancy = new Map<string, string>()
+  for (const entry of paletteLayout.value.items) {
+    occupancy.set(`${tileGlobalCol(entry)},${tileGlobalRow(entry)}`, paletteEntryKeyOf(entry.item))
+  }
+  const movingKeys = new Set(cells.map(cell => cell.key))
+  const vacated = [...cells].sort((a, b) => a.row - b.row || a.col - b.col)
+  const displaced: { key: string; col: number; row: number }[] = []
+  let vacateIndex = 0
+  for (const target of targetCells) {
+    const occupant = occupancy.get(`${target.col},${target.row}`)
+    if (!occupant || movingKeys.has(occupant)) continue
+    const slot = vacated[vacateIndex++]
+    if (!slot) return
+    displaced.push({ key: occupant, col: slot.col, row: slot.row })
+  }
+  mapStore.setPaletteCellsByKey([...targetCells, ...displaced])
+}
+
+/** X / Y：翻转选中的图块（多选时整组排列一起镜像） */
+function toggleFlip(axis: 'h' | 'v') {
+  const targets = flipTargets()
+  if (!targets.length) return
+  const next = axis === 'h' ? !flipHOn.value : !flipVOn.value
+  mirrorSelectionCells(targets, axis)
+  for (const item of targets) {
+    mapStore.setPaletteEntryFlip(
+      paletteEntryKeyOf(item),
+      axis === 'h' ? next : item.flipH,
+      axis === 'v' ? next : item.flipV,
+    )
+  }
+}
+
+/** 复制选中的图块到右侧空位：新条目和原条目完全独立，可以各自翻转 */
+function copySelectedTiles() {
+  if (props.disabled) return
+  const targets = flipTargets()
+  if (!targets.length) return
+  // 先把整张调色板的格子坐标固化，避免复制后其余图块自动重排
+  materializePaletteCells()
+
+  const layoutByKey = new Map<string, PaletteLayoutItem>()
+  for (const entry of paletteLayout.value.items) {
+    layoutByKey.set(paletteEntryKeyOf(entry.item), entry)
+  }
+  const sourceLayout = targets
+    .map(item => layoutByKey.get(item.key))
+    .filter((entry): entry is PaletteLayoutItem => !!entry)
+  if (!sourceLayout.length) return
+
+  let minCol = Infinity
+  let maxCol = -1
+  let minRow = Infinity
+  let maxRow = -1
+  for (const entry of sourceLayout) {
+    const col = tileGlobalCol(entry)
+    const row = tileGlobalRow(entry)
+    if (col < minCol) minCol = col
+    if (col > maxCol) maxCol = col
+    if (row < minRow) minRow = row
+    if (row > maxRow) maxRow = row
+  }
+  const width = maxCol - minCol + 1
+  const height = maxRow - minRow + 1
+
+  // 从选区右侧开始，找一块不会压到已有图块的空位
+  const occupied = new Set<string>()
+  for (const entry of paletteLayout.value.items) {
+    occupied.add(`${tileGlobalCol(entry)},${tileGlobalRow(entry)}`)
+  }
+  let startCol = maxCol + 1
+  while (true) {
+    let free = true
+    for (let dc = 0; dc < width && free; dc++) {
+      for (let dr = 0; dr < height; dr++) {
+        if (occupied.has(`${startCol + dc},${minRow + dr}`)) {
+          free = false
+          break
+        }
+      }
+    }
+    if (free) break
+    startCol++
+  }
+
+  const copies = sourceLayout.map(entry => ({
+    resourceId: entry.item.resource.id,
+    tileIndex: entry.item.tileIndex,
+    flipH: entry.item.flipH,
+    flipV: entry.item.flipV,
+    col: startCol + (tileGlobalCol(entry) - minCol),
+    row: tileGlobalRow(entry),
+  }))
+  const newKeys = mapStore.addPaletteEntryCopies(copies)
+  if (!newKeys.length) return
+
+  // 复制完直接选中新副本，方便马上翻转出另一个朝向
+  paletteSelection.clear()
+  for (const key of newKeys) paletteSelection.add(key)
+  const first = paletteItems.value.find(item => item.key === newKeys[0])
+  if (first) emitSelectItem(first)
 }
 
 function onPalettePointerMove(e: PointerEvent) {
@@ -662,9 +862,6 @@ function fitPaletteView() {
 
 /** 鼠标在调色板上时按 F 才响应，避免影响代码编辑器里的输入 */
 function onPaletteWindowKeydown(e: KeyboardEvent) {
-  if (!paletteHovered.value) return
-  if (e.key !== 'f' && e.key !== 'F') return
-  if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
   const target = e.target as HTMLElement | null
   if (target && (
     target.tagName === 'INPUT'
@@ -672,6 +869,25 @@ function onPaletteWindowKeydown(e: KeyboardEvent) {
     || target.tagName === 'SELECT'
     || target.isContentEditable
   )) return
+
+  // X / Y：翻转选中的图块（同 Tiled），只在地图编辑页的图块模式下生效
+  const key = e.key.toLowerCase()
+  if ((key === 'x' || key === 'y') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (
+      editorStore.isGameMode
+      && editorStore.activeEditorMode === 'map'
+      && mapStore.activeMode === 'tile'
+    ) {
+      e.preventDefault()
+      toggleFlip(key === 'x' ? 'h' : 'v')
+    }
+    return
+  }
+
+  // F：鼠标在调色板上时把全部图块缩放到视口内并居中
+  if (!paletteHovered.value) return
+  if (e.key !== 'f' && e.key !== 'F') return
+  if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
   e.preventDefault()
   fitPaletteView()
 }
@@ -788,9 +1004,14 @@ const paletteEntries = computed(() => mapStore.mapData.tilePalette ?? [])
 
 interface PaletteItem {
   paletteIndex: number
+  /** 条目唯一键（同一图块的多个副本各有一个） */
+  key: string
   resource: MapResource
   resourceIndex: number
   tileIndex: number
+  /** 图块自身朝向：调色板显示与落笔都用它 */
+  flipH: boolean
+  flipV: boolean
   thumb: string
 }
 
@@ -808,9 +1029,12 @@ const paletteItems = computed<PaletteItem[]>(() => {
     if (tileEmpty.value.get(`${resource.id}:${entry.tileIndex}`)) continue
     items.push({
       paletteIndex: i,
+      key: tilePaletteEntryKey(entry),
       resource,
       resourceIndex,
       tileIndex: entry.tileIndex,
+      flipH: entry.flipH === true,
+      flipV: entry.flipV === true,
       thumb: tileThumbs.value.get(`${resource.id}:${entry.tileIndex}`) || '',
     })
   }
@@ -906,24 +1130,28 @@ const paletteLayout = computed<{
   return { items: placed, width, height }
 })
 
+// 选择变化 / 切换图层后，随机池跟着更新（放在 paletteItems / paletteLayout 初始化之后）
+watch(
+  () => [randomBrushOn.value, [...paletteSelection].sort().join('|'), paletteFlipSignature()],
+  () => syncRandomBrushPool(),
+)
+
 // 选择变化、图块移动/重排后都要重算图章位置（放在 paletteLayout 定义之后，immediate 才能安全取值）
 watch(
   () => [
     [...paletteSelection].sort().join('|'),
     paletteLayout.value.items
-      .map(entry => `${tileKey(entry.item.resource.id, entry.item.tileIndex)}@${tileGlobalCol(entry)},${tileGlobalRow(entry)}`)
+      .map(entry => `${paletteEntryKeyOf(entry.item)}@${tileGlobalCol(entry)},${tileGlobalRow(entry)}`)
       .join('|'),
+    // 朝向变化（翻转）后，图章 / 画笔也要跟着换成新朝向
+    paletteFlipSignature(),
   ],
   () => syncPaletteSelection(),
   { immediate: true },
 )
 
 const selectedPaletteIndex = computed(() => {
-  if (mapStore.selectedResourceIndex < 0) return -1
-  const item = paletteItems.value.find(it =>
-    it.resourceIndex === mapStore.selectedResourceIndex
-    && it.tileIndex === mapStore.selectedTileIndex
-  )
+  const item = paletteItems.value.find(it => isCurrentBrush(it))
   return item ? item.paletteIndex : -1
 })
 
@@ -994,6 +1222,8 @@ async function generateTileThumbnails() {
   const batchCols = new Map<string, number>()
   const batchThumbs = new Map<string, string>()
   const batchEmpty = new Map<string, boolean>()
+  // 所有素材都命中缓存时结果和上次完全相同：不要替换 Map（否则会触发整个调色板重绘）
+  let cacheMissed = false
 
   for (const res of tileResources.value) {
     const key = cacheKey(res)
@@ -1007,6 +1237,7 @@ async function generateTileThumbnails() {
       }
       continue
     }
+    cacheMissed = true
 
     try {
       const url = await getResourceUrl(res.path)
@@ -1045,10 +1276,19 @@ async function generateTileThumbnails() {
     }
   }
 
-  tileCounts.value = batchCounts
-  tileCols.value = batchCols
-  tileThumbs.value = batchThumbs
-  tileEmpty.value = batchEmpty
+  // 内容有变化才替换响应式 Map：切图层时全部命中缓存，跳过赋值可避免整块调色板重绘
+  const changed =
+    cacheMissed ||
+    batchCounts.size !== tileCounts.value.size ||
+    batchCols.size !== tileCols.value.size ||
+    batchThumbs.size !== tileThumbs.value.size ||
+    batchEmpty.size !== tileEmpty.value.size
+  if (changed) {
+    tileCounts.value = batchCounts
+    tileCols.value = batchCols
+    tileThumbs.value = batchThumbs
+    tileEmpty.value = batchEmpty
+  }
   syncPaletteWithResources(batchCounts, batchEmpty)
 }
 
@@ -1103,12 +1343,14 @@ function syncPaletteWithResources(
       if (empty.get(`${res.id}:${t}`)) continue
       added.push({ resourceId: res.id, tileIndex: t })
     }
+    // 保留这套素材已有的副本（带 id 的条目）：改图块尺寸重新切图后，用户复制/翻转出来的图块不会丢
+    const keptCopies = palette.filter(e => e.resourceId === res.id && e.id)
     // 在原位置替换，避免整套素材被挪到调色板末尾
     const insertAt = palette.findIndex(e => e.resourceId === res.id)
     const others = palette.filter(e => e.resourceId !== res.id)
     palette = insertAt >= 0
-      ? [...others.slice(0, insertAt), ...added, ...others.slice(insertAt)]
-      : [...others, ...added]
+      ? [...others.slice(0, insertAt), ...added, ...keptCopies, ...others.slice(insertAt)]
+      : [...others, ...added, ...keptCopies]
     expandedSlices.set(res.id, key)
     paletteChanged = true
   }
@@ -1153,7 +1395,7 @@ function onDeleteSelected() {
   if (paletteSelection.size > 0) {
     const indices: number[] = []
     for (const item of paletteItems.value) {
-      if (paletteSelection.has(tileKey(item.resource.id, item.tileIndex))) {
+      if (paletteSelection.has(paletteEntryKeyOf(item))) {
         indices.push(item.paletteIndex)
       }
     }
@@ -1180,6 +1422,14 @@ function onClearResources() {
       </button>
       <button class="bar-tool-btn" v-tooltip="'上传本地图块'" :disabled="disabled" @click="uploadLocalTiles">
         <img :src="iconUpload" class="bar-tool-icon" />
+      </button>
+      <button
+        class="bar-tool-btn"
+        v-tooltip="'复制选中的图块（复制出来的和原图块各自独立，可以分别翻转）'"
+        :disabled="disabled || (paletteSelection.size === 0 && selectedPaletteIndex < 0)"
+        @click="copySelectedTiles"
+      >
+        <img :src="iconCopy" class="bar-tool-icon" />
       </button>
       <button
         class="bar-tool-btn"
@@ -1226,6 +1476,25 @@ function onClearResources() {
         <img :src="iconCollisionOff" class="bar-tool-icon" />
       </button>
       <div class="bar-tool-sep" />
+      <!-- 图块朝向：翻转选中的图块；调色板里直接显示翻转后的样子 -->
+      <button
+        class="bar-tool-btn"
+        :class="{ 'bar-tool-on': flipHOn }"
+        v-tooltip="'左右翻转选中的图块（快捷键 X）'"
+        :disabled="disabled || flipTargetCount === 0"
+        @click="toggleFlip('h')"
+      >
+        <img :src="iconFlipH" class="bar-tool-icon" />
+      </button>
+      <button
+        class="bar-tool-btn"
+        :class="{ 'bar-tool-on': flipVOn }"
+        v-tooltip="'上下翻转选中的图块（快捷键 Y）'"
+        :disabled="disabled || flipTargetCount === 0"
+        @click="toggleFlip('v')"
+      >
+        <img :src="iconFlipV" class="bar-tool-icon" />
+      </button>
       <button
         class="bar-tool-btn"
         :class="{ 'bar-tool-on': randomBrushOn }"
@@ -1289,17 +1558,19 @@ function onClearResources() {
       <div class="palette-plane" :style="palettePlaneStyle">
         <div
           v-for="entry in paletteLayout.items"
-          :key="`${entry.item.resource.id}:${entry.item.tileIndex}`"
+          :key="paletteEntryKeyOf(entry.item)"
           class="tile-cell"
           :class="{
-            'tile-selected': entry.item.resourceIndex === mapStore.selectedResourceIndex
-              && entry.item.tileIndex === mapStore.selectedTileIndex,
-            'tile-box-selected': paletteSelection.has(tileKey(entry.item.resource.id, entry.item.tileIndex)),
-            'tile-dragging': draggingKeys.has(tileKey(entry.item.resource.id, entry.item.tileIndex))
+            'tile-selected': isCurrentBrush(entry.item),
+            'tile-box-selected': paletteSelection.has(paletteEntryKeyOf(entry.item)),
+            'tile-dragging': draggingKeys.has(paletteEntryKeyOf(entry.item))
           }"
           :title="`${entry.item.resource.name} · #${entry.item.tileIndex}`"
-          :style="[{ left: `${entry.left}px`, top: `${entry.top}px` }, paletteCellBackground(entry.item)]"
-        />
+          :style="{ left: `${entry.left}px`, top: `${entry.top}px` }"
+        >
+          <!-- 图块图像单独一层：镜像只翻图片，不影响选中描边和网格 -->
+          <div class="tile-cell-img" :style="paletteCellStyle(entry.item)" />
+        </div>
       </div>
       <!-- 网格独立成层：画在图块之上，永远按屏幕像素清晰渲染 -->
       <canvas ref="gridCanvasRef" class="palette-grid" />
@@ -1330,8 +1601,10 @@ function onClearResources() {
             top: `${ghost.top}px`,
             width: `${ghost.size}px`,
             height: `${ghost.size}px`
-          }, paletteCellBackground(ghost.item)]"
-        />
+          }]"
+        >
+          <div class="tile-ghost-img" :style="paletteCellStyle(ghost.item)" />
+        </div>
       </div>
     </Teleport>
   </div>
@@ -1591,6 +1864,7 @@ function onClearResources() {
 .tile-ghost {
   position: absolute;
   border-radius: 3px;
+  overflow: hidden;
   background-color: rgb(52, 56, 66);
   box-shadow:
     0 8px 16px rgba(0, 0, 0, 0.55),
@@ -1623,19 +1897,32 @@ function onClearResources() {
   transition: box-shadow 0.1s;
 }
 
-/* 悬停：细绿线。已选中的图块不参与悬停，避免点击后看起来还停在 hover 状态 */
+/* 图块图像层：镜像通过 transform 翻这一层，选中描边 / 网格不受影响 */
+.tile-cell-img,
+.tile-ghost-img {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transform-origin: center;
+}
+
+/* 悬停：细绿线。已选中的图块不参与悬停，避免点击后看起来还停在 hover 状态。
+   用 outline 而不是 inset box-shadow：图片是子元素，inset 阴影会被图片盖住 */
 .tile-cell:not(.tile-selected):not(.tile-box-selected):hover {
-  box-shadow: inset 0 0 0 1px rgb(91, 199, 114);
+  outline: 1px solid rgb(91, 199, 114);
+  outline-offset: -1px;
 }
 
 .tile-selected {
   background-color: rgb(60, 65, 75);
-  box-shadow: inset 0 0 0 1px rgb(91, 199, 114);
+  outline: 1px solid rgb(91, 199, 114);
+  outline-offset: -1px;
 }
 
 /* 选择工具选中的图块：2px 亮绿色内描边；优先级高于 hover，点下去立刻变粗线 */
 .tile-cell.tile-box-selected {
-  box-shadow: inset 0 0 0 2px rgb(91, 251, 132);
+  outline: 2px solid rgb(91, 251, 132);
+  outline-offset: -2px;
 }
 
 .resource-empty {
