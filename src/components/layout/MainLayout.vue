@@ -382,7 +382,7 @@ watch(() => editorStore.activeEditorMode, (mode) => {
 onMounted(loadAllMapThumbnails)
 
 // 启动时静默检查更新，只显示圆点提示，不弹窗
-// 窗口标题显示面向用户的版本号（静默补丁版本内部号更大，但界面按映射后的版本展示）
+// 窗口标题原样显示当前版本（含 -beta.N），不做映射/截断，方便按用户截图确认具体版本
 onMounted(async () => {
   try {
     const { getVersion } = await import('@tauri-apps/api/app')
@@ -1367,7 +1367,8 @@ async function loadSpriteThumbnail(item: { id: string; path: string }) {
     // .bsf 文件或含 manifest.json 的 sheet 目录 → 前端从 sheet 裁第一帧
     if (/\.bsf$/i.test(item.path)) {
       const { getBsfThumbnail } = await import('../../composables/useSpriteData')
-      spriteThumbnails.value[item.id] = await normalizeSpriteThumb(await getBsfThumbnail(item.path))
+      // 已是归一化画布（与动画预览同一尺寸基准），不要再裁一遍
+      spriteThumbnails.value[item.id] = await getBsfThumbnail(item.path)
       return
     }
     const isImage = /\.(png|jpe?g|gif|bmp|webp)$/i.test(item.path)
@@ -1377,7 +1378,8 @@ async function loadSpriteThumbnail(item: { id: string; path: string }) {
       }).catch(() => false)
       if (hasManifest) {
         const { getBsfThumbnail } = await import('../../composables/useSpriteData')
-        spriteThumbnails.value[item.id] = await normalizeSpriteThumb(await getBsfThumbnail(item.path))
+        // 已是归一化画布（与动画预览同一尺寸基准），不要再裁一遍
+        spriteThumbnails.value[item.id] = await getBsfThumbnail(item.path)
         return
       }
     }
@@ -2210,17 +2212,6 @@ function spriteDisplayName(name: string) {
         </button>
       </template>
 
-      <!-- 开发模式 (仅 dev 构建可见)：二级菜单集中放开发者工具 -->
-      <div v-if="isDevMode" class="menu-file-wrapper" @mouseleave="closeDevMenu">
-        <button class="menu-btn" @click="toggleDevMenu">
-          <img :src="iconDev" class="menu-icon" />
-          <span>开发模式</span>
-        </button>
-        <div v-show="devMenuVisible" class="file-menu-dropdown">
-          <button class="file-menu-item" @click="openAssetStudio">素材整理</button>
-        </div>
-      </div>
-
       <!-- 设置 (两种模式都有) -->
       <div class="menu-file-wrapper" @mouseleave="closeSettingsMenu">
         <button class="menu-btn" @click="toggleSettingsMenu">
@@ -2329,6 +2320,17 @@ function spriteDisplayName(name: string) {
         </div>
       </div>
 
+      <!-- DEV工具 (仅 dev 构建可见)：二级菜单集中放开发者工具 -->
+      <div v-if="isDevMode" class="menu-file-wrapper" @mouseleave="closeDevMenu">
+        <button class="menu-btn" @click="toggleDevMenu">
+          <img :src="iconDev" class="menu-icon" />
+          <span>DEV工具</span>
+        </button>
+        <div v-show="devMenuVisible" class="file-menu-dropdown">
+          <button class="file-menu-item" @click="openAssetStudio">素材整理</button>
+        </div>
+      </div>
+
       <!-- 弹性空间 (占6份) -->
       <div class="menu-spacer"></div>
 
@@ -2342,7 +2344,7 @@ function spriteDisplayName(name: string) {
 
       <!-- 帮助 (仅图标) -->
       <button class="menu-btn menu-btn-help" v-tooltip="'帮助 (⌘+点击打开AI助手)'" @click="onHelpClick">
-        <img :src="iconHelp" width="24" height="24" />
+        <img :src="iconHelp" width="20" height="20" />
       </button>
     </div>
 

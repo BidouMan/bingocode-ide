@@ -32,11 +32,13 @@ export interface IndexEntry {
   pyi?: string
 }
 
-/** 每个分类一份 index.json：分类目录名即分类标签，索引只存名字/标签/拼音 */
+/** 每个分类一份 index.json：分类目录名即分类标签，索引存名字/标签/拼音 + 分类的显示顺序 */
 export interface CategoryIndex {
   version: number
   tagPool: string[]
   entries: Record<string, IndexEntry>
+  /** 分类的显示顺序（dev 整理工具可手动排序）；未列出的分类按名称排 */
+  groups: string[]
 }
 
 export const UNGROUPED = '未分类'
@@ -76,9 +78,10 @@ export const useMapResourceLibStore = defineStore('mapResourceLib', () => {
         version: typeof data.version === 'number' ? data.version : 1,
         tagPool: Array.isArray(data.tagPool) ? data.tagPool : [],
         entries: data.entries && typeof data.entries === 'object' ? data.entries : {},
+        groups: Array.isArray(data.groups) ? data.groups.filter((g: unknown) => typeof g === 'string') : [],
       }
     } catch {
-      return { version: 1, tagPool: [], entries: {} }
+      return { version: 1, tagPool: [], entries: {}, groups: [] }
     }
   }
 
@@ -113,6 +116,16 @@ export const useMapResourceLibStore = defineStore('mapResourceLib', () => {
     return found
   }
 
+  /** 只列一级子目录名（含空目录），供整理工具管理分类 */
+  async function listGroups(category: ResourceCategory): Promise<string[]> {
+    try {
+      const top = await invoke<string[]>('list_dir', { path: categoryDir(category) })
+      return top.filter(e => e.endsWith('/')).map(e => e.replace(/\/+$/, ''))
+    } catch {
+      return []
+    }
+  }
+
   async function loadBuiltinResources() {
     // 每次打开面板都重新扫描：read_dir 为微秒级操作，缩略图走 WebView 缓存的文件 URL，
     // 重扫零负担；这样才能让用户新放入的图片无需重启即被看到
@@ -122,10 +135,13 @@ export const useMapResourceLibStore = defineStore('mapResourceLib', () => {
 
     const results: MapResourceItem[] = []
     const stamp = Date.now()
+    /** 每个分类的手动排序权重表 */
+    const groupOrders: Record<string, Map<string, number>> = {}
 
     for (const category of RESOURCE_CATEGORIES) {
       const dirPath = categoryDir(category)
       const index = await readCategoryIndex(category)
+      groupOrders[category] = new Map(index.groups.map((g, i) => [g, i]))
 
       for (const entry of await scanCategory(category)) {
         if (!isBuiltinAsset(manifest, `maps/${category}/${entry.rel}`)) continue
@@ -148,7 +164,8 @@ export const useMapResourceLibStore = defineStore('mapResourceLib', () => {
       }
     }
 
-    // 分类间保持 images -> tiles -> tilesets；分类内「未分类」垫底，其余按中文名排序
+    // 分类间保持 images -> tiles -> tilesets；分类内「未分类」垫底，
+    // 其余按 index.json 里的手动顺序排，未登记的按名称排
     results.sort((a, b) => {
       if (a.category !== b.category) {
         return RESOURCE_CATEGORIES.indexOf(a.category) - RESOURCE_CATEGORIES.indexOf(b.category)
@@ -156,6 +173,10 @@ export const useMapResourceLibStore = defineStore('mapResourceLib', () => {
       if (a.group !== b.group) {
         if (a.group === UNGROUPED) return 1
         if (b.group === UNGROUPED) return -1
+        const order = groupOrders[a.category]
+        const ia = order.get(a.group) ?? Number.MAX_SAFE_INTEGER
+        const ib = order.get(b.group) ?? Number.MAX_SAFE_INTEGER
+        if (ia !== ib) return ia - ib
         return a.group.localeCompare(b.group, 'zh-CN')
       }
       return a.name.localeCompare(b.name, 'zh-CN', { numeric: true })
@@ -170,6 +191,7 @@ export const useMapResourceLibStore = defineStore('mapResourceLib', () => {
     categoryDir,
     indexFilePath,
     readCategoryIndex,
+    listGroups,
     loadBuiltinResources,
   }
 })

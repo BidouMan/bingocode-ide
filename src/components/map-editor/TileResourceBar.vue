@@ -20,6 +20,9 @@ import iconChevron from '../../assets/icons/right_arrow.svg'
 import iconClickSelect from '../../assets/icons/选择箭头.svg'
 import iconMove from '../../assets/icons/移动工具.svg'
 import iconRandom from '../../assets/icons/随机.svg'
+import iconZoomIn from '../../assets/icons/add-one.svg'
+import iconZoomOut from '../../assets/icons/reduce-one.svg'
+import iconFocus from '../../assets/icons/聚焦.svg'
 import iconFlipH from '../../assets/icons/水平翻转.svg'
 import iconFlipV from '../../assets/icons/垂直翻转.svg'
 import iconCollisionOn from '../../assets/icons/重置锚点.svg'
@@ -860,6 +863,68 @@ function fitPaletteView() {
   panY.value = (rect.height - paletteLayout.value.height * zoom.value) / 2
 }
 
+/** 悬浮缩放条显示的百分比 */
+const paletteZoomText = computed(() => `${Math.round(zoom.value * 100)}%`)
+
+/** 按钮缩放：以视口中心为锚点，避免缩放时视野跑偏 */
+function zoomPaletteBy(factor: number) {
+  const vp = viewportRef.value
+  if (!vp) return
+  const next = Math.min(PALETTE_MAX_ZOOM, Math.max(PALETTE_MIN_ZOOM, zoom.value * factor))
+  if (next === zoom.value) return
+  const rect = vp.getBoundingClientRect()
+  const cx = rect.width / 2
+  const cy = rect.height / 2
+  const ratio = next / zoom.value
+  panX.value = cx - (cx - panX.value) * ratio
+  panY.value = cy - (cy - panY.value) * ratio
+  zoom.value = next
+}
+
+/** 实际尺寸（100%）居中显示整张调色板 */
+function resetPaletteView() {
+  const vp = viewportRef.value
+  if (!vp) return
+  const rect = vp.getBoundingClientRect()
+  zoom.value = 1
+  panX.value = (rect.width - paletteLayout.value.width) / 2
+  panY.value = (rect.height - paletteLayout.value.height) / 2
+}
+
+/**
+ * 放大并居中选中的图块（多选时按整组包围盒居中）。
+ * 放大到单格约 60px（zoom=1.5）就够看清，不继续放大以免素材过大。
+ */
+function focusSelectedTileView() {
+  const vp = viewportRef.value
+  if (!vp) return
+  const selectedLayout = paletteLayout.value.items.filter(entry =>
+    paletteSelection.has(paletteEntryKeyOf(entry.item))
+  )
+  const targets = selectedLayout.length
+    ? selectedLayout
+    : paletteLayout.value.items.filter(entry => isCurrentBrush(entry.item))
+  if (!targets.length) return
+
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const entry of targets) {
+    if (entry.left < minX) minX = entry.left
+    if (entry.top < minY) minY = entry.top
+    if (entry.left + PALETTE_CELL > maxX) maxX = entry.left + PALETTE_CELL
+    if (entry.top + PALETTE_CELL > maxY) maxY = entry.top + PALETTE_CELL
+  }
+
+  const rect = vp.getBoundingClientRect()
+  // 已经放得更大时保持当前比例，不要因为点一下反而缩小
+  const next = Math.min(PALETTE_MAX_ZOOM, Math.max(1.5, zoom.value))
+  zoom.value = next
+  panX.value = rect.width / 2 - ((minX + maxX) / 2) * next
+  panY.value = rect.height / 2 - ((minY + maxY) / 2) * next
+}
+
 /** 鼠标在调色板上时按 F 才响应，避免影响代码编辑器里的输入 */
 function onPaletteWindowKeydown(e: KeyboardEvent) {
   const target = e.target as HTMLElement | null
@@ -1574,6 +1639,40 @@ function onClearResources() {
       </div>
       <!-- 网格独立成层：画在图块之上，永远按屏幕像素清晰渲染 -->
       <canvas ref="gridCanvasRef" class="palette-grid" />
+
+      <!-- 悬浮缩放条：固定在调色板右下角，不随图块平移/缩放 -->
+      <div class="palette-float-bar" @pointerdown.stop @mousedown.stop @dblclick.stop>
+        <button
+          class="float-btn"
+          v-tooltip="'缩小'"
+          :disabled="zoom <= PALETTE_MIN_ZOOM"
+          @click="zoomPaletteBy(1 / 1.25)"
+        >
+          <img :src="iconZoomOut" class="float-icon" />
+        </button>
+        <button
+          class="float-zoom-text"
+          v-tooltip="'点击恢复 100% 并居中显示'"
+          @click="resetPaletteView"
+        >{{ paletteZoomText }}</button>
+        <button
+          class="float-btn"
+          v-tooltip="'放大'"
+          :disabled="zoom >= PALETTE_MAX_ZOOM"
+          @click="zoomPaletteBy(1.25)"
+        >
+          <img :src="iconZoomIn" class="float-icon" />
+        </button>
+        <span class="float-sep" />
+        <button
+          class="float-btn"
+          v-tooltip="'放大并居中选中的图块'"
+          :disabled="!paletteLayout.items.length"
+          @click="focusSelectedTileView"
+        >
+          <img :src="iconFocus" class="float-icon" />
+        </button>
+      </div>
       <div
         v-if="paletteBoxRect"
         class="palette-box-select"
@@ -1817,6 +1916,80 @@ function onClearResources() {
   z-index: 4;
 }
 
+/* 悬浮缩放条：固定在调色板右下角，深色圆角浮窗（参考 Unity 图块调色板底部工具条） */
+.palette-float-bar {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(34, 37, 43, 0.92);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+  cursor: default;
+  user-select: none;
+}
+
+.float-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.1s;
+}
+
+.float-btn:hover:not(:disabled) {
+  background: rgb(61, 64, 72);
+}
+
+.float-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.float-icon {
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+}
+
+/* 百分比本身也是按钮：点一下恢复 100% 并居中 */
+.float-zoom-text {
+  min-width: 42px;
+  height: 26px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #cfd3d8;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  cursor: pointer;
+  transition: background-color 0.1s;
+}
+
+.float-zoom-text:hover {
+  background: rgb(61, 64, 72);
+}
+
+.float-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
 .palette-viewport:active {
   cursor: grabbing;
 }
@@ -1838,11 +2011,11 @@ function onClearResources() {
   cursor: grabbing;
 }
 
-/* 框选矩形 */
+/* 框选矩形：蓝色，和绿色素材区分开 */
 .palette-box-select {
   position: absolute;
-  border: 1px solid rgb(91, 251, 132);
-  background: rgba(91, 251, 132, 0.12);
+  border: 1px solid rgb(10, 132, 255);
+  background: rgba(10, 132, 255, 0.16);
   pointer-events: none;
   z-index: 5;
 }
@@ -1866,14 +2039,23 @@ function onClearResources() {
   border-radius: 3px;
   overflow: hidden;
   background-color: rgb(52, 56, 66);
-  box-shadow:
-    0 8px 16px rgba(0, 0, 0, 0.55),
-    inset 0 0 0 1px rgb(91, 251, 132);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.55);
   transform: scale(1.06);
   transform-origin: center;
   pointer-events: none;
   image-rendering: pixelated;
   opacity: 0.95;
+}
+
+/* 拖影描边也放到覆盖层：图片是子元素，inset 阴影会被盖住 */
+.tile-ghost::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  box-sizing: border-box;
+  border: 2px solid rgb(64, 158, 255);
+  pointer-events: none;
 }
 
 .palette-plane {
@@ -1894,7 +2076,6 @@ function onClearResources() {
   background-color: transparent;
   border: none;
   cursor: default;
-  transition: box-shadow 0.1s;
 }
 
 /* 图块图像层：镜像通过 transform 翻这一层，选中描边 / 网格不受影响 */
@@ -1906,23 +2087,31 @@ function onClearResources() {
   transform-origin: center;
 }
 
-/* 悬停：细绿线。已选中的图块不参与悬停，避免点击后看起来还停在 hover 状态。
-   用 outline 而不是 inset box-shadow：图片是子元素，inset 阴影会被图片盖住 */
-.tile-cell:not(.tile-selected):not(.tile-box-selected):hover {
-  outline: 1px solid rgb(91, 199, 114);
-  outline-offset: -1px;
+/* 选中 / 悬停高亮：放覆盖层，画在图片之上（参考 Unity 图块调色板：干净的实心描边，不加辉光） */
+.tile-cell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  pointer-events: none;
+  transition: border-color 0.1s;
 }
 
-.tile-selected {
-  background-color: rgb(60, 65, 75);
-  outline: 1px solid rgb(91, 199, 114);
-  outline-offset: -1px;
+/* 悬停：细白线。已选中的图块不参与悬停，避免点击后看起来还停在 hover 状态 */
+.tile-cell:not(.tile-selected):not(.tile-box-selected):hover::after {
+  border-color: rgba(255, 255, 255, 0.85);
 }
 
-/* 选择工具选中的图块：2px 亮绿色内描边；优先级高于 hover，点下去立刻变粗线 */
-.tile-cell.tile-box-selected {
-  outline: 2px solid rgb(91, 251, 132);
-  outline-offset: -2px;
+/* 选择工具里一起选中的图块：亮蓝描边 */
+.tile-cell.tile-box-selected::after {
+  border: 2px solid rgb(110, 196, 255);
+}
+
+/* 当前画笔：更深的蓝，且放在后面覆盖 box-selected，保证「正在画的」最醒目 */
+.tile-cell.tile-selected::after {
+  border: 2px solid rgb(64, 158, 255);
 }
 
 .resource-empty {

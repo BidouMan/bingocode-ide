@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
-import { normalizeSpriteThumb } from '../utils/spriteThumb'
+import { normalizeSpriteThumb, renderNormalizedBsfFrames } from '../utils/spriteThumb'
+import { unionContentRects } from '../utils/bsfPacker'
 import { loadBuiltinAssetManifest, isBuiltinAsset } from '../utils/builtinAssets'
 
 export type SpriteLibType = 'bgs' | 'bsf' | 'image'
@@ -139,8 +140,9 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
           const dataUrl = item.type === 'bsf'
             ? await (await import('../composables/useSpriteData')).getBsfThumbnail(item.filePath)
             : await invoke<string>('get_sprite_thumbnail', { path: item.filePath })
-          // 裁到内容框：不同尺寸/留白的素材在库里视觉大小一致
-          item.thumbUrl = await normalizeSpriteThumb(dataUrl)
+          // .bsf 已是归一化画布（与悬停动画同一尺寸基准），再裁一遍会二次重采样；
+          // 其余格式裁到内容框，不同尺寸/留白的素材在库里视觉大小一致
+          item.thumbUrl = item.type === 'bsf' ? dataUrl : await normalizeSpriteThumb(dataUrl)
           item.loaded = true
         } catch (e) {
           console.error(`[SpriteLib] ${item.name}: 加载缩略图失败 (path=${item.filePath})`, e)
@@ -219,24 +221,20 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
     const sheetBlob = await sheetEntry.async('blob')
     const { loadImage } = await import('../composables/useSpriteData')
     const sheetImage = await loadImage(sheetBlob)
-    // 画回完整参考画布（与 .bgs 整帧导出观感一致；紧致裁剪帧直接展示会偏大且帧间不齐）
-    const canvasSize = manifest.canvas || {
+    // 与缩略图共用并集内容框归一化：悬停播放时角色尺寸/位置和缩略图一致，不再突然变大，
+    // 帧间也保持真实相对大小，不会抖动
+    const union = unionContentRects(frames) ?? {
+      x: frames[0]?.rect?.x ?? 0,
+      y: frames[0]?.rect?.y ?? 0,
       w: frames[0]?.rect?.w ?? 1,
       h: frames[0]?.rect?.h ?? 1,
     }
     const urls: string[] = []
-    for (const name of order) {
-      const f = byName.get(name)
-      const canvas = document.createElement('canvas')
-      canvas.width = canvasSize.w
-      canvas.height = canvasSize.h
-      const ctx = canvas.getContext('2d')!
-      const offset = f.offset || { x: 0, y: 0 }
-      ctx.drawImage(
-        sheetImage,
-        f.rect.x, f.rect.y, f.rect.w, f.rect.h,
-        offset.x, offset.y, f.rect.w, f.rect.h,
-      )
+    for (const canvas of renderNormalizedBsfFrames(
+      sheetImage,
+      order.map(name => byName.get(name)).filter(Boolean) as any,
+      union,
+    )) {
       const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
       if (blob) urls.push(URL.createObjectURL(blob))
     }

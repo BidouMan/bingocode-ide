@@ -14,6 +14,8 @@ import { loadImage } from '../composables/useSpriteData'
 import { contentBBox } from './bsfPacker'
 import { SMALL_ART_MAX_SIDE } from './renderMode'
 
+interface RectBox { x: number; y: number; w: number; h: number }
+
 /** 缩略图画布边长（正方形）：所有素材共用，保证列表里视觉大小一致 */
 const THUMB_SIZE = 160
 /**
@@ -21,6 +23,43 @@ const THUMB_SIZE = 160
  * 0.43 是「铺满」方案（≈0.86）的一半——列表里铺满格子看着太大太挤。
  */
 const THUMB_CONTENT_RATIO = 0.43
+
+/**
+ * .bsf 多帧归一化：所有帧共用**同一个内容框并集**做缩放基准，逐帧画进 THUMB_SIZE² 透明画布。
+ * 缩略图（默认帧）和悬停动画（全部帧）都走这里，因此动画播放时角色尺寸、位置和缩略图完全一致，
+ * 不会出现"悬停变大再跳回去"；帧与帧之间也保持真实相对大小，不会忽大忽小。
+ */
+export function renderNormalizedBsfFrames(
+  sheet: CanvasImageSource,
+  frames: Array<{ rect: RectBox; offset?: { x: number; y: number } }>,
+  union: RectBox,
+): HTMLCanvasElement[] {
+  const inner = Math.round(THUMB_SIZE * THUMB_CONTENT_RATIO)
+  const scale = Math.min(inner / union.w, inner / union.h)
+  // 判定是否像素画：用并集最长边（整包美术风格统一，避免同包帧的采样方式不一致）
+  const smoothing = Math.max(union.w, union.h) > SMALL_ART_MAX_SIDE
+  const originX = (THUMB_SIZE - union.w * scale) / 2
+  const originY = (THUMB_SIZE - union.h * scale) / 2
+
+  return frames.map(f => {
+    const out = document.createElement('canvas')
+    out.width = THUMB_SIZE
+    out.height = THUMB_SIZE
+    const ctx = out.getContext('2d')!
+    ctx.imageSmoothingEnabled = smoothing
+    const ox = f.offset?.x ?? 0
+    const oy = f.offset?.y ?? 0
+    ctx.drawImage(
+      sheet,
+      f.rect.x, f.rect.y, f.rect.w, f.rect.h,
+      originX + (ox - union.x) * scale,
+      originY + (oy - union.y) * scale,
+      f.rect.w * scale,
+      f.rect.h * scale,
+    )
+    return out
+  })
+}
 
 export async function normalizeSpriteThumb(src: string): Promise<string> {
   const img = await loadImage(src)

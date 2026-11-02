@@ -1,6 +1,6 @@
 import JSZip from 'jszip'
 import { invoke } from '@tauri-apps/api/core'
-import { contentBBox } from '../utils/bsfPacker'
+import { contentBBox, unionContentRects } from '../utils/bsfPacker'
 
 export interface SpriteFrame {
   name: string
@@ -161,18 +161,13 @@ export async function getBsfThumbnail(path: string): Promise<string> {
   )
   const frame = allFrames[defaultIdx] ?? allFrames[0]
   if (!frame?.rect) throw new Error('manifest.frames 为空')
-  // 画回完整参考画布：紧致裁剪帧直接展示会比 .bgs 整帧导出"大一圈"
-  const canvasSize = manifest.canvas || { w: frame.rect.w, h: frame.rect.h }
-  const canvas = document.createElement('canvas')
-  canvas.width = canvasSize.w
-  canvas.height = canvasSize.h
-  const offset = frame.offset || { x: 0, y: 0 }
-  canvas.getContext('2d')!.drawImage(
-    sheetImage,
-    frame.rect.x, frame.rect.y, frame.rect.w, frame.rect.h,
-    offset.x, offset.y, frame.rect.w, frame.rect.h,
-  )
-  return canvas.toDataURL('image/png')
+  // 与悬停动画共用同一套归一化（并集内容框）：缩略图与动画帧尺寸完全一致，悬停不会跳大
+  const union = unionContentRects(allFrames) ?? {
+    x: frame.rect.x, y: frame.rect.y, w: frame.rect.w, h: frame.rect.h,
+  }
+  const { renderNormalizedBsfFrames } = await import('../utils/spriteThumb')
+  const [out] = renderNormalizedBsfFrames(sheetImage, [frame], union)
+  return out!.toDataURL('image/png')
 }
 
 /** 路径是否为单图角色（单张 png/jpg/... 贴图，而非目录角色） */

@@ -22,34 +22,22 @@ const searchQuery = ref('')
 // 只按打开来源过滤分类：图层面板打开时只显示图像，图块面板打开时只显示图块/集合
 const isImageMode = computed(() => props.scope === 'image')
 
-const ALL_CATEGORIES: Array<{ id: ResourceCategory; label: string }> = [
-  { id: 'images', label: '图像' },
-  { id: 'tiles', label: '图块' },
-  { id: 'tilesets', label: '集合' },
-]
-
-const categories = computed(() =>
-  isImageMode.value
-    ? ALL_CATEGORIES.filter(c => c.id === 'images')
-    : ALL_CATEGORIES.filter(c => c.id !== 'images')
-)
-
+/** 当前浏览的资源类型：图块 / 集合（图像模式固定为 images） */
 const activeCategory = ref<ResourceCategory>(isImageMode.value ? 'images' : 'tiles')
+/** 当前选中的分类（子目录名），null = 全部 */
+const activeGroup = ref<string | null>(null)
+
+/** 分类标签取哪个目录：图像模式看 images，其余看 tiles（集合不参与分类） */
+const groupSource = computed<ResourceCategory>(() => (isImageMode.value ? 'images' : 'tiles'))
 
 /** 分类 chips：由子目录名自动推导，不额外维护词表 */
 const groupOptions = computed(() => {
   const groups: string[] = []
   for (const item of store.items) {
-    if (item.category !== activeCategory.value) continue
+    if (item.category !== groupSource.value) continue
     if (!groups.includes(item.group)) groups.push(item.group)
   }
   return groups
-})
-
-const activeGroup = ref<string | null>(null)
-
-watch(activeCategory, () => {
-  activeGroup.value = null
 })
 
 // 目录被移空/改名后，已选中的分类 chip 跟着失效
@@ -60,6 +48,21 @@ watch(groupOptions, groups => {
 onMounted(() => {
   store.loadBuiltinResources()
 })
+
+function selectAll() {
+  activeCategory.value = groupSource.value
+  activeGroup.value = null
+}
+
+function selectGroup(group: string) {
+  activeCategory.value = groupSource.value
+  activeGroup.value = group
+}
+
+function selectTilesets() {
+  activeCategory.value = 'tilesets'
+  activeGroup.value = null
+}
 
 const filteredResources = computed(() => {
   let list = store.items.filter(r => r.category === activeCategory.value)
@@ -77,32 +80,28 @@ function onCardClick(res: MapResourceItem) {
     <div class="lib-toolbar">
       <input v-model="searchQuery" class="lib-search" placeholder="搜索素材..." />
       <div style="width:10px" />
+      <!-- 同一行：全部 + 分类 chips + 集合（集合固定放最后） -->
       <button
-        v-for="cat in categories"
-        :key="cat.id"
         class="lib-tab-btn"
-        :class="{ 'lib-tab-active': activeCategory === cat.id }"
-        @click="activeCategory = cat.id"
-      >
-        {{ cat.label }}
-      </button>
-      <div class="lib-spacer" />
-      <div style="width:120px" />
-      <button class="lib-return-btn" @click="emit('close')">返回</button>
-    </div>
-
-    <!-- 分类筛选：只有存在多个分类时才占一行，避免空条 -->
-    <div v-if="groupOptions.length > 1" class="lib-groups">
-      <button class="lib-group-btn" :class="{ 'lib-group-active': activeGroup === null }" @click="activeGroup = null">全部</button>
+        :class="{ 'lib-tab-active': activeCategory === groupSource && activeGroup === null }"
+        @click="selectAll"
+      >全部</button>
       <button
         v-for="group in groupOptions"
         :key="group"
         class="lib-group-btn"
-        :class="{ 'lib-group-active': activeGroup === group }"
-        @click="activeGroup = activeGroup === group ? null : group"
-      >
-        {{ group }}
-      </button>
+        :class="{ 'lib-group-active': activeCategory === groupSource && activeGroup === group }"
+        @click="selectGroup(group)"
+      >{{ group }}</button>
+      <button
+        v-if="!isImageMode"
+        class="lib-tab-btn"
+        :class="{ 'lib-tab-active': activeCategory === 'tilesets' }"
+        @click="selectTilesets"
+      >集合</button>
+      <div class="lib-spacer" />
+      <div style="width:120px" />
+      <button class="lib-return-btn" @click="emit('close')">返回</button>
     </div>
 
     <div class="lib-grid">
@@ -198,27 +197,11 @@ function onCardClick(res: MapResourceItem) {
   color: white;
 }
 
-/* 分类 chips：独立一行，横向滚动，视觉规格与 tab 按钮一致 */
-.lib-groups {
-  display: flex;
-  align-items: center;
-  height: 32px;
-  min-height: 32px;
-  padding: 0 5px;
-  gap: 4px;
-  flex-shrink: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
-}
-
-.lib-groups::-webkit-scrollbar {
-  display: none;
-}
-
+/* 分类 chips：与「全部 / 集合」同处一行，宽度随文字自适应 */
 .lib-group-btn {
-  height: 24px;
+  height: 28px;
   padding: 0 10px;
+  margin-left: 2px;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 4px;
