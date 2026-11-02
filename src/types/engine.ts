@@ -187,6 +187,12 @@ export interface ShowCollisionCommand extends EngineCommand {
   data: { visible: boolean }
 }
 
+/** 引擎初始化完成（角色/地图等全部建好、主循环即将开始）：用于结束启动加载页 */
+export interface GameReadyCommand extends EngineCommand {
+  type: 'GAME_READY'
+  data: Record<string, never>
+}
+
 export type AnyEngineCommand =
   | CreateCommand
   | UpdateCommand
@@ -204,6 +210,7 @@ export type AnyEngineCommand =
   | PauseStateCommand
   | UICommandCommand
   | ShowCollisionCommand
+  | GameReadyCommand
 
 export type InputEventType =
   | 'K_DOWN'

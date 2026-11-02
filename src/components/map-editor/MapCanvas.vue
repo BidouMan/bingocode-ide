@@ -75,6 +75,12 @@ async function resolveImagePath(path: string): Promise<string> {
   const cached = resolvedPathCache.get(path)
   if (cached) return cached
 
+  // 绘制测试里的内存缩放图是 data URL，直接可加载
+  if (path.startsWith('data:')) {
+    resolvedPathCache.set(path, path)
+    return path
+  }
+
   let url: string
   if (path.startsWith('/maps/')) {
     try {
@@ -4357,6 +4363,23 @@ function centerOnWorld(x: number, y: number) {
   app.render()
 }
 
+/** 把视口居中到整张地图（进入绘制测试时用） */
+function centerMap() {
+  const w = mapStore.mapData.width * mapStore.mapData.tileSize
+  const h = mapStore.mapData.height * mapStore.mapData.tileSize
+  centerOnWorld(w / 2, h / 2)
+}
+
+/** 当前视口中心的世界坐标：绘制测试退出时用来还原原来的视角 */
+function getViewCenter(): { x: number; y: number } | null {
+  if (!app) return null
+  const scale = viewport.currentScale.value
+  return {
+    x: (app.screen.width / 2 - app.stage.x) / scale,
+    y: (app.screen.height / 2 - app.stage.y) / scale,
+  }
+}
+
 /** 标记管理里双击 / 定位：把视口居中到该标记 */
 function centerMarker(id: string) {
   const marker = mapStore.mapData.markers.find(m => m.id === id)
@@ -4503,6 +4526,9 @@ defineExpose({
   redraw,
   centerMarker,
   centerShape,
+  centerMap,
+  centerOnWorld,
+  getViewCenter,
   cursorGridPos,
   renderAllLayers,
   showTransformBox: transform.showTransformBox,

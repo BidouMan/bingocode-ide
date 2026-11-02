@@ -240,6 +240,11 @@ export function useEngine() {
           renderStore.showFps = cmd.data.visible
         }
         break
+
+      case 'GAME_READY':
+        // 引擎初始化全部完成（角色/地图等都建好了），交给帧循环收尾启动加载页
+        renderStore.noteEngineReady()
+        break
     }
   }
 
@@ -396,18 +401,24 @@ export function useEngine() {
   }
 
   async function run() {
+    // 点击运行的那一刻固定住模式：准备阶段（等画布、挂监听）里就算切了模式，
+    // 也只能运行点击时那个模式的标签，绝不能读到另一模式的标签
+    const runMode: 'game' | 'code' = editorStore.isGameMode ? 'game' : 'code'
+    // 游戏模式：点击运行立刻进入加载页，填满 Python 启动前的空档，
+    // 否则预览窗会先露一段默认背景色，再闪一下加载页就进游戏
+    if (runMode === 'game') renderStore.beginStartupLoading()
+
     // 再次点击运行 = 重新开始：先彻底停掉旧进程（杀进程 + 摘监听）。
     // 不先停的话，启动准备阶段旧程序残留的渲染指令会追加进新场景，出现新旧角色同屏
     if (editorStore.isRunning) await stop()
+    // stop() 会收起加载页，重启时重新进入
+    if (runMode === 'game') renderStore.beginStartupLoading()
 
     // 等待项目初始化完成（onMounted 可能尚未完成）
     if (!projectStore.root) {
       await projectStore.initProject()
     }
 
-    // 点击运行的那一刻固定住模式：准备阶段（等画布、挂监听）里就算切了模式，
-    // 也只能运行点击时那个模式的标签，绝不能读到另一模式的标签
-    const runMode: 'game' | 'code' = editorStore.isGameMode ? 'game' : 'code'
     let tab = runMode === 'game'
       ? (editorStore.gameTabs[editorStore.gameActiveTabIndex] ?? null)
       : (editorStore.codeTabs[editorStore.codeActiveTabIndex] ?? null)
@@ -419,6 +430,7 @@ export function useEngine() {
         : (editorStore.codeTabs[editorStore.codeActiveTabIndex] ?? null)
       if (!tab) {
         terminalStore.appendLine('\x1b[31m没有打开的文件\x1b[0m')
+        renderStore.resetTextureLoading()
         return
       }
     }
@@ -430,6 +442,7 @@ export function useEngine() {
       if (!projectRoot) {
         terminalStore.appendLine('\x1b[31m项目目录还没准备好，请稍后再试\x1b[0m')
         editorStore.setRunning(false)
+        renderStore.resetTextureLoading()
         return
       }
       const codeDir = `${projectRoot}/code`
@@ -486,7 +499,9 @@ export function useEngine() {
     // 删除后重建同名、重新上传同名文件、绘制保存覆盖原图），跨运行复用会渲染出
     // 已删除旧资源的贴图。缓存只在单次运行内复用，运行开始一律清空重新加载。
     invalidateGameTextures()
-    renderStore.resetTextureLoading()
+    // clearAll() 会收起加载页；游戏模式在这里重新进入，等 GAME_READY + 贴图就绪后再结束
+    if (runMode === 'game') renderStore.beginStartupLoading()
+    else renderStore.resetTextureLoading()
     terminalStore.clear()
     // 运行期间切到 python 模式：屏蔽后台 zsh 提示符（%）泄漏到控制台，
     // 同时让终端 Ctrl+C 走引擎停止逻辑
@@ -655,6 +670,7 @@ export function useEngine() {
       terminalStore.appendLine(`\x1b[31m启动失败: ${err}\x1b[0m`)
       terminalStore.terminalMode = 'shell'
       editorStore.setRunning(false)
+      renderStore.resetTextureLoading()
     }
   }
 

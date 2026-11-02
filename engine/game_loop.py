@@ -19,6 +19,18 @@ import engine_state as st
 
 # ---------- 内部函数 ----------
 
+_READY_SENT = False
+
+
+def _notify_ready():
+    """用户代码的初始化（建角色、载地图等）全部完成后，通知 IDE 结束启动加载页。
+    旧 run() 与新 start_game() 两条入口都会调用，保证每次运行只发一次。"""
+    global _READY_SENT
+    if _READY_SENT:
+        return
+    _READY_SENT = True
+    print(json.dumps({"type": "GAME_READY", "data": {}}))
+
 
 def _send_fps_to_ide(fps):
     """内部统计并发送 FPS 数值"""
@@ -96,6 +108,8 @@ def run():
     st._PERF_STATS["last_time"] = time.time()
     accumulator = 0.0
     prev_time = time.perf_counter()
+
+    _notify_ready()
 
     while True:
         if st._STOPPED:
@@ -239,6 +253,9 @@ def start_game(project_dir=None, target_file=None):
             "register_generator": register_generator,
         }
         exec(script_content, exec_globals)
+
+    # 初始化完成：通知 IDE 结束启动加载页（旧 run() 模式已在 run() 内部发过，不会重复）
+    _notify_ready()
 
     # 主循环
     st._PERF_STATS["last_time"] = time.time()

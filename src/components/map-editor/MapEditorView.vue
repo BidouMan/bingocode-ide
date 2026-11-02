@@ -9,11 +9,13 @@ import iconUndo from '../../assets/icons/undo.svg'
 import iconRedo from '../../assets/icons/redo.svg'
 import iconMapLibrary from '../../assets/icons/图片库.svg'
 import TileResourceBar from './TileResourceBar.vue'
+import DrawingLayerTools from './DrawingLayerTools.vue'
 import PropertyPanel from './PropertyPanel.vue'
 import LayerPanel from './LayerPanel.vue'
 import TileCollisionPanel from './TileCollisionPanel.vue'
 import PaintColorPanel from '../paint-editor/PaintColorPanel.vue'
 import { useMapStore } from '../../stores/map'
+import type { MapData, TilePaletteEntry } from '../../stores/map'
 import { useMapEditorStore } from '../../stores/mapEditor'
 import { usePaintStore } from '../../stores/paint'
 import { useResourceStore } from '../../stores/resource'
@@ -107,6 +109,7 @@ const mapCanvasRef = ref<InstanceType<typeof MapCanvas>>()
 const layerPanelRef = ref<InstanceType<typeof LayerPanel>>()
 const tileResourceBarRef = ref<{
   uploadLocalTiles: () => void
+  requestCenterPaletteView: () => void
 } | null>(null)
 const propertyPanelRef = ref<InstanceType<typeof PropertyPanel>>()
 
@@ -242,6 +245,8 @@ const emit = defineEmits<{
   'open-resource-lib': [scope: 'image' | 'tile']
   'open-map-library': []
   'map-thumbnail-updated': [itemId: string, dataUrl: string]
+  /** 退出绘制测试：回到素材整理页 */
+  'tile-test-exit': []
 }>()
 
 // ====== 持久化：map.json 读写、.bgm 修复、路径解析 ======
@@ -299,6 +304,8 @@ async function saveMapToProject(mapName?: string) {
 
 function runAutoSave() {
   autoSaveIdleHandle = null
+  // 绘制测试只有内存数据，任何情况都不写盘
+  if (tileTestMode.value || !mapStore.currentMapPath) return
   // 数据没变（例如刚打开地图、载入过程顺带 bump 了计数器）就跳过
   const signal = dataSignal()
   if (signal === lastSavedSignal) return
@@ -552,13 +559,209 @@ function onLayerThumbUpdated(layerId: number, dataUrl: string) {
   layerPanelRef.value?.setLayerThumb(layerId, dataUrl)
 }
 
-defineExpose({ switchToMap, placeImageResource })
+// ====== 绘制测试（dev 素材整理页调用）：临时地图，绝不落盘 ======
+interface TileTestItem {
+  /** 素材路径（如 /maps/tiles/砖块/草地.png），直接交给图块渲染 */
+  path: string
+  name: string
+  /** tile=单张图块；tileset=多格图集（按测试地图格子切） */
+  assetKind?: 'tile' | 'tileset'
+}
+
+const tileTestMode = ref(false)
+/** 进入测试前的真实地图快照（含未落盘的改动），退出时原样还原 */
+let tileTestBackup: {
+  mapData: MapData
+  mapPath: string
+  viewCenter: { x: number; y: number } | null
+} | null = null
+
+/** 加载测试素材图片：/maps/** 是引擎素材库路径，走数据 URL 读 */
+async function loadTestImage(path: string): Promise<HTMLImageElement> {
+  let url = path
+  if (path.startsWith('/maps/')) {
+    try {
+      const engineDir = await invoke<string>('get_engine_assets_dir')
+      url = await invoke<string>('read_image_as_data_url', { path: `${engineDir}${path}` })
+    } catch {
+      url = path
+    }
+  }
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error(`加载图片失败: ${path}`))
+    img.src = url
+  })
+}
+
+/** 单图块尺寸和测试格子不一致时，在内存里按最近邻缩放到格子尺寸（不写任何文件） */
+function fitTileToGrid(img: HTMLImageElement, size: number): string {
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return img.src
+  ctx.imageSmoothingEnabled = false
+  ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, 0, 0, size, size)
+  return canvas.toDataURL('image/png')
+}
+
+/** 从素材整理页进入绘制测试：用选中素材拼一张纯内存地图，画完直接退出 */
+async function startTileTest(items: TileTestItem[]) {
+  if (items.length === 0) return
+  // 已经在测试中（再点一次）：先退出还原，再重新进入，保证快照不被覆盖成测试数据
+  if (tileTestMode.value) exitTileTest(false)
+  else {
+    // 取消可能还在排队中的自动保存：否则它会拿着测试地图的数据写盘
+    cancelAutoSave()
+    tileTestBackup = {
+      mapData: JSON.parse(JSON.stringify(mapStore.mapData)),
+      mapPath: mapStore.currentMapPath,
+      // 记住原地图视角，退出测试时还原，不要让用户重新找位置
+      viewCenter: mapCanvasRef.value?.getViewCenter() ?? null,
+    }
+  }
+
+  // 先一次性读入所有图片，后续统一按测试格子归一化（全程只在内存里，不写文件）
+  const images = await Promise.all(items.map(item => loadTestImage(item.path).catch(() => null)))
+  const sizes = images.map(img => (img
+    ? { w: img.naturalWidth, h: img.naturalHeight }
+    : { w: mapStore.mapData.tileSize, h: mapStore.mapData.tileSize }))
+  // 格子尺寸取「出现次数最多的单张图块尺寸」：混合尺寸时至少让多数素材 1:1 显示
+  const singleSizes = sizes
+    .filter((_, i) => items[i].assetKind !== 'tileset')
+    .map(s => s.w)
+  const freq = new Map<number, number>()
+  for (const w of singleSizes) freq.set(w, (freq.get(w) ?? 0) + 1)
+  let tileSize = 0
+  let bestCount = 0
+  for (const [w, count] of freq) {
+    if (count > bestCount) {
+      bestCount = count
+      tileSize = w
+    }
+  }
+  // 只选了图集时没有现成格子尺寸：按常见图块尺寸找一个能整除整张图集的
+  if (!tileSize) {
+    const sheets = sizes.filter((_, i) => items[i].assetKind === 'tileset')
+    tileSize = [16, 32, 8].find(n => sheets.every(s => s.w % n === 0 && s.h % n === 0)) ?? 16
+  }
+  tileSize = Math.max(8, Math.round(tileSize))
+
+  const data = createEmptyMapData('绘制测试')
+  data.width = 32
+  data.height = 24
+  data.tileSize = tileSize
+  data.tileSizeExplicit = true
+
+  const groupId = 'test-tiles'
+  data.tilesetGroups = [{ id: groupId, name: '测试素材' }]
+
+  const palette: TilePaletteEntry[] = []
+  let firstgid = 1
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]
+    const id = `test-res-${i}`
+    const kind: 'tile' | 'tileset' = item.assetKind === 'tileset' ? 'tileset' : 'tile'
+    const size = sizes[i] ?? { w: tileSize, h: tileSize }
+    // 单图块：尺寸和格子不一致时按最近邻缩放到格子（内存 data URL），切块恒为一格；
+    // 图集：不推断尺寸、不缩放，只按测试地图的格子切
+    let srcPath = item.path
+    if (kind === 'tile') {
+      const img = images[i]
+      if (img && (size.w !== tileSize || size.h !== tileSize)) {
+        srcPath = fitTileToGrid(img, tileSize)
+      }
+    }
+    const cutW = tileSize
+    const cutH = tileSize
+    data.resources.push({
+      id,
+      firstgid,
+      name: item.name,
+      path: srcPath,
+      resourceType: kind,
+      tileWidth: cutW,
+      tileHeight: cutH,
+      collisionType: '图像',
+      collisionEnabled: false,
+      groupId,
+      assetKind: kind,
+      ...(kind === 'tile' ? { nativeTileSize: size.w } : {}),
+    })
+    data.tileSets.push({
+      id,
+      name: item.name,
+      imagePath: srcPath,
+      resourceType: kind,
+      tileWidth: cutW,
+      tileHeight: cutH,
+      firstgid,
+      collisionType: '图像',
+      collisionEnabled: false,
+      tiles: [],
+    })
+    firstgid += 10000
+
+    if (kind === 'tileset') {
+      // 图集按测试地图格子切：整张图集的前 128 块都放进调色板
+      const cols = Math.max(1, Math.floor(size.w / tileSize))
+      const rows = Math.max(1, Math.floor(size.h / tileSize))
+      const count = Math.min(cols * rows, 128)
+      for (let idx = 0; idx < count; idx++) palette.push({ resourceId: id, tileIndex: idx })
+    } else {
+      palette.push({ resourceId: id, tileIndex: 0 })
+    }
+  }
+  data.tilePalette = palette
+  data.layers = [{ id: 0, name: '图块', type: 'drawing', visible: true, locked: false, tiles: {}, groupId }]
+
+  // path 置空：自动保存只在有 path 时触发，这样怎么画都不会写任何文件
+  mapStore.setMapPath('')
+  mapStore.loadMap(data)
+  tileTestMode.value = true
+  // 等提示条撑开、画布重新布局后再把测试地图居中，避免停在左上角。
+  // 容器尺寸由 ResizeObserver 更新，可能晚于一帧，再补一次居中（幂等）
+  await nextTick()
+  requestAnimationFrame(() => {
+    mapCanvasRef.value?.centerMap()
+    // 调色板里的图块也居中显示（异步布局就绪后由组件内部补一次）
+    tileResourceBarRef.value?.requestCenterPaletteView()
+    setTimeout(() => mapCanvasRef.value?.centerMap(), 60)
+    // 图块工作区若是刚挂载出来，组件实例可能晚一拍才就绪
+    setTimeout(() => tileResourceBarRef.value?.requestCenterPaletteView(), 200)
+  })
+}
+
+/** 退出绘制测试：丢弃测试地图，还原进入前的真实地图（含未保存的改动） */
+function exitTileTest(notify = true) {
+  if (!tileTestMode.value) return
+  tileTestMode.value = false
+  const backup = tileTestBackup
+  tileTestBackup = null
+  if (!backup) return
+  // 只有恢复到非空路径时才需要跳过路径监听（空路径本来就不会触发加载）
+  skipNextPathWatch = backup.mapPath !== ''
+  mapStore.setMapPath(backup.mapPath)
+  mapStore.loadMap(backup.mapData)
+  // 还原过程 bump 了 revision：对齐签名，避免立刻把同一份数据再写一次盘
+  lastSavedSignal = dataSignal()
+  // 视角也还原：回到进入测试前看的位置
+  if (backup.viewCenter) {
+    mapCanvasRef.value?.centerOnWorld(backup.viewCenter.x, backup.viewCenter.y)
+  }
+  // 退出后回到素材整理页继续处理素材（重新进入测试时不需要切页）
+  if (notify) emit('tile-test-exit')
+}
+
+defineExpose({ switchToMap, placeImageResource, startTileTest })
 </script>
 
 <template>
   <div class="map-editor-view">
-    <div class="map-editor-body" :class="{ disabled: !hasMaps }">
-      <div class="map-editor-left">
+    <div class="map-editor-body" :class="{ disabled: !hasMaps && !tileTestMode }">
+      <div v-if="!tileTestMode" class="map-editor-left">
         <LayerPanel
           ref="layerPanelRef"
           :disabled="!hasMaps"
@@ -570,7 +773,18 @@ defineExpose({ switchToMap, placeImageResource })
       </div>
       <div class="map-editor-center">
         <div class="map-view">
+          <!-- 测试模式：顶部工具条（画笔 / 直线 / 矩形 / 擦除），不落盘 -->
+          <div v-if="tileTestMode" class="tile-test-bar">
+            <span class="tile-test-title">绘制测试</span>
+            <span class="tile-test-sep" />
+            <div class="tile-test-tools">
+              <DrawingLayerTools />
+            </div>
+            <div class="tile-test-spacer" />
+            <button class="tile-test-exit" @click="exitTileTest()">退出测试</button>
+          </div>
           <MapToolbar
+            v-if="!tileTestMode"
             :disabled="!hasMaps"
             @switch-map="switchToMap"
             @delete-selection="mapCanvasRef?.deleteActive()"
@@ -591,14 +805,14 @@ defineExpose({ switchToMap, placeImageResource })
             <MapCanvas
               ref="mapCanvasRef"
               class="map-canvas-area"
-              :class="{ disabled: !hasMaps }"
+              :class="{ disabled: !hasMaps && !tileTestMode }"
               @cursor-move="onCursorMove"
               @cursor-leave="mapEditorStore.setCursorPos(null, null)"
               @layer-thumb-updated="onLayerThumbUpdated"
               @marker-activate="onMarkerActivate"
             />
             <!-- 浮动视图工具条：撤销/重做/缩放（与角色绘制页一致） -->
-            <div v-if="hasMaps" class="view-float-bar" @dblclick.stop>
+            <div v-if="hasMaps || tileTestMode" class="view-float-bar" @dblclick.stop>
               <button class="view-float-btn" v-tooltip="'缩小'" @click="mapCanvasRef?.zoomOut()">
                 <img :src="iconZoomOut" width="16" height="16" draggable="false" />
               </button>
@@ -642,7 +856,7 @@ defineExpose({ switchToMap, placeImageResource })
               <div class="tile-workspace-palette">
                 <TileResourceBar
                   ref="tileResourceBarRef"
-                  :disabled="!hasMaps"
+                  :disabled="!hasMaps && !tileTestMode"
                   @open-library="onOpenLibrary"
                   @select-tile="(rIdx, tIdx, entry) => mapStore.selectTile(rIdx, tIdx, entry)"
                 />
@@ -664,7 +878,7 @@ defineExpose({ switchToMap, placeImageResource })
           </div>
         </div>
       </div>
-      <div class="map-editor-right">
+      <div v-if="!tileTestMode" class="map-editor-right">
         <!-- 右侧面板分页：属性常驻；第二页跟着图层类型走（图片=绘制，图块=图块，碰撞层=碰撞） -->
         <div class="right-tabs">
           <button class="right-tab" :class="{ 'right-tab-active': rightTab === 'props' }" @click="setRightTab('props')">属性</button>
@@ -708,7 +922,7 @@ defineExpose({ switchToMap, placeImageResource })
         </div>
       </div>
     </div>
-    <div v-if="!hasMaps" class="map-empty-banner">
+    <div v-if="!hasMaps && !tileTestMode" class="map-empty-banner">
       <div class="empty-content">
         <img :src="iconMapLibrary" class="empty-icon" alt="" />
         <p class="empty-text">请先选择、绘制或上传地图</p>
@@ -737,6 +951,55 @@ defineExpose({ switchToMap, placeImageResource })
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* 绘制测试工具条：画笔 / 直线 / 矩形 / 擦除，画完直接退出 */
+.tile-test-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 8px;
+  background: var(--bg-base);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.tile-test-title {
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.tile-test-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border-light);
+  flex-shrink: 0;
+}
+
+.tile-test-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.tile-test-spacer {
+  flex: 1;
+}
+
+.tile-test-exit {
+  height: 22px;
+  padding: 0 10px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-light);
+  border-radius: 3px;
+  color: var(--text);
+  font-size: 12px;
+  cursor: default;
+}
+
+.tile-test-exit:hover {
+  background: var(--bg-active);
 }
 
 .right-tabs {

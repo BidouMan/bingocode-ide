@@ -772,6 +772,8 @@ function gameLoop() {
   syncSayTexts()
   syncDrawTexts()
   syncHitboxes()
+  // 启动加载页收尾：引擎就绪 + 贴图全部就绪 + 本帧场景已同步，才撤掉覆盖层
+  renderStore.tryFinishStartup()
 }
 
 function onKeyDown(e: KeyboardEvent) {

@@ -118,6 +118,10 @@ export const useRenderStore = defineStore('render', () => {
   const textureTotal = ref(0)
   const textureLoaded = ref(0)
   const isLoadingTextures = ref(false)
+  // 启动加载：点击运行就立即显示加载页，避免先露出默认背景色再闪一下加载页；
+  // 结束条件 = 引擎初始化完成（GAME_READY）+ 贴图全部就绪 + 帧循环已同步场景
+  const startupPending = ref(false)
+  const engineReady = ref(false)
 
   function createSprite(id: string, data: Partial<SpriteData>) {
     sprites.value.set(id, {
@@ -221,6 +225,35 @@ export const useRenderStore = defineStore('render', () => {
     textureTotal.value = 0
     textureLoaded.value = 0
     isLoadingTextures.value = false
+    startupPending.value = false
+    engineReady.value = false
+  }
+
+  /** 点击运行立刻进入加载页（游戏模式），覆盖 Python 启动期间的默认背景色空档 */
+  function beginStartupLoading() {
+    textureTotal.value = 0
+    textureLoaded.value = 0
+    engineReady.value = false
+    startupPending.value = true
+    isLoadingTextures.value = true
+  }
+
+  /** 引擎初始化完成（GAME_READY） */
+  function noteEngineReady() {
+    engineReady.value = true
+  }
+
+  /**
+   * 启动加载收尾：由 GameCanvas 在每帧同步完场景后调用。
+   * 三个条件都满足才隐藏覆盖层：引擎就绪、贴图全部加载完、本帧已完成场景同步。
+   * 放在帧末而不是贴图计数回调里，避免「最后一张贴图刚解码完、还没贴到显示对象上」
+   * 就提前撤销覆盖层，露出占位画面。
+   */
+  function tryFinishStartup() {
+    if (!startupPending.value || !engineReady.value) return
+    if (textureTotal.value > 0 && textureLoaded.value < textureTotal.value) return
+    startupPending.value = false
+    isLoadingTextures.value = false
   }
 
   function setTextureTotal(total: number) {
@@ -230,6 +263,8 @@ export const useRenderStore = defineStore('render', () => {
 
   function incrementTextureLoaded() {
     textureLoaded.value++
+    // 启动阶段不在计数回调里收尾，交给帧循环的 tryFinishStartup
+    if (startupPending.value) return
     if (textureLoaded.value >= textureTotal.value && textureTotal.value > 0) {
       isLoadingTextures.value = false
     }
@@ -357,6 +392,9 @@ export const useRenderStore = defineStore('render', () => {
     setHitbox,
     removeHitbox,
     resetTextureLoading,
+    beginStartupLoading,
+    noteEngineReady,
+    tryFinishStartup,
     setTextureTotal,
     incrementTextureLoaded,
     setLoadingState,

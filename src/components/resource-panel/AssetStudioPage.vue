@@ -16,7 +16,11 @@ import CustomSelect from '../common/CustomSelect.vue'
  * 开发模式专用：内置素材整理页（多选 / 批量改目录 / 批量打标签 / 改名）。
  * 整页只在 dev 构建里被动态 import，正式包不会包含它。
  */
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{
+  close: []
+  /** 绘制测试：把选中的图块/图集交给地图编辑器临时试画 */
+  'tile-test': [items: Array<{ path: string; name: string; assetKind?: 'tile' | 'tileset' }>]
+}>()
 
 const store = useMapResourceLibStore()
 
@@ -362,6 +366,26 @@ async function importAssets() {
     busy.value = false
     await manualReload()
   }
+}
+
+/**
+ * 绘制测试：把选中的图块 / 图集带进地图编辑器临时试画。
+ * 只在内存里拼一张测试地图，不产生任何地图文件；看图块拼在一起效果如何，不好就直接删素材。
+ */
+function startDrawTest() {
+  if (busy.value) return
+  const items = selectedItems.value
+  if (items.length === 0) {
+    error.value = '请先选择要测试的图块素材'
+    return
+  }
+  error.value = ''
+  emit('tile-test', items.map(item => ({
+    path: item.path,
+    name: item.name,
+    // 集合分类是多格图集，按当前测试地图的格子切；图块分类是单张图块
+    assetKind: item.category === 'tilesets' ? 'tileset' : 'tile',
+  })))
 }
 
 /** 手动重新扫描并刷新列表（不自动调用：编辑过程中页面保持不动） */
@@ -1284,6 +1308,12 @@ async function saveFileName() {
       <span class="count">已选 {{ selectedRels.length }} / {{ filtered.length }}</span>
       <div class="spacer" />
       <button class="btn" :disabled="busy" @click="importAssets">添加资源</button>
+      <button
+        class="btn"
+        :disabled="busy || selectedRels.length === 0 || activeCategory === 'images'"
+        :title="activeCategory === 'images' ? '绘制测试只支持图块 / 集合素材' : '带着选中图块进入地图编辑器临时试画'"
+        @click="startDrawTest"
+      >绘制测试</button>
       <button class="btn" :disabled="busy" @click="manualReload">重新加载</button>
       <button class="btn" :class="{ 'btn-on': viewMode === 'grid' }" @click="viewMode = 'grid'">图标</button>
       <button class="btn" :class="{ 'btn-on': viewMode === 'list' }" @click="viewMode = 'list'">列表</button>

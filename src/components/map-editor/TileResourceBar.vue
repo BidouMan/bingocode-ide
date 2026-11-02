@@ -891,6 +891,27 @@ function resetPaletteView() {
   panY.value = (rect.height - paletteLayout.value.height) / 2
 }
 
+// 进入绘制测试时请求一次「居中显示」：图块尺寸/切图是异步算出来的，
+// 所以等布局就绪（或稍后）再居中，避免按空布局算错位置
+let pendingCenterPalette = false
+
+function tryCenterPaletteView() {
+  if (!pendingCenterPalette) return
+  const vp = viewportRef.value
+  if (!vp || vp.clientWidth === 0 || !paletteLayout.value.items.length) return
+  pendingCenterPalette = false
+  resetPaletteView()
+}
+
+/** 外部（绘制测试）请求：把调色板按 100% 居中显示一次 */
+function requestCenterPaletteView() {
+  pendingCenterPalette = true
+  tryCenterPaletteView()
+  // 布局异步生成时，上面这次可能还没就绪，补两次
+  window.setTimeout(tryCenterPaletteView, 120)
+  window.setTimeout(tryCenterPaletteView, 400)
+}
+
 /**
  * 放大并居中选中的图块（多选时按整组包围盒居中）。
  * 放大到单格约 60px（zoom=1.5）就够看清，不继续放大以免素材过大。
@@ -1024,6 +1045,7 @@ async function uploadLocalTiles() {
 
 defineExpose({
   uploadLocalTiles,
+  requestCenterPaletteView,
 })
 
 const currentResources = computed(() => mapStore.activeLayerResources)
@@ -1223,6 +1245,12 @@ const selectedPaletteIndex = computed(() => {
 async function getResourceUrl(path: string): Promise<string> {
   const cached = globalUrlCache.get(path)
   if (cached) return cached
+
+  // 绘制测试里的内存缩放图是 data URL，直接可加载
+  if (path.startsWith('data:')) {
+    globalUrlCache.set(path, path)
+    return path
+  }
 
   let url: string
   if (path.startsWith('/maps/')) {
@@ -1442,6 +1470,8 @@ watch(() => mapStore.mapLoadCount, () => {
   expandedSlices = new Map(tileResources.value.map(r => [r.id, slicingKey(r)]))
   refreshAll()
 })
+// 布局就绪（尺寸/切图算好）后补一次居中
+watch(paletteLayout, () => tryCenterPaletteView())
 
 onMounted(() => {
   expandedSlices = new Map(tileResources.value.map(r => [r.id, slicingKey(r)]))

@@ -118,8 +118,11 @@ const paintOpenMode = ref<'edit' | 'newFrame'>('newFrame')
 const paintInitialFrameIndex = ref(0)
 /** 角色编辑器实例：追加帧后强制重载帧列表 */
 const spriteEditorRef = ref<{ reload: () => Promise<void> } | null>(null)
-/** 地图编辑器实例：内置资源库选图后直接放置为图片图层 */
-const mapEditorRef = ref<{ placeImageResource: (path: string) => Promise<void> } | null>(null)
+/** 地图编辑器实例：内置资源库选图后直接放置为图片图层 / 素材整理页进入绘制测试 */
+const mapEditorRef = ref<{
+  placeImageResource: (path: string) => Promise<void>
+  startTileTest: (items: Array<{ path: string; name: string; assetKind?: 'tile' | 'tileset' }>) => Promise<void>
+} | null>(null)
 /** 绘制页实例：顶部菜单切页前先自动保存 */
 const paintPageRef = ref<{ saveBeforeLeave: () => Promise<boolean> } | null>(null)
 watch(currentPage, (page) => {
@@ -1325,6 +1328,15 @@ function editorRedo() {
   window.dispatchEvent(new CustomEvent('editor-redo'))
 }
 
+/** 素材整理页「绘制测试」：带着选中图块进入地图编辑器试画，全程不写任何地图文件 */
+async function onTileTest(items: Array<{ path: string; name: string; assetKind?: 'tile' | 'tileset' }>) {
+  editorStore.setGameMode(true)
+  editorStore.setActiveEditorMode('map')
+  switchPage(0)
+  await nextTick()
+  await mapEditorRef.value?.startTileTest(items)
+}
+
 function switchPage(page: number) {
   // 从全屏切回小窗口时，关闭调试面板
   if (currentPage.value === 1 && page !== 1) {
@@ -2366,6 +2378,7 @@ function spriteDisplayName(name: string) {
             @open-resource-lib="(scope) => { mapResLibScope = scope; currentPage = 4 }"
             @open-map-library="currentPage = 2"
             @map-thumbnail-updated="onMapThumbnailUpdated"
+            @tile-test-exit="switchPage(8)"
           />
         </div>
 
@@ -2693,6 +2706,21 @@ function spriteDisplayName(name: string) {
         </div>
         <div class="fullscreen-stage-area">
           <GameCanvas v-show="currentPage === 1" @offset-update="canvasOffsetX = $event" />
+          <!-- Loading覆盖层（全屏运行同样先显示加载页，避免闪默认背景色） -->
+          <div v-if="renderStore.isLoadingTextures" class="loading-overlay">
+            <div class="loading-content">
+              <div class="loading-balls">
+                <div class="ball ball-1"></div>
+                <div class="ball ball-2"></div>
+                <div class="ball ball-3"></div>
+              </div>
+              <div class="loading-text">加载资源中...</div>
+              <div class="loading-progress">{{ loadingProgress }}%</div>
+              <div class="loading-bar">
+                <div class="loading-bar-fill" :style="{ width: loadingProgress + '%' }"></div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -2736,7 +2764,7 @@ function spriteDisplayName(name: string) {
 
       <!-- ─── page 8: 素材整理（开发模式专用，正式包不含该组件） ─── -->
       <div v-show="currentPage === 8" class="lib-page">
-        <component :is="AssetStudioPage" v-if="AssetStudioPage" :key="assetStudioKey" @close="switchPage(0)" />
+        <component :is="AssetStudioPage" v-if="AssetStudioPage" :key="assetStudioKey" @close="switchPage(0)" @tile-test="onTileTest" />
       </div>
 
     </div>

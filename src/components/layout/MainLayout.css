@@ -998,6 +998,7 @@
   margin: 0 4px;
 }
 .fullscreen-stage-area {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;

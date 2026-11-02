@@ -1056,12 +1056,22 @@ export const useMapStore = defineStore('map', () => {
         const rIdx = activeLayerResources.value.findIndex(r => r.id === first.resourceId)
         selectedResourceIndex.value = rIdx
         selectedTileIndex.value = first.tileIndex
+        // 条目键和朝向一起同步：否则上一个地图/图层的画笔条目会残留，高亮对不上
+        selectedTileEntryKey.value = tilePaletteEntryKey(first)
+        selectedTileFlipH.value = first.flipH === true
+        selectedTileFlipV.value = first.flipV === true
       } else if (!palette && activeLayerResources.value.length > 0) {
         selectedResourceIndex.value = 0
         selectedTileIndex.value = 0
+        selectedTileEntryKey.value = ''
+        selectedTileFlipH.value = false
+        selectedTileFlipV.value = false
       } else {
         selectedResourceIndex.value = -1
         selectedTileIndex.value = -1
+        selectedTileEntryKey.value = ''
+        selectedTileFlipH.value = false
+        selectedTileFlipV.value = false
       }
     }
   }
