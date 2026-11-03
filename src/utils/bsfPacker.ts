@@ -51,33 +51,6 @@ export function contentBBox(canvas: HTMLCanvasElement): { x: number; y: number; 
 }
 
 /**
- * 多帧内容框并集（画布坐标）：帧 rect + offset 本身就是紧致内容框，
- * 不需要扫描像素。动画预览/缩略图共用这个并集当尺寸基准，尺寸才不会帧间跳动。
- */
-export function unionContentRects(
-  frames: Array<{
-    rect?: { x: number; y: number; w: number; h: number }
-    offset?: { x: number; y: number }
-  }>,
-): { x: number; y: number; w: number; h: number } | null {
-  let minX = Infinity
-  let minY = Infinity
-  let maxX = -Infinity
-  let maxY = -Infinity
-  for (const f of frames) {
-    if (!f.rect || f.rect.w <= 0 || f.rect.h <= 0) continue
-    const ox = f.offset?.x ?? 0
-    const oy = f.offset?.y ?? 0
-    if (ox < minX) minX = ox
-    if (oy < minY) minY = oy
-    if (ox + f.rect.w > maxX) maxX = ox + f.rect.w
-    if (oy + f.rect.h > maxY) maxY = oy + f.rect.h
-  }
-  if (maxX <= minX || maxY <= minY) return null
-  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
-}
-
-/**
  * 把 N 张全画布帧（canvas.w × canvas.h，含透明背景）打包为 sheet + frames 元数据。
  * 空白帧退化为 1×1 透明占位（manifest.frames 不允许为空数组）。
  */

@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { loadBuiltinAssetManifest, isBuiltinAsset } from '../utils/builtinAssets'
 
-export type ResourceCategory = 'images' | 'tiles' | 'tilesets'
+export type ResourceCategory = 'images' | 'tiles' | 'tilesets' | 'characters' | 'items'
 
 export interface MapResourceItem {
   /** 显示名：索引里的中文名，未登记时回退为文件名 */
@@ -22,6 +22,8 @@ export interface MapResourceItem {
   file: string
   /** 分类目录内的相对路径，也是索引条目的 key */
   rel: string
+  /** 角色素材专用：包文件（.bgs/.bsf）或普通图片 */
+  spriteKind?: 'package' | 'image'
 }
 
 /** 索引条目的字段（可选，缺省时回退文件名） */

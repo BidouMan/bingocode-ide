@@ -1,6 +1,6 @@
 import JSZip from 'jszip'
 import { invoke } from '@tauri-apps/api/core'
-import { contentBBox, unionContentRects } from '../utils/bsfPacker'
+import { contentBBox } from '../utils/bsfPacker'
 
 export interface SpriteFrame {
   name: string
@@ -161,12 +161,11 @@ export async function getBsfThumbnail(path: string): Promise<string> {
   )
   const frame = allFrames[defaultIdx] ?? allFrames[0]
   if (!frame?.rect) throw new Error('manifest.frames 为空')
-  // 与悬停动画共用同一套归一化（并集内容框）：缩略图与动画帧尺寸完全一致，悬停不会跳大
-  const union = unionContentRects(allFrames) ?? {
-    x: frame.rect.x, y: frame.rect.y, w: frame.rect.w, h: frame.rect.h,
-  }
+  // 与悬停动画共用同一套归一化：默认帧内容框为锚点，缩略图与动画帧尺寸一致，悬停不跳大
+  const off = frame.offset || { x: 0, y: 0 }
+  const anchor = { x: off.x, y: off.y, w: frame.rect.w, h: frame.rect.h }
   const { renderNormalizedBsfFrames } = await import('../utils/spriteThumb')
-  const [out] = renderNormalizedBsfFrames(sheetImage, [frame], union)
+  const [out] = renderNormalizedBsfFrames(sheetImage, [frame], anchor)
   return out!.toDataURL('image/png')
 }
 

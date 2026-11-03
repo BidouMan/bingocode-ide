@@ -2,8 +2,14 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
-import { UNGROUPED, joinPath, useMapResourceLibStore } from '../../stores/mapResourceLib'
-import type { IndexEntry, MapResourceItem, ResourceCategory } from '../../stores/mapResourceLib'
+import { UNGROUPED, IMAGE_EXTS, joinPath, useMapResourceLibStore } from '../../stores/mapResourceLib'
+import type { CategoryIndex, IndexEntry, MapResourceItem, ResourceCategory } from '../../stores/mapResourceLib'
+import {
+  SPRITE_PACKAGE_EXTS,
+  SPRITE_STUDIO_CATEGORIES,
+  isSpriteCategory,
+  useSpriteResourceStudioStore,
+} from '../../stores/spriteResourceStudio'
 import { searchItems } from '../../utils/assetSearch'
 import { fitPixelThumb, THUMB_SIZE } from '../../utils/thumbFit'
 import iconEdit from '../../assets/icons/编辑.svg'
@@ -22,15 +28,54 @@ const emit = defineEmits<{
   'tile-test': [items: Array<{ path: string; name: string; assetKind?: 'tile' | 'tileset' }>]
 }>()
 
-const store = useMapResourceLibStore()
+const mapStore = useMapResourceLibStore()
+const spriteStore = useSpriteResourceStudioStore()
 
 const CATEGORIES: Array<{ id: ResourceCategory; label: string }> = [
   { id: 'tiles', label: '图块' },
   { id: 'tilesets', label: '集合' },
   { id: 'images', label: '图像' },
+  ...SPRITE_STUDIO_CATEGORIES,
 ]
 
 const activeCategory = ref<ResourceCategory>('tiles')
+/** 当前页签是角色素材（sprites）还是地图素材（maps） */
+const isSpriteScope = computed(() => isSpriteCategory(activeCategory.value))
+
+/**
+ * 两个素材库共用一套整理 UI：按当前页签把读写委托给对应 store。
+ * 角色 store 只被本页（dev 专用）引用，正式包不会包含它。
+ */
+const store = {
+  get items() {
+    return isSpriteScope.value ? spriteStore.items : mapStore.items
+  },
+  get engineDir() {
+    return isSpriteScope.value ? spriteStore.engineDir : mapStore.engineDir
+  },
+  categoryDir(category: ResourceCategory) {
+    return isSpriteScope.value
+      ? spriteStore.categoryDir(category as 'characters' | 'items')
+      : mapStore.categoryDir(category)
+  },
+  indexFilePath(category: ResourceCategory) {
+    return isSpriteScope.value
+      ? spriteStore.indexFilePath(category as 'characters' | 'items')
+      : mapStore.indexFilePath(category)
+  },
+  readCategoryIndex(category: ResourceCategory) {
+    return isSpriteScope.value
+      ? spriteStore.readCategoryIndex(category as 'characters' | 'items')
+      : mapStore.readCategoryIndex(category)
+  },
+  listGroups(category: ResourceCategory) {
+    return isSpriteScope.value ? spriteStore.listGroups(category as 'characters' | 'items') : mapStore.listGroups(category)
+  },
+  loadBuiltinResources(force = false) {
+    return isSpriteScope.value ? spriteStore.loadSpriteResources(force) : mapStore.loadBuiltinResources()
+  },
+}
+
 const searchQuery = ref('')
 const viewMode = ref<'grid' | 'list'>('grid')
 const activeGroup = ref<string | null>(null)
@@ -139,8 +184,13 @@ function selectFirstIfEmpty() {
   lastClicked.value = first.rel
 }
 
+/** 按当前页签加载对应的素材库（角色库有缓存，地图库每次重扫） */
+async function reloadAssets(force = false) {
+  await store.loadBuiltinResources(force)
+}
+
 onMounted(async () => {
-  await store.loadBuiltinResources()
+  await reloadAssets()
   await loadIndex()
   selectFirstIfEmpty()
 })
@@ -152,8 +202,10 @@ watch(activeCategory, async () => {
   renamingFolder.value = null
   confirmDeleteFolder.value = null
   creatingFolder.value = false
+  folderPanelOpen.value = false
   resetFolderDrag()
   assetOverFolder.value = null
+  await reloadAssets()
   await loadIndex()
   selectFirstIfEmpty()
 })
@@ -161,6 +213,8 @@ watch(activeCategory, async () => {
 // ─── 列表 / 筛选 ───
 
 const groupOptions = computed(() => {
+  // 角色素材不分子文件夹，没有分类筛选
+  if (isSpriteScope.value) return []
   const groups: string[] = []
   for (const item of store.items) {
     if (item.category !== activeCategory.value) continue
@@ -220,11 +274,21 @@ const visibleTags = computed(() => {
 /** 下拉里的「多个分类」占位值：多选且分组不一致时显示，避免误以为全部都在某个分类里 */
 const MIXED_GROUP = '__mixed__'
 
-/** 分类下拉的选项：未分类 →（多选且分类不一时显示「多个分类」）→ 已有分类 */
+/** 分类下拉的选项：角色素材 = 角色/道具两个目录；地图素材 = 未分类 →（多选且分类不一时显示「多个分类」）→ 已有分类 */
 const groupSelectOptions = computed(() => {
+  if (isSpriteScope.value) {
+    return SPRITE_STUDIO_CATEGORIES.map(cat => ({ label: cat.label, value: cat.id }))
+  }
   const opts = [{ label: '未分类', value: '' }]
   if (groupTarget.value === MIXED_GROUP) opts.push({ label: '多个分类', value: MIXED_GROUP })
   return [...opts, ...folders.value.map(group => ({ label: group, value: group }))]
+})
+
+/** 移动按钮是否可用：角色素材要在「角色/道具」间切换，地图素材要选到具体分类 */
+const moveDisabled = computed(() => {
+  if (busy.value || selectedRels.value.length === 0) return true
+  if (isSpriteScope.value) return !groupTarget.value || groupTarget.value === activeCategory.value
+  return groupTarget.value === MIXED_GROUP
 })
 
 /** 把下拉框同步回选中素材的真实分类（移动成功/失败后都调用，避免下拉停在无效值） */
@@ -232,6 +296,10 @@ function syncGroupTarget() {
   const items = selectedItems.value
   if (!items.length) {
     groupTarget.value = ''
+    return
+  }
+  if (isSpriteScope.value) {
+    groupTarget.value = items[0].category
     return
   }
   const groupOf = (item: MapResourceItem) => (item.group === UNGROUPED ? '' : item.group)
@@ -314,15 +382,12 @@ function entryTags(rel: string): string[] {
   return entries.value[rel]?.tags ?? []
 }
 
-async function writeIndex(): Promise<boolean> {
+/** 把索引内容写入指定文件 */
+async function saveIndexFile(path: string, index: CategoryIndex): Promise<boolean> {
   try {
     await invoke('write_file', {
-      path: store.indexFilePath(activeCategory.value),
-      content: JSON.stringify(
-        { version: version.value, tagPool: tagPool.value, groups: folders.value, entries: entries.value },
-        null,
-        2,
-      ) + '\n',
+      path,
+      content: JSON.stringify(index, null, 2) + '\n',
     })
     return true
   } catch (e) {
@@ -331,13 +396,28 @@ async function writeIndex(): Promise<boolean> {
   }
 }
 
-/** 添加资源：从本地任意目录选图片（可多选），复制进当前分类目录 */
+/** 保存当前分类的索引 */
+function writeIndex(): Promise<boolean> {
+  return saveIndexFile(store.indexFilePath(activeCategory.value), {
+    version: version.value,
+    tagPool: tagPool.value,
+    groups: folders.value,
+    entries: entries.value,
+  })
+}
+
+/** 添加资源：从本地任意目录选文件（可多选），复制进当前分类目录 */
 async function importAssets() {
   if (busy.value) return
+  const spriteScope = isSpriteScope.value
   const picked = await open({
     title: '添加资源',
     multiple: true,
-    filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'] }],
+    filters: [
+      spriteScope
+        ? { name: '角色素材', extensions: ['bgs', 'bsf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'] }
+        : { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'] },
+    ],
   })
   if (!picked) return
   const files = Array.isArray(picked) ? picked : [picked]
@@ -346,18 +426,33 @@ async function importAssets() {
   busy.value = true
   error.value = ''
   try {
-    // 目标目录：当前筛选到某个分类就放进该分类，否则放分类根目录（未分类）
-    const group = activeGroup.value && activeGroup.value !== UNGROUPED ? activeGroup.value : ''
-    const targetDir = group
-      ? joinPath(store.categoryDir(activeCategory.value), group)
-      : store.categoryDir(activeCategory.value)
-    if (group) await invoke('create_dir', { path: targetDir })
-
     let added = 0
-    for (const src of files) {
-      // copy_file 自带重名后缀处理（xxx_1.png），返回最终落盘路径
-      const dst = await invoke<string>('copy_file', { src, dstDir: targetDir })
-      if (dst) added++
+    if (spriteScope) {
+      // 角色素材：包文件进 packages/，普通图片进 images/
+      for (const src of files) {
+        const isPackage = SPRITE_PACKAGE_EXTS.test(src)
+        if (!isPackage && !IMAGE_EXTS.test(src)) continue
+        const targetDir = joinPath(
+          store.categoryDir(activeCategory.value),
+          isPackage ? 'packages' : 'images',
+        )
+        await invoke('create_dir', { path: targetDir })
+        // copy_file 自带重名后缀处理（xxx_1.png），返回最终落盘路径
+        const dst = await invoke<string>('copy_file', { src, dstDir: targetDir })
+        if (dst) added++
+      }
+    } else {
+      // 目标目录：当前筛选到某个分类就放进该分类，否则放分类根目录（未分类）
+      const group = activeGroup.value && activeGroup.value !== UNGROUPED ? activeGroup.value : ''
+      const targetDir = group
+        ? joinPath(store.categoryDir(activeCategory.value), group)
+        : store.categoryDir(activeCategory.value)
+      if (group) await invoke('create_dir', { path: targetDir })
+
+      for (const src of files) {
+        const dst = await invoke<string>('copy_file', { src, dstDir: targetDir })
+        if (dst) added++
+      }
     }
     if (added === 0) error.value = '没有添加任何文件'
   } catch (e) {
@@ -373,7 +468,7 @@ async function importAssets() {
  * 只在内存里拼一张测试地图，不产生任何地图文件；看图块拼在一起效果如何，不好就直接删素材。
  */
 function startDrawTest() {
-  if (busy.value) return
+  if (busy.value || isSpriteScope.value) return
   const items = selectedItems.value
   if (items.length === 0) {
     error.value = '请先选择要测试的图块素材'
@@ -392,7 +487,7 @@ function startDrawTest() {
 async function manualReload() {
   busy.value = true
   const keep = [...selectedRels.value]
-  await store.loadBuiltinResources()
+  await reloadAssets(true)
   await loadIndex()
   const category = activeCategory.value
   const kept = keep.filter(rel => store.items.some(i => i.category === category && i.rel === rel))
@@ -417,6 +512,25 @@ function syncItemMeta(rel: string) {
   item.pyi = entry.pyi ?? ''
 }
 
+/** 列表里的「目录」列：角色素材显示包文件 / 图片，地图素材显示分类名 */
+function itemDirLabel(item: MapResourceItem): string {
+  if (isSpriteCategory(item.category)) return item.spriteKind === 'package' ? '包文件' : '图片'
+  return item.group
+}
+
+/** 素材所在目录（相对分类目录）：地图 = 分类文件夹；角色 = packages / images */
+function itemRelPrefix(item: MapResourceItem): string {
+  if (isSpriteCategory(item.category)) return item.spriteKind === 'package' ? 'packages' : 'images'
+  return item.group === UNGROUPED ? '' : item.group
+}
+
+/** 按当前文件名规则拼出新的分类内相对路径（保留原扩展名） */
+function buildItemRel(item: MapResourceItem, base: string): string {
+  const ext = item.file.match(/[.][^.]+$/)?.[0] ?? '.png'
+  const prefix = itemRelPrefix(item)
+  return prefix ? `${prefix}/${base}${ext}` : `${base}${ext}`
+}
+
 /** 文件移动/改名后同步路径、分类与缩略图（只更新这一项，不重扫） */
 function syncItemPath(oldRel: string, newRel: string) {
   const item = findItem(oldRel)
@@ -424,8 +538,15 @@ function syncItemPath(oldRel: string, newRel: string) {
   const dir = store.categoryDir(activeCategory.value)
   item.rel = newRel
   item.file = newRel.split('/').pop() ?? item.file
-  item.group = newRel.includes('/') ? newRel.slice(0, newRel.lastIndexOf('/')) : UNGROUPED
   item.name = entries.value[newRel]?.name || item.file.replace(/[.][^.]+$/, '')
+  if (isSpriteCategory(item.category)) {
+    item.group = UNGROUPED
+    item.path = `/sprites/${item.category}/${newRel}`
+    // 包文件缩略图由内容生成，改名不影响；图片走文件 URL，需要换成新路径
+    if (item.spriteKind === 'image') item.thumbnail = `${convertFileSrc(joinPath(dir, newRel))}?t=${Date.now()}`
+    return
+  }
+  item.group = newRel.includes('/') ? newRel.slice(0, newRel.lastIndexOf('/')) : UNGROUPED
   item.path = `/maps/${activeCategory.value}/${newRel}`
   item.thumbnail = `${convertFileSrc(joinPath(dir, newRel))}?t=${Date.now()}`
 }
@@ -526,9 +647,103 @@ async function moveRelsToGroup(rels: string[], group: string) {
 
 async function applyGroup(group: string) {
   if (group === MIXED_GROUP) return
+  if (isSpriteScope.value) {
+    if (isSpriteCategory(group)) await moveToSpriteCategory(group)
+    return
+  }
   await moveRelsToGroup([...selectedRels.value], group)
   // 移动失败或素材本来就在该分类时，下拉回到真实值
   syncGroupTarget()
+}
+
+/** 角色素材换分类：在 sprites/characters 与 sprites/items 之间移动文件与索引条目 */
+async function moveToSpriteCategory(target: ResourceCategory) {
+  const source = activeCategory.value
+  if (!isSpriteCategory(source) || !isSpriteCategory(target) || source === target) return
+  const rels = [...selectedRels.value]
+  if (!rels.length || busy.value) return
+
+  busy.value = true
+  error.value = ''
+  const sourceDir = spriteStore.categoryDir(source)
+  const targetDir = spriteStore.categoryDir(target)
+  const targetIndex = await spriteStore.readCategoryIndex(target)
+  const targetIndexBackup = JSON.parse(JSON.stringify(targetIndex)) as CategoryIndex
+  const sourceEntriesBackup = { ...entries.value }
+  const used = new Set(store.items.filter(i => i.category === target).map(i => i.rel))
+  const moved: Array<{ item: MapResourceItem; oldRel: string; newRel: string; meta?: IndexEntry }> = []
+
+  for (const rel of rels) {
+    const item = store.items.find(i => i.category === source && i.rel === rel)
+    if (!item) continue
+    const kind = item.spriteKind === 'package' ? 'packages' : 'images'
+    const newRel = uniqueRel(kind, item.file, used)
+    try {
+      await invoke('rename_path', { oldPath: joinPath(sourceDir, rel), newPath: joinPath(targetDir, newRel) })
+    } catch (e) {
+      error.value = `「${item.name}」移动失败：${e}`
+      continue
+    }
+    used.delete(rel)
+    used.add(newRel)
+    const meta = entries.value[rel]
+    moved.push({ item, oldRel: rel, newRel, meta })
+    if (meta) {
+      delete entries.value[rel]
+      targetIndex.entries[newRel] = meta
+      // 目标分类的标签池也收录这些标签，切过去后能直接看到
+      for (const tag of meta.tags ?? []) {
+        if (!targetIndex.tagPool.includes(tag)) targetIndex.tagPool.push(tag)
+      }
+    }
+  }
+
+  if (moved.length === 0) {
+    busy.value = false
+    return
+  }
+
+  const okTarget = await saveIndexFile(spriteStore.indexFilePath(target), targetIndex)
+  const okSource =
+    okTarget &&
+    (await saveIndexFile(spriteStore.indexFilePath(source), {
+      version: version.value,
+      tagPool: tagPool.value,
+      groups: folders.value,
+      entries: entries.value,
+    }))
+  if (!okTarget || !okSource) {
+    // 索引没写成功：文件移回原处，目标索引恢复原样
+    for (const m of [...moved].reverse()) {
+      try {
+        await invoke('rename_path', { oldPath: joinPath(targetDir, m.newRel), newPath: joinPath(sourceDir, m.oldRel) })
+      } catch {
+        // 回滚失败时保留根因提示
+      }
+    }
+    entries.value = sourceEntriesBackup
+    await saveIndexFile(spriteStore.indexFilePath(target), targetIndexBackup)
+    busy.value = false
+    return
+  }
+
+  // 成功：更新内存里的素材归属（与角色库缓存共用同一批对象，切到目标页签也能看到）
+  for (const m of moved) {
+    const item = m.item
+    item.category = target
+    item.rel = m.newRel
+    item.file = m.newRel.split('/').pop() ?? item.file
+    item.group = UNGROUPED
+    item.path = `/sprites/${target}/${m.newRel}`
+    if (item.spriteKind === 'image') item.thumbnail = `${convertFileSrc(joinPath(targetDir, m.newRel))}?t=${Date.now()}`
+  }
+  const movedSet = new Set(moved.map(m => m.oldRel))
+  selectedRels.value = selectedRels.value.filter(r => !movedSet.has(r))
+  if (lastClicked.value && movedSet.has(lastClicked.value)) lastClicked.value = null
+  groupTarget.value = ''
+  busy.value = false
+  // 移走的素材不在当前页签了，自动选中剩下的第一个
+  selectFirstIfEmpty()
 }
 
 async function moveOne(oldRel: string, newRel: string): Promise<boolean> {
@@ -1032,8 +1247,9 @@ async function deleteItem(rel: string) {
   }
   delete entries.value[rel]
   if (!(await writeIndex())) error.value = '索引写入失败，素材已删除但索引可能不一致'
-  // 直接从列表移除，避免整库重扫导致缩略图闪动
-  store.items = store.items.filter(i => !(i.category === category && i.rel === rel))
+  // 直接从列表移除，避免整库重扫导致缩略图闪动；用 splice 保持角色库缓存同步
+  const removeIndex = store.items.findIndex(i => i.category === category && i.rel === rel)
+  if (removeIndex >= 0) store.items.splice(removeIndex, 1)
   selectedRels.value = selectedRels.value.filter(r => r !== rel)
   if (lastClicked.value === rel) lastClicked.value = null
   busy.value = false
@@ -1234,9 +1450,7 @@ function validateFileName(base: string): string | null {
   if (/[\\/:*?"<>|]/.test(base)) return '文件名不能包含 \\ / : * ? " < > |'
   const item = singleItem.value
   if (!item) return null
-  const ext = item.file.match(/[.][^.]+$/)?.[0] ?? '.png'
-  const group = item.group === UNGROUPED ? '' : item.group
-  const newRel = group ? `${group}/${base}${ext}` : `${base}${ext}`
+  const newRel = buildItemRel(item, base)
   if (store.items.some(i => i.category === activeCategory.value && i.rel === newRel)) return '同目录已有同名文件'
   return null
 }
@@ -1272,9 +1486,7 @@ async function saveFileName() {
     error.value = invalid
     return
   }
-  const ext = item.file.match(/[.][^.]+$/)?.[0] ?? '.png'
-  const group = item.group === UNGROUPED ? '' : item.group
-  const newRel = group ? `${group}/${base}${ext}` : `${base}${ext}`
+  const newRel = buildItemRel(item, base)
 
   if (!(await moveOne(item.rel, newRel))) return
   // 显示名直接跟随文件名：不再单独维护中文名
@@ -1296,6 +1508,7 @@ async function saveFileName() {
         :key="cat.id"
         class="tab"
         :class="{ 'tab-on': activeCategory === cat.id }"
+        :disabled="busy"
         @click="activeCategory = cat.id"
       >{{ cat.label }}</button>
       <input v-model="searchQuery" class="search" placeholder="搜索名字 / 拼音 / 标签" />
@@ -1310,8 +1523,8 @@ async function saveFileName() {
       <button class="btn" :disabled="busy" @click="importAssets">添加资源</button>
       <button
         class="btn"
-        :disabled="busy || selectedRels.length === 0 || activeCategory === 'images'"
-        :title="activeCategory === 'images' ? '绘制测试只支持图块 / 集合素材' : '带着选中图块进入地图编辑器临时试画'"
+        :disabled="busy || selectedRels.length === 0 || isSpriteScope || activeCategory === 'images'"
+        :title="isSpriteScope ? '绘制测试只支持地图图块 / 集合素材' : activeCategory === 'images' ? '绘制测试只支持图块 / 集合素材' : '带着选中图块进入地图编辑器临时试画'"
         @click="startDrawTest"
       >绘制测试</button>
       <button class="btn" :disabled="busy" @click="manualReload">重新加载</button>
@@ -1356,7 +1569,7 @@ async function saveFileName() {
             <img class="thumb-img" :src="item.thumbnail" loading="lazy" draggable="false" @load="fitPixelThumb" />
           </div>
           <div class="card-name">{{ item.name }}</div>
-          <div class="card-meta">{{ item.group }} · {{ item.file }}</div>
+          <div class="card-meta">{{ itemDirLabel(item) }} · {{ item.file }}</div>
         </div>
         <div v-if="filtered.length === 0" class="empty">没有素材</div>
       </div>
@@ -1393,7 +1606,7 @@ async function saveFileName() {
           </span>
           <span class="col-name" :title="item.name">{{ item.name }}</span>
           <span class="col-file" :title="item.file">{{ item.file }}</span>
-          <span class="col-group">{{ item.group }}</span>
+          <span class="col-group">{{ itemDirLabel(item) }}</span>
           <span class="col-tags">
             <span v-for="tag in item.tags" :key="tag" class="mini-tag">{{ tag }}</span>
           </span>
@@ -1418,10 +1631,11 @@ async function saveFileName() {
               @keydown.enter="($event.target as HTMLInputElement).blur()"
             />
           </div>
-          <div class="field" :class="{ last: !folderPanelOpen }">
+          <div class="field" :class="{ last: isSpriteScope || !folderPanelOpen }">
             <div class="field-head">
               <label>分类</label>
               <button
+                v-if="!isSpriteScope"
                 class="icon-btn gear"
                 :class="{ 'gear-on': folderPanelOpen }"
                 :title="folderPanelOpen ? '收起分类管理' : '分类管理'"
@@ -1440,7 +1654,7 @@ async function saveFileName() {
               <button
                 class="icon-btn move-btn"
                 title="移到所选分类"
-                :disabled="busy || selectedRels.length === 0 || groupTarget === MIXED_GROUP"
+                :disabled="moveDisabled"
                 @click="applyGroup(groupTarget)"
               >
                 <img :src="iconMove" alt="" draggable="false" />
@@ -1448,8 +1662,8 @@ async function saveFileName() {
             </div>
           </div>
 
-          <!-- 分类管理：点设置按钮后向下展开 -->
-          <div v-if="folderPanelOpen" class="folder-manager">
+          <!-- 分类管理：点设置按钮后向下展开（角色素材只有角色/道具两个目录，不需要子分类） -->
+          <div v-if="folderPanelOpen && !isSpriteScope" class="folder-manager">
             <p v-if="folders.length === 0 && !creatingFolder" class="panel-card-hint">还没有分类</p>
 
             <div
@@ -1666,7 +1880,8 @@ async function saveFileName() {
   color: var(--accent);
 }
 
-.btn[disabled] {
+.btn[disabled],
+.tab[disabled] {
   opacity: 0.5;
   cursor: default;
 }

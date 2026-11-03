@@ -1,4 +1,12 @@
-import type { MapResourceItem } from '../stores/mapResourceLib'
+/** 可检索素材的最小字段集合（地图素材 / 角色素材的整理页共用） */
+export interface SearchableAsset {
+  name: string
+  file: string
+  group: string
+  tags: string[]
+  py: string
+  pyi: string
+}
 
 /** 全角字符转半角：学生用中文输入法时常打出全角空格/字母 */
 function toHalfWidth(input: string): string {
@@ -22,7 +30,7 @@ export function splitQuery(query: string): string[] {
 const LETTERS_ONLY = /^[a-z]+$/
 
 /** 单个词在条目上的得分；0 表示未命中 */
-function scoreToken(item: MapResourceItem, token: string): number {
+function scoreToken(item: SearchableAsset, token: string): number {
   const name = normalize(item.name)
   const fileName = normalize(item.file.replace(/[.][^.]+$/, ''))
   const group = normalize(item.group)
@@ -55,11 +63,11 @@ function scoreToken(item: MapResourceItem, token: string): number {
  * 检索 + 排序：所有词都命中才算命中，得分累加；
  * 同分按名称排序，保证结果稳定可预期。
  */
-export function searchItems(list: MapResourceItem[], query: string): MapResourceItem[] {
+export function searchItems<T extends SearchableAsset>(list: T[], query: string): T[] {
   const tokens = splitQuery(query)
   if (tokens.length === 0) return list
 
-  const scored: Array<{ item: MapResourceItem; score: number }> = []
+  const scored: Array<{ item: T; score: number }> = []
   for (const item of list) {
     let total = 0
     let matched = true

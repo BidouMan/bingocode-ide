@@ -2,7 +2,6 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { normalizeSpriteThumb, renderNormalizedBsfFrames } from '../utils/spriteThumb'
-import { unionContentRects } from '../utils/bsfPacker'
 import { loadBuiltinAssetManifest, isBuiltinAsset } from '../utils/builtinAssets'
 
 export type SpriteLibType = 'bgs' | 'bsf' | 'image'
@@ -17,6 +16,15 @@ export interface SpriteLibItem {
   loaded: boolean
   /** 分类目录名（sprites/ 下的子目录：characters / items / ...） */
   category: string
+  /** 文件名（含扩展名），检索用 */
+  file: string
+  /** 标签（来自分类目录 index.json，素材整理工具维护） */
+  tags: string[]
+  /** 预计算拼音（全拼 / 首字母），检索用 */
+  py: string
+  pyi: string
+  /** 角色素材不分子文件夹，固定为空串 */
+  group: string
 }
 
 /**
@@ -36,6 +44,25 @@ function joinPath(base: string, ...parts: string[]): string {
   const cleanBase = base.replace(/[\\/]+$/, '')
   const cleanParts = parts.map(p => p.replace(/^[\\/]+/, '').replace(/[\\/]+$/, ''))
   return [cleanBase, ...cleanParts].join(sep)
+}
+
+// 分类索引条目的字段（整理工具写入；缺省时回退文件名）
+interface SpriteIndexEntry {
+  name?: string
+  tags?: string[]
+  py?: string
+  pyi?: string
+}
+
+/** 读分类索引：缺失或损坏时退化为纯文件名显示，不影响库存 */
+async function readSpriteIndex(spritesRoot: string, category: string): Promise<Record<string, SpriteIndexEntry>> {
+  try {
+    const raw = await invoke<string>('read_file', { path: joinPath(spritesRoot, category, 'index.json') })
+    const data = JSON.parse(raw)
+    return data.entries && typeof data.entries === 'object' ? data.entries : {}
+  } catch {
+    return {}
+  }
 }
 
 export const useSpriteLibStore = defineStore('spriteLib', () => {
@@ -60,6 +87,8 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
 
       // 逐分类扫描 packages/*（.bgs / .bsf 包文件）与 images/*
       for (const { dir: cat } of SPRITE_CATEGORIES) {
+        // 分类索引：素材整理工具写入的显示名 / 标签 / 拼音
+        const index = await readSpriteIndex(spritesRoot, cat)
         // 精灵包文件：.bgs（逐帧）与 .bsf（sheet 图集）
         // 老版本内置的是 .bgs，新版本换成了同名 .bsf。Windows 覆盖安装不会删除旧文件，
         // 安装目录里会同时存在两份 → 按「文件名主干」去重并优先 .bsf，避免同一角色显示两遍
@@ -87,7 +116,20 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
         }
         for (const pkg of packages.values()) {
           const filePath = joinPath(packagesDir, pkg.file)
-          found.set(filePath, { name: pkg.name, filePath, type: pkg.type, thumbUrl: '', loaded: false, category: cat })
+          const meta = index[`packages/${pkg.file}`] ?? {}
+          found.set(filePath, {
+            name: meta.name || pkg.name,
+            filePath,
+            type: pkg.type,
+            thumbUrl: '',
+            loaded: false,
+            category: cat,
+            file: pkg.file,
+            tags: Array.isArray(meta.tags) ? meta.tags : [],
+            py: meta.py ?? '',
+            pyi: meta.pyi ?? '',
+            group: '',
+          })
         }
 
         // 常规图片文件
@@ -103,7 +145,20 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
             // 与精灵包同名的图片属于同一个角色，已由包文件展示，跳过避免重复
             if (packages.has(name.toLowerCase())) continue
             const filePath = joinPath(imagesDir, filename)
-            found.set(filePath, { name, filePath, type: 'image', thumbUrl: '', loaded: false, category: cat })
+            const meta = index[`images/${filename}`] ?? {}
+            found.set(filePath, {
+              name: meta.name || name,
+              filePath,
+              type: 'image',
+              thumbUrl: '',
+              loaded: false,
+              category: cat,
+              file: filename,
+              tags: Array.isArray(meta.tags) ? meta.tags : [],
+              py: meta.py ?? '',
+              pyi: meta.pyi ?? '',
+              group: '',
+            })
           }
         } catch (_e) {
           // images 目录可能为空或不存在，静默处理
@@ -118,7 +173,13 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
       for (const item of found.values()) {
         const old = oldByPath.get(item.filePath)
         if (old && old.loaded) {
+          // 索引可能在两次打开之间被整理工具改过，元数据要跟着刷新
           old.category = item.category
+          old.name = item.name
+          old.file = item.file
+          old.tags = item.tags
+          old.py = item.py
+          old.pyi = item.pyi
           merged.push(old)
           continue
         }
@@ -221,19 +282,17 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
     const sheetBlob = await sheetEntry.async('blob')
     const { loadImage } = await import('../composables/useSpriteData')
     const sheetImage = await loadImage(sheetBlob)
-    // 与缩略图共用并集内容框归一化：悬停播放时角色尺寸/位置和缩略图一致，不再突然变大，
-    // 帧间也保持真实相对大小，不会抖动
-    const union = unionContentRects(frames) ?? {
-      x: frames[0]?.rect?.x ?? 0,
-      y: frames[0]?.rect?.y ?? 0,
-      w: frames[0]?.rect?.w ?? 1,
-      h: frames[0]?.rect?.h ?? 1,
-    }
+    // 与缩略图共用同一锚点（默认帧内容框）：悬停播放时默认帧和缩略图零跳动，
+    // 帧间保持真实相对大小；更大的帧按真实比例放大，不会整体缩一圈
+    const anchorFrame =
+      byName.get(manifest.defaultFrame) ?? byName.get(order[0]!) ?? frames[0]
+    const aOff = anchorFrame.offset || { x: 0, y: 0 }
+    const anchor = { x: aOff.x, y: aOff.y, w: anchorFrame.rect.w, h: anchorFrame.rect.h }
     const urls: string[] = []
     for (const canvas of renderNormalizedBsfFrames(
       sheetImage,
       order.map(name => byName.get(name)).filter(Boolean) as any,
-      union,
+      anchor,
     )) {
       const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
       if (blob) urls.push(URL.createObjectURL(blob))

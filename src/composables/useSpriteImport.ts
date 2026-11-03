@@ -19,6 +19,13 @@ export function isImageFile(filename: string): boolean {
   return IMAGE_EXTS.some(ext => lower.endsWith(ext))
 }
 
+/** 角色默认名：直接取文件名主干（去掉路径与扩展名），空名回退「角色」 */
+export function spriteNameFromFile(filename: string): string {
+  const base = filename.split(/[\\/]/).pop() || ''
+  const stem = base.replace(/\.[^.]+$/, '').trim()
+  return stem || '角色'
+}
+
 /**
  * 导入单个角色文件到项目目录，返回新资源 id；失败或项目目录未就绪返回 null。
  */
@@ -36,8 +43,8 @@ export async function importSpriteFile(file: File, fileName: string): Promise<st
         return null
       }
       const pngBlob = await svgToPngBlob(file)
-      // 默认名字统一为「角色N」顺序名，磁盘文件名与 store 名字保持一致（引擎按名字查找）
-      const spriteName = resourceStore.nextSequentialName('sprite', '角色')
+      // 默认名取文件名主干（去重后与磁盘文件名一致，引擎按名字查找）
+      const spriteName = resourceStore.uniqueName('sprite', spriteNameFromFile(fileName))
       const projectPath = `${projectRoot}/assets/sprites/${spriteName}.png`
       await invoke('write_binary', {
         path: projectPath,
@@ -60,7 +67,7 @@ export async function importSpriteFile(file: File, fileName: string): Promise<st
         console.warn(`[SpriteImport] 项目目录未就绪，无法导入 ${isBsf ? '.bsf' : '.bgs'} 角色`)
         return null
       }
-      const spriteName = resourceStore.nextSequentialName('sprite', '角色')
+      const spriteName = resourceStore.uniqueName('sprite', spriteNameFromFile(fileName))
       // 先把包文件写到项目目录，再用 Rust 命令解压，最后删除临时文件
       const tmpPkgPath = `${projectRoot}/assets/sprites/${spriteName}${isBsf ? '.bsf' : '.bgs'}`
       await invoke('write_binary', {
@@ -86,7 +93,7 @@ export async function importSpriteFile(file: File, fileName: string): Promise<st
 
     // 普通图片：复制到项目目录（磁盘文件名与 store 名字一致，保留原扩展名供引擎查找）
     if (isImageFile(fileName)) {
-      const spriteName = resourceStore.nextSequentialName('sprite', '角色')
+      const spriteName = resourceStore.uniqueName('sprite', spriteNameFromFile(fileName))
       const ext = fileName.match(/\.[^.]+$/)?.[0] || '.png'
       if (!projectRoot) {
         const objectUrl = URL.createObjectURL(file)

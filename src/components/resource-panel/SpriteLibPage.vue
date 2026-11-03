@@ -5,6 +5,7 @@ import { useSpriteLibStore, SPRITE_CATEGORIES } from '../../stores/spriteLib'
 import { useResourceStore } from '../../stores/resource'
 import { useProjectStore } from '../../stores/project'
 import { svgToPngBlob } from '../../utils/imageConvert'
+import { searchItems } from '../../utils/assetSearch'
 
 const emit = defineEmits<{
   close: []
@@ -38,14 +39,13 @@ function categoryLabel(cat: string): string {
   return found?.label || cat
 }
 
-// 当前分类 + 搜索过滤后的资源列表
-const visibleItems = computed(() => {
-  const q = searchText.value.trim().toLowerCase()
-  return spriteLibStore.items.filter(item =>
-    item.category === activeCategory.value &&
-    (!q || item.name.toLowerCase().includes(q))
-  )
-})
+// 当前分类 + 搜索过滤后的资源列表（名字 / 文件名 / 标签 / 拼音都能搜）
+const visibleItems = computed(() =>
+  searchItems(
+    spriteLibStore.items.filter(item => item.category === activeCategory.value),
+    searchText.value,
+  ),
+)
 
 // ====== 悬停动画预览 ======
 // .bgs：解析帧按 fps 轮播（解析结果缓存在 store，每个包只解析一次）
@@ -96,9 +96,9 @@ async function selectSprite(item: { name: string; filePath: string; type: string
   if (!projectRoot) return
 
   if (item.type === 'bgs' || item.type === 'bsf') {
-    // .bgs / .bsf 包文件：解压到项目目录（默认名字统一为「角色N」顺序名，磁盘目录名与 store 名字一致）
+    // .bgs / .bsf 包文件：解压到项目目录（默认名取素材文件名，重名时自动加序号）
     // .bsf 解压后为 sheet.png + manifest.json，引擎按 manifest 走 UV 动画
-    const spriteName = resourceStore.nextSequentialName('sprite', '角色')
+    const spriteName = resourceStore.uniqueName('sprite', item.name)
     try {
       await invoke<string>('extract_bgs_to_project', {
         bgsPath: item.filePath,
@@ -119,7 +119,7 @@ async function selectSprite(item: { name: string; filePath: string; type: string
     emit('imported', id as string, spriteName, item.filePath)
   } else if (item.filePath.toLowerCase().endsWith('.svg')) {
     // SVG：引擎（Pillow）不支持，导入时栅格化为 PNG（与上传流程一致）
-    const spriteName = resourceStore.nextSequentialName('sprite', '角色')
+    const spriteName = resourceStore.uniqueName('sprite', item.name)
     try {
       const bytes = await invoke<number[]>('read_binary', { path: item.filePath })
       const svgBlob = new Blob([new Uint8Array(bytes)], { type: 'image/svg+xml' })
@@ -141,7 +141,7 @@ async function selectSprite(item: { name: string; filePath: string; type: string
     }
   } else {
     // 常规图片文件：复制到项目目录（磁盘文件名与 store 名字一致，保留原扩展名供引擎查找）
-    const spriteName = resourceStore.nextSequentialName('sprite', '角色')
+    const spriteName = resourceStore.uniqueName('sprite', item.name)
     try {
       const ext = item.filePath.split('.').pop() || 'png'
       const relativePath = `assets/sprites/${spriteName}.${ext}`
@@ -167,7 +167,7 @@ async function selectSprite(item: { name: string; filePath: string; type: string
 <template>
   <div class="sprite-lib-page">
     <div class="lib-toolbar">
-      <input v-model="searchText" class="lib-search" placeholder="搜索角色..." />
+      <input v-model="searchText" class="lib-search" placeholder="搜索名字 / 拼音 / 标签" />
       <div style="width:10px" />
       <button
         v-for="cat in spriteLibStore.categories"

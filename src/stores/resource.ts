@@ -52,6 +52,15 @@ export const useResourceStore = defineStore('resource', () => {
     return name
   }
 
+  // 按期望名生成不冲突的资源名：重名时追加 -1、-2…（上传角色用文件名做默认名时需要先定名再写盘）
+  function uniqueName(type: ResourceItem['type'], desired: string) {
+    const existingNames = getList(type).value.map(i => i.name)
+    if (!existingNames.includes(desired)) return desired
+    let counter = 1
+    while (existingNames.includes(`${desired}-${counter}`)) counter++
+    return `${desired}-${counter}`
+  }
+
   // id 可选：代码资源的 id 必须与标签页 id 保持一致，重命名/删除才能正确联动
   function addItem(item: Omit<ResourceItem, 'id'>, id?: string) {
     const list = getList(item.type)
@@ -130,5 +139,5 @@ export const useResourceStore = defineStore('resource', () => {
     mapDataCache.value.clear()
   }
 
-  return { sprites, maps, sounds, codes, selectedSpriteId, spriteThumbVersions, bumpSpriteThumb, addItem, removeItem, renameItem, updateItemPath, clearAll, getItem, clearAllResources, setCachedMapData, getCachedMapData, clearMapDataCache, nextSequentialName }
+  return { sprites, maps, sounds, codes, selectedSpriteId, spriteThumbVersions, bumpSpriteThumb, addItem, removeItem, renameItem, updateItemPath, clearAll, getItem, clearAllResources, setCachedMapData, getCachedMapData, clearMapDataCache, nextSequentialName, uniqueName }
 })
