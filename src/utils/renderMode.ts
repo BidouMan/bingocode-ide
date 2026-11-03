@@ -9,6 +9,11 @@
  *
  * 内置素材实测（2026-10-21）：46 个 .bsf 里 42 个画布最大边 ≤128px（帧 rect 最小 12px），
  * 57 张单图 PNG 里 45 张 ≤136px（108px 道具、128~136px 角色），仅 12 张 196~500px 插画。
+ *
+ * 瓦片注意：瓦片贴图是图集子纹理，「内容尺寸」是图集格子尺寸（tileWidth/Height），
+ * 绝不能拿图集整图尺寸判定——一张 16px 格的图集轻松超过 128px，会误判成大插画走平滑。
+ * 瓦片/图像层的判定在 GameCanvas 的 syncTiles 里做（同款 WeakMap 逐源缓存），
+ * 本文件只提供统一的阈值与解析函数。
  */
 export type RenderMode = 'auto' | 'smooth' | 'pixelated'
 

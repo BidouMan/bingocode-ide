@@ -176,12 +176,14 @@ function applyRenderMode() {
   autoScaleModes = new WeakMap()
   // 已创建的精灵仍持有旧 scaleMode 的纹理：清掉 texKey 让下一帧重新取纹理
   for (const obj of spriteDisplayObjects.values()) obj._texKey = null
-  // 已放置的瓦片/图像图层：直接改纹理源的采样方式，不重建对象
-  // （重建要重新加载全部贴图，会闪烁且更耗性能）。auto 模式下 currentScaleMode 是 linear，
-  // 与新建瓦片一致，所以这里不需要额外处理
-  for (const obj of tileDisplayObjects.values()) {
-    const source = obj.texture?.source
-    if (source && source.scaleMode !== currentScaleMode) source.scaleMode = currentScaleMode
+  // 已放置的瓦片/图像图层：显式模式直接改纹理源的采样方式，不重建对象
+  // （重建要重新加载全部贴图，会闪烁且更耗性能）。
+  // auto 模式不再强制：autoScaleModes 已清空，下一帧 syncTiles 会按内容尺寸重新判定
+  if (mode !== 'auto') {
+    for (const obj of tileDisplayObjects.values()) {
+      const source = obj.texture?.source
+      if (source && source.scaleMode !== currentScaleMode) source.scaleMode = currentScaleMode
+    }
   }
 }
 
@@ -527,6 +529,33 @@ async function syncTiles() {
     }
 
     if (displayObj) {
+      // auto 模式：瓦片按「内容尺寸」判定采样。瓦片贴图是图集子纹理，内容尺寸是图集
+      // 格子尺寸（tileWidth/Height）而不是图集整图尺寸（16px 格的图集轻松超过 128px）；
+      // 图像层用图片自然尺寸，SVG 恒平滑。判定结果按纹理源缓存一次（同一图集的全部
+      // 瓦片共用一个 source，只判一次），之后每帧只是一次 WeakMap 查表。
+      if (editorStore.renderMode === 'auto') {
+        const source = displayObj.texture?.source
+        if (source) {
+          let mode = autoScaleModes.get(source)
+          if (!mode) {
+            if (tileData.type === 'tile') {
+              const tileSet = tileData.tileSetIndex !== undefined
+                ? renderStore.tileSets[tileData.tileSetIndex]
+                : undefined
+              mode = tileSet
+                ? effectiveScaleMode('auto', tileSet.tileWidth, tileSet.tileHeight)
+                : effectiveScaleMode('auto', displayObj.texture.width, displayObj.texture.height)
+            } else {
+              // SVG 矢量图按目标像素重绘，最近邻会把栅格化锯齿固化下来，恒平滑
+              mode = tileData.imagePath?.toLowerCase().endsWith('.svg')
+                ? 'linear'
+                : effectiveScaleMode('auto', displayObj.texture.width, displayObj.texture.height)
+            }
+            autoScaleModes.set(source, mode)
+          }
+          if (source.scaleMode !== mode) source.scaleMode = mode
+        }
+      }
       // 脏检查：只在实际数据变化时更新属性
       // scale_x/scale_y 已含最终缩放，直接使用，不能再乘 scale（会平方）
       const tileScaleX = tileData.scaleX ?? tileData.scale ?? 1
