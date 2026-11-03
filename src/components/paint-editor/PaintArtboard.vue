@@ -621,6 +621,8 @@ const penPolyline = computed(() => {
  * 位于 overlay（与 artboard 同 transform）→ 位置用画板逻辑坐标、
  * 直径=brushSize 逻辑尺寸，随视图缩放屏幕尺寸自动正确（dataURL 光标超浏览器上限会失效）。
  * 用 SVG 双圆而非 div+box-shadow：阴影环在 translate 亚像素定位下会断裂成细小黑线段。
+ * 注意：svg 视口不能为 0 尺寸——Chromium（Windows WebView2）会直接跳过渲染其全部
+ * 子元素（WebKit/macOS 会画），因此用 2×2 视口、圆心 (1,1)，定位点回退 1px 对齐光标。
  */
 const brushCursorStyle = computed(() => {
   const t = store.activeTool
@@ -628,8 +630,8 @@ const brushCursorStyle = computed(() => {
   const c = store.cursorPos
   if (!c) return null
   return {
-    left: `${c.x}px`,
-    top: `${c.y}px`,
+    left: `${c.x - 1}px`,
+    top: `${c.y - 1}px`,
   }
 })
 
@@ -1413,16 +1415,17 @@ defineExpose({
             :stroke-width="1.2 * boxStrokeInv"
           />
         </svg>
-        <!-- 画笔/橡皮自绘光标圈（矢量模式；SVG 双圆 = 深浅底可见，0 尺寸 svg + overflow visible
-             以定位点为圆心；r 用画板逻辑坐标随视图正确缩放） -->
+        <!-- 画笔/橡皮自绘光标圈（矢量模式；SVG 双圆 = 深浅底可见，2×2 视口 + overflow visible，
+             圆心 (1,1) 对齐定位点——0 尺寸 svg 在 Chromium/Windows 上子元素不渲染；
+             r 用画板逻辑坐标随视图正确缩放） -->
         <svg
           v-if="brushCursorStyle"
           class="brush-cursor-ring"
           :style="brushCursorStyle"
           overflow="visible"
         >
-          <circle :r="store.brushSize / 2" fill="none" stroke="rgba(0, 0, 0, 0.55)" :stroke-width="3 / Math.max(0.1, store.zoom)" />
-          <circle :r="store.brushSize / 2" fill="none" stroke="rgba(255, 255, 255, 0.95)" :stroke-width="1.5 / Math.max(0.1, store.zoom)" />
+          <circle cx="1" cy="1" :r="store.brushSize / 2" fill="none" stroke="rgba(0, 0, 0, 0.55)" :stroke-width="3 / Math.max(0.1, store.zoom)" />
+          <circle cx="1" cy="1" :r="store.brushSize / 2" fill="none" stroke="rgba(255, 255, 255, 0.95)" :stroke-width="1.5 / Math.max(0.1, store.zoom)" />
         </svg>
         <!-- 手动裁切框：实线外框 + 8 个锚点 + 实时尺寸；拖拽锚点调整，回车确认 -->
         <svg
@@ -1700,12 +1703,13 @@ defineExpose({
   50% { stroke-opacity: 0.35; }
 }
 
-/* 画笔/橡皮自绘光标圈：0 尺寸 svg 锚定在光标逻辑坐标，overflow visible 画圆，
-   随画板 transform 缩放（任意 zoom 屏幕尺寸正确）；SVG 双圆避免阴影环亚像素断裂 */
+/* 画笔/橡皮自绘光标圈：2×2 svg（圆心 (1,1)）锚定在光标逻辑坐标，overflow visible 画圆，
+   随画板 transform 缩放（任意 zoom 屏幕尺寸正确）；SVG 双圆避免阴影环亚像素断裂。
+   视口不能为 0 尺寸：Chromium（Windows WebView2）会跳过渲染 0 尺寸 svg 的全部子元素 */
 .brush-cursor-ring {
   position: absolute;
-  width: 0;
-  height: 0;
+  width: 2px;
+  height: 2px;
   overflow: visible;
   pointer-events: none;
   z-index: 7;

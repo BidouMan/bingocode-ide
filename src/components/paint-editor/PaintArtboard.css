@@ -145,12 +145,13 @@
   50% { stroke-opacity: 0.35; }
 }
 
-/* 画笔/橡皮自绘光标圈：0 尺寸 svg 锚定在光标逻辑坐标，overflow visible 画圆，
-   随画板 transform 缩放（任意 zoom 屏幕尺寸正确）；SVG 双圆避免阴影环亚像素断裂 */
+/* 画笔/橡皮自绘光标圈：2×2 svg（圆心 (1,1)）锚定在光标逻辑坐标，overflow visible 画圆，
+   随画板 transform 缩放（任意 zoom 屏幕尺寸正确）；SVG 双圆避免阴影环亚像素断裂。
+   视口不能为 0 尺寸：Chromium（Windows WebView2）会跳过渲染 0 尺寸 svg 的全部子元素 */
 .brush-cursor-ring {
   position: absolute;
-  width: 0;
-  height: 0;
+  width: 2px;
+  height: 2px;
   overflow: visible;
   pointer-events: none;
   z-index: 7;
