@@ -141,7 +141,9 @@ export const useSpriteResourceStudioStore = defineStore('spriteResourceStudio', 
   async function loadSpriteResources(force = false) {
     if (loading) return
     if (!force && cache) {
-      items.value = cache
+      // 有缓存就直接复用，不重赋值 items.value
+      // —— 避免触发 Vue computed 重算导致列表闪烁
+      if (!items.value.length) items.value = cache
       return
     }
 

@@ -22,8 +22,10 @@ export default defineConfig({
         '**/src-tauri/target/**',
         // publicDir 指向 engine/assets，dev 模式下素材整理工具会写 index.json、改名/移动文件，
         // Vite 默认把这些变更当成静态资源更新并整页刷新，导致编辑素材时页面反复重启。
-        // 忽略 maps 目录即可保持编辑连续；图片仍由静态服务按需读取，不受影响。
+        // 忽略 maps / sprites / sounds 目录即可保持编辑连续；文件仍由静态服务按需读取，不受影响。
         '**/engine/assets/maps/**',
+        '**/engine/assets/sprites/**',
+        '**/engine/assets/sounds/**',
       ],
     },
   },

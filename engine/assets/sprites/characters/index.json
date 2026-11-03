@@ -1,0 +1,287 @@
+{
+  "version": 1,
+  "tagPool": [],
+  "groups": [],
+  "entries": {
+    "images/船-1.png": {
+      "name": "船-1",
+      "py": "chuan-1",
+      "pyi": "c-1"
+    },
+    "images/船-2.png": {
+      "name": "船-2",
+      "py": "chuan-2",
+      "pyi": "c-2"
+    },
+    "images/加农炮.png": {
+      "name": "加农炮",
+      "py": "jianongpao",
+      "pyi": "jnp"
+    },
+    "packages/大眼仔.bsf": {
+      "name": "大眼仔",
+      "py": "dayanzai",
+      "pyi": "dyz"
+    },
+    "packages/仙人掌.bsf": {
+      "name": "仙人掌",
+      "py": "xianrenzhang",
+      "pyi": "xrz"
+    },
+    "images/车-1.png": {
+      "name": "车-1",
+      "py": "che-1",
+      "pyi": "c-1"
+    },
+    "images/车-2.png": {
+      "name": "车-2",
+      "py": "che-2",
+      "pyi": "c-2"
+    },
+    "images/车-3.png": {
+      "name": "车-3",
+      "py": "che-3",
+      "pyi": "c-3"
+    },
+    "images/车-4.png": {
+      "name": "车-4",
+      "py": "che-4",
+      "pyi": "c-4"
+    },
+    "packages/樱桃炸弹.bsf": {
+      "name": "樱桃炸弹",
+      "py": "yingtaozhadan",
+      "pyi": "ytzd"
+    },
+    "images/蛋小黄.png": {
+      "name": "蛋小黄",
+      "py": "danxiaohuang",
+      "pyi": "dxh"
+    },
+    "images/蛋小黑.png": {
+      "name": "蛋小黑",
+      "py": "danxiaohei",
+      "pyi": "dxh"
+    },
+    "images/蛋海盗.png": {
+      "name": "蛋海盗",
+      "py": "danhaidao",
+      "pyi": "dhd"
+    },
+    "packages/火焰人.bsf": {
+      "name": "火焰人",
+      "py": "huoyanren",
+      "pyi": "hyr"
+    },
+    "packages/胖胖鱼.bsf": {
+      "name": "胖胖鱼",
+      "py": "pangpangyu",
+      "pyi": "ppy"
+    },
+    "packages/小紫鱼.bsf": {
+      "name": "小紫鱼",
+      "py": "xiaoziyu",
+      "pyi": "xzy"
+    },
+    "packages/章鱼怪.bsf": {
+      "name": "章鱼怪",
+      "py": "zhangyuguai",
+      "pyi": "zyg"
+    },
+    "packages/小企鹅.bsf": {
+      "name": "小企鹅",
+      "py": "xiaoqie",
+      "pyi": "xqe"
+    },
+    "packages/海马哥.bsf": {
+      "name": "海马哥",
+      "py": "haimage",
+      "pyi": "hmg"
+    },
+    "packages/大鲨鱼.bsf": {
+      "name": "大鲨鱼",
+      "py": "dashayu",
+      "pyi": "dsy"
+    },
+    "packages/高达-1.bsf": {
+      "name": "高达-1",
+      "py": "gaoda-1",
+      "pyi": "gd-1"
+    },
+    "packages/高达-2.bsf": {
+      "name": "高达-2",
+      "py": "gaoda-2",
+      "pyi": "gd-2"
+    },
+    "packages/高达-3.bsf": {
+      "name": "高达-3",
+      "py": "gaoda-3",
+      "pyi": "gd-3"
+    },
+    "packages/海盗鹅.bsf": {
+      "name": "海盗鹅",
+      "py": "haidaoe",
+      "pyi": "hde"
+    },
+    "images/哈基蜂.png": {
+      "name": "哈基蜂",
+      "py": "hajifeng",
+      "pyi": "hjf"
+    },
+    "images/卡皮巴拉-2.png": {
+      "name": "卡皮巴拉-2",
+      "py": "kapibala-2",
+      "pyi": "kpbl-2"
+    },
+    "packages/卡比.bsf": {
+      "name": "卡比",
+      "py": "kabi",
+      "pyi": "kb"
+    },
+    "packages/大眼妹.bsf": {
+      "name": "大眼妹",
+      "py": "dayanmei",
+      "pyi": "dym"
+    },
+    "images/坤坤.png": {
+      "name": "坤坤",
+      "py": "kunkun",
+      "pyi": "kk"
+    },
+    "images/奶龙.png": {
+      "name": "奶龙",
+      "py": "nailong",
+      "pyi": "nl"
+    },
+    "packages/马里奥.bsf": {
+      "name": "马里奥",
+      "py": "maliao",
+      "pyi": "mla"
+    },
+    "packages/库巴.bsf": {
+      "name": "库巴",
+      "py": "kuba",
+      "pyi": "kb"
+    },
+    "packages/粑粑人.bsf": {
+      "name": "粑粑人",
+      "py": "babaren",
+      "pyi": "bbr"
+    },
+    "packages/红乌龟.bsf": {
+      "name": "红乌龟",
+      "py": "hongwugui",
+      "pyi": "hwg"
+    },
+    "packages/尖刺龟.bsf": {
+      "name": "尖刺龟",
+      "py": "jiancigui",
+      "pyi": "jcg"
+    },
+    "packages/方块人.bsf": {
+      "name": "方块人",
+      "py": "fangkuairen",
+      "pyi": "fkr"
+    },
+    "images/小蓝.png": {
+      "name": "小蓝",
+      "py": "xiaolan",
+      "pyi": "xl"
+    },
+    "images/独眼兽-1.png": {
+      "name": "独眼兽-1",
+      "py": "duyanshou-1",
+      "pyi": "dys-1"
+    },
+    "images/独眼兽-2.png": {
+      "name": "独眼兽-2",
+      "py": "duyanshou-2",
+      "pyi": "dys-2"
+    },
+    "images/牛来.png": {
+      "name": "牛来",
+      "py": "niulai",
+      "pyi": "nl"
+    },
+    "packages/豌豆射手.bsf": {
+      "name": "豌豆射手",
+      "py": "wandousheshou",
+      "pyi": "wdss"
+    },
+    "packages/佩佩.bsf": {
+      "name": "佩佩",
+      "py": "peipei",
+      "pyi": "pp"
+    },
+    "images/飞机-1.png": {
+      "name": "飞机-1",
+      "py": "feiji-1",
+      "pyi": "fj-1"
+    },
+    "images/飞机-2.png": {
+      "name": "飞机-2",
+      "py": "feiji-2",
+      "pyi": "fj-2"
+    },
+    "images/飞机-3.png": {
+      "name": "飞机-3",
+      "py": "feiji-3",
+      "pyi": "fj-3"
+    },
+    "images/妙蛙种子.png": {
+      "name": "妙蛙种子",
+      "py": "miaowazhongzi",
+      "pyi": "mwzz"
+    },
+    "images/小火龙.png": {
+      "name": "小火龙",
+      "py": "xiaohuolong",
+      "pyi": "xhl"
+    },
+    "images/杰尼龟.png": {
+      "name": "杰尼龟",
+      "py": "jienigui",
+      "pyi": "jng"
+    },
+    "images/皮卡丘.png": {
+      "name": "皮卡丘",
+      "py": "pikaqiu",
+      "pyi": "pkq"
+    },
+    "images/臭臭泥.png": {
+      "name": "臭臭泥",
+      "py": "chouchouni",
+      "pyi": "ccn"
+    },
+    "images/耿鬼.png": {
+      "name": "耿鬼",
+      "py": "genggui",
+      "pyi": "gg"
+    },
+    "images/可达鸭.png": {
+      "name": "可达鸭",
+      "py": "kedaya",
+      "pyi": "kdy"
+    },
+    "images/蛋蛋.png": {
+      "name": "蛋蛋",
+      "py": "dandan",
+      "pyi": "dd"
+    },
+    "images/卡拉.png": {
+      "name": "卡拉",
+      "py": "kala",
+      "pyi": "kl"
+    },
+    "images/变变怪.png": {
+      "name": "变变怪",
+      "py": "bianbianguai",
+      "pyi": "bbg"
+    },
+    "images/卡比兽.png": {
+      "name": "卡比兽",
+      "py": "kabishou",
+      "pyi": "kbs"
+    }
+  }
+}
