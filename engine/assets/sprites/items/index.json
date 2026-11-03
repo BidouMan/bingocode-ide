@@ -1,0 +1,157 @@
+{
+  "version": 1,
+  "tagPool": [],
+  "groups": [],
+  "entries": {
+    "images/砖块.png": {
+      "name": "砖块",
+      "py": "zhuankuai",
+      "pyi": "zk"
+    },
+    "packages/子弹_1.bsf": {
+      "name": "子弹_1",
+      "py": "zidan_1",
+      "pyi": "zd_1"
+    },
+    "packages/子弹_2.bsf": {
+      "name": "子弹_2",
+      "py": "zidan_2",
+      "pyi": "zd_2"
+    },
+    "packages/子弹_3.bsf": {
+      "name": "子弹_3",
+      "py": "zidan_3",
+      "pyi": "zd_3"
+    },
+    "packages/子弹_4.bsf": {
+      "name": "子弹_4",
+      "py": "zidan_4",
+      "pyi": "zd_4"
+    },
+    "packages/子弹_5.bsf": {
+      "name": "子弹_5",
+      "py": "zidan_5",
+      "pyi": "zd_5"
+    },
+    "packages/金币_1.bsf": {
+      "name": "金币_1",
+      "py": "jinbi_1",
+      "pyi": "jb_1"
+    },
+    "images/金币_2.png": {
+      "name": "金币_2",
+      "py": "jinbi_2",
+      "pyi": "jb_2"
+    },
+    "images/枪.svg": {
+      "name": "枪",
+      "py": "qiang",
+      "pyi": "q"
+    },
+    "images/小骷髅.png": {
+      "name": "小骷髅",
+      "py": "xiaokulou",
+      "pyi": "xkl"
+    },
+    "images/奖杯.png": {
+      "name": "奖杯",
+      "py": "jiangbei",
+      "pyi": "jb"
+    },
+    "images/血瓶.png": {
+      "name": "血瓶",
+      "py": "xueping",
+      "pyi": "xp"
+    },
+    "images/蓝瓶.png": {
+      "name": "蓝瓶",
+      "py": "lanping",
+      "pyi": "lp"
+    },
+    "images/绿瓶.png": {
+      "name": "绿瓶",
+      "py": "lüping",
+      "pyi": "lp"
+    },
+    "images/沙漏.png": {
+      "name": "沙漏",
+      "py": "shalou",
+      "pyi": "sl"
+    },
+    "images/宝箱.png": {
+      "name": "宝箱",
+      "py": "baoxiang",
+      "pyi": "bx"
+    },
+    "images/钱袋.png": {
+      "name": "钱袋",
+      "py": "qiandai",
+      "pyi": "qd"
+    },
+    "images/锁.png": {
+      "name": "锁",
+      "py": "suo",
+      "pyi": "s"
+    },
+    "images/炸弹.png": {
+      "name": "炸弹",
+      "py": "zhadan",
+      "pyi": "zd"
+    },
+    "images/宝石_1.png": {
+      "name": "宝石_1",
+      "py": "baoshi_1",
+      "pyi": "bs_1"
+    },
+    "images/宝石_2.png": {
+      "name": "宝石_2",
+      "py": "baoshi_2",
+      "pyi": "bs_2"
+    },
+    "images/宝石_3.png": {
+      "name": "宝石_3",
+      "py": "baoshi_3",
+      "pyi": "bs_3"
+    },
+    "images/地图.png": {
+      "name": "地图",
+      "py": "ditu",
+      "pyi": "dt"
+    },
+    "images/卷轴.png": {
+      "name": "卷轴",
+      "py": "juanzhou",
+      "pyi": "jz"
+    },
+    "images/魔法书.png": {
+      "name": "魔法书",
+      "py": "mofashu",
+      "pyi": "mfs"
+    },
+    "images/盾牌.png": {
+      "name": "盾牌",
+      "py": "dunpai",
+      "pyi": "dp"
+    },
+    "images/宝剑.png": {
+      "name": "宝剑",
+      "py": "baojian",
+      "pyi": "bj"
+    },
+    "images/红心.png": {
+      "name": "红心",
+      "py": "hongxin",
+      "pyi": "hx"
+    },
+    "images/钥匙.png": {
+      "name": "钥匙",
+      "py": "yaoshi",
+      "pyi": "ys"
+    },
+    "packages/太阳花.bsf": {
+      "name": "太阳花",
+      "py": "taiyanghua",
+      "pyi": "tyh"
+    }
+  }
+}

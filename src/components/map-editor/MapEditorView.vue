@@ -720,6 +720,11 @@ async function startTileTest(items: TileTestItem[]) {
   // path 置空：自动保存只在有 path 时触发，这样怎么画都不会写任何文件
   mapStore.setMapPath('')
   mapStore.loadMap(data)
+  // loadMap 里的 migrateLayerTilesets 会自动选中调色板第一项，
+  // 测试模式下不该有默认选中：用户没主动选，画布上乱点就会画出一块「意外」的砖
+  mapStore.selectedResourceIndex = -1
+  mapStore.selectedTileIndex = -1
+  mapStore.selectedTileEntryKey = ''
   tileTestMode.value = true
   // 等提示条撑开、画布重新布局后再把测试地图居中，避免停在左上角。
   // 容器尺寸由 ResizeObserver 更新，可能晚于一帧，再补一次居中（幂等）

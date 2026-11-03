@@ -88,6 +88,13 @@ const multiSelect = ref(false)
 const entries = ref<Record<string, IndexEntry>>({})
 const tagPool = ref<string[]>([])
 const version = ref(1)
+/**
+ * 当前内存里的索引属于哪个分类。
+ * 切页签瞬间置为 null：此时 entries/tagPool 还是上一个分类的数据，
+ * 若此刻发生写入（比如焦点还在文件名框上按回车），会把旧分类的索引写进新分类的文件里，
+ * 表现为「标签池被清空、条目大面积丢失」。写入前必须校验它和 activeCategory 一致。
+ */
+const indexCategory = ref<ResourceCategory | null>(null)
 /** 当前分类下真实存在的文件夹（按手动顺序排列，含空目录） */
 const folders = ref<string[]>([])
 
@@ -157,11 +164,23 @@ function toggleTagPanel() {
 // ─── 数据加载 ───
 
 async function loadIndex() {
-  const idx = await store.readCategoryIndex(activeCategory.value)
+  const category = activeCategory.value
+  const idx = await store.readCategoryIndex(category)
+  // 读取期间用户又切了页签：丢弃本次结果，否则会把 A 分类的索引装进 B 分类
+  if (category !== activeCategory.value) return
   entries.value = idx.entries
   tagPool.value = [...idx.tagPool]
   version.value = idx.version
   await refreshFolders(idx.groups)
+  if (category !== activeCategory.value) return
+  if (idx.ok === false) {
+    // 索引文件存在但解析失败：停止写入，避免用空数据把原文件覆盖掉
+    indexCategory.value = null
+    error.value = '索引文件内容损坏，已停止写入以免覆盖原数据（可先备份再修复 index.json）'
+    return
+  }
+  error.value = ''
+  indexCategory.value = category
 }
 
 /** 合并「索引里的顺序」和「磁盘上实际存在的文件夹」：索引有顺序的优先，新出现且未登记的按名称排 */
@@ -175,13 +194,9 @@ async function refreshFolders(order: string[] = folders.value) {
   folders.value = [...ordered, ...rest]
 }
 
-/** 列表变化后若没有选中项，自动选第一个，保证右侧面板一进来就有内容 */
+/** 列表变化后不再自动选中第一项：用户没主动点，右侧面板就保持未选中状态 */
 function selectFirstIfEmpty() {
-  if (selectedRels.value.length > 0) return
-  const first = filtered.value[0]
-  if (!first) return
-  selectedRels.value = [first.rel]
-  lastClicked.value = first.rel
+  // 刻意为空：保留函数签名，避免调用点散落修改
 }
 
 /** 按当前页签加载对应的素材库（角色库有缓存，地图库每次重扫） */
@@ -196,6 +211,10 @@ onMounted(async () => {
 })
 
 watch(activeCategory, async () => {
+  // 立刻失效：切页签后旧分类的 entries/tagPool 还在内存里，必须先禁止写入
+  indexCategory.value = null
+  entries.value = {}
+  tagPool.value = []
   activeGroup.value = null
   selectedRels.value = []
   lastClicked.value = null
@@ -344,18 +363,40 @@ function toggle(rel: string) {
   lastClicked.value = rel
 }
 
-/** Shift + 点击：从上次点击的位置连选（仅多选模式） */
+/**
+ * 系统标准多选手势（不依赖「多选」开关）：
+ * - 无修饰键：单选替换选区
+ * - Cmd/Ctrl + 点击：切换单项选中状态（累加）
+ * - Shift + 点击：从上次点击到当前位置的连续范围（按当前筛选列表顺序，天然跨行）
+ *   - 单独 Shift：范围替换选区
+ *   - Cmd/Ctrl + Shift：范围加入现有选区
+ */
 function onItemClick(rel: string, event: MouseEvent) {
-  if (multiSelect.value && event.shiftKey && lastClicked.value) {
-    const list = filtered.value.map(i => i.rel)
+  const additive = event.metaKey || event.ctrlKey
+  const list = filtered.value.map(i => i.rel)
+
+  if (event.shiftKey && lastClicked.value) {
     const from = list.indexOf(lastClicked.value)
     const to = list.indexOf(rel)
     if (from >= 0 && to >= 0) {
       const [start, end] = from < to ? [from, to] : [to, from]
-      selectedRels.value = [...new Set([...selectedRels.value, ...list.slice(start, end + 1)])]
+      const range = list.slice(start, end + 1)
+      selectedRels.value = additive
+        ? [...new Set([...selectedRels.value, ...range])]
+        : range
       return
     }
   }
+
+  if (additive) {
+    const index = selectedRels.value.indexOf(rel)
+    if (index >= 0) selectedRels.value.splice(index, 1)
+    else selectedRels.value.push(rel)
+    lastClicked.value = rel
+    return
+  }
+
+  // 普通点击：多选开关打开时仍走旧的累积切换，否则单选替换
   toggle(rel)
 }
 
@@ -385,9 +426,19 @@ function entryTags(rel: string): string[] {
 /** 把索引内容写入指定文件 */
 async function saveIndexFile(path: string, index: CategoryIndex): Promise<boolean> {
   try {
+    // 防御：标签数组按顺序去重，避免重复标签落盘（列表里同一标签显示两次）
+    const cleanEntries: Record<string, IndexEntry> = {}
+    for (const [rel, entry] of Object.entries(index.entries)) {
+      cleanEntries[rel] = entry.tags ? { ...entry, tags: [...new Set(entry.tags)] } : entry
+    }
+    const clean: CategoryIndex = {
+      ...index,
+      tagPool: [...new Set(index.tagPool)],
+      entries: cleanEntries,
+    }
     await invoke('write_file', {
       path,
-      content: JSON.stringify(index, null, 2) + '\n',
+      content: JSON.stringify(clean, null, 2) + '\n',
     })
     return true
   } catch (e) {
@@ -396,9 +447,14 @@ async function saveIndexFile(path: string, index: CategoryIndex): Promise<boolea
   }
 }
 
-/** 保存当前分类的索引 */
-function writeIndex(): Promise<boolean> {
-  return saveIndexFile(store.indexFilePath(activeCategory.value), {
+/** 保存当前分类的索引：必须保证内存里的数据确实属于当前分类，否则拒绝写入 */
+async function writeIndex(): Promise<boolean> {
+  const category = activeCategory.value
+  if (indexCategory.value !== category) {
+    error.value = '索引正在加载，请稍后再试'
+    return false
+  }
+  return saveIndexFile(store.indexFilePath(category), {
     version: version.value,
     tagPool: tagPool.value,
     groups: folders.value,
@@ -659,6 +715,8 @@ async function applyGroup(group: string) {
 async function moveToSpriteCategory(target: ResourceCategory) {
   const source = activeCategory.value
   if (!isSpriteCategory(source) || !isSpriteCategory(target) || source === target) return
+  // 索引还没切到当前分类时禁止写盘，否则会用旧分类的空索引覆盖目标索引
+  if (indexCategory.value !== source) return
   const rels = [...selectedRels.value]
   if (!rels.length || busy.value) return
 
@@ -667,6 +725,11 @@ async function moveToSpriteCategory(target: ResourceCategory) {
   const sourceDir = spriteStore.categoryDir(source)
   const targetDir = spriteStore.categoryDir(target)
   const targetIndex = await spriteStore.readCategoryIndex(target)
+  if (targetIndex.ok === false) {
+    error.value = '目标分类的索引文件已损坏，已停止写入以免覆盖原数据'
+    busy.value = false
+    return
+  }
   const targetIndexBackup = JSON.parse(JSON.stringify(targetIndex)) as CategoryIndex
   const sourceEntriesBackup = { ...entries.value }
   const used = new Set(store.items.filter(i => i.category === target).map(i => i.rel))
@@ -1274,7 +1337,10 @@ async function toggleTagOnSelection(tag: string) {
   for (const rel of rels) {
     const entry = ensureEntry(rel)
     const tags = [...(entry.tags ?? [])]
-    entry.tags = removeAll ? tags.filter(t => t !== tag) : [...tags, tag]
+    // 多选时「部分有、部分没有」走添加分支：已有的素材不能再 push 一次，否则同一标签会重复
+    entry.tags = removeAll
+      ? tags.filter(t => t !== tag)
+      : tags.includes(tag) ? tags : [...tags, tag]
   }
   const ok = await writeIndex()
   busy.value = false
@@ -1742,8 +1808,8 @@ async function saveFileName() {
           </div>
         </div>
 
-        <!-- 2. 标签：点标签给选中素材打上/去掉，标签管理在设置里 -->
-        <div v-if="selectedRels.length > 0" class="panel-card tags-card">
+        <!-- 2. 标签：常驻显示；未选中素材时禁用点击，但能看到标签池 -->
+        <div class="panel-card tags-card">
           <div class="panel-card-head">
             <span class="panel-card-title">标签</span>
             <button
@@ -1774,7 +1840,7 @@ async function saveFileName() {
                     }
                   : {},
               ]"
-              :disabled="busy"
+              :disabled="busy || (!tagPanelOpen && selectedRels.length === 0)"
               :draggable="tagPanelOpen"
               @click="tagPanelOpen ? selectManagingTag(tag) : toggleTagOnSelection(tag)"
               @dragstart="onTagDragStart(tag, $event)"

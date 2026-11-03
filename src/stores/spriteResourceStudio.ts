@@ -48,19 +48,27 @@ export const useSpriteResourceStudioStore = defineStore('spriteResourceStudio', 
     return joinPath(categoryDir(category), INDEX_FILE)
   }
 
-  /** 读索引：缺失或损坏时静默退化为纯文件名检索 */
+  /** 读索引：缺失时退化为纯文件名检索；内容损坏时标记 ok=false，调用方应停止写入 */
   async function readCategoryIndex(category: SpriteCategory): Promise<CategoryIndex> {
+    let raw: string
     try {
-      const raw = await invoke<string>('read_file', { path: indexFilePath(category) })
+      raw = await invoke<string>('read_file', { path: indexFilePath(category) })
+    } catch {
+      // 文件不存在 = 新分类，空索引是正常状态
+      return { version: 1, tagPool: [], entries: {}, groups: [], ok: true }
+    }
+    try {
       const data = JSON.parse(raw)
       return {
         version: typeof data.version === 'number' ? data.version : 1,
         tagPool: Array.isArray(data.tagPool) ? data.tagPool : [],
         entries: data.entries && typeof data.entries === 'object' ? data.entries : {},
         groups: Array.isArray(data.groups) ? data.groups.filter((g: unknown) => typeof g === 'string') : [],
+        ok: true,
       }
     } catch {
-      return { version: 1, tagPool: [], entries: {}, groups: [] }
+      // 内容损坏（例如写到一半被打断）：不能让上层拿空索引去覆盖
+      return { version: 1, tagPool: [], entries: {}, groups: [], ok: false }
     }
   }
 

@@ -41,6 +41,12 @@ export interface CategoryIndex {
   entries: Record<string, IndexEntry>
   /** 分类的显示顺序（dev 整理工具可手动排序）；未列出的分类按名称排 */
   groups: string[]
+  /**
+   * 读取结果是否可信（仅 readCategoryIndex 返回时携带，写盘时不写）：
+   * 文件不存在 → true（新建分类，空索引是合理的）；
+   * 文件存在但内容解析失败 → false（此时绝不能用空索引覆盖原文件）
+   */
+  ok?: boolean
 }
 
 export const UNGROUPED = '未分类'
@@ -71,19 +77,27 @@ export const useMapResourceLibStore = defineStore('mapResourceLib', () => {
     return joinPath(categoryDir(category), INDEX_FILE)
   }
 
-  /** 读索引：缺失或损坏时静默退化为纯文件名检索，绝不影响资源列表 */
+  /** 读索引：缺失时退化为纯文件名检索；内容损坏时标记 ok=false，调用方应停止写入 */
   async function readCategoryIndex(category: ResourceCategory): Promise<CategoryIndex> {
+    let raw: string
     try {
-      const raw = await invoke<string>('read_file', { path: indexFilePath(category) })
+      raw = await invoke<string>('read_file', { path: indexFilePath(category) })
+    } catch {
+      // 文件不存在 = 新分类，空索引是正常状态
+      return { version: 1, tagPool: [], entries: {}, groups: [], ok: true }
+    }
+    try {
       const data = JSON.parse(raw)
       return {
         version: typeof data.version === 'number' ? data.version : 1,
         tagPool: Array.isArray(data.tagPool) ? data.tagPool : [],
         entries: data.entries && typeof data.entries === 'object' ? data.entries : {},
         groups: Array.isArray(data.groups) ? data.groups.filter((g: unknown) => typeof g === 'string') : [],
+        ok: true,
       }
     } catch {
-      return { version: 1, tagPool: [], entries: {}, groups: [] }
+      // 内容损坏（例如写到一半被打断）：不能让上层拿空索引去覆盖
+      return { version: 1, tagPool: [], entries: {}, groups: [], ok: false }
     }
   }
 

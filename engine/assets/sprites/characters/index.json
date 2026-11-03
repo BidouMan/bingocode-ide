@@ -263,11 +263,6 @@
       "py": "kedaya",
       "pyi": "kdy"
     },
-    "images/蛋蛋.png": {
-      "name": "蛋蛋",
-      "py": "dandan",
-      "pyi": "dd"
-    },
     "images/卡拉.png": {
       "name": "卡拉",
       "py": "kala",
@@ -282,6 +277,91 @@
       "name": "卡比兽",
       "py": "kabishou",
       "pyi": "kbs"
+    },
+    "images/皮皮.png": {
+      "name": "皮皮",
+      "py": "pipi",
+      "pyi": "pp"
+    },
+    "packages/小机甲.bsf": {
+      "name": "小机甲",
+      "py": "xiaojijia",
+      "pyi": "xjj"
+    },
+    "packages/洛克人.bsf": {
+      "name": "洛克人",
+      "py": "luokeren",
+      "pyi": "lkr"
+    },
+    "packages/骷髅王.bsf": {
+      "name": "骷髅王",
+      "py": "kulouwang",
+      "pyi": "klw"
+    },
+    "images/雪王.png": {
+      "name": "雪王",
+      "py": "xuewang",
+      "pyi": "xw"
+    },
+    "packages/太阳花.bsf": {
+      "name": "太阳花",
+      "py": "taiyanghua",
+      "pyi": "tyh"
+    },
+    "packages/吸血鬼-1.bsf": {
+      "name": "吸血鬼-1",
+      "py": "xixuegui-1",
+      "pyi": "xxg-1"
+    },
+    "packages/吸血鬼-2.bsf": {
+      "name": "吸血鬼-2",
+      "py": "xixuegui-2",
+      "pyi": "xxg-2"
+    },
+    "packages/战士-1.bsf": {
+      "name": "战士-1",
+      "py": "zhanshi-1",
+      "pyi": "zs-1"
+    },
+    "packages/战士-2.bsf": {
+      "name": "战士-2",
+      "py": "zhanshi-2",
+      "pyi": "zs-2"
+    },
+    "packages/小红帽.bsf": {
+      "name": "小红帽",
+      "py": "xiaohongmao",
+      "pyi": "xhm"
+    },
+    "packages/小智.bsf": {
+      "name": "小智",
+      "py": "xiaozhi",
+      "pyi": "xz"
+    },
+    "packages/僵尸_1.bsf": {
+      "name": "僵尸_1",
+      "py": "jiangshi_1",
+      "pyi": "js_1"
+    },
+    "packages/僵尸_2.bsf": {
+      "name": "僵尸_2",
+      "py": "jiangshi_2",
+      "pyi": "js_2"
+    },
+    "packages/僵尸_3.bsf": {
+      "name": "僵尸_3",
+      "py": "jiangshi_3",
+      "pyi": "js_3"
+    },
+    "packages/僵尸_4.bsf": {
+      "name": "僵尸_4",
+      "py": "jiangshi_4",
+      "pyi": "js_4"
+    },
+    "images/卡皮巴拉.png": {
+      "name": "卡皮巴拉",
+      "py": "kapibala",
+      "pyi": "kpbl"
     }
   }
 }
