@@ -5,25 +5,17 @@
  */
 export const THUMB_SIZE = 64
 
-export function fitPixelImage(img: HTMLImageElement, boxSize: number = THUMB_SIZE) {
-  const { naturalWidth, naturalHeight } = img
-  if (!naturalWidth || !naturalHeight) return
-
-  if (naturalWidth <= boxSize && naturalHeight <= boxSize) {
-    // 小于方框的像素图：整数倍放大，保证像素不糊
-    const factor = Math.floor(Math.min(boxSize / naturalWidth, boxSize / naturalHeight))
-    img.style.width = `${naturalWidth * factor}px`
-    img.style.height = `${naturalHeight * factor}px`
-  } else {
-    // 超过方框的大图（背景、图集）：统一按方框缩小，由 CSS contain 保持比例
-    img.style.width = `${boxSize}px`
-    img.style.height = `${boxSize}px`
-  }
+export function fitPixelImage(img: HTMLImageElement) {
+  // 尺寸统一交给 CSS 的固定方框 + object-fit: contain 处理；
+  // 这里只保证像素图按最近邻缩放，不被浏览器双线性插值模糊。
+  // 同时清掉可能残留的内联宽高，避免覆盖 CSS 的 100% 尺寸。
   img.style.imageRendering = 'pixelated'
+  img.style.width = ''
+  img.style.height = ''
 }
 
-/** img @load 事件：加载完就按统一尺寸缩放（boxSize 不传时用默认缩略图尺寸） */
-export function fitPixelThumb(event: Event, boxSize: number = THUMB_SIZE) {
+/** img @load 事件：加载完就应用像素渲染（尺寸由 CSS 控制） */
+export function fitPixelThumb(event: Event) {
   const img = event.currentTarget as HTMLImageElement | null
-  if (img) fitPixelImage(img, boxSize)
+  if (img) fitPixelImage(img)
 }

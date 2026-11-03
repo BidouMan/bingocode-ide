@@ -21,6 +21,12 @@ export const SPRITE_STUDIO_CATEGORIES: Array<{ id: SpriteCategory; label: string
 /** 精灵包扩展名（.bgs 逐帧 / .bsf sheet 图集） */
 export const SPRITE_PACKAGE_EXTS = /\.(bgs|bsf)$/i
 
+/**
+ * 素材整理页缩略图的内容占比：默认 0.43 是按普通列表格子的观感定的，
+ * 整理页卡片格子更大，用 0.86（正好是默认的两倍）让图像更饱满。
+ */
+const STUDIO_THUMB_CONTENT_RATIO = 0.86
+
 export function isSpriteCategory(category: string): category is SpriteCategory {
   return category === 'characters' || category === 'items'
 }
@@ -99,16 +105,34 @@ export const useSpriteResourceStudioStore = defineStore('spriteResourceStudio', 
     return found
   }
 
-  /** 包文件缩略图需要解包：放在列表展示后再异步补齐，避免整页等待 */
+  /**
+   * 补齐缩略图，统一到固定 160×160 画布（内容按最长边缩放居中），
+   * 保证列表里不同尺寸/留白的素材视觉大小一致。
+   *
+   * 注意不能对图片用 `convertFileSrc` 的文件 URL：跨域协议会污染 canvas，
+   * `normalizeSpriteThumb` 里的 `toDataURL` 会抛异常并静默退回原图，
+   * 于是图片缩略图就按各自原始画布撑满卡片、和包文件大小对不上。
+   * 一律用 Rust 读成 base64 data URL（同内置角色库 spriteLib 的做法）再归一化。
+   */
   async function fillThumbnail(item: MapResourceItem) {
     try {
       const abs = joinPath(categoryDir(item.category as SpriteCategory), item.rel)
-      if (abs.toLowerCase().endsWith('.bsf')) {
-        const { getBsfThumbnail } = await import('../composables/useSpriteData')
-        item.thumbnail = await getBsfThumbnail(abs)
-      } else {
-        item.thumbnail = await invoke<string>('get_sprite_thumbnail', { path: abs })
+      const lower = abs.toLowerCase()
+      if (lower.endsWith('.svg')) {
+        // SVG 无法由 Rust 图片库解码，直接交给 <img>（矢量图尺寸不受留白影响）
+        item.thumbnail = convertFileSrc(abs)
+        return
       }
+      if (lower.endsWith('.bsf')) {
+        // .bsf 缩略图本身就是归一化画布（与悬停动画共用默认帧锚点），无需二次重采样
+        const { getBsfThumbnail } = await import('../composables/useSpriteData')
+        item.thumbnail = await getBsfThumbnail(abs, STUDIO_THUMB_CONTENT_RATIO)
+        return
+      }
+      // .bgs 取默认帧、单图直接读取，均为 base64 data URL（不污染 canvas）
+      const dataUrl = await invoke<string>('get_sprite_thumbnail', { path: abs })
+      const { normalizeSpriteThumb } = await import('../utils/spriteThumb')
+      item.thumbnail = await normalizeSpriteThumb(dataUrl, STUDIO_THUMB_CONTENT_RATIO)
     } catch (e) {
       console.warn('[SpriteResourceStudio] 缩略图加载失败:', item.rel, e)
     }
@@ -130,17 +154,15 @@ export const useSpriteResourceStudioStore = defineStore('spriteResourceStudio', 
 
       for (const { id: category } of SPRITE_STUDIO_CATEGORIES) {
         const index = await readCategoryIndex(category)
-        const dirPath = categoryDir(category)
         for (const entry of await scanCategory(category)) {
           if (!isBuiltinAsset(manifest, `sprites/${category}/${entry.rel}`)) continue
           const meta = index.entries[entry.rel] ?? {}
-          const absPath = joinPath(dirPath, entry.rel)
           result.push({
             name: meta.name || entry.file.replace(/[.][^.]+$/, ''),
             path: `/sprites/${category}/${entry.rel}`,
             category,
-            // 图片直接用文件 URL 交给 <img>；包文件先留空，稍后解包出缩略图
-            thumbnail: entry.kind === 'image' ? convertFileSrc(absPath) : '',
+            // 缩略图统一在 fillThumbnail 里生成为归一化 data URL（含图片），先留空占位
+            thumbnail: '',
             group: UNGROUPED,
             tags: Array.isArray(meta.tags) ? meta.tags : [],
             py: meta.py ?? '',
@@ -164,10 +186,13 @@ export const useSpriteResourceStudioStore = defineStore('spriteResourceStudio', 
 
       items.value = result
       cache = result
-      // 包文件缩略图逐个解包，避免几十个 zip 同时解码占满内存
+      // 逐个补齐缩略图（包文件需解包、图片需归一化），避免几十个素材同时解码占满内存。
+      // 注意：必须从 items.value（reactive 代理）取元素再赋值，
+      // 直接改 result 里的原始对象不会触发响应式，缩略图要等下次重渲染才显示。
+      const proxyItems = items.value
       void (async () => {
-        for (const item of result) {
-          if (item.spriteKind === 'package') await fillThumbnail(item)
+        for (const item of proxyItems) {
+          await fillThumbnail(item)
         }
       })()
     } catch (e) {

@@ -133,7 +133,7 @@ async function cropSheetFrame(
  * .bsf 缩略图：渲染 defaultFrame（缺省第一帧）→ dataURL。
  * 支持两种形态：内置库的 .bsf zip 文件 / 项目内解压后的 sheet 目录。
  */
-export async function getBsfThumbnail(path: string): Promise<string> {
+export async function getBsfThumbnail(path: string, contentRatio?: number): Promise<string> {
   let manifest: any
   let sheetImage: HTMLImageElement
 
@@ -165,7 +165,7 @@ export async function getBsfThumbnail(path: string): Promise<string> {
   const off = frame.offset || { x: 0, y: 0 }
   const anchor = { x: off.x, y: off.y, w: frame.rect.w, h: frame.rect.h }
   const { renderNormalizedBsfFrames } = await import('../utils/spriteThumb')
-  const [out] = renderNormalizedBsfFrames(sheetImage, [frame], anchor)
+  const [out] = renderNormalizedBsfFrames(sheetImage, [frame], anchor, contentRatio)
   return out!.toDataURL('image/png')
 }
 

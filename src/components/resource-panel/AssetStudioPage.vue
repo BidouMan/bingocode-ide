@@ -123,7 +123,7 @@ let ghostEl: HTMLElement | null = null
 const LIST_THUMB_SIZE = 32
 
 function onListThumbLoad(event: Event) {
-  fitPixelThumb(event, LIST_THUMB_SIZE)
+  fitPixelThumb(event)
 }
 
 const groupTarget = ref('')
@@ -542,8 +542,7 @@ function syncItemPath(oldRel: string, newRel: string) {
   if (isSpriteCategory(item.category)) {
     item.group = UNGROUPED
     item.path = `/sprites/${item.category}/${newRel}`
-    // 包文件缩略图由内容生成，改名不影响；图片走文件 URL，需要换成新路径
-    if (item.spriteKind === 'image') item.thumbnail = `${convertFileSrc(joinPath(dir, newRel))}?t=${Date.now()}`
+    // 角色缩略图是归一化后的 data URL，与文件路径无关，改名/移动都无需重载
     return
   }
   item.group = newRel.includes('/') ? newRel.slice(0, newRel.lastIndexOf('/')) : UNGROUPED
@@ -735,7 +734,7 @@ async function moveToSpriteCategory(target: ResourceCategory) {
     item.file = m.newRel.split('/').pop() ?? item.file
     item.group = UNGROUPED
     item.path = `/sprites/${target}/${m.newRel}`
-    if (item.spriteKind === 'image') item.thumbnail = `${convertFileSrc(joinPath(targetDir, m.newRel))}?t=${Date.now()}`
+    // 缩略图是 data URL，跨分类移动无需重载
   }
   const movedSet = new Set(moved.map(m => m.oldRel))
   selectedRels.value = selectedRels.value.filter(r => !movedSet.has(r))
@@ -2016,9 +2015,10 @@ async function saveFileName() {
 }
 
 .card-thumb img {
-  max-width: 100%;
-  max-height: 100%;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
+  image-rendering: pixelated;
 }
 
 .card-name {
@@ -2113,9 +2113,10 @@ async function saveFileName() {
 }
 
 .col-thumb img {
-  max-width: 100%;
-  max-height: 100%;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
+  image-rendering: pixelated;
 }
 
 .col-name {

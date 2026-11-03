@@ -21,6 +21,7 @@ const THUMB_SIZE = 160
 /**
  * 内容最长边占缩略图的比例（含呼吸边）。
  * 0.43 是「铺满」方案（≈0.86）的一半——列表里铺满格子看着太大太挤。
+ * 素材整理页的卡片格子更大，会显式传入 0.86 让缩略图更饱满。
  */
 const THUMB_CONTENT_RATIO = 0.43
 
@@ -38,8 +39,9 @@ export function renderNormalizedBsfFrames(
   sheet: CanvasImageSource,
   frames: Array<{ rect: RectBox; offset?: { x: number; y: number } }>,
   anchor: RectBox,
+  contentRatio: number = THUMB_CONTENT_RATIO,
 ): HTMLCanvasElement[] {
-  const inner = Math.round(THUMB_SIZE * THUMB_CONTENT_RATIO)
+  const inner = Math.round(THUMB_SIZE * contentRatio)
   const scale = Math.min(inner / anchor.w, inner / anchor.h)
   // 判定是否像素画：用锚定帧最长边（整包美术风格统一，避免同包帧的采样方式不一致）
   const smoothing = Math.max(anchor.w, anchor.h) > SMALL_ART_MAX_SIDE
@@ -67,7 +69,10 @@ export function renderNormalizedBsfFrames(
   })
 }
 
-export async function normalizeSpriteThumb(src: string): Promise<string> {
+export async function normalizeSpriteThumb(
+  src: string,
+  contentRatio: number = THUMB_CONTENT_RATIO,
+): Promise<string> {
   const img = await loadImage(src)
   const w = img.naturalWidth || img.width
   const h = img.naturalHeight || img.height
@@ -86,7 +91,7 @@ export async function normalizeSpriteThumb(src: string): Promise<string> {
     const box = contentBBox(scan) ?? { x: 0, y: 0, w: sw, h: sh }
 
     // 内容按最长边铺进内部区，居中画进固定画布
-    const inner = Math.round(THUMB_SIZE * THUMB_CONTENT_RATIO)
+    const inner = Math.round(THUMB_SIZE * contentRatio)
     const drawScale = Math.min(inner / box.w, inner / box.h)
     const dw = Math.max(1, Math.round(box.w * drawScale))
     const dh = Math.max(1, Math.round(box.h * drawScale))
