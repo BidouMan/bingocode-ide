@@ -52,7 +52,6 @@ import iconCodeSave from '../../assets/icons/codemode_保存.svg'
 import iconCodeRun from '../../assets/icons/codemode_运行.svg'
 import iconCodeStop from '../../assets/icons/codemode_停止.svg'
 import iconSettings from '../../assets/icons/icon--settings.svg'
-import iconDev from '../../assets/icons/开发工具.svg'
 import iconHelp from '../../assets/icons/help.svg'
 import iconPlay from '../../assets/icons/icon--play.svg'
 import iconStop from '../../assets/icons/icon--stop-all.svg'
@@ -98,14 +97,12 @@ const mapLibPageKey = ref(0)
 const mapResLibPageKey = ref(0)
 /** 内置资源库打开范围：图层面板只给图像资源，图块面板只给图块资源 */
 const mapResLibScope = ref<'image' | 'tile'>('image')
-/** 开发模式入口只在 dev 构建里可见；正式构建时被静态替换为 false（见 AGENTS.md 开发者工具规矩） */
-const isDevMode = import.meta.env.DEV
-const devMenuVisible = ref(false)
-
-// 开发工具页：只在 dev 构建里动态引入，正式包的 dist 里不会有这个 chunk
+// 开发工具页 + 菜单：只在 dev 构建里动态引入，正式包的 dist 里不会有这些 chunk
 const AssetStudioPage = shallowRef<Component | null>(null)
+const DevMenu = shallowRef<Component | null>(null)
 if (import.meta.env.DEV) {
   import('../resource-panel/AssetStudioPage.vue').then(mod => { AssetStudioPage.value = mod.default })
+  import('./DevMenu.vue').then(mod => { DevMenu.value = mod.default })
 }
 const assetStudioKey = ref(0)
 const spriteLibPageKey = ref(0)
@@ -578,18 +575,9 @@ function closeSettingsMenu() {
   engineSubmenu.value = null
 }
 
-// ─── 开发模式菜单（仅 dev 构建可见）───
-function toggleDevMenu() {
-  devMenuVisible.value = !devMenuVisible.value
-}
-
-function closeDevMenu() {
-  devMenuVisible.value = false
-}
-
+// ─── 开发模式菜单（仅 dev 构建可见，菜单 UI 在 DevMenu.vue）───
 /** 开发工具：内置素材整理页（独立页面，支持多选批量操作） */
 function openAssetStudio() {
-  closeDevMenu()
   currentPage.value = 8
 }
 
@@ -2344,16 +2332,8 @@ function spriteDisplayName(name: string) {
         </div>
       </div>
 
-      <!-- DEV工具 (仅 dev 构建可见)：二级菜单集中放开发者工具 -->
-      <div v-if="isDevMode" class="menu-file-wrapper" @mouseleave="closeDevMenu">
-        <button class="menu-btn" @click="toggleDevMenu">
-          <img :src="iconDev" class="menu-icon" />
-          <span>DEV工具</span>
-        </button>
-        <div v-show="devMenuVisible" class="file-menu-dropdown">
-          <button class="file-menu-item" @click="openAssetStudio">素材整理</button>
-        </div>
-      </div>
+      <!-- DEV工具 (仅 dev 构建可见)：独立组件 DevMenu.vue 动态引入，正式包不含此 chunk -->
+      <component :is="DevMenu" v-if="DevMenu" @open-asset-studio="openAssetStudio" />
 
       <!-- 弹性空间 (占6份) -->
       <div class="menu-spacer"></div>
