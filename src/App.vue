@@ -16,9 +16,14 @@ onMounted(async () => {
   }
   // 无论如何都显示窗口（不被 Monaco 加载阻塞）
   bootReady.value = true
-  const win = getCurrentWebviewWindow()
-  await win.show()
-  win.setFocus()
+  // 纯浏览器（非 Tauri）环境下 getCurrentWebviewWindow 会抛错，静默跳过窗口显隐
+  try {
+    const win = getCurrentWebviewWindow()
+    await win.show()
+    win.setFocus()
+  } catch {
+    /* 非 Tauri 环境忽略 */
+  }
 })
 </script>
 

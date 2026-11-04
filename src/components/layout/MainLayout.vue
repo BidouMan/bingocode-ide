@@ -473,27 +473,35 @@ function onGameSaveShortcut(e: KeyboardEvent) {
 onMounted(() => window.addEventListener('keydown', onGameSaveShortcut))
 onUnmounted(() => window.removeEventListener('keydown', onGameSaveShortcut))
 
-// 退出保护：有未保存代码时弹窗提示（Tauri 原生窗口关闭）
-const appWindow = getCurrentWebviewWindow()
+// 退出保护：有未保存代码时弹窗提示（Tauri 原生窗口关闭；纯浏览器 dev 环境静默跳过）
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _appWindow: any = null
+try {
+  _appWindow = getCurrentWebviewWindow()
+} catch {
+  /* 非 Tauri 环境忽略（浏览器 dev 模式仍可用；桌面端正常注册） */
+}
 let pendingClose = false
 
-appWindow.onCloseRequested(async (e) => {
-  if (pendingClose) {
-    return
-  }
-  if (editorStore.hasUnsavedTabs) {
-    e.preventDefault()
-    const shouldSave = await ask('有未保存的代码，是否保存？', { title: '未保存的代码', kind: 'warning' })
-    if (shouldSave) {
-      // 游戏模式里「+」新建但还没运行过的标签没有路径，先落到项目 code/ 再保存其余文件，
-      // 否则这类标签的内容会随窗口关闭直接丢掉
-      await projectStore.flushCodeTabs().catch(() => {})
-      await editorStore.saveAllModifiedTabs()
+if (_appWindow) {
+  _appWindow.onCloseRequested(async (e: { preventDefault: () => void }) => {
+    if (pendingClose) {
+      return
     }
-  }
-  pendingClose = true
-  await appWindow.close()
-})
+    if (editorStore.hasUnsavedTabs) {
+      e.preventDefault()
+      const shouldSave = await ask('有未保存的代码，是否保存？', { title: '未保存的代码', kind: 'warning' })
+      if (shouldSave) {
+        // 游戏模式里「+」新建但还没运行过的标签没有路径，先落到项目 code/ 再保存其余文件，
+        // 否则这类标签的内容会随窗口关闭直接丢掉
+        await projectStore.flushCodeTabs().catch(() => {})
+        await editorStore.saveAllModifiedTabs()
+      }
+    }
+    pendingClose = true
+    await _appWindow.close?.()
+  })
+}
 
 // 自动选中第一个资源
 function autoSelectFirst() {

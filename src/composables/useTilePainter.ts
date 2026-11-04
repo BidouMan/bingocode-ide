@@ -25,6 +25,8 @@ export function useTilePainter(options: TilePainterOptions) {
   const { getApp, getPIXI } = options
 
   let lastPaintedKey = ''
+  /** 上一落笔格：画笔拖动时沿它到当前格连线补齐中间格（快速拖动时指针事件是跳点采样的） */
+  let lastPaintedPos: { x: number; y: number } | null = null
 
   // 幽灵预览：用真实图块纹理铺在格子上（半透明），代替原来的绿色边框
   const PREVIEW_ALPHA = 0.5
@@ -599,6 +601,7 @@ export function useTilePainter(options: TilePainterOptions) {
 
   function resetPaintKey() {
     lastPaintedKey = ''
+    lastPaintedPos = null
   }
 
   // 绘制工具按下：左键绘制，右键擦除；橡皮、油漆桶、移动工具同理
@@ -613,6 +616,7 @@ export function useTilePainter(options: TilePainterOptions) {
           // 擦除模式：画笔左键也改为擦除
           eraseStampAt(pos)
           lastPaintedKey = `${pos.x},${pos.y}`
+          lastPaintedPos = pos
           options.onTileErased(pos.x, pos.y)
         } else {
           // 多图块图章：一次贴出整组；普通画笔：只贴当前一块
@@ -632,11 +636,13 @@ export function useTilePainter(options: TilePainterOptions) {
             updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
           }
           lastPaintedKey = `${pos.x},${pos.y}`
+          lastPaintedPos = pos
           options.onTilePainted(pos.x, pos.y, tileId)
         }
       } else if ((e.button as number) === 2) {
         eraseStampAt(pos)
         lastPaintedKey = `${pos.x},${pos.y}`
+        lastPaintedPos = pos
         options.onTileErased(pos.x, pos.y)
       }
     } else if (
@@ -756,35 +762,40 @@ export function useTilePainter(options: TilePainterOptions) {
           // 绘制工具：右键擦除；擦除模式下左键也擦除
           if (mapEditorStore.currentTool === 'draw' && mapStore.activeLayer && mapStore.activeLayer.type === 'drawing') {
             const layer = mapStore.activeLayer
-            if (e.buttons === 2 || mapEditorStore.eraseMode) {
-              eraseStampAt(pos)
-              options.onTileErased(pos.x, pos.y)
-            } else {
-              const stampCells = expandStamp([pos])
-              if (stampCells.length) {
-                paintStampCells(layer.id, stampCells)
-                options.onTilePainted(
-                  pos.x,
-                  pos.y,
-                  encodeTileId(
-                    layer.id, stampCells[0].resourceIndex, stampCells[0].tileIndex,
-                    stampCells[0].flipH, stampCells[0].flipV,
-                  ),
-                )
+            // 快速拖动时相邻事件会跳过多个格子：沿上一落笔格到当前格连线补齐中间格（含当前格，起点已画过故跳过）
+            const cells = lastPaintedPos ? lineCells(lastPaintedPos, pos).slice(1) : [pos]
+            for (const cell of cells) {
+              if (e.buttons === 2 || mapEditorStore.eraseMode) {
+                eraseStampAt(cell)
+                options.onTileErased(cell.x, cell.y)
               } else {
-                const brush = mapStore.pickBrush()
-                if (brush.tileIndex >= 0) {
-                  const tileId = encodeTileId(
-                    layer.id, brush.resourceIndex, brush.tileIndex, brush.flipH, brush.flipV,
+                const stampCells = expandStamp([cell])
+                if (stampCells.length) {
+                  paintStampCells(layer.id, stampCells)
+                  options.onTilePainted(
+                    cell.x,
+                    cell.y,
+                    encodeTileId(
+                      layer.id, stampCells[0].resourceIndex, stampCells[0].tileIndex,
+                      stampCells[0].flipH, stampCells[0].flipV,
+                    ),
                   )
-                  mapStore.setTile(pos.x, pos.y, tileId)
-                  updateTileAt(mapStore.activeLayerIndex, pos.x, pos.y)
-                  options.onTilePainted(pos.x, pos.y, tileId)
+                } else {
+                  const brush = mapStore.pickBrush()
+                  if (brush.tileIndex >= 0) {
+                    const tileId = encodeTileId(
+                      layer.id, brush.resourceIndex, brush.tileIndex, brush.flipH, brush.flipV,
+                    )
+                    mapStore.setTile(cell.x, cell.y, tileId)
+                    updateTileAt(mapStore.activeLayerIndex, cell.x, cell.y)
+                    options.onTilePainted(cell.x, cell.y, tileId)
+                  }
                 }
               }
             }
           }
           lastPaintedKey = key
+          lastPaintedPos = pos
         }
       }
     }

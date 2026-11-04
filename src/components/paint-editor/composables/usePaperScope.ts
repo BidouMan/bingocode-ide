@@ -2441,43 +2441,121 @@ export function usePaperScope(
   }
 
   /**
+   * 橡皮扫掠胶囊（= 圆沿线段扫掠的精确包络，from==to 时退化为圆）：
+   * 一次 pointermove 的整段擦除合并为一条胶囊路径——每个被碰对象只做一次布尔差集，
+   * 且胶囊边界是精确直线+半圆弧（旧实现按 r/2 步长插值圆链，边缘呈锯齿且逐点重复求交）。
+   * insert:false（布尔运算/contains/intersects 均为纯几何，preparePath 内部 clone 操作数），
+   * 不进场景树 → 不进撤销快照、无需 remove。
+   */
+  function makeSweptCapsule(
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+    r: number
+  ): paper.Path {
+    const S = scope!
+    const dx = to.x - from.x
+    const dy = to.y - from.y
+    const dist = Math.hypot(dx, dy)
+    if (dist < 1e-3 || r < 1e-3) {
+      return new S.Path.Circle({
+        center: new S.Point(to.x, to.y),
+        radius: Math.max(r, 1e-3),
+        insert: false,
+      })
+    }
+    const ux = dx / dist
+    const uy = dy / dist
+    const nx = -uy * r // 左法向 × r
+    const ny = ux * r
+    const path = new S.Path({ insert: false })
+    path.moveTo(new S.Point(from.x + nx, from.y + ny)) // A 左肩
+    path.lineTo(new S.Point(to.x + nx, to.y + ny)) // B 左肩
+    path.arcTo(
+      new S.Point(to.x + ux * r, to.y + uy * r),
+      new S.Point(to.x - nx, to.y - ny)
+    ) // B 端半圆（三点弧，圆心=B）
+    path.lineTo(new S.Point(from.x - nx, from.y - ny)) // A 右肩
+    path.arcTo(
+      new S.Point(from.x - ux * r, from.y - uy * r),
+      new S.Point(from.x + nx, from.y + ny)
+    ) // A 端半圆
+    path.closed = true
+    return path
+  }
+
+  /** paper 半公开 API 窄类型（0.12.18 dist 源码核实：getStrokeBounds(matrix) 与缓存的 getGlobalMatrix） */
+  type BoundsProbe = paper.Item & {
+    getStrokeBounds: (m: paper.Matrix) => paper.Rectangle
+    getGlobalMatrix: () => paper.Matrix
+  }
+
+  /** 对象边界上的一点（Path=首锚点；复合路径=首子路径首锚点）——供「橡皮完全罩住小对象」判定 */
+  function firstBoundaryPoint(item: paper.PathItem): paper.Point | null {
+    if (item instanceof scope!.Path) return item.firstSegment?.point ?? null
+    const children = (item as paper.CompoundPath).children
+    if (children) {
+      for (const c of children) {
+        if (c instanceof scope!.Path && c.firstSegment) return c.firstSegment.point
+      }
+    }
+    return null
+  }
+
+  /**
    * 橡皮接触判定（对齐 Scratch touches=几何相交，替代点 hitTest）：
    * 点 hitTest 在圆心进入已咬空区域/贴边缘时会漏判 → 该刀跳过 → 漏咬出
    * 梯形回缩与尖角残留（擦除边缘不规则的根因）。几何判定与圆心位置无关：
-   * 圆心在实心内，或橡皮圆（⊕描边半宽——视觉橡皮须碰到描边带）与对象相交。
+   * 胶囊端点在实心内、橡皮胶囊（⊕描边半宽——视觉橡皮须碰到描边带）与对象相交、
+   * 或对象整体被胶囊罩住（小对象边界无交点，旧实现会漏擦）。
    */
   function eraserTouches(
     item: paper.PathItem,
-    p: { x: number; y: number },
+    from: { x: number; y: number },
+    to: { x: number; y: number },
     r: number
   ): boolean {
     const S = scope!
-    if (item.contains(p)) return true
     let sw = 0
     if (item instanceof S.Path) {
       const sc = item.strokeColor
       if (sc && sc.alpha > 0.004) sw = (item.strokeWidth || 0) / 2
     }
-    const probe = new S.Path.Circle(new S.Point(p.x, p.y), r + sw)
-    const hit = item.intersects(probe)
-    probe.remove()
-    return hit
+    const f = new S.Point(from.x, from.y)
+    if (item.contains(f)) return true
+    if (!f.equals(new S.Point(to.x, to.y)) && item.contains(new S.Point(to.x, to.y))) return true
+    const gate = makeSweptCapsule(from, to, r + sw)
+    if (item.intersects(gate)) return true
+    const bp = firstBoundaryPoint(item)
+    return !!bp && gate.contains(bp)
   }
 
-  /** 递归收集与橡皮接触的可擦对象：PathItem 整体收（复合不深入）、组递归、跳过位图代理 */
+  /**
+   * 递归收集与橡皮胶囊接触的可擦对象：PathItem 整体收（复合不深入）、组递归、跳过位图代理。
+   * 先做包围盒预筛（strokeBounds 含描边外扩、getGlobalMatrix 均有缓存，纯矩形比较 O(1)），
+   * 未碰到的对象零几何开销——旧实现逐插值点对全部对象建探测圆 + intersects，是卡顿主因。
+   */
   function collectErasable(
     items: paper.Item[],
-    p: { x: number; y: number },
+    from: { x: number; y: number },
+    to: { x: number; y: number },
     r: number,
     out: paper.PathItem[]
   ) {
     const S = scope!
+    // 扫掠线段 AABB（项目坐标）；strokeBounds 扩 r 后仍不相交 = 不可能接触
+    const minX = Math.min(from.x, to.x) - r
+    const maxX = Math.max(from.x, to.x) + r
+    const minY = Math.min(from.y, to.y) - r
+    const maxY = Math.max(from.y, to.y) + r
     for (const it of items) {
       if (isBitmapRaster(it)) continue
       if (it instanceof S.PathItem) {
-        if (eraserTouches(it, p, r)) out.push(it)
+        const probe = it as unknown as BoundsProbe
+        const b = probe.getStrokeBounds(probe.getGlobalMatrix())
+        if (b.right < minX || b.left > maxX || b.bottom < minY || b.top > maxY) continue
+        if (eraserTouches(it, from, to, r)) out.push(it)
       } else if (it.children) {
-        collectErasable(it.children, p, r, out)
+        collectErasable(it.children, from, to, r, out)
       }
     }
   }
@@ -2563,11 +2641,16 @@ export function usePaperScope(
 
   /**
    * 擦后局部修边（对齐 Scratch 修正逻辑：只修正被擦的那条边）：
-   * 只扫描橡皮圆邻域内的顶点，删除布尔交界产生的低曲率多余点
+   * 只扫描橡皮胶囊邻域（到扫掠线段距离 ≤ 2r）内的顶点，删除布尔交界产生的低曲率多余点
    *（点到前后弦距离 < 0.75px 的内部点=微折锯齿；真实弧的弓高点>0.75 保留），
    * 删点后以直线连接 → 被擦边整齐，未擦区域一律不动（无全路径重拟合的形状漂移）。
    */
-  function trimErasedEdges(item: paper.Item, c: { x: number; y: number }, radius: number) {
+  function trimErasedEdges(
+    item: paper.Item,
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+    radius: number
+  ) {
     const S = scope!
     const paths: paper.Path[] = []
     if (item instanceof S.Path) {
@@ -2579,6 +2662,9 @@ export function usePaperScope(
     }
     const zone = radius * 2
     const z2 = zone * zone
+    const abx = to.x - from.x
+    const aby = to.y - from.y
+    const abLen2 = abx * abx + aby * aby
     for (const pth of paths) {
       // 多轮扫描（删点会改变邻域索引），直到无点可删
       for (let round = 0; round < 8; round++) {
@@ -2592,9 +2678,12 @@ export function usePaperScope(
           const seg = pth.segments[i]
           if (!seg) break
           const p = seg.point
-          const dx = p.x - c.x
-          const dy = p.y - c.y
-          if (dx * dx + dy * dy > z2) continue
+          // 点到扫掠线段（胶囊中轴）的距离平方
+          let t = abLen2 > 0 ? ((p.x - from.x) * abx + (p.y - from.y) * aby) / abLen2 : 0
+          t = Math.max(0, Math.min(1, t))
+          const ddx = p.x - (from.x + t * abx)
+          const ddy = p.y - (from.y + t * aby)
+          if (ddx * ddx + ddy * ddy > z2) continue
           const prev = pth.segments[i - 1]
           const next = pth.segments[i + 1]
           if (!prev || !next) continue
@@ -2620,16 +2709,21 @@ export function usePaperScope(
     }
   }
 
-  function eraseAt(p: { x: number; y: number }) {
+  /**
+   * 一次擦除手势步（pointerdown 单点 / pointermove 整段扫掠）：
+   * from→to 合并为一条胶囊，每个被碰对象只做一次几何操作（旧实现按 r/2 步长插值、
+   * 逐点重复 collect + 布尔差集，快速拖动一次事件最多 64 刀，老机器卡顿主因）。
+   */
+  function eraseAt(from: { x: number; y: number }, to: { x: number; y: number }) {
     if (!scope) return
     const S = scope
     const r = Math.max(2, store.brushSize / 2)
     const layer = activeLayer()
     if (!layer) return
 
-    // 几何接触收集（可一圆同时作用多个相交对象；位图代理在收集时排除）
+    // 几何接触收集（可一胶囊同时作用多个相交对象；位图代理在收集时排除）
     const targets: paper.PathItem[] = []
-    collectErasable(layer.children, p, r, targets)
+    collectErasable(layer.children, from, to, r, targets)
     if (targets.length === 0) return
     if (!erasePushed) {
       pushHistory()
@@ -2637,6 +2731,7 @@ export function usePaperScope(
     }
 
     let acted = false
+    let fillCapsule: paper.Path | null = null // 按擦除半径惰性构建，多对象共享（subtract 内部 clone）
     for (const target of targets) {
       try {
         const closedFilled =
@@ -2644,15 +2739,15 @@ export function usePaperScope(
           target.closed &&
           hasVisibleFill(target)
         if (closedFilled) {
-          // 闭合填充（形状/画笔 blob/复合）：橡皮像素圆布尔差集挖洞
-          //（断口=橡皮圆弧切面，与矩形/圆形擦除统一）；擦断多块时拆为独立对象。
+          // 闭合填充（形状/画笔 blob/复合）：橡皮扫掠胶囊布尔差集挖洞
+          //（断口=精确半圆弧+直线切面）；擦断多块时拆为独立对象。
           // 注意：擦后不做全路径 simplify——那会挪动未擦区域的点（反复执行=形状漂移）
           // 并破坏精确圆弧断面（Scratch mergeEraser 同：布尔后直接落位）；
           // 断面本身是 paper 精确贝塞尔弧，天然光滑
-          const circle = new S.Path.Circle(new S.Point(p.x, p.y), r)
-          const result = target.subtract(circle)
+          if (!fillCapsule) fillCapsule = makeSweptCapsule(from, to, r)
+          const result = target.subtract(fillCapsule)
           if (result && !result.isEmpty()) {
-            trimErasedEdges(result, p, r) // 只修被擦边：删圆邻域内多余顶点，未擦区域不动
+            trimErasedEdges(result, from, to, r) // 只修被擦边：删胶囊邻域内多余顶点，未擦区域不动
             result.insertBelow(target)
             target.remove()
             separateErasedCompound(result)
@@ -2661,11 +2756,10 @@ export function usePaperScope(
           }
           acted = true
         } else if (target instanceof S.Path) {
-          // 开放笔画/无填充路径：切分圆 ⊕ cap 外伸（可见断开=橡皮直径）
+          // 开放笔画/无填充路径：切分胶囊 ⊕ cap 外伸（可见断开=橡皮直径）
           const capExt = target.strokeCap === 'butt' ? 0 : (target.strokeWidth || 0) / 2
-          const circle = new S.Path.Circle(new S.Point(p.x, p.y), r + capExt)
-          acted = splitPathAtCircle(target, circle) || acted
-          circle.remove()
+          const capsule = capExt === 0 && fillCapsule ? fillCapsule : makeSweptCapsule(from, to, r + capExt)
+          acted = splitPathAtCircle(target, capsule) || acted
         } else {
           // 罕见兜底（无填充复合环等）：整体移除
           target.remove()
@@ -3598,7 +3692,7 @@ export function usePaperScope(
       erasePushed = false
       eraseChanged = false
       eraseLast = p
-      eraseAt(p)
+      eraseAt(p, p)
     } else if (tool === 'select') {
       beginSelect(p, e.shiftKey, e.timeStamp)
     } else if (tool === 'reshape') {
@@ -3644,24 +3738,10 @@ export function usePaperScope(
     } else if (tool === 'line' || tool === 'rect' || tool === 'ellipse') {
       continueShape(p, e.shiftKey)
     } else if (tool === 'eraser') {
-      // 轨迹连续化：pointermove 事件间距可超过擦除圆直径（快速拖动一帧几十 px），
-      // 逐事件点擦会在轨迹上留下永远擦不到的空洞——沿上一点按半径步长插值补擦
-      // （与画笔引擎 fixedDistance 连续采样同等保证）
-      const from = eraseLast ?? p
-      const dx = p.x - from.x
-      const dy = p.y - from.y
-      const dist = Math.hypot(dx, dy)
-      // 圆心距 = 半径/2（重叠 75%）：逐刀咬出的圆并集交界更密，断口包络更接近
-      // 理想平滑带（步长=半径时交角明显，放大可见台阶）
-      const step = Math.max(1, store.brushSize / 4)
-      const n = Math.min(Math.ceil(dist / step), 64)
-      if (n <= 1) {
-        eraseAt(p)
-      } else {
-        for (let i = 1; i <= n; i++) {
-          eraseAt({ x: from.x + (dx * i) / n, y: from.y + (dy * i) / n })
-        }
-      }
+      // 轨迹连续化：pointermove 事件间距可超过擦除圆直径（快速拖动一帧几十 px）。
+      // 胶囊扫掠 = 圆沿线段的精确连续包络，一次布尔覆盖整段，天然无空洞，
+      // 不再需要逐点插值补擦（旧实现一次事件最多 64 刀布尔运算，老机器卡顿主因）
+      eraseAt(eraseLast ?? p, p)
       eraseLast = p
     } else if (tool === 'select') {
       continueSelect(p, e.shiftKey)
