@@ -2441,47 +2441,47 @@ export function usePaperScope(
   }
 
   /**
-   * 橡皮扫掠胶囊（= 圆沿线段扫掠的精确包络，from==to 时退化为圆）：
-   * 一次 pointermove 的整段擦除合并为一条胶囊路径——每个被碰对象只做一次布尔差集，
-   * 且胶囊边界是精确直线+半圆弧（旧实现按 r/2 步长插值圆链，边缘呈锯齿且逐点重复求交）。
-   * insert:false（布尔运算/contains/intersects 均为纯几何，preparePath 内部 clone 操作数），
-   * 不进场景树 → 不进撤销快照、无需 remove。
+   * 橡皮扫掠形状（多圆 CompoundPath）。
+   *
+   * 为什么不用单个胶囊 sweep Path：paper 0.12.18 的 resolveCrossings 对
+   * "切线+圆弧平滑连接"的复合胶囊边界会丢失圆弧段——subtract 结果断面全变成
+   * 直线（就是用户看到的尖角/拖尾）。而对 CompoundPath.children 里的每个独立
+   * 圆分别求交是正确的：每圆的贝塞尔圆弧都完整保留，断面圆顺（all-straight=false）。
+   *
+   * 圆数量 N = min(12, max(2, ceil(dist / (1.5 * r)) + 1))：
+   *  - 间距 1.5r（相邻圆重叠 0.5r，保证连续无漏咬）
+   *  - 上限 12 个（最长擦除距离仍可控）
+   *  - 每事件只做 1 次布尔差集（旧实现按 r/4 插值最多 64 次——老机器卡顿主因）。
    */
-  function makeSweptCapsule(
+  function makeMultiCircleEraser(
     from: { x: number; y: number },
     to: { x: number; y: number },
     r: number
-  ): paper.Path {
+  ): paper.CompoundPath {
     const S = scope!
     const dx = to.x - from.x
     const dy = to.y - from.y
     const dist = Math.hypot(dx, dy)
-    if (dist < 1e-3 || r < 1e-3) {
-      return new S.Path.Circle({
+    const rSafe = Math.max(r, 1e-3)
+    if (dist < 1e-3) {
+      const cp = new S.CompoundPath({ insert: false })
+      cp.addChild(new S.Path.Circle({
         center: new S.Point(to.x, to.y),
-        radius: Math.max(r, 1e-3),
-        insert: false,
-      })
+        radius: rSafe,
+      }))
+      return cp
     }
-    const ux = dx / dist
-    const uy = dy / dist
-    const nx = -uy * r // 左法向 × r
-    const ny = ux * r
-    // 胶囊主体：两切线 + 两端半圆。
-    // 半圆弧用 radius arcTo（明确半径 r），而非三点弧（through 版本会算偏圆心 → 断面尖刺）。
-    // from-to 距离 = 2r，radius = r，paper 自动算出圆心 = from/to 中点 = 胶囊端面圆心 ✓
-    const path = new S.Path({ insert: false })
-    // B 端半圆 + A 端半圆：radius arcTo（明确半径= r，paper.d.ts 缺此重载，强转绕过）
-    const arcToRadius = path.arcTo.bind(path) as (
-      end: paper.PointLike, radius: paper.SizeLike, rot: number, cw: boolean, large: boolean
-    ) => void
-    path.moveTo(new S.Point(from.x + nx, from.y + ny)) // A 左肩
-    path.lineTo(new S.Point(to.x + nx, to.y + ny)) // B 左肩 → 切线1
-    arcToRadius(new S.Point(to.x - nx, to.y - ny), new S.Size(r, r), 0, false, true) // B 端
-    path.lineTo(new S.Point(from.x - nx, from.y - ny)) // A 右肩 → 切线2
-    arcToRadius(new S.Point(from.x + nx, from.y + ny), new S.Size(r, r), 0, false, true) // A 端
-    path.closed = true
-    return path
+    // 间距 1.5r → 相邻圆重叠 0.5r；N 上限 12 防极端长距离
+    const N = Math.min(12, Math.max(2, Math.ceil(dist / (1.5 * rSafe)) + 1))
+    const cp = new S.CompoundPath({ insert: false })
+    for (let i = 0; i < N; i++) {
+      const t = N === 1 ? 0.5 : i / (N - 1)
+      cp.addChild(new S.Path.Circle({
+        center: new S.Point(from.x + dx * t, from.y + dy * t),
+        radius: rSafe,
+      }))
+    }
+    return cp
   }
 
   /** paper 半公开 API 窄类型（0.12.18 dist 源码核实：getStrokeBounds(matrix) 与缓存的 getGlobalMatrix） */
@@ -2524,7 +2524,7 @@ export function usePaperScope(
     const f = new S.Point(from.x, from.y)
     if (item.contains(f)) return true
     if (!f.equals(new S.Point(to.x, to.y)) && item.contains(new S.Point(to.x, to.y))) return true
-    const gate = makeSweptCapsule(from, to, r + sw)
+    const gate = makeMultiCircleEraser(from, to, r + sw)
     if (item.intersects(gate)) return true
     const bp = firstBoundaryPoint(item)
     return !!bp && gate.contains(bp)
@@ -2566,8 +2566,8 @@ export function usePaperScope(
    * 交点倒序 splitAt（保持前方交点位置有效）→ 逐段 contains 判定移除。
    * @returns 是否发生实际删除
    */
-  function splitPathAtCircle(path: paper.Path, circle: paper.Path): boolean {
-    const inter = path.getIntersections(circle)
+  function splitPathAtCircle(path: paper.Path, capsule: paper.PathItem): boolean {
+    const inter = path.getIntersections(capsule)
     if (inter.length === 0) return false
     const subs: paper.Path[] = []
     for (let j = inter.length - 1; j >= 0; j--) {
@@ -2582,7 +2582,7 @@ export function usePaperScope(
     for (let k = subs.length - 1; k >= 0; k--) {
       const s = subs[k]
       const loc = s.length > 1e-6 ? s.getLocationAt(s.length / 2) : null
-      if (!loc || circle.contains(loc.point)) {
+      if (!loc || capsule.contains(loc.point)) {
         s.remove()
         subs.splice(k, 1)
         removedAny = true
@@ -2680,7 +2680,7 @@ export function usePaperScope(
     }
 
     let acted = false
-    let fillCapsule: paper.Path | null = null // 按擦除半径惰性构建，多对象共享（subtract 内部 clone）
+    let fillCapsule: paper.PathItem | null = null // 按擦除半径惰性构建，多对象共享（subtract 内部 clone）
     for (const target of targets) {
       try {
         const closedFilled =
@@ -2693,7 +2693,7 @@ export function usePaperScope(
           // 注意：擦后不做全路径 simplify——那会挪动未擦区域的点（反复执行=形状漂移）
           // 并破坏精确圆弧断面（Scratch mergeEraser 同：布尔后直接落位）；
           // 断面本身是 paper 精确贝塞尔弧，天然光滑
-          if (!fillCapsule) fillCapsule = makeSweptCapsule(from, to, r)
+          if (!fillCapsule) fillCapsule = makeMultiCircleEraser(from, to, r)
           const result = target.subtract(fillCapsule)
           if (result && !result.isEmpty()) {
             simplifyCompoundChildren(result)    // 清布尔交界密集微段（tolerance=0.4px）
@@ -2707,7 +2707,7 @@ export function usePaperScope(
         } else if (target instanceof S.Path) {
           // 开放笔画/无填充路径：切分胶囊 ⊕ cap 外伸（可见断开=橡皮直径）
           const capExt = target.strokeCap === 'butt' ? 0 : (target.strokeWidth || 0) / 2
-          const capsule = capExt === 0 && fillCapsule ? fillCapsule : makeSweptCapsule(from, to, r + capExt)
+          const capsule = capExt === 0 && fillCapsule ? fillCapsule : makeMultiCircleEraser(from, to, r + capExt)
           acted = splitPathAtCircle(target, capsule) || acted
         } else {
           // 罕见兜底（无填充复合环等）：整体移除
