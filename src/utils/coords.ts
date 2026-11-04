@@ -13,6 +13,17 @@
 export const STAGE_W = 640
 export const STAGE_H = 480
 
+/**
+ * 新建地图的默认格子数：跟随图块尺寸，保证地图像素尺寸 ≈ 一个游戏画面。
+ * 16px → 40×30；32px → 20×15；64px → 10×8（480/64 不整除，向上取整略出一格）。
+ */
+export function defaultMapGridSize(tileSize: number): { width: number; height: number } {
+  return {
+    width: Math.max(1, Math.round(STAGE_W / tileSize)),
+    height: Math.max(1, Math.round(STAGE_H / tileSize)),
+  }
+}
+
 /** 用户坐标原点在世界空间中的位置（y 原点跟随地图高度，地图底部 = y 0） */
 export const USER_ORIGIN_X = 0
 export let USER_ORIGIN_Y: number = STAGE_H

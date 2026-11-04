@@ -69,6 +69,7 @@ import iconAddOne from '../../assets/icons/add-one.svg'
 import iconReduceOne from '../../assets/icons/reduce-one.svg'
 import { useThemeStore } from '../../stores/theme'
 import { useSettingsStore } from '../../stores/settings'
+import { defaultMapGridSize } from '../../utils/coords'
 import { normalizeSpriteThumb } from '../../utils/spriteThumb'
 
 const editorStore = useEditorStore()
@@ -1014,8 +1015,7 @@ async function onCreateMap() {
   const mapData = {
     name,
     version: 5,
-    width: 40,
-    height: 30,
+    ...defaultMapGridSize(settingsStore.defaultTileSize),
     tileSize: settingsStore.defaultTileSize,
     gravity: false,
     boundaryCollision: false,
@@ -1151,8 +1151,7 @@ async function createImageMapProject(fileName: string, opts: { bytes?: number[];
   }
   const mapData = {
     name: mapName,
-    width: 40,
-    height: 30,
+    ...defaultMapGridSize(settingsStore.defaultTileSize),
     tileSize: settingsStore.defaultTileSize,
     gravity: false,
     boundaryCollision: false,

@@ -7,6 +7,7 @@ import { useProjectStore } from '../stores/project'
 import { useSettingsStore } from '../stores/settings'
 import { deserializeMap } from '../utils/mapSerializer'
 import { serializeMapAsync } from '../utils/mapSaveAsync'
+import { defaultMapGridSize } from '../utils/coords'
 
 interface MapPersistenceOptions {
   /** 画布缩略图（保存 map.json 时一并写入 thumbnail.png） */
@@ -174,8 +175,7 @@ export function useMapPersistence(options: MapPersistenceOptions) {
     return {
       name,
       version: 5,
-      width: 40,
-      height: 30,
+      ...defaultMapGridSize(settingsStore.defaultTileSize),
       tileSize: settingsStore.defaultTileSize,
       gravity: false,
       boundaryCollision: false,

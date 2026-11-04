@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { useMapEditorStore } from './mapEditor'
 import { useSettingsStore } from './settings'
-import { setUserOriginY } from '../utils/coords'
+import { setUserOriginY, defaultMapGridSize } from '../utils/coords'
 import { tileBaseGid } from '../utils/tileGid'
 
 export interface TileData {
@@ -286,8 +286,7 @@ export const useMapStore = defineStore('map', () => {
   const mapData = ref<MapData>({
     name: '未命名地图',
     version: 5,
-    width: 40,
-    height: 30,
+    ...defaultMapGridSize(settingsStore.defaultTileSize),
     tileSize: settingsStore.defaultTileSize,
     gravity: false,
     boundaryCollision: false,
@@ -715,8 +714,7 @@ export const useMapStore = defineStore('map', () => {
     mapData.value = {
       name: '未命名地图',
       version: 5,
-      width: 40,
-      height: 30,
+      ...defaultMapGridSize(settingsStore.defaultTileSize),
       tileSize: settingsStore.defaultTileSize,
       gravity: false,
       boundaryCollision: false,
