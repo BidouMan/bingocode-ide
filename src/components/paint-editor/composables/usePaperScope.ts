@@ -2467,18 +2467,19 @@ export function usePaperScope(
     const uy = dy / dist
     const nx = -uy * r // 左法向 × r
     const ny = ux * r
+    // 胶囊主体：两切线 + 两端半圆。
+    // 半圆弧用 radius arcTo（明确半径 r），而非三点弧（through 版本会算偏圆心 → 断面尖刺）。
+    // from-to 距离 = 2r，radius = r，paper 自动算出圆心 = from/to 中点 = 胶囊端面圆心 ✓
     const path = new S.Path({ insert: false })
+    // B 端半圆 + A 端半圆：radius arcTo（明确半径= r，paper.d.ts 缺此重载，强转绕过）
+    const arcToRadius = path.arcTo.bind(path) as (
+      end: paper.PointLike, radius: paper.SizeLike, rot: number, cw: boolean, large: boolean
+    ) => void
     path.moveTo(new S.Point(from.x + nx, from.y + ny)) // A 左肩
-    path.lineTo(new S.Point(to.x + nx, to.y + ny)) // B 左肩
-    path.arcTo(
-      new S.Point(to.x + ux * r, to.y + uy * r),
-      new S.Point(to.x - nx, to.y - ny)
-    ) // B 端半圆（三点弧，圆心=B）
-    path.lineTo(new S.Point(from.x - nx, from.y - ny)) // A 右肩
-    path.arcTo(
-      new S.Point(from.x - ux * r, from.y - uy * r),
-      new S.Point(from.x + nx, from.y + ny)
-    ) // A 端半圆
+    path.lineTo(new S.Point(to.x + nx, to.y + ny)) // B 左肩 → 切线1
+    arcToRadius(new S.Point(to.x - nx, to.y - ny), new S.Size(r, r), 0, false, true) // B 端
+    path.lineTo(new S.Point(from.x - nx, from.y - ny)) // A 右肩 → 切线2
+    arcToRadius(new S.Point(from.x + nx, from.y + ny), new S.Size(r, r), 0, false, true) // A 端
     path.closed = true
     return path
   }
@@ -2640,76 +2641,6 @@ export function usePaperScope(
   }
 
   /**
-   * 擦后局部修边（对齐 Scratch 修正逻辑：只修正被擦的那条边）：
-   * 只扫描橡皮胶囊邻域（到扫掠线段距离 ≤ 2r）内的顶点，删除布尔交界产生的低曲率多余点
-   *（点到前后弦距离 < 0.75px 的内部点=微折锯齿；真实弧的弓高点>0.75 保留），
-   * 删点后以直线连接 → 被擦边整齐，未擦区域一律不动（无全路径重拟合的形状漂移）。
-   */
-  function trimErasedEdges(
-    item: paper.Item,
-    from: { x: number; y: number },
-    to: { x: number; y: number },
-    radius: number
-  ) {
-    const S = scope!
-    const paths: paper.Path[] = []
-    if (item instanceof S.Path) {
-      paths.push(item)
-    } else if (item instanceof S.CompoundPath && item.children) {
-      for (const ch of item.children) {
-        if (ch instanceof S.Path) paths.push(ch)
-      }
-    }
-    const zone = radius * 2
-    const z2 = zone * zone
-    const abx = to.x - from.x
-    const aby = to.y - from.y
-    const abLen2 = abx * abx + aby * aby
-    for (const pth of paths) {
-      // 多轮扫描（删点会改变邻域索引），直到无点可删
-      for (let round = 0; round < 8; round++) {
-        const segs = pth.segments
-        const n = segs.length
-        if (n <= 3) break
-        let removed = false
-        const last = pth.closed ? n - 1 : n - 2
-        for (let i = 1; i <= last; i++) {
-          if (i >= pth.segments.length - 1 && !pth.closed) break
-          const seg = pth.segments[i]
-          if (!seg) break
-          const p = seg.point
-          // 点到扫掠线段（胶囊中轴）的距离平方
-          let t = abLen2 > 0 ? ((p.x - from.x) * abx + (p.y - from.y) * aby) / abLen2 : 0
-          t = Math.max(0, Math.min(1, t))
-          const ddx = p.x - (from.x + t * abx)
-          const ddy = p.y - (from.y + t * aby)
-          if (ddx * ddx + ddy * ddy > z2) continue
-          const prev = pth.segments[i - 1]
-          const next = pth.segments[i + 1]
-          if (!prev || !next) continue
-          const a = prev.point
-          const b = next.point
-          const ax = b.x - a.x
-          const ay = b.y - a.y
-          const len = Math.hypot(ax, ay)
-          if (len < 1e-6) {
-            seg.remove()
-            removed = true
-            break
-          }
-          const d = Math.abs((p.x - a.x) * ay - (p.y - a.y) * ax) / len
-          if (d < 0.75) {
-            seg.remove()
-            removed = true
-            break
-          }
-        }
-        if (!removed) break
-      }
-    }
-  }
-
-  /**
    * 一次擦除手势步（pointerdown 单点 / pointermove 整段扫掠）：
    * from→to 合并为一条胶囊，每个被碰对象只做一次几何操作（旧实现按 r/2 步长插值、
    * 逐点重复 collect + 布尔差集，快速拖动一次事件最多 64 刀，老机器卡顿主因）。
@@ -2765,7 +2696,6 @@ export function usePaperScope(
           if (!fillCapsule) fillCapsule = makeSweptCapsule(from, to, r)
           const result = target.subtract(fillCapsule)
           if (result && !result.isEmpty()) {
-            trimErasedEdges(result, from, to, r) // 只修被擦边：删胶囊邻域内多余顶点
             simplifyCompoundChildren(result)    // 清布尔交界密集微段（tolerance=0.4px）
             result.insertBelow(target)
             target.remove()
