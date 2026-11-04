@@ -2471,8 +2471,8 @@ export function usePaperScope(
       }))
       return cp
     }
-    // 间距 1.5r → 相邻圆重叠 0.5r；N 上限 12 防极端长距离
-    const N = Math.min(12, Math.max(2, Math.ceil(dist / (1.5 * rSafe)) + 1))
+    // 间距 1.5r → 相邻圆重叠 0.5r；N 无硬上限，保证连续覆盖不漏擦
+    const N = Math.max(2, Math.ceil(dist / (1.5 * rSafe)) + 1)
     const cp = new S.CompoundPath({ insert: false })
     for (let i = 0; i < N; i++) {
       const t = N === 1 ? 0.5 : i / (N - 1)

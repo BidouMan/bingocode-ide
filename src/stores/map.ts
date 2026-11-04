@@ -314,6 +314,9 @@ export const useMapStore = defineStore('map', () => {
   /** 图块集列表里当前选中的分组（删除 / 禁用 / 锁定按它操作；空值视为第一个分组） */
   const selectedTilesetGroupId = ref('')
 
+  /** 新导入图块素材后待选中的素材 id：调色板切片是异步生成的，由 TileResourceBar 刷新完成后落实选中 */
+  const pendingTileSelectResourceId = ref('')
+
   // 图像实例选中状态（画布选中图像后，属性面板/工具栏共用）
   const selectedImageLayerId = ref(-1)
 
@@ -1873,6 +1876,7 @@ export const useMapStore = defineStore('map', () => {
     useTilesetGroupForActiveLayer,
     renameTilesetGroup,
     selectedTilesetGroupId,
+    pendingTileSelectResourceId,
     selectTilesetGroup,
     setTilesetGroupFlags,
     deleteTilesetGroup,

@@ -1007,6 +1007,7 @@ async function uploadLocalTiles() {
     await generateTileThumbnails()
   }
 
+  let lastResourceId = ''
   for (const src of paths) {
     // 单图块按整数倍缩放适配；多格图集只按当前格子切（切错了改尺寸重切）
     const imported = await importTileImage(src, { fileName: src.split(/[\\/]/).pop() })
@@ -1039,7 +1040,10 @@ async function uploadLocalTiles() {
     } catch {
       // 加载失败时由 refreshAll 重试
     }
+    lastResourceId = resourceId
   }
+  // 导入完默认选中最后上传的图块，不用再手动点一次（切片异步生成，刷新完成后落实）
+  if (lastResourceId) mapStore.pendingTileSelectResourceId = lastResourceId
   await refreshAll()
 }
 
@@ -1452,6 +1456,43 @@ function syncPaletteWithResources(
 
 async function refreshAll() {
   await generateTileThumbnails()
+  applyPendingTileSelect()
+}
+
+/** 保持当前缩放，把调色板里的某块图块平移到视口内（刚好可见即可，不居中） */
+function ensurePaletteItemVisible(entry: PaletteLayoutItem) {
+  const vp = viewportRef.value
+  if (!vp) return
+  const rect = vp.getBoundingClientRect()
+  const size = PALETTE_CELL * zoom.value
+  const topLeft = localPointToViewport(entry.left, entry.top)
+  const margin = 8
+  if (topLeft.x < margin) panX.value += margin - topLeft.x
+  else if (topLeft.x + size > rect.width - margin) panX.value += rect.width - margin - (topLeft.x + size)
+  if (topLeft.y < margin) panY.value += margin - topLeft.y
+  else if (topLeft.y + size > rect.height - margin) panY.value += rect.height - margin - (topLeft.y + size)
+}
+
+/** 导入图块素材后落实待选中：默认高亮新素材的最后一块图块（同手动点选，框选同步收拢到它） */
+function applyPendingTileSelect() {
+  const resourceId = mapStore.pendingTileSelectResourceId
+  if (!resourceId) return
+  // 素材已不在当前图块集（被删掉 / 换了地图）就放弃这次选中
+  if (!tileResources.value.some(r => r.id === resourceId)) {
+    mapStore.pendingTileSelectResourceId = ''
+    return
+  }
+  const items = paletteItems.value.filter(item => item.resource.id === resourceId)
+  const last = items[items.length - 1]
+  if (!last) return // 切片还没算出来，等下一轮刷新再试
+  mapStore.pendingTileSelectResourceId = ''
+  paletteSelection.clear()
+  paletteSelection.add(paletteEntryKeyOf(last))
+  emitSelectItem(last)
+  // 新素材排在调色板末尾，可能不在视口里：保持缩放，刚好把它挪到可见
+  const key = paletteEntryKeyOf(last)
+  const layout = paletteLayout.value.items.find(entry => paletteEntryKeyOf(entry.item) === key)
+  if (layout) ensurePaletteItemVisible(layout)
 }
 
 watch(() => mapStore.activeLayerIndex, () => {
@@ -1467,6 +1508,7 @@ watch(
 // 载入地图后以当前素材为基线，避免把已删除的图块重新展开
 watch(() => mapStore.mapLoadCount, () => {
   paletteSelection.clear()
+  mapStore.pendingTileSelectResourceId = ''
   expandedSlices = new Map(tileResources.value.map(r => [r.id, slicingKey(r)]))
   refreshAll()
 })

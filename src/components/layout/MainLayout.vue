@@ -1312,7 +1312,7 @@ async function onResLibImported(path: string, kind?: 'tile' | 'tileset') {
   const engineDir = await invoke<string>('get_engine_assets_dir')
   const imported = await importTileImage(`${engineDir}${path}`, { fileName, kind })
   if (!imported) return
-  mapStore.addResource({
+  const resourceId = mapStore.addResource({
     name,
     path: imported.path,
     resourceType: 'tileset',
@@ -1324,6 +1324,8 @@ async function onResLibImported(path: string, kind?: 'tile' | 'tileset') {
     nativeTileSize: imported.nativeTileSize,
     assetKind: imported.assetKind,
   })
+  // 默认选中新导入的图块（切片异步生成，由调色板刷新完成后落实）
+  mapStore.pendingTileSelectResourceId = resourceId
   editorStore.setActiveEditorMode('map')
   editorStore.setResourceTab('map')
   currentPage.value = 0
