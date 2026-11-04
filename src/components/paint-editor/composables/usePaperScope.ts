@@ -233,7 +233,7 @@ export function usePaperScope(
       bitmapRaster.remove()
       bitmapRaster = null
       bitmapRasterBase = null
-      forceUpdateView() // 同步重绘（模式切换同帧交接，防一帧空窗/重影）
+      scope.view.update() // 同步重绘（模式切换同帧交接，防一帧空窗/重影）
     }
   }
 
@@ -256,7 +256,7 @@ export function usePaperScope(
     scope.project.activeLayer?.insertChild(0, r)
     bitmapRaster = r
     bitmapRasterBase = r.matrix.clone()
-    forceUpdateView() // 同步重绘代理（模式切换同帧交接，位图 canvas 随后隐藏无空窗）
+    scope.view.update() // 同步重绘代理（模式切换同帧交接，位图 canvas 随后隐藏无空窗）
   }
 
   /** restoreFrom（undo/redo）后把代理插回场景：历史快照不含代理，保留对象与其变换 */
@@ -278,41 +278,6 @@ export function usePaperScope(
       return fn()
     } finally {
       if (wasAttached && r && !r.parent) activeLayer()?.insertChild(0, r)
-    }
-  }
-
-  // ─── 渲染节奏调度器（高频交互合帧）───
-
-  /**
-   * 默认 paper.autoUpdate=true：每次 insert/remove 都会立即全场景 Canvas 重绘——
-   * pointermove 每秒 ~60 次就触发 ~60 次重绘，老机器卡跟布尔运算本身无关。
-   * 关掉 autoUpdate 后所有 view.update 统一走：
-   *   scheduleViewUpdate() —— 调度下一次 rAF 合帧（高频路径用，最多每帧 1 次）
-   *   forceUpdateView()     —— 立即刷（view.matrix 变更/切帧/卸载等必须立刻的场景）
-   * 跟 Fabric.js 把同步 renderAll 换成 requestRenderAll 是同一个套路。
-   */
-  let _rafPending = false
-  function scheduleViewUpdate(_force = false) {
-    if (!scope) return
-    if (_rafPending) return // 已有 rAF 排队，等这一帧合并
-    _rafPending = true
-    requestAnimationFrame(() => {
-      _rafPending = false
-      if (!scope) return
-      try {
-        scheduleViewUpdate()
-      } catch {
-        /* 极端渲染异常兜底：不让 rAF 循环挂起 */
-      }
-    })
-  }
-  function forceUpdateView() {
-    if (!scope) return
-    _rafPending = false
-    try {
-      scheduleViewUpdate()
-    } catch {
-      /* 忽略 */
     }
   }
 
@@ -471,7 +436,7 @@ export function usePaperScope(
     }
     scope.project.activeLayer?.activate()
     reattachBitmapRaster()
-    forceUpdateView()
+    scope.view.update()
     clearSelection()
     syncVectorContentFlag()
   }
@@ -746,7 +711,7 @@ export function usePaperScope(
       if (scope.project.layers.length === 0) new scope.Layer()
       scope.project.activeLayer?.activate()
     }
-    scheduleViewUpdate()
+    scope.view.update()
     currentIdx = index
     clearSelection()
     syncBitmapRaster() // 换帧重建位图代理（新帧位图；位图引擎 watcher 先行，DOM 已切好）
@@ -843,7 +808,7 @@ export function usePaperScope(
       penDiscard()
       if (scope.project.layers.length === 0) new scope.Layer()
       scope.project.activeLayer?.activate()
-      scheduleViewUpdate()
+      scope.view.update()
     }
     syncHistoryFlags()
     syncVectorContentFlag()
@@ -871,7 +836,7 @@ export function usePaperScope(
     scope.project.clear()
     if (scope.project.layers.length === 0) new scope.Layer()
     scope.project.activeLayer?.activate()
-    forceUpdateView()
+    scope.view.update()
     frameJson = frameJson.map(() => null)
     frameRaster = frameRaster.map(() => null)
     histMap.clear()
@@ -1295,7 +1260,7 @@ export function usePaperScope(
     store.penState = null
     setSelection([path])
     // 不切换工具：保持当前钢笔工具，选框可直接操作（与直线/矩形/圆形一致）
-    scheduleViewUpdate()
+    scope.view.update()
     return true
   }
 
@@ -1310,7 +1275,7 @@ export function usePaperScope(
     penCursor = null
     store.penState = null
     if (had && rollbackHistory) popHistory()
-    if (had) scheduleViewUpdate()
+    if (had) scope.view.update()
     return had
   }
 
@@ -2826,10 +2791,7 @@ export function usePaperScope(
       }
     }
     clearSelection()
-    if (acted) {
-      eraseChanged = true
-      scheduleViewUpdate() // 合帧重绘（关掉 autoUpdate 后必须手动调度）
-    }
+    if (acted) eraseChanged = true
   }
 
   // ─── 文字工具（Scratch text-tool 同款：TEXT_EDIT_MODE / SELECT_MODE 双态）───
@@ -2956,12 +2918,12 @@ export function usePaperScope(
     // 编辑中收起变换框（选中态由编辑会话接管）
     clearSelection()
     syncTextEditOverlay()
-    scheduleViewUpdate()
+    scope.view.update()
     // 字体异步加载完成后重测 internalBounds（首帧可能用回退字体量宽，加载完再贴合一次）
     ensurePaintFont().then(() => {
       if (textMode === 'edit' && textBox === item) {
         syncTextEditOverlay()
-        scheduleViewUpdate()
+        scope.view.update()
       }
     })
   }
@@ -2972,7 +2934,7 @@ export function usePaperScope(
     textDirty = true
     textBox.content = value
     syncTextEditOverlay()
-    scheduleViewUpdate()
+    scope.view.update()
   }
 
   /** 命中 PointText（文字工具专用：fill 命中即可编辑；位图代理是 Raster 不会命中） */
@@ -3919,7 +3881,7 @@ export function usePaperScope(
       view.matrix = new scope.Matrix(m.a, m.b, m.c, m.d, m.tx, m.ty)
       canvas.style.clipPath = options.viewport.getClipPath(sw, sh) ?? ''
       priv._needsUpdate = true
-      forceUpdateView()
+      scope.view.update()
       return
     }
 
@@ -3940,7 +3902,7 @@ export function usePaperScope(
     }
 
     priv._needsUpdate = true
-    forceUpdateView() // 背面可能被清空 + 矩阵已变，同步重绘一帧
+    scope.view.update() // 背面可能被清空 + 矩阵已变，同步重绘一帧
   }
 
   /** 舞台尺寸观察（窗口变化）→ 重同步视口 */
@@ -3952,9 +3914,8 @@ export function usePaperScope(
     // 独立 PaperScope 实例：与全局默认 scope 隔离，卸载时 remove() 彻底释放
     scope = new paper.PaperScope()
     scope.setup(canvas) // canvas 铺满舞台且其上无 transform → setup 读到的 rect 即舞台布局尺寸
-    // 关掉 autoUpdate，所有 view.update 统一走我们的 rAF 调度器（每秒最多 60 次）；
-    // 否则高频 pointermove 里每次 insert/remove 都会立即重绘——老机器照样卡
-    ;(scope.project as unknown as { setAutoUpdate: (v: boolean) => void }).setAutoUpdate(false)
+    // 保持 paper 默认 autoUpdate=true：insert/remove/修改 都会立即触发 Canvas 重绘
+    // （我们优化的是算法层面——每事件 1 次胶囊布尔 + 包围盒预筛；渲染节流等算法验证稳定后再考虑）
     hookSeamFillRendering(scope.project) // 相邻图形共边抗锯齿缝隙修复（显示/导出共用）
     if (scope.project.layers.length === 0) new scope.Layer()
     scope.project.activeLayer?.activate()
@@ -4119,7 +4080,7 @@ export function usePaperScope(
       scope.project.clear()
       if (scope.project.layers.length === 0) new scope.Layer()
       scope.project.activeLayer?.activate()
-      forceUpdateView()
+      scope.view.update()
       syncVectorContentFlag()
     }
     undoStack = []
