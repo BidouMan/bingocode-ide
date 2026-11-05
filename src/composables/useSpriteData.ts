@@ -133,7 +133,10 @@ async function cropSheetFrame(
  * .bsf 缩略图：渲染 defaultFrame（缺省第一帧）→ dataURL。
  * 支持两种形态：内置库的 .bsf zip 文件 / 项目内解压后的 sheet 目录。
  */
-export async function getBsfThumbnail(path: string, contentRatio?: number): Promise<string> {
+export async function getBsfThumbnail(
+  path: string,
+  contentRatio?: number,
+): Promise<{ dataUrl: string; width: number; height: number }> {
   let manifest: any
   let sheetImage: HTMLImageElement
 
@@ -161,12 +164,15 @@ export async function getBsfThumbnail(path: string, contentRatio?: number): Prom
   )
   const frame = allFrames[defaultIdx] ?? allFrames[0]
   if (!frame?.rect) throw new Error('manifest.frames 为空')
+  // 画布尺寸：manifest.canvas 优先；否则用所有帧并集的最大边界，兜底用 sheet 尺寸
+  const width: number = manifest.canvas?.width ?? frame.rect.w
+  const height: number = manifest.canvas?.height ?? frame.rect.h
   // 与悬停动画共用同一套归一化：默认帧内容框为锚点，缩略图与动画帧尺寸一致，悬停不跳大
   const off = frame.offset || { x: 0, y: 0 }
   const anchor = { x: off.x, y: off.y, w: frame.rect.w, h: frame.rect.h }
   const { renderNormalizedBsfFrames } = await import('../utils/spriteThumb')
   const [out] = renderNormalizedBsfFrames(sheetImage, [frame], anchor, contentRatio)
-  return out!.toDataURL('image/png')
+  return { dataUrl: out!.toDataURL('image/png'), width, height }
 }
 
 /** 路径是否为单图角色（单张 png/jpg/... 贴图，而非目录角色） */

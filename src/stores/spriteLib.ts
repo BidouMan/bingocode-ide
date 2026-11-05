@@ -198,8 +198,11 @@ export const useSpriteLibStore = defineStore('spriteLib', () => {
             continue
           }
           // .bsf：前端从 sheet 裁第一帧（Rust 侧不解析 sheet 图集）
-          const dataUrl = item.type === 'bsf'
+          const bsfResult = item.type === 'bsf'
             ? await (await import('../composables/useSpriteData')).getBsfThumbnail(item.filePath)
+            : null
+          const dataUrl = bsfResult
+            ? bsfResult.dataUrl
             : await invoke<string>('get_sprite_thumbnail', { path: item.filePath })
           // .bsf 已是归一化画布（与悬停动画同一尺寸基准），再裁一遍会二次重采样；
           // 其余格式裁到内容框，不同尺寸/留白的素材在库里视觉大小一致

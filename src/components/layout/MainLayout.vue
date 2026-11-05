@@ -1379,7 +1379,7 @@ async function loadSpriteThumbnail(item: { id: string; path: string }) {
     if (/\.bsf$/i.test(item.path)) {
       const { getBsfThumbnail } = await import('../../composables/useSpriteData')
       // 已是归一化画布（与动画预览同一尺寸基准），不要再裁一遍
-      spriteThumbnails.value[item.id] = await getBsfThumbnail(item.path)
+      spriteThumbnails.value[item.id] = (await getBsfThumbnail(item.path)).dataUrl
       return
     }
     const isImage = /\.(png|jpe?g|gif|bmp|webp)$/i.test(item.path)
@@ -1390,7 +1390,7 @@ async function loadSpriteThumbnail(item: { id: string; path: string }) {
       if (hasManifest) {
         const { getBsfThumbnail } = await import('../../composables/useSpriteData')
         // 已是归一化画布（与动画预览同一尺寸基准），不要再裁一遍
-        spriteThumbnails.value[item.id] = await getBsfThumbnail(item.path)
+        spriteThumbnails.value[item.id] = (await getBsfThumbnail(item.path)).dataUrl
         return
       }
     }

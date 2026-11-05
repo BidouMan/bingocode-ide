@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { loadBuiltinAssetManifest, isBuiltinAsset } from '../utils/builtinAssets'
+import { loadImageElement } from '../utils/tileAssetFit'
 
 export type ResourceCategory = 'images' | 'tiles' | 'tilesets' | 'characters' | 'items'
 
@@ -24,6 +25,9 @@ export interface MapResourceItem {
   rel: string
   /** 角色素材专用：包文件（.bgs/.bsf）或普通图片 */
   spriteKind?: 'package' | 'image'
+  /** 原始图像尺寸（宽×高，像素），由缩略图加载阶段补齐，列表模式可直接展示 */
+  width?: number
+  height?: number
 }
 
 /** 索引条目的字段（可选，缺省时回退文件名） */
@@ -199,6 +203,26 @@ export const useMapResourceLibStore = defineStore('mapResourceLib', () => {
     })
 
     items.value = results
+
+    // 异步回填原始尺寸：thumbnail 是文件 URL（convertFileSrc），
+    // 直接用 loadImageElement 取 naturalWidth/Height 即原图尺寸，不依赖 <img> @load（缓存图可能不触发）
+    fillSizes()
+  }
+
+  /** 后台填充地图素材的原始尺寸（图片文件 URL 的 natural 尺寸 = 原图尺寸） */
+  async function fillSizes() {
+    const list = items.value
+    for (const item of list) {
+      try {
+        const img = await loadImageElement(item.thumbnail)
+        if (img.naturalWidth > 0) {
+          item.width = img.naturalWidth
+          item.height = img.naturalHeight
+        }
+      } catch {
+        // 读取失败的素材尺寸保持空，列表显示「—」
+      }
+    }
   }
 
   return {

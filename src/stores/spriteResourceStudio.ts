@@ -134,13 +134,21 @@ export const useSpriteResourceStudioStore = defineStore('spriteResourceStudio', 
       if (lower.endsWith('.bsf')) {
         // .bsf 缩略图本身就是归一化画布（与悬停动画共用默认帧锚点），无需二次重采样
         const { getBsfThumbnail } = await import('../composables/useSpriteData')
-        item.thumbnail = await getBsfThumbnail(abs, STUDIO_THUMB_CONTENT_RATIO)
+        const { dataUrl, width, height } = await getBsfThumbnail(abs, STUDIO_THUMB_CONTENT_RATIO)
+        item.thumbnail = dataUrl
+        item.width = width
+        item.height = height
         return
       }
       // .bgs 取默认帧、单图直接读取，均为 base64 data URL（不污染 canvas）
       const dataUrl = await invoke<string>('get_sprite_thumbnail', { path: abs })
       const { normalizeSpriteThumb } = await import('../utils/spriteThumb')
       item.thumbnail = await normalizeSpriteThumb(dataUrl, STUDIO_THUMB_CONTENT_RATIO)
+      // 用原始 dataURL 取真实尺寸（归一化后的 thumbnail 是 160×160，不能用）
+      const { loadImage } = await import('../composables/useSpriteData')
+      const img = await loadImage(dataUrl)
+      item.width = img.naturalWidth
+      item.height = img.naturalHeight
     } catch (e) {
       console.warn('[SpriteResourceStudio] 缩略图加载失败:', item.rel, e)
     }

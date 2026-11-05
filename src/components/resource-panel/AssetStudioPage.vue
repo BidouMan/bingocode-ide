@@ -11,7 +11,7 @@ import {
   useSpriteResourceStudioStore,
 } from '../../stores/spriteResourceStudio'
 import { searchItems } from '../../utils/assetSearch'
-import { fitPixelThumb, THUMB_SIZE } from '../../utils/thumbFit'
+import { fitPixelImage, THUMB_SIZE } from '../../utils/thumbFit'
 import iconEdit from '../../assets/icons/编辑.svg'
 import iconDelete from '../../assets/icons/icon--delete.svg'
 import iconSettings from '../../assets/icons/icon--settings.svg'
@@ -129,8 +129,21 @@ let ghostEl: HTMLElement | null = null
 /** 列表模式缩略图比图标模式小一档 */
 const LIST_THUMB_SIZE = 32
 
-function onListThumbLoad(event: Event) {
-  fitPixelThumb(event)
+/** 缩略图加载统一入口：像素图锐化 + 回填原始尺寸（仅地图素材 thumbnail 是文件 URL，
+ *  natural 即原图尺寸；角色素材的尺寸在 store 填充阶段已写好，这里跳过避免覆盖） */
+function onThumbLoad(event: Event) {
+  const img = event.currentTarget as HTMLImageElement | null
+  if (!img) return
+  fitPixelImage(img)
+  const rel = img.dataset.rel
+  if (!rel || img.naturalWidth === 0) return
+  // spriteResourceStudio 的缩略图是归一化 160×160 dataURL，不能取 natural
+  if (img.src.startsWith('data:')) return
+  const item = store.items.value.find(i => i.rel === rel)
+  if (item && item.width == null) {
+    item.width = img.naturalWidth
+    item.height = img.naturalHeight
+  }
 }
 
 const groupTarget = ref('')
@@ -1631,7 +1644,7 @@ async function saveFileName() {
             @click.stop="toggle(item.rel)"
           />
           <div class="card-thumb">
-            <img class="thumb-img" :src="item.thumbnail" loading="lazy" draggable="false" @load="fitPixelThumb" />
+            <img class="thumb-img" :src="item.thumbnail" loading="lazy" draggable="false" :data-rel="item.rel" @load="onThumbLoad" />
           </div>
           <div class="card-name">{{ item.name }}</div>
           <div class="card-meta">{{ itemDirLabel(item) }} · {{ item.file }}</div>
@@ -1647,6 +1660,7 @@ async function saveFileName() {
           <span class="col-name">名字</span>
           <span class="col-file">文件名</span>
           <span class="col-group">目录</span>
+          <span class="col-size">尺寸</span>
           <span class="col-tags">标签</span>
         </div>
         <div
@@ -1667,11 +1681,12 @@ async function saveFileName() {
             @click.stop="toggle(item.rel)"
           />
           <span class="col-thumb">
-            <img class="thumb-img" :src="item.thumbnail" loading="lazy" draggable="false" @load="onListThumbLoad" />
+            <img class="thumb-img" :src="item.thumbnail" loading="lazy" draggable="false" :data-rel="item.rel" @load="onThumbLoad" />
           </span>
           <span class="col-name" :title="item.name">{{ item.name }}</span>
           <span class="col-file" :title="item.file">{{ item.file }}</span>
           <span class="col-group">{{ itemDirLabel(item) }}</span>
+          <span class="col-size">{{ item.width != null ? `${item.width}×${item.height}` : '—' }}</span>
           <span class="col-tags">
             <span v-for="tag in item.tags" :key="tag" class="mini-tag">{{ tag }}</span>
           </span>
@@ -1971,6 +1986,8 @@ async function saveFileName() {
 
 .count {
   color: #8a8f93;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .multi {
@@ -2210,6 +2227,15 @@ async function saveFileName() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.col-size {
+  width: 90px;
+  flex: none;
+  color: #9ca0a4;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  padding-right: 8px;
 }
 
 .col-tags {
