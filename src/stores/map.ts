@@ -1,9 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { useMapEditorStore } from './mapEditor'
+import { useProjectStore } from './project'
 import { useSettingsStore } from './settings'
 import { setUserOriginY, defaultMapGridSize } from '../utils/coords'
 import { tileBaseGid } from '../utils/tileGid'
+import { deleteUnreferencedTileImages } from '../utils/tileFileCleanup'
 
 export interface TileData {
   collision: boolean
@@ -494,6 +496,13 @@ export const useMapStore = defineStore('map', () => {
     if (patch.disabled !== undefined) group.disabled = patch.disabled
   }
 
+  /** 删除图块素材后清理项目里不再被引用的复制图片（异步，失败只告警） */
+  function cleanupTileImages(candidates: Iterable<string | undefined | null>) {
+    const root = useProjectStore().root
+    if (!root || !mapData.value.name) return
+    void deleteUnreferencedTileImages(root, mapData.value.name, candidates, mapData.value)
+  }
+
   /**
    * 删除一个图块集：连同其中的图块素材、调色板条目和画布上用过这些图块的格子一起移除。
    * 只剩一个图块集或该图块集被锁定时不删除（返回 false）。
@@ -525,6 +534,13 @@ export const useMapStore = defineStore('map', () => {
       return [firstgid, upper] as const
     })
 
+    const doomedTileSets = mapData.value.tileSets.filter(
+      ts => doomedIds.has(ts.id) || doomedFirstgids.includes(ts.firstgid),
+    )
+    const doomedPaths = [
+      ...doomed.flatMap(r => [r.path, r.originPath]),
+      ...doomedTileSets.map(ts => ts.imagePath),
+    ]
     mapData.value.resources = mapData.value.resources.filter(r => !doomedIds.has(r.id))
     mapData.value.tileSets = mapData.value.tileSets.filter(
       ts => !(doomedIds.has(ts.id) || doomedFirstgids.includes(ts.firstgid)),
@@ -560,6 +576,7 @@ export const useMapStore = defineStore('map', () => {
       selectedTileIndex.value = -1
     }
     tileRevision.value++
+    cleanupTileImages(doomedPaths)
     return true
   }
 
@@ -934,7 +951,27 @@ export const useMapStore = defineStore('map', () => {
     } else if (activeLayerIndex.value >= mapData.value.layers.length) {
       activeLayerIndex.value = mapData.value.layers.length - 1
     }
-    // 图块集是独立的资源仓库：删图层不删图块集，其它图层随时可以切过去继续用
+    // 最后一个图块图层被删除后，图块集已没有任何图层使用：
+    // 连同图块素材、调色板和项目里复制出来的图片一并清理，避免留下拿不到的孤立资源
+    if (removed?.type === 'drawing'
+      && !mapData.value.layers.some(l => l.type === 'drawing')) {
+      const tileResources = mapData.value.resources.filter(r => r.resourceType !== 'image')
+      const doomedPaths = [
+        ...tileResources.flatMap(r => [r.path, r.originPath]),
+        ...mapData.value.tileSets.map(ts => ts.imagePath),
+      ]
+      const doomedIds = new Set(tileResources.map(r => r.id))
+      mapData.value.resources = mapData.value.resources.filter(r => !doomedIds.has(r.id))
+      mapData.value.tileSets = []
+      mapData.value.tilePalette = []
+      mapData.value.tilesetGroups = []
+      selectedTilesetGroupId.value = ''
+      selectedResourceIndex.value = -1
+      selectedTileIndex.value = -1
+      tileRevision.value++
+      cleanupTileImages(doomedPaths)
+    }
+    // 图块集在还有其它图块图层时是共享资源仓库，只删图层不删图块集
     syncToolWithLayer()
     imageRevision.value++
   }
@@ -1403,6 +1440,11 @@ export const useMapStore = defineStore('map', () => {
           .filter(gid => gid > removedTileSet.firstgid)
       : []
     const nextFirstgid = higherGids.length > 0 ? Math.min(...higherGids) : Infinity
+    const doomedPaths = [
+      removedResource.path,
+      removedResource.originPath,
+      removedTileSet?.imagePath,
+    ]
 
     mapData.value.resources.splice(resourceIndex, 1)
     // 移除该素材对应的图块笔刷
@@ -1438,6 +1480,7 @@ export const useMapStore = defineStore('map', () => {
     } else if (selectedResourceIndex.value > index) {
       selectedResourceIndex.value--
     }
+    cleanupTileImages(doomedPaths)
   }
 
   function clearResources() {
@@ -1446,6 +1489,13 @@ export const useMapStore = defineStore('map', () => {
     const removed = activeLayerResources.value
     const removedIds = new Set(removed.map(r => r.id))
     const removedFirstgids = new Set(removed.map(r => r.firstgid))
+    const doomedTileSets = mapData.value.tileSets.filter(
+      ts => removedIds.has(ts.id) || removedFirstgids.has(ts.firstgid),
+    )
+    const doomedPaths = [
+      ...removed.flatMap(r => [r.path, r.originPath]),
+      ...doomedTileSets.map(ts => ts.imagePath),
+    ]
     // 从地图级素材库移除当前图层可见的素材
     mapData.value.resources = mapData.value.resources.filter(r => !removedIds.has(r.id))
     // 移除对应图块笔刷
@@ -1462,6 +1512,7 @@ export const useMapStore = defineStore('map', () => {
       layer.tiles = {}
       tileRevision.value++
     }
+    cleanupTileImages(doomedPaths)
   }
 
   function updateMapProperty(key: keyof MapData, value: any) {
