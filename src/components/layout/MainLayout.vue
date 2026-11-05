@@ -1255,7 +1255,7 @@ async function onMapLibImportedImage(engineRelPath: string) {
   await createImageMapProject(fileName, { srcPath: absPath })
 }
 
-async function onResLibImported(path: string, kind?: 'tile' | 'tileset') {
+async function onResLibImported(path: string, kind?: 'tile' | 'tileset', tileSize?: number) {
   const fileName = path.split('/').pop() || 'resource.png'
   const name = fileName.split('.')[0] || '资源'
   // 图层面板打开的资源库固定按图像导入；图块面板打开时才作为图块集
@@ -1295,9 +1295,9 @@ async function onResLibImported(path: string, kind?: 'tile' | 'tileset') {
     return
   }
 
-  // 图块模式：单图块会按整数倍缩放适配，图集只按当前格子切（不缩放）
+  // 图块模式：单图块会按整数倍缩放适配；图集若在素材库里设定了图块尺寸，就按设定值切
   const engineDir = await invoke<string>('get_engine_assets_dir')
-  const imported = await importTileImage(`${engineDir}${path}`, { fileName, kind })
+  const imported = await importTileImage(`${engineDir}${path}`, { fileName, kind, tileSize })
   if (!imported) return
   const resourceId = mapStore.addResource({
     name,

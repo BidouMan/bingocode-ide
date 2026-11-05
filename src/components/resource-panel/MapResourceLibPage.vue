@@ -12,8 +12,9 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   'close': []
-  /** 第二个参数：素材类型（tiles=单图块 / tilesets=图集；图像模式不传） */
-  'imported': [path: string, kind?: 'tile' | 'tileset']
+  /** 第二个参数：素材类型（tiles=单图块 / tilesets=图集；图像模式不传）；
+   *  第三个参数：图集在素材库里设定的每格边长（未设定不传） */
+  'imported': [path: string, kind?: 'tile' | 'tileset', tileSize?: number]
 }>()
 
 const store = useMapResourceLibStore()
@@ -119,7 +120,9 @@ function onCardClick(res: MapResourceItem, e: MouseEvent) {
 }
 
 function emitImportSingle(res: MapResourceItem) {
-  emit('imported', res.path, res.category === 'tilesets' ? 'tileset' : res.category === 'tiles' ? 'tile' : undefined)
+  const kind = res.category === 'tilesets' ? 'tileset' : res.category === 'tiles' ? 'tile' : undefined
+  // 只有图集带「图块尺寸」设定，单图块不需要
+  emit('imported', res.path, kind, kind === 'tileset' ? res.tileSize : undefined)
 }
 
 /** 批量导入：逐个 emit，MainLayout 那边本来就是单个处理 */

@@ -25,7 +25,7 @@ import CustomSelect from '../common/CustomSelect.vue'
 const emit = defineEmits<{
   close: []
   /** 绘制测试：把选中的图块/图集交给地图编辑器临时试画 */
-  'tile-test': [items: Array<{ path: string; name: string; assetKind?: 'tile' | 'tileset' }>]
+  'tile-test': [items: Array<{ path: string; name: string; assetKind?: 'tile' | 'tileset'; tileSize?: number }>]
 }>()
 
 const mapStore = useMapResourceLibStore()
@@ -139,7 +139,7 @@ function onThumbLoad(event: Event) {
   if (!rel || img.naturalWidth === 0) return
   // spriteResourceStudio 的缩略图是归一化 160×160 dataURL，不能取 natural
   if (img.src.startsWith('data:')) return
-  const item = store.items.value.find(i => i.rel === rel)
+  const item = store.items.find(i => i.rel === rel)
   if (item && item.width == null) {
     item.width = img.naturalWidth
     item.height = img.naturalHeight
@@ -519,6 +519,28 @@ async function writeIndex(): Promise<boolean> {
   })
 }
 
+/**
+ * 下拉选好图块尺寸后立即写入分类索引：之后从资源库把该集合放进图块图层时，
+ * 就按这个尺寸切图，不再按当前地图格子「猜」。
+ */
+async function onTileSizeChange(value: string) {
+  const size = Number(value)
+  if (!Number.isInteger(size) || size < 1 || size > 512) return
+  const targets = [...selectedTilesets.value]
+  if (!targets.length || busy.value) return
+  busy.value = true
+  error.value = ''
+  for (const item of targets) ensureEntry(item.rel).tileSize = size
+  const ok = await writeIndex()
+  busy.value = false
+  if (ok) {
+    for (const item of targets) item.tileSize = size
+  } else {
+    // 写盘失败：重新读回索引，避免界面显示一个并未保存的值
+    await loadIndex()
+  }
+}
+
 /** 添加资源：从本地任意目录选文件（可多选），复制进当前分类目录 */
 async function importAssets() {
   if (busy.value) return
@@ -591,8 +613,9 @@ function startDrawTest() {
   emit('tile-test', items.map(item => ({
     path: item.path,
     name: item.name,
-    // 集合分类是多格图集，按当前测试地图的格子切；图块分类是单张图块
+    // 集合分类是多格图集：带上设定的图块尺寸，测试地图按它切而不是再猜
     assetKind: item.category === 'tilesets' ? 'tileset' : 'tile',
+    tileSize: item.category === 'tilesets' ? item.tileSize : undefined,
   })))
 }
 
@@ -613,6 +636,37 @@ async function manualReload() {
 function findItem(rel: string) {
   return store.items.find(i => i.category === activeCategory.value && i.rel === rel)
 }
+
+/** 选中的图块集：图块尺寸只对「集合」页签有意义 */
+const selectedTilesets = computed(() => selectedItems.value.filter(i => i.category === 'tilesets'))
+
+/** 是否展示「图块尺寸」面板：仅集合页签（地图素材范围） */
+const showTileSizeCard = computed(() => !isSpriteScope.value && activeCategory.value === 'tilesets')
+
+/** 图块尺寸下拉选项（常用像素尺寸） */
+const TILE_SIZE_OPTIONS = [8, 16, 24, 32, 48, 64].map(n => ({ label: `${n}×${n}`, value: String(n) }))
+
+/** 下拉当前值；没设定过时默认显示 16 */
+const tileSizeInput = ref('16')
+
+const tileSizeStatus = computed(() => {
+  const sizes = selectedTilesets.value.map(i => i.tileSize)
+  if (!sizes.length) return ''
+  const first = sizes[0]
+  if (sizes.every(s => s === first)) return first ? `已设定 ${first}×${first}` : '未设定（默认 16）'
+  return '选中项不一致，选择后统一应用'
+})
+
+watch(
+  () => selectedTilesets.value.map(i => i.tileSize ?? '').join('|'),
+  () => {
+    const sizes = selectedTilesets.value.map(i => i.tileSize)
+    const first = sizes[0]
+    // 多选且尺寸不一致时回到默认 16，避免误以为全部都是同一个值
+    tileSizeInput.value = sizes.length && sizes.every(s => s === first) ? String(first ?? 16) : '16'
+  },
+  { immediate: true },
+)
 
 /** 名字/标签改完只同步这一个条目，避免整页重扫导致列表跳动 */
 function syncItemMeta(rel: string) {
@@ -1865,6 +1919,26 @@ async function saveFileName() {
           </div>
         </div>
 
+        <!-- 1.5 图块尺寸：只对「集合」页签生效，设定后导入地图按此尺寸切图 -->
+        <div v-if="showTileSizeCard" class="panel-card">
+          <div class="panel-card-title">图块尺寸</div>
+          <div class="field last">
+            <div class="field-head">
+              <label>每格边长（像素）</label>
+              <span v-if="tileSizeStatus" class="field-status">{{ tileSizeStatus }}</span>
+            </div>
+            <CustomSelect
+              :model-value="tileSizeInput"
+              :options="TILE_SIZE_OPTIONS"
+              :disabled="busy || selectedTilesets.length === 0"
+              @update:model-value="onTileSizeChange"
+            />
+            <p class="panel-card-hint">
+              选择后立即生效；设定后把该集合放进图块图层时按这个尺寸切图。
+            </p>
+          </div>
+        </div>
+
         <!-- 2. 标签：常驻显示；未选中素材时禁用点击，但能看到标签池 -->
         <div class="panel-card tags-card">
           <div class="panel-card-head">
@@ -2380,6 +2454,12 @@ async function saveFileName() {
 
 .field-head > label {
   color: #9ca0a4;
+  font-size: 11px;
+}
+
+/* 字段标题右侧的状态文字（如「已设定 32×32」） */
+.field-status {
+  color: #7c8084;
   font-size: 11px;
 }
 

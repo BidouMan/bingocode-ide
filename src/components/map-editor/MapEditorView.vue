@@ -25,6 +25,7 @@ import { useMapPaint } from '../../composables/useMapPaint'
 import JSZip from 'jszip'
 import { deserializeMap } from '../../utils/mapSerializer'
 import { toUserX, toUserY } from '../../utils/coords'
+import { canFitTileSize } from '../../utils/tileAssetFit'
 
 const mapStore = useMapStore()
 const mapEditorStore = useMapEditorStore()
@@ -566,6 +567,8 @@ interface TileTestItem {
   name: string
   /** tile=单张图块；tileset=多格图集（按测试地图格子切） */
   assetKind?: 'tile' | 'tileset'
+  /** 图集在素材库里设定的每格边长；有值时按它切，不再按测试格子猜 */
+  tileSize?: number
 }
 
 const tileTestMode = ref(false)
@@ -607,6 +610,18 @@ function fitTileToGrid(img: HTMLImageElement, size: number): string {
   return canvas.toDataURL('image/png')
 }
 
+/** 图集每格尺寸和测试格子能整数倍换算时，整张图在内存里按最近邻缩放（不写文件） */
+function fitSheetToGrid(img: HTMLImageElement, native: number, size: number): string {
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(img.naturalWidth * size / native)
+  canvas.height = Math.round(img.naturalHeight * size / native)
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return img.src
+  ctx.imageSmoothingEnabled = false
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+  return canvas.toDataURL('image/png')
+}
+
 /** 从素材整理页进入绘制测试：用选中素材拼一张纯内存地图，画完直接退出 */
 async function startTileTest(items: TileTestItem[]) {
   if (items.length === 0) return
@@ -628,21 +643,30 @@ async function startTileTest(items: TileTestItem[]) {
   const sizes = images.map(img => (img
     ? { w: img.naturalWidth, h: img.naturalHeight }
     : { w: mapStore.mapData.tileSize, h: mapStore.mapData.tileSize }))
-  // 格子尺寸取「出现次数最多的单张图块尺寸」：混合尺寸时至少让多数素材 1:1 显示
+  /** 取出现次数最多的尺寸（并列时取先出现的） */
+  function mostFrequent(values: number[]): number {
+    const freq = new Map<number, number>()
+    for (const v of values) freq.set(v, (freq.get(v) ?? 0) + 1)
+    let best = 0
+    let bestCount = 0
+    for (const [v, count] of freq) {
+      if (count > bestCount) {
+        best = v
+        bestCount = count
+      }
+    }
+    return best
+  }
+
+  // 格子尺寸优先采用素材库里为图集设定好的尺寸；没设定过才按单张图块尺寸推断
+  const configuredSizes = items
+    .filter(it => it.assetKind === 'tileset' && it.tileSize && it.tileSize > 0)
+    .map(it => it.tileSize!)
   const singleSizes = sizes
     .filter((_, i) => items[i].assetKind !== 'tileset')
     .map(s => s.w)
-  const freq = new Map<number, number>()
-  for (const w of singleSizes) freq.set(w, (freq.get(w) ?? 0) + 1)
-  let tileSize = 0
-  let bestCount = 0
-  for (const [w, count] of freq) {
-    if (count > bestCount) {
-      bestCount = count
-      tileSize = w
-    }
-  }
-  // 只选了图集时没有现成格子尺寸：按常见图块尺寸找一个能整除整张图集的
+  let tileSize = configuredSizes.length ? mostFrequent(configuredSizes) : mostFrequent(singleSizes)
+  // 只选了未设定尺寸的图集：按常见图块尺寸找一个能整除整张图集的
   if (!tileSize) {
     const sheets = sizes.filter((_, i) => items[i].assetKind === 'tileset')
     tileSize = [16, 32, 8].find(n => sheets.every(s => s.w % n === 0 && s.h % n === 0)) ?? 16
@@ -666,16 +690,33 @@ async function startTileTest(items: TileTestItem[]) {
     const kind: 'tile' | 'tileset' = item.assetKind === 'tileset' ? 'tileset' : 'tile'
     const size = sizes[i] ?? { w: tileSize, h: tileSize }
     // 单图块：尺寸和格子不一致时按最近邻缩放到格子（内存 data URL），切块恒为一格；
-    // 图集：不推断尺寸、不缩放，只按测试地图的格子切
+    // 图集：设定了图块尺寸就按设定值切，未设定才按测试地图的格子切
     let srcPath = item.path
+    let cutW = tileSize
+    let cutH = tileSize
+    // 图集按格子缩放后的整图尺寸（调色板按它算块数）
+    let sheetW = size.w
+    let sheetH = size.h
     if (kind === 'tile') {
       const img = images[i]
       if (img && (size.w !== tileSize || size.h !== tileSize)) {
         srcPath = fitTileToGrid(img, tileSize)
       }
+    } else {
+      const native = item.tileSize && item.tileSize > 0 ? Math.round(item.tileSize) : 0
+      const img = images[i]
+      if (native && native !== tileSize) {
+        if (img && canFitTileSize(native, tileSize)) {
+          srcPath = fitSheetToGrid(img, native, tileSize)
+          sheetW = Math.round(size.w * tileSize / native)
+          sheetH = Math.round(size.h * tileSize / native)
+        } else {
+          // 无法整数倍换算：按设定尺寸切，至少每块的切法是对的
+          cutW = native
+          cutH = native
+        }
+      }
     }
-    const cutW = tileSize
-    const cutH = tileSize
     data.resources.push({
       id,
       firstgid,
@@ -688,7 +729,7 @@ async function startTileTest(items: TileTestItem[]) {
       collisionEnabled: false,
       groupId,
       assetKind: kind,
-      ...(kind === 'tile' ? { nativeTileSize: size.w } : {}),
+      ...(kind === 'tile' ? { nativeTileSize: size.w } : item.tileSize ? { nativeTileSize: item.tileSize } : {}),
     })
     data.tileSets.push({
       id,
@@ -705,9 +746,9 @@ async function startTileTest(items: TileTestItem[]) {
     firstgid += 10000
 
     if (kind === 'tileset') {
-      // 图集按测试地图格子切：整张图集的前 128 块都放进调色板
-      const cols = Math.max(1, Math.floor(size.w / tileSize))
-      const rows = Math.max(1, Math.floor(size.h / tileSize))
+      // 图集按实际切片尺寸计块数：整张图集的前 128 块都放进调色板
+      const cols = Math.max(1, Math.floor(sheetW / cutW))
+      const rows = Math.max(1, Math.floor(sheetH / cutH))
       const count = Math.min(cols * rows, 128)
       for (let idx = 0; idx < count; idx++) palette.push({ resourceId: id, tileIndex: idx })
     } else {

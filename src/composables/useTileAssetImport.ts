@@ -18,6 +18,11 @@ export interface TileImportOptions {
    * 缺省时按图片自动判断：小正方形图视为单图块，其余视为图集。
    */
   kind?: 'tile' | 'tileset'
+  /**
+   * 图集在素材库里预先设定的每格边长（像素）。
+   * 有值就按它切图；缺省时才退回「按当前地图格子切」。
+   */
+  tileSize?: number
 }
 
 export interface ImportedTileAsset {
@@ -27,7 +32,7 @@ export interface ImportedTileAsset {
   tileHeight: number
   /** 原始图片：改格子尺寸时从这里重新处理 */
   originPath: string
-  /** 只有单图块才有原始尺寸；图集不推断尺寸 */
+  /** 原始每格尺寸：单图块按图片边长识别；图集仅在素材库设定了尺寸时才有值 */
   nativeTileSize?: number
   assetKind: 'tile' | 'tileset'
 }
@@ -40,8 +45,8 @@ export interface ImportedTileAsset {
  * - 和地图格子不一致时按整数倍缩放适配；空地图可以直接跟随素材尺寸。
  *
  * 图集（tileset）：
- * - 图片里看不出每格多大，**绝不推断、绝不缩放**；
- * - 只按当前地图格子切；切错了就改地图的图块尺寸，会从原图重新切一遍。
+ * - 素材库设定了图块尺寸时，按设定值切（空地图可直接跟随；与地图格子能整数倍换算时按最近邻缩放）；
+ * - 完全没设定时才退回「按当前地图格子切」；切错了就改地图的图块尺寸，会从原图重新切一遍。
  */
 export function useTileAssetImport() {
   const mapStore = useMapStore()
@@ -108,14 +113,71 @@ export function useTileAssetImport() {
       return null
     }
 
-    // 图集：不推断尺寸、不缩放，直接按当前地图格子切
+    // 图集：未设定尺寸时按当前地图格子切；素材库设定了尺寸就按设定值切，不再猜
     if (kind === 'tileset') {
+      const configured = options.tileSize && Number.isFinite(options.tileSize)
+        ? Math.round(options.tileSize)
+        : 0
+      if (configured <= 0) {
+        const grid = mapStore.mapData.tileSize
+        return {
+          path: originPath,
+          tileWidth: grid,
+          tileHeight: grid,
+          originPath,
+          assetKind: 'tileset',
+        }
+      }
+
+      // 空地图：直接采用素材自己的格子尺寸（与单图块一致）
+      if (configured !== mapStore.mapData.tileSize && canAutoSwitchGrid()) {
+        mapStore.updateTileSize(configured)
+      }
       const grid = mapStore.mapData.tileSize
+
+      // 设定值与地图格子一致：原图直接切
+      if (configured === grid) {
+        return {
+          path: originPath,
+          tileWidth: configured,
+          tileHeight: configured,
+          originPath,
+          nativeTileSize: configured,
+          assetKind: 'tileset',
+        }
+      }
+
+      // 能整数倍换算：整张图按最近邻缩放到地图格子，切片仍是地图格子（同单图块）
+      if (canFitTileSize(configured, grid)) {
+        const fitted = await fitOrNull(dataUrl, configured, grid)
+        if (fitted) {
+          const derivedPath = derivedTilePath(originPath, grid)
+          try {
+            await invoke('write_binary', {
+              path: `${projectStore.root}/${derivedPath}`,
+              data: dataUrlToBytes(fitted.dataUrl),
+            })
+            return {
+              path: derivedPath,
+              tileWidth: grid,
+              tileHeight: grid,
+              originPath,
+              nativeTileSize: configured,
+              assetKind: 'tileset',
+            }
+          } catch (e) {
+            console.error('[TileImport] 写入图集适配图失败:', e)
+          }
+        }
+      }
+
+      // 无法整数倍（如 16 → 24）：按设定尺寸切，至少每块的切法是对的
       return {
         path: originPath,
-        tileWidth: grid,
-        tileHeight: grid,
+        tileWidth: configured,
+        tileHeight: configured,
         originPath,
+        nativeTileSize: configured,
         assetKind: 'tileset',
       }
     }
@@ -190,8 +252,8 @@ export function useTileAssetImport() {
 
   /**
    * 改格子尺寸后，把已有素材按新的网格重新处理：
-   * - 图集：从原图按新格子重新切（不缩放，切错了再改尺寸即可）；
-   * - 单图块：从原图按整数倍缩放。
+   * - 设定了原始尺寸的素材（单图块 / 有图块尺寸的图集）：从原图按整数倍缩放；
+   * - 未设定尺寸的图集：从原图按新格子重新切（不缩放，切错了再改尺寸即可）。
    */
   async function refitTilesetsToGrid(targetGrid: number): Promise<void> {
     const projectRoot = projectStore.root
@@ -204,15 +266,17 @@ export function useTileAssetImport() {
     let changed = false
     for (const resource of resources) {
       const kind = await resolveAssetKind(resource)
-      if (kind === 'tileset') {
-        const originPath = resource.originPath ?? resource.path
+      const native = resource.nativeTileSize
+      const originPath = resource.originPath ?? resource.path
+
+      // 未设定尺寸的图集：只换切片尺寸与图片路径，不动像素（用新格子把原图重新切一遍）
+      if (!native && kind === 'tileset') {
         if (
           resource.tileWidth === targetGrid
           && resource.tileHeight === targetGrid
           && resource.path === originPath
         ) continue
 
-        // 只换切片尺寸与图片路径，不动像素：相当于用新格子把原图重新切一遍
         mapStore.setResourceAsset(resource.id, {
           path: originPath,
           tileWidth: targetGrid,
@@ -224,9 +288,8 @@ export function useTileAssetImport() {
         continue
       }
 
-      const native = resource.nativeTileSize
-      const originPath = resource.originPath
-      if (!native || !originPath || !canFitTileSize(native, targetGrid)) continue
+      // 已知原始每格尺寸（单图块 / 设定了图块尺寸的图集）：按整数倍缩放适配
+      if (!native || !resource.originPath || !canFitTileSize(native, targetGrid)) continue
 
       if (targetGrid === native) {
         if (resource.path === originPath && resource.tileWidth === native) continue

@@ -28,6 +28,8 @@ export interface MapResourceItem {
   /** 原始图像尺寸（宽×高，像素），由缩略图加载阶段补齐，列表模式可直接展示 */
   width?: number
   height?: number
+  /** 图块集每格边长（像素）：素材库索引里手动设定，导入地图时按它切图；未设定则按地图格子切 */
+  tileSize?: number
 }
 
 /** 索引条目的字段（可选，缺省时回退文件名） */
@@ -36,6 +38,8 @@ export interface IndexEntry {
   tags?: string[]
   py?: string
   pyi?: string
+  /** 图块集每格边长（像素，仅 tilesets 分类使用）；设定后导入地图时按此尺寸切图 */
+  tileSize?: number
 }
 
 /** 每个分类一份 index.json：分类目录名即分类标签，索引存名字/标签/拼音 + 分类的显示顺序 */
@@ -178,6 +182,8 @@ export const useMapResourceLibStore = defineStore('mapResourceLib', () => {
           tags: Array.isArray(meta.tags) ? meta.tags : [],
           py: meta.py ?? '',
           pyi: meta.pyi ?? '',
+          // 图块尺寸只对图集有意义：非正整数一律视为未设定
+          tileSize: typeof meta.tileSize === 'number' && meta.tileSize > 0 ? meta.tileSize : undefined,
           file: entry.file,
           rel: entry.rel,
         })

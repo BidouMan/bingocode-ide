@@ -6,6 +6,7 @@
     "图集",
     "森林"
   ],
+  "groups": [],
   "entries": {
     "knight.png": {
       "name": "骑士图集",
@@ -17,6 +18,46 @@
       ],
       "py": "qishituji",
       "pyi": "qstj"
+    },
+    "树木_1.png": {
+      "name": "树木_1",
+      "py": "shumu_1",
+      "pyi": "sm_1"
+    },
+    "集合_1.png": {
+      "tileSize": 32
+    },
+    "破碎神庙_1.png": {
+      "tileSize": 32
+    },
+    "破碎神庙_2.png": {
+      "tileSize": 32
+    },
+    "破碎神庙_3.png": {
+      "tileSize": 32
+    },
+    "破碎神庙_4.png": {
+      "tileSize": 32
+    },
+    "破碎神庙_5.png": {
+      "tileSize": 32
+    },
+    "集合_3.png": {
+      "tileSize": 32
+    },
+    "可爱室内.png": {
+      "tileSize": 32
+    },
+    "森林_1.png": {
+      "tileSize": 32
+    },
+    "森林_2.png": {
+      "tileSize": 16
+    },
+    "地下城_1.png": {
+      "name": "地下城_1",
+      "py": "dixiacheng_1",
+      "pyi": "dxc_1"
     }
   }
 }
