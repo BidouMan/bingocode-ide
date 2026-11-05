@@ -80,6 +80,9 @@ def _input_sync_listener():
             elif clean_line == "RESUME:":
                 st._PAUSED = False
                 st._PENDING_RESPONSES.append(json.dumps({"type": "PAUSE_STATE", "data": {"paused": False}}))
+            elif clean_line == "START:":
+                # 前端启动加载页已收起：放开主循环（见 engine_state._GAME_START_GATE）
+                st._GAME_START_GATE.set()
             elif clean_line == "SHOW_FPS:1":
                 st._SHOW_FPS = True
                 st._PENDING_RESPONSES.append(json.dumps({"type": "FPS_UPDATE", "data": {"fps": round(st._PERF_STATS.get("last_fps", 0), 1)}}))

@@ -32,6 +32,17 @@ def _notify_ready():
     print(json.dumps({"type": "GAME_READY", "data": {}}))
 
 
+# 前端异常时不要永远卡住：最多等 5 秒就自己开始
+_START_GATE_TIMEOUT = 5.0
+
+
+def _wait_for_start():
+    """等前端把启动加载页收起后再开始跑主循环。
+    等待期间主循环尚未进入，角色位置、动画、generator 都不会动，
+    避免加载页还盖着时角色已经走出一段距离。"""
+    st._GAME_START_GATE.wait(timeout=_START_GATE_TIMEOUT)
+
+
 def _send_fps_to_ide(fps):
     """内部统计并发送 FPS 数值"""
     packet = {"type": "FPS_UPDATE", "data": {"fps": round(fps, 1)}}
@@ -106,10 +117,12 @@ def run():
         return
 
     st._PERF_STATS["last_time"] = time.time()
-    accumulator = 0.0
-    prev_time = time.perf_counter()
 
     _notify_ready()
+    _wait_for_start()
+
+    accumulator = 0.0
+    prev_time = time.perf_counter()
 
     while True:
         if st._STOPPED:
@@ -256,6 +269,7 @@ def start_game(project_dir=None, target_file=None):
 
     # 初始化完成：通知 IDE 结束启动加载页（旧 run() 模式已在 run() 内部发过，不会重复）
     _notify_ready()
+    _wait_for_start()
 
     # 主循环
     st._PERF_STATS["last_time"] = time.time()

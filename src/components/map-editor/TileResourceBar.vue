@@ -1067,7 +1067,7 @@ function onTileSizeChange(val: string) {
   if (!Number.isFinite(newSize) || newSize <= 0) return
   if (newSize === mapStore.mapData.tileSize) return
   mapStore.updateTileSize(newSize, true)
-  // 图集从原图按新格子重新切；单图块按整数倍重新缩放
+  // 所有素材都从原图按新格子重新归一化（整数倍整图缩放，非整数倍逐块缩放）
   void refitTilesetsToGrid(newSize)
 }
 

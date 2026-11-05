@@ -28,7 +28,7 @@ export interface MapResourceItem {
   /** 原始图像尺寸（宽×高，像素），由缩略图加载阶段补齐，列表模式可直接展示 */
   width?: number
   height?: number
-  /** 图块集每格边长（像素）：素材库索引里手动设定，导入地图时按它切图；未设定则按地图格子切 */
+  /** 图块集每格边长（像素）：素材库索引里手动设定，导入地图时按它切图；未设定时导入按默认 16 */
   tileSize?: number
 }
 
@@ -38,7 +38,7 @@ export interface IndexEntry {
   tags?: string[]
   py?: string
   pyi?: string
-  /** 图块集每格边长（像素，仅 tilesets 分类使用）；设定后导入地图时按此尺寸切图 */
+  /** 图块集每格边长（像素，仅 tilesets 分类使用）；设定后导入地图时按此尺寸切图，未设定按默认 16 */
   tileSize?: number
 }
 

@@ -728,6 +728,8 @@ export function useEngine() {
   // ─── 调试工具 ───
   function sendPause() { sendInput('PAUSE:') }
   function sendResume() { sendInput('RESUME:') }
+  /** 启动加载页已收起：放开引擎主循环（引擎在 GAME_READY 后会一直等到这个信号） */
+  function sendStart() { sendInput('START:') }
   function sendShowFps(on: boolean) { sendInput(`SHOW_FPS:${on ? 1 : 0}`) }
   function sendShowCollision(on: boolean) { sendInput(`SHOW_COLLISION:${on ? 1 : 0}`) }
 
@@ -741,6 +743,7 @@ export function useEngine() {
     sendMouseUp,
     sendPause,
     sendResume,
+    sendStart,
     sendShowFps,
     sendShowCollision,
     cleanup,

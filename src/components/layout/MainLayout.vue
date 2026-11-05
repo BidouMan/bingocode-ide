@@ -84,6 +84,12 @@ const fileExplorerStore = useFileExplorerStore()
 const engine = useEngine()
 const { importTileImage } = useTileAssetImport()
 
+// 启动加载页收起时通知引擎开跑：引擎在 GAME_READY 后一直等待这个信号，
+// 保证加载页还盖着时角色不动（不能只靠 pause，学生代码里的 move() 仍会执行）
+watch(() => renderStore.startupPending, (pending, wasPending) => {
+  if (wasPending && !pending && editorStore.isRunning) engine.sendStart()
+})
+
 // loading进度
 const loadingProgress = computed(() => {
   if (renderStore.textureTotal === 0) return 0

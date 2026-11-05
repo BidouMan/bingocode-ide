@@ -121,8 +121,8 @@ function onCardClick(res: MapResourceItem, e: MouseEvent) {
 
 function emitImportSingle(res: MapResourceItem) {
   const kind = res.category === 'tilesets' ? 'tileset' : res.category === 'tiles' ? 'tile' : undefined
-  // 只有图集带「图块尺寸」设定，单图块不需要
-  emit('imported', res.path, kind, kind === 'tileset' ? res.tileSize : undefined)
+  // 图集没在素材管理器里指定过尺寸时按默认 16 切，不需要先去管理器设置一遍
+  emit('imported', res.path, kind, kind === 'tileset' ? (res.tileSize ?? 16) : undefined)
 }
 
 /** 批量导入：逐个 emit，MainLayout 那边本来就是单个处理 */

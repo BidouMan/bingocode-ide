@@ -22,7 +22,8 @@
     "树木_1.png": {
       "name": "树木_1",
       "py": "shumu_1",
-      "pyi": "sm_1"
+      "pyi": "sm_1",
+      "tileSize": 16
     },
     "集合_1.png": {
       "tileSize": 32
@@ -57,7 +58,20 @@
     "地下城_1.png": {
       "name": "地下城_1",
       "py": "dixiacheng_1",
-      "pyi": "dxc_1"
+      "pyi": "dxc_1",
+      "tileSize": 16
+    },
+    "地下城_2.png": {
+      "tileSize": 16
+    },
+    "集合_2.png": {
+      "tileSize": 16
+    },
+    "马里奥.png": {
+      "tileSize": 16
+    },
+    "小农场.png": {
+      "tileSize": 16
     }
   }
 }

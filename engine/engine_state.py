@@ -10,6 +10,7 @@
 """
 
 import queue
+import threading
 import time
 
 # ---------------- 输入（input_api.py 写入，主循环读取） ----------------
@@ -43,6 +44,9 @@ _EVENT_PENDING = set()
 _EVENT_ACTIVE = set()
 _PAUSED = False
 _STOPPED = False
+# 启动闸门：引擎初始化完成（GAME_READY）后先停在这里，等前端「启动加载页」收起
+# 并通过 stdin 发来 START: 才放开主循环。否则加载页还盖着时角色已经在走了。
+_GAME_START_GATE = threading.Event()
 
 # ---------------- 精灵 / 物理 ----------------
 _SPRITES = {}  # 存储所有精灵实例

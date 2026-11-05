@@ -610,15 +610,35 @@ function fitTileToGrid(img: HTMLImageElement, size: number): string {
   return canvas.toDataURL('image/png')
 }
 
-/** 图集每格尺寸和测试格子能整数倍换算时，整张图在内存里按最近邻缩放（不写文件） */
+/**
+ * 图集每格尺寸和测试格子不一致时，整张图在内存里按最近邻归一化（不写文件）。
+ * 整数倍整图缩放；非整数倍逐块缩放，保证每块都正好落在格子里。
+ */
 function fitSheetToGrid(img: HTMLImageElement, native: number, size: number): string {
+  const cols = Math.floor(img.naturalWidth / native)
+  const rows = Math.floor(img.naturalHeight / native)
+  if (cols <= 0 || rows <= 0) return img.src
+  const width = cols * size
+  const height = rows * size
   const canvas = document.createElement('canvas')
-  canvas.width = Math.round(img.naturalWidth * size / native)
-  canvas.height = Math.round(img.naturalHeight * size / native)
+  canvas.width = width
+  canvas.height = height
   const ctx = canvas.getContext('2d')
   if (!ctx) return img.src
   ctx.imageSmoothingEnabled = false
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+  if (canFitTileSize(native, size)) {
+    ctx.drawImage(img, 0, 0, cols * native, rows * native, 0, 0, width, height)
+  } else {
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        ctx.drawImage(
+          img,
+          c * native, r * native, native, native,
+          c * size, r * size, size, size,
+        )
+      }
+    }
+  }
   return canvas.toDataURL('image/png')
 }
 
@@ -658,10 +678,10 @@ async function startTileTest(items: TileTestItem[]) {
     return best
   }
 
-  // 格子尺寸优先采用素材库里为图集设定好的尺寸；没设定过才按单张图块尺寸推断
+  // 格子尺寸优先采用素材库里为图集设定好的尺寸；没设定过的图集按默认 16
   const configuredSizes = items
-    .filter(it => it.assetKind === 'tileset' && it.tileSize && it.tileSize > 0)
-    .map(it => it.tileSize!)
+    .filter(it => it.assetKind === 'tileset')
+    .map(it => (it.tileSize && it.tileSize > 0 ? Math.round(it.tileSize) : 16))
   const singleSizes = sizes
     .filter((_, i) => items[i].assetKind !== 'tileset')
     .map(s => s.w)
@@ -703,18 +723,14 @@ async function startTileTest(items: TileTestItem[]) {
         srcPath = fitTileToGrid(img, tileSize)
       }
     } else {
-      const native = item.tileSize && item.tileSize > 0 ? Math.round(item.tileSize) : 0
+      // 未设定尺寸的图集按默认 16 切（与素材库导入保持一致）
+      const native = item.tileSize && item.tileSize > 0 ? Math.round(item.tileSize) : 16
       const img = images[i]
-      if (native && native !== tileSize) {
-        if (img && canFitTileSize(native, tileSize)) {
-          srcPath = fitSheetToGrid(img, native, tileSize)
-          sheetW = Math.round(size.w * tileSize / native)
-          sheetH = Math.round(size.h * tileSize / native)
-        } else {
-          // 无法整数倍换算：按设定尺寸切，至少每块的切法是对的
-          cutW = native
-          cutH = native
-        }
+      // 和测试格子不一致：一律归一化到格子（整数倍整图缩放，非整数倍逐块缩放）
+      if (native && native !== tileSize && img) {
+        srcPath = fitSheetToGrid(img, native, tileSize)
+        sheetW = Math.floor(size.w / native) * tileSize
+        sheetH = Math.floor(size.h / native) * tileSize
       }
     }
     data.resources.push({

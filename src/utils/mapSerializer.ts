@@ -7,7 +7,7 @@ export interface MapSaveData {
   width: number
   height: number
   tileSize: number
-  /** 用户是否手动指定过格子尺寸（指定后导入素材不再自动改网格） */
+  /** 格子尺寸是否已锁定（手动指定或首次导入素材时确定；锁定后导入素材不再自动改网格） */
   tileSizeExplicit?: boolean
   gravity: boolean
   /** 边界碰撞：勾选后角色被地图矩形挡住；旧存档缺省时沿用 gravity */
@@ -180,7 +180,7 @@ export interface MapLoadData {
   width: number
   height: number
   tileSize: number
-  /** 用户是否手动指定过格子尺寸（指定后导入素材不再自动改网格） */
+  /** 格子尺寸是否已锁定（手动指定或首次导入素材时确定；锁定后导入素材不再自动改网格） */
   tileSizeExplicit?: boolean
   gravity: boolean
   boundaryCollision: boolean
@@ -707,8 +707,9 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
     width: data.width,
     height: data.height,
     tileSize: data.tileSize,
-    // 旧存档没有该字段：只要不是默认的 16，就视为用户自己选过格子尺寸（避免导入素材时被自动改回去）
-    tileSizeExplicit: data.tileSizeExplicit === true || (Number(data.tileSize) || 16) !== 16,
+    // 只有真的锁定过（手动改格子或首次导入素材）才算「已指定」；
+    // 不能把默认的 32 也当成锁定，否则重新打开地图后就再也没机会按素材尺寸初始化。
+    tileSizeExplicit: data.tileSizeExplicit === true,
     gravity: data.gravity,
     // 旧存档没有该字段：沿用重力地图原来的钳制行为
     boundaryCollision: data.boundaryCollision ?? data.gravity ?? false,
