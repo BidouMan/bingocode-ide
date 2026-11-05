@@ -271,10 +271,54 @@ function folderItemCount(name: string) {
   return store.items.filter(i => i.category === activeCategory.value && i.group === name).length
 }
 
+type SortKey = 'name' | 'dir' | 'size' | null
+type SortDir = 'asc' | 'desc'
+const sortKey = ref<SortKey>(null)
+const sortDir = ref<SortDir>('asc')
+
+function toggleSort(key: Exclude<SortKey, null>) {
+  if (sortKey.value !== key) {
+    sortKey.value = key
+    sortDir.value = 'asc'
+  } else if (sortDir.value === 'asc') {
+    sortDir.value = 'desc'
+  } else {
+    // 升序 → 降序 → 关闭
+    sortKey.value = null
+  }
+}
+
+function sortArrow(key: Exclude<SortKey, null>) {
+  if (sortKey.value !== key) return ''
+  return sortDir.value === 'asc' ? ' ▲' : ' ▼'
+}
+
 const filtered = computed(() => {
   let list = store.items.filter(r => r.category === activeCategory.value)
   if (activeGroup.value) list = list.filter(r => r.group === activeGroup.value)
-  return searchItems(list, searchQuery.value)
+  list = searchItems(list, searchQuery.value)
+  if (sortKey.value) {
+    const key = sortKey.value
+    const dir = sortDir.value === 'asc' ? 1 : -1
+    list = [...list].sort((a, b) => {
+      let va: string | number
+      let vb: string | number
+      if (key === 'name') {
+        va = a.name
+        vb = b.name
+      } else if (key === 'dir') {
+        va = a.group || ''
+        vb = b.group || ''
+      } else {
+        va = (a.width ?? 0) * (a.height ?? 0)
+        vb = (b.width ?? 0) * (b.height ?? 0)
+      }
+      if (va < vb) return -1 * dir
+      if (va > vb) return 1 * dir
+      return 0
+    })
+  }
+  return list
 })
 
 const selectedItems = computed(() =>
@@ -1657,10 +1701,9 @@ async function saveFileName() {
         <div class="row row-head">
           <span class="col-check" />
           <span class="col-thumb-head" />
-          <span class="col-name">名字</span>
-          <span class="col-file">文件名</span>
-          <span class="col-group">目录</span>
-          <span class="col-size">尺寸</span>
+          <span class="col-name sortable" @click="toggleSort('name')">名字{{ sortArrow('name') }}</span>
+          <span class="col-group sortable" @click="toggleSort('dir')">目录{{ sortArrow('dir') }}</span>
+          <span class="col-size sortable" @click="toggleSort('size')">尺寸{{ sortArrow('size') }}</span>
           <span class="col-tags">标签</span>
         </div>
         <div
@@ -1684,7 +1727,6 @@ async function saveFileName() {
             <img class="thumb-img" :src="item.thumbnail" loading="lazy" draggable="false" :data-rel="item.rel" @load="onThumbLoad" />
           </span>
           <span class="col-name" :title="item.name">{{ item.name }}</span>
-          <span class="col-file" :title="item.file">{{ item.file }}</span>
           <span class="col-group">{{ itemDirLabel(item) }}</span>
           <span class="col-size">{{ item.width != null ? `${item.width}×${item.height}` : '—' }}</span>
           <span class="col-tags">
@@ -2203,7 +2245,7 @@ async function saveFileName() {
 }
 
 .col-name {
-  width: 160px;
+  width: 240px;
   flex: none;
   color: white;
   overflow: hidden;
@@ -2211,13 +2253,13 @@ async function saveFileName() {
   white-space: nowrap;
 }
 
-.col-file {
-  width: 200px;
-  flex: none;
-  color: #9ca0a4;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.sortable:hover {
+  color: var(--accent);
 }
 
 .col-group {
