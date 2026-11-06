@@ -173,21 +173,15 @@ def run():
         while st._PENDING_RESPONSES:
             print(st._PENDING_RESPONSES.pop(0))
 
-        # 帧率限制：混合等待策略。time.sleep() 睡大部分时间省电，
-        # 末尾用精确自旋补齐 macOS time.sleep() 的精度不足
+        # 帧率限制：纯 time.sleep()，不 busy-wait 自旋。
+        # 自旋（while pass）会把一个 CPU 核心占满，低端机器直接过热降频、越跑越卡。
+        # Scratch 用浏览器 requestAnimationFrame 调度，从不自旋——这是我们和 Scratch 的关键差异。
+        # time.sleep 精度虽不如自旋，但省电优先；帧率偶尔波动远比 CPU 100% 好。
         target_frame_time = 1.0 / 60.0
         elapsed = time.perf_counter() - now
         remaining = target_frame_time - elapsed
-        if remaining > 0.003:
-            # 用 sleep 睡大部分时间（省电），留约 1.5ms 给自旋
-            time.sleep(remaining - 0.0015)
-            # 精确自旋补齐剩余时间
-            while time.perf_counter() - now < target_frame_time:
-                pass
-        elif remaining > 0:
-            # 剩余时间很少，直接自旋（避免 sleep 精度问题）
-            while time.perf_counter() - now < target_frame_time:
-                pass
+        if remaining > 0:
+            time.sleep(remaining)
 
 
 def register_generator(gen):
@@ -361,16 +355,12 @@ def start_game(project_dir=None, target_file=None):
             print(st._PENDING_RESPONSES.pop(0))
 
         # 帧率限制
+        # 帧率限制：纯 time.sleep()，不 busy-wait 自旋（理由同 run()）
         target_frame_time = 1.0 / 60.0
         elapsed = time.perf_counter() - now
         remaining = target_frame_time - elapsed
-        if remaining > 0.003:
-            time.sleep(remaining - 0.0015)
-            while time.perf_counter() - now < target_frame_time:
-                pass
-        elif remaining > 0:
-            while time.perf_counter() - now < target_frame_time:
-                pass
+        if remaining > 0:
+            time.sleep(remaining)
 
 
 def _update_sprite_animation(sprite):

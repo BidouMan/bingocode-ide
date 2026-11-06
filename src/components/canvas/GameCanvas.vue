@@ -28,6 +28,12 @@ const emit = defineEmits<{
   'offset-update': [offset: number]
 }>()
 
+// 当前画布是否处于可见/激活状态。MainLayout 同时挂两个 GameCanvas（预览窗 + 全屏窗），
+// 不可见的那个应停止 PixiJS ticker，避免双倍 60fps 渲染占满 CPU。
+const props = defineProps<{
+  active?: boolean
+}>()
+
 let app: any = null
 let PIXI: any = null
 let spriteDisplayObjects: Map<string, any> = new Map()
@@ -75,6 +81,8 @@ async function initPixi() {
     antialias: true,
     resolution: window.devicePixelRatio || 1,
     autoDensity: true,
+    // 优先使用高性能 GPU：低端集显机器走集显，双显卡机器走独显，避免用软件渲染
+    powerPreference: 'high-performance',
   })
 
   containerRef.value.appendChild(app.canvas)
@@ -785,6 +793,14 @@ function gameLoop() {
     resetDisplayObjects()
   }
 
+  // 游戏未运行时跳过高开销的同步操作：sprites/tiles 不会变化，
+  // PixiJS 会自动保留最后一帧画面。避免空转占满 CPU（低端机器尤其明显）。
+  if (!editorStore.isRunning) {
+    // 仍需收尾启动加载页（贴图加载完成时隐藏）
+    renderStore.tryFinishStartup()
+    return
+  }
+
   // 更新帧耗时（仅在性能面板开启时计算，避免不必要的开销）
   if (renderStore.showStats) {
     updateFrameTime(app.ticker.deltaMS)
@@ -961,6 +977,12 @@ onMounted(async () => {
     await initPixi()
     if (app) {
       app.ticker.add(gameLoop)
+      // ticker 只在「画布可见 + 游戏运行中」时启动：
+      // 不可见或未运行时停止，避免 PixiJS 空转占满 CPU（低端机器尤其明显）。
+      // 停止后 canvas 保留最后一帧画面，视觉上无变化。
+      if (!(props.active !== false && editorStore.isRunning)) {
+        app.ticker.stop()
+      }
     }
     if (editorStore.isRunning) {
       nextTick(addGameListeners)
@@ -971,6 +993,22 @@ onMounted(async () => {
     signalGameCanvasReady()
   }
 })
+
+// 画布可见性或游戏运行状态变化时启停 ticker
+// 运行条件：画布可见（active !== false）且游戏正在运行
+const shouldRunTicker = () => props.active !== false && editorStore.isRunning
+
+watch(
+  () => [props.active, editorStore.isRunning],
+  () => {
+    if (!app) return
+    if (shouldRunTicker()) {
+      app.ticker.start()
+    } else {
+      app.ticker.stop()
+    }
+  }
+)
 
 onBeforeUnmount(() => {
   removeGameListeners()

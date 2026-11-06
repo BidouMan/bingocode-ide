@@ -2396,7 +2396,7 @@ function spriteDisplayName(name: string) {
             </div>
             <div class="game-preview-wrapper">
               <div class="game-preview-container">
-                <GameCanvas class="game-preview-canvas" />
+                <GameCanvas class="game-preview-canvas" :active="currentPage === 0" />
                 <!-- Loading覆盖层 -->
                 <Transition name="loading-fade">
                   <div v-if="renderStore.isLoadingTextures" class="loading-overlay">
@@ -2704,7 +2704,7 @@ function spriteDisplayName(name: string) {
           </div>
         </div>
         <div class="fullscreen-stage-area">
-          <GameCanvas v-show="currentPage === 1" @offset-update="canvasOffsetX = $event" />
+          <GameCanvas v-show="currentPage === 1" :active="currentPage === 1" @offset-update="canvasOffsetX = $event" />
           <!-- Loading覆盖层（全屏运行同样先显示加载页，避免闪默认背景色） -->
           <Transition name="loading-fade">
             <div v-if="renderStore.isLoadingTextures" class="loading-overlay">

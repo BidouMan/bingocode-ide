@@ -147,6 +147,10 @@ async function initPixi() {
     resolution: window.devicePixelRatio || 1,
     autoDensity: true,
   })
+  // 地图编辑器是按需渲染（手动调用 app.render()），不需要 PixiJS 持续 ticker。
+  // 不停止的话，即使切到代码页面（v-show 隐藏），ticker 仍以 60fps 渲染空场景，
+  // WebView2 GPU 进程会持续占满 CPU。
+  app.ticker.stop()
   canvasRef.value.appendChild(app.canvas)
   // Pixi 画布必须绝对定位在容器左上角：模板里前序元素/空白文本会产生行盒，
   // inline canvas 会被往下挤，导致鼠标坐标与叠加层整体错位
