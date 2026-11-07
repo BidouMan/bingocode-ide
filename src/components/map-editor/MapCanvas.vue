@@ -4140,6 +4140,14 @@ async function renderNow() {
   if (app) app.render()
 }
 
+/** 绘制页改过画布尺寸返回后：选中图片的变换框按最新宽高重建（不等用户重新点选） */
+function refreshTransformBox() {
+  // 只有图片模式才显示整图变换框（图块模式下不弹框）
+  if (mapStore.activeMode !== 'image') return
+  transform.restoreSelectedImageUI()
+  requestStageRender()
+}
+
 onMounted(() => {
   // Pixi 就绪后强制渲染一次（绘制功能已迁往绘制页，这里只做地编渲染）
   nextTick(async () => {
@@ -4580,6 +4588,7 @@ defineExpose({
   resetCanvasState,
   reloadImages,
   renderNow,
+  refreshTransformBox,
   getThumbnailDataUrl,
   getLayerThumbnailDataUrl,
   placeImageFromPath,

@@ -874,6 +874,8 @@ defineExpose({
   reloadImages: () => mapCanvasRef.value?.reloadImages(),
   /** 绘制页保存返回后：强制刷新一帧，保证新图层立即可见 */
   renderNow: () => mapCanvasRef.value?.renderNow(),
+  /** 绘制页改过画布尺寸返回后：选中图片的变换框按最新宽高重建 */
+  refreshTransformBox: () => mapCanvasRef.value?.refreshTransformBox(),
 })
 </script>
 

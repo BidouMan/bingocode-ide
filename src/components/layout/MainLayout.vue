@@ -157,6 +157,7 @@ const mapEditorRef = ref<{
   startTileTest: (items: Array<{ path: string; name: string; assetKind?: 'tile' | 'tileset' }>) => Promise<void>
   reloadImages: () => void
   renderNow: () => Promise<void>
+  refreshTransformBox: () => void
 } | null>(null)
 /** 绘制页实例：顶部菜单切页前先自动保存 */
 const paintPageRef = ref<{ saveBeforeLeave: () => Promise<boolean> } | null>(null)
@@ -1134,6 +1135,8 @@ async function onMapImageSaved(blob: Blob, width: number, height: number) {
     currentPage.value = 0
     // 回页后图层重建是异步的：等下一拍再强制出一帧，保证新图层立即可见
     await nextTick()
+    // 画布尺寸改过时，选中图片的变换框先按最新宽高重建（不能等用户重新点选）
+    mapEditorRef.value?.refreshTransformBox()
     await mapEditorRef.value?.renderNow()
   } catch (e) {
     console.error('[MainLayout] 保存地图图像失败:', e)

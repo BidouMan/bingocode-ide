@@ -781,19 +781,30 @@ function setImageScale(axis: 'x' | 'y', e: Event) {
 }
 
 
-/** 地图尺寸提交：输入过程中不实时生效，失焦/回车时统一校验后调整，
- *  避免逐字输入（如 40 → 450）触发多次画板重建与内容裁剪 */
+/** 地图尺寸按像素显示：格子数 × 图块尺寸（16px 的默认地图即 640 × 480） */
+const mapTilePixels = computed(() => Math.max(1, Math.round(mapStore.mapData.tileSize) || 1))
+const mapPixelWidth = computed(() => Math.round(mapStore.mapData.width * mapTilePixels.value))
+const mapPixelHeight = computed(() => Math.round(mapStore.mapData.height * mapTilePixels.value))
+const maxMapPixelSide = computed(() => MAX_MAP_SIDE_CELLS * mapTilePixels.value)
+
+/** 地图尺寸提交：输入的是像素值，内部换算回格子数。
+ *  输入过程中不实时生效，失焦/回车时统一校验后调整，
+ *  避免逐字输入（如 640 → 7200）触发多次画板重建与内容裁剪 */
 function commitMapSize(axis: 'width' | 'height', e: Event) {
   const el = e.target as HTMLInputElement
   const parsed = Number(el.value)
+  const tile = mapTilePixels.value
   const current = axis === 'width' ? mapStore.mapData.width : mapStore.mapData.height
-  const value = Number.isFinite(parsed) && parsed >= 1 ? Math.round(parsed) : current
-  if (value !== current) mapStore.updateMapProperty(axis, value)
+  const currentPixels = current * tile
+  const pixels = Number.isFinite(parsed) && parsed >= 1 ? Math.round(parsed) : currentPixels
+  // 非整格像素（如格子 32 时输入 650）就近对齐到最近的整格
+  const cells = Math.max(1, Math.min(MAX_MAP_SIDE_CELLS, Math.round(pixels / tile)))
+  if (cells !== current) mapStore.updateMapProperty(axis, cells)
   // 非法/空值回填当前合法值，避免输入框与实际地图尺寸不一致
-  el.value = String(value)
+  el.value = String(cells * tile)
 }
 
-/** 地图尺寸上下箭头：按 1 个单位增减，最小 1，走和手动输入相同的校验 */
+/** 地图尺寸上下箭头：按 1 个格子（= 1 个图块尺寸像素）增减，最小 1 格 */
 function stepMapSize(axis: 'width' | 'height', delta: number) {
   const current = axis === 'width' ? mapStore.mapData.width : mapStore.mapData.height
   const value = Math.round(current) + delta
@@ -1747,10 +1758,10 @@ function runTilesetMenu(action: TilesetMenuAction) {
                   <input
                     class="att-input att-input-no-spin"
                     type="number"
-                    min="1"
-                    :max="MAX_MAP_SIDE_CELLS"
-                    step="1"
-                    :value="mapStore.mapData.width"
+                    :min="mapTilePixels"
+                    :max="maxMapPixelSide"
+                    :step="mapTilePixels"
+                    :value="mapPixelWidth"
                     :disabled="disabled"
                     @change="commitMapSize('width', $event)"
                   />
@@ -1768,10 +1779,10 @@ function runTilesetMenu(action: TilesetMenuAction) {
                   <input
                     class="att-input att-input-no-spin"
                     type="number"
-                    min="1"
-                    :max="MAX_MAP_SIDE_CELLS"
-                    step="1"
-                    :value="mapStore.mapData.height"
+                    :min="mapTilePixels"
+                    :max="maxMapPixelSide"
+                    :step="mapTilePixels"
+                    :value="mapPixelHeight"
                     :disabled="disabled"
                     @change="commitMapSize('height', $event)"
                   />

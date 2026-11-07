@@ -107,7 +107,8 @@ onMounted(async () => {
     boardH = fitMapSide(boardH, boardW)
     store.artboardWidth = boardW
     store.artboardHeight = boardH
-    store.sizeForced = true
+    // 地图图像不锁定画布尺寸：可按需改尺寸/裁切，保存后图层尺寸同步更新
+    store.sizeForced = false
     store.resetView()
     if (frame) {
       // 画板可能还没完成挂载（ref 为空时直接跳过会让画板空着 → 保存静默失败），
