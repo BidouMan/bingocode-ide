@@ -520,6 +520,11 @@
   transition: width 0.3s ease;
 }
 
+/* 就绪收尾：直接补满，不再等 0.3s 过渡（否则淡出时进度条只走一半就消失） */
+.loading-bar-fill.is-complete {
+  transition: none;
+}
+
 /* 资源标签 */
 .outline-tabs {
   display: flex;

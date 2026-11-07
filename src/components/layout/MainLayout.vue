@@ -2619,7 +2619,7 @@ function spriteDisplayName(name: string) {
                       <div class="loading-text">正在加载中</div>
                       <div class="loading-progress">{{ loadingProgress }}%</div>
                       <div class="loading-bar">
-                        <div class="loading-bar-fill" :style="{ width: loadingProgress + '%' }"></div>
+                        <div class="loading-bar-fill" :class="{ 'is-complete': loadingProgress >= 100 }" :style="{ width: loadingProgress + '%' }"></div>
                       </div>
                     </div>
                   </div>
@@ -2927,7 +2927,7 @@ function spriteDisplayName(name: string) {
                 <div class="loading-text">正在加载中</div>
                 <div class="loading-progress">{{ loadingProgress }}%</div>
                 <div class="loading-bar">
-                  <div class="loading-bar-fill" :style="{ width: loadingProgress + '%' }"></div>
+                  <div class="loading-bar-fill" :class="{ 'is-complete': loadingProgress >= 100 }" :style="{ width: loadingProgress + '%' }"></div>
                 </div>
               </div>
             </div>
