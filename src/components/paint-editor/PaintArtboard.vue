@@ -778,6 +778,11 @@ function onZoomIn() {
 function onZoomOut() {
   store.setZoom(Math.round((store.zoom - 0.1) * 100) / 100)
 }
+/** 画布回到视口中心（保持当前缩放，对齐常见绘图软件「居中」行为） */
+function centerView() {
+  store.panX = 0
+  store.panY = 0
+}
 
 // ─── 拾色（吸管）：从合成缓存读点击点像素色，写入目标通道后退出 ───
 function onStagePointerDownForPick(e: PointerEvent) {
@@ -850,6 +855,30 @@ function onStageKeydown(e: KeyboardEvent) {
       cancelCrop()
       e.preventDefault()
     }
+    return
+  }
+
+  // 撤销/重做（通用习惯）：
+  // macOS = Cmd+Z / Cmd+Shift+Z；Windows = Ctrl+Z / Ctrl+Y（同时兼容 Ctrl+Shift+Z）
+  if (mod) {
+    const key = e.key.toLowerCase()
+    if (key === 'z') {
+      if (e.shiftKey) redoActive()
+      else undoActive()
+      e.preventDefault()
+      return
+    }
+    if (key === 'y' && !e.shiftKey) {
+      redoActive()
+      e.preventDefault()
+      return
+    }
+  }
+
+  // F：画布回到视口中心（不改变缩放）
+  if (!mod && !e.altKey && (e.key === 'f' || e.key === 'F')) {
+    centerView()
+    e.preventDefault()
     return
   }
 

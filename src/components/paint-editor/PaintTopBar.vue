@@ -2,8 +2,6 @@
 import { computed } from 'vue'
 import { usePaintStore, ARTBOARD_MAX } from '../../stores/paint'
 
-import iconClose from '../../assets/icons/关闭.svg'
-import iconSave from '../../assets/icons/保存.svg'
 import iconCrop from '../../assets/icons/裁切画板.svg'
 import iconCopy from '../../assets/icons/copy.svg'
 import iconPaste from '../../assets/icons/粘贴.svg'
@@ -287,7 +285,6 @@ function commitSize(axis: 'w' | 'h', e: Event) {
     <!-- 最右：关闭 + 保存 -->
     <div class="topbar-actions">
       <button class="back-btn" v-tooltip="'关闭'" @click="emit('close')">
-        <img :src="iconClose" class="icon-sm icon-close" draggable="false" />
         <span>关闭</span>
       </button>
       <button
@@ -296,7 +293,6 @@ function commitSize(axis: 'w' | 'h', e: Event) {
         :title="saveAllowed ? (props.saveTitle || '保存为新角色') : '画板为空，先画点什么'"
         @click="emit('save')"
       >
-        <img :src="iconSave" class="icon-sm" draggable="false" />
         <span>保存</span>
       </button>
     </div>
@@ -305,6 +301,7 @@ function commitSize(axis: 'w' | 'h', e: Event) {
 
 <style scoped>
 .paint-topbar {
+  --ctl-h: 30px; /* 顶栏所有按钮/输入框统一高度 */
   display: flex;
   align-items: center;
   height: 44px;
@@ -328,8 +325,8 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: var(--ctl-h);
+  height: var(--ctl-h);
   background: transparent;
   border: none;
   border-radius: 6px;
@@ -356,15 +353,12 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   height: 18px;
   pointer-events: none;
 }
-/* 关闭图标单独缩小（须在 .icon-sm 之后，同权重后者生效） */
-.icon-close {
-  width: 13px;
-  height: 13px;
-}
 
 /* 矢量|位图 分段切换（不参与压缩：窄窗口下文字不竖排） */
 .mode-switch {
   display: flex;
+  align-items: center;
+  height: var(--ctl-h);
   background: var(--bg-panel);
   border-radius: 6px;
   padding: 2px;
@@ -373,8 +367,10 @@ function commitSize(axis: 'w' | 'h', e: Event) {
 }
 
 .mode-btn {
-  padding: 4px 12px;
+  height: calc(var(--ctl-h) - 4px);
+  padding: 0 12px;
   font-size: 12px;
+  line-height: calc(var(--ctl-h) - 4px);
   color: var(--text-muted);
   background: transparent;
   border: none;
@@ -406,7 +402,7 @@ function commitSize(axis: 'w' | 'h', e: Event) {
 
 .size-input {
   width: 54px;
-  height: 26px;
+  height: var(--ctl-h);
   padding: 0 6px;
   font-size: 12px;
   color: var(--text-secondary);
@@ -488,11 +484,12 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   background: var(--border-light);
 }
 
-/* 最右关闭/保存组：钉成与下方颜色面板同宽的列（左缘=面板左边框 200px，右缘=顶栏内边距） */
+/* 最右关闭/保存组：与下方 200px 颜色面板左右各留 10px，
+   两个按钮等宽并与颜色面板整体水平居中 */
 .topbar-actions {
   position: absolute;
   right: 10px;
-  width: 190px; /* 面板 200px − 顶栏右 padding 10px */
+  width: 180px; /* 面板 200px − 左右各 10px 间距 */
   display: flex;
   align-items: center;
   gap: 4px;
@@ -504,9 +501,8 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  height: 30px;
-  flex: 1;
+  height: var(--ctl-h);
+  flex: 1 1 0;
   min-width: 0;
   padding: 0 8px;
   font-size: 12px;
@@ -525,14 +521,13 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   border-color: var(--text-muted);
 }
 
-/* 保存：主操作（中深绿底 + 纯白图标/文字；brightness 1.15 = 背景与前景整体提亮 15%） */
+/* 保存：主操作（中深绿底 + 纯白文字；brightness 1.15 = 背景与前景整体提亮 15%） */
 .save-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  height: 30px;
-  flex: 1; /* 与关闭等宽 */
+  height: var(--ctl-h);
+  flex: 1 1 0; /* 与关闭等宽 */
   min-width: 0;
   padding: 0 8px;
   font-size: 12px;
