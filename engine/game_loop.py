@@ -22,6 +22,18 @@ import engine_state as st
 _READY_SENT = False
 
 
+def _flush_updates_maybe():
+    """帧末合并发送精灵更新。
+
+    性能模式下隔帧发送（30 次/秒）：更新里存的是绝对坐标，少发一半包只是画面刷新
+    变疏，不会影响游戏速度；逻辑步进始终保持 60Hz。
+    """
+    st._FRAME_SEQ += 1
+    if st._PERF_MODE and (st._FRAME_SEQ & 1):
+        return
+    _flush_frame_updates()
+
+
 def _notify_ready():
     """用户代码的初始化（建角色、载地图等）全部完成后，通知 IDE 结束启动加载页。
     旧 run() 与新 start_game() 两条入口都会调用，保证每次运行只发一次。"""
@@ -154,7 +166,7 @@ def run():
 
         # 同步位置跟随（挂点/角色），再合并发送本帧所有精灵更新
         _update_follows()
-        _flush_frame_updates()
+        _flush_updates_maybe()
 
         st._MOUSE_STATE["last_down"] = st._MOUSE_STATE["down"]
 
@@ -333,7 +345,7 @@ def start_game(project_dir=None, target_file=None):
 
         # 同步位置跟随（挂点/角色），再帧合并发送
         _update_follows()
-        _flush_frame_updates()
+        _flush_updates_maybe()
 
         # 状态更新
         st._MOUSE_STATE["last_down"] = st._MOUSE_STATE["down"]

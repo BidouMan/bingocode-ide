@@ -7,6 +7,7 @@ import { useRenderStore } from '../stores/render'
 import { useTerminalStore } from '../stores/terminal'
 import { useProjectStore } from '../stores/project'
 import { useResourceStore } from '../stores/resource'
+import { useSettingsStore } from '../stores/settings'
 import { waitForGameCanvasReady } from '../utils/gameCanvasReady'
 import { invalidateGameTextures } from '../utils/gameTextures'
 import { baseName, dirName, isProjectCodePath } from '../utils/projectPath'
@@ -21,6 +22,7 @@ export function useEngine() {
   const terminalStore = useTerminalStore()
   const projectStore = useProjectStore()
   const resourceStore = useResourceStore()
+  const settingsStore = useSettingsStore()
 
   function parseInstruction(jsonStr: string): AnyEngineCommand | null {
     try {
@@ -621,6 +623,8 @@ export function useEngine() {
           engineDir: env.engine_dir,
           runId: runGeneration,
         })
+        // 进程起来后立刻下发性能模式：引擎在 START 之前不会进主循环，这里设置必定赶得上
+        if (settingsStore.perfMode) sendPerfMode(true)
       } else {
         // ═══ 代码模式：通过子进程运行 Python，不走 PTY，完全无回显 ═══
         if (!tab) {
@@ -731,6 +735,8 @@ export function useEngine() {
   /** 启动加载页已收起：放开引擎主循环（引擎在 GAME_READY 后会一直等到这个信号） */
   function sendStart() { sendInput('START:') }
   function sendShowFps(on: boolean) { sendInput(`SHOW_FPS:${on ? 1 : 0}`) }
+  /** 性能模式：引擎把更新包降到每两帧一发，渲染降到 30fps；逻辑步进不动，游戏速度不变 */
+  function sendPerfMode(on: boolean) { sendInput(`PERF_MODE:${on ? 1 : 0}`) }
   function sendShowCollision(on: boolean) { sendInput(`SHOW_COLLISION:${on ? 1 : 0}`) }
 
   return {
@@ -745,6 +751,7 @@ export function useEngine() {
     sendResume,
     sendStart,
     sendShowFps,
+    sendPerfMode,
     sendShowCollision,
     cleanup,
   }

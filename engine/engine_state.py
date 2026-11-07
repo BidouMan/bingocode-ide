@@ -36,6 +36,18 @@ _MAX_FRAME_TIME = 0.05
 _MAX_PHYSICS_STEPS = 3
 _PERF_STATS = {"last_time": time.time(), "frame_count": 0}
 
+# 性能模式：只降低画面刷新与数据发送频率，逻辑步进恒为 60Hz。
+# 逻辑帧率一旦跟着变，学生写的 x += 5、重力、speed 等「每帧一次」的代码就会整体变速，
+# 这不符合游戏引擎的基本约定，所以这里绝不动 _PHYSICS_DT。
+_PERF_MODE = False
+
+
+def set_perf_mode(on):
+    """性能模式开关：仅影响渲染相关，不改变游戏逻辑速度。"""
+    global _PERF_MODE
+    _PERF_MODE = bool(on)
+
+
 # ---------------- 事件广播 / 游戏控制 ----------------
 _EVENT_LISTENERS = {}
 # 广播事件的两帧缓冲：broadcast() 写入 _EVENT_PENDING，下一步开始提升到 _EVENT_ACTIVE，
@@ -73,6 +85,7 @@ _AUTO_CAMERA_TARGET = None  # 由地图相机设置自动跟随的主玩家（�
 _SHOW_FPS = False
 _SHOW_ALL_COLLISION = False
 _FRAME_UPDATES = []  # 每帧精灵更新缓冲，帧末合并发送
+_FRAME_SEQ = 0  # 物理步序号，性能模式下用于隔帧发送
 _IMAGE_SIZE_CACHE = {}  # 图像尺寸缓存，避免重复磁盘IO
 _IMAGE_BBOX_CACHE = {}  # 图片内容框缓存：同一张图批量创建角色时免去重复读盘+像素采样
 

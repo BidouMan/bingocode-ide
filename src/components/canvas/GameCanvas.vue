@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useRenderStore } from '../../stores/render'
 import { useEditorStore } from '../../stores/editor'
+import { useSettingsStore } from '../../stores/settings'
 import { useEngine } from '../../composables/useEngine'
 import { signalGameCanvasReady, resetGameCanvasReady } from '../../utils/gameCanvasReady'
 import { effectiveScaleMode } from '../../utils/renderMode'
@@ -20,6 +21,7 @@ import {
 
 const renderStore = useRenderStore()
 const editorStore = useEditorStore()
+const settingsStore = useSettingsStore()
 const engine = useEngine()
 
 const containerRef = ref<HTMLDivElement>()
@@ -78,7 +80,8 @@ async function initPixi() {
   await app.init({
     background: '#1a1c21',
     backgroundAlpha: 1,
-    antialias: true,
+    // 性能模式关闭抗锯齿：MSAA 对老集显（如 HD Graphics 3000）开销很可观
+    antialias: !settingsStore.perfMode,
     resolution: window.devicePixelRatio || 1,
     autoDensity: true,
     // 优先使用高性能 GPU：低端集显机器走集显，双显卡机器走独显，避免用软件渲染
@@ -977,6 +980,9 @@ onMounted(async () => {
     await initPixi()
     if (app) {
       app.ticker.add(gameLoop)
+      // 性能模式把画面刷新压到 30 帧（0 = 不限制）。
+      // 只影响显示频率，引擎逻辑仍按 60Hz 步进，游戏速度不变。
+      app.ticker.maxFPS = settingsStore.perfMode ? 30 : 0
       // ticker 只在「画布可见 + 游戏运行中」时启动：
       // 不可见或未运行时停止，避免 PixiJS 空转占满 CPU（低端机器尤其明显）。
       // 停止后 canvas 保留最后一帧画面，视觉上无变化。
@@ -1007,6 +1013,15 @@ watch(
     } else {
       app.ticker.stop()
     }
+  }
+)
+
+// 性能模式开关即时生效：渲染帧率随之切换（抗锯齿只能在下次挂载时调整）
+watch(
+  () => settingsStore.perfMode,
+  (on) => {
+    if (!app) return
+    app.ticker.maxFPS = on ? 30 : 0
   }
 )
 

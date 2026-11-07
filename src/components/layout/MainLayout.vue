@@ -582,6 +582,13 @@ function closeSettingsMenu() {
   engineSubmenu.value = null
 }
 
+/** 性能模式：切换后立刻通知正在运行的引擎，未运行则下次启动生效 */
+function onTogglePerfMode() {
+  const next = !settingsStore.perfMode
+  settingsStore.setPerfMode(next)
+  if (editorStore.isRunning) engine.sendPerfMode(next)
+}
+
 // ─── 开发模式菜单（仅 dev 构建可见，菜单 UI 在 DevMenu.vue）───
 /** 开发工具：内置素材整理页（独立页面，支持多选批量操作） */
 function openAssetStudio() {
@@ -2314,6 +2321,12 @@ function spriteDisplayName(name: string) {
                     @click="settingsStore.setDefaultTileSize(size); closeSettingsMenu()"
                   >{{ size }}x{{ size }}</button>
                 </div>
+              </div>
+              <div class="file-menu-item settings-menu-item" @click="onTogglePerfMode">
+                <span>性能模式</span>
+                <span class="settings-toggle" :class="{ 'settings-toggle-on': settingsStore.perfMode }">
+                  <span class="settings-toggle-knob"></span>
+                </span>
               </div>
               <div class="file-menu-item settings-menu-item" @click="editorStore.setFocusMode(!editorStore.focusMode)">
                 <span>专注模式</span>

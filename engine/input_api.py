@@ -89,6 +89,10 @@ def _input_sync_listener():
             elif clean_line == "SHOW_FPS:0":
                 st._SHOW_FPS = False
                 st._PENDING_RESPONSES.append(json.dumps({"type": "FPS_UPDATE", "data": {"fps": 0}}))
+            elif clean_line == "PERF_MODE:1":
+                st.set_perf_mode(True)
+            elif clean_line == "PERF_MODE:0":
+                st.set_perf_mode(False)
             elif clean_line == "SHOW_COLLISION:1":
                 st._SHOW_ALL_COLLISION = True
                 for sprite in st._SPRITES.values():
