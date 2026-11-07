@@ -41,6 +41,25 @@ def _read_run_manifest(directory: str):
         return None
 
 
+def _auto_import_offset(content: str) -> int:
+    """计算 IDE 自动插入的 import 头占了几行。
+
+    游戏模式运行前，前端会在每个代码文件开头加 4 行（sys.path + from bingo_engine import *）。
+    语法错误的行号要减掉这 4 行，否则学生在编辑器里找不到报错的那一行。
+    """
+    lines = content.splitlines()
+    if len(lines) < 4:
+        return 0
+    if (
+        lines[0].strip() == 'import sys'
+        and 'not in sys.path' in lines[1]
+        and lines[2].strip().startswith('sys.path.insert')
+        and lines[3].strip() in ('from bingo_engine import *', 'import bingo_engine')
+    ):
+        return 4
+    return 0
+
+
 def discover_and_merge(project_dir: str, target_file: str = None) -> str:
     """
     发现项目所有 .py 文件并合并为一个脚本
@@ -58,8 +77,9 @@ def discover_and_merge(project_dir: str, target_file: str = None) -> str:
         try:
             tree = ast.parse(content)
         except SyntaxError as e:
+            offset = _auto_import_offset(content)
             raise SyntaxError(
-                f"{os.path.basename(target_file)} 第 {e.lineno} 行语法错误：{e.msg}"
+                f"{os.path.basename(target_file)} 第 {max(1, e.lineno - offset)} 行语法错误：{e.msg}"
             ) from None
 
         # 含 while True 或顶层循环的文件都转 generator（循环逐帧可见）
@@ -97,9 +117,6 @@ def discover_and_merge(project_dir: str, target_file: str = None) -> str:
     # 收集所有非 import 代码块
     code_blocks = []
 
-    # 记录第一个语法错误：全部文件都解析失败时抛出，避免误报"没有找到 Python 文件"
-    parse_error = None
-
     for f in py_files:
         filepath = os.path.join(search_dir, f)
         with open(filepath, 'r', encoding='utf-8') as fh:
@@ -108,9 +125,11 @@ def discover_and_merge(project_dir: str, target_file: str = None) -> str:
         try:
             tree = ast.parse(content)
         except SyntaxError as e:
-            if parse_error is None:
-                parse_error = (f, e)
-            continue
+            # 任何一个文件有语法错误都直接报出来并停止运行。
+            # 以前是跳过这个文件、继续跑其它文件：学生代码写了一半（少冒号/括号）时，
+            # 坏文件被悄悄丢掉，剩下的文件照常运行，看起来像 IDE 卡住且没有任何提示。
+            offset = _auto_import_offset(content)
+            raise SyntaxError(f"{f} 第 {max(1, e.lineno - offset)} 行语法错误：{e.msg}") from None
 
         # 提取 import 语句
         for node in tree.body:
@@ -139,11 +158,6 @@ def discover_and_merge(project_dir: str, target_file: str = None) -> str:
     if all_imports:
         parts.append('\n'.join(all_imports))
     parts.extend(code_blocks)
-
-    # 所有文件都有语法错误 → 抛出真实错误信息，而不是返回空串
-    if not parts and parse_error is not None:
-        f, e = parse_error
-        raise SyntaxError(f"{f} 第 {e.lineno} 行语法错误：{e.msg}") from None
 
     return '\n\n'.join(parts)
 

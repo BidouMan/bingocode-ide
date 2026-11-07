@@ -14,6 +14,8 @@ interface TilePainterOptions {
   onTilePainted: (x: number, y: number, tileId: number) => void
   onTileErased: (x: number, y: number) => void
   onRenderRequest: () => void
+  /** 幽灵预览位置变化后只重出一帧舞台（不需要重建图层） */
+  onPreviewChange?: () => void
 }
 
 /**
@@ -109,6 +111,8 @@ export function useTilePainter(options: TilePainterOptions) {
     previewTargets = new Map()
     if (previewContainer) previewContainer.visible = false
     clearPreviewSprites()
+    // 舞台 ticker 已停：隐藏也必须补一帧，否则幽灵图块会残留在上一帧画面里
+    options.onPreviewChange?.()
   }
 
   /** 为当前预览里还没缓存的图块加载纹理 */
@@ -140,6 +144,7 @@ export function useTilePainter(options: TilePainterOptions) {
     if (previewTargets.size === 0) {
       previewContainer.visible = false
       clearPreviewSprites()
+      options.onPreviewChange?.()
       return
     }
 
@@ -194,6 +199,8 @@ export function useTilePainter(options: TilePainterOptions) {
       previewSprites.delete(cellKey)
     }
     previewContainer.visible = previewSprites.size > 0
+    // 舞台 ticker 已停：幽灵图块的位置变化必须手动补一帧，否则不会跟着鼠标移动
+    options.onPreviewChange?.()
   }
 
   /** 随机画笔是否真正生效（开关打开且池子里有图块；池子为空时回退到当前画笔） */

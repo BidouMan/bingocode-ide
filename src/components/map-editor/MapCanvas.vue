@@ -2490,6 +2490,8 @@ const painter = useTilePainter({
   onTilePainted: (x, y, tileId) => emit('tile-painted', x, y, tileId),
   onTileErased: (x, y) => emit('tile-erased', x, y),
   onRenderRequest: () => scheduleRender(),
+  // 幽灵预览跟随鼠标：只重出一帧舞台，不能走 scheduleRender（会重建所有图层）
+  onPreviewChange: () => requestStageRender(),
 })
 
 // ====== 矢量绘制（覆盖层 + Paper.js 引擎） ======

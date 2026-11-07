@@ -1681,6 +1681,27 @@ export function useBitmapCanvas(
       commitBitmapText()
     },
     isTextEditing: () => textAnchor !== null,
+    /**
+     * 画板外起笔 / 续笔 / 收笔（PaintArtboard 舞台层转发）：
+     * 画板外按下的 pointerdown 落不到 canvas 上，由舞台接管后把坐标转发至此。
+     * 起点坐标允许为负/越界，画板外的笔画部分由 canvas 自身裁剪，天然不可见。
+     */
+    freehandBegin: (point: { x: number; y: number }) => {
+      if (activeOp !== 'none') return
+      // 与画布内 pointerdown 同序：先收口浮动选框（否则浮动像素会漏进笔画层）
+      if (floatCanvas && store.floatActive) {
+        commitFloatNow()
+        setSelection(null)
+        updateCursor()
+      }
+      beginFreeStroke(point)
+    },
+    freehandContinue: (point: { x: number; y: number }) => {
+      if (activeOp === 'free') continueFreeStroke(point)
+    },
+    freehandEnd: () => {
+      if (activeOp === 'free') endFreeStroke()
+    },
     /** 位图钢笔：Enter 闭合 / Esc 丢弃（PaintArtboard 键盘转发） */
     penFinish: () => bitmapPen.finish(),
     penCancel: () => bitmapPen.cancel(),

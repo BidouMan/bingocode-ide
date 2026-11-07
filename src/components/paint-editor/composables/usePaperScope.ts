@@ -2591,6 +2591,18 @@ export function usePaperScope(
     }
   }
 
+  /**
+   * 橡皮手势收尾（画布内 pointerup 与「画板外起笔」转发共用）：
+   * 一次性 applyEraseBlob（整段擦除体只做一次布尔运算，断面干净无接缝）
+   */
+  function finishErase() {
+    applyEraseBlob()
+    if (eraseChanged) markDirty()
+    erasePushed = false
+    eraseChanged = false
+    eraseLast = null
+  }
+
   /** 可见填充判定（对齐 Scratch：无填充或 alpha≈0 视为笔画，走切分分支） */
   function hasVisibleFill(item: paper.Item): boolean {
     const f = item.fillColor
@@ -3814,12 +3826,7 @@ export function usePaperScope(
     } else if (tool === 'fill') {
       fillRelease()
     } else if (tool === 'eraser') {
-      // 手势结束：一次性 applyEraseBlob（整段擦除体只做一次布尔运算，断面干净无接缝）
-      applyEraseBlob()
-      if (eraseChanged) markDirty()
-      erasePushed = false
-      eraseChanged = false
-      eraseLast = null
+      finishErase()
     }
     selOp = 'none'
   }
@@ -4138,6 +4145,23 @@ export function usePaperScope(
     penFinish,
     /** 收起选中（Esc 路由；清 selected 与变换框） */
     deselect: clearSelection,
+    /**
+     * 画板外起笔 / 续笔 / 收笔（PaintArtboard 舞台层转发）：
+     * 矢量画布被 clip-path 裁到画板视觉盒，画板外的 pointerdown 命中不到画布，
+     * 由舞台接管后把坐标转发至此；起点坐标允许为负/越界，画板外部分被裁剪不可见。
+     */
+    freehandBegin: (p: { x: number; y: number }) => {
+      if (store.activeTool === 'brush') beginBrush(p)
+      else if (store.activeTool === 'eraser') beginErase(p)
+    },
+    freehandContinue: (p: { x: number; y: number }) => {
+      if (store.activeTool === 'brush') continueBrush(p)
+      else if (store.activeTool === 'eraser') continueErase(eraseLast ?? p, p)
+    },
+    freehandEnd: () => {
+      if (store.activeTool === 'brush') endBrush()
+      else if (store.activeTool === 'eraser') finishErase()
+    },
     /** 塑形：选中锚点曲线化（顶栏「曲线」按钮） */
     curveSelectedPoints,
     /** 塑形：选中锚点折线化（顶栏「折线」按钮） */

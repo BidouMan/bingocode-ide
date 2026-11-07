@@ -36,6 +36,9 @@ const {
   getCanvas,
   textEditInput: bitmapTextInput, textEditCommit: bitmapTextCommit,
   penFinish: bitmapPenFinish, penCancel: bitmapPenCancel,
+  freehandBegin: bitmapFreehandBegin,
+  freehandContinue: bitmapFreehandContinue,
+  freehandEnd: bitmapFreehandEnd,
 } = useBitmapCanvas(bitmapCanvas, { smartSnap: paintSnapInfo })
 
 // 矢量绘制引擎（paper 场景图/对象操作/多帧 JSON 快照），坐标与位图同源（clientToArtboard）
@@ -186,6 +189,8 @@ function drawPickLens(clientX: number, clientY: number) {
 
 function onStagePointerLeavePick() {
   if (store.eyedropperActive) pickLensPos.value = null
+  // 鼠标离开整个舞台：笔刷圈一并隐藏（回到舞台后由 pointermove 重建）
+  store.cursorPos = null
 }
 
 // 激活/退出拾色：构建/释放合成缓存（首次 move 前镜不显示）
@@ -276,6 +281,106 @@ const artboardStyle = computed(() => {
   }
   return style
 })
+
+/**
+ * 画板外起笔（对齐专业绘图软件）：画笔/橡皮在画板外的灰色舞台区按下后，
+ * 拖入画板即可正常绘制。画板外按下的 pointerdown 落不到位图 canvas 上，
+ * 矢量 canvas 又被 clip-path 裁到画板视觉盒、画板外同样命中不到，故统一在此接管：
+ * 按下先记起点并捕获指针，指针进入画板才真正落笔（按下点→入板点的线段由 canvas
+ * 裁剪，只显示画板内部分）；未进入画板就松开 = 什么都没发生（不压撤销步、不弄脏画板）。
+ */
+let outsideStroke: {
+  pointerId: number
+  /** 按下时的画板坐标（可为负/越界） */
+  start: { x: number; y: number }
+  /** 是否已真正开始绘制 */
+  started: boolean
+} | null = null
+
+function isFreehandTool() {
+  return store.activeTool === 'brush' || store.activeTool === 'eraser'
+}
+
+function isInsideArtboard(p: { x: number; y: number }) {
+  return p.x >= 0 && p.y >= 0 && p.x <= store.artboardWidth && p.y <= store.artboardHeight
+}
+
+/** 自由笔画按模式分派到对应引擎（矢量/位图同参） */
+function freehandBeginAt(p: { x: number; y: number }) {
+  if (store.mode === 'vector') vectorEngine.freehandBegin(p)
+  else bitmapFreehandBegin(p)
+}
+function freehandContinueAt(p: { x: number; y: number }) {
+  if (store.mode === 'vector') vectorEngine.freehandContinue(p)
+  else bitmapFreehandContinue(p)
+}
+function freehandEndAt() {
+  if (store.mode === 'vector') vectorEngine.freehandEnd()
+  else bitmapFreehandEnd()
+}
+
+/** 舞台 pointerdown：拾色优先，其后处理画板外起笔 */
+function onStagePointerDown(e: PointerEvent) {
+  onStagePointerDownForPick(e)
+  if (store.eyedropperActive) return
+  if (e.button !== 0 || !isFreehandTool()) return
+  if (store.cropMode || store.textEdit) return
+  const el = e.target as Element | null
+  // 画板内（canvas 铺满画板）、两块绘制画布、舞台浮动工具条上的按下不归这里管
+  if (!el || typeof el.closest !== 'function') return
+  if (el === vectorCanvas.value || el === bitmapCanvas.value) return
+  if (el.closest('.artboard') || el.closest('.view-float-bar')) return
+  const p = clientToArtboard(e.clientX, e.clientY)
+  if (!p) return
+  outsideStroke = { pointerId: e.pointerId, start: p, started: false }
+  stageRef.value?.setPointerCapture(e.pointerId)
+  e.preventDefault()
+}
+
+function onStagePointerMoveDraw(e: PointerEvent) {
+  // 画笔/橡皮：笔刷圈跟随鼠标，画板外（灰色舞台区）同样显示（专业软件同款）
+  if (showBrushCursor.value) {
+    const el = e.target as Element | null
+    const overUi = !!(el && typeof el.closest === 'function' && el.closest('.view-float-bar'))
+    store.cursorPos = overUi ? null : clientToArtboard(e.clientX, e.clientY)
+  }
+  if (!outsideStroke || e.pointerId !== outsideStroke.pointerId) return
+  if (e.buttons !== 1) {
+    // 左键已松开（pointerup 意外丢失）：收口已开始的笔画并放弃这次起笔，
+    // 避免"悬停即在画板上落笔"
+    const id = e.pointerId
+    if (outsideStroke.started) freehandEndAt()
+    outsideStroke = null
+    const stage = stageRef.value
+    if (stage?.hasPointerCapture(id)) stage.releasePointerCapture(id)
+    return
+  }
+  const p = clientToArtboard(e.clientX, e.clientY)
+  if (!p) return
+  if (!outsideStroke.started) {
+    if (!isInsideArtboard(p)) return
+    freehandBeginAt(outsideStroke.start)
+    outsideStroke.started = true
+  }
+  freehandContinueAt(p)
+}
+
+function onStagePointerUpDraw(e: PointerEvent) {
+  if (!outsideStroke || e.pointerId !== outsideStroke.pointerId) return
+  const s = outsideStroke
+  outsideStroke = null
+  const p = clientToArtboard(e.clientX, e.clientY)
+  // 按下在外、松开在内且中途没有 move 采样：补一笔，保证「点进画板」也能落点
+  if (!s.started && p && isInsideArtboard(p)) {
+    freehandBeginAt(s.start)
+    s.started = true
+    freehandContinueAt(p)
+  }
+  if (s.started) freehandEndAt()
+  const stage = stageRef.value
+  if (stage?.hasPointerCapture(e.pointerId)) stage.releasePointerCapture(e.pointerId)
+  store.cursorPos = p && isInsideArtboard(p) ? p : null
+}
 
 // ─── 手动裁切（拖拽锚点调整画布尺寸，回车确认）───
 /** 裁切框边命中方向（true = 该边跟随指针移动） */
@@ -634,6 +739,13 @@ const brushCursorStyle = computed(() => {
     top: `${c.y - 1}px`,
   }
 })
+
+/** 画笔/橡皮选中：舞台范围内隐藏系统光标，只显示自绘笔刷圈（对齐专业绘图软件） */
+const showBrushCursor = computed(() =>
+  !store.eyedropperActive &&
+  !store.cropMode &&
+  (store.activeTool === 'brush' || store.activeTool === 'eraser')
+)
 
 function focusStage() {
   stageRef.value?.focus()
@@ -1133,14 +1245,17 @@ defineExpose({
   <div
     ref="stageRef"
     class="paint-stage"
-    :class="{ picking: store.eyedropperActive }"
+    :class="{ picking: store.eyedropperActive, 'show-brush-cursor': showBrushCursor }"
     tabindex="0"
     @wheel.prevent="onStageWheel"
     @mousedown="onStageMouseDown"
     @mousemove="onStageMouseMove"
     @mouseup="isPanning = false"
     @dblclick="onStageDblClick"
-    @pointerdown="onStagePointerDownForPick"
+    @pointerdown="onStagePointerDown"
+    @pointermove="onStagePointerMoveDraw"
+    @pointerup="onStagePointerUpDraw"
+    @pointercancel="onStagePointerUpDraw"
     @pointerleave="onStagePointerLeavePick"
     @keydown="onStageKeydown"
   >
@@ -1577,6 +1692,15 @@ defineExpose({
 .paint-stage.picking,
 .paint-stage.picking canvas {
   cursor: none !important;
+}
+
+/* 画笔/橡皮选中：舞台内（含画板外的灰色区域）隐藏系统光标，
+   只显示自绘笔刷圈（对齐专业绘图软件；带自身 cursor 的按钮不受影响） */
+.paint-stage.show-brush-cursor {
+  cursor: none;
+}
+.paint-stage.show-brush-cursor .view-float-bar {
+  cursor: default;
 }
 
 /* ─── 拾色放大镜 ─── */
