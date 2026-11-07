@@ -60,7 +60,7 @@ const vectorEngine = usePaperScope(vectorCanvas, bitmapCanvas, {
 
 /**
  * 绘制页智能吸附候选：画板边界与中心 + 其它对象的边/中心（与地图编辑器同一套阈值），
- * 不做网格吸附（角色画板没有网格）；附近没有候选线时由吸附工具兜底为整数像素。
+ * 显示网格时同时吸附网格线；附近没有候选线时由吸附工具兜底为整数像素。
  */
 function paintSnapInfo(): SnapInfo | null {
   if (!store.smartSnap) return null
@@ -74,7 +74,8 @@ function paintSnapInfo(): SnapInfo | null {
   }
   return {
     lines: { xs, ys },
-    grid: 0,
+    // 网格吸附仅在网格可见时生效（避免吸到看不见的网格线）
+    grid: store.showGrid ? Math.max(1, Math.round(store.gridSize) || 16) : 0,
     threshold: snapThreshold(store.zoom),
   }
 }
@@ -281,6 +282,22 @@ const artboardStyle = computed(() => {
   }
   return style
 })
+
+// ─── 显示网格（格子尺寸在 store 中，默认取地图编辑器的图块尺寸）───
+/** 网格线位置（画板逻辑坐标）：只画内部线，避免与画板边框重叠；
+    屏幕间距过密（<5px）时不画，避免几千条 SVG 线拖慢缩放与拖动 */
+const gridLines = computed(() => {
+  const vertical: number[] = []
+  const horizontal: number[] = []
+  if (!store.showGrid) return { vertical, horizontal }
+  const t = Math.max(1, Math.round(store.gridSize) || 16)
+  if (t * store.zoom < 5) return { vertical, horizontal }
+  for (let x = t; x < store.artboardWidth; x += t) vertical.push(x)
+  for (let y = t; y < store.artboardHeight; y += t) horizontal.push(y)
+  return { vertical, horizontal }
+})
+/** 线宽按屏幕像素恒定：画板整体被 zoom 缩放，这里反向除以 zoom */
+const gridStroke = computed(() => 1 / Math.max(0.1, store.zoom))
 
 /**
  * 画板外起笔（对齐专业绘图软件）：画笔/橡皮在画板外的灰色舞台区按下后，
@@ -960,15 +977,24 @@ function moveFrame(from: number, to: number) {
   store.selectFrame(to)
 }
 
-/** 整体载入（编辑既有角色）：既有帧均为纯位图，矢量槽重置 */
+/**
+ * 整体载入（编辑既有角色）：位图帧来自角色文件；
+ * vectors 非空时同时恢复侧车里的矢量快照（对象保持独立可编辑）。
+ */
 function loadFrames(
   canvases: HTMLCanvasElement[],
   names: (string | null)[],
-  activeIndex: number
+  activeIndex: number,
+  vectors?: (string | null)[]
 ) {
   commitTextEdit() // 载入前收口编辑中的文字
   bitmapLoadFrames(canvases, names, activeIndex)
   vectorEngine.onLoadFrames(canvases.length)
+  if (vectors && vectors.some((v) => v)) {
+    vectorEngine.loadVectorFrames(vectors)
+    // 位图载入时缩略图只含位图层，矢量恢复后补画当前帧
+    regenThumb(store.activeFrameIndex)
+  }
 }
 
 /**
@@ -1225,6 +1251,10 @@ defineExpose({
   moveFrame,
   loadFrames,
   getFrameCanvases: getFrameCanvasesComposed,
+  /** 纯位图层帧（保存绘制侧车底图用：不含矢量，移动对象不会残留旧像素） */
+  getFrameCanvasesBitmap: bitmapGetFrameCanvases,
+  /** 每帧矢量快照（保存绘制侧车用，与 getFrameCanvasesBitmap 下标对齐） */
+  getFrameVectors: () => vectorEngine.exportAllFrameVectors(),
   getFrameNames,
   copySelection: copyActive,
   pasteClipboard: pasteActive,
@@ -1289,6 +1319,35 @@ defineExpose({
          浮于矢量画布之上——选区框必须盖住两层内容 -->
     <div class="paint-overlay">
       <div class="paint-overlay-box" :style="artboardStyle">
+        <!-- 网格 overlay：格子尺寸与「网格尺寸」输入值一致，作为绘制/吸附参考，
+             不写进画板像素；盖在内容之上、选区框之下 -->
+        <svg
+          v-if="store.showGrid && (gridLines.vertical.length || gridLines.horizontal.length)"
+          class="grid-overlay"
+          :viewBox="`0 0 ${store.artboardWidth} ${store.artboardHeight}`"
+          preserveAspectRatio="none"
+        >
+          <line
+            v-for="x in gridLines.vertical"
+            :key="`v${x}`"
+            :x1="x"
+            y1="0"
+            :x2="x"
+            :y2="store.artboardHeight"
+            stroke="rgba(51, 51, 51, 0.55)"
+            :stroke-width="gridStroke"
+          />
+          <line
+            v-for="y in gridLines.horizontal"
+            :key="`h${y}`"
+            x1="0"
+            :y1="y"
+            :x2="store.artboardWidth"
+            :y2="y"
+            stroke="rgba(51, 51, 51, 0.55)"
+            :stroke-width="gridStroke"
+          />
+        </svg>
         <!-- 选区框（仅框选拖动中的进行态预览，样式与地图/形状图层统一） -->
         <div v-if="selectionStyle && !store.floatActive" class="selection-marquee" :style="selectionStyle"></div>
         <!-- 矢量选中变换框：定向矩形（可带旋转角）+ 8 缩放手柄 + 旋转柄，
@@ -1797,6 +1856,18 @@ defineExpose({
   position: relative;
   transform-origin: center center;
   pointer-events: none;
+}
+
+/* 网格 overlay：铺满画板、屏幕恒定 1px 线宽（线宽在组件内按 zoom 反算），
+   z-index 低于选区/变换框，任何模式下都不拦截指针 */
+.grid-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 4;
+  overflow: hidden;
 }
 
 /* 选区框（框选拖动态）：与地图编辑器 / 形状图层统一的靛蓝实线 + 10% 填充 */

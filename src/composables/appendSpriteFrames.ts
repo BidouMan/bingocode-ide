@@ -29,6 +29,68 @@ export interface AppendFramesResult {
   newPath?: string
 }
 
+// ────────────────────────────────────────────────────────────────
+// 绘制页矢量可编辑数据侧车（保证重新进入绘制页后对象仍可分别选中）
+// ────────────────────────────────────────────────────────────────
+
+/**
+ * 侧车帧数据：与角色帧按下标对齐。
+ * - vector：paper 场景 JSON（该帧无矢量内容时为 null）
+ * - bitmap：该帧「纯位图层」的 PNG data URL——只在有矢量内容时写入，
+ *   避免把已包含矢量的合成图当作底图而导致移动对象后残留旧像素
+ */
+export interface PaintSidecarFrame {
+  vector: string | null
+  bitmap?: string
+}
+
+export interface PaintSidecar {
+  version: 1
+  frames: PaintSidecarFrame[]
+}
+
+const PAINT_SIDECAR_FILE = 'paint.json'
+
+/** 读取指定侧车文件；不存在/损坏时返回 null（按纯位图内容处理） */
+export async function readPaintSidecarAt(filePath: string): Promise<PaintSidecar | null> {
+  try {
+    const text = await invoke<string>('read_file', { path: filePath })
+    const data = JSON.parse(text) as Partial<PaintSidecar> | null
+    if (!data || data.version !== 1 || !Array.isArray(data.frames)) return null
+    return { version: 1, frames: data.frames }
+  } catch {
+    return null
+  }
+}
+
+/** 覆盖写入指定侧车文件 */
+export async function writePaintSidecarAt(filePath: string, frames: PaintSidecarFrame[]): Promise<void> {
+  await invoke('write_file', {
+    path: filePath,
+    content: JSON.stringify({ version: 1, frames }, null, 2),
+  })
+}
+
+/** 删除指定侧车文件（不存在时静默忽略） */
+export async function deletePaintSidecarAt(filePath: string): Promise<void> {
+  await invoke('delete_path', { path: filePath }).catch(() => {})
+}
+
+/** 读取角色目录下的绘制侧车（dirPath/paint.json） */
+export function readPaintSidecar(dirPath: string): Promise<PaintSidecar | null> {
+  return readPaintSidecarAt(`${dirPath}/${PAINT_SIDECAR_FILE}`)
+}
+
+/** 写角色目录下的绘制侧车（覆盖）；无矢量内容时调用方应改用 deletePaintSidecar */
+export function writePaintSidecar(dirPath: string, frames: PaintSidecarFrame[]): Promise<void> {
+  return writePaintSidecarAt(`${dirPath}/${PAINT_SIDECAR_FILE}`, frames)
+}
+
+/** 删除角色目录下的绘制侧车（矢量被清空/烘焙后不留过期的可编辑数据） */
+export function deletePaintSidecar(dirPath: string): Promise<void> {
+  return deletePaintSidecarAt(`${dirPath}/${PAINT_SIDECAR_FILE}`)
+}
+
 function canvasToPng(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('canvas.toBlob 失败'))), 'image/png')

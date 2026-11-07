@@ -26,7 +26,12 @@ import MapResourceLibPage from '../resource-panel/MapResourceLibPage.vue'
 import SoundLibPage from '../resource-panel/SoundLibPage.vue'
 import PaintEditorPage from '../paint-editor/PaintEditorPage.vue'
 import FramePickerPage from '../resource-panel/FramePickerPage.vue'
-import { appendFramesToSprite } from '../../composables/appendSpriteFrames'
+import {
+  appendFramesToSprite,
+  writePaintSidecarAt,
+  deletePaintSidecarAt,
+  type PaintSidecarFrame,
+} from '../../composables/appendSpriteFrames'
 import { useTileAssetImport } from '../../composables/useTileAssetImport'
 import HelpPanel from '../help/HelpPanel.vue'
 import PythonHelpPanel from '../help/PythonHelpPanel.vue'
@@ -1073,7 +1078,27 @@ function onOpenMapImagePaint(req: { imagePath: string; width: number; height: nu
 }
 
 // 绘制页保存地图图像：写回项目素材目录，再登记资源 / 建立图像图层
-async function onMapImageSaved(blob: Blob, width: number, height: number) {
+/**
+ * 地图图像旁的绘制侧车（image.png.paint.json）：保留矢量对象结构，
+ * 再次进绘制页时能恢复为可分别选中的图形；无矢量内容时删除过期侧车。
+ */
+async function persistMapPaintSidecar(imageAbsPath: string, sidecar: PaintSidecarFrame[] | null) {
+  const file = `${imageAbsPath}.paint.json`
+  try {
+    if (sidecar && sidecar.length > 0) await writePaintSidecarAt(file, sidecar)
+    else await deletePaintSidecarAt(file)
+  } catch (e) {
+    // 侧车失败不影响图像本身保存（仅退化为整张位图编辑）
+    console.warn('[MainLayout] 地图绘制侧车写入失败:', e)
+  }
+}
+
+async function onMapImageSaved(
+  blob: Blob,
+  width: number,
+  height: number,
+  sidecar: PaintSidecarFrame[] | null
+) {
   const target = mapPaintTarget.value
   const projectRoot = projectStore.root
   if (!projectRoot) {
@@ -1087,7 +1112,9 @@ async function onMapImageSaved(blob: Blob, width: number, height: number) {
       editorStore.setGameMode(true)
       editorStore.setActiveEditorMode('map')
       editorStore.setResourceTab('map')
-      await createImageMapProject('绘制地图.png', { bytes })
+      const created = await createImageMapProject('绘制地图.png', { bytes })
+      // 新地图的绘制侧车写到图像旁，之后从地图里再次进入绘制页仍可分别编辑图形
+      if (created) await persistMapPaintSidecar(`${projectRoot}/${created.imageRelPath}`, sidecar)
       mapPaintNewMap.value = false
       currentPage.value = 0
     } catch (e) {
@@ -1110,6 +1137,7 @@ async function onMapImageSaved(blob: Blob, width: number, height: number) {
     if (target.imagePath) {
       // 再次编辑：覆盖原素材并刷新地图画布纹理
       await invoke('write_binary', { path: `${projectRoot}/${target.imagePath}`, data: bytes })
+      await persistMapPaintSidecar(`${projectRoot}/${target.imagePath}`, sidecar)
       const res = mapStore.mapData.resources.find(r => r.path === target.imagePath)
       if (res) {
         res.tileWidth = width
@@ -1138,6 +1166,7 @@ async function onMapImageSaved(blob: Blob, width: number, height: number) {
       }
       const relPath = `assets/maps/${target.mapName}/images/${name}.png`
       await invoke('write_binary', { path: `${projectRoot}/${relPath}`, data: bytes })
+      await persistMapPaintSidecar(`${projectRoot}/${relPath}`, sidecar)
       mapStore.addResource({
         name,
         path: relPath,
@@ -1394,6 +1423,7 @@ async function createImageMapProject(fileName: string, opts: { bytes?: number[];
   }
   // 兜底：缓存已有会直接短路返回
   await loadMapThumbnail({ id: newItemId, path: mapDir })
+  return { mapName, mapDir, imageRelPath }
 }
 
 // 用 2D canvas 生成地图缩略图快照（与编辑器画布快照语义一致：底色 + 图层内容），

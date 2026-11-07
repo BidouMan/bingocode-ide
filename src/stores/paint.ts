@@ -103,12 +103,23 @@ export const usePaintStore = defineStore('paint', () => {
   const sizeForced = ref(false)
   /**
    * 智能吸附开关（绘制页）：拖动/缩放选中对象时吸附画板边缘与中心、
-   * 其它对象的边缘与中心；不做网格吸附（角色画板没有网格）。
+   * 其它对象的边缘与中心；显示网格时还会吸附到网格线。
    */
   const smartSnap = ref(true)
+  /**
+   * 显示网格开关（绘制页）：格子尺寸取当前地图编辑器的图块尺寸（mapData.tileSize），
+   * 开启后智能吸附也会吸附到网格线；仅作视觉参考，不写进画板像素。
+   */
+  const showGrid = ref(false)
+  /** 网格格子尺寸（px）：打开绘制页时默认取当前地图的图块尺寸，可在顶栏「网格」输入框修改 */
+  const gridSize = ref(16)
 
   function toggleSmartSnap() {
     smartSnap.value = !smartSnap.value
+  }
+
+  function toggleGrid() {
+    showGrid.value = !showGrid.value
   }
 
   // ─── 选中图形尺寸（顶栏尺寸输入框复用：有选中时显示/编辑图形尺寸）───
@@ -318,6 +329,8 @@ export const usePaintStore = defineStore('paint', () => {
     dirty.value = false
     sizeForced.value = false
     smartSnap.value = true
+    showGrid.value = false
+    gridSize.value = 16
     shapeSize.value = null
     liveShapeSize.value = null
     cropMode.value = false
@@ -375,6 +388,9 @@ export const usePaintStore = defineStore('paint', () => {
     sizeForced,
     smartSnap,
     toggleSmartSnap,
+    showGrid,
+    gridSize,
+    toggleGrid,
     shapeSize,
     liveShapeSize,
     cropMode,

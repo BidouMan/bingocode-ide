@@ -17,6 +17,7 @@ import iconLayerDown from '../../assets/icons/下移图层.svg'
 import iconCurve from '../../assets/icons/曲线.svg'
 import iconStraight from '../../assets/icons/折线.svg'
 import iconSnap from '../../assets/icons/吸附锚点.svg'
+import iconGrid from '../../assets/icons/显示网格.svg'
 
 const props = defineProps<{
   /** 保存按钮提示（编辑模式为「保存回角色」） */
@@ -51,6 +52,16 @@ const emit = defineEmits<{
 }>()
 
 const store = usePaintStore()
+
+/** 网格尺寸输入：clamp 1~ARTBOARD_MAX，失焦/回车提交（默认值 = 当前地图图块尺寸） */
+function commitGridSize(e: Event) {
+  const el = e.target as HTMLInputElement
+  let v = Math.round(Number(el.value))
+  if (!Number.isFinite(v)) v = store.gridSize
+  v = Math.min(ARTBOARD_MAX, Math.max(1, v))
+  store.gridSize = v
+  el.value = String(v)
+}
 
 // ─── 模式感知的可用状态（位图看选区/剪贴板，矢量看对象选中/矢量剪贴板）───
 const isVector = () => store.mode === 'vector'
@@ -232,13 +243,43 @@ function commitSize(axis: 'w' | 'h', e: Event) {
         :class="{ 'icon-btn-active': store.smartSnap }"
         v-tooltip="
           store.smartSnap
-            ? '智能吸附已开启（拖动/缩放时对齐画板的边与中心、其它图形的边与中心）'
+            ? (store.showGrid
+              ? '智能吸附已开启（对齐画板的边与中心、其它图形，以及网格线）'
+              : '智能吸附已开启（拖动/缩放时对齐画板的边与中心、其它图形的边与中心）')
             : '智能吸附已关闭（完全自由移动）'
         "
         @click="store.toggleSmartSnap()"
       >
         <img :src="iconSnap" class="icon-sm" draggable="false" />
       </button>
+    </div>
+
+    <!-- 网格开关组（吸附按钮右侧）：开启后显示网格线，并在右侧出现「网格尺寸」输入框；
+         与吸附按钮保持 4px 同组间距，输入控件展开后自带 4px 间距，不再额外加分割线 -->
+    <div class="grid-group">
+      <button
+        class="icon-btn"
+        :class="{ 'icon-btn-active': store.showGrid }"
+        v-tooltip="store.showGrid ? '隐藏网格' : '显示网格（按地图图块的网格尺寸）'"
+        @click="store.toggleGrid()"
+      >
+        <img :src="iconGrid" class="icon-sm" draggable="false" />
+      </button>
+      <template v-if="store.showGrid">
+        <span class="grid-label">网格尺寸</span>
+        <input
+          class="size-input grid-size-input"
+          type="number"
+          min="1"
+          :max="ARTBOARD_MAX"
+          :value="store.gridSize"
+          title="网格尺寸（px，失焦或回车生效）"
+          aria-label="网格尺寸"
+          @change="commitGridSize"
+          @keydown.enter="commitGridSize"
+        />
+        <span class="size-unit">px</span>
+      </template>
     </div>
 
     <div class="topbar-spacer"></div>
@@ -268,7 +309,9 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   align-items: center;
   height: 44px;
   padding: 0 10px 0 4px;
-  gap: 10px;
+  /* 统一间距基准：工具栏内按钮/控件/分组之间、分隔线两侧一律 4px
+     （矢量|位图 属于整体分段控件，其内部 2px 缝隙保持不变） */
+  gap: 4px;
   background: var(--bg-base);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
@@ -401,20 +444,39 @@ function commitSize(axis: 'w' | 'h', e: Event) {
 .size-unit {
   font-size: 11px;
   color: var(--text-muted);
-  margin-left: -2px;
 }
 
 .topbar-spacer {
   flex: 1;
 }
 
+/* 网格开关组：紧跟吸附按钮，间距与其它按钮一致（4px） */
+.grid-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* 网格尺寸标签（仅网格开启时出现在开关右侧） */
+.grid-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.grid-size-input {
+  width: 52px;
+}
+
 /* 选区/对象操作组 */
 .op-group {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding-left: 8px;
-  margin-left: 4px;
+  gap: 4px;
+  /* 与组内间距一致：分割线左侧 4px（由顶栏 gap 提供），右侧 4px */
+  padding-left: 4px;
   border-left: 1px solid var(--border-light);
   flex-shrink: 0;
 }
@@ -422,7 +484,7 @@ function commitSize(axis: 'w' | 'h', e: Event) {
 .op-divider {
   width: 1px;
   height: 16px;
-  margin: 0 4px;
+  margin: 0;
   background: var(--border-light);
 }
 
@@ -433,7 +495,7 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   width: 190px; /* 面板 200px − 顶栏右 padding 10px */
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   flex-shrink: 0;
 }
 

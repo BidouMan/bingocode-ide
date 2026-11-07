@@ -550,8 +550,8 @@ export function usePaperScope(
     const nx = topMid.x - f.cx
     const ny = topMid.y - f.cy
     const nl = Math.hypot(nx, ny) || 1
-    // 旋转柄：顶边中点沿外法线，外偏移按 1/zoom 屏幕恒定约 14px（与位图一致）
-    const rotOff = 14 / Math.max(0.1, store.zoom)
+    // 旋转柄：顶边中点沿外法线，外偏移按 1/zoom 屏幕恒定约 24px（与位图一致）
+    const rotOff = 24 / Math.max(0.1, store.zoom)
     store.vectorSelBox = {
       corners: cs,
       handles: [
@@ -819,6 +819,39 @@ export function usePaperScope(
   function beforeExport() {
     exportActiveFrame()
     syncVectorContentFlag()
+  }
+
+  /** 导出全部帧的矢量快照（保存侧车用；活动帧先固化，无矢量内容的帧为 null） */
+  function exportAllFrameVectors(): (string | null)[] {
+    exportActiveFrame()
+    return frameJson.map((j) => j ?? null)
+  }
+
+  /**
+   * 恢复侧车中的矢量快照（与位图帧下标对齐）：重新进入绘制页后对象仍是独立可编辑图形。
+   * 非活动帧只保留 JSON 槽位（栅格在切帧时按需生成）；历史栈清空。
+   */
+  function loadVectorFrames(jsons: (string | null)[]) {
+    if (!scope) return
+    const count = store.frames.length
+    frameJson = Array.from({ length: count }, (_, i) => jsons[i] ?? null)
+    frameRaster = Array.from({ length: count }, () => null)
+    histMap.clear()
+    undoStack = []
+    redoStack = []
+    currentIdx = -1
+    syncHistoryFlags()
+    const idx = Math.min(Math.max(0, store.activeFrameIndex), Math.max(0, count - 1))
+    try {
+      importFrame(idx)
+    } catch (e) {
+      // 侧车损坏/格式不兼容：降级为纯位图，不阻塞绘制页打开
+      console.warn('[PaintEditor] 矢量侧车恢复失败，按位图载入:', e)
+      frameJson = Array.from({ length: count }, () => null)
+      frameRaster = Array.from({ length: count }, () => null)
+      currentIdx = -1
+      importFrame(idx)
+    }
   }
 
   /**
@@ -3130,10 +3163,11 @@ export function usePaperScope(
   }
 
   /**
-   * 变换框手柄命中（优先级与位图 hitTestFloat 一致）：
-   * rotate > 缩放角/边手柄 > 框内(move) > outside。
-   * 旋转柄命中宽容化：圆点命中区加大，且「顶边中点→圆点」的连线线段也可命中
-   * （实际操作常按在连线上，仅圆点可中会表现为"旋转无效"——按下即落到 outside 清选区）。
+   * 变换框手柄命中：缩放手柄 > 旋转柄 > 框内(move) > outside。
+   * 缩放优先于旋转：旋转柄外移到 24px 后，其圆点命中区与「顶边中点」缩放手柄
+   * 在视觉上仍有交叠风险，若旋转先行会导致该手柄永远选不中（想向上拉大变成旋转）。
+   * 旋转柄命中半径按屏幕恒定 10px；「顶边中点→圆点」连线只认远离框体的一段，
+   * 避免顶边中点附近被连线判定吞掉。
    */
   function hitTestFrame(
     p: { x: number; y: number }
@@ -3142,16 +3176,25 @@ export function usePaperScope(
     const z = Math.max(0.1, store.zoom)
     const cs = frameCorners(selFrame)
 
-    // 旋转柄：圆点 + 连接线段（点到线段距离）
+    // 缩放手柄（角+边中点）优先命中，命中区按屏幕恒定（不设 world 下限，
+    // 否则高倍缩放时命中区随 zoom 放大，会盖住旋转柄并导致旋转柄点不中）
+    const hs = 10 / z
+    for (const def of scaleHandleDefs()) {
+      if (Math.abs(p.x - def.world.x) <= hs / 2 && Math.abs(p.y - def.world.y) <= hs / 2) {
+        return { kind: 'scale', def }
+      }
+    }
+
+    // 旋转柄：圆点（命中半径屏幕恒定约 10px）
     const topMid = { x: (cs[0].x + cs[1].x) / 2, y: (cs[0].y + cs[1].y) / 2 }
     const nxl = Math.hypot(topMid.x - selFrame.cx, topMid.y - selFrame.cy) || 1
-    const rotOff = 14 / z
+    const rotOff = 24 / z
     const rot = {
       x: topMid.x + ((topMid.x - selFrame.cx) / nxl) * rotOff,
       y: topMid.y + ((topMid.y - selFrame.cy) / nxl) * rotOff,
     }
-    if (Math.hypot(p.x - rot.x, p.y - rot.y) <= Math.max(12, 18 / z)) return { kind: 'rotate' }
-    // 连线线段命中（topMid → rot）
+    if (Math.hypot(p.x - rot.x, p.y - rot.y) <= 10 / z) return { kind: 'rotate' }
+    // 连线线段命中（排除靠近顶边中点的前 40%，该段属于缩放手柄区域）
     {
       const ax = rot.x - topMid.x
       const ay = rot.y - topMid.y
@@ -3159,15 +3202,7 @@ export function usePaperScope(
       const t = len2 > 0 ? Math.max(0, Math.min(1, ((p.x - topMid.x) * ax + (p.y - topMid.y) * ay) / len2)) : 0
       const dx = p.x - (topMid.x + ax * t)
       const dy = p.y - (topMid.y + ay * t)
-      if (Math.hypot(dx, dy) <= Math.max(6, 10 / z)) return { kind: 'rotate' }
-    }
-
-    // 缩放手柄（角+边中点），命中区按屏幕恒定
-    const hs = Math.max(4, 10 / z)
-    for (const def of scaleHandleDefs()) {
-      if (Math.abs(p.x - def.world.x) <= hs / 2 && Math.abs(p.y - def.world.y) <= hs / 2) {
-        return { kind: 'scale', def }
-      }
+      if (t >= 0.4 && Math.hypot(dx, dy) <= 6 / z) return { kind: 'rotate' }
     }
 
     if (inPolygon(p, cs)) return { kind: 'move' }
@@ -4177,6 +4212,9 @@ export function usePaperScope(
     onFrameRemoved,
     moveFrame,
     onLoadFrames,
+    /** 侧车：导出/恢复每帧矢量快照（重新进入绘制页保持对象可分别选中） */
+    exportAllFrameVectors,
+    loadVectorFrames,
     beforeExport,
     clearAllForBake,
     resizeArtboard,
