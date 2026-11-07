@@ -13,15 +13,12 @@ import DrawingLayerTools from './DrawingLayerTools.vue'
 import PropertyPanel from './PropertyPanel.vue'
 import LayerPanel from './LayerPanel.vue'
 import TileCollisionPanel from './TileCollisionPanel.vue'
-import PaintColorPanel from '../paint-editor/PaintColorPanel.vue'
 import { useMapStore } from '../../stores/map'
 import type { MapData, TilePaletteEntry } from '../../stores/map'
 import { useMapEditorStore } from '../../stores/mapEditor'
-import { usePaintStore } from '../../stores/paint'
 import { useResourceStore } from '../../stores/resource'
 import { useProjectStore } from '../../stores/project'
 import { useMapPersistence } from '../../composables/useMapPersistence'
-import { useMapPaint } from '../../composables/useMapPaint'
 import JSZip from 'jszip'
 import { deserializeMap } from '../../utils/mapSerializer'
 import { toUserX, toUserY } from '../../utils/coords'
@@ -29,7 +26,6 @@ import { canFitTileSize } from '../../utils/tileAssetFit'
 
 const mapStore = useMapStore()
 const mapEditorStore = useMapEditorStore()
-const paintStore = usePaintStore()
 const resourceStore = useResourceStore()
 const projectStore = useProjectStore()
 
@@ -60,8 +56,8 @@ const imageSizeText = computed(() => {
   return `图片尺寸:${Math.round(img.width || 0)}×${Math.round(img.height || 0)}`
 })
 
-// ====== 右栏分页：属性 / 绘制 / 图块 / 形状（第二页由图层类型决定） ======
-type RightTab = 'props' | 'paint' | 'tile' | 'shape'
+// ====== 右栏分页：属性 + 图层类型的专属页（图块 = 图块，碰撞层 = 碰撞；图片图层只有属性） ======
+type RightTab = 'props' | 'tile' | 'shape'
 
 /**
  * 每种图层类型各自记住上次停留的分页。
@@ -83,7 +79,6 @@ function setRightTab(tab: RightTab) {
 
 /** 右侧底部信息栏：描述当前最下方那块面板在做什么，避免和顶部 tab 名字重复 */
 const rightInfoText = computed(() => {
-  if (rightTab.value === 'paint') return '绘制设置'
   if (rightTab.value === 'tile') return '图块设置'
   if (rightTab.value === 'shape') return '碰撞设置'
   return '地图设置'
@@ -174,9 +169,6 @@ function onImageTransformChanged() {
   if (img) mapCanvasRef.value?.showTransformBox(img)
 }
 
-// ====== 图片模式：直接在画布上绘制，颜色面板复用绘制页 ======
-const mapPaint = useMapPaint()
-
 // 形状层：选中 / 新建形状后自动切到「形状」页（选择集合每次变更都会触发，重复点同一个形状也算）
 watch(
   () => mapEditorStore.activeShapeIds,
@@ -185,60 +177,35 @@ watch(
   },
 )
 
-// 浮动画布工具条：撤销/重做按当前编辑模式取可用性
-const canUndo = computed(() => {
-  const mode = mapStore.activeMode
-  if (mode === 'tile') return mapStore.canUndoTile
-  if (mode === 'shape') return false
-  return mapEditorStore.paintMode === 'vector'
-    ? paintStore.vectorCanUndo
-    : (mapCanvasRef.value?.canUndoPaint ?? false)
-})
-const canRedo = computed(() => {
-  const mode = mapStore.activeMode
-  if (mode === 'tile') return mapStore.canRedoTile
-  if (mode === 'shape') return false
-  return mapEditorStore.paintMode === 'vector'
-    ? paintStore.vectorCanRedo
-    : (mapCanvasRef.value?.canRedoPaint ?? false)
-})
+// 浮动画布工具条：撤销/重做只服务图块层（图片的像素编辑已迁到绘制页）
+const canUndo = computed(() => (mapStore.activeMode === 'tile' ? mapStore.canUndoTile : false))
+const canRedo = computed(() => (mapStore.activeMode === 'tile' ? mapStore.canRedoTile : false))
 
-// 位图模式与全局绘制 store 对齐；矢量专属工具名切回位图时回退画笔
-watch(
-  () => mapEditorStore.paintMode,
-  (mode) => {
-    if (mode !== 'bitmap') return
-    paintStore.setMode('bitmap')
-    const t = mapEditorStore.imageTool
-    if (t === 'reshape' || t === 'text' || t === 'eyedropper') {
-      mapEditorStore.setImageTool('brush')
-      paintStore.setTool('brush')
-    }
-  },
-  { immediate: true }
-)
-
-// 绘制按钮/画笔工具：新建一张空白图片图层并启用指定工具
-async function startImagePaint(tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse' | 'pen' | 'text' | 'reshape' | 'eyedropper' = 'brush') {
+/** 「绘制图层」按钮：新建空白画板并跳转绘制页（保存后自动插入图层） */
+function requestPaintLayer() {
+  if (!mapStore.currentMapPath) return
   const w = Math.max(1, mapStore.mapData.width * mapStore.mapData.tileSize)
   const h = Math.max(1, mapStore.mapData.height * mapStore.mapData.tileSize)
-  const canvas = document.createElement('canvas')
-  canvas.width = w
-  canvas.height = h
-  const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
-  if (!blob) return
-  try {
-    await mapPaint.saveMapImage(blob, w, h, mapStore.activeLayer?.id ?? -1, mapEditorStore.paintMode)
-    mapEditorStore.setImageTool(tool)
-    // 新建绘制图层后直接停在「绘制」页，方便马上选颜色 / 调粗细描边
-    if (mapStore.activeMode === 'image') setRightTab('paint')
-    // 矢量专属工具需要矢量模式（新建图层后进入）；钢笔两种模式都支持
-    if (tool === 'text' || tool === 'reshape' || tool === 'eyedropper') {
-      mapEditorStore.setPaintMode('vector')
-    }
-  } catch (e) {
-    console.error('[MapEditor] 创建绘制图层失败:', e)
-  }
+  emit('open-paint-image', {
+    imagePath: '',
+    width: w,
+    height: h,
+    insertIndex: mapStore.activeLayerIndex,
+  })
+}
+
+/** 双击图像图层 / 「编辑图像」：再次进入绘制页修改该素材 */
+function onEditImageLayer(layerId?: number) {
+  const layer = layerId != undefined
+    ? mapStore.mapData.layers.find(l => l.id === layerId)
+    : mapStore.activeLayer
+  if (!layer || layer.type !== 'image') return
+  emit('open-paint-image', {
+    imagePath: layer.image.imagePath,
+    width: layer.image.width || 1,
+    height: layer.image.height || 1,
+    insertIndex: -1,
+  })
 }
 
 const emit = defineEmits<{
@@ -248,6 +215,8 @@ const emit = defineEmits<{
   'map-thumbnail-updated': [itemId: string, dataUrl: string]
   /** 退出绘制测试：回到素材整理页 */
   'tile-test-exit': []
+  /** 进入绘制页：imagePath 为空 = 新建空白图像图层；非空 = 再次编辑这张图片 */
+  'open-paint-image': [req: { imagePath: string; width: number; height: number; insertIndex: number }]
 }>()
 
 // ====== 持久化：map.json 读写、.bgm 修复、路径解析 ======
@@ -307,6 +276,9 @@ function runAutoSave() {
   autoSaveIdleHandle = null
   // 绘制测试只有内存数据，任何情况都不写盘
   if (tileTestMode.value || !mapStore.currentMapPath) return
+  // 地图已从素材列表删除（目录也一起删了）时绝不能再写回：
+  // 否则会凭空造出一份只有 map.json + 缩略图、绘制图片全丢的空壳地图
+  if (!resourceStore.maps.some(m => m.id === mapStore.currentMapPath)) return
   // 数据没变（例如刚打开地图、载入过程顺带 bump 了计数器）就跳过
   const signal = dataSignal()
   if (signal === lastSavedSignal) return
@@ -339,15 +311,11 @@ watch(
 // ====== 统一入口：currentMapPath 变化时自动保存当前 + 加载目标 ======
 // 新建地图时设此标志跳过 watcher 的加载流程
 let skipNextPathWatch = false
-// 保存前先把矢量内容烘进当前图片像素，避免存档丢内容
-async function flushVectorPaint() {
-  await mapCanvasRef.value?.exitVectorPaint()
-}
 
-/** 空地图（无任何图层）默认创建一张空白图像图层，进入后可直接绘制 */
+/** 空地图（无任何图层）默认创建一张空白图块图层，进入后可直接画图块 */
 async function ensureDefaultLayer() {
   if (mapStore.mapData.layers.length > 0) return
-  await startImagePaint('brush')
+  mapStore.addLayer('图块图层')
   await saveMapToProject()
 }
 
@@ -361,7 +329,6 @@ watch(() => mapStore.currentMapPath, async (newPath, oldPath) => {
   if (oldPath) {
     // 根据 UUID 找到旧地图的名称，用名称路径保存（名称可能已被重命名）
     const oldItem = resourceStore.maps.find(m => m.id === oldPath)
-    await flushVectorPaint()
     if (oldItem) await saveMapToProject(oldItem.name)
   }
   const loaded = await loadMapFromProject(newPath)
@@ -400,7 +367,6 @@ function switchToMap(itemId: string) {
 
 async function onNewMap() {
   if (mapStore.currentMapPath) {
-    await flushVectorPaint()
     await saveMapToProject()
   }
 
@@ -515,7 +481,6 @@ async function onImportMap() {
         // 先设 path 让 saveMapToProject 能找到资源项
         const importItem = resourceStore.maps.find(m => m.id === id)
         if (importItem && projectStore.root) importItem.path = mapDirPath(name)
-        await flushVectorPaint()
         await saveMapToProject()
         return
       }
@@ -541,15 +506,6 @@ function onCursorMove(x: number, y: number) {
   mapEditorStore.setCursorPos(x, y)
 }
 
-function onSwitchPaintMode(mode: 'bitmap' | 'vector') {
-  mapEditorStore.setPaintMode(mode)
-}
-
-/** 图片工具栏按下工具：单向切换——只有绘制类工具切到「绘制」页，选择工具不强制回属性 */
-function onImageToolPicked(tool: string) {
-  if (tool !== 'select' && mapStore.activeMode === 'image') setRightTab('paint')
-}
-
 /** 图块图层缩略图：只按该图层自身的瓦片数据合成 */
 function getLayerThumbnail(layerId: number): string | null | Promise<string | null> {
   return mapCanvasRef.value?.getLayerThumbnailDataUrl(layerId) ?? null
@@ -558,6 +514,99 @@ function getLayerThumbnail(layerId: number): string | null | Promise<string | nu
 /** 绘制过程中即时推送的单图层缩略图（只更新对应一条） */
 function onLayerThumbUpdated(layerId: number, dataUrl: string) {
   layerPanelRef.value?.setLayerThumb(layerId, dataUrl)
+}
+
+// ====== 图像图层：常规变换（复制 / 旋转 / 镜像） ======
+/** 复制当前图像图层：连同图片文件一起复制，避免两个图层共用同一张素材 */
+async function onCopyImageLayer() {
+  const layer = mapStore.activeLayer
+  const projectRoot = projectStore.root
+  if (!layer || layer.type !== 'image' || !projectRoot) return
+  const img = layer.image
+  const mapName = mapStore.mapData.name || '未命名地图'
+  const fileName = img.imagePath.split('/').pop() || 'image.png'
+  const dot = fileName.lastIndexOf('.')
+  const base = dot > 0 ? fileName.slice(0, dot) : fileName
+  const ext = dot > 0 ? fileName.slice(dot) : '.png'
+  const used = new Set(mapStore.mapData.resources.map(r => r.path.split('/').pop() || ''))
+  let name = `${base}-副本`
+  let seq = 2
+  while (used.has(`${name}${ext}`)) name = `${base}-副本${seq++}`
+  const relPath = `assets/maps/${mapName}/images/${name}${ext}`
+  try {
+    const data = await invoke<number[]>('read_binary', { path: `${projectRoot}/${img.imagePath}` })
+    await invoke('write_binary', { path: `${projectRoot}/${relPath}`, data })
+  } catch (e) {
+    console.error('[MapEditor] 复制图片失败:', e)
+    return
+  }
+  mapStore.addResource({
+    name,
+    path: relPath,
+    resourceType: 'image',
+    tileWidth: img.width,
+    tileHeight: img.height,
+    collisionType: '图像',
+    collisionEnabled: false,
+  })
+  // 偏移少许，复制后两层不会完全重叠在一起
+  mapStore.addImageAt(mapStore.activeLayerIndex, {
+    ...img,
+    imagePath: relPath,
+    position: [img.position[0] + 16, img.position[1] + 16],
+  }, `${layer.name} 副本`)
+}
+
+/** 顺时针旋转 90°：围绕图片中心旋转，位置同步调整保持中心不动 */
+function onRotateImageLayer() {
+  const img = mapStore.selectedImage
+  if (!img) return
+  const scaleX = img.scaleX ?? img.scale ?? 1
+  const scaleY = img.scaleY ?? img.scale ?? 1
+  const w = (img.width || 0) * Math.abs(scaleX)
+  const h = (img.height || 0) * Math.abs(scaleY)
+  const cx = img.position[0] + w / 2
+  const cy = img.position[1] + h / 2
+  img.rotation = ((img.rotation || 0) + 90) % 360
+  img.position = [cx - h / 2, cy - w / 2]
+  mapStore.imageRevision++
+  mapCanvasRef.value?.showTransformBox(img)
+}
+
+/** 水平 / 垂直镜像：直接翻转图片像素并覆盖原素材 */
+async function onFlipImageLayer(axis: 'h' | 'v') {
+  const img = mapStore.selectedImage
+  const projectRoot = projectStore.root
+  if (!img || !projectRoot) return
+  try {
+    const src = await invoke<string>('read_image_as_data_url', { path: `${projectRoot}/${img.imagePath}` })
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image()
+      el.onload = () => resolve(el)
+      el.onerror = reject
+      el.src = src
+    })
+    const canvas = document.createElement('canvas')
+    canvas.width = image.naturalWidth
+    canvas.height = image.naturalHeight
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    if (axis === 'h') {
+      ctx.translate(canvas.width, 0)
+      ctx.scale(-1, 1)
+    } else {
+      ctx.translate(0, canvas.height)
+      ctx.scale(1, -1)
+    }
+    ctx.drawImage(image, 0, 0)
+    const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'))
+    if (!blob) return
+    const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()))
+    await invoke('write_binary', { path: `${projectRoot}/${img.imagePath}`, data: bytes })
+    mapCanvasRef.value?.reloadImages()
+  } catch (e) {
+    console.error('[MapEditor] 镜像图片失败:', e)
+  }
 }
 
 // ====== 绘制测试（dev 素材整理页调用）：临时地图，绝不落盘 ======
@@ -817,7 +866,15 @@ function exitTileTest(notify = true) {
   if (notify) emit('tile-test-exit')
 }
 
-defineExpose({ switchToMap, placeImageResource, startTileTest })
+defineExpose({
+  switchToMap,
+  placeImageResource,
+  startTileTest,
+  /** 绘制页覆盖保存后：清缓存并重建图像图层（转发到画布） */
+  reloadImages: () => mapCanvasRef.value?.reloadImages(),
+  /** 绘制页保存返回后：强制刷新一帧，保证新图层立即可见 */
+  renderNow: () => mapCanvasRef.value?.renderNow(),
+})
 </script>
 
 <template>
@@ -828,7 +885,8 @@ defineExpose({ switchToMap, placeImageResource, startTileTest })
           ref="layerPanelRef"
           :disabled="!hasMaps"
           :get-layer-thumbnail="getLayerThumbnail"
-          @paint="startImagePaint"
+          @paint="requestPaintLayer"
+          @edit-image="onEditImageLayer"
           @open-library="emit('open-resource-lib', 'image')"
           @upload-image="onUploadLocal"
         />
@@ -849,19 +907,11 @@ defineExpose({ switchToMap, placeImageResource, startTileTest })
             v-if="!tileTestMode"
             :disabled="!hasMaps"
             @switch-map="switchToMap"
-            @delete-selection="mapCanvasRef?.deleteActive()"
-            @copy-selection="mapCanvasRef?.copyActive()"
-            @paste-selection="mapCanvasRef?.pasteActive()"
-            @flip-h="mapCanvasRef?.flipActive('h')"
-            @flip-v="mapCanvasRef?.flipActive('v')"
-            @group="mapCanvasRef?.groupActive()"
-            @ungroup="mapCanvasRef?.ungroupActive()"
-            @layer-up="mapCanvasRef?.layerUpActive()"
-            @layer-down="mapCanvasRef?.layerDownActive()"
-            @switch-paint-mode="onSwitchPaintMode"
-            @create-paint-layer="startImagePaint"
-            @tool-picked="onImageToolPicked"
-            @resize-shape="(w, h) => mapCanvasRef?.resizeShapeSize(w, h)"
+            @copy-image-layer="onCopyImageLayer"
+            @rotate-image="onRotateImageLayer"
+            @flip-image-h="onFlipImageLayer('h')"
+            @flip-image-v="onFlipImageLayer('v')"
+            @edit-image="onEditImageLayer()"
           />
           <div class="canvas-stage">
             <MapCanvas
@@ -941,7 +991,7 @@ defineExpose({ switchToMap, placeImageResource, startTileTest })
         </div>
       </div>
       <div v-if="!tileTestMode" class="map-editor-right">
-        <!-- 右侧面板分页：属性常驻；第二页跟着图层类型走（图片=绘制，图块=图块，碰撞层=碰撞） -->
+        <!-- 右侧面板分页：属性常驻；第二页跟着图层类型走（图块=图块，碰撞层=碰撞） -->
         <div class="right-tabs">
           <button class="right-tab" :class="{ 'right-tab-active': rightTab === 'props' }" @click="setRightTab('props')">属性</button>
           <button
@@ -956,17 +1006,9 @@ defineExpose({ switchToMap, placeImageResource, startTileTest })
             :class="{ 'right-tab-active': rightTab === 'tile' }"
             @click="setRightTab('tile')"
           >图块</button>
-          <button
-            v-else
-            class="right-tab"
-            :class="{ 'right-tab-active': rightTab === 'paint' }"
-            @click="setRightTab('paint')"
-          >绘制</button>
         </div>
         <div class="right-body">
-          <PaintColorPanel v-show="rightTab === 'paint'" />
           <PropertyPanel
-            v-show="rightTab !== 'paint'"
             ref="propertyPanelRef"
             class="right-props"
             :disabled="!hasMaps"

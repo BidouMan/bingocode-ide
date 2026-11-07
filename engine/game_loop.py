@@ -44,8 +44,10 @@ def _notify_ready():
     print(json.dumps({"type": "GAME_READY", "data": {}}))
 
 
-# 前端异常时不要永远卡住：最多等 5 秒就自己开始
-_START_GATE_TIMEOUT = 5.0
+# 前端异常时不要永远卡住：最多等这么久就自己开始。
+# 旧机器上贴图解码 + 首帧渲染可能明显超过 5 秒，超时太短会在加载页还盖着时
+# 就悄悄开跑，撤掉加载页的瞬间角色已经移动了一段（看起来像闪了一下旧画面）。
+_START_GATE_TIMEOUT = 15.0
 
 
 def _wait_for_start():

@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onUnmounted, watch, shallowRef } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, watch, watchEffect, shallowRef } from 'vue'
 import type { Component } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
-import { open, save, ask } from '@tauri-apps/plugin-dialog'
+import { open, save, ask, message } from '@tauri-apps/plugin-dialog'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import JSZip from 'jszip'
 import { useEditorStore } from '../../stores/editor'
@@ -90,11 +90,22 @@ watch(() => renderStore.startupPending, (pending, wasPending) => {
   if (wasPending && !pending && editorStore.isRunning) engine.sendStart()
 })
 
-// loading进度
-const loadingProgress = computed(() => {
-  if (renderStore.textureTotal === 0) return 0
-  return Math.floor((renderStore.textureLoaded / renderStore.textureTotal) * 100)
+// 启动进度由布局自己的帧循环推进，不依赖 GameCanvas 的 ticker：
+// 准备阶段和杀死旧进程阶段游戏还没进入 running 状态，画布 ticker 是停着的，
+// 靠它推进进度会让进度条在这段时间卡住不动
+watchEffect((onCleanup) => {
+  if (!renderStore.isLoadingTextures) return
+  let raf = 0
+  const step = () => {
+    renderStore.tickStartupProgress()
+    raf = requestAnimationFrame(step)
+  }
+  raf = requestAnimationFrame(step)
+  onCleanup(() => cancelAnimationFrame(raf))
 })
+
+// loading进度：由 render store 按启动阶段平滑推进，不再只按贴图数量算（会卡 0% 后跳满）
+const loadingProgress = computed(() => Math.round(renderStore.startupProgress))
 
 // change_page: 0=编辑器, 1=全屏, 2=地图库, 3=角色库, 4=素材库, 5=声音库, 6=角色绘制器, 7=造型选帧库, 8=素材整理(dev)
 const currentPage = ref(0)
@@ -120,12 +131,32 @@ const paintTarget = ref<{ id: string; name: string; path: string } | null>(null)
 /** 绘制页打开方式：edit = 双击帧（选中该帧）；newFrame = 抽屉（自动新建空白帧） */
 const paintOpenMode = ref<'edit' | 'newFrame'>('newFrame')
 const paintInitialFrameIndex = ref(0)
+/** 地图绘制目标：从地图编辑器「绘制图层」/双击图像图层进入时非空（null = 角色绘制） */
+const mapPaintTarget = ref<{
+  mapId: string
+  mapName: string
+  /** 已有图片的项目相对路径；空 = 新建图像图层 */
+  imagePath: string
+  width: number
+  height: number
+  /** 新建时的插入位置（当前激活图层索引；-1 = 顶层） */
+  insertIndex: number
+} | null>(null)
+/** 绘制页模式：地图绘制目标存在即视为地图图像模式 */
+const paintMode = computed<'sprite' | 'mapImage'>(() => (mapPaintTarget.value ? 'mapImage' : 'sprite'))
+/** 再次编辑已有地图图像时的绝对路径 */
+const mapPaintExistingAbs = computed(() => {
+  const t = mapPaintTarget.value
+  return t && t.imagePath ? `${projectStore.root}/${t.imagePath}` : null
+})
 /** 角色编辑器实例：追加帧后强制重载帧列表 */
 const spriteEditorRef = ref<{ reload: () => Promise<void> } | null>(null)
 /** 地图编辑器实例：内置资源库选图后直接放置为图片图层 / 素材整理页进入绘制测试 */
 const mapEditorRef = ref<{
   placeImageResource: (path: string) => Promise<void>
   startTileTest: (items: Array<{ path: string; name: string; assetKind?: 'tile' | 'tileset' }>) => Promise<void>
+  reloadImages: () => void
+  renderNow: () => Promise<void>
 } | null>(null)
 /** 绘制页实例：顶部菜单切页前先自动保存 */
 const paintPageRef = ref<{ saveBeforeLeave: () => Promise<boolean> } | null>(null)
@@ -950,6 +981,7 @@ function onOpenLibrary(type: string) {
 
 function onOpenPaint() {
   // 资源抽屉「绘制角色」= 新建角色
+  mapPaintTarget.value = null
   paintTarget.value = null
   paintOpenMode.value = 'newFrame'
   currentPage.value = 6  // paint editor page
@@ -960,6 +992,7 @@ function onOpenPaintAppend() {
   const id = resourceStore.selectedSpriteId
   const item = id ? resourceStore.getItem(id, 'sprite') : null
   if (!item) return
+  mapPaintTarget.value = null
   paintTarget.value = { id: item.id, name: item.name, path: item.path }
   paintOpenMode.value = 'newFrame'
   currentPage.value = 6
@@ -970,6 +1003,7 @@ function onOpenPaintEdit(index: number) {
   const id = resourceStore.selectedSpriteId
   const item = id ? resourceStore.getItem(id, 'sprite') : null
   if (!item) return
+  mapPaintTarget.value = null
   paintTarget.value = { id: item.id, name: item.name, path: item.path }
   paintOpenMode.value = 'edit'
   paintInitialFrameIndex.value = index
@@ -1012,6 +1046,109 @@ function onPaintSaved(id: string, _name: string) {
   if (isAppend) {
     nextTick(() => spriteEditorRef.value?.reload())
   }
+}
+
+/** 地图编辑器请求进入绘制页：新建空白图像图层 / 再次编辑已有图像 */
+function onOpenMapImagePaint(req: { imagePath: string; width: number; height: number; insertIndex?: number }) {
+  if (!mapStore.currentMapPath) return
+  mapPaintTarget.value = {
+    mapId: mapStore.currentMapPath,
+    mapName: mapStore.mapData.name || '未命名地图',
+    imagePath: req.imagePath || '',
+    width: Math.max(1, Math.round(req.width)),
+    height: Math.max(1, Math.round(req.height)),
+    insertIndex: req.insertIndex ?? -1,
+  }
+  paintTarget.value = null
+  currentPage.value = 6
+}
+
+// 绘制页保存地图图像：写回项目素材目录，再登记资源 / 建立图像图层
+async function onMapImageSaved(blob: Blob, width: number, height: number) {
+  const target = mapPaintTarget.value
+  const projectRoot = projectStore.root
+  if (!target || !projectRoot) {
+    console.warn('[MainLayout] 地图绘制目标已丢失，无法保存')
+    return
+  }
+
+  try {
+    const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()))
+
+    if (target.imagePath) {
+      // 再次编辑：覆盖原素材并刷新地图画布纹理
+      await invoke('write_binary', { path: `${projectRoot}/${target.imagePath}`, data: bytes })
+      const res = mapStore.mapData.resources.find(r => r.path === target.imagePath)
+      if (res) {
+        res.tileWidth = width
+        res.tileHeight = height
+      }
+      const layer = mapStore.mapData.layers.find(l => l.type === 'image' && l.image.imagePath === target.imagePath)
+      if (layer && layer.type === 'image') {
+        layer.image.width = width
+        layer.image.height = height
+      }
+      mapStore.imageRevision++
+      await nextTick()
+      mapEditorRef.value?.reloadImages()
+    } else {
+      // 新建：写入地图素材目录 → 登记资源 → 在当前图层上方插入图像图层
+      const imagesDir = `${projectRoot}/assets/maps/${target.mapName}/images`
+      try {
+        await invoke('create_dir', { path: imagesDir })
+      } catch { /* 目录已存在 */ }
+      const usedPaths = new Set(mapStore.mapData.resources.map(r => r.path))
+      let name = '绘制图层'
+      let seq = 1
+      while (usedPaths.has(`assets/maps/${target.mapName}/images/${name}.png`)) {
+        seq++
+        name = `绘制图层${seq}`
+      }
+      const relPath = `assets/maps/${target.mapName}/images/${name}.png`
+      await invoke('write_binary', { path: `${projectRoot}/${relPath}`, data: bytes })
+      mapStore.addResource({
+        name,
+        path: relPath,
+        resourceType: 'image',
+        tileWidth: width,
+        tileHeight: height,
+        collisionType: '图像',
+        collisionEnabled: false,
+      })
+      mapStore.addImageAt(target.insertIndex, {
+        imagePath: relPath,
+        position: [0, 0],
+        rotation: 0,
+        scale: 1,
+        scaleX: 1,
+        scaleY: 1,
+        opacity: 1,
+        width,
+        height,
+        collisionType: '图像',
+        collisionEnabled: false,
+      }, name)
+    }
+
+    mapPaintTarget.value = null
+    currentPage.value = 0
+    // 回页后图层重建是异步的：等下一拍再强制出一帧，保证新图层立即可见
+    await nextTick()
+    await mapEditorRef.value?.renderNow()
+  } catch (e) {
+    console.error('[MainLayout] 保存地图图像失败:', e)
+    // 失败时不跳页，并给出可见提示（避免"点保存没反应"）
+    await message(`保存地图图像失败：${e instanceof Error ? e.message : String(e)}`, {
+      title: '地图绘制',
+      kind: 'error',
+    })
+  }
+}
+
+/** 绘制页关闭：清空地图绘制目标后回到编辑器 */
+function onClosePaintPage() {
+  mapPaintTarget.value = null
+  switchPage(0)
 }
 
 async function onCreateMap() {
@@ -1474,11 +1611,20 @@ function deleteSpriteFromContext(id: string) {
 
 function deleteMapFromContext(id: string) {
   const item = resourceStore.maps.find(i => i.id === id)
+  // 删掉的正好是编辑器当前打开的地图：必须先让编辑器从这张地图上摘下来，
+  // 否则它会继续对着已删除的目录绘制，绘制写盘会把删掉的目录重新造出来
+  const wasOpen = mapStore.currentMapPath === id
   resourceStore.removeItem(id, 'map')
   if (selectedResource.value === id) {
     selectedResource.value = resourceStore.maps.length > 0 ? resourceStore.maps[0].id : null
   }
   mapContextMenu.value.show = false
+  if (wasOpen) {
+    // 先清空画布状态（同时丢弃未落盘的绘制会话），有其它地图就切过去
+    mapStore.newMap()
+    const next = resourceStore.maps[0]
+    if (next) mapStore.setMapPath(next.id)
+  }
   // 同步删除项目目录中的文件（失败必须留痕：磁盘残留会让引擎按名字解析到已删除的旧地图）
   if (item?.path) invoke('delete_path', { path: item.path }).catch(e => console.error('[MainLayout] 删除地图文件失败:', item.path, e))
 }
@@ -1651,7 +1797,11 @@ function confirmMapRename() {
 
   const renameId = mapRenameId.value
   // 先执行目录迁移，再改名字
-  migrateMapDir(oldName, val).then(() => {
+  migrateMapDir(oldName, val).then((ok) => {
+    mapRenameId.value = null
+    // 目录迁移失败（例如目标目录已存在）时不能继续改内存路径，
+    // 否则所有图片路径都会指向一个不存在的目录，图层缩略图变“？”、内容消失、绘制失效
+    if (!ok) return
     resourceStore.renameItem(renameId, val)
     // 更新 item.path
     if (projectStore.root) {
@@ -1660,7 +1810,6 @@ function confirmMapRename() {
     // 同步预解析缓存与正在编辑的地图内存，
     // 否则自动保存仍写回旧目录：旧地图复活成双份，新地图丢重力/碰撞等后续修改
     syncRenamedMapState(renameId, oldName, val)
-    mapRenameId.value = null
   })
 }
 
@@ -1690,6 +1839,8 @@ function syncRenamedMapState(id: string, oldName: string, newName: string) {
     for (const layer of data.layers || []) {
       if (layer.image) {
         layer.image.imagePath = replaceMapPathPrefix(layer.image.imagePath, oldName, newName) ?? layer.image.imagePath
+        // 矢量图层的底图也要跟着改名，否则改名后矢量内容会指向旧目录里的文件
+        layer.image.vectorBasePath = replaceMapPathPrefix(layer.image.vectorBasePath, oldName, newName) ?? layer.image.vectorBasePath
       }
     }
   }
@@ -1703,13 +1854,21 @@ function syncRenamedMapState(id: string, oldName: string, newName: string) {
   }
 }
 
-async function migrateMapDir(oldName: string, newName: string) {
-  if (!projectStore.root) return
+async function migrateMapDir(oldName: string, newName: string): Promise<boolean> {
+  if (!projectStore.root) return false
   const oldDir = `${projectStore.root}/assets/maps/${oldName}`
   const newDir = `${projectStore.root}/assets/maps/${newName}`
   try {
     const exists = await invoke<boolean>('path_exists', { path: oldDir })
-    if (!exists) return
+    // 目录本来就不在（只有内存态）：没什么可迁移的，改名本身是安全的
+    if (!exists) return true
+
+    // 目标目录已存在时 rename 在 macOS 上会直接失败（非空目录无法覆盖）：
+    // 必须先挡住，否则调用方会把所有图片路径改到那个不存在/别人的目录里
+    if (await invoke<boolean>('path_exists', { path: newDir })) {
+      console.warn('[MainLayout] 目标地图目录已存在，放弃改名:', newDir)
+      return false
+    }
 
     // 原子重命名整个目录
     await invoke('rename_path', { oldPath: oldDir, newPath: newDir })
@@ -1739,8 +1898,10 @@ async function migrateMapDir(oldName: string, newName: string) {
       }
       await invoke('write_file', { path: jsonPath, content: JSON.stringify(data) })
     }
+    return true
   } catch (e) {
     console.error('[MainLayout] 迁移地图目录失败:', e)
+    return false
   }
 }
 
@@ -2389,6 +2550,7 @@ function spriteDisplayName(name: string) {
             @open-map-library="currentPage = 2"
             @map-thumbnail-updated="onMapThumbnailUpdated"
             @tile-test-exit="switchPage(8)"
+            @open-paint-image="onOpenMapImagePaint"
           />
         </div>
 
@@ -2410,16 +2572,16 @@ function spriteDisplayName(name: string) {
             <div class="game-preview-wrapper">
               <div class="game-preview-container">
                 <GameCanvas class="game-preview-canvas" :active="currentPage === 0" />
-                <!-- Loading覆盖层 -->
+                <!-- 启动遮罩：先纯色盖住画布，超过 200ms 才显示加载页 -->
                 <Transition name="loading-fade">
                   <div v-if="renderStore.isLoadingTextures" class="loading-overlay">
-                    <div class="loading-content">
+                    <div v-if="renderStore.startupPageVisible" class="loading-content">
                       <div class="loading-balls">
                         <div class="ball ball-1"></div>
                         <div class="ball ball-2"></div>
                         <div class="ball ball-3"></div>
                       </div>
-                      <div class="loading-text">加载资源中...</div>
+                      <div class="loading-text">正在加载中</div>
                       <div class="loading-progress">{{ loadingProgress }}%</div>
                       <div class="loading-bar">
                         <div class="loading-bar-fill" :style="{ width: loadingProgress + '%' }"></div>
@@ -2718,16 +2880,16 @@ function spriteDisplayName(name: string) {
         </div>
         <div class="fullscreen-stage-area">
           <GameCanvas v-show="currentPage === 1" :active="currentPage === 1" @offset-update="canvasOffsetX = $event" />
-          <!-- Loading覆盖层（全屏运行同样先显示加载页，避免闪默认背景色） -->
+          <!-- 启动遮罩：先纯色盖住画布，超过 200ms 才显示加载页 -->
           <Transition name="loading-fade">
             <div v-if="renderStore.isLoadingTextures" class="loading-overlay">
-              <div class="loading-content">
+              <div v-if="renderStore.startupPageVisible" class="loading-content">
                 <div class="loading-balls">
                   <div class="ball ball-1"></div>
                   <div class="ball ball-2"></div>
                   <div class="ball ball-3"></div>
                 </div>
-                <div class="loading-text">加载资源中...</div>
+                <div class="loading-text">正在加载中</div>
                 <div class="loading-progress">{{ loadingProgress }}%</div>
                 <div class="loading-bar">
                   <div class="loading-bar-fill" :style="{ width: loadingProgress + '%' }"></div>
@@ -2763,11 +2925,15 @@ function spriteDisplayName(name: string) {
         <PaintEditorPage
           :key="paintPageKey"
           ref="paintPageRef"
+          :mode="paintMode"
           :target-sprite="paintTarget"
+          :map-image-size="{ w: mapPaintTarget?.width ?? 640, h: mapPaintTarget?.height ?? 480 }"
+          :map-image-abs-path="mapPaintExistingAbs"
           :open-mode="paintOpenMode"
           :initial-frame-index="paintInitialFrameIndex"
-          @close="switchPage(0)"
+          @close="onClosePaintPage"
           @saved="onPaintSaved"
+          @saved-map-image="onMapImageSaved"
         />
       </div>
 

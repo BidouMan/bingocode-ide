@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { ask } from '@tauri-apps/plugin-dialog'
-import { usePaintStore, ARTBOARD_MAX } from '../../stores/paint'
+import { ask, message } from '@tauri-apps/plugin-dialog'
+import { usePaintStore } from '../../stores/paint'
 import { useResourceStore } from '../../stores/resource'
 import { useProjectStore } from '../../stores/project'
 import {
@@ -37,6 +37,8 @@ const props = defineProps<{
   mode?: 'sprite' | 'mapImage'
   /** mapImage 模式的画板尺寸（通常等于地图像素尺寸） */
   mapImageSize?: { w: number; h: number }
+  /** mapImage 模式：要再次编辑的既有地图图像绝对路径；空 = 新建空白画板 */
+  mapImageAbsPath?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -68,16 +70,52 @@ async function frameBlobToCanvas(blob: Blob, w: number, h: number): Promise<HTML
 // MainLayout 用 :key 递增保证每次打开全新实例；store 是全局的，挂载时重置
 onMounted(async () => {
   store.reset()
-  // 地图背景：单画板，尺寸锁定为地图像素尺寸
+  // 地图背景：单画板，尺寸锁定（新建=地图像素尺寸；编辑已有图片=图片自身像素尺寸）
   if (props.mode === 'mapImage') {
-    const size = props.mapImageSize
-    if (size) {
-      const clamp = (v: number) => Math.min(ARTBOARD_MAX, Math.max(1, Math.round(v)))
-      store.artboardWidth = clamp(size.w)
-      store.artboardHeight = clamp(size.h)
+    let w = props.mapImageSize?.w
+    let h = props.mapImageSize?.h
+    let frame: HTMLCanvasElement | null = null
+    if (props.mapImageAbsPath) {
+      try {
+        const src = await invoke<string>('read_image_as_data_url', { path: props.mapImageAbsPath })
+        const img = await loadImage(src)
+        w = img.naturalWidth || img.width
+        h = img.naturalHeight || img.height
+        frame = document.createElement('canvas')
+        frame.width = Math.max(1, Math.round(w))
+        frame.height = Math.max(1, Math.round(h))
+        frame.getContext('2d')!.drawImage(img, 0, 0)
+      } catch (e) {
+        console.error('[PaintEditor] 载入地图图像失败:', e)
+      }
     }
+    // 地图画板可远大于像素图上限：按浏览器画布安全面积（约 1600 万像素）等比缩放，
+    // 常见的大地图（如 6540×480）仍按原尺寸打开
+    const MAX_MAP_SIDE = 16384
+    const MAX_MAP_AREA = 16_000_000
+    const fitMapSide = (side: number, other: number) => {
+      let value = Math.min(MAX_MAP_SIDE, Math.max(1, side))
+      const area = value * Math.max(1, Math.round(other))
+      if (area > MAX_MAP_AREA) {
+        value = Math.max(1, value * Math.sqrt(MAX_MAP_AREA / area))
+      }
+      return Math.max(1, Math.round(value))
+    }
+    let boardW = Math.round(w ?? 640)
+    let boardH = Math.round(h ?? 480)
+    boardW = fitMapSide(boardW, boardH)
+    boardH = fitMapSide(boardH, boardW)
+    store.artboardWidth = boardW
+    store.artboardHeight = boardH
     store.sizeForced = true
     store.resetView()
+    if (frame) {
+      // 画板可能还没完成挂载（ref 为空时直接跳过会让画板空着 → 保存静默失败），
+      // 这里多等几拍直到 ref 就绪再载入帧
+      for (let i = 0; i < 6 && !artboardRef.value; i++) await nextTick()
+      await nextTick()
+      artboardRef.value?.loadFrames([frame], ['地图图像'], 0)
+    }
     return
   }
 
@@ -158,16 +196,24 @@ async function onClose() {
 
 /** 保存当前编辑；返回是否成功（失败时调用方不应离开页面） */
 async function saveArtwork(): Promise<boolean> {
-  if (store.dirty === false) return true
-  const canvases = artboardRef.value?.getFrameCanvases()
-  const names = artboardRef.value?.getFrameNames()
-  if (!canvases || !names || canvases.length === 0) return false
+  // 地图图像即使未落笔也要产出（新建空白图层需要把空白画板落盘）
+  if (props.mode !== 'mapImage' && store.dirty === false) return true
 
   try {
+    const canvases = artboardRef.value?.getFrameCanvases()
+    const names = artboardRef.value?.getFrameNames()
+    if (!canvases || !names || canvases.length === 0) {
+      console.error('[PaintEditor] 画板未就绪，无法保存')
+      return false
+    }
+
     // ─── 地图背景：只导出当前画板为 PNG，由外层写入地图目录 ───
     if (props.mode === 'mapImage') {
       const canvas = canvases[Math.min(Math.max(0, store.activeFrameIndex), canvases.length - 1)]
-      if (!canvas) return false
+      if (!canvas) {
+        console.error('[PaintEditor] 地图画板帧缺失，无法导出')
+        return false
+      }
       const blob = await exportArtboardPngBlob(canvas, store.artboardWidth, store.artboardHeight)
       emit('saved-map-image', blob, store.artboardWidth, store.artboardHeight)
       return true
@@ -213,13 +259,25 @@ async function saveArtwork(): Promise<boolean> {
     emit('saved', id, spriteName)
     return true
   } catch (e) {
-    console.error('[PaintEditor] 保存角色失败:', e)
+    console.error('[PaintEditor] 保存失败:', e)
     return false
   }
 }
 
-function onSave() {
-  saveArtwork()
+async function onSave() {
+  try {
+    const ok = await saveArtwork()
+    if (ok) return
+  } catch (e) {
+    console.error('[PaintEditor] 保存失败:', e)
+  }
+  // 失败必须给出可见反馈，不能"点了没反应"
+  await message(
+    props.mode === 'mapImage'
+      ? '保存地图图像失败，请重试。如果一直失败，请把控制台里的错误信息反馈给我们。'
+      : '保存角色失败，请重试。如果一直失败，请把控制台里的错误信息反馈给我们。',
+    { title: props.mode === 'mapImage' ? '地图绘制' : '角色绘制', kind: 'error' },
+  )
 }
 
 /** 顶部菜单切换页面时调用：自动保存当前编辑，成功后才允许离开 */
@@ -234,6 +292,7 @@ defineExpose({ saveBeforeLeave })
   <div class="paint-page">
     <PaintTopBar
       :save-title="mode === 'mapImage' ? '保存为地图图像' : (targetSprite ? '保存回角色' : undefined)"
+      :can-save="mode === 'mapImage' ? true : undefined"
       @close="onClose"
       @save="onSave"
       @crop="artboardRef?.beginCrop()"

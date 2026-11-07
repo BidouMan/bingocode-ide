@@ -411,10 +411,21 @@ export function useEngine() {
     if (runMode === 'game') renderStore.beginStartupLoading()
 
     // 再次点击运行 = 重新开始：先彻底停掉旧进程（杀进程 + 摘监听）。
-    // 不先停的话，启动准备阶段旧程序残留的渲染指令会追加进新场景，出现新旧角色同屏
-    if (editorStore.isRunning) await stop()
-    // stop() 会收起加载页，重启时重新进入
-    if (runMode === 'game') renderStore.beginStartupLoading()
+    // 不先停的话，启动准备阶段旧程序残留的渲染指令会追加进新场景，出现新旧角色同屏。
+    // keepLoading：重启期间加载页必须一直盖着，否则 stop() 收掉覆盖层到新进程拉起之间
+    // 会露出上一次运行的最后画面（旧 Windows 上这段可达数百毫秒，肉眼就是一闪）
+    if (editorStore.isRunning) await stop({ keepLoading: runMode === 'game' })
+
+    // 清场放在启动准备的最前面：此时加载页已经盖住画布，
+    // 先把上一轮的显示对象与贴图缓存清掉，后续准备阶段不会再露出旧画面。
+    // 保留启动进度（游戏模式），否则重启时进度条会先涨到十几再归零
+    renderStore.clearAll({ preserveStartup: runMode === 'game' })
+    // 纹理缓存按文件路径做 key，而磁盘文件在两次运行间可能变化（角色改名顶替旧名、
+    // 删除后重建同名、重新上传同名文件、绘制保存覆盖原图），跨运行复用会渲染出
+    // 已删除旧资源的贴图。缓存只在单次运行内复用，运行开始一律清空重新加载。
+    invalidateGameTextures()
+    // 游戏模式的加载页已在 run() 开头开启；代码模式没有加载页，这里收掉残留状态
+    if (runMode !== 'game') renderStore.resetTextureLoading()
 
     // 等待项目初始化完成（onMounted 可能尚未完成）
     if (!projectStore.root) {
@@ -496,14 +507,6 @@ export function useEngine() {
     // 运行前自动保存「当前模式」修改过的文件；绝不写另一模式的文件
     await editorStore.saveCurrentModeModifiedTabs()
 
-    renderStore.clearAll()
-    // 纹理缓存按文件路径做 key，而磁盘文件在两次运行间可能变化（角色改名顶替旧名、
-    // 删除后重建同名、重新上传同名文件、绘制保存覆盖原图），跨运行复用会渲染出
-    // 已删除旧资源的贴图。缓存只在单次运行内复用，运行开始一律清空重新加载。
-    invalidateGameTextures()
-    // clearAll() 会收起加载页；游戏模式在这里重新进入，等 GAME_READY + 贴图就绪后再结束
-    if (runMode === 'game') renderStore.beginStartupLoading()
-    else renderStore.resetTextureLoading()
     terminalStore.clear()
     // 运行期间切到 python 模式：屏蔽后台 zsh 提示符（%）泄漏到控制台，
     // 同时让终端 Ctrl+C 走引擎停止逻辑
@@ -616,6 +619,11 @@ export function useEngine() {
           await editorStore.writeGameManifest(projectDir).catch(() => {})
         }
 
+        // 前置准备（写代码文件、解析环境）已完成：进入「启动引擎」阶段。
+        // 从这一刻到 GAME_READY 之间没有可观测总量（Python 启动 + 导入 + 执行学生代码），
+        // 进度条改由时间缓动推进，不再卡在 0% 干等
+        renderStore.markEngineLaunched()
+
         // 不传 scriptPath，让 discover_and_merge 按清单运行 code/ 目录里的项目代码
         await invoke('run_script', {
           workingDir: env.working_dir,
@@ -679,7 +687,12 @@ export function useEngine() {
   }
 
   let _stopping = false
-  async function stop() {
+  /**
+   * 停止程序。
+   * keepLoading = true：这是「重启」流程的一环，加载页已经显示、必须一直盖到新进程就绪，
+   * 不能让 stop() 顺手把覆盖层收掉（否则会露出上一次运行的最后画面）。
+   */
+  async function stop(options: { keepLoading?: boolean } = {}) {
     // 幂等保护：防止并发/重复调用
     if (_stopping || !editorStore.isRunning) return
     _stopping = true
@@ -695,7 +708,7 @@ export function useEngine() {
     terminalStore.flushNow()
     // 停止后保留最后一帧画面（不清空渲染数据）：学生需要看停止时的画面。
     // 新一轮运行由 run() 的 clearAll() + 场景代次清场保证不复用旧对象/旧纹理。
-    renderStore.resetTextureLoading()
+    if (!options.keepLoading) renderStore.resetTextureLoading()
     terminalStore.resetInputState()
     if (terminalStore.terminalMode === 'python') {
       terminalStore.terminalMode = 'shell'

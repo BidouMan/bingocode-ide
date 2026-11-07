@@ -78,8 +78,15 @@ export interface TileSetInfo {
   tileHeight: number
 }
 
-/** 启动加载页最短显示时间：快电脑上避免一闪而过（慢电脑实际耗时更长，不受影响） */
-const MIN_STARTUP_MS = 500
+/**
+ * 启动超过该时长才把纯色遮罩升级为加载页。
+ * 更快的启动完全不显示加载页，避免给高性能电脑凭空增加等待。
+ */
+const PAGE_REVEAL_MS = 200
+/** 加载页一旦出现，最短停留时间：避免「刚出现就被撤掉」的割裂感 */
+const PAGE_MIN_DWELL_MS = 150
+/** 进度平滑时间常数（ms）：只朝目标值缓动、绝不后退，避免数值跳变 */
+const PROGRESS_EASE_MS = 180
 
 export const useRenderStore = defineStore('render', () => {
   const sprites = ref<Map<string, SpriteData>>(new Map())
@@ -121,12 +128,23 @@ export const useRenderStore = defineStore('render', () => {
   const textureTotal = ref(0)
   const textureLoaded = ref(0)
   const isLoadingTextures = ref(false)
-  // 启动加载：点击运行就立即显示加载页，避免先露出默认背景色再闪一下加载页；
-  // 结束条件 = 引擎初始化完成（GAME_READY）+ 贴图全部就绪 + 帧循环已同步场景，
-  // 且加载页至少显示 MIN_STARTUP_MS，避免快电脑上一闪而过被看成故障闪烁
+  // 启动遮罩：点击运行立刻盖住画布（纯色，无文字），防止露出旧画面/空画布；
+  // 超过 PAGE_REVEAL_MS 仍未就绪才升级为带进度条的加载页；
+  // 结束条件 = 引擎初始化完成（GAME_READY）+ 贴图全部就绪 + 本帧场景已同步
   const startupPending = ref(false)
   const engineReady = ref(false)
+  const startupProgress = ref(0)
+  /** 加载页（文字 + 进度条）是否已经出现；前 200ms 只有纯色遮罩 */
+  const startupPageVisible = ref(false)
   let startupStartedAt = 0
+  /** 加载页首次出现的时间点，用于保证最短停留 */
+  let startupPageShownAt = 0
+  /** 引擎进程真正拉起的时间点（前置准备阶段到此结束） */
+  let engineLaunchedAt = 0
+  /** 上一次进度推进的时间，用于按真实帧间隔做指数缓动 */
+  let lastProgressTick = 0
+  /** 内部浮点进度：只在整数变化时写回 ref，避免每帧触发整个布局重渲染 */
+  let startupProgressRaw = 0
 
   function createSprite(id: string, data: Partial<SpriteData>) {
     sprites.value.set(id, {
@@ -195,7 +213,12 @@ export const useRenderStore = defineStore('render', () => {
     }
   }
 
-  function clearAll() {
+  /**
+   * 清空场景。
+   * preserveStartup = true：这是「新一轮运行」在加载页内部清场，只重置贴图计数，
+   * 保留启动进度与计时（否则重启时进度条会先涨到十几再归零，看起来像卡了一下）。
+   */
+  function clearAll(options: { preserveStartup?: boolean } = {}) {
     sprites.value.clear()
     tiles.value.clear()
     tileSets.value = []
@@ -221,7 +244,13 @@ export const useRenderStore = defineStore('render', () => {
     showCollision.value = false
     showStats.value = false
     shakeIntensity.value = 0
-    resetTextureLoading()
+    if (options.preserveStartup) {
+      textureTotal.value = 0
+      textureLoaded.value = 0
+      engineReady.value = false
+    } else {
+      resetTextureLoading()
+    }
     // 通知画布：下一帧先销毁全部显示对象再重建，避免跨运行复用旧对象/旧纹理
     sceneEpoch.value++
   }
@@ -232,16 +261,33 @@ export const useRenderStore = defineStore('render', () => {
     isLoadingTextures.value = false
     startupPending.value = false
     engineReady.value = false
+    startupPageVisible.value = false
+    startupProgress.value = 0
+    startupProgressRaw = 0
+    engineLaunchedAt = 0
+    startupPageShownAt = 0
   }
 
-  /** 点击运行立刻进入加载页（游戏模式），覆盖 Python 启动期间的默认背景色空档 */
+  /** 点击运行立刻盖上纯色遮罩（游戏模式），防止露出上一次运行的最后画面 */
   function beginStartupLoading() {
     textureTotal.value = 0
     textureLoaded.value = 0
     engineReady.value = false
     startupPending.value = true
+    startupPageVisible.value = false
+    startupProgress.value = 0
+    startupProgressRaw = 0
     startupStartedAt = performance.now()
+    lastProgressTick = startupStartedAt
+    engineLaunchedAt = 0
+    startupPageShownAt = 0
     isLoadingTextures.value = true
+  }
+
+  /** 前置准备（初始化项目 / 保存 / 写代码文件）完成，Python 进程即将拉起 */
+  function markEngineLaunched() {
+    if (!startupPending.value) return
+    engineLaunchedAt = performance.now()
   }
 
   /** 引擎初始化完成（GAME_READY） */
@@ -249,33 +295,90 @@ export const useRenderStore = defineStore('render', () => {
     engineReady.value = true
   }
 
+  function texturesReady(): boolean {
+    return textureTotal.value === 0 || textureLoaded.value >= textureTotal.value
+  }
+
+  /**
+   * 帧循环驱动进度推进（由 MainLayout 的 rAF 循环每帧调用）。
+   * 同时负责「遮罩 → 加载页」的升级：启动超过 PAGE_REVEAL_MS 才出现文字和进度条。
+   *
+   * 各阶段目标值：
+   * - 准备阶段 0→22%（时间缓动）
+   * - 引擎启动 22→60%（Python 启动没有可观测总量，用时间缓动逼近，绝不静止）
+   * - 资源加载 60→85%（真实贴图比例 + 缓慢爬升）
+   * - 就绪收尾 99%
+   * 进度只增不减，且按帧间隔做指数缓动，任何阶段切换都不会出现数值跳变。
+   */
+  function tickStartupProgress(now: number = performance.now()) {
+    if (!startupPending.value) return
+
+    // 200ms 还没启动完，才把纯色遮罩升级成真正的加载页
+    if (!startupPageVisible.value && now - startupStartedAt >= PAGE_REVEAL_MS) {
+      startupPageVisible.value = true
+      startupPageShownAt = now
+    }
+
+    const dt = Math.min(Math.max(now - lastProgressTick, 0), 200)
+    lastProgressTick = now
+
+    let target: number
+    if (engineReady.value && texturesReady()) {
+      target = 99
+    } else if (textureTotal.value > 0) {
+      const ratio = Math.min(1, textureLoaded.value / textureTotal.value)
+      // 最后 15% 留给引擎就绪与首帧，避免「资源加载完却还要干等」
+      target = 60 + 25 * ratio
+      // 贴图是逐张登记的（图像层更是一张张解码），比例可能早已接近 1 但还有后续资源，
+      // 加一条不超过 85% 的缓慢爬升，保证这一阶段进度条不会长时间静止不动
+      const creep = 60 + 20 * (1 - Math.exp(-(now - startupStartedAt) / 3000))
+      target = Math.max(target, Math.min(85, creep))
+    } else if (engineLaunchedAt > 0) {
+      const elapsed = now - engineLaunchedAt
+      target = 20 + 40 * (1 - Math.exp(-elapsed / 1500))
+    } else {
+      // 项目初始化 / 保存文件 / 等画布初始化：没有总量可统计，同样用缓动推进，
+      // 老机器上某个环节慢一点也不会让进度条一动不动
+      target = 22 * (1 - Math.exp(-(now - startupStartedAt) / 2500))
+    }
+
+    if (target <= startupProgressRaw) return
+    const k = 1 - Math.exp(-dt / PROGRESS_EASE_MS)
+    startupProgressRaw = Math.min(target, startupProgressRaw + (target - startupProgressRaw) * k)
+    const rounded = Math.floor(startupProgressRaw)
+    if (rounded > startupProgress.value) startupProgress.value = rounded
+  }
+
   /**
    * 启动加载收尾：由 GameCanvas 在每帧同步完场景后调用。
-   * 条件都满足才隐藏覆盖层：引擎就绪、贴图全部加载完、本帧已完成场景同步，
-   * 并且加载页已显示满 MIN_STARTUP_MS（快电脑也别一闪而过；慢电脑本来就超过，不受影响）。
+   * 条件：引擎就绪 + 贴图全部加载完 + 本帧场景已同步。
    * 放在帧末而不是贴图计数回调里，避免「最后一张贴图刚解码完、还没贴到显示对象上」
-   * 就提前撤销覆盖层，露出占位画面。
+   * 就提前撤销遮罩，露出占位画面。
+   *
+   * 时长的处理：
+   * - 200ms 内就绪：加载页从未出现，直接撤掉遮罩，不补显示
+   * - 加载页已出现：至少显示 PAGE_MIN_DWELL_MS，避免刚出现就被撤掉
+   * 不再有额外的强制停留时间，就绪即走。
    */
-  function tryFinishStartup() {
+  function tryFinishStartup(now: number = performance.now()) {
     if (!startupPending.value || !engineReady.value) return
-    if (textureTotal.value > 0 && textureLoaded.value < textureTotal.value) return
-    if (performance.now() - startupStartedAt < MIN_STARTUP_MS) return
+    if (!texturesReady()) return
+    if (startupPageVisible.value && now - startupPageShownAt < PAGE_MIN_DWELL_MS) return
+    startupProgressRaw = 100
+    startupProgress.value = 100
     startupPending.value = false
     isLoadingTextures.value = false
   }
 
+  // 贴图计数只服务于进度，不再自行控制加载页显隐：
+  // 运行中新建角色/加载新图片时若弹一次全屏「加载资源中」，就是肉眼可见的闪屏。
+  // 覆盖层只在本轮启动（startupPending）期间显示。
   function setTextureTotal(total: number) {
     textureTotal.value = total
-    isLoadingTextures.value = total > 0
   }
 
   function incrementTextureLoaded() {
     textureLoaded.value++
-    // 启动阶段不在计数回调里收尾，交给帧循环的 tryFinishStartup
-    if (startupPending.value) return
-    if (textureLoaded.value >= textureTotal.value && textureTotal.value > 0) {
-      isLoadingTextures.value = false
-    }
   }
 
   function setLoadingState(loading: boolean) {
@@ -386,6 +489,8 @@ export const useRenderStore = defineStore('render', () => {
     textureLoaded,
     isLoadingTextures,
     startupPending,
+    startupPageVisible,
+    startupProgress,
     createSprite,
     updateSprite,
     deleteSprite,
@@ -402,7 +507,9 @@ export const useRenderStore = defineStore('render', () => {
     removeHitbox,
     resetTextureLoading,
     beginStartupLoading,
+    markEngineLaunched,
     noteEngineReady,
+    tickStartupProgress,
     tryFinishStartup,
     setTextureTotal,
     incrementTextureLoaded,

@@ -21,7 +21,12 @@ import iconSnap from '../../assets/icons/吸附锚点.svg'
 const props = defineProps<{
   /** 保存按钮提示（编辑模式为「保存回角色」） */
   saveTitle?: string
+  /** 是否允许保存（地图绘制即使未落笔也要能把画板落盘；未传则按画板 dirty 判断） */
+  canSave?: boolean
 }>()
+
+/** 保存按钮可用性：外部显式指定优先（地图绘制恒可保存） */
+const saveAllowed = computed(() => props.canSave ?? store.dirty)
 
 const emit = defineEmits<{
   close: []
@@ -246,8 +251,8 @@ function commitSize(axis: 'w' | 'h', e: Event) {
       </button>
       <button
         class="save-btn"
-        :disabled="!store.dirty"
-        :title="store.dirty ? (props.saveTitle || '保存为新角色') : '画板为空，先画点什么'"
+        :disabled="!saveAllowed"
+        :title="saveAllowed ? (props.saveTitle || '保存为新角色') : '画板为空，先画点什么'"
         @click="emit('save')"
       >
         <img :src="iconSave" class="icon-sm" draggable="false" />

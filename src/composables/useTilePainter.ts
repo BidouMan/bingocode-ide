@@ -1,5 +1,5 @@
 import type { MapResource } from '../stores/map'
-import { useMapStore } from '../stores/map'
+import { MAX_MAP_SIDE_CELLS, useMapStore } from '../stores/map'
 import { useMapEditorStore } from '../stores/mapEditor'
 import { createLayerTransform, tileSpriteTransform } from '../utils/tileLayerTransform'
 import { tileBaseGid, tileFlipFlags, withTileFlip } from '../utils/tileGid'
@@ -153,8 +153,11 @@ export function useTilePainter(options: TilePainterOptions) {
       layer?.type === 'drawing' ? layer : null,
     )
     const wanted = new Set<string>()
+    // 预览精灵上限：矩形 + 图章可能展开出远多于落笔格数的格子，全画出来会卡顿（落笔本身不受影响）
+    const MAX_PREVIEW_SPRITES = 4000
 
     for (const [cellKey, target] of previewTargets) {
+      if (wanted.size >= MAX_PREVIEW_SPRITES) break
       const tex = previewTextures.get(previewKey(target.resource, target.tileIndex))
       if (!tex) continue
       wanted.add(cellKey)
@@ -345,6 +348,57 @@ export function useTilePainter(options: TilePainterOptions) {
     showPreview(buildPreviewTargets([pos], brush, mapEditorStore.currentTool !== 'fill'))
   }
 
+  /**
+   * 单次直线 / 矩形最多落笔的格子数。
+   * 学生一次拖出巨大范围时，如果照单全收会同步生成海量格子（卡死界面），这里按面积/长度收缩。
+   */
+  const MAX_SHAPE_CELLS = 10000
+
+  /** 提示「范围已自动缩小」：拖动中反复调用只会刷新同一条提示 */
+  function hintShapeLimit() {
+    mapEditorStore.showHint('一次画的格子太多，已自动缩小绘制范围')
+  }
+
+  /** 当前单次落笔的格子预算：多图块图章每个锚点会铺一整组，预算要按图章格数折算 */
+  function shapeCellBudget() {
+    const stampCount = isStampActive() ? Math.max(1, stampEntries(true)?.length ?? 1) : 1
+    return Math.max(1, Math.floor(MAX_SHAPE_CELLS / stampCount))
+  }
+
+  /**
+   * 收缩直线 / 矩形的终点：终点格数超预算时以起点为锚点按比例缩小，
+   * 并保证不越过地图单边上限（超出部分本来也不会落笔）。
+   */
+  function clampShapeEnd(start: { x: number; y: number }, end: { x: number; y: number }) {
+    const maxIndex = MAX_MAP_SIDE_CELLS - 1
+    const budget = shapeCellBudget()
+    let ex = Math.min(end.x, maxIndex)
+    let ey = Math.min(end.y, maxIndex)
+    if (mapEditorStore.currentTool === 'line') {
+      const dx = Math.abs(ex - start.x)
+      const dy = Math.abs(ey - start.y)
+      const len = Math.max(dx, dy) + 1
+      if (len > budget) {
+        const k = (budget - 1) / Math.max(dx, dy)
+        ex = start.x + Math.round((ex - start.x) * k)
+        ey = start.y + Math.round((ey - start.y) * k)
+        hintShapeLimit()
+      }
+    } else {
+      const w = Math.abs(ex - start.x) + 1
+      const h = Math.abs(ey - start.y) + 1
+      if (w * h > budget) {
+        const k = Math.sqrt(budget / (w * h))
+        const nw = Math.max(1, Math.floor(w * k))
+        const nh = Math.max(1, Math.floor(h * k))
+        ex = start.x + (ex >= start.x ? 1 : -1) * (nw - 1)
+        ey = start.y + (ey >= start.y ? 1 : -1) * (nh - 1)
+        hintShapeLimit()
+      }
+    }
+    return { x: ex, y: ey }
+  }
+
   /** 直线（Bresenham）：起点到终点的所有格子，含两端 */
   function lineCells(start: { x: number; y: number }, end: { x: number; y: number }) {
     const cells: { x: number; y: number }[] = []
@@ -378,9 +432,10 @@ export function useTilePainter(options: TilePainterOptions) {
     return cells
   }
 
-  /** 当前直线/矩形工具对应的格子集合 */
+  /** 当前直线/矩形工具对应的格子集合（终点先按单笔预算收缩，预览与落笔一致） */
   function shapeCells(start: { x: number; y: number }, end: { x: number; y: number }) {
-    return mapEditorStore.currentTool === 'line' ? lineCells(start, end) : rectCells(start, end)
+    const clamped = clampShapeEnd(start, end)
+    return mapEditorStore.currentTool === 'line' ? lineCells(start, clamped) : rectCells(start, clamped)
   }
 
   /**
@@ -694,7 +749,11 @@ export function useTilePainter(options: TilePainterOptions) {
           const baseGid = tileBaseGid(tileId)
           const spriteKey = `${layer.id}:${pos.x},${pos.y}`
           moveStartSprite = options.getTileSprite(spriteKey) ?? null
-          if (moveStartSprite) moveStartSprite.visible = false
+          if (moveStartSprite) {
+            moveStartSprite.visible = false
+            // 标记「工具临时隐藏」：视口裁剪重算可见性时不要把它又翻出来
+            moveStartSprite.__toolHidden = true
+          }
           // 异步加载纹理创建拖拽 sprite
           const PIXI = getPIXI()
           const app = getApp()
@@ -705,8 +764,8 @@ export function useTilePainter(options: TilePainterOptions) {
           }
           const tIdx = matchedTs ? baseGid - matchedTs.firstgid : 0
           const texRes = matchedTs
-            ? mapStore.mapData.resources.find((r: MapResource) => r.firstgid === matchedTs.firstgid)
-              ?? mapStore.mapData.resources.find((r: MapResource) => r.path === matchedTs.imagePath)
+            ? mapStore.mapData.resources.find((r: MapResource) => r.resourceType !== 'image' && r.firstgid === matchedTs.firstgid)
+              ?? mapStore.mapData.resources.find((r: MapResource) => r.resourceType !== 'image' && r.path === matchedTs.imagePath)
             : null
           if (texRes && PIXI && app) {
             options.getTileTexture(texRes, tIdx).then(texture => {
@@ -820,6 +879,7 @@ export function useTilePainter(options: TilePainterOptions) {
       } else if (moveStartSprite) {
         // 未移动，恢复原始 sprite 可见
         moveStartSprite.visible = true
+        moveStartSprite.__toolHidden = false
       }
       moveStartPos = null
       moveTileId = 0
@@ -847,8 +907,14 @@ export function useTilePainter(options: TilePainterOptions) {
     const { width, height } = mapStore.mapData
     const stack: [number, number][] = [[startX, startY]]
     const visited = new Set<string>()
+    // 整片同色的大地图会扩散到上百万格：超过预算先停下并提示，避免长时间卡死
+    const MAX_FILL_CELLS = 100000
 
     while (stack.length > 0) {
+      if (visited.size > MAX_FILL_CELLS) {
+        mapEditorStore.showHint(`一次填充最多 ${MAX_FILL_CELLS} 格，已停止扩散`)
+        break
+      }
       const [x, y] = stack.pop()!
       const key = `${x},${y}`
       if (visited.has(key)) continue
@@ -882,6 +948,12 @@ export function useTilePainter(options: TilePainterOptions) {
 
   // 切换地图时清理移动工具状态
   function resetMoveState() {
+    // 被打断的移动操作要把临时隐藏的原始图块恢复可见
+    if (moveStartSprite && !moveStartSprite.destroyed) {
+      moveStartSprite.visible = true
+      moveStartSprite.__toolHidden = false
+    }
+    moveStartSprite = null
     moveStartPos = null
     moveTileId = 0
     moveFlipH = false

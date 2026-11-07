@@ -3,7 +3,6 @@ import { ref, computed, watch } from 'vue'
 import { useMapStore } from '../../stores/map'
 import { useMapEditorStore } from '../../stores/mapEditor'
 import { useResourceStore } from '../../stores/resource'
-import { usePaintStore, ARTBOARD_MAX } from '../../stores/paint'
 import CustomSelect from '../common/CustomSelect.vue'
 import ImageLayerTools from './ImageLayerTools.vue'
 import DrawingLayerTools from './DrawingLayerTools.vue'
@@ -20,45 +19,17 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'switch-map': [itemId: string]
-  'delete-selection': []
-  'copy-selection': []
-  'paste-selection': []
-  'flip-h': []
-  'flip-v': []
-  'group': []
-  'ungroup': []
-  'layer-up': []
-  'layer-down': []
-  'switch-paint-mode': [mode: 'bitmap' | 'vector']
-  'create-paint-layer': [tool: 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse' | 'pen' | 'text' | 'reshape' | 'eyedropper']
-  'resize-shape': [w: number, h: number]
-  /** 图片工具被按下（含重复点击）：上层据此切换右侧分页 */
-  'tool-picked': [tool: 'select' | 'reshape' | 'brush' | 'eraser' | 'fill' | 'text' | 'line' | 'rect' | 'ellipse' | 'pen' | 'eyedropper']
+  /** 图像图层：复制图层 / 旋转 / 镜像 / 进入绘制页 */
+  'copy-image-layer': []
+  'rotate-image': []
+  'flip-image-h': []
+  'flip-image-v': []
+  'edit-image': []
 }>()
 
 const mapStore = useMapStore()
 const mapEditorStore = useMapEditorStore()
 const resourceStore = useResourceStore()
-const paintStore = usePaintStore()
-
-// 图片图层里选中了绘制图形（位图浮动选区 / 矢量选框）时才显示尺寸输入
-const shapeSelected = computed(() => mapStore.activeMode === 'image' && paintStore.shapeSize !== null)
-const shapeW = computed(() => Math.round(paintStore.shapeSize?.w ?? 0))
-const shapeH = computed(() => Math.round(paintStore.shapeSize?.h ?? 0))
-
-/** 输入图形宽高：保持中心不变，未编辑的那一轴沿用原始精确值 */
-function commitShapeSize(axis: 'w' | 'h', e: Event) {
-  const el = e.target as HTMLInputElement
-  const s = paintStore.shapeSize
-  if (!s) return
-  let v = Math.round(Number(el.value))
-  if (!Number.isFinite(v)) v = axis === 'w' ? Math.round(s.w) : Math.round(s.h)
-  v = Math.min(ARTBOARD_MAX, Math.max(1, v))
-  const w = axis === 'w' ? v : Math.max(1, s.w)
-  const h = axis === 'h' ? v : Math.max(1, s.h)
-  emit('resize-shape', w, h)
-  el.value = String(axis === 'w' ? Math.round(paintStore.shapeSize?.w ?? w) : Math.round(paintStore.shapeSize?.h ?? h))
-}
 
 const isImageLayer = computed(() => mapStore.activeMode === 'image')
 const isShapeLayer = computed(() => mapStore.activeMode === 'shape')
@@ -105,18 +76,11 @@ function onToolAreaWheel(e: WheelEvent) {
       <ImageLayerTools
         v-if="isImageLayer"
         :disabled="disabled"
-        @delete-selection="emit('delete-selection')"
-        @copy-selection="emit('copy-selection')"
-        @paste-selection="emit('paste-selection')"
-        @flip-h="emit('flip-h')"
-        @flip-v="emit('flip-v')"
-        @group="emit('group')"
-        @ungroup="emit('ungroup')"
-        @layer-up="emit('layer-up')"
-        @layer-down="emit('layer-down')"
-        @switch-paint-mode="(mode) => emit('switch-paint-mode', mode)"
-        @create-layer="(tool) => emit('create-paint-layer', tool)"
-        @tool-picked="(tool) => emit('tool-picked', tool)"
+        @copy-layer="emit('copy-image-layer')"
+        @rotate="emit('rotate-image')"
+        @flip-h="emit('flip-image-h')"
+        @flip-v="emit('flip-image-v')"
+        @edit-image="emit('edit-image')"
       />
       <ShapeLayerTools v-else-if="isShapeLayer" :disabled="disabled" />
       <DrawingLayerTools v-else :disabled="disabled" />
@@ -161,35 +125,6 @@ function onToolAreaWheel(e: WheelEvent) {
     >
       <img :src="iconSnapGrid" class="toolbar-icon" />
     </button>
-
-    <!-- 选中绘制图形时：显示图形宽高（与角色绘制页顶栏一致） -->
-    <template v-if="shapeSelected">
-      <div class="toolbar-separator" />
-      <div class="shape-size-inputs" title="选中图形尺寸（输入后回车生效）">
-        <input
-          class="shape-size-input"
-          type="number"
-          min="1"
-          :max="ARTBOARD_MAX"
-          :value="shapeW"
-          aria-label="图形宽度"
-          @change="commitShapeSize('w', $event)"
-          @keydown.enter="commitShapeSize('w', $event)"
-        />
-        <span class="shape-size-x">×</span>
-        <input
-          class="shape-size-input"
-          type="number"
-          min="1"
-          :max="ARTBOARD_MAX"
-          :value="shapeH"
-          aria-label="图形高度"
-          @change="commitShapeSize('h', $event)"
-          @keydown.enter="commitShapeSize('h', $event)"
-        />
-        <span class="shape-size-unit">px</span>
-      </div>
-    </template>
 
     <div class="toolbar-spacer" />
 

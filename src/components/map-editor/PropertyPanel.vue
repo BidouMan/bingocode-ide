@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { useMapStore, DEFAULT_CAMERA_SETTINGS, type ShapeKind, type ShapeItem, type TileData } from '../../stores/map'
+import { useMapStore, DEFAULT_CAMERA_SETTINGS, MAX_MAP_SIDE_CELLS, type ShapeKind, type ShapeItem, type TileData } from '../../stores/map'
 import { useEditorStore } from '../../stores/editor'
 import { useResourceStore } from '../../stores/resource'
 import { useMapEditorStore } from '../../stores/mapEditor'
@@ -1748,6 +1748,7 @@ function runTilesetMenu(action: TilesetMenuAction) {
                     class="att-input att-input-no-spin"
                     type="number"
                     min="1"
+                    :max="MAX_MAP_SIDE_CELLS"
                     step="1"
                     :value="mapStore.mapData.width"
                     :disabled="disabled"
@@ -1768,6 +1769,7 @@ function runTilesetMenu(action: TilesetMenuAction) {
                     class="att-input att-input-no-spin"
                     type="number"
                     min="1"
+                    :max="MAX_MAP_SIDE_CELLS"
                     step="1"
                     :value="mapStore.mapData.height"
                     :disabled="disabled"

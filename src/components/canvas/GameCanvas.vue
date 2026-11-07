@@ -821,6 +821,7 @@ function gameLoop() {
   syncDrawTexts()
   syncHitboxes()
   // 启动加载页收尾：引擎就绪 + 贴图全部就绪 + 本帧场景已同步，才撤掉覆盖层
+  // （进度条本身由 MainLayout 自己的帧循环推进，不依赖画布 ticker 是否在跑）
   renderStore.tryFinishStartup()
 }
 

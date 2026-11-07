@@ -1,6 +1,7 @@
 import * as pako from 'pako'
 import type { TilePaletteEntry } from '../stores/map'
 import { imageLocalToWorld } from './mapImageGeometry'
+import { isValidMapTileSize } from './tileAssetFit'
 
 export interface MapSaveData {
   name: string
@@ -479,9 +480,11 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
 
   // 统一解析素材：补全 id/firstgid，并与 tileset 一一配对
   const resolveResource = (r: any): any => {
+    const isImage = r.resourceType === 'image'
     let matched: any = null
-    if (r.id) matched = tileSets.find(ts => ts.id === r.id) ?? null
-    if (!matched && r.firstgid != null) {
+    // 图片素材不参与图块集配对：它没有图块的 GID 空间，配上去会把真正的图块集顶掉
+    if (r.id && !isImage) matched = tileSets.find(ts => ts.id === r.id) ?? null
+    if (!matched && !isImage && r.firstgid != null) {
       matched = tileSets.find(ts => ts.firstgid === r.firstgid) ?? null
     }
     if (!matched) {
@@ -520,8 +523,10 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
         collisionEnabled: r.collisionEnabled || false,
         tiles: [],
       }
-      tileSets.push(matched)
-      claimedTileSets.add(matched)
+      if (!isImage) {
+        tileSets.push(matched)
+        claimedTileSets.add(matched)
+      }
     }
 
     return {
@@ -568,6 +573,12 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
     seenImagePaths.add(r.path)
     return true
   })
+
+  // 旧存档里图片素材也被建成了图块集：它们会按 firstgid 抢在真正的图块集前面被匹配到，
+  // 导致图块画上去什么都不显示。这里按「素材 id 或同名同图」把它们剔除
+  const cleanTileSets = tileSets.filter(ts => !resources.some(r =>
+    r.resourceType === 'image' && ((ts.id && r.id === ts.id) || (r.path === ts.imagePath && r.name === ts.name)),
+  ))
 
   // 扁平模型：旧存档一个 imagelayer 里的多张图片，拆成多个独立图片图层
   const layers: any[] = []
@@ -706,7 +717,8 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
     version: 5,
     width: data.width,
     height: data.height,
-    tileSize: data.tileSize,
+    // 存档里的格子尺寸必须校验：损坏 / 手改的 1000000 会让地图直接崩掉
+    tileSize: isValidMapTileSize(data.tileSize) ? data.tileSize : 32,
     // 只有真的锁定过（手动改格子或首次导入素材）才算「已指定」；
     // 不能把默认的 32 也当成锁定，否则重新打开地图后就再也没机会按素材尺寸初始化。
     tileSizeExplicit: data.tileSizeExplicit === true,
@@ -719,7 +731,7 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
     collisionEnabled: data.collisionEnabled || false,
     resources,
     layers,
-    tileSets,
+    tileSets: cleanTileSets,
     tilesetGroups: Array.isArray(data.tilesetGroups)
       ? data.tilesetGroups.map(g => ({
           id: String(g.id),

@@ -887,6 +887,9 @@ def _render_map():
             for image_idx, image in enumerate(layer["images"]):
                 # 生成唯一的图像ID
                 sprite_id = f"image_{layer_idx}_{image_idx}"
+                # 相机移动会多次调用本函数：已经发过的图像不再重发（否则每走半格就全量重发整张地图）
+                if sprite_id in st._MAP_SPRITES:
+                    continue
 
                 # 获取图像位置
                 position = image.get("position", [0, 0])
@@ -989,6 +992,10 @@ def _render_map():
 
                 sprite_id = f"tile_{layer_idx}_{x}_{y}"
                 tile_key = (layer_idx, x, y)
+                # 相机移动会多次调用本函数：已经发过的图块不再重发
+                # （地图是静态的，首次加载发全量，之后只补新增图块）
+                if sprite_id in st._MAP_SPRITES:
+                    continue
 
                 # 获取瓦片集的具体瓦片大小（图块实际大小）
                 tile_set_size_w = tile_size  # 默认使用地图的全局tile_size
@@ -1055,6 +1062,10 @@ def _render_map():
         # 使用地图的全局tile_size作为数据包的tile_size（格子大小）
         # 这样图块始终在原来的格子位置上
         packet_tile_size = tile_size
+
+        # 相机移动时如果没有新图块要画，就不要每半格都发一个空包
+        if not batch_commands:
+            return
 
         packet = {
             "type": "CREATE_BATCH",

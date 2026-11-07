@@ -10,8 +10,25 @@
  * - 非整数倍（如 24 → 16）逐块缩放，保证每块都正好落进格子里，不会累积错位。
  */
 
-/** 常见的单图块边长（单张图片即一个图块时使用） */
+/** 常见的单图块边长（单张图片即一个图块时使用；素材整理里可选的图集尺寸也取这一组） */
 const SINGLE_TILE_SIZES = [8, 12, 16, 24, 32, 48, 64]
+
+/** 地图格子尺寸的安全范围：挡住异常数据（如索引被手改成 1000000）把地图压成 1×1 */
+export const MIN_MAP_TILE_SIZE = 1
+export const MAX_MAP_TILE_SIZE = 256
+
+/** 地图格子尺寸是否合法（正整数且在安全范围内） */
+export function isValidMapTileSize(value: unknown): value is number {
+  return typeof value === 'number'
+    && Number.isInteger(value)
+    && value >= MIN_MAP_TILE_SIZE
+    && value <= MAX_MAP_TILE_SIZE
+}
+
+/** 素材自带的图块尺寸是否可信（只认常见取值，其余按「未设定」处理） */
+export function isValidAssetTileSize(value: unknown): value is number {
+  return typeof value === 'number' && SINGLE_TILE_SIZES.includes(value)
+}
 
 /** 判断两个尺寸能否整数倍互转（16↔32、32↔64 可以，16↔24 不行） */
 export function canFitTileSize(native: number, grid: number): boolean {
@@ -94,6 +111,10 @@ export async function fitTileSheet(
     ctx.drawImage(img, 0, 0, cols * nativeTileSize, rows * nativeTileSize, 0, 0, width, height)
   } else {
     // 非整数倍（如 24 → 16）：每块单独缩放后画到对应格子，块与块之间不会错位
+    const blocks = cols * rows
+    if (blocks > 2000) {
+      console.warn('[TileFit] 非整数倍缩放需要逐块绘制，块数较多可能卡顿:', blocks)
+    }
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         ctx.drawImage(
