@@ -4,23 +4,17 @@ import { useMapStore } from '../../stores/map'
 import { useMapEditorStore } from '../../stores/mapEditor'
 import iconSelect from '../../assets/icons/选择箭头.svg'
 import iconCopy from '../../assets/icons/copy.svg'
-import iconRotate from '../../assets/icons/旋转.svg'
 import iconFlipH from '../../assets/icons/水平翻转.svg'
 import iconFlipV from '../../assets/icons/垂直翻转.svg'
-import iconEdit from '../../assets/icons/编辑1.svg'
 
 defineProps<{ disabled?: boolean }>()
 const emit = defineEmits<{
   /** 复制当前图像图层（含图片文件） */
   'copy-layer': []
-  /** 顺时针旋转 90° */
-  'rotate': []
   /** 水平镜像 */
   'flip-h': []
   /** 垂直镜像 */
   'flip-v': []
-  /** 进入绘制页编辑这张图像 */
-  'edit-image': []
 }>()
 
 const mapStore = useMapStore()
@@ -48,8 +42,6 @@ function pickMove() {
     <img :src="iconSelect" class="toolbar-icon" />
   </button>
 
-  <div class="toolbar-separator" />
-
   <button
     class="toolbar-btn"
     :disabled="disabled || !canOperate"
@@ -57,14 +49,6 @@ function pickMove() {
     @click="emit('copy-layer')"
   >
     <img :src="iconCopy" class="toolbar-icon" />
-  </button>
-  <button
-    class="toolbar-btn"
-    :disabled="disabled || !canOperate"
-    v-tooltip="'顺时针旋转 90°'"
-    @click="emit('rotate')"
-  >
-    <img :src="iconRotate" class="toolbar-icon" />
   </button>
   <button
     class="toolbar-btn"
@@ -81,17 +65,6 @@ function pickMove() {
     @click="emit('flip-v')"
   >
     <img :src="iconFlipV" class="toolbar-icon" />
-  </button>
-
-  <div class="toolbar-separator" />
-
-  <button
-    class="toolbar-btn"
-    :disabled="disabled || !canOperate"
-    v-tooltip="'进入绘制页编辑这张图像'"
-    @click="emit('edit-image')"
-  >
-    <img :src="iconEdit" class="toolbar-icon" />
   </button>
 </template>
 

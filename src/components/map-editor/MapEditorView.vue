@@ -557,22 +557,6 @@ async function onCopyImageLayer() {
   }, `${layer.name} 副本`)
 }
 
-/** 顺时针旋转 90°：围绕图片中心旋转，位置同步调整保持中心不动 */
-function onRotateImageLayer() {
-  const img = mapStore.selectedImage
-  if (!img) return
-  const scaleX = img.scaleX ?? img.scale ?? 1
-  const scaleY = img.scaleY ?? img.scale ?? 1
-  const w = (img.width || 0) * Math.abs(scaleX)
-  const h = (img.height || 0) * Math.abs(scaleY)
-  const cx = img.position[0] + w / 2
-  const cy = img.position[1] + h / 2
-  img.rotation = ((img.rotation || 0) + 90) % 360
-  img.position = [cx - h / 2, cy - w / 2]
-  mapStore.imageRevision++
-  mapCanvasRef.value?.showTransformBox(img)
-}
-
 /** 水平 / 垂直镜像：直接翻转图片像素并覆盖原素材 */
 async function onFlipImageLayer(axis: 'h' | 'v') {
   const img = mapStore.selectedImage
@@ -910,7 +894,6 @@ defineExpose({
             :disabled="!hasMaps"
             @switch-map="switchToMap"
             @copy-image-layer="onCopyImageLayer"
-            @rotate-image="onRotateImageLayer"
             @flip-image-h="onFlipImageLayer('h')"
             @flip-image-v="onFlipImageLayer('v')"
             @edit-image="onEditImageLayer()"

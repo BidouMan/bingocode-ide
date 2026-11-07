@@ -142,8 +142,14 @@ const mapPaintTarget = ref<{
   /** 新建时的插入位置（当前激活图层索引；-1 = 顶层） */
   insertIndex: number
 } | null>(null)
-/** 绘制页模式：地图绘制目标存在即视为地图图像模式 */
-const paintMode = computed<'sprite' | 'mapImage'>(() => (mapPaintTarget.value ? 'mapImage' : 'sprite'))
+/** 资源抽屉「绘制地图」：空白画板绘制，保存后生成一张新地图（不插入当前地图） */
+const mapPaintNewMap = ref(false)
+/** 绘制页模式：地图绘制目标存在或新建地图绘制时视为地图图像模式 */
+const paintMode = computed<'sprite' | 'mapImage'>(() => (mapPaintTarget.value || mapPaintNewMap.value ? 'mapImage' : 'sprite'))
+/** 绘制页画板尺寸：编辑地图图像用目标尺寸，新建地图绘制用默认一屏大小 */
+const paintBoardSize = computed(() => mapPaintTarget.value
+  ? { w: mapPaintTarget.value.width, h: mapPaintTarget.value.height }
+  : { w: 640, h: 480 })
 /** 再次编辑已有地图图像时的绝对路径 */
 const mapPaintExistingAbs = computed(() => {
   const t = mapPaintTarget.value
@@ -980,8 +986,9 @@ function onOpenLibrary(type: string) {
   }
 }
 
-function onOpenPaint() {
-  // 资源抽屉「绘制角色」= 新建角色
+function onOpenPaint(type?: string) {
+  // 资源抽屉「绘制地图」= 空白画板画一张新地图，保存后生成地图并进入编辑器
+  mapPaintNewMap.value = type === 'map'
   mapPaintTarget.value = null
   paintTarget.value = null
   paintOpenMode.value = 'newFrame'
@@ -1052,6 +1059,7 @@ function onPaintSaved(id: string, _name: string) {
 /** 地图编辑器请求进入绘制页：新建空白图像图层 / 再次编辑已有图像 */
 function onOpenMapImagePaint(req: { imagePath: string; width: number; height: number; insertIndex?: number }) {
   if (!mapStore.currentMapPath) return
+  mapPaintNewMap.value = false
   mapPaintTarget.value = {
     mapId: mapStore.currentMapPath,
     mapName: mapStore.mapData.name || '未命名地图',
@@ -1068,7 +1076,30 @@ function onOpenMapImagePaint(req: { imagePath: string; width: number; height: nu
 async function onMapImageSaved(blob: Blob, width: number, height: number) {
   const target = mapPaintTarget.value
   const projectRoot = projectStore.root
-  if (!target || !projectRoot) {
+  if (!projectRoot) {
+    console.warn('[MainLayout] 项目目录未就绪，无法保存地图图像')
+    return
+  }
+  // ─── 资源抽屉「绘制地图」：保存为一张新地图（图像模式） ───
+  if (mapPaintNewMap.value) {
+    try {
+      const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()))
+      editorStore.setGameMode(true)
+      editorStore.setActiveEditorMode('map')
+      editorStore.setResourceTab('map')
+      await createImageMapProject('绘制地图.png', { bytes })
+      mapPaintNewMap.value = false
+      currentPage.value = 0
+    } catch (e) {
+      console.error('[MainLayout] 保存绘制地图失败:', e)
+      await message(`保存绘制地图失败：${e instanceof Error ? e.message : String(e)}`, {
+        title: '地图绘制',
+        kind: 'error',
+      })
+    }
+    return
+  }
+  if (!target) {
     console.warn('[MainLayout] 地图绘制目标已丢失，无法保存')
     return
   }
@@ -1151,6 +1182,7 @@ async function onMapImageSaved(blob: Blob, width: number, height: number) {
 /** 绘制页关闭：清空地图绘制目标后回到编辑器 */
 function onClosePaintPage() {
   mapPaintTarget.value = null
+  mapPaintNewMap.value = false
   switchPage(0)
 }
 
@@ -2930,7 +2962,7 @@ function spriteDisplayName(name: string) {
           ref="paintPageRef"
           :mode="paintMode"
           :target-sprite="paintTarget"
-          :map-image-size="{ w: mapPaintTarget?.width ?? 640, h: mapPaintTarget?.height ?? 480 }"
+          :map-image-size="paintBoardSize"
           :map-image-abs-path="mapPaintExistingAbs"
           :open-mode="paintOpenMode"
           :initial-frame-index="paintInitialFrameIndex"

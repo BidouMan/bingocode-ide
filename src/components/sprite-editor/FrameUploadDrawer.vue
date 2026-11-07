@@ -3,7 +3,7 @@ import { ref, watch } from 'vue'
 import { svgToPngBlob } from '../../utils/imageConvert'
 
 import iconFileUpload from '../../assets/icons/icon--file-upload.svg'
-import iconPaint from '../../assets/icons/icon--paint.svg'
+import iconPaint from '../../assets/icons/画笔工具.svg'
 import iconSelectSprite from '../../assets/icons/icon--select--sprite.svg'
 import iconSpriteUpload from '../../assets/icons/sprite_upload.svg'
 

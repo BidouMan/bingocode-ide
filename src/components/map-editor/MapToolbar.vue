@@ -12,6 +12,7 @@ import iconSnapGrid from '../../assets/icons/吸附锚点.svg'
 import iconMarker from '../../assets/icons/标记.svg'
 import iconShow from '../../assets/icons/icon_show.svg'
 import iconHide from '../../assets/icons/icon_hide.svg'
+import iconPaint from '../../assets/icons/画笔工具.svg'
 
 const props = defineProps<{
   disabled?: boolean
@@ -19,9 +20,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'switch-map': [itemId: string]
-  /** 图像图层：复制图层 / 旋转 / 镜像 / 进入绘制页 */
+  /** 图像图层：复制图层 / 镜像 / 进入绘制页 */
   'copy-image-layer': []
-  'rotate-image': []
   'flip-image-h': []
   'flip-image-v': []
   'edit-image': []
@@ -33,6 +33,8 @@ const resourceStore = useResourceStore()
 
 const isImageLayer = computed(() => mapStore.activeMode === 'image')
 const isShapeLayer = computed(() => mapStore.activeMode === 'shape')
+/** 当前是否选中图像图层：决定「进入绘制页」按钮能否使用 */
+const canEditImage = computed(() => mapStore.activeLayer?.type === 'image')
 
 // 有被隐藏的标记时出现「显示隐藏标记」按钮；全部恢复后自动关掉临时显示，避免状态残留
 const hasHiddenMarkers = computed(() => mapStore.mapData.markers.some(m => m.visible === false))
@@ -71,16 +73,24 @@ function onToolAreaWheel(e: WheelEvent) {
 
 <template>
   <div class="map-toolbar">
+    <!-- 最左：进入绘制页编辑当前图像图层（位置固定，非图像图层时禁用） -->
+    <button
+      class="toolbar-btn"
+      :disabled="disabled || !canEditImage"
+      v-tooltip="canEditImage ? '进入绘制页编辑这张图像' : '先选中图像图层'"
+      @click="emit('edit-image')"
+    >
+      <img :src="iconPaint" class="toolbar-icon" />
+    </button>
+
     <!-- 工具跟着当前图层类型切换：图片=图像工具，形状=形状工具，图块=绘制工具 -->
     <div class="tool-area" @wheel="onToolAreaWheel">
       <ImageLayerTools
         v-if="isImageLayer"
         :disabled="disabled"
         @copy-layer="emit('copy-image-layer')"
-        @rotate="emit('rotate-image')"
         @flip-h="emit('flip-image-h')"
         @flip-v="emit('flip-image-v')"
-        @edit-image="emit('edit-image')"
       />
       <ShapeLayerTools v-else-if="isShapeLayer" :disabled="disabled" />
       <DrawingLayerTools v-else :disabled="disabled" />

@@ -2,7 +2,7 @@
 import { useMapEditorStore } from '../../stores/mapEditor'
 import type { MapTool } from '../../stores/map'
 import iconMove from '../../assets/icons/移动工具.svg'
-import iconPaint from '../../assets/icons/icon--paint.svg'
+import iconPaint from '../../assets/icons/画笔工具.svg'
 import iconEraseRaw from '../../assets/icons/清空.svg?raw'
 import iconLine from '../../assets/icons/直线工具.svg'
 import iconRect from '../../assets/icons/矩形_rectangle.svg'

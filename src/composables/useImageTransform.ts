@@ -25,11 +25,17 @@ export function useImageTransform(options: ImageTransformOptions) {
   let transformHandles: any[] = []
   let rotationHandle: any = null
   let rotationLine: any = null
+  /** 变换框整体容器：定位到图像中心并按旋转角旋转，框与手柄随图像一起转 */
+  let transformGizmo: any = null
   let selectedImageSprite: any = null
   let selectedImageData: any = null
   let selectedImageLayerId: number = -1
   let transformDragging = false
   let transformHandleIndex = -1
+  /** 缩放手柄按下时记录：旋转前图像中心（世界坐标）与旋转角（度） */
+  let transformStartCenter = { x: 0, y: 0 }
+  let transformStartRotation = 0
+  /** 旋转前矩形（图像本地坐标，原点 = 图像中心） */
   let transformStartBox = { left: 0, top: 0, right: 0, bottom: 0 }
   let isRotating = false
   let rotationStartAngle = 0
@@ -159,15 +165,22 @@ export function useImageTransform(options: ImageTransformOptions) {
       const worldPos = screenToWorld(e)
       if (!worldPos) return true
       const idx = transformHandleIndex
-      let mx = worldPos.x
-      let my = worldPos.y
-      // 智能吸附：缩放手柄拖动的边就近对齐像素/网格/图像边缘与中心；关闭时不吸附
-      if (mapEditorStore.smartSnap) {
+      const rad = (transformStartRotation * Math.PI) / 180
+      const cos = Math.cos(rad)
+      const sin = Math.sin(rad)
+      // 世界坐标 → 图像本地坐标（相对旋转前中心，按 -旋转角 反向旋转），
+      // 这样旋转过的图片拖手柄时边线仍沿图片自身方向伸缩
+      const dx = worldPos.x - transformStartCenter.x
+      const dy = worldPos.y - transformStartCenter.y
+      let mx = cos * dx + sin * dy
+      let my = -sin * dx + cos * dy
+      // 智能吸附：未旋转时按世界网格吸附；旋转后本地轴不对应世界轴，按像素自由拖动
+      if (mapEditorStore.smartSnap && Math.abs(sin) < 1e-9 && cos > 0) {
         const ts = Math.max(1, mapStore.mapData.tileSize)
         const lines = snapLines(selectedImageLayerId)
         const threshold = snapThreshold(viewportScale())
-        mx = snapAxisValue(mx, lines.xs, ts, threshold)
-        my = snapAxisValue(my, lines.ys, ts, threshold)
+        mx = snapAxisValue(mx + transformStartCenter.x, lines.xs, ts, threshold) - transformStartCenter.x
+        my = snapAxisValue(my + transformStartCenter.y, lines.ys, ts, threshold) - transformStartCenter.y
       }
 
       // Each handle controls specific edges: [left, top, right, bottom]
@@ -232,10 +245,13 @@ export function useImageTransform(options: ImageTransformOptions) {
       if (pixelW < minPx) pixelW = minPx
       if (pixelH < minPx) pixelH = minPx
 
-      selectedImageData.position = [
-        Math.min(newLeft, newRight),
-        Math.min(newTop, newBottom),
-      ]
+      // 本地矩形中心的位移按旋转角映射回世界坐标：旋转过的图片拖动时
+      // 中心沿图片自身轴向移动，未旋转时与原逻辑完全一致
+      const centerLocalX = (newLeft + newRight) / 2
+      const centerLocalY = (newTop + newBottom) / 2
+      const centerX = transformStartCenter.x + cos * centerLocalX - sin * centerLocalY
+      const centerY = transformStartCenter.y + sin * centerLocalX + cos * centerLocalY
+      selectedImageData.position = [centerX - pixelW / 2, centerY - pixelH / 2]
       // Update scale to match new pixel size, keeping natural width/height constant
       const origW = selectedImageData.width || 64
       const origH = selectedImageData.height || 64
@@ -330,22 +346,33 @@ export function useImageTransform(options: ImageTransformOptions) {
     const pos = imgData.position || [0, 0]
     const w = (imgData.width || 64) * (imgData.scaleX ?? imgData.scale ?? 1)
     const h = (imgData.height || 64) * (imgData.scaleY ?? imgData.scale ?? 1)
-    const cx = pos[0] + w / 2
-    const cy = pos[1] + h / 2
+    const angle = ((imgData.rotation ?? 0) * Math.PI) / 180
+
+    // 变换框挂到容器上：容器定位于图像中心并按图像旋转角旋转，
+    // 框与手柄都画在以中心为原点的本地坐标里 → 旋转图像时框跟着一起转
+    transformGizmo = new PIXI.Container()
+    transformGizmo.position.set(pos[0] + w / 2, pos[1] + h / 2)
+    transformGizmo.rotation = angle
+    app.stage.addChild(transformGizmo)
+
+    const l = -w / 2
+    const t = -h / 2
+    const r = w / 2
+    const b = h / 2
 
     // Bounding box
     transformBox = new PIXI.Graphics()
-    transformBox.rect(pos[0], pos[1], w, h)
+    transformBox.rect(l, t, w, h)
     transformBox.stroke({ width: 1, color: 0x528bff, alpha: 0.8 })
     transformBox.fill({ color: 0x528bff, alpha: 0.05 })
-    app.stage.addChild(transformBox)
+    transformGizmo.addChild(transformBox)
 
     // 8 handles: 4 corners + 4 edge midpoints
     const handlePositions = [
-      [pos[0], pos[1]], [pos[0] + w / 2, pos[1]], [pos[0] + w, pos[1]],
-      [pos[0] + w, pos[1] + h / 2],
-      [pos[0] + w, pos[1] + h], [pos[0] + w / 2, pos[1] + h], [pos[0], pos[1] + h],
-      [pos[0], pos[1] + h / 2],
+      [l, t], [0, t], [r, t],
+      [r, 0],
+      [r, b], [0, b], [l, b],
+      [l, 0],
     ]
 
     transformHandles = handlePositions.map((hp, i) => {
@@ -360,32 +387,30 @@ export function useImageTransform(options: ImageTransformOptions) {
         transformDragging = true
         transformHandleIndex = i
         isImageDragging = true
-        // Read current data at click time — not closure vars that may be stale
-        const p = selectedImageData.position || [0, 0]
-        const s = selectedImageData.scaleX ?? selectedImageData.scale ?? 1
-        const sy = selectedImageData.scaleY ?? selectedImageData.scale ?? 1
-        transformStartBox = {
-          left: p[0], top: p[1],
-          right: p[0] + (selectedImageData.width || 64) * s,
-          bottom: p[1] + (selectedImageData.height || 64) * sy,
-        }
+        // 按下时记录旋转前中心与旋转角：拖动计算在图像本地坐标系里进行
+        const f = selectedImageData
+        const p = f.position || [0, 0]
+        const sx = f.scaleX ?? f.scale ?? 1
+        const sy = f.scaleY ?? f.scale ?? 1
+        const pw = (f.width || 64) * sx
+        const ph = (f.height || 64) * sy
+        transformStartRotation = f.rotation ?? 0
+        transformStartCenter = { x: p[0] + pw / 2, y: p[1] + ph / 2 }
+        transformStartBox = { left: -pw / 2, top: -ph / 2, right: pw / 2, bottom: ph / 2 }
       })
-      app.stage.addChild(handle)
+      transformGizmo.addChild(handle)
       return handle
     })
 
     // Rotation handle: circle above top-center, connected by a line
-    const rotX = cx
-    const rotY = pos[1] - 30
-
     rotationLine = new PIXI.Graphics()
-    rotationLine.moveTo(cx, pos[1])
-    rotationLine.lineTo(rotX, rotY)
+    rotationLine.moveTo(0, t)
+    rotationLine.lineTo(0, t - 30)
     rotationLine.stroke({ width: 1, color: 0x528bff, alpha: 0.8 })
-    app.stage.addChild(rotationLine)
+    transformGizmo.addChild(rotationLine)
 
     rotationHandle = new PIXI.Graphics()
-    rotationHandle.circle(rotX, rotY, 6)
+    rotationHandle.circle(0, t - 30, 6)
     rotationHandle.fill({ color: 0xffffff })
     rotationHandle.stroke({ width: 1.5, color: 0x528bff })
     rotationHandle.cursor = 'crosshair'
@@ -394,10 +419,21 @@ export function useImageTransform(options: ImageTransformOptions) {
       e.stopPropagation()
       isRotating = true
       isImageDragging = true
-      const angle = Math.atan2(e.globalY - cy, e.globalX - cx)
-      rotationStartAngle = angle - (selectedImageData.rotation ?? 0) * Math.PI / 180
+      const f = selectedImageData
+      const p = f.position || [0, 0]
+      const pw = (f.width || 64) * (f.scaleX ?? f.scale ?? 1)
+      const ph = (f.height || 64) * (f.scaleY ?? f.scale ?? 1)
+      const ccx = p[0] + pw / 2
+      const ccy = p[1] + ph / 2
+      // 起始角必须用世界坐标计算：拖动时用的是 screenToWorld，
+      // 若这里用屏幕坐标会和拖动时的坐标系不一致，按下瞬间角度差被放大 → 图像和框跳一下
+      const pressWorld = screenToWorld(e)
+      const pointerAngle = pressWorld
+        ? Math.atan2(pressWorld.y - ccy, pressWorld.x - ccx)
+        : Math.atan2(e.globalY - ccy, e.globalX - ccx)
+      rotationStartAngle = pointerAngle - (f.rotation ?? 0) * Math.PI / 180
     })
-    app.stage.addChild(rotationHandle)
+    transformGizmo.addChild(rotationHandle)
   }
 
   function updateSelectedImageSprite() {
@@ -441,70 +477,66 @@ export function useImageTransform(options: ImageTransformOptions) {
 
   function removeTransformBox() {
     const app = getApp()
-    if (transformBox) {
-      app?.stage.removeChild(transformBox)
-      transformBox.destroy()
-      transformBox = null
+    if (transformGizmo) {
+      app?.stage.removeChild(transformGizmo)
+      transformGizmo.destroy({ children: true })
+      transformGizmo = null
     }
-    for (const h of transformHandles) {
-      app?.stage.removeChild(h)
-      h.destroy()
-    }
+    // 子对象随容器一起销毁，这里只清空引用
+    transformBox = null
     transformHandles = []
-    if (rotationHandle) {
-      app?.stage.removeChild(rotationHandle)
-      rotationHandle.destroy()
-      rotationHandle = null
-    }
-    if (rotationLine) {
-      app?.stage.removeChild(rotationLine)
-      rotationLine.destroy()
-      rotationLine = null
-    }
+    rotationHandle = null
+    rotationLine = null
     selectedImageData = null
     selectedImageSprite = null
   }
 
   function updateTransformBox() {
-    if (!selectedImageData || !transformBox) return
+    if (!selectedImageData || !transformBox || !transformGizmo) return
     const pos = selectedImageData.position || [0, 0]
     const w = (selectedImageData.width || 64) * (selectedImageData.scaleX ?? selectedImageData.scale ?? 1)
     const h = (selectedImageData.height || 64) * (selectedImageData.scaleY ?? selectedImageData.scale ?? 1)
+    const angle = ((selectedImageData.rotation ?? 0) * Math.PI) / 180
+
+    // 容器跟随图像中心与旋转角，保证旋转时框与手柄和图像保持同一姿态
+    transformGizmo.position.set(pos[0] + w / 2, pos[1] + h / 2)
+    transformGizmo.rotation = angle
+
+    const l = -w / 2
+    const t = -h / 2
+    const r = w / 2
+    const b = h / 2
 
     transformBox.clear()
-    transformBox.rect(pos[0], pos[1], w, h)
+    transformBox.rect(l, t, w, h)
     transformBox.stroke({ width: 1, color: 0x528bff, alpha: 0.8 })
     transformBox.fill({ color: 0x528bff, alpha: 0.05 })
 
     const handlePositions = [
-      [pos[0], pos[1]], [pos[0] + w / 2, pos[1]], [pos[0] + w, pos[1]],
-      [pos[0] + w, pos[1] + h / 2],
-      [pos[0] + w, pos[1] + h], [pos[0] + w / 2, pos[1] + h], [pos[0], pos[1] + h],
-      [pos[0], pos[1] + h / 2],
+      [l, t], [0, t], [r, t],
+      [r, 0],
+      [r, b], [0, b], [l, b],
+      [l, 0],
     ]
 
-    transformHandles.forEach((h, i) => {
-      h.clear()
-      h.rect(handlePositions[i][0] - 4, handlePositions[i][1] - 4, 8, 8)
-      h.fill({ color: 0xffffff })
-      h.stroke({ width: 1, color: 0x528bff })
+    transformHandles.forEach((handle, i) => {
+      handle.clear()
+      handle.rect(handlePositions[i][0] - 4, handlePositions[i][1] - 4, 8, 8)
+      handle.fill({ color: 0xffffff })
+      handle.stroke({ width: 1, color: 0x528bff })
     })
 
-    // Update rotation handle position
-    const cx = pos[0] + w / 2
-    const rotX = cx
-    const rotY = pos[1] - 30
-
+    // Update rotation handle position（本地坐标，随框旋转）
     if (rotationLine) {
       rotationLine.clear()
-      rotationLine.moveTo(cx, pos[1])
-      rotationLine.lineTo(rotX, rotY)
+      rotationLine.moveTo(0, t)
+      rotationLine.lineTo(0, t - 30)
       rotationLine.stroke({ width: 1, color: 0x528bff, alpha: 0.8 })
     }
 
     if (rotationHandle) {
       rotationHandle.clear()
-      rotationHandle.circle(rotX, rotY, 6)
+      rotationHandle.circle(0, t - 30, 6)
       rotationHandle.fill({ color: 0xffffff })
       rotationHandle.stroke({ width: 1.5, color: 0x528bff })
     }
