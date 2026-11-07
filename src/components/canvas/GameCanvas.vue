@@ -1017,6 +1017,18 @@ watch(
   }
 )
 
+// 未运行时的清场（新建 / 打开项目）：此时 ticker 已停止，gameLoop 不会处理场景代次，
+// 画布会一直保留上一个项目的最后一帧。这里主动销毁残留显示对象并重绘一帧。
+watch(
+  () => renderStore.sceneEpoch,
+  () => {
+    if (editorStore.isRunning || !app) return
+    appliedSceneEpoch = renderStore.sceneEpoch
+    resetDisplayObjects()
+    app.renderer.render(app.stage)
+  }
+)
+
 // 性能模式开关即时生效：渲染帧率随之切换（抗锯齿只能在下次挂载时调整）
 watch(
   () => settingsStore.perfMode,
