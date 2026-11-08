@@ -769,6 +769,24 @@ def _handle_physics_collision():
                 sprite._smart_jump_active = False
         sprite._smart_jump_called = False
 
+        # 移动平台跟随：上一帧踩在某个角色平台（单向或实心碰撞）上时，本帧跟着它一起移动。
+        # 平台在用户代码 / set_speed 里已经先走了一步，这里把同样的位移补给站在上面的角色；
+        # 之后照常走重力和碰撞（被墙挡住就停下，被平台带离边缘就自然掉下去）。
+        # 跳跃起跳时 jump() 已把 _on_ground 置 False，所以跳离平台不会被拖走。
+        platform = sprite._ground_platform
+        if sprite._on_ground and platform is not None and platform is not sprite:
+            if (
+                platform._is_deleted
+                or not getattr(platform, "_visible", True)
+                or platform._collision_physics_off
+            ):
+                sprite._ground_platform = None
+            else:
+                platform_dx = platform._x - platform._frame_start_x
+                platform_dy = platform._y - platform._frame_start_y
+                if abs(platform_dx) > 1e-6 or abs(platform_dy) > 1e-6:
+                    sprite.move_and_slide(platform_dx, platform_dy, axis_order="yx")
+
         sprite._on_ground = False
 
         if st._CURRENT_MAP.get("gravity", False) and sprite._gravity:

@@ -74,8 +74,10 @@ def _begin_physics_step():
             _update_sprite_animation(sprite)
     if st._CURRENT_MAP is not None:
         for sprite in st._SPRITES.values():
-            # 禁止下滑功能据此区分主动移动与斜面推挤下滑
+            # 禁止下滑功能据此区分主动移动与斜面推挤下滑；
+            # _frame_start_y 供「移动平台跟随」算平台本帧走了多远
             sprite._frame_start_x = sprite._x
+            sprite._frame_start_y = sprite._y
 
 
 def _end_physics_step():

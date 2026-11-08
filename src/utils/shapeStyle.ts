@@ -11,12 +11,12 @@ export const SHAPE_TAG_PRESETS = ['墙体', '地面', '道具', '机关', '危�
 
 /**
  * 角色碰撞类型预设：角色不按「地形」分类，而是按玩法身份分类。
- * 缺省「身体」覆盖玩家 / NPC 等普通实体；其余是代码里最常见的 is_touch 查询目标。
+ * 缺省「默认」覆盖没有特殊身份的普通角色；其余是代码里最常见的 is_touch 查询目标。
  */
-export const SPRITE_COLLISION_TAG_PRESETS = ['身体', '敌人', '道具', '子弹', '感应区']
+export const SPRITE_COLLISION_TAG_PRESETS = ['默认', '玩家', '敌人', '道具', '子弹', '感应区']
 
 /** 角色未设置类型时的默认值（引擎也按这个值处理空类型） */
-export const SPRITE_DEFAULT_COLLISION_TAG = '身体'
+export const SPRITE_DEFAULT_COLLISION_TAG = '默认'
 
 /**
  * 单向碰撞方向四选一：值与引擎 oneWayDirX / oneWayDirY 一致（世界坐标，y 向下）。

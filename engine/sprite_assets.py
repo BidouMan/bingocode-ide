@@ -80,11 +80,11 @@ class SpriteAssetsMixin:
         # 碰撞作用（可选）：solid=碰撞 / sensor=感应（不参与物理阻挡，仍可被检测）/ both
         kind = manifest.get("collisionKind", manifest.get("collision_kind", "solid"))
         self._collision_kind = kind if kind in ("solid", "sensor", "both") else "solid"
-        # 碰撞类型（tag，可选）：代码里 is_touch("标签") 查询用；空 = 默认「身体」
+        # 碰撞类型（tag，可选）：代码里 is_touch("标签") 查询用；空 = 默认「默认」
         tag = str(
             manifest.get("collisionTag", manifest.get("collision_tag", "") or "")
         ).strip()
-        self._collision_tag = tag or "身体"
+        self._collision_tag = tag or "默认"
         # 单向碰撞（可选）：true = 可作为单向碰撞体；方向与地图 oneWayDirX/Y 同一语义
         self._collision_one_way = bool(
             manifest.get("collisionOneWay", manifest.get("collision_one_way", False))
@@ -114,6 +114,12 @@ class SpriteAssetsMixin:
         # 禁用碰撞（可选）：True = 该角色不参与地形/边界物理阻挡，仍可被碰到检测
         self._collision_disabled = bool(
             manifest.get("collisionDisabled", manifest.get("collision_disabled", False))
+        )
+        # 移动平台（可选）：True = 由代码驱动的平台，移动时不被其它角色顶住（运动学平台）
+        self._collision_moving_platform = bool(
+            manifest.get(
+                "collisionMovingPlatform", manifest.get("collision_moving_platform", False)
+            )
         )
         # 受重力影响（可选）：False = 重力地图里也不下坠，撞墙/落地等碰撞照常
         self._gravity = bool(manifest.get("gravity", True))

@@ -66,6 +66,8 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
         self._current_scale_x = 1.0
         self.hitbox_scale = 1.0
         self._on_ground = False
+        # 当前踩着的「角色平台」（其它参与物理碰撞的 Sprite）：移动平台跟随用
+        self._ground_platform = None
         # 接触掩码（P4）：本帧 x/y 解算中碰到的方向，按位记录
         self._contacts = 0
         self._vy = 0
@@ -90,8 +92,10 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
         self._is_deleted = False
         self._layer = 0
         self._speed = 0
-        # 本物理步学生代码执行前的 x：用于区分主动移动与斜面碰撞推挤下滑
+        # 本物理步学生代码执行前的 x/y：x 用于区分主动移动与斜面碰撞推挤下滑，
+        # y 与 x 一起算出平台本帧走了多远，供站在平台上的角色跟随
         self._frame_start_x = 0.0
+        self._frame_start_y = 0.0
         self._on_hit_callbacks = []
         # 感应区进出回调：[(tag, callback)]；_sensor_active_tags 记录当前仍在区域内的标签，
         # 用于「只在从无到有 / 从有到无时各触发一次」
@@ -125,14 +129,18 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
         self._is_bsf = False
         # 禁用碰撞（编辑器「禁用碰撞」开关；仅 .bsf manifest 提供，缺省开启）
         self._collision_disabled = False
-        # 碰撞作用 / 类型（编辑器「作用 / 类型」；仅 .bsf 提供，缺省 solid / 身体）
+        # 碰撞作用 / 类型（编辑器「作用 / 类型」；仅 .bsf 提供，缺省 solid / 默认）
+        # （空类型由 sprite_assets 补成「默认」）
         self._collision_kind = "solid"
-        self._collision_tag = "身体"
+        self._collision_tag = "默认"
         # 单向碰撞（编辑器「单向碰撞」；仅 .bsf 提供，缺省关闭）
         # true = 该角色可作为单向碰撞体：只有从「方向」一侧靠近时挡住，另一侧可穿过
         self._collision_one_way = False
         self._collision_one_way_dir = (0.0, 1.0)
         self._collision_one_way_margin = 0.0
+        # 移动平台（编辑器「移动平台」开关；仅 .bsf 提供，缺省关闭）
+        # true = 由代码驱动的平台：移动时不被其它角色顶住，反而会推开/托着角色走
+        self._collision_moving_platform = False
         # 受重力影响（编辑器「重力」开关 / 代码 sprite.gravity；缺省受重力）
         self._gravity = True
         self.config = self._load_sprite_config()

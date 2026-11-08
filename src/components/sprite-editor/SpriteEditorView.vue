@@ -1756,7 +1756,7 @@ const COLLISION_KIND_OPTIONS = [
 
 const collisionKindValue = computed(() => currentSprite.value?.bsf?.collisionKind ?? 'solid')
 
-/** 感应角色 / 已禁用碰撞的角色没有物理阻挡：单向碰撞控件保留但禁用（对齐地图属性面板） */
+/** 感应角色 / 已禁用碰撞的角色没有物理阻挡：单向碰撞 / 移动平台控件保留但禁用（对齐地图属性面板） */
 const collisionPhysicsDisabled = computed(
   () => collisionKindValue.value === 'sensor' || collisionDisabled.value,
 )
@@ -1809,7 +1809,7 @@ function onCollisionTagSelect(v: string) {
     bsf.collisionTag = ''
   } else {
     spriteTagCustomMode.value = false
-    // 「身体」是默认值，不写字段
+    // 「默认」是默认值，不写字段
     if (v && v !== SPRITE_DEFAULT_COLLISION_TAG) bsf.collisionTag = v
     else delete bsf.collisionTag
   }
@@ -1886,6 +1886,17 @@ function onCollisionOneWayMarginInput(e: Event) {
   const margin = Number.isFinite(raw) ? Math.min(8, Math.max(0, raw)) : 0
   if (margin > 0) bsf.collisionOneWayMargin = margin
   else delete bsf.collisionOneWayMargin
+  scheduleSave()
+}
+
+/** 移动平台：由代码驱动的平台角色，移动时不被其它角色顶住，会推开/托着角色走 */
+const collisionMovingPlatform = computed(() => !!currentSprite.value?.bsf?.collisionMovingPlatform)
+
+function onCollisionMovingPlatformChange(e: Event) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  if ((e.target as HTMLInputElement).checked) bsf.collisionMovingPlatform = true
+  else delete bsf.collisionMovingPlatform
   scheduleSave()
 }
 
@@ -3890,6 +3901,18 @@ function onWindowBlur() {
                       />
                     </div>
                   </template>
+                  <div class="att-row">
+                    <span class="att-label">移动平台</span>
+                    <label class="att-checkbox" title="由代码移动的平台：移动时不会被其它角色顶住，会推着角色走">
+                      <input
+                        type="checkbox"
+                        :checked="collisionMovingPlatform"
+                        :disabled="collisionPhysicsDisabled"
+                        @change="onCollisionMovingPlatformChange"
+                      />
+                      <span class="att-checkbox-text">启用</span>
+                    </label>
+                  </div>
                   <div class="att-row">
                     <span class="att-label">碰撞层级</span>
                     <label class="att-checkbox" title="碰撞层级开关（现阶段保存设置，运行时暂未接入）">

@@ -79,7 +79,7 @@ export interface BsfMeta {
    * both = 碰撞 + 感应。缺省 solid。
    */
   collisionKind?: 'solid' | 'sensor' | 'both'
-  /** 碰撞类型 / 标签（可选）：代码里 is_touch("标签") 查询用；缺省「身体」 */
+  /** 碰撞类型 / 标签（可选）：代码里 is_touch("标签") 查询用；缺省「默认」 */
   collisionTag?: string
   /** 禁用碰撞：true = 该角色完全不参与地形/边界物理阻挡（不影响碰到检测） */
   collisionDisabled?: boolean
@@ -90,6 +90,11 @@ export interface BsfMeta {
   collisionOneWayDirY?: number
   /** 单向碰撞厚度（可选，0~8 像素）：越大越容易踩住/挡住；缺省 0 */
   collisionOneWayMargin?: number
+  /**
+   * 移动平台（可选）：true = 由代码驱动的平台角色，移动时不会被其它角色顶住，
+   * 反而会推开/托着角色走（专业引擎里的运动学平台）；缺省关闭
+   */
+  collisionMovingPlatform?: boolean
   /** 碰撞层级开关（可选）：当前仅编辑器保存，运行时尚未接入 */
   collisionLayersEnabled?: boolean
   /** 所在碰撞层（1~8，缺省 1）：仅编辑器保存，运行时尚未接入 */
@@ -385,6 +390,7 @@ async function buildBsfSpriteData(manifest: any, sheetImage: HTMLImageElement): 
               : {}),
           }
         : {}),
+      ...(manifest.collisionMovingPlatform ? { collisionMovingPlatform: true } : {}),
       ...(manifest.collisionLayersEnabled
         ? {
             collisionLayersEnabled: true,
@@ -471,6 +477,8 @@ export async function saveBsfManifest(dirPath: string, sprite: SpriteData): Prom
             : {}),
         }
       : {}),
+    // 移动平台（可选）：true = 代码驱动的平台不被其它角色推动；缺省不写字段
+    ...(sprite.bsf.collisionMovingPlatform ? { collisionMovingPlatform: true } : {}),
     // 碰撞层级 / 掩码 / 旋转（可选）：当前仅编辑器保存，运行时尚未接入
     ...(sprite.bsf.collisionLayersEnabled
       ? {

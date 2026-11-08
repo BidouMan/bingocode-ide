@@ -3,7 +3,7 @@
 什么时候来这里改：角色卡进地形、穿过瓦片、斜坡/单向平台、碰撞抖动、接触方向判断。
 类结构：SpritePhysicsMixin 由 sprite.Sprite 继承，方法内可直接用 self 的字段。"""
 import math
-from models.shape_kernel import ConvexPolygon, intersects, overlap as shape_overlap, point_inside, sweep as shape_sweep
+from models.shape_kernel import ConvexPolygon, inflate, intersects, overlap as shape_overlap, point_inside, sweep as shape_sweep
 from models.static_index import SENSOR_EPS
 from collision_geometry import _aabb_polygon_mtv, _image_collision_world_polygons, _playable_bounds, _screen_bounds, _shape_convex_parts, _sign
 from input_api import mouse
@@ -418,10 +418,12 @@ class SpritePhysicsMixin:
         best_delta = None
         best_mag = 0.0
         best_effect = None
+        # 落地来源：踩在哪个角色平台上（None = 地形），供移动平台跟随使用
+        best_owner = None
         encounter_mask = 0
 
-        def consider(delta, correction_for_side, effect=None):
-            nonlocal best_delta, best_mag, best_effect, encounter_mask
+        def consider(delta, correction_for_side, effect=None, owner=None):
+            nonlocal best_delta, best_mag, best_effect, best_owner, encounter_mask
             if delta is None or abs(delta) < 1e-7:
                 return
             # 接触掩码记录「实际碰到了哪一侧」，不受运动方向过滤影响
@@ -439,6 +441,7 @@ class SpritePhysicsMixin:
                 best_delta = delta
                 best_mag = magnitude
                 best_effect = effect
+                best_owner = owner
 
         # 检测所有图层中的形状层与图像碰撞（图块在下方统一走 static_world）
         for layer_index, layer in enumerate(st._CURRENT_MAP.get("layers", [])):
@@ -484,6 +487,56 @@ class SpritePhysicsMixin:
                         effect = "ceiling"
                 consider(correction + margin, correction, effect)
                 continue
+
+        # --- 角色实心碰撞 ---
+        # 编辑器里没「禁用碰撞」、作用为「碰撞」/「碰撞+感应」的角色是实心的：
+        # 四面都挡，和地图墙体一样参与轴向解算。勾了「单向碰撞」的角色仍走下面的单向逻辑。
+        # 单向碰撞角色 / 「移动平台」角色不反过来推别人：
+        # 单向碰撞是被动平台，移动平台是运动学物体（只由代码驱动），
+        # 否则角色在板上走 / 跳跃时会把板顶走，实心移动板也会被角色卡停。
+        if not self._collision_one_way and not self._collision_moving_platform:
+            own_shape = None
+            for other in st._SPRITES.values():
+                if other is self or other._is_deleted or not getattr(other, "_visible", True):
+                    continue
+                if getattr(other, "_collision_one_way", False):
+                    continue
+                if other._collision_physics_off:
+                    continue
+                # 站在自己身上的角色不反过来挡住自己，否则升降平台会被踩住它的角色卡死
+                if getattr(other, "_ground_platform", None) is self:
+                    continue
+                other_rect = other._get_hitbox_rect()
+                if not other_rect:
+                    continue
+                # 包围盒宽相：只有可能相交的角色才进入精确 SAT
+                if (
+                    other_rect[2] <= sprite_rect[0] or other_rect[0] >= sprite_rect[2]
+                    or other_rect[3] <= sprite_rect[1] or other_rect[1] >= sprite_rect[3]
+                ):
+                    continue
+                if own_shape is None:
+                    own_shape = self._get_collision_shape()
+                manifold = shape_overlap(own_shape, other._get_collision_shape())
+                if manifold is None:
+                    continue
+                mtv = (manifold.normal[0] * manifold.depth,
+                       manifold.normal[1] * manifold.depth)
+                if not self._mtv_axis_dominant(mtv, axis):
+                    continue
+                correction = mtv[0] if axis == "x" else mtv[1]
+                if abs(correction) < 1e-6:
+                    continue
+                if axis == "y" and abs(correction) > self._MAX_CONTACT_SNAP:
+                    continue
+                margin = 0.05 if correction > 0 else -0.05
+                effect = None
+                if axis == "y":
+                    if correction < 0 and direction > 0:
+                        effect = "ground"
+                    elif correction > 0 and direction < 0:
+                        effect = "ceiling"
+                consider(correction + margin, correction, effect, other)
 
         # --- 图块碰撞 ---
         # 几何统一取自 static_world（与 depenetrate / sweep_test / raycast 同源），
@@ -662,8 +715,14 @@ class SpritePhysicsMixin:
                 if best_effect == "ground":
                     self._on_ground = True
                     self._vy = 0
+                    # 记住踩着的是哪个角色平台，下一帧跟着它一起移动
+                    self._ground_platform = best_owner
                 elif best_effect == "ceiling":
                     self._vy = 0
+                    self._ground_platform = None
+                else:
+                    # 本帧没有落地：清掉上一帧的平台记忆，避免悬空还跟着平台走
+                    self._ground_platform = None
 
         # 地图边界碰撞检测
         # 只有开启「边界碰撞」才把地图像素矩形当隐形墙钳制；
@@ -704,8 +763,11 @@ class SpritePhysicsMixin:
         语义与地图单向碰撞一致：方向 (0,1)/(0,-1)/(1,0)/(-1,0) 表示
         「触发碰撞的运动方向」，只有从实心面靠近时才产生修正，另一侧可穿过；
         厚度 margin 放宽「原本在实心面之外」的判定（0~8 像素）。
-        普通角色互相之间仍不阻挡——角色作单向碰撞体是显式开启的能力。
+        没开单向碰撞的实心角色由 _resolve_collision 里的「角色实心碰撞」统一处理。
         """
+        # 移动平台是运动学物体：移动路径完全由代码决定，不被任何角色（含单向碰撞体）挡住
+        if self._collision_moving_platform:
+            return
         prev_bottom = self._prev_bottom_y
         prev_top = self._prev_top_y
         prev_left = self._prev_left_x
@@ -736,7 +798,7 @@ class SpritePhysicsMixin:
                 if sprite_rect[3] <= top or sprite_rect[1] >= bottom:
                     continue
                 correction = top - sprite_rect[3]
-                consider(correction - 0.05, correction, "ground")
+                consider(correction - 0.05, correction, "ground", other)
                 continue
 
             if dir_y < 0:
@@ -954,8 +1016,10 @@ class SpritePhysicsMixin:
         if not isinstance(target, Sprite):
             return False
 
-        # 角色间碰撞使用真实判定形状（.bsf 胶囊/多边形不再降级 AABB）
-        shape1 = self._get_collision_shape()
+        # 角色间碰撞使用真实判定形状（.bsf 胶囊/多边形不再降级 AABB）。
+        # 实心角色互相顶住后会留下 0.05 像素的求解间隙，判定「碰到」时外扩
+        # SENSOR_EPS，避免贴在一起却检测不到（on_touch_group 依赖这里）。
+        shape1 = inflate(self._get_collision_shape(), SENSOR_EPS)
         shape2 = target._get_collision_shape()
         return shape_overlap(shape1, shape2) is not None
 
