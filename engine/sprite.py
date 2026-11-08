@@ -128,9 +128,9 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
         self._is_bsf = False
         # 禁用碰撞（编辑器「禁用碰撞」开关；仅 .bsf manifest 提供，缺省开启）
         self._collision_disabled = False
-        # 碰撞作用 / 类型（编辑器「作用 / 类型」；仅 .bsf 提供，缺省 solid / 未命名）
+        # 碰撞作用 / 类型（编辑器「作用 / 类型」；仅 .bsf 提供，缺省 solid / 身体）
         self._collision_kind = "solid"
-        self._collision_tag = ""
+        self._collision_tag = "身体"
         # 受重力影响（编辑器「重力」开关 / 代码 sprite.gravity；缺省受重力）
         self._gravity = True
         self.config = self._load_sprite_config()

@@ -77,7 +77,7 @@ export interface BsfMeta {
    * both = 碰撞 + 感应。缺省 solid。
    */
   collisionKind?: 'solid' | 'sensor' | 'both'
-  /** 碰撞类型 / 标签（可选）：代码里 is_touch("标签") 查询用；缺省空 = 未命名 */
+  /** 碰撞类型 / 标签（可选）：代码里 is_touch("标签") 查询用；缺省「身体」 */
   collisionTag?: string
   /** 禁用碰撞：true = 该角色完全不参与地形/边界物理阻挡（不影响碰到检测） */
   collisionDisabled?: boolean

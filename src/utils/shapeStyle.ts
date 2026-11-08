@@ -9,6 +9,15 @@ import type { ShapeItem, ShapeKind } from '../stores/map'
 /** 类型（tag）预设：地图图块 / 形状 / 角色共用同一份常用玩法分类 */
 export const SHAPE_TAG_PRESETS = ['墙体', '地面', '道具', '机关', '危险区']
 
+/**
+ * 角色碰撞类型预设：角色不按「地形」分类，而是按玩法身份分类。
+ * 缺省「身体」覆盖玩家 / NPC 等普通实体；其余是代码里最常见的 is_touch 查询目标。
+ */
+export const SPRITE_COLLISION_TAG_PRESETS = ['身体', '敌人', '道具', '子弹', '感应区']
+
+/** 角色未设置类型时的默认值（引擎也按这个值处理空类型） */
+export const SPRITE_DEFAULT_COLLISION_TAG = '身体'
+
 /** 作用类型中文名 */
 export const SHAPE_KIND_LABELS: Record<ShapeKind, string> = {
   solid: '碰撞',

@@ -17,8 +17,11 @@ import FrameUploadDrawer from './FrameUploadDrawer.vue'
 import CollisionShapeOverlay from './CollisionShapeOverlay.vue'
 // 下拉框复用地图编辑器属性面板的自绘组件，保证两个编辑器的控件样式一致
 import CustomSelect from '../common/CustomSelect.vue'
-// 类型（tag）预设与地图编辑器共用同一份，保证两端「类型」可选项一致
-import { SHAPE_TAG_PRESETS } from '../../utils/shapeStyle'
+// 类型（tag）预设：角色按玩法身份分类，与地图的墙体/地面等类型分开
+import {
+  SPRITE_COLLISION_TAG_PRESETS,
+  SPRITE_DEFAULT_COLLISION_TAG,
+} from '../../utils/shapeStyle'
 
 const emit = defineEmits<{
   /** 造型列表抽屉：打开绘制页为当前角色绘制新帧（编辑模式，自动新建空白帧） */
@@ -1776,15 +1779,15 @@ watch(currentSprite, () => {
 const collisionTagValue = computed(() =>
   spriteTagCustomMode.value
     ? SPRITE_TAG_CUSTOM
-    : (currentSprite.value?.bsf?.collisionTag || '').trim(),
+    : (currentSprite.value?.bsf?.collisionTag || '').trim() || SPRITE_DEFAULT_COLLISION_TAG,
 )
 
 const collisionTagOptions = computed(() => {
   const current = (currentSprite.value?.bsf?.collisionTag || '').trim()
   // 旧角色用过的自定义标签也要能在下拉里选到
-  const extra = current && !SHAPE_TAG_PRESETS.includes(current) ? [current] : []
+  const extra = current && !SPRITE_COLLISION_TAG_PRESETS.includes(current) ? [current] : []
   return [
-    ...SHAPE_TAG_PRESETS.map(tag => ({ label: tag, value: tag })),
+    ...SPRITE_COLLISION_TAG_PRESETS.map(tag => ({ label: tag, value: tag })),
     ...extra.map(tag => ({ label: tag, value: tag })),
     { label: '自定义…', value: SPRITE_TAG_CUSTOM },
   ]
@@ -1798,7 +1801,8 @@ function onCollisionTagSelect(v: string) {
     bsf.collisionTag = ''
   } else {
     spriteTagCustomMode.value = false
-    if (v) bsf.collisionTag = v
+    // 「身体」是默认值，不写字段
+    if (v && v !== SPRITE_DEFAULT_COLLISION_TAG) bsf.collisionTag = v
     else delete bsf.collisionTag
   }
   scheduleSave()
@@ -1818,7 +1822,7 @@ function onCollisionTagBlur(e: Event) {
   const bsf = currentSprite.value?.bsf
   if (!bsf) return
   const name = (e.target as HTMLInputElement).value.trim()
-  if (name) bsf.collisionTag = name
+  if (name && name !== SPRITE_DEFAULT_COLLISION_TAG) bsf.collisionTag = name
   else {
     delete bsf.collisionTag
     spriteTagCustomMode.value = false
@@ -2831,6 +2835,15 @@ function frameWorldRect(t: SpriteTransform): { left: number; top: number; right:
   return { left: centerX - hw, top: centerY - hh, right: centerX + hw, bottom: centerY + hh }
 }
 
+/**
+ * 变换手柄外层：左键点在框内不穿透给画布（避免误取消选中）；
+ * 但中键 / 空格+左键 / Alt+左键 是画布平移，必须放行，否则鼠标停在角色框内时无法平移画布
+ */
+function onGizmoRootMouseDown(e: MouseEvent) {
+  if (shouldStartPan(e)) return
+  e.stopPropagation()
+}
+
 /** 手柄拖动开始：内部=移动，四角=等比缩放，顶部圆点=旋转 */
 function startGizmoDrag(kind: 'move' | 'scale' | 'rotate', e: MouseEvent) {
   if (e.button !== 0 || !gizmoVisible.value) return
@@ -3443,7 +3456,7 @@ function onWindowBlur() {
             v-if="gizmoVisible"
             class="gizmo-root"
             :style="gizmoRootStyle"
-            @mousedown.stop
+            @mousedown="onGizmoRootMouseDown"
             @dblclick.stop
           >
             <div class="gizmo-rotator" :style="gizmoRotatorStyle">
