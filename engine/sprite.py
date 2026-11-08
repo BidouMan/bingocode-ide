@@ -71,6 +71,10 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
         # 接触掩码（P4）：本帧 x/y 解算中碰到的方向，按位记录
         self._contacts = 0
         self._vy = 0
+        # 从移动平台起跳时继承的横向速度（像素/帧），在空中逐帧衰减；0 = 无惯性
+        self._launch_vx = 0.0
+        # 上一帧脚下平台的横向位移（像素/帧），jump() 用它计算继承速度
+        self._platform_vx = 0.0
         self._prev_bottom_y = 0
         # 本步移动前的内容盒上沿：与 _prev_bottom_y 一起判断「从上方落地 / 从下方撞头」
         self._prev_top_y = 0
@@ -416,12 +420,22 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
     def jump(self, power=10):
         """角色跳跃
 
+        站在会移动的角色平台上起跳时，会自动继承平台的水平速度，
+        带着一点「甩出去」的惯性（空中慢慢减弱，落地后消失）。
+
         Args:
             power: 跳跃力度（默认10，越大跳得越高）
         """
         self._vy = -power
         self._on_ground = False
         self._jump_cut = False
+        # 从移动平台起跳：继承平台的横向速度，带一点「甩出去」的惯性
+        platform_vx = self._platform_vx if self._ground_platform is not None else 0.0
+        if abs(platform_vx) > 0.05:
+            # 上限 6 像素/帧：平台速度被学生调得特别快时也不至于甩飞
+            self._launch_vx = max(-6.0, min(6.0, platform_vx))
+        else:
+            self._launch_vx = 0.0
 
 
     def stop_jump(self):
