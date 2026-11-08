@@ -5,7 +5,7 @@
 import json
 import math
 import os
-from models.shape_kernel import aabb_shape, capsule_shape, polygon_shape
+from models.shape_kernel import aabb_shape, capsule_shape, point_inside, polygon_shape
 from collision_geometry import _image_bbox_info
 import engine_state as st
 
@@ -509,15 +509,46 @@ class SpriteAssetsMixin:
           - 普通图片用非透明内容框
         形状随位置/缩放/翻转/旋转一起烘焙，不再降级成世界 AABB。
         """
-        self._setup_hitbox()
+        return self._shape_from_points(self._collision_local_points())
 
-        # 局部顶点：优先自定义碰撞，否则内容框
-        points = None
+
+    def _get_visual_shape(self):
+        """角色「看得到的部分」的世界形状（鼠标点击判定用，不受自定义碰撞盒影响）。"""
+        return self._shape_from_points(self._visual_local_points(), visual=True)
+
+
+    def _point_inside_visual(self, x, y):
+        """点是否落在角色可见内容框内（点击判定用，旋转/缩放后也准确）。"""
+        return point_inside(self._get_visual_shape(), (x, y))
+
+
+    def _collision_local_points(self):
+        """碰撞判定的局部顶点：优先 .bsf 自定义碰撞，否则内容框。"""
+        self._setup_hitbox()
         if getattr(self, "_is_bsf", False) and getattr(self, "_local_collision_points", None):
-            points = tuple(self._local_collision_points)
-        elif hasattr(self, "_content_bbox") and self._content_bbox:
-            b = self._content_bbox
-            points = ((b[0], b[1]), (b[2], b[1]), (b[2], b[3]), (b[0], b[3]))
+            return tuple(self._local_collision_points)
+        return self._content_points()
+
+
+    def _visual_local_points(self):
+        """可见内容框的局部顶点（与碰撞盒无关）。"""
+        self._setup_hitbox()
+        return self._content_points()
+
+
+    def _content_points(self):
+        b = getattr(self, "_content_bbox", None)
+        if not b:
+            return None
+        return ((b[0], b[1]), (b[2], b[1]), (b[2], b[3]), (b[0], b[3]))
+
+
+    def _shape_from_points(self, points, visual=False):
+        """把局部顶点烘焙成世界形状（含缩放/翻转/旋转），按帧缓存。
+
+        碰撞形状与可见形状各用一份缓存，点击查询不会覆盖物理碰撞缓存。
+        """
+        self._setup_hitbox()
 
         if not points or len(points) < 3:
             rect = self._get_hitbox_rect()
@@ -526,6 +557,7 @@ class SpriteAssetsMixin:
                 return aabb_shape(self._x, self._y, self._x, self._y)
             return aabb_shape(rect[0], rect[1], rect[2], rect[3])
 
+        cache = "_cached_visual_shape" if visual else "_cached_shape"
         s = self._scale / 100.0
         flip_x = getattr(self, "_display_flip", getattr(self, "_current_scale_x", 1))
         rot_style = getattr(self, "_rotation_style", "all around")
@@ -541,15 +573,15 @@ class SpriteAssetsMixin:
             self.image,
         )
         if (
-            getattr(self, "_cached_shape", None) is not None
-            and getattr(self, "_cached_shape_key", None) == cache_key
-            and abs(self._cached_shape_x - self._x) < 0.01
-            and abs(self._cached_shape_y - self._y) < 0.01
-            and self._cached_shape_scale == self._scale
-            and getattr(self, "_cached_shape_flip", 1) == flip_x
-            and getattr(self, "_cached_shape_angle", 0) == effective_angle
+            getattr(self, cache, None) is not None
+            and getattr(self, cache + "_key", None) == cache_key
+            and abs(getattr(self, cache + "_x", 0) - self._x) < 0.01
+            and abs(getattr(self, cache + "_y", 0) - self._y) < 0.01
+            and getattr(self, cache + "_scale", 0) == self._scale
+            and getattr(self, cache + "_flip", 1) == flip_x
+            and getattr(self, cache + "_angle", 0) == effective_angle
         ):
-            return self._cached_shape
+            return getattr(self, cache)
 
         img_w, img_h = self._orig_w, self._orig_h
         vox = getattr(self, "_visual_offset_x", 0.0)
@@ -576,13 +608,13 @@ class SpriteAssetsMixin:
             shape = (aabb_shape(rect[0], rect[1], rect[2], rect[3]) if rect
                      else aabb_shape(self._x, self._y, self._x, self._y))
 
-        self._cached_shape = shape
-        self._cached_shape_key = cache_key
-        self._cached_shape_x = self._x
-        self._cached_shape_y = self._y
-        self._cached_shape_scale = self._scale
-        self._cached_shape_flip = flip_x
-        self._cached_shape_angle = effective_angle
+        setattr(self, cache, shape)
+        setattr(self, cache + "_key", cache_key)
+        setattr(self, cache + "_x", self._x)
+        setattr(self, cache + "_y", self._y)
+        setattr(self, cache + "_scale", self._scale)
+        setattr(self, cache + "_flip", flip_x)
+        setattr(self, cache + "_angle", effective_angle)
         return shape
 
 

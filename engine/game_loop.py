@@ -12,7 +12,7 @@ from effects import random_float, random_int, shake, show_collision, show_text
 from game_control import GameStop, _promote_event_frame, _safe_call, broadcast, is_paused, on_receive, pause, receive, resume, show_fps, stop_game
 from input_api import _custom_input, _sync_input_frame, key_down, key_pressed, key_up, mouse, mouse_down, mouse_pressed, mouse_up
 from map_runtime import _handle_physics_collision, _process_sensor_events, load_map
-from sprite import Sprite
+from sprite import Sprite, _resolve_click_target
 from timing import Timer, time_passed, wait
 from user_error import report_code_errors, report_error, report_user_error
 import engine_state as st
@@ -80,6 +80,27 @@ def _begin_physics_step():
             sprite._frame_start_y = sprite._y
 
 
+def _process_click_events():
+    """把本物理步的鼠标点击派发给命中的角色（on_clicked 回调）。
+
+    和 is_clicked 共用 _resolve_click_target 的解析结果，一次按下只触发一次；
+    暂停中也照常派发，与 mouse_pressed() 的语义保持一致。
+    """
+    seq = st._CLICK_STATE["active_seq"]
+    if seq < 0 or st._CLICK_STATE["dispatched_seq"] == seq:
+        return
+    st._CLICK_STATE["dispatched_seq"] = seq
+    target_id = _resolve_click_target()
+    if target_id is None:
+        return
+    sprite = st._SPRITES.get(target_id)
+    if sprite is None or sprite._is_deleted or not sprite._visible:
+        return
+    callback = getattr(sprite, "_click_callback", None)
+    if callback:
+        _safe_call(callback, sprite)
+
+
 def _end_physics_step():
     """物理步收尾（未暂停时）：气泡计时、自动移动、触碰回调、地形碰撞、感应事件。"""
     if st._PAUSED:
@@ -123,8 +144,10 @@ def _end_physics_step():
 
 def run():
     st._MOUSE_STATE["down"] = False
+    st._MOUSE_STATE["down_step_prev"] = False
     st._MOUSE_STATE["released"] = False
     st._MOUSE_STATE["released_frame"] = False
+    st._CLICK_STATE.update(press_seq=0, active_seq=-1, resolved_seq=-1, target_id=None, dispatched_seq=-1)
     st._GAME_TIME = 0.0
     st._WAIT_TIMERS.clear()
     st._EVENT_PENDING.clear()
@@ -155,6 +178,7 @@ def run():
             # 暂停时也要同步输入快照：用户代码需要靠按键检测来调用 resume()
             _sync_input_frame()
             _promote_event_frame()
+            _process_click_events()
 
             _begin_physics_step()
             main_module.loop()
@@ -321,6 +345,7 @@ def start_game(project_dir=None, target_file=None):
             # 暂停时也要同步输入快照：学生代码需要靠按键检测来调用 resume()
             _sync_input_frame()
             _promote_event_frame()
+            _process_click_events()
 
             _begin_physics_step()
 
@@ -348,6 +373,7 @@ def start_game(project_dir=None, target_file=None):
                         (s._speed > 0) or
                         (getattr(s, "animation_state", None) and s.animation_state.get("is_playing", False)) or
                         bool(s._on_hit_callbacks) or
+                        bool(getattr(s, "_click_callback", None)) or
                         bool(s._sensor_enter_callbacks) or
                         bool(s._sensor_exit_callbacks) or
                         s._follow_ref is not None

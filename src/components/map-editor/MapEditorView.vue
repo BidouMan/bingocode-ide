@@ -212,6 +212,10 @@ const emit = defineEmits<{
   // scope 决定内置资源库只显示图像还是图块：图层面板固定图像，图块面板固定图块
   'open-resource-lib': [scope: 'image' | 'tile']
   'open-map-library': []
+  /** 创建地图：生成一张空白地图工程并直接进入编辑 */
+  'create-map': []
+  /** 绘制地图：进入绘制页空白画板，保存后生成一张新地图 */
+  'open-paint': []
   'map-thumbnail-updated': [itemId: string, dataUrl: string]
   /** 退出绘制测试：回到素材整理页 */
   'tile-test-exit': []
@@ -365,20 +369,9 @@ function switchToMap(itemId: string) {
   mapStore.setMapPath(itemId)
 }
 
-async function onNewMap() {
-  if (mapStore.currentMapPath) {
-    await saveMapToProject()
-  }
-
-  // 默认名字统一为「地图N」顺序名
-  const name = resourceStore.nextSequentialName('map', '地图')
-  const id = resourceStore.addItem({ name, type: 'map', path: '' })
-  const item = resourceStore.maps.find(m => m.id === id)
-  if (item && projectStore.root) item.path = mapDirPath(name)
-  skipNextPathWatch = true
-  mapStore.setMapPath(id)
-  mapStore.loadMap(createEmptyMapData(name))
-  await ensureDefaultLayer()
+/** 空地图横幅「绘制地图」：进入绘制页画一张新地图（不是在当前地图里加图块图层） */
+function onOpenPaintMap() {
+  emit('open-paint')
 }
 
 async function onUploadLocal() {
@@ -500,6 +493,10 @@ function onOpenLibrary() {
 /** 空地图横幅：打开内置地图库选择一张地图 */
 function onChooseMap() {
   emit('open-map-library')
+}
+
+function onCreateMap() {
+  emit('create-map')
 }
 
 function onCursorMove(x: number, y: number) {
@@ -1014,10 +1011,11 @@ defineExpose({
     <div v-if="!hasMaps && !tileTestMode" class="map-empty-banner">
       <div class="empty-content">
         <img :src="iconMapLibrary" class="empty-icon" alt="" />
-        <p class="empty-text">请先选择、绘制或上传地图</p>
+        <p class="empty-text">请先选择、绘制、创建或上传地图</p>
         <div class="empty-actions">
           <button class="empty-btn" @click="onChooseMap">选择地图</button>
-          <button class="empty-btn empty-btn-secondary" @click="onNewMap">绘制地图</button>
+          <button class="empty-btn empty-btn-secondary" @click="onOpenPaintMap">绘制地图</button>
+          <button class="empty-btn empty-btn-secondary" @click="onCreateMap">创建地图</button>
           <button class="empty-btn empty-btn-secondary" @click="onImportMap">上传地图</button>
         </div>
       </div>

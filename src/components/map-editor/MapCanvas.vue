@@ -60,8 +60,9 @@ const collisionOverlayRef = ref<HTMLCanvasElement>()
 let PIXI: any = null
 let app: any = null
 let tileContainer: any = null
-// Pixi v8 的 resizeTo 只监听 window resize，页面从隐藏切到显示时不会重新量尺寸，
-// 这里自行监听容器尺寸变化，避免画布小于容器导致网格显示不全
+// 画布尺寸完全交给 ResizeObserver 管理（不使用 Pixi 的 resizeTo）：
+// resizeTo 会在 window resize 时抢先改 app.screen，导致下面的尺寸比较提前返回，
+// 网格只画到旧画布范围——放大窗口后网格显示不全，必须拖动一下画布才刷新
 let resizeObserver: ResizeObserver | null = null
 
 const mapStore = useMapStore()
@@ -147,11 +148,14 @@ async function initPixi() {
   app = new PIXI.Application()
   await app.init({
     background: '#1e1e1e',
-    resizeTo: canvasRef.value,
     antialias: true,
     resolution: window.devicePixelRatio || 1,
     autoDensity: true,
   })
+  // 初始化时按容器量一次尺寸（未用 resizeTo，Pixi 默认 800×600）
+  const initW = canvasRef.value.clientWidth
+  const initH = canvasRef.value.clientHeight
+  if (initW > 0 && initH > 0) app.renderer.resize(initW, initH)
   // 地图编辑器是按需渲染（手动调用 app.render()），不需要 PixiJS 持续 ticker。
   // 不停止的话，即使切到代码页面（v-show 隐藏），ticker 仍以 60fps 渲染空场景，
   // WebView2 GPU 进程会持续占满 CPU。

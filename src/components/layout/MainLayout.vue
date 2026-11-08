@@ -2613,6 +2613,8 @@ function spriteDisplayName(name: string) {
             ref="mapEditorRef"
             @open-resource-lib="(scope) => { mapResLibScope = scope; currentPage = 4 }"
             @open-map-library="currentPage = 2"
+            @create-map="onCreateMap"
+            @open-paint="onOpenPaint('map')"
             @map-thumbnail-updated="onMapThumbnailUpdated"
             @tile-test-exit="switchPage(8)"
             @open-paint-image="onOpenMapImagePaint"

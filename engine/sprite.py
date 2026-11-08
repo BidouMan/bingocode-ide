@@ -101,6 +101,8 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
         self._frame_start_x = 0.0
         self._frame_start_y = 0.0
         self._on_hit_callbacks = []
+        # 鼠标点击回调（on_clicked）：一个角色只保留最后一次注册
+        self._click_callback = None
         # 感应区进出回调：[(tag, callback)]；_sensor_active_tags 记录当前仍在区域内的标签，
         # 用于「只在从无到有 / 从有到无时各触发一次」
         self._sensor_enter_callbacks = []
@@ -556,6 +558,29 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
         self._sensor_exit_callbacks.append((tag, callback))
 
 
+    def is_clicked(self):
+        """这一帧鼠标左键是不是正好点到这个角色（按看得见的图片算）
+
+        一次按下只算一次点击，按住不放不会一直返回 True；
+        两个角色叠在一起时，只有最上面（后创建）的那个算点中。
+        """
+        if self._is_deleted or not self._visible:
+            return False
+        return _resolve_click_target() == self.id
+
+
+    def on_clicked(self, callback):
+        """当这个角色被鼠标点中时执行 callback（注册一次即可，写在 while True 外面）
+
+        回调可以不写参数，也可以写 1 个参数（被点的角色自己）。
+        同一个角色重复注册会覆盖上一次：写在循环里也不会越积越多。
+        """
+        if not callable(callback):
+            print("[提示] on_clicked 需要传一个函数，例如：大鲨鱼.on_clicked(被点到了)")
+            return
+        self._click_callback = callback
+
+
     def broadcast(self, event_name):
         """发送广播（触发所有接收该事件的回调；单个回调出错不会中断游戏）"""
         broadcast(event_name)
@@ -906,3 +931,30 @@ def _resolve_target_xy(target):
         # 必须读世界坐标：target.x/y 是用户空间，会翻转 y
         return (target._x, target._y)
     return None
+
+
+def _resolve_click_target():
+    """返回本次点击命中的角色 id；没点中角色返回 None。
+
+    每次真实按下只解析一次（按 press_seq 缓存），使 is_clicked / on_clicked
+    看到的是同一个结果。判定用可见内容框，重叠时保留最后命中的那个
+    （_SPRITES 是插入顺序 = 创建顺序，后创建的画在上面）。
+    """
+    seq = st._CLICK_STATE["active_seq"]
+    if seq < 0:
+        return None
+    if st._CLICK_STATE["resolved_seq"] == seq:
+        return st._CLICK_STATE["target_id"]
+
+    mx = st._MOUSE_STATE["x"]
+    my = st._MOUSE_STATE["y"]
+    target_id = None
+    for sprite in st._SPRITES.values():
+        if sprite._is_deleted or not sprite._visible:
+            continue
+        if sprite._point_inside_visual(mx, my):
+            target_id = sprite.id
+
+    st._CLICK_STATE["target_id"] = target_id
+    st._CLICK_STATE["resolved_seq"] = seq
+    return target_id

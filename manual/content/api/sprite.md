@@ -19,7 +19,7 @@ description: 角色、敌人、子弹和道具都从 Sprite 开始。本页完�
 | 创建与删除 | `Sprite(名字)`、`delete()` |
 | 位置与尺寸 | `x`、`y`、`pos`、`scale`、`angle`、`layer`、`vy` |
 | 显示与动画 | `show()`、`hide()`、`say()`、`play()`、`set_rotation_mode()` |
-| 分组与碰撞回调 | `add_to_group()`、`is_touch_group()`、`on_touch_group()` |
+| 分组、碰撞与点击 | `add_to_group()`、`is_touch_group()`、`on_touch_group()`、`is_clicked()`、`on_clicked()` |
 | 标记与跟随 | `get_marker()`、`follow()`、`unfollow()` |
 
 ## 创建与删除
@@ -358,6 +358,45 @@ bullet.on_touch_group("enemies", 子弹命中)
 - 传了 `callback` 后，引擎不再自动删除，删不删由函数决定。
 - 子弹是循环里新建的，就要在每次新建后注册一次；角色只创建一次，就注册一次。
 - 对方忘了 `add_to_group()`，回调永远不会触发，这是最常见的问题。
+
+### is_clicked — 是否被鼠标点到
+
+<div class="api-sig"><span class="badge method">方法</span><code>hero.is_clicked()</code><span class="sig-note">返回 True / False</span></div>
+
+鼠标左键这一帧是否正好点在这个角色上。写在 `while True` 里，按一下算一次。
+
+```python
+while True:
+    if 大鲨鱼.is_clicked():
+        print(1)
+```
+
+- 只看角色**图片看得到的部分**，编辑器里画的碰撞盒不影响点击范围。
+- 按下那一帧返回 `True`，按住不放不会一直触发。
+- 两个角色叠在一起时，只有最上面（后创建）的那个算点中。
+- 隐藏或已删除的角色不会响应。
+- 和 `is_touch(mouse) + mouse_pressed()` 相比，不用自己判断“最上层”和“只点一次”，更适合做按钮、可点击的道具。
+
+### on_clicked — 被点击时自动执行
+
+<div class="api-sig"><span class="badge method">方法</span><code>hero.on_clicked(callback)</code><span class="sig-note">注册一次即可</span></div>
+
+给角色注册点击回调。鼠标左键点中角色时执行函数，不需要自己写 `if`。
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `callback` | 函数 | 是 | 被点击时执行；可以不写参数，或写 1 个参数（被点的角色） |
+
+```python
+def 被点到了(角色):
+    角色.say("别戳我！", 1)
+
+大鲨鱼.on_clicked(被点到了)
+```
+
+- 注册写在 `while True` **外面**；同一个角色重复注册会覆盖上一次。
+- 判定范围和重叠规则与 `is_clicked()` 完全相同。
+- 回调里要让角色消失，自己调用 `delete()`。
 
 ## 标记与跟随
 

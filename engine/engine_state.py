@@ -22,7 +22,13 @@ _PRESSED_KEYS_PREV = set()
 _RELEASED_KEYS = set()
 _RELEASED_FRAME = set()
 # 用字典包装鼠标状态：released 由输入线程累积，released_frame 是每个物理步的快照（供 mouse_up）
-_MOUSE_STATE = {"down": False, "last_down": False, "released": False, "released_frame": False, "x": 0, "y": 0}
+_MOUSE_STATE = {"down": False, "last_down": False, "down_step_prev": False, "released": False, "released_frame": False, "x": 0, "y": 0}
+# 点击（角色被点击）状态：
+#   press_seq    —— 输入线程在按下那一刻 +1，一次真实按下只有一个序号
+#   active_seq   —— 本物理步有效的那次按下序号（-1 = 本步没有新的点击）
+#   resolved_seq / target_id —— 缓存这次按下点中的最上层角色，供 is_clicked / on_clicked 共用
+#   dispatched_seq —— 已派发过 on_clicked 的按下序号，保证一次按下只回调一次
+_CLICK_STATE = {"press_seq": 0, "active_seq": -1, "resolved_seq": -1, "target_id": None, "dispatched_seq": -1}
 _PENDING_RESPONSES = []  # 监听线程→主线程的待发响应
 _USER_INPUT_QUEUE = queue.Queue()  # 用户 input() 输入队列
 
