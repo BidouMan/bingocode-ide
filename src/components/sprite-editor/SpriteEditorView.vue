@@ -50,8 +50,9 @@ import iconResetAnchor from '../../assets/icons/重置锚点.svg'
 import iconReset from '../../assets/icons/重置.svg'
 import iconMarker from '../../assets/icons/标记.svg'
 import iconMarkerRaw from '../../assets/icons/标记.svg?raw'
+import iconAnimation from '../../assets/icons/动画.svg'
 import iconSpriteEmpty from '../../assets/icons/角色精灵.svg'
-import iconSelectTool from '../../assets/icons/选取工具.svg'
+import iconSelectTool from '../../assets/icons/选择箭头.svg'
 import iconZoomIn from '../../assets/icons/add-one.svg'
 import iconZoomOut from '../../assets/icons/reduce-one.svg'
 import iconUndo from '../../assets/icons/undo.svg'
@@ -385,8 +386,6 @@ const viewSize = ref({ w: 0, h: 0 })
 /** 进入角色时视口还没测量到：等挂载/尺寸就绪后再适配一次 */
 const sceneFitPending = ref(false)
 let viewResizeObserver: ResizeObserver | null = null
-/** 鼠标在场景中的世界坐标（信息栏显示；离开画布为 null） */
-const mouseWorld = ref<{ x: number; y: number } | null>(null)
 
 const costumeContextMenu = ref<{ show: boolean; x: number; y: number; index: number }>({ show: false, x: 0, y: 0, index: 0 })
 const animContextMenu = ref<{ show: boolean; x: number; y: number; name: string }>({ show: false, x: 0, y: 0, name: '' })
@@ -763,8 +762,6 @@ function onCanvasMouseMove(e: MouseEvent) {
     canvasPanY.value = panStartOffsetY.value + (e.clientY - panStartY.value)
     return
   }
-  // 信息栏坐标：无论什么工具都实时回显鼠标所在的世界坐标（x 右、y 上）
-  mouseWorld.value = screenToWorld(e)
   const p = screenToCanvas(e)
   // 放置中的幽灵图钉跟随鼠标（直接改 DOM 样式，不触发整页重渲染）
   if (markerPlacing.value) {
@@ -773,10 +770,6 @@ function onCanvasMouseMove(e: MouseEvent) {
       applyGhostPosition()
     }
   }
-}
-
-function onCanvasMouseLeave() {
-  mouseWorld.value = null
 }
 
 function onCanvasMouseUp(e: MouseEvent) {
@@ -1101,11 +1094,17 @@ function clearDraft(key: string) {
 }
 
 /**
- * 输入框显示值：正在编辑时用用户输入的原文，否则用真实数据。
- * 必须这样绑定——如果只绑真实值，每次按键引起的重渲染都会把输入框内容重置回旧值。
+ * 数值显示文本：与输入框里实际渲染的字符完全一致（最多两位小数、去掉多余的 0）。
+ * 单位定位必须用同一个字符串测量，否则会出现「显示 0.1、单位按 0 定位」的错位重叠。
  */
-function draftValue(key: string, value: number): string | number {
-  return draftText[key] ?? value
+function formatFieldText(value: number): string {
+  if (!Number.isFinite(value)) return '0'
+  return String(Number(value.toFixed(2)))
+}
+
+/** 输入框显示值：正在编辑时用用户输入的原文，否则用真实数据（格式化后）。 */
+function draftValue(key: string, value: number): string {
+  return draftText[key] ?? formatFieldText(value)
 }
 
 /** 聚焦即全选当前数值：直接输入就能整体替换 */
@@ -1115,20 +1114,20 @@ function selectOnFocus(e: Event) {
   setTimeout(() => el.select(), 0)
 }
 
-/** 位置单位：拖拽/改值用真实值，正在输入时跟着输入内容走 */
+/** 位置单位：与输入框显示文本共用同一字符串（编辑中 = 原文，否则 = 格式化值） */
 function axisUnitStyleFor(key: 'x' | 'y', value: number): Record<string, string> {
   return unitStyleAfterText(
-    draftText[key] ?? String(Math.round(value)),
+    draftText[key] ?? formatFieldText(value),
     28,
     unitFieldWidth[key],
     'px',
   )
 }
 
-/** 旋转单位：编辑期间跟着输入内容 */
+/** 旋转单位：与输入框显示文本共用同一字符串 */
 function angleUnitStyle(value: number): Record<string, string> {
   return unitStyleAfterText(
-    draftText.angle ?? String(Math.round(value)),
+    draftText.angle ?? formatFieldText(value),
     7,
     unitFieldWidth.angle,
     '°',
@@ -1225,9 +1224,22 @@ const rotationDirty = computed(() => sceneTransform.value.angle !== 0)
 function resetTransformAxis(field: 'x' | 'y' | 'angle' | 'scaleX' | 'scaleY') {
   const t = ensureTransform()
   if (!t) return
-  if (field === 'scaleX' || field === 'scaleY') t[field] = 100
-  else t[field] = 0
-  clearDraft(field)
+  if (field === 'scaleX' || field === 'scaleY') {
+    // 勾选「约束比例」时 X / Y 联动：点任意一个重置按钮都把两轴一起还原
+    if (scaleLink.value) {
+      t.scale = 100
+      delete t.scaleX
+      delete t.scaleY
+      clearDraft('scaleX')
+      clearDraft('scaleY')
+    } else {
+      t[field] = 100
+      clearDraft(field)
+    }
+  } else {
+    t[field] = 0
+    clearDraft(field)
+  }
   // 分轴值与统一缩放相同时不留冗余字段
   if (t.scaleX !== undefined && t.scaleX === t.scale) delete t.scaleX
   if (t.scaleY !== undefined && t.scaleY === t.scale) delete t.scaleY
@@ -1362,12 +1374,25 @@ function resetAnno() {
 const activeTool = ref<'select' | 'pivot' | 'collision' | 'marker'>('select')
 
 /** 右侧面板标签页：动画（预览 + 片段）/ 属性（角色检视器，配合工具栏当前工具） */
-const rightTab = ref<'animation' | 'props'>('animation')
+const RIGHT_TAB_KEY = 'bingo-ide-sprite-right-tab'
+function readSavedRightTab(): 'animation' | 'props' {
+  try {
+    return localStorage.getItem(RIGHT_TAB_KEY) === 'props' ? 'props' : 'animation'
+  } catch {
+    return 'animation' // 首次进入默认「动画」页
+  }
+}
+const rightTab = ref<'animation' | 'props'>(readSavedRightTab())
 
 /** 工具条切换工具：同时把右侧面板切到「属性」页——该工具的详细设置都在那里 */
 function pickTool(tool: 'select' | 'pivot' | 'collision' | 'marker') {
   activateCanvasTool(tool)
   rightTab.value = 'props'
+}
+
+/** 工具条「动画」：只切右侧面板到「动画」页，不改变画布当前工具 */
+function pickAnimation() {
+  rightTab.value = 'animation'
 }
 
 /** 属性面板分区折叠状态：与地图编辑器检视器一致的可折叠分区，默认全部展开 */
@@ -1892,18 +1917,6 @@ const pivotHandleStyle = computed(() => {
   return p ? { left: `${p.x}px`, top: `${p.y}px` } : {}
 })
 
-/** 屏幕坐标 → 场景世界坐标（x 向右 / y 向上；信息栏显示用，与角色变换无关） */
-function screenToWorld(e: MouseEvent): { x: number; y: number } | null {
-  const rect = canvasRef.value?.getBoundingClientRect()
-  if (!rect) return null
-  const z = canvasZoom.value
-  if (z <= 0) return null
-  return {
-    x: Math.round((e.clientX - rect.left - rect.width / 2 - canvasPanX.value) / z),
-    y: Math.round(-(e.clientY - rect.top - rect.height / 2 - canvasPanY.value) / z),
-  }
-}
-
 /**
  * 屏幕坐标 → 逻辑画布坐标（0.5px 吸附）。
  * 角色在场景里会被平移 / 旋转 / 缩放，不能读包围盒（旋转后的包围盒不是真实比例），
@@ -2212,6 +2225,15 @@ function closeContextMenus() {
 // 记住用户最后一次的场景缩放（切换角色 / 重新进入角色编辑器时沿用）
 watch(canvasZoom, z => saveSceneZoom(z))
 
+// 记住用户最后停留的右侧面板页（首次进入默认「动画」页）
+watch(rightTab, tab => {
+  try {
+    localStorage.setItem(RIGHT_TAB_KEY, tab)
+  } catch {
+    // localStorage 不可用时忽略
+  }
+})
+
 // 帧切换 / 缩放 / 预览倍率 / 渲染模式变化 → 重绘（flush: post 保证 canvas 已挂载）
 // 注意：必须放在所有 ref/computed 声明之后——watch 创建时会立即求值一次来源，
 // 提前注册会在 setup 阶段抛 TDZ（Cannot access 'canvasZoom' before initialization），
@@ -2411,6 +2433,14 @@ function onWindowBlur() {
           <img :src="iconResetAnchor" class="layer-chip-icon" alt="" />碰撞
         </button>
         <button
+          class="layer-chip"
+          :class="{ active: rightTab === 'animation' }"
+          type="button"
+          @click="pickAnimation"
+        >
+          <img :src="iconAnimation" class="layer-chip-icon" alt="" />动画
+        </button>
+        <button
           v-if="canAnno"
           class="layer-chip"
           :class="{ active: activeTool === 'marker' }"
@@ -2434,7 +2464,6 @@ function onWindowBlur() {
         @mousedown="onCanvasMouseDown"
         @mousemove="onCanvasMouseMove"
         @mouseup="onCanvasMouseUp"
-        @mouseleave="onCanvasMouseLeave"
         @dblclick="resetCanvas"
       >
         <!-- 无限网格 + 世界原点轴（类似地图编辑器的工作区，不画舞台边界） -->
@@ -2603,13 +2632,6 @@ function onWindowBlur() {
             <img :src="iconRedo" width="14" height="14" draggable="false" />
           </button>
         </div>
-      </div>
-
-      <!-- 场景信息栏：角色尺寸 / 鼠标世界坐标 / 缩放 -->
-      <div class="scene-info-bar">
-        <span>角色 {{ Math.round(displayFrameBounds.w) }} × {{ Math.round(displayFrameBounds.h) }}</span>
-        <span>坐标 {{ mouseWorld ? `${mouseWorld.x}, ${mouseWorld.y}` : '—, —' }}</span>
-        <span>缩放 {{ zoomPercent }}%</span>
       </div>
     </div>
 

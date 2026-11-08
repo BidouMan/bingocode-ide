@@ -331,21 +331,6 @@
   margin: 0 4px;
 }
 
-/* ─── 场景信息栏 ─── */
-.scene-info-bar {
-  height: 30px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 20px;
-  background: rgb(26, 28, 33);
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
-  color: #8a8f98;
-  font-size: 11px;
-  user-select: none;
-}
-
 /* ═══ 中: 画布列 — 标注图层 ═══ */
 .canvas-col {
   position: relative;
@@ -817,28 +802,34 @@
   width: 100%;
   min-width: 0;
 }
-/* 旋转框内嵌滑条：图标上移并收小，避免压住底部滑条 */
+/* 旋转框内嵌滑条：重置图标与数字文字垂直对齐（数字在滑条上方的文字区居中） */
 .att-slider-field .att-reset {
-  top: 0;
-  right: 2px;
+  top: 13px;
+  transform: translateY(-50%);
+  right: 4px;
   width: 18px;
   height: 18px;
 }
-/* 旋转框内嵌滑条版：数字区在滑条上方，单位跟着数字垂直居中（下移避开滑条） */
+/* 旋转框内嵌滑条版：单位与数字同一水平线 */
 .att-slider-field .att-axis-unit.is-degree {
-  top: 11px;
+  top: 13px;
 }
 /* 旋转数值框：滑条内嵌在框内底部（Godot 风格），数字仍可直接编辑 */
 .att-slider-field {
   position: relative;
+  display: block;
   flex: 1;
   min-width: 0;
 }
 .att-slider-field .att-input {
-  /* 比常规输入框高一点：上半部分放数字、底部留给滑条 */
-  height: 30px;
-  padding-bottom: 9px;
-  /* 右侧留出度数单位的位置，数字过长时被裁切，不会压到单位 */
+  /* 块级显示：去掉 inline-block 基线留出的空隙，容器高度与输入框完全一致 */
+  display: block;
+  width: 100%;
+  /* 比常规输入框高一点：上半部分放数字、底部留给滑条。
+     底部留白 7px，数字区中心到上边框和到滑条中心距离一致（视觉对称） */
+  height: 34px;
+  padding-bottom: 7px;
+  /* 右侧留出度数单位和重置图标的位置，数字过长时被裁切，不会压到它们 */
   padding-right: 46px;
   line-height: normal;
 }
