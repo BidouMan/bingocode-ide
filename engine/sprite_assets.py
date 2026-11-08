@@ -83,8 +83,22 @@ class SpriteAssetsMixin:
         )
         # 受重力影响（可选）：False = 重力地图里也不下坠，撞墙/落地等碰撞照常
         self._gravity = bool(manifest.get("gravity", True))
+        # 初始隐藏（可选，编辑器「图层设置」勾选项）：缺省可见
+        self._bsf_hidden = bool(manifest.get("hidden", False))
+        # 翻转模式（可选，编辑器「翻转模式」下拉）：flipX / flipY = 创建时镜像
+        self._bsf_flip_x = bool(manifest.get("flipX", False))
+        self._bsf_flip_y = bool(manifest.get("flipY", False))
+        # 默认图层（可选）：数字越大越靠前，同层按创建顺序；缺省 0
+        try:
+            self._bsf_layer = int(manifest.get("layer", 0) or 0)
+        except (TypeError, ValueError):
+            self._bsf_layer = 0
+        # Y 轴排序（可选）：true = 同层内按脚底 Y 坐标排序；缺省不启用
+        self._bsf_y_sort = bool(manifest.get("ySort", False))
         # 挂点（可选）：名字 → {x, y}（画布坐标）；帧级覆盖在 frames[i].markers
         self._bsf_markers = manifest.get("markers") or {}
+        # 场景初始变换（可选，用户坐标）：缺省 = 引擎默认舞台中心/0°/100%
+        self._bsf_transform = manifest.get("transform")
         self._bsf_clips = {
             c.get("name"): c
             for c in manifest.get("clips", [])
@@ -163,14 +177,14 @@ class SpriteAssetsMixin:
             return None
         # 显示缩放/镜像（与 _update_transform 一致；_display_flip 含跟随继承）
         base_scale = self._scale / 100.0
-        sx = base_scale * getattr(self, "_display_flip", self._current_scale_x)
-        sy = base_scale
+        sx = base_scale * getattr(self, "_scale_ratio_x", 1.0) * getattr(self, "_display_flip", self._current_scale_x)
+        sy = base_scale * getattr(self, "_scale_ratio_y", 1.0)
         style = self._rotation_style
         if style == "left_right":
             display_angle = 0.0
         elif style == "none":
             display_angle = 0.0
-            sx = base_scale
+            sx = base_scale * getattr(self, "_scale_ratio_x", 1.0)
         else:
             display_angle = float(self._angle)
         rad = math.radians(display_angle)
@@ -420,9 +434,9 @@ class SpriteAssetsMixin:
             # 减去 pivot（内容重心）
             px = lx - vox
             py = ly - voy
-            # 缩放（含水平翻转）
-            sx = px * s * flip_x
-            sy = py * s
+            # 缩放（含水平翻转与分轴缩放比例）
+            sx = px * s * getattr(self, "_scale_ratio_x", 1.0) * flip_x
+            sy = py * s * getattr(self, "_scale_ratio_y", 1.0)
             # 旋转
             rx = sx * cos_a - sy * sin_a
             ry = sx * sin_a + sy * cos_a
@@ -507,8 +521,8 @@ class SpriteAssetsMixin:
             ly = by - img_h / 2.0
             px = lx - vox
             py = ly - voy
-            sx = px * s * flip_x
-            sy = py * s
+            sx = px * s * getattr(self, "_scale_ratio_x", 1.0) * flip_x
+            sy = py * s * getattr(self, "_scale_ratio_y", 1.0)
             rx = sx * cos_a - sy * sin_a
             ry = sx * sin_a + sy * cos_a
             world_points.append((self._x + rx, self._y + ry))
@@ -533,13 +547,15 @@ class SpriteAssetsMixin:
     def _update_transform(self):
         """统一处理旋转、缩放和镜像逻辑"""
         display_angle = self._angle
-        # 计算基础缩放比例（百分比转为小数）
+        # 计算基础缩放比例（百分比转为小数）；分轴缩放比例乘在各自轴上
         base_scale = self._scale / 100.0
+        ratio_x = getattr(self, "_scale_ratio_x", 1.0)
+        ratio_y = getattr(self, "_scale_ratio_y", 1.0)
 
-        # 默认情况下，Y轴只受 size 影响
-        final_scale_y = base_scale
+        # 默认情况下，Y轴只受 size 影响（编辑器「翻转模式」选垂直翻转时取 -1）
+        final_scale_y = base_scale * ratio_y * self._base_flip_y
         # X轴受 size、自身镜像状态、跟随镜像继承共同影响（Godot 子节点语义）
-        final_scale_x = base_scale * self._current_scale_x * self._follow_flip
+        final_scale_x = base_scale * ratio_x * self._current_scale_x * self._follow_flip
 
         if self._rotation_style == "left_right":
             norm_angle = self._angle % 360
@@ -549,16 +565,19 @@ class SpriteAssetsMixin:
                 self._current_scale_x = 1.0
 
             # 重新计算镜像后的 X 缩放（含跟随继承）
-            final_scale_x = base_scale * self._current_scale_x * self._follow_flip
+            final_scale_x = base_scale * ratio_x * self._current_scale_x * self._follow_flip
             display_angle = 0
 
         elif self._rotation_style == "none":
             display_angle = 0
-            # "none" = 永不旋转永不翻转（含跟随继承），Scratch「不旋转」语义
-            final_scale_x = base_scale
+            # "none" = 永不旋转永不翻转（含跟随继承），Scratch「不旋转」语义；
+            # 仍保留角色资源的默认翻转模式（编辑器里显式设置过才生效）
+            final_scale_x = base_scale * ratio_x * self._base_flip_x
 
         # 本帧显示镜像倍率：供挂点世界坐标求值与链式跟随读取
-        self._display_flip = final_scale_x / base_scale if base_scale else 1.0
+        # （除以含分轴比例的基准，保证这里只保留 ±1 的纯镜像语义）
+        denom = base_scale * ratio_x
+        self._display_flip = final_scale_x / denom if denom else 1.0
 
         # 🚀 缓存比对：如果上次发送值相同，跳过发送以减少管道压力
         current_key = (

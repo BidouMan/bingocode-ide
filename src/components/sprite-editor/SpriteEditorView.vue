@@ -2,8 +2,10 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useResourceStore } from '../../stores/resource'
 import { useEditorStore } from '../../stores/editor'
-import type { SpriteData, SpriteAnimation } from '../../composables/useSpriteData'
-import { readSpriteFromPath, revokeSpriteUrls, saveSpriteConfig, saveBsfManifest, isImageSpritePath, buildSingleFrameBsfMeta, imageSpriteToBsfDir, loadImage } from '../../composables/useSpriteData'
+import { useProjectStore } from '../../stores/project'
+import { invoke } from '@tauri-apps/api/core'
+import type { SpriteData, SpriteAnimation, SpriteTransform } from '../../composables/useSpriteData'
+import { readSpriteFromPath, revokeSpriteUrls, saveSpriteConfig, saveBsfManifest, isImageSpritePath, buildSingleFrameBsfMeta, imageSpriteToBsfDir, loadImage, DEFAULT_SPRITE_TRANSFORM, imageContentBox } from '../../composables/useSpriteData'
 import type { SpriteCollisionShape } from '../../composables/useSpriteData'
 import { appendFramesToSprite } from '../../composables/appendSpriteFrames'
 import { useFrameReorder } from '../../composables/useFrameReorder'
@@ -11,6 +13,8 @@ import { cssImageRendering } from '../../utils/renderMode'
 import { drawImageCrisp } from '../../utils/pixelCanvas'
 import FrameUploadDrawer from './FrameUploadDrawer.vue'
 import CollisionShapeOverlay from './CollisionShapeOverlay.vue'
+// 下拉框复用地图编辑器属性面板的自绘组件，保证两个编辑器的控件样式一致
+import CustomSelect from '../common/CustomSelect.vue'
 
 const emit = defineEmits<{
   /** 造型列表抽屉：打开绘制页为当前角色绘制新帧（编辑模式，自动新建空白帧） */
@@ -38,14 +42,28 @@ import iconAdd from '../../assets/icons/btn_preview_add.svg'
 import iconLoop from '../../assets/icons/anim_loop.svg'
 import iconLoopOff from '../../assets/icons/anim_loop_off.svg'
 import iconCenterPivot from '../../assets/icons/中心点.svg'
+// ?raw：中心锚点图形直接内联成 <svg> 元素（不依赖 <img> 资源加载，避免 WebView 里加载/解码失败导致不可见）
+import iconPivotAnchorSvgRaw from '../../assets/icons/中心锚点.svg?raw'
 import iconResetAnchor from '../../assets/icons/重置锚点.svg'
 import iconMarker from '../../assets/icons/标记.svg'
 import iconMarkerRaw from '../../assets/icons/标记.svg?raw'
 import iconSpriteEmpty from '../../assets/icons/角色精灵.svg'
+import iconSelectTool from '../../assets/icons/选取工具.svg'
+import iconZoomIn from '../../assets/icons/add-one.svg'
+import iconZoomOut from '../../assets/icons/reduce-one.svg'
+// 属性面板分区折叠箭头（与地图编辑器检视器同一个图标）
+import iconChevron from '../../assets/icons/right_arrow.svg'
 
 const resourceStore = useResourceStore()
 const editorStore = useEditorStore()
+const projectStore = useProjectStore()
 const fileDialog = useFileDialog()
+
+/** 中心锚点图形标记：去掉 XML 声明、给根 svg 内联尺寸，直接内联进 DOM（画布与变换手柄中心共用）
+ *  （v-html 注入的节点拿不到 scoped 样式，尺寸必须写在 svg 自身的 style 上） */
+const pivotAnchorMarkup = iconPivotAnchorSvgRaw
+  .slice(iconPivotAnchorSvgRaw.indexOf('<svg'))
+  .replace('<svg', '<svg style="display:block;width:100%;height:100%"')
 
 /** 空状态「上传角色」：本地文件导入后自动选中（图片/ .bgs / .bsf / svg） */
 async function onEmptyUpload() {
@@ -71,41 +89,104 @@ const imageRenderingStyle = computed(() =>
  */
 const canvasFrameNatural = ref<{ w: number; h: number } | null>(null)
 
+/** 非 .bsf 角色（旧 .bgs）：当前帧非透明内容框，用于中心点/包围盒（引擎也是内容重心定位） */
+const nonBsfBox = ref<{ url: string; box: { x: number; y: number; w: number; h: number } } | null>(null)
+let nonBsfMeasureToken = 0
+
+async function measureNonBsfBox() {
+  const sprite = currentSprite.value
+  const frame = sprite?.frames[canvasDisplayIndex.value]
+  if (!sprite || sprite.bsf || !frame) {
+    nonBsfBox.value = null
+    return
+  }
+  const token = ++nonBsfMeasureToken
+  try {
+    const img = await frameImage(frame.url)
+    if (token !== nonBsfMeasureToken) return
+    nonBsfBox.value = { url: frame.url, box: imageContentBox(img) }
+  } catch {
+    if (token === nonBsfMeasureToken) nonBsfBox.value = null
+  }
+}
+
 /** 光栅化安全上限（像素）：大插画 × 高倍缩放不能无限放大布局尺寸，否则显存/内存爆掉 */
 const RASTER_CAP = 4096
+
+/** 角色场景变换：未写入数据时用默认值（原点 / 0° / 100%，即不改变引擎默认出生位置） */
+const sceneTransform = computed<SpriteTransform>(
+  () => currentSprite.value?.transform ?? DEFAULT_SPRITE_TRANSFORM,
+)
+
+/** 角色实际显示倍率（分轴）= 场景缩放 × 角色缩放百分比（屏幕像素 / 素材像素） */
+const displayZoomX = computed(() => {
+  const t = sceneTransform.value
+  return canvasZoom.value * (Math.max(5, t.scaleX ?? t.scale) / 100)
+})
+const displayZoomY = computed(() => {
+  const t = sceneTransform.value
+  return canvasZoom.value * (Math.max(5, t.scaleY ?? t.scale) / 100)
+})
+
+/** 综合显示倍率：非等比缩放时取两轴较大值（布局光栅按最大倍率准备，另一轴缩小后依然清晰） */
+const displayZoom = computed(() => Math.max(displayZoomX.value, displayZoomY.value))
 
 /** 参与布局的缩放倍率：小图（≤128px）在 32× 上限内永远走布局放大，始终清晰 */
 const canvasLayoutZoom = computed(() => {
   const size = canvasFrameNatural.value
-  if (!size) return canvasZoom.value
+  if (!size) return displayZoom.value
   const naturalMax = Math.max(size.w, size.h, 1)
-  return Math.min(canvasZoom.value, RASTER_CAP / naturalMax)
+  return Math.min(displayZoom.value, RASTER_CAP / naturalMax)
 })
 
-/** 超出光栅上限的余量交给合成层缩放（倍数很小，观感损失可忽略） */
-const canvasResidualScale = computed(() =>
-  canvasLayoutZoom.value > 0 ? canvasZoom.value / canvasLayoutZoom.value : 1,
-)
+/** 场景世界层：屏幕中心为世界原点，pan 平移 + zoom 缩放；子元素用世界坐标（y 向上取负） */
+const sceneWorldStyle = computed(() => ({
+  transform: `translate(${canvasPanX.value}px, ${canvasPanY.value}px) scale(${canvasZoom.value})`,
+}))
 
-const canvasWrapperStyle = computed(() => {
-  const parts: string[] = []
-  if (canvasPanX.value || canvasPanY.value) {
-    parts.push(`translate(${canvasPanX.value}px, ${canvasPanY.value}px)`)
+/**
+ * 角色对象：定位在场景锚点（当前帧包围盒中心），围绕锚点旋转 + 剩余缩放。
+ * 画布已按 canvasLayoutZoom 光栅化，这里只补 (角色缩放 / 光栅倍率) 的余量。
+ * 支持 X / Y 分轴缩放（取消「约束比例」后可设置不同宽高比）。
+ */
+const spriteObjectStyle = computed(() => {
+  const t = sceneTransform.value
+  const layout = canvasLayoutZoom.value
+  const sx = Math.max(5, t.scaleX ?? t.scale)
+  const sy = Math.max(5, t.scaleY ?? t.scale)
+  const objectScaleX = layout > 0 ? (sx / 100) / layout : 1
+  const objectScaleY = layout > 0 ? (sy / 100) / layout : 1
+  const parts = [`rotate(${-t.angle}deg)`]
+  if (Math.abs(objectScaleX - 1) > 0.0001 || Math.abs(objectScaleY - 1) > 0.0001) {
+    parts.push(`scale(${objectScaleX}, ${objectScaleY})`)
   }
-  if (Math.abs(canvasResidualScale.value - 1) > 0.001) {
-    parts.push(`scale(${canvasResidualScale.value})`)
+  return {
+    left: `${t.x}px`,
+    top: `${-t.y}px`,
+    transform: parts.join(' '),
+    transformOrigin: '0 0',
   }
-  return parts.length > 0 ? { transform: parts.join(' ') } : {}
+})
+
+/** 帧画布：以场景锚点（包围盒中心）为原点摆放 */
+const frameCanvasStyle = computed(() => {
+  const p = objectAnchor.value
+  const layout = canvasLayoutZoom.value
+  return { left: `${-p.x * layout}px`, top: `${-p.y * layout}px` }
 })
 
 /** 标注层：画布坐标 + transform 缩放（缩放不影响图片采样，只放大矢量手柄） */
 const annoLayerStyle = computed(() => {
   const canvas = currentSprite.value?.bsf?.canvas
   if (!canvas) return {}
+  const p = objectAnchor.value
+  const layout = canvasLayoutZoom.value
   return {
+    left: `${-p.x * layout}px`,
+    top: `${-p.y * layout}px`,
     width: `${canvas.w}px`,
     height: `${canvas.h}px`,
-    transform: `scale(${canvasLayoutZoom.value})`,
+    transform: `scale(${layout})`,
   }
 })
 
@@ -144,7 +225,19 @@ async function drawSpriteFrame() {
     imageRenderingStyle.value !== 'pixelated',
     RASTER_CAP,
   )
+  // 旧 .bgs 角色没有 manifest：量出内容框，让中心点与包围盒对齐引擎语义
+  if (!currentSprite.value?.bsf) measureNonBsfBox()
 }
+
+/** 翻转模式在编辑器里的预览效果：按画布/预览图自身中心镜像，与游戏创建时的朝向一致 */
+const flipPreviewStyle = computed(() => {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return {}
+  const sx = bsf.flipX ? -1 : 1
+  const sy = bsf.flipY ? -1 : 1
+  if (sx === 1 && sy === 1) return {}
+  return { transform: `scale(${sx}, ${sy})` }
+})
 
 async function drawPreviewFrame() {
   const el = previewCanvasEl.value
@@ -171,8 +264,70 @@ function redrawSpriteImages() {
 
 const currentSprite = ref<SpriteData | null>(null)
 const currentSpritePath = ref('')
+
 // 当前已加载角色对应的资源 id：用于区分「重命名当前角色」与「切换到别的角色」
 const currentSpriteId = ref<string | null>(null)
+
+// ─── 属性面板「角色信息 → 名称」：可改名（同步磁盘目录/文件名，与资源面板右键改名同一套规则） ───
+/**
+ * 显示名以资源管理器里的名字为准（素材库的中文名 / 文件名），
+ * 不用 manifest 内部 name —— 那是素材作者在制作软件里取的名字（如 fish_7）。
+ */
+const spriteDisplayName = computed(() => {
+  const id = currentSpriteId.value || resourceStore.selectedSpriteId
+  const item = id ? resourceStore.sprites.find(s => s.id === id) : null
+  return item?.name || currentSprite.value?.name || ''
+})
+const spriteNameDraft = ref('')
+watch(
+  spriteDisplayName,
+  (name) => { spriteNameDraft.value = name ?? '' },
+  { immediate: true },
+)
+
+/** 改名提交：先迁移磁盘路径（目录角色整体改名，图片角色保留扩展名），成功后再改显示名 */
+async function commitSpriteRename() {
+  const sprite = currentSprite.value
+  const id = currentSpriteId.value
+  const item = id ? resourceStore.sprites.find(s => s.id === id) : null
+  if (!sprite || !item) return
+  const val = spriteNameDraft.value.trim()
+  const oldName = item.name
+  if (!val) { spriteNameDraft.value = oldName; return }
+  if (val === oldName) return
+
+  let newPath: string | null = null
+  const base = projectStore.root ? `${projectStore.root}/assets/sprites` : ''
+  if (base) {
+    try {
+      const oldDir = `${base}/${oldName}`
+      if (await invoke<boolean>('path_exists', { path: oldDir })) {
+        await invoke('rename_path', { oldPath: oldDir, newPath: `${base}/${val}` })
+        newPath = `${base}/${val}`
+      } else {
+        for (const ext of ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']) {
+          const oldFile = `${base}/${oldName}${ext}`
+          if (await invoke<boolean>('path_exists', { path: oldFile })) {
+            await invoke('rename_path', { oldPath: oldFile, newPath: `${base}/${val}${ext}` })
+            newPath = `${base}/${val}${ext}`
+            break
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[SpriteEditor] 重命名角色失败:', e)
+      spriteNameDraft.value = oldName
+      return
+    }
+  }
+
+  resourceStore.renameItem(item.id, val)
+  sprite.name = val
+  if (newPath) {
+    item.path = newPath
+    currentSpritePath.value = newPath
+  }
+}
 /** 载入失败信息（读盘/解析异常直接显示出来，避免"点了没反应"看起来像跳转失败） */
 const loadError = ref<string | null>(null)
 const selectedFrameIndex = ref(0)
@@ -184,7 +339,7 @@ const costumeHighlightIndex = ref(0)
 const canvasDisplayIndex = ref(0)
 const previewBgIndex = ref(0)
 
-// 画布缩放和平移
+// 场景视图：缩放和平移（世界坐标系与游戏一致：x 向右、y 向上）
 const canvasZoom = ref(1)
 const canvasPanX = ref(0)
 const canvasPanY = ref(0)
@@ -194,8 +349,15 @@ const panStartY = ref(0)
 const panStartOffsetX = ref(0)
 const panStartOffsetY = ref(0)
 const canvasRef = ref<HTMLDivElement | null>(null)
-/** 标注层：屏幕坐标 → 画布坐标用它实测的包围盒反推比例（含 pan/缩放/余量缩放） */
-const annoLayerRef = ref<HTMLDivElement | null>(null)
+/** 按住空格临时进入平移模式（与地图编辑器一致） */
+const spaceHeld = ref(false)
+/** 场景视口尺寸（网格对齐、适配视图需要） */
+const viewSize = ref({ w: 0, h: 0 })
+/** 进入角色时视口还没测量到：等挂载/尺寸就绪后再适配一次 */
+const sceneFitPending = ref(false)
+let viewResizeObserver: ResizeObserver | null = null
+/** 鼠标在场景中的世界坐标（信息栏显示；离开画布为 null） */
+const mouseWorld = ref<{ x: number; y: number } | null>(null)
 
 const costumeContextMenu = ref<{ show: boolean; x: number; y: number; index: number }>({ show: false, x: 0, y: 0, index: 0 })
 const animContextMenu = ref<{ show: boolean; x: number; y: number; name: string }>({ show: false, x: 0, y: 0, name: '' })
@@ -344,14 +506,19 @@ async function loadSprite(item: { id: string; name: string; path: string }) {
     selectedAnim.value = null
     stopAnimation()
     annoScope.value = 'all'
-    activeAnnoLayer.value = 'pivot'
+    activeTool.value = 'select'
     cancelMarkerPlacing()
     annoDefaultPivot.value = currentSprite.value.bsf
       ? { ...currentSprite.value.bsf.pivot }
       : null
-    canvasZoom.value = 1
-    canvasPanX.value = 0
-    canvasPanY.value = 0
+    // 场景视图：等 DOM 渲染后按角色尺寸适配缩放，并把角色包围盒中心放到视口中心
+    await nextTick()
+    if (viewSize.value.w > 0) {
+      sceneFitPending.value = false
+      fitSceneView()
+    } else {
+      sceneFitPending.value = true
+    }
     if (currentSprite.value.animations.length > 0) {
       const first = currentSprite.value.animations[0]
       selectedAnim.value = first
@@ -522,7 +689,7 @@ function onCanvasWheel(e: WheelEvent) {
 
   const oldZoom = canvasZoom.value
   const delta = e.deltaY > 0 ? 0.9 : 1.1
-  const newZoom = Math.min(32, Math.max(0.1, oldZoom * delta))
+  const newZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, oldZoom * delta))
 
   // 以鼠标位置为中心缩放: 保持鼠标下的像素点不动
   canvasPanX.value = mouseX - (mouseX - canvasPanX.value) * (newZoom / oldZoom)
@@ -530,9 +697,14 @@ function onCanvasWheel(e: WheelEvent) {
   canvasZoom.value = newZoom
 }
 
-// 中键按下开始平移
+/** 平移：中键、空格 + 左键、Alt + 左键（与地图编辑器一致） */
+function shouldStartPan(e: MouseEvent): boolean {
+  return e.button === 1 || (e.button === 0 && (spaceHeld.value || e.altKey))
+}
+
+// 中键 / 空格 / Alt 按下开始平移
 function onCanvasMouseDown(e: MouseEvent) {
-  if (e.button === 1) {
+  if (shouldStartPan(e)) {
     e.preventDefault()
     e.stopPropagation()
     isPanning.value = true
@@ -558,9 +730,11 @@ function onCanvasMouseMove(e: MouseEvent) {
     canvasPanY.value = panStartOffsetY.value + (e.clientY - panStartY.value)
     return
   }
+  // 信息栏坐标：无论什么工具都实时回显鼠标所在的世界坐标（x 右、y 上）
+  mouseWorld.value = screenToWorld(e)
+  const p = screenToCanvas(e)
   // 放置中的幽灵图钉跟随鼠标（直接改 DOM 样式，不触发整页重渲染）
   if (markerPlacing.value) {
-    const p = screenToCanvas(e)
     if (p) {
       ghostPoint = p
       applyGhostPosition()
@@ -568,29 +742,32 @@ function onCanvasMouseMove(e: MouseEvent) {
   }
 }
 
+function onCanvasMouseLeave() {
+  mouseWorld.value = null
+}
+
 function onCanvasMouseUp(e: MouseEvent) {
-  if (e.button === 1) {
+  // 中键 / 空格或 Alt + 左键 都可能发起平移，松开对应键都要结束
+  if (e.button === 1 || (e.button === 0 && isPanning.value)) {
     isPanning.value = false
   }
 }
 
 function onGlobalMouseUp(e: MouseEvent) {
-  if (e.button === 1) {
+  if (e.button === 1 || (e.button === 0 && isPanning.value)) {
     isPanning.value = false
   }
-}
-
-// 双击重置画布
-function resetCanvas() {
-  canvasZoom.value = 1
-  canvasPanX.value = 0
-  canvasPanY.value = 0
 }
 
 // ═══ 中心点标注（.bsf 角色 / 单图角色合成单帧 bsf：manifest 带 pivot 元数据） ═══
 
 /** 编辑作用域：all = 改统一值（全部帧生效）；one = 写当前帧覆盖 */
 const annoScope = ref<'all' | 'one'>('all')
+
+/** 属性面板「作用范围」下拉：切换编辑作用域 */
+function onScopeSelect(value: string) {
+  annoScope.value = value === 'one' ? 'one' : 'all'
+}
 const isPivotDragging = ref(false)
 /** 加载时快照的默认统一 pivot（「重置」按钮的恢复目标） */
 const annoDefaultPivot = ref<{ x: number; y: number } | null>(null)
@@ -612,6 +789,318 @@ function hasPivotOverride(i: number): boolean {
 }
 
 const annoPivot = computed(() => effPivot(annoFrameIndex.value))
+
+// ═══ 场景视图：角色对象几何 / 网格 / 视图适配 ═══
+
+/** 角色中心点（画布坐标）：.bsf 用帧有效中心；旧 .bgs 用内容框中心（与引擎一致） */
+const spritePivot = computed<{ x: number; y: number }>(() => {
+  if (canAnno.value) {
+    const p = effPivot(annoFrameIndex.value)
+    if (p) return p
+    const c = currentSprite.value?.bsf?.canvas
+    return c ? { x: c.w / 2, y: c.h / 2 } : { x: 0, y: 0 }
+  }
+  const sprite = currentSprite.value
+  const frame = sprite?.frames[canvasDisplayIndex.value]
+  const measured = nonBsfBox.value
+  if (measured && frame && measured.url === frame.url) {
+    return { x: measured.box.x + measured.box.w / 2, y: measured.box.y + measured.box.h / 2 }
+  }
+  return { x: spriteNaturalW.value / 2, y: spriteNaturalH.value / 2 }
+})
+
+/** 角色包围盒（画布坐标）：.bsf 用帧实际渲染矩形（不含透明画布留白），旧 .bgs 用内容框 */
+const displayFrameBounds = computed(() => {
+  if (canAnno.value) {
+    const f = currentSprite.value?.bsf?.frames[annoFrameIndex.value]
+    if (f) return { x: f.offset.x, y: f.offset.y, w: f.rect.w, h: f.rect.h }
+  }
+  const sprite = currentSprite.value
+  const frame = sprite?.frames[canvasDisplayIndex.value]
+  const measured = nonBsfBox.value
+  if (measured && frame && measured.url === frame.url) return measured.box
+  return {
+    x: 0,
+    y: 0,
+    w: canvasFrameNatural.value?.w ?? spriteNaturalW.value,
+    h: canvasFrameNatural.value?.h ?? spriteNaturalH.value,
+  }
+})
+
+const ZOOM_MIN = 0.1
+const ZOOM_MAX = 32
+const zoomPercent = computed(() => Math.round(canvasZoom.value * 100))
+
+/** 属性面板「尺寸」：素材尺寸（.bsf 用画布尺寸，图片角色用当前帧内容框），只读展示 */
+const spriteSize = computed(() => {
+  const c = currentSprite.value?.bsf?.canvas
+  if (c) return { w: c.w, h: c.h }
+  const b = displayFrameBounds.value
+  return { w: Math.round(b.w), h: Math.round(b.h) }
+})
+
+/**
+ * 场景对象锚点（画布坐标）= 当前帧包围盒中心。
+ * 角色在场景里以「视觉中心」摆放/旋转/缩放，选中框四周对称、正中心正好落在坐标轴上；
+ * 角色自身的中心点（pivot）只作为游戏内注册点，由「中心」工具单独显示与编辑。
+ */
+const objectAnchor = computed<{ x: number; y: number }>(() => {
+  const b = displayFrameBounds.value
+  if (b && b.w > 0 && b.h > 0) return { x: b.x + b.w / 2, y: b.y + b.h / 2 }
+  return spritePivot.value
+})
+
+/** 世界原点在场景视口中的屏幕位置 */
+const originScreen = computed(() => ({
+  x: viewSize.value.w / 2 + canvasPanX.value,
+  y: viewSize.value.h / 2 + canvasPanY.value,
+}))
+
+/** 网格步长（世界像素）：保证屏幕上不小于 8px，随缩放自适应 1/2/4/8/16… */
+function gridStepWorld(zoom: number): number {
+  let step = 1
+  while (step * zoom < 8) step *= 2
+  return step
+}
+
+const sceneGridStyle = computed(() => {
+  const z = canvasZoom.value
+  const step = gridStepWorld(z)
+  const minor = step * z
+  const major = minor * 8
+  const ox = originScreen.value.x
+  const oy = originScreen.value.y
+  const minorLineH = 'linear-gradient(to right, rgba(255,255,255,0.045) 1px, transparent 1px)'
+  const minorLineV = 'linear-gradient(to bottom, rgba(255,255,255,0.045) 1px, transparent 1px)'
+  const majorLineH = 'linear-gradient(to right, rgba(255,255,255,0.09) 1px, transparent 1px)'
+  const majorLineV = 'linear-gradient(to bottom, rgba(255,255,255,0.09) 1px, transparent 1px)'
+  return {
+    backgroundImage: `${minorLineH}, ${minorLineV}, ${majorLineH}, ${majorLineV}`,
+    backgroundSize: `${minor}px ${minor}px, ${minor}px ${minor}px, ${major}px ${major}px, ${major}px ${major}px`,
+    backgroundPosition: `${ox}px ${oy}px, ${ox}px ${oy}px, ${ox}px ${oy}px, ${ox}px ${oy}px`,
+  }
+})
+
+/** 把角色包围盒中心对齐到视口中心（保持给定缩放） */
+function centerOnSprite(zoom = canvasZoom.value) {
+  const t = sceneTransform.value
+  const p = objectAnchor.value
+  const b = displayFrameBounds.value
+  const scaleFactor = Math.max(5, t.scale) / 100
+  const rad = (-t.angle) * Math.PI / 180
+  const dx = (b.x + b.w / 2 - p.x) * zoom * scaleFactor
+  const dy = (b.y + b.h / 2 - p.y) * zoom * scaleFactor
+  const rx = dx * Math.cos(rad) - dy * Math.sin(rad)
+  const ry = dx * Math.sin(rad) + dy * Math.cos(rad)
+  canvasPanX.value = -t.x * zoom - rx
+  canvasPanY.value = t.y * zoom - ry
+}
+
+/** 进入角色时适配：按包围盒留出 30% 边距，缩放不超过 8× */
+function fitSceneView() {
+  if (!currentSprite.value) return
+  const vw = viewSize.value.w || canvasRef.value?.clientWidth || 640
+  const vh = viewSize.value.h || canvasRef.value?.clientHeight || 480
+  const b = displayFrameBounds.value
+  const sf = Math.max(5, sceneTransform.value.scale) / 100
+  const w = Math.max(1, b.w * sf)
+  const h = Math.max(1, b.h * sf)
+  const z = Math.min(8, Math.max(ZOOM_MIN, Math.min((vw * 0.7) / w, (vh * 0.7) / h)))
+  canvasZoom.value = z
+  centerOnSprite(z)
+}
+
+/** 重置视图：100% 缩放并把角色放回视口中心 */
+function resetCanvas() {
+  canvasZoom.value = 1
+  centerOnSprite(1)
+}
+
+function zoomBy(factor: number) {
+  const old = canvasZoom.value
+  const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, old * factor))
+  const ratio = next / old
+  // 保持视口中心不动（初始适配已把角色对到中心）
+  canvasPanX.value *= ratio
+  canvasPanY.value *= ratio
+  canvasZoom.value = next
+}
+
+/** 确保 transform 字段存在：只有用户真正编辑过才会写进角色数据 */
+function ensureTransform(): SpriteTransform | null {
+  const sprite = currentSprite.value
+  if (!sprite) return null
+  if (!sprite.transform) sprite.transform = { ...DEFAULT_SPRITE_TRANSFORM }
+  return sprite.transform
+}
+
+/**
+ * 单位文字（px）定位：紧跟在数字后面，只留 6px 间隙。
+ * 输入框是固定宽度、数字左对齐，用「字符宽（ch）」估算数字占位，
+ * 这样 1 位数和 4 位数都能让 px 贴在自己后面，不会飞到输入框右边缘。
+ */
+function axisUnitLeft(value: number): string {
+  const text = String(Math.round(Number.isFinite(value) ? value : 0))
+  const digits = text.replace('-', '').length
+  // 负号比数字窄，按 0.6 个字符宽计入
+  const signWidth = text.startsWith('-') ? 0.6 : 0
+  return `calc(28px + ${digits + signWidth}ch + 6px)`
+}
+
+/** 缩放 X / Y 的显示值：分轴字段缺省时等于统一缩放 */
+const scaleXValue = computed(() => sceneTransform.value.scaleX ?? sceneTransform.value.scale)
+const scaleYValue = computed(() => sceneTransform.value.scaleY ?? sceneTransform.value.scale)
+
+/** 约束比例：勾选时 X / Y 联动（默认勾选）；取消后允许分别设置宽高比例
+ *  切换到已保存分轴缩放的角色时自动取消勾选，避免显示值被误清 */
+const scaleLink = ref(true)
+watch(
+  () => [sceneTransform.value.scaleX, sceneTransform.value.scaleY],
+  ([sx, sy]) => {
+    // 有分轴数据 = 之前取消过约束；切换到普通角色时恢复默认勾选
+    scaleLink.value = sx === undefined && sy === undefined
+  },
+  { immediate: true },
+)
+
+function onScaleLinkChange(e: Event) {
+  scaleLink.value = (e.target as HTMLInputElement).checked
+  const t = ensureTransform()
+  if (!t) return
+  if (scaleLink.value) {
+    // 重新锁定：以 X 为基准统一，清掉分轴字段
+    t.scale = scaleXValue.value
+    delete t.scaleX
+    delete t.scaleY
+    scheduleSave()
+  }
+}
+
+/** 缩放输入：约束比例时同时改 X / Y，否则只改当前轴 */
+function onScaleInput(axis: 'x' | 'y', e: Event) {
+  const raw = Number((e.target as HTMLInputElement).value)
+  if (!Number.isFinite(raw)) return
+  const t = ensureTransform()
+  if (!t) return
+  const v = Math.min(1000, Math.max(5, raw))
+  if (scaleLink.value) {
+    t.scale = v
+    delete t.scaleX
+    delete t.scaleY
+  } else if (axis === 'x') {
+    t.scaleX = v
+  } else {
+    t.scaleY = v
+  }
+  scheduleSave()
+}
+
+/** 写入单个变换字段（拖拽手柄 / 滑条共用；改统一缩放时清掉分轴值） */
+function setTransformField(field: keyof SpriteTransform, value: number) {
+  if (!Number.isFinite(value)) return
+  const t = ensureTransform()
+  if (!t) return
+  if (field === 'scale') {
+    t.scale = Math.min(1000, Math.max(5, value))
+    delete t.scaleX
+    delete t.scaleY
+  } else t[field] = value
+  scheduleSave()
+}
+
+function resetSceneTransform() {
+  const sprite = currentSprite.value
+  if (!sprite) return
+  sprite.transform = { ...DEFAULT_SPRITE_TRANSFORM }
+  scheduleSave()
+}
+
+function onTransformInput(field: keyof SpriteTransform, e: Event) {
+  const v = Number((e.target as HTMLInputElement).value)
+  if (!Number.isFinite(v)) return
+  setTransformField(field, v)
+}
+
+// ═══ 变换手柄（「选择」工具）：移动 / 等比缩放 / 旋转 ═══
+
+type GizmoCorner = 'tl' | 'tr' | 'br' | 'bl'
+type GizmoDrag = {
+  kind: 'move' | 'scale' | 'rotate'
+  startClientX: number
+  startClientY: number
+  start: SpriteTransform
+  pivotClientX: number
+  pivotClientY: number
+  startDistance: number
+  startPointerAngle: number
+}
+
+const gizmoDrag = ref<GizmoDrag | null>(null)
+
+const gizmoVisible = computed(() => activeTool.value === 'select' && !!currentSprite.value)
+
+const sceneGizmoLayerStyle = computed(() => ({
+  transform: `translate(${canvasPanX.value}px, ${canvasPanY.value}px)`,
+}))
+
+/** 手柄根节点：世界坐标 (t.x, t.y) 映射到视口（y 向上取负） */
+const gizmoRootStyle = computed(() => {
+  const t = sceneTransform.value
+  const z = canvasZoom.value
+  return { left: `${t.x * z}px`, top: `${-t.y * z}px` }
+})
+
+const gizmoRotatorStyle = computed(() => ({
+  transform: `rotate(${-sceneTransform.value.angle}deg)`,
+}))
+
+/** 选择框相对场景锚点（包围盒中心）的偏移与尺寸（显示倍率 = 场景缩放 × 角色缩放，分轴） */
+const gizmoFrameStyle = computed(() => {
+  const p = objectAnchor.value
+  const b = displayFrameBounds.value
+  const dzx = displayZoomX.value
+  const dzy = displayZoomY.value
+  return {
+    left: `${(b.x - p.x) * dzx}px`,
+    top: `${(b.y - p.y) * dzy}px`,
+    width: `${Math.max(1, b.w * dzx)}px`,
+    height: `${Math.max(1, b.h * dzy)}px`,
+  }
+})
+
+const gizmoArmStyle = computed(() => {
+  const p = objectAnchor.value
+  const b = displayFrameBounds.value
+  const dzx = displayZoomX.value
+  const dzy = displayZoomY.value
+  return {
+    left: `${(b.x + b.w / 2 - p.x) * dzx}px`,
+    top: `${(b.y - p.y) * dzy - 22}px`,
+  }
+})
+
+const gizmoKnobStyle = computed(() => {
+  const p = objectAnchor.value
+  const b = displayFrameBounds.value
+  const dzx = displayZoomX.value
+  const dzy = displayZoomY.value
+  return {
+    left: `${(b.x + b.w / 2 - p.x) * dzx}px`,
+    top: `${(b.y - p.y) * dzy - 30}px`,
+  }
+})
+
+/** 四角缩放手柄：反向旋转保持屏幕轴对齐 */
+function gizmoHandleStyle(corner: GizmoCorner) {
+  const pos: Record<GizmoCorner, [number, number]> = {
+    tl: [0, 0], tr: [100, 0], br: [100, 100], bl: [0, 100],
+  }
+  return {
+    left: `${pos[corner][0]}%`,
+    top: `${pos[corner][1]}%`,
+    transform: `translate(-50%, -50%) rotate(${sceneTransform.value.angle}deg)`,
+  }
+}
 
 function setPivot(p: { x: number; y: number }) {
   const bsf = currentSprite.value?.bsf
@@ -644,7 +1133,66 @@ function resetAnno() {
 // ═══ 碰撞标注（.bsf / 单图角色；无自定义 = 引擎自动碰撞，学生默认路径） ═══
 
 /** 当前激活的标注图层：中心 / 碰撞 / 标记（单选，同一套画布框架） */
-const activeAnnoLayer = ref<'pivot' | 'collision' | 'marker'>('pivot')
+const activeTool = ref<'select' | 'pivot' | 'collision' | 'marker'>('select')
+
+/** 右侧面板标签页：动画（预览 + 片段）/ 属性（角色检视器，配合工具栏当前工具） */
+const rightTab = ref<'animation' | 'props'>('animation')
+
+/** 工具条切换工具：同时把右侧面板切到「属性」页——该工具的详细设置都在那里 */
+function pickTool(tool: 'select' | 'pivot' | 'collision' | 'marker') {
+  activateCanvasTool(tool)
+  rightTab.value = 'props'
+}
+
+/** 属性面板分区折叠状态：与地图编辑器检视器一致的可折叠分区，默认全部展开 */
+const propFold = ref({
+  basic: true,
+  transform: true,
+  pivot: true,
+  collision: true,
+  marker: true,
+  markerDetail: true,
+})
+
+/** 属性面板下拉选项：与地图编辑器属性面板共用 CustomSelect，选项统一在脚本里定义 */
+const SCOPE_OPTIONS = [
+  { label: '全部帧', value: 'all' },
+  { label: '仅当前帧', value: 'one' },
+]
+
+const FLIP_MODE_OPTIONS = [
+  { label: '不翻转', value: 'none' },
+  { label: '水平翻转', value: 'h' },
+  { label: '垂直翻转', value: 'v' },
+  { label: '水平 + 垂直', value: 'hv' },
+]
+
+/** 翻转模式下拉的当前值（把 flipX / flipY 两个开关合并成一个选项） */
+const flipModeValue = computed(() => {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return 'none'
+  if (bsf.flipX && bsf.flipY) return 'hv'
+  if (bsf.flipX) return 'h'
+  if (bsf.flipY) return 'v'
+  return 'none'
+})
+
+function onFlipModeSelect(v: string) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  if (v === 'h' || v === 'hv') bsf.flipX = true
+  else delete bsf.flipX
+  if (v === 'v' || v === 'hv') bsf.flipY = true
+  else delete bsf.flipY
+  scheduleSave()
+}
+
+const COLLISION_TYPE_OPTIONS = [
+  { label: '自动（内容包围盒）', value: 'auto' },
+  { label: '矩形', value: 'rect' },
+  { label: '胶囊', value: 'capsule' },
+  { label: '自定义多边形', value: 'polygon' },
+]
 
 /** 第 i 帧的有效碰撞形状：帧覆盖 > 统一值 > null（自动碰撞） */
 function effCollision(i: number): SpriteCollisionShape | null {
@@ -699,6 +1247,15 @@ function resetCollisionToAuto() {
   scheduleSave()
 }
 
+/** 属性面板「碰撞类型」下拉的当前值：null（自动碰撞）显示为 auto */
+const collisionTypeValue = computed(() => effCol.value?.type ?? 'auto')
+
+/** 属性面板「碰撞类型」切换：自动 = 清空自定义碰撞，其余按类型转换 */
+function onCollisionTypeSelect(value: string) {
+  if (value === 'auto') resetCollisionToAuto()
+  else convertCollisionType(value as 'rect' | 'capsule' | 'polygon')
+}
+
 /** 禁用碰撞：整角色不参与地形/边界物理阻挡（碰撞形状保留，重新勾选即恢复） */
 const collisionDisabled = computed(() => !!currentSprite.value?.bsf?.collisionDisabled)
 
@@ -724,6 +1281,42 @@ function onGravityChange(e: Event) {
   scheduleSave()
 }
 
+/** Y 轴排序：勾选后同层内按脚底 Y 坐标排序（越靠下越靠前） */
+const spriteYSort = computed(() => !!currentSprite.value?.bsf?.ySort)
+
+function onYSortChange(e: Event) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  const checked = (e.target as HTMLInputElement).checked
+  if (checked) bsf.ySort = true
+  else delete bsf.ySort
+  scheduleSave()
+}
+
+/** 初始隐藏：勾选后角色创建时不可见（代码里 show() 后出现），适合先摆好位置隐藏的角色 */
+const spriteHidden = computed(() => !!currentSprite.value?.bsf?.hidden)
+
+/** 默认图层：数字越大越靠前；同一层按创建顺序（后创建的在上面） */
+const spriteLayer = computed(() => currentSprite.value?.bsf?.layer ?? 0)
+
+function onLayerChange(e: Event) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  const raw = Math.round(Number((e.target as HTMLInputElement).value))
+  const n = Number.isFinite(raw) ? Math.max(-100, Math.min(100, raw)) : 0
+  if (n === 0) delete bsf.layer
+  else bsf.layer = n
+  scheduleSave()
+}
+
+function onHiddenChange(e: Event) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  if ((e.target as HTMLInputElement).checked) bsf.hidden = true
+  else delete bsf.hidden
+  scheduleSave()
+}
+
 /** 当前帧内容框（画布坐标）→ 自定义碰撞初值：与自动碰撞行为一致起步 */
 function frameContentCollision(): SpriteCollisionShape {
   const bsf = currentSprite.value!.bsf!
@@ -737,10 +1330,10 @@ function frameContentCollision(): SpriteCollisionShape {
   }
 }
 
-function activateAnnoLayer(layer: 'pivot' | 'collision' | 'marker') {
+function activateCanvasTool(layer: 'select' | 'pivot' | 'collision' | 'marker') {
   // 幽灵图钉只在标记图层有效，切到别的图层先退出放置
   if (layer !== 'marker') cancelMarkerPlacing()
-  activeAnnoLayer.value = layer
+  activeTool.value = layer
   if (layer === 'collision') {
     const bsf = currentSprite.value?.bsf
     if (!bsf) return
@@ -857,6 +1450,12 @@ function hasAnyMarkerOverride(i: number): boolean {
 const selMarkerPos = computed(() =>
   selMarkerName.value ? effMarker(selMarkerName.value, annoFrameIndex.value) : null,
 )
+
+/** 属性面板标记列表：坐标文本（整数像素，与场景信息栏一致） */
+function markerCoordText(name: string): string {
+  const p = effMarker(name, annoFrameIndex.value)
+  return p ? `${Math.round(p.x)}, ${Math.round(p.y)}` : '—'
+}
 
 function markerHandleStyle(name: string) {
   const p = effMarker(name, annoFrameIndex.value)
@@ -1067,22 +1666,45 @@ const pivotHandleStyle = computed(() => {
   return p ? { left: `${p.x}px`, top: `${p.y}px` } : {}
 })
 
+/** 屏幕坐标 → 场景世界坐标（x 向右 / y 向上；信息栏显示用，与角色变换无关） */
+function screenToWorld(e: MouseEvent): { x: number; y: number } | null {
+  const rect = canvasRef.value?.getBoundingClientRect()
+  if (!rect) return null
+  const z = canvasZoom.value
+  if (z <= 0) return null
+  return {
+    x: Math.round((e.clientX - rect.left - rect.width / 2 - canvasPanX.value) / z),
+    y: Math.round(-(e.clientY - rect.top - rect.height / 2 - canvasPanY.value) / z),
+  }
+}
+
 /**
  * 屏幕坐标 → 逻辑画布坐标（0.5px 吸附）。
- * 不能手算 zoom/pan 逆变换：标注层既被 canvasLayoutZoom 缩放，又可能被外层的
- * 「余量缩放」(canvasResidualScale) 二次缩放，手算极易漏项（旧实现把画布中心
- * 偏移当未缩放处理，缩放≠1 时中心点/标记就会偏离鼠标）。
- * 直接读标注层实际包围盒反推比例，与 CollisionShapeOverlay 同一套算法。
+ * 角色在场景里会被平移 / 旋转 / 缩放，不能读包围盒（旋转后的包围盒不是真实比例），
+ * 必须按正向变换做精确逆运算：
+ * 屏幕 = 视口中心 + pan + (x·zoom, -y·zoom) + R(-angle)·((画布点 - 中心点)·显示倍率)
  */
 function screenToCanvas(e: MouseEvent): { x: number; y: number } | null {
-  const el = annoLayerRef.value
-  const bsf = currentSprite.value?.bsf
-  if (!el || !bsf || bsf.canvas.w <= 0 || bsf.canvas.h <= 0) return null
-  const rect = el.getBoundingClientRect()
-  if (rect.width <= 0 || rect.height <= 0) return null
-  const lx = (e.clientX - rect.left) / (rect.width / bsf.canvas.w)
-  const ly = (e.clientY - rect.top) / (rect.height / bsf.canvas.h)
-  return { x: Math.round(lx * 2) / 2, y: Math.round(ly * 2) / 2 }
+  const sprite = currentSprite.value
+  const rect = canvasRef.value?.getBoundingClientRect()
+  if (!sprite || !rect) return null
+  const t = sceneTransform.value
+  const z = canvasZoom.value
+  const dz = displayZoom.value
+  if (dz <= 0) return null
+  // 场景锚点（包围盒中心）在屏幕上的位置
+  const anchorX = rect.left + rect.width / 2 + canvasPanX.value + t.x * z
+  const anchorY = rect.top + rect.height / 2 + canvasPanY.value - t.y * z
+  const sx = e.clientX - anchorX
+  const sy = e.clientY - anchorY
+  // 反向旋转（CSS 旋转 -angle，逆运算 +angle）
+  const a = t.angle * Math.PI / 180
+  const cos = Math.cos(a)
+  const sin = Math.sin(a)
+  const vx = (sx * cos - sy * sin) / dz
+  const vy = (sx * sin + sy * cos) / dz
+  const p = objectAnchor.value
+  return { x: Math.round((vx + p.x) * 2) / 2, y: Math.round((vy + p.y) * 2) / 2 }
 }
 
 function onPivotMouseDown(e: MouseEvent) {
@@ -1124,6 +1746,119 @@ function onMarkerDragMove(e: MouseEvent) {
 
 function onMarkerDragUp() {
   isMarkerDragging.value = false
+}
+
+// ── 变换手柄拖拽：移动 / 等比缩放 / 旋转 ──
+
+function normalizeAngle(a: number): number {
+  const n = (((a + 180) % 360) + 360) % 360 - 180
+  return Math.round((Math.abs(n) === 180 ? 180 : n) * 10) / 10
+}
+
+/** 手柄拖动开始：内部=移动，四角=等比缩放，顶部圆点=旋转 */
+function startGizmoDrag(kind: 'move' | 'scale' | 'rotate', e: MouseEvent) {
+  if (e.button !== 0 || !gizmoVisible.value) return
+  e.preventDefault()
+  e.stopPropagation()
+  const t = ensureTransform()
+  const rect = canvasRef.value?.getBoundingClientRect()
+  if (!t || !rect) return
+  const z = canvasZoom.value
+  const pivotClientX = rect.left + rect.width / 2 + canvasPanX.value + t.x * z
+  const pivotClientY = rect.top + rect.height / 2 + canvasPanY.value - t.y * z
+  const dx = e.clientX - pivotClientX
+  const dy = e.clientY - pivotClientY
+  gizmoDrag.value = {
+    kind,
+    startClientX: e.clientX,
+    startClientY: e.clientY,
+    start: { ...t },
+    pivotClientX,
+    pivotClientY,
+    startDistance: Math.hypot(dx, dy),
+    startPointerAngle: Math.atan2(dy, dx),
+  }
+  document.addEventListener('mousemove', onGizmoDragMove)
+  document.addEventListener('mouseup', onGizmoDragUp)
+}
+
+function onGizmoDragMove(e: MouseEvent) {
+  const d = gizmoDrag.value
+  if (!d) return
+  const t = ensureTransform()
+  if (!t) return
+  const z = canvasZoom.value
+  if (d.kind === 'move') {
+    let dx = (e.clientX - d.startClientX) / z
+    let dy = -(e.clientY - d.startClientY) / z
+    if (e.shiftKey) {
+      if (Math.abs(dx) >= Math.abs(dy)) dy = 0
+      else dx = 0
+    }
+    t.x = Math.round(d.start.x + dx)
+    t.y = Math.round(d.start.y + dy)
+  } else if (d.kind === 'scale') {
+    const dist = Math.hypot(e.clientX - d.pivotClientX, e.clientY - d.pivotClientY)
+    const ratio = d.startDistance > 0 ? dist / d.startDistance : 1
+    const clamp = (v: number) => Math.min(1000, Math.max(5, Math.round(v)))
+    if (scaleLink.value) {
+      // 约束比例：两轴同步，清掉分轴值
+      t.scale = clamp(d.start.scale * ratio)
+      delete t.scaleX
+      delete t.scaleY
+    } else {
+      // 已取消约束：按各自起点等比缩放，保持宽高比
+      const sx0 = d.start.scaleX ?? d.start.scale
+      const sy0 = d.start.scaleY ?? d.start.scale
+      t.scaleX = clamp(sx0 * ratio)
+      t.scaleY = clamp(sy0 * ratio)
+    }
+  } else {
+    const pointerAngle = Math.atan2(e.clientY - d.pivotClientY, e.clientX - d.pivotClientX)
+    const delta = (pointerAngle - d.startPointerAngle) * 180 / Math.PI
+    // 屏幕顺时针 = 用户角度逆时针为负
+    let angle = d.start.angle - delta
+    angle = e.shiftKey ? Math.round(angle / 15) * 15 : angle
+    t.angle = normalizeAngle(angle)
+  }
+  scheduleSave()
+}
+
+function onGizmoDragUp() {
+  if (!gizmoDrag.value) return
+  gizmoDrag.value = null
+  document.removeEventListener('mousemove', onGizmoDragMove)
+  document.removeEventListener('mouseup', onGizmoDragUp)
+  scheduleSave()
+}
+
+/** Esc 取消正在进行的变换拖拽：回到拖拽前状态 */
+function cancelGizmoDrag() {
+  const d = gizmoDrag.value
+  if (!d) return
+  const t = ensureTransform()
+  if (t) {
+    t.x = d.start.x
+    t.y = d.start.y
+    t.angle = d.start.angle
+    t.scale = d.start.scale
+    // 分轴缩放同样恢复（start 里缺省表示当时是统一缩放）
+    if (d.start.scaleX === undefined) delete t.scaleX
+    else t.scaleX = d.start.scaleX
+    if (d.start.scaleY === undefined) delete t.scaleY
+    else t.scaleY = d.start.scaleY
+  }
+  gizmoDrag.value = null
+  document.removeEventListener('mousemove', onGizmoDragMove)
+  document.removeEventListener('mouseup', onGizmoDragUp)
+}
+
+/** 键盘事件来自输入框时不触发全局快捷键 */
+function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null
+  if (!el) return false
+  const tag = el.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable
 }
 
 
@@ -1257,6 +1992,10 @@ watch(
     () => currentSprite.value?.frames[canvasDisplayIndex.value]?.url,
     () => currentSprite.value?.frames[selectedFrameIndex.value]?.url,
     () => canvasZoom.value,
+    // 角色缩放会改变光栅化倍率，必须重画（否则 canvas 尺寸不跟随，放大后发糊）
+    () => sceneTransform.value.scale,
+    () => sceneTransform.value.scaleX,
+    () => sceneTransform.value.scaleY,
     () => previewScale.value,
     () => editorStore.renderMode,
   ],
@@ -1274,24 +2013,60 @@ onMounted(() => {
   document.addEventListener('mouseup', onMarkerDragUp)
   // 标记放置中按 Esc 退出（与地图编辑器一致）
   window.addEventListener('keydown', onEditorKeydown)
-  // 首屏：canvas 挂载后按当前帧画一次
-  nextTick(redrawSpriteImages)
+  window.addEventListener('keyup', onEditorKeyup)
+  window.addEventListener('blur', onWindowBlur)
+  // 场景视口尺寸：网格对齐 / 适配视图 / 原点坐标都依赖它
+  const el = canvasRef.value
+  if (el) {
+    viewSize.value = { w: el.clientWidth, h: el.clientHeight }
+    viewResizeObserver = new ResizeObserver(() => {
+      viewSize.value = { w: el.clientWidth, h: el.clientHeight }
+    })
+    viewResizeObserver.observe(el)
+  }
+  // 首屏：canvas 挂载后按当前帧画一次；视口刚测好时补做一次视图适配
+  nextTick(() => {
+    redrawSpriteImages()
+    if (sceneFitPending.value) {
+      sceneFitPending.value = false
+      fitSceneView()
+    }
+  })
 })
 
 onBeforeUnmount(() => {
   stopAnimation()
   revokeSpriteUrls(currentSprite.value)
   if (saveTimer) clearTimeout(saveTimer)
+  viewResizeObserver?.disconnect()
+  viewResizeObserver = null
   document.removeEventListener('mouseup', onGlobalMouseUp)
   document.removeEventListener('mousemove', onPivotDragMove)
   document.removeEventListener('mouseup', onPivotDragUp)
   document.removeEventListener('mousemove', onMarkerDragMove)
   document.removeEventListener('mouseup', onMarkerDragUp)
+  document.removeEventListener('mousemove', onGizmoDragMove)
+  document.removeEventListener('mouseup', onGizmoDragUp)
   window.removeEventListener('keydown', onEditorKeydown)
+  window.removeEventListener('keyup', onEditorKeyup)
+  window.removeEventListener('blur', onWindowBlur)
 })
 
 function onEditorKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape' && markerPlacing.value) cancelMarkerPlacing()
+  if (e.key === 'Escape' && gizmoDrag.value) cancelGizmoDrag()
+  // 空格临时平移（输入框里敲空格不拦截；不 preventDefault，避免抢掉按钮的键盘激活）
+  if (e.code === 'Space' && !isTypingTarget(e.target)) {
+    spaceHeld.value = true
+  }
+}
+
+function onEditorKeyup(e: KeyboardEvent) {
+  if (e.code === 'Space') spaceHeld.value = false
+}
+
+function onWindowBlur() {
+  spaceHeld.value = false
 }
 </script>
 
@@ -1351,253 +2126,98 @@ function onEditorKeydown(e: KeyboardEvent) {
 
     <!-- 中: 画布列（标注工具条 + 画布） -->
     <div class="canvas-col">
-      <!-- 标注图层工具条：图层单选切换，同一画布框架 -->
-      <div v-if="canAnno" class="anno-toolbar">
+      <!-- 场景工具条：选择（变换）/ 中心 / 碰撞 / 标记，同一场景框架 -->
+      <div v-if="currentSprite" class="anno-toolbar">
         <button
           class="layer-chip"
-          :class="{ active: activeAnnoLayer === 'pivot' }"
+          :class="{ active: activeTool === 'select' }"
           type="button"
-          @click="activateAnnoLayer('pivot')"
+          @click="pickTool('select')"
+        >
+          <img :src="iconSelectTool" class="layer-chip-icon" alt="" />选择
+        </button>
+        <button
+          v-if="canAnno"
+          class="layer-chip"
+          :class="{ active: activeTool === 'pivot' }"
+          type="button"
+          @click="pickTool('pivot')"
         >
           <img :src="iconCenterPivot" class="layer-chip-icon" alt="" />中心
         </button>
         <button
+          v-if="canAnno"
           class="layer-chip"
-          :class="{ active: activeAnnoLayer === 'collision' }"
+          :class="{ active: activeTool === 'collision' }"
           type="button"
-          @click="activateAnnoLayer('collision')"
+          @click="pickTool('collision')"
         >
           <img :src="iconResetAnchor" class="layer-chip-icon" alt="" />碰撞
         </button>
         <button
+          v-if="canAnno"
           class="layer-chip"
-          :class="{ active: activeAnnoLayer === 'marker' }"
+          :class="{ active: activeTool === 'marker' }"
           type="button"
-          @click="activateAnnoLayer('marker')"
+          @click="pickTool('marker')"
         >
           <img :src="iconMarker" class="layer-chip-icon" alt="" />标记
         </button>
-        <!-- 标注控件随激活图层切换（与底部浮动条同源，共享状态） -->
-        <template v-if="activeAnnoLayer === 'pivot'">
-          <div class="props-sep"></div>
-          <div class="coord-group">
-            <label>X</label>
-            <input
-              class="coord-input"
-              type="number"
-              step="0.5"
-              :value="annoPivot ? annoPivot.x.toFixed(1) : ''"
-              @change="onCoordChange('x', $event)"
-            />
-          </div>
-          <div class="coord-group">
-            <label>Y</label>
-            <input
-              class="coord-input"
-              type="number"
-              step="0.5"
-              :value="annoPivot ? annoPivot.y.toFixed(1) : ''"
-              @change="onCoordChange('y', $event)"
-            />
-          </div>
-          <div class="props-sep"></div>
-          <button class="preset-btn" type="button" @click="applyPivotPreset('center')">中心</button>
-          <button class="preset-btn" type="button" @click="applyPivotPreset('feet')">脚底</button>
-          <button class="preset-btn" type="button" @click="resetAnno">重置</button>
-          <button
-            v-if="hasPivotOverride(annoFrameIndex)"
-            class="clear-override-btn"
-            type="button"
-            @click="clearPivotOverride"
-          >恢复统一</button>
-          <div class="props-sep"></div>
-          <div class="scope-seg">
-            <button
-              type="button"
-              :class="{ on: annoScope === 'all' }"
-              @click="annoScope = 'all'"
-            >全部帧</button>
-            <button
-              type="button"
-              :class="{ on: annoScope === 'one', 'on-blue': annoScope === 'one' }"
-              @click="annoScope = 'one'"
-            >仅当前帧</button>
-          </div>
-        </template>
-        <template v-else-if="activeAnnoLayer === 'collision'">
-          <div class="props-sep"></div>
-          <div class="scope-seg">
-            <button
-              type="button"
-              :class="{ on: !effCol }"
-              @click="resetCollisionToAuto"
-            >自动</button>
-            <button
-              type="button"
-              :class="{ on: effCol?.type === 'rect' }"
-              @click="convertCollisionType('rect')"
-            >矩形</button>
-            <button
-              type="button"
-              :class="{ on: effCol?.type === 'capsule' }"
-              @click="convertCollisionType('capsule')"
-            >胶囊</button>
-            <button
-              type="button"
-              :class="{ on: effCol?.type === 'polygon' }"
-              @click="convertCollisionType('polygon')"
-            >自定义</button>
-          </div>
-          <div class="props-sep"></div>
-          <button
-            v-if="hasCollisionOverride(annoFrameIndex)"
-            class="clear-override-btn"
-            type="button"
-            @click="clearCollisionOverride"
-          >恢复统一</button>
-          <div class="props-sep"></div>
-          <div class="scope-seg">
-            <button
-              type="button"
-              :class="{ on: annoScope === 'all' }"
-              @click="annoScope = 'all'"
-            >全部帧</button>
-            <button
-              type="button"
-              :class="{ on: annoScope === 'one', 'on-blue': annoScope === 'one' }"
-              @click="annoScope = 'one'"
-            >仅当前帧</button>
-          </div>
-          <div class="props-sep"></div>
-          <label class="anno-checkbox" title="关闭后不参与物理：不会被墙壁、地面挡住，也无法站在地上">
-            <input
-              type="checkbox"
-              :checked="collisionDisabled"
-              @change="onCollisionDisabledChange"
-            />
-            <span>禁用碰撞</span>
-          </label>
-          <label class="anno-checkbox" title="关闭后不受地图重力影响，不会向下掉落；撞墙、落地等碰撞不受影响（适合子弹、飞行敌人）">
-            <input
-              type="checkbox"
-              :checked="gravityEnabled"
-              @change="onGravityChange"
-            />
-            <span>重力</span>
-          </label>
-        </template>
-        <template v-else>
-          <!-- 标记：点「添加标记」后在画布上点一下放置；再点一次或按 Esc 取消 -->
-          <div class="props-sep"></div>
-          <button
-            class="preset-btn"
-            type="button"
-            :class="{ 'is-active': markerPlacing }"
-            title="点一下进入放置，再在画布上点一下放好标记"
-            @click="toggleMarkerPlacing"
-          >添加标记</button>
-          <input
-            v-if="selMarkerName"
-            class="marker-rename-input"
-            v-model="markerNameDraft"
-            title="标记名称"
-            @blur="commitMarkerRename"
-            @keydown.enter="($event.target as HTMLInputElement).blur()"
-            @keydown.escape="cancelMarkerRename"
-          />
-          <button
-            v-if="selMarkerName"
-            class="preset-btn"
-            type="button"
-            title="删除标记"
-            @click="deleteMarker(selMarkerName)"
-          >删除</button>
-          <!-- 选中标记后才有坐标/作用域可调；没有标记时工具栏留空，提示去画布点一下 -->
-          <template v-if="selMarkerName">
-            <div class="props-sep"></div>
-            <div class="coord-group">
-              <label>X</label>
-              <input
-                class="coord-input"
-                type="number"
-                step="0.5"
-                :value="selMarkerPos ? selMarkerPos.x.toFixed(1) : ''"
-                @change="onMarkerCoordChange('x', $event)"
-              />
-            </div>
-            <div class="coord-group">
-              <label>Y</label>
-              <input
-                class="coord-input"
-                type="number"
-                step="0.5"
-                :value="selMarkerPos ? selMarkerPos.y.toFixed(1) : ''"
-                @change="onMarkerCoordChange('y', $event)"
-              />
-            </div>
-            <div class="props-sep"></div>
-            <button
-              v-if="hasMarkerOverride(selMarkerName, annoFrameIndex)"
-              class="clear-override-btn"
-              type="button"
-              @click="clearMarkerOverride"
-            >恢复统一</button>
-            <div class="props-sep"></div>
-            <div class="scope-seg">
-              <button
-                type="button"
-                :class="{ on: annoScope === 'all' }"
-                @click="annoScope = 'all'"
-              >全部帧</button>
-              <button
-                type="button"
-                :class="{ on: annoScope === 'one', 'on-blue': annoScope === 'one' }"
-                @click="annoScope = 'one'"
-              >仅当前帧</button>
-            </div>
-          </template>
-        </template>
+        <!-- 详细设置集中在右侧「属性」面板：随当前工具联动 -->
       </div>
 
       <div
         ref="canvasRef"
-        class="sprite-canvas"
-        :class="{ 'is-panning': isPanning, 'is-marker-placing': markerPlacing }"
+        class="sprite-canvas scene-viewport"
+        :class="{
+          'is-panning': isPanning,
+          'is-marker-placing': markerPlacing,
+          'is-space-ready': spaceHeld && !isPanning,
+        }"
         @wheel.prevent="onCanvasWheel"
         @mousedown="onCanvasMouseDown"
         @mousemove="onCanvasMouseMove"
         @mouseup="onCanvasMouseUp"
-        @mouseleave="onCanvasMouseUp"
+        @mouseleave="onCanvasMouseLeave"
         @dblclick="resetCanvas"
       >
-        <div class="canvas-center-anchor">
+        <!-- 无限网格 + 世界原点轴（类似地图编辑器的工作区，不画舞台边界） -->
+        <div class="scene-grid" :style="sceneGridStyle"></div>
+        <div class="scene-axis scene-axis-x" :style="{ top: `${originScreen.y}px` }"></div>
+        <div class="scene-axis scene-axis-y" :style="{ left: `${originScreen.x}px` }"></div>
+        <div
+          class="scene-origin-dot"
+          :style="{ left: `${originScreen.x}px`, top: `${originScreen.y}px` }"
+        ></div>
+
+        <!-- 世界层：角色对象以中心点为定位 / 旋转原点，包围盒随变换移动 -->
+        <div class="scene-world" :style="sceneWorldStyle">
           <div
-            class="canvas-sprite-wrapper"
-            :style="canvasWrapperStyle"
+            v-if="currentSprite?.frames[canvasDisplayIndex]"
+            class="sprite-object"
+            :style="spriteObjectStyle"
           >
             <!-- 帧图由 canvas 自绘：采样方式（最近邻/平滑）由 imageSmoothingEnabled 决定，
                  不受浏览器对 <img> 放大时的合成层重采样影响 -->
             <canvas
-              v-if="currentSprite?.frames[canvasDisplayIndex]"
               ref="spriteCanvasEl"
               class="canvas-sprite"
-              :style="{ imageRendering: imageRenderingStyle }"
+              :style="{ imageRendering: imageRenderingStyle, ...frameCanvasStyle, ...flipPreviewStyle }"
             />
-            <!-- 标注层：画布坐标 + transform 缩放（手柄内部再 1/zoom 反向缩放保持屏幕尺寸恒定） -->
+            <!-- 标注层：画布坐标 + transform 缩放（手柄内部再 1/显示倍率 反向缩放保持屏幕尺寸恒定） -->
             <div
               v-if="canAnno && currentSprite?.bsf"
-              ref="annoLayerRef"
               class="canvas-anno-layer"
               :style="annoLayerStyle"
             >
               <!-- 洋葱皮幽灵：相邻帧有效中心点不一致时显示（中心点图层） -->
               <div
-                v-for="g in (activeAnnoLayer === 'pivot' ? pivotGhosts : [])"
+                v-for="g in (activeTool === 'pivot' ? pivotGhosts : [])"
                 :key="g.i"
                 class="pivot-ghost"
                 :style="{ left: `${g.x}px`, top: `${g.y}px` }"
               >
-                <div class="ghost-counter" :style="{ transform: `scale(${1 / canvasZoom})` }">
+                <div class="ghost-counter" :style="{ transform: `scale(${1 / displayZoom})` }">
                   <span class="ghost-ring"></span>
                 </div>
               </div>
@@ -1605,21 +2225,22 @@ function onEditorKeydown(e: KeyboardEvent) {
               <div
                 v-if="annoPivot"
                 class="pivot-handle"
-                :class="{ 'is-override': annoScope === 'one', 'is-inactive': activeAnnoLayer !== 'pivot' }"
+                :class="{ 'is-override': annoScope === 'one', 'is-inactive': activeTool !== 'pivot', 'is-select': activeTool === 'select' }"
                 :style="pivotHandleStyle"
                 @mousedown="onPivotMouseDown"
               >
-                <div class="pivot-visual" :style="{ transform: `scale(${1 / canvasZoom})` }">
-                  <div class="pivot-ring"></div>
+                <div class="pivot-visual" :style="{ transform: `scale(${1 / Math.max(0.001, canvasLayoutZoom)})` }">
+                  <div class="pivot-anchor-icon" v-html="pivotAnchorMarkup"></div>
                 </div>
               </div>
               <!-- 碰撞形状叠加层（自动态显示引擎内容框；拖动手柄立即转为自定义） -->
               <CollisionShapeOverlay
-                v-if="activeAnnoLayer === 'collision'"
+                v-if="activeTool === 'collision'"
                 :canvas-w="currentSprite.bsf.canvas.w"
                 :canvas-h="currentSprite.bsf.canvas.h"
                 :shape="collisionDisplay"
-                :zoom="canvasZoom"
+                :zoom="displayZoom"
+                :angle="sceneTransform.angle"
                 :disabled="collisionDisabled"
                 @update="onCollisionUpdate"
               />
@@ -1629,14 +2250,14 @@ function onEditorKeydown(e: KeyboardEvent) {
                 ref="markerGhostEl"
                 class="marker-handle is-ghost"
               >
-                <div class="marker-visual" :style="{ transform: `scale(${1 / canvasZoom})` }">
+                <div class="marker-visual" :style="{ transform: `scale(${1 / displayZoom}) rotate(${sceneTransform.angle}deg)` }">
                   <div class="marker-icon" v-html="markerIconSvg"></div>
                   <span class="marker-label">新标记</span>
                 </div>
               </div>
               <!-- 标记手柄：标记.svg 图钉（图标配色独立于 svg 填充，mask 上色），画布点选/拖拽 -->
               <div
-                v-for="name in (activeAnnoLayer === 'marker' ? markerNames : [])"
+                v-for="name in (activeTool === 'marker' ? markerNames : [])"
                 :key="name"
                 class="marker-handle"
                 :class="{
@@ -1646,7 +2267,7 @@ function onEditorKeydown(e: KeyboardEvent) {
                 :style="markerHandleStyle(name)"
                 @mousedown="onMarkerMouseDown(name, $event)"
               >
-                <div class="marker-visual" :style="{ transform: `scale(${1 / canvasZoom})` }">
+                <div class="marker-visual" :style="{ transform: `scale(${1 / displayZoom}) rotate(${sceneTransform.angle}deg)` }">
                   <div class="marker-icon" v-html="markerIconSvg"></div>
                   <span class="marker-label">{{ name }}</span>
                 </div>
@@ -1654,12 +2275,88 @@ function onEditorKeydown(e: KeyboardEvent) {
             </div>
           </div>
         </div>
+
+        <!-- 变换手柄（屏幕空间：手柄尺寸恒定，不随场景缩放变形） -->
+        <div class="scene-gizmo-layer" :style="sceneGizmoLayerStyle">
+          <div
+            v-if="gizmoVisible"
+            class="gizmo-root"
+            :style="gizmoRootStyle"
+            @mousedown.stop
+            @dblclick.stop
+          >
+            <div class="gizmo-rotator" :style="gizmoRotatorStyle">
+              <div
+                class="gizmo-frame"
+                :style="gizmoFrameStyle"
+                title="拖动移动角色"
+                @mousedown="startGizmoDrag('move', $event)"
+              >
+                <span
+                  v-for="corner in (['tl', 'tr', 'br', 'bl'] as const)"
+                  :key="corner"
+                  class="gizmo-handle"
+                  :style="gizmoHandleStyle(corner)"
+                  @mousedown="startGizmoDrag('scale', $event)"
+                ></span>
+              </div>
+              <div class="gizmo-arm" :style="gizmoArmStyle"></div>
+              <div
+                class="gizmo-knob"
+                :style="gizmoKnobStyle"
+                title="拖动旋转角色（按住 Shift 每 15° 吸附）"
+                @mousedown="startGizmoDrag('rotate', $event)"
+              ></div>
+            </div>
+            <div
+              class="gizmo-anchor-icon"
+              v-html="pivotAnchorMarkup"
+              title="旋转中心：中心点"
+            ></div>
+          </div>
+        </div>
+
+        <!-- 右下角缩放条（与地图编辑器一致） -->
+        <div class="scene-zoom-bar" @mousedown.stop @dblclick.stop>
+          <button class="scene-zoom-btn" type="button" title="缩小" @click="zoomBy(0.9)">
+            <img :src="iconZoomOut" alt="" />
+          </button>
+          <button class="scene-zoom-value" type="button" title="重置视图（100%）" @click="resetCanvas">
+            {{ zoomPercent }}%
+          </button>
+          <button class="scene-zoom-btn" type="button" title="放大" @click="zoomBy(1.1)">
+            <img :src="iconZoomIn" alt="" />
+          </button>
+        </div>
+      </div>
+
+      <!-- 场景信息栏：角色尺寸 / 鼠标世界坐标 / 缩放 -->
+      <div class="scene-info-bar">
+        <span>角色 {{ Math.round(displayFrameBounds.w) }} × {{ Math.round(displayFrameBounds.h) }}</span>
+        <span>坐标 {{ mouseWorld ? `${mouseWorld.x}, ${mouseWorld.y}` : '—, —' }}</span>
+        <span>缩放 {{ zoomPercent }}%</span>
       </div>
     </div>
 
-    <!-- 右: 预览面板 (264px) -->
+    <!-- 右: 面板（动画 / 属性 两页切换，272px） -->
     <div class="preview-panel">
-      <div class="preview-label">ANIMATION</div>
+      <div class="right-tabs">
+        <button
+          class="right-tab"
+          :class="{ active: rightTab === 'animation' }"
+          type="button"
+          @click="rightTab = 'animation'"
+        >动画</button>
+        <button
+          class="right-tab"
+          :class="{ active: rightTab === 'props' }"
+          type="button"
+          @click="rightTab = 'props'"
+        >属性</button>
+      </div>
+
+      <!-- 动画页：预览 + 播放控制 + 动画片段 -->
+      <template v-if="rightTab === 'animation'">
 
       <!-- 预览区域 256×256 -->
       <div class="preview-bg">
@@ -1669,7 +2366,7 @@ function onEditorKeydown(e: KeyboardEvent) {
               v-if="currentSprite?.frames[selectedFrameIndex]"
               ref="previewCanvasEl"
               class="preview-image"
-              :style="{ imageRendering: imageRenderingStyle }"
+              :style="{ imageRendering: imageRenderingStyle, ...flipPreviewStyle }"
             />
           </div>
           <!-- FPS 控制 (悬浮在预览底部)：左=拖动滑条，右=帧数手动输入；速度按片段独立保存 -->
@@ -1760,6 +2457,454 @@ function onEditorKeydown(e: KeyboardEvent) {
               <button class="anim-loop-btn" @click.stop="toggleLoop(anim)">
                 <img :src="anim.loop !== false ? iconLoop : iconLoopOff" />
               </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      </template>
+
+      <!-- 属性页：所有分区放在同一页（排版对齐地图编辑器属性面板） -->
+      <div v-else class="props-scroll">
+        <div class="att-frame">
+          <!-- 基础设置：名称（可改） / 尺寸 / 图层 / 翻转 -->
+          <div class="att-group">
+            <div class="mi-section" :class="{ open: propFold.basic }">
+              <button class="mi-head" type="button" @click="propFold.basic = !propFold.basic">
+                <img :src="iconChevron" class="mi-chevron" alt="" />
+                <span class="mi-head-title">基础设置</span>
+              </button>
+              <div v-if="propFold.basic" class="mi-body">
+                <div class="att-row">
+                  <span class="att-label">名称</span>
+                  <input
+                    v-model="spriteNameDraft"
+                    class="att-input"
+                    title="角色名称，改完按回车或点别处生效"
+                    @blur="commitSpriteRename"
+                    @keydown.enter="($event.target as HTMLInputElement).blur()"
+                    @keydown.escape="spriteNameDraft = spriteDisplayName"
+                  />
+                </div>
+                <!-- 尺寸：只读信息（.bsf 用画布尺寸，图片角色用当前帧内容框） -->
+                <div class="att-row">
+                  <span class="att-label">尺寸</span>
+                  <div class="att-size-group">
+                    <div class="att-axis-field">
+                      <span class="att-axis-tag">X</span>
+                      <input
+                        class="att-input att-input-no-spin"
+                        type="number"
+                        :value="spriteSize.w"
+                        readonly
+                        tabindex="-1"
+                        title="画布尺寸，由素材画面决定"
+                      />
+                    </div>
+                    <div class="att-axis-field">
+                      <span class="att-axis-tag">Y</span>
+                      <input
+                        class="att-input att-input-no-spin"
+                        type="number"
+                        :value="spriteSize.h"
+                        readonly
+                        tabindex="-1"
+                        title="画布尺寸，由素材画面决定"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <!-- 图层设置：数字越大越靠前；下面几项是角色级开关 -->
+                  <div class="att-row">
+                    <span class="att-label">图层设置</span>
+                    <div class="att-size-group">
+                      <input
+                        class="att-input att-input-no-spin"
+                        type="number"
+                        step="1"
+                        title="数字越大越靠前（可填负数垫底）；同一层按创建顺序，后创建的在上面"
+                        :value="spriteLayer"
+                        :disabled="!currentSprite?.bsf"
+                        @change="onLayerChange"
+                      />
+                    </div>
+                  </div>
+                  <!-- 翻转模式：默认朝向与镜像（写入数据，游戏里创建角色时生效） -->
+                  <div class="att-row">
+                    <span class="att-label">翻转模式</span>
+                    <CustomSelect
+                      class="att-select"
+                      :model-value="flipModeValue"
+                      :options="FLIP_MODE_OPTIONS"
+                      @update:model-value="onFlipModeSelect"
+                    />
+                  </div>
+                  <div class="att-row">
+                    <span class="att-label">初始隐藏</span>
+                    <label class="att-checkbox" title="勾选后角色刚创建时看不见（代码里 show() 再出现），适合先藏起来的角色">
+                      <input
+                        type="checkbox"
+                        :checked="spriteHidden"
+                        :disabled="!currentSprite?.bsf"
+                        @change="onHiddenChange"
+                      />
+                    </label>
+                  </div>
+                  <div class="att-row">
+                    <span class="att-label">受到重力</span>
+                    <label class="att-checkbox" title="关闭后不受地图重力影响，不会向下掉落；撞墙、落地等碰撞不受影响（适合子弹、飞行敌人）">
+                      <input
+                        type="checkbox"
+                        :checked="gravityEnabled"
+                        :disabled="!currentSprite?.bsf"
+                        @change="onGravityChange"
+                      />
+                    </label>
+                  </div>
+                  <div class="att-row">
+                    <span class="att-label">Y轴排序</span>
+                    <label class="att-checkbox" title="同一图层内按脚底高度排序：越靠下方的角色盖住上方的角色（适合俯视/横版场景的遮挡）">
+                      <input
+                        type="checkbox"
+                        :checked="spriteYSort"
+                        :disabled="!currentSprite?.bsf"
+                        @change="onYSortChange"
+                      />
+                    </label>
+                  </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 变换：位置 / 缩放 / 旋转 / 重置（独立分区，默认展开） -->
+          <div class="att-group">
+            <div class="mi-section" :class="{ open: propFold.transform }">
+              <button class="mi-head" type="button" @click="propFold.transform = !propFold.transform">
+                <img :src="iconChevron" class="mi-chevron" alt="" />
+                <span class="mi-head-title">变换</span>
+              </button>
+              <div v-if="propFold.transform" class="mi-body">
+                <!-- 位置：X / Y 分两行，X 红、Y 绿（与画布坐标轴颜色一致） -->
+                <div class="att-row att-row-stacked">
+                  <span class="att-label">位置</span>
+                  <div class="att-axis-group">
+                    <div class="att-axis-row">
+                      <div class="att-axis-field has-unit">
+                        <span class="att-axis-tag is-x">X</span>
+                        <input
+                          class="att-input att-input-no-spin"
+                          type="number"
+                          step="1"
+                          title="相对默认出生位置的水平偏移（向右为正）"
+                          :value="sceneTransform.x"
+                          @change="onTransformInput('x', $event)"
+                        />
+                        <span class="att-axis-unit" :style="{ left: axisUnitLeft(sceneTransform.x) }">px</span>
+                      </div>
+                    </div>
+                    <div class="att-axis-row">
+                      <div class="att-axis-field has-unit">
+                        <span class="att-axis-tag is-y">Y</span>
+                        <input
+                          class="att-input att-input-no-spin"
+                          type="number"
+                          step="1"
+                          title="相对默认出生位置的垂直偏移（向上为正）"
+                          :value="sceneTransform.y"
+                          @change="onTransformInput('y', $event)"
+                        />
+                        <span class="att-axis-unit" :style="{ left: axisUnitLeft(sceneTransform.y) }">px</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 缩放：X / Y 两行（百分比，100 = 原尺寸）；取消「约束比例」可分别设置 -->
+                <div class="att-row att-row-stacked">
+                  <span class="att-label">缩放</span>
+                  <div class="att-axis-group">
+                    <div class="att-axis-row">
+                      <div class="att-axis-field">
+                        <span class="att-axis-tag is-x">X</span>
+                        <input
+                          class="att-input att-input-no-spin"
+                          type="number"
+                          step="1"
+                          min="5"
+                          max="1000"
+                          title="水平缩放百分比，100 = 原尺寸"
+                          :value="scaleXValue"
+                          @change="onScaleInput('x', $event)"
+                        />
+                      </div>
+                    </div>
+                    <div class="att-axis-row">
+                      <div class="att-axis-field">
+                        <span class="att-axis-tag is-y">Y</span>
+                        <input
+                          class="att-input att-input-no-spin"
+                          type="number"
+                          step="1"
+                          min="5"
+                          max="1000"
+                          title="垂直缩放百分比，100 = 原尺寸"
+                          :value="scaleYValue"
+                          @change="onScaleInput('y', $event)"
+                        />
+                      </div>
+                    </div>
+                    <div class="att-axis-row att-axis-lock">
+                      <label class="att-checkbox" title="勾选时 X / Y 同步变化；取消后可分别设置宽高比例">
+                        <input type="checkbox" :checked="scaleLink" @change="onScaleLinkChange" />
+                      </label>
+                      <span class="att-checkbox-text">约束比例</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 旋转：数字框在上、滑条在下（单位是度，不写 °） -->
+                <div class="att-row att-row-stacked">
+                  <span class="att-label">旋转</span>
+                  <div class="att-axis-group">
+                    <input
+                      class="att-input att-input-no-spin"
+                      type="number"
+                      step="1"
+                      title="逆时针为正"
+                      :value="sceneTransform.angle"
+                      @change="onTransformInput('angle', $event)"
+                    />
+                    <input
+                      class="att-range"
+                      type="range"
+                      min="-180"
+                      max="180"
+                      step="1"
+                      :value="sceneTransform.angle"
+                      @input="onTransformInput('angle', $event)"
+                    />
+                  </div>
+                </div>
+
+                <div class="mi-actions">
+                  <button class="mi-btn" type="button" title="回到默认位置（原点）、0°、100%" @click="resetSceneTransform">重置变换</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 中心点（所有工具共用同一页） -->
+          <div class="att-group">
+            <div class="mi-section" :class="{ open: propFold.pivot }">
+              <button class="mi-head" type="button" @click="propFold.pivot = !propFold.pivot">
+                <img :src="iconChevron" class="mi-chevron" alt="" />
+                <span class="mi-head-title">中心点</span>
+              </button>
+              <div v-if="propFold.pivot" class="mi-body">
+                <template v-if="canAnno">
+                  <div class="att-row att-row-stacked">
+                    <span class="att-label">位置</span>
+                    <div class="att-axis-group">
+                      <div class="att-axis-row">
+                        <div class="att-axis-field">
+                          <span class="att-axis-tag">X</span>
+                          <input
+                            class="att-input att-input-no-spin"
+                            type="number"
+                            step="0.5"
+                            :value="annoPivot ? annoPivot.x.toFixed(1) : ''"
+                            @change="onCoordChange('x', $event)"
+                          />
+                        </div>
+                      </div>
+                      <div class="att-axis-row">
+                        <div class="att-axis-field">
+                          <span class="att-axis-tag">Y</span>
+                          <input
+                            class="att-input att-input-no-spin"
+                            type="number"
+                            step="0.5"
+                            :value="annoPivot ? annoPivot.y.toFixed(1) : ''"
+                            @change="onCoordChange('y', $event)"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="att-row">
+                    <span class="att-label">作用范围</span>
+                    <CustomSelect
+                      class="att-select"
+                      :model-value="annoScope"
+                      :options="SCOPE_OPTIONS"
+                      @update:model-value="onScopeSelect"
+                    />
+                  </div>
+                  <div class="mi-actions">
+                    <button class="mi-btn" type="button" @click="applyPivotPreset('center')">中心</button>
+                    <button class="mi-btn" type="button" @click="applyPivotPreset('feet')">脚底</button>
+                  </div>
+                  <div class="mi-actions">
+                    <button class="mi-btn" type="button" @click="resetAnno">重置</button>
+                    <button
+                      v-if="hasPivotOverride(annoFrameIndex)"
+                      class="mi-btn"
+                      type="button"
+                      @click="clearPivotOverride"
+                    >恢复统一</button>
+                  </div>
+                </template>
+                <div v-else class="mi-list-empty">单图角色保存标注后会自动转为 .bsf，之后才能编辑中心点。</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 碰撞（所有工具共用同一页） -->
+          <div class="att-group">
+            <div class="mi-section" :class="{ open: propFold.collision }">
+              <button class="mi-head" type="button" @click="propFold.collision = !propFold.collision">
+                <img :src="iconChevron" class="mi-chevron" alt="" />
+                <span class="mi-head-title">碰撞</span>
+              </button>
+              <div v-if="propFold.collision" class="mi-body">
+                <template v-if="canAnno">
+                  <div class="att-row">
+                    <span class="att-label">类型</span>
+                    <CustomSelect
+                      class="att-select"
+                      :model-value="collisionTypeValue"
+                      :options="COLLISION_TYPE_OPTIONS"
+                      @update:model-value="onCollisionTypeSelect"
+                    />
+                  </div>
+                  <div class="att-row">
+                    <span class="att-label">作用范围</span>
+                    <CustomSelect
+                      class="att-select"
+                      :model-value="annoScope"
+                      :options="SCOPE_OPTIONS"
+                      @update:model-value="onScopeSelect"
+                    />
+                  </div>
+                  <div class="att-row">
+                    <span class="att-label">禁用碰撞</span>
+                    <label class="att-checkbox" title="关闭后不参与物理：不会被墙壁、地面挡住，也无法站在地上">
+                      <input type="checkbox" :checked="collisionDisabled" @change="onCollisionDisabledChange" />
+                    </label>
+                  </div>
+                  <div v-if="hasCollisionOverride(annoFrameIndex)" class="mi-actions">
+                    <button class="mi-btn" type="button" @click="clearCollisionOverride">恢复统一</button>
+                  </div>
+                </template>
+                <div v-else class="mi-list-empty">单图角色保存标注后会自动转为 .bsf，之后才能编辑碰撞。</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 标记（所有工具共用同一页） -->
+          <div class="att-group">
+            <div class="mi-section" :class="{ open: propFold.marker }">
+              <button class="mi-head" type="button" @click="propFold.marker = !propFold.marker">
+                <img :src="iconChevron" class="mi-chevron" alt="" />
+                <span class="mi-head-title">标记</span>
+                <span v-if="canAnno && markerNames.length" class="mi-count">{{ markerNames.length }}</span>
+              </button>
+              <div v-if="propFold.marker" class="mi-body">
+                <template v-if="canAnno">
+                  <div class="mi-actions">
+                    <button
+                      class="mi-btn"
+                      type="button"
+                      :class="{ 'is-on': markerPlacing }"
+                      title="点一下进入放置，再在画布上点一下放好标记"
+                      @click="toggleMarkerPlacing"
+                    >{{ markerPlacing ? '点击画布放置…' : '添加标记' }}</button>
+                  </div>
+                  <div v-if="markerNames.length" class="mi-list">
+                    <button
+                      v-for="name in markerNames"
+                      :key="name"
+                      class="mi-list-row"
+                      :class="{ 'is-selected': name === selMarkerName }"
+                      type="button"
+                      @click="selMarkerName = name"
+                    >
+                      <span class="mi-list-dot"></span>
+                      <span class="mi-list-name">{{ name }}</span>
+                      <span class="mi-list-coord">{{ markerCoordText(name) }}</span>
+                    </button>
+                  </div>
+                  <div v-else class="mi-list-empty">还没有标记。点「添加标记」后在画布上点一下放置。</div>
+                </template>
+                <div v-else class="mi-list-empty">单图角色保存标注后会自动转为 .bsf，之后才能编辑标记。</div>
+              </div>
+            </div>
+
+            <!-- 选中标记后的详细设置（与地图编辑器「标记检视器」一致的第二个分区） -->
+            <div v-if="canAnno && selMarkerName" class="mi-section" :class="{ open: propFold.markerDetail }">
+              <button class="mi-head" type="button" @click="propFold.markerDetail = !propFold.markerDetail">
+                <img :src="iconChevron" class="mi-chevron" alt="" />
+                <span class="mi-head-title">标记设置</span>
+              </button>
+              <div v-if="propFold.markerDetail" class="mi-body">
+                <div class="att-row">
+                  <span class="att-label">名称</span>
+                  <input
+                    v-model="markerNameDraft"
+                    class="att-input"
+                    title="标记名称"
+                    @blur="commitMarkerRename"
+                    @keydown.enter="($event.target as HTMLInputElement).blur()"
+                    @keydown.escape="cancelMarkerRename"
+                  />
+                </div>
+                <div class="att-row att-row-stacked">
+                  <span class="att-label">坐标</span>
+                  <div class="att-axis-group">
+                    <div class="att-axis-row">
+                      <div class="att-axis-field">
+                        <span class="att-axis-tag">X</span>
+                        <input
+                          class="att-input att-input-no-spin"
+                          type="number"
+                          step="0.5"
+                          :value="selMarkerPos ? selMarkerPos.x.toFixed(1) : ''"
+                          @change="onMarkerCoordChange('x', $event)"
+                        />
+                      </div>
+                    </div>
+                    <div class="att-axis-row">
+                      <div class="att-axis-field">
+                        <span class="att-axis-tag">Y</span>
+                        <input
+                          class="att-input att-input-no-spin"
+                          type="number"
+                          step="0.5"
+                          :value="selMarkerPos ? selMarkerPos.y.toFixed(1) : ''"
+                          @change="onMarkerCoordChange('y', $event)"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="att-row">
+                  <span class="att-label">作用范围</span>
+                  <CustomSelect
+                    class="att-select"
+                    :model-value="annoScope"
+                    :options="SCOPE_OPTIONS"
+                    @update:model-value="onScopeSelect"
+                  />
+                </div>
+                <div class="mi-actions">
+                  <button class="mi-btn mi-btn-danger" type="button" @click="deleteMarker(selMarkerName)">删除标记</button>
+                  <button
+                    v-if="hasMarkerOverride(selMarkerName, annoFrameIndex)"
+                    class="mi-btn"
+                    type="button"
+                    @click="clearMarkerOverride"
+                  >恢复统一</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

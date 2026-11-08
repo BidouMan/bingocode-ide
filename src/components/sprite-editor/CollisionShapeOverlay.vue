@@ -15,6 +15,8 @@ const props = defineProps<{
   canvasH: number
   shape: SpriteCollisionShape
   zoom: number
+  /** 角色旋转角度（用户坐标，逆时针为正）；用于反向换算鼠标坐标 */
+  angle?: number
   /** 禁用碰撞：形状仍显示但整体置灰（与地图编辑器禁用碰撞体同观感） */
   disabled?: boolean
 }>()
@@ -79,15 +81,28 @@ const polyPointsStr = computed(() =>
   props.shape.type === 'polygon' ? props.shape.points.map(p => `${p[0]},${p[1]}`).join(' ') : '',
 )
 
-// ── 屏幕坐标 → 画布逻辑坐标（根元素被 zoom 变换，用自身 rect 反推） ──
+// ── 屏幕坐标 → 画布逻辑坐标（根元素可能被旋转/缩放，用中心点 + 反向旋转还原） ──
 /** 返回画布坐标 + 实际屏幕缩放倍率（命中容差按屏幕像素换算要用） */
 function clientToCanvas(e: MouseEvent): { x: number; y: number; scale: number } | null {
   const el = rootRef.value
   if (!el) return null
   const r = el.getBoundingClientRect()
-  if (r.width === 0) return null
-  const scale = r.width / props.canvasW
-  return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale, scale }
+  if (r.width === 0 || r.height === 0) return null
+  // 旋转不改变元素中心；缩放倍率由父级传入（旋转后的包围盒宽度不是真实比例）
+  const scale = Math.max(0.001, props.zoom)
+  const cx = r.left + r.width / 2
+  const cy = r.top + r.height / 2
+  // 角色以 CSS -angle 旋转，逆运算 +angle
+  const a = (props.angle || 0) * Math.PI / 180
+  const cos = Math.cos(a)
+  const sin = Math.sin(a)
+  const dx = e.clientX - cx
+  const dy = e.clientY - cy
+  return {
+    x: (dx * cos - dy * sin) / scale + props.canvasW / 2,
+    y: (dx * sin + dy * cos) / scale + props.canvasH / 2,
+    scale,
+  }
 }
 
 // ── 手柄定义 ──

@@ -58,9 +58,15 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
         self._x = 320
         self._y = 240
         self._scale = 100
+        # 分轴缩放比例（编辑器取消「约束比例」时写入）：相对 _scale 的倍数，1.0 = 跟随统一缩放
+        self._scale_ratio_x = 1.0
+        self._scale_ratio_y = 1.0
         self._angle = 0
         self._rotation_style = "all"
         self._current_scale_x = 1.0
+        # 默认朝向镜像倍率（编辑器「翻转模式」；±1，缺省 +1 不翻转）
+        self._base_flip_x = 1.0
+        self._base_flip_y = 1.0
         self.hitbox_scale = 1.0
         self._on_ground = False
         # 接触掩码（P4）：本帧 x/y 解算中碰到的方向，按位记录
@@ -125,9 +131,30 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
         # 受重力影响（编辑器「重力」开关 / 代码 sprite.gravity；缺省受重力）
         self._gravity = True
         self.config = self._load_sprite_config()
+        # 翻转模式（编辑器「基础设置」）：创建时按 manifest 设置默认镜像方向
+        if self._is_bsf:
+            self._base_flip_x = -1.0 if bool(getattr(self, "_bsf_flip_x", False)) else 1.0
+            self._base_flip_y = -1.0 if bool(getattr(self, "_bsf_flip_y", False)) else 1.0
+        self._current_scale_x = self._base_flip_x
         # .bgs 的 config.json 直接携带 gravity 字段（.bsf 已在 normalize 时读取）
         if self.config and not self._is_bsf:
             self._gravity = bool(self.config.get("gravity", True))
+
+        # 场景初始变换（可选，编辑器「选择」图层保存）：用户坐标 / 角度逆时针 / 缩放百分比。
+        # 缺省不写字段 = 保持引擎默认（舞台中心 320,240 / 0° / 100%），旧角色行为完全不变。
+        raw_transform = None
+        if self._is_bsf:
+            raw_transform = getattr(self, "_bsf_transform", None)
+        elif self.config:
+            raw_transform = self.config.get("transform")
+        self._apply_initial_transform(raw_transform)
+
+        # 初始可见 / 默认图层（编辑器「图层设置」；缺省 = 可见、层级 0）
+        if self._is_bsf:
+            self._visible = not bool(getattr(self, "_bsf_hidden", False))
+            self._layer = int(getattr(self, "_bsf_layer", 0))
+        elif self.config:
+            self._visible = not bool(self.config.get("hidden", False))
 
         if self.config:
             # 如果是 BGS 角色包格式
@@ -173,10 +200,13 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
             "y": self._y,
             "angle": self._angle,
             "scale": self._scale / 100.0,
-            "scale_x": 1.0,
-            "scale_y": 1.0,
+            # X 轴最终缩放（含左右翻转样式的镜像），避免 CREATE 首帧忽略缩放/朝向
+            "scale_x": (self._scale / 100.0) * self._scale_ratio_x * self._current_scale_x,
+            "scale_y": (self._scale / 100.0) * self._scale_ratio_y * self._base_flip_y,
+            "visible": self._visible,
             "type": "image",
             "layer": self._layer,  # 默认 0：数字越大越靠前，学生设 1/2 即可盖住别人
+            "y_sort": bool(getattr(self, "_bsf_y_sort", False)),  # 同层按脚底 Y 排序
             "vox": self._visual_offset_x,
             "voy": self._visual_offset_y,
             "raw_cw": self._content_w,
@@ -203,6 +233,45 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
         # 立即调用_get_hitbox_rect，确保碰撞盒信息已计算
         self._get_hitbox_rect()
 
+
+    def _apply_initial_transform(self, raw):
+        """应用角色场景变换（可选字段；角色局部坐标：x 右 / y 上 / 角度逆时针 / 缩放百分比）
+
+        编辑器保存的 x/y 是「相对引擎默认出生位置的偏移」，所以 0,0 等价于没设置：
+        没编辑过位置的角色仍从舞台中心出生，不会被挪到地图角落。
+        """
+        if not isinstance(raw, dict):
+            return
+        try:
+            dx = float(raw.get("x", 0.0))
+            dy = float(raw.get("y", 0.0))
+            angle = float(raw.get("angle", 0.0))
+            scale = float(raw.get("scale", 100.0))
+        except (TypeError, ValueError):
+            return
+        if not all(math.isfinite(v) for v in (dx, dy, angle, scale)):
+            return
+        # 分轴缩放（可选）：编辑器取消「约束比例」后写入 scaleX/scaleY（百分比）。
+        # 统一缩放仍是 _scale，分轴只记录相对倍数，运行时 sprite.scale 改动照常生效。
+        ratio_x, ratio_y = 1.0, 1.0
+        try:
+            sx_raw = raw.get("scaleX", scale)
+            sy_raw = raw.get("scaleY", scale)
+            sx = min(max(float(sx_raw), 5.0), 1000.0)
+            sy = min(max(float(sy_raw), 5.0), 1000.0)
+            if math.isfinite(sx) and math.isfinite(sy):
+                base = min(max(scale, 5.0), 1000.0)
+                ratio_x = sx / base if base else 1.0
+                ratio_y = sy / base if base else 1.0
+        except (TypeError, ValueError):
+            ratio_x, ratio_y = 1.0, 1.0
+        # 偏移叠加在 __init__ 的默认出生位置 (320, 240) 上；增量转换不带原点平移
+        self._x += to_world_dx(dx)
+        self._y += to_world_dy(dy)
+        self._angle = to_world_angle(angle)
+        self._scale = min(max(scale, 5.0), 1000.0)
+        self._scale_ratio_x = ratio_x
+        self._scale_ratio_y = ratio_y
 
     def goto(self, x, y=None):
         """移到指定坐标；也接受标记引用或另一个角色（注册点对齐）

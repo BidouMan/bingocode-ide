@@ -52,8 +52,57 @@ export interface BsfMeta {
   collisionDisabled?: boolean
   /** 受重力影响：false = 重力地图里也不下坠（撞墙/落地等碰撞照常）；缺省 = 受重力 */
   gravity?: boolean
+  /** 初始隐藏：true = 角色创建时不可见（代码里 show() 后出现）；缺省 = 可见 */
+  hidden?: boolean
+  /** 默认图层：数字越大越靠前，同层按创建顺序；缺省 0 */
+  layer?: number
+  /** Y 轴排序：true = 同层内按脚底 Y 坐标排序（越靠下越靠前）；缺省不启用 */
+  ySort?: boolean
+  /** 水平翻转：true = 创建时左右镜像（素材朝左也能用）；缺省不翻转 */
+  flipX?: boolean
+  /** 垂直翻转：true = 创建时上下镜像；缺省不翻转 */
+  flipY?: boolean
   /** 统一挂点（按名字，画布坐标）：武器/道具挂载锚点，如 hand_r / head */
   markers?: Record<string, { x: number; y: number }>
+}
+
+/**
+ * 角色场景变换（角色自己的局部坐标系，原点 = 引擎默认出生位置）：
+ * x 向右、y 向上为正，表示相对默认出生位置的偏移；angle 逆时针为正（度）；
+ * scale 为百分比（100 = 原始大小）。
+ * 缺省（未写入数据）= 0,0 / 0° / 100%，即完全不改变引擎的默认出生位置。
+ */
+export interface SpriteTransform {
+  x: number
+  y: number
+  angle: number
+  scale: number
+  /** 非等比缩放（百分比）：仅「约束比例」取消勾选且 X / Y 不同时写入；缺省 = 用 scale */
+  scaleX?: number
+  scaleY?: number
+}
+
+/** 默认变换 = 原点、不旋转、100% 缩放（不写数据时引擎出生在舞台中心 320,240 的行为不变） */
+export const DEFAULT_SPRITE_TRANSFORM: SpriteTransform = { x: 0, y: 0, angle: 0, scale: 100 }
+
+/** 读取并校验角色初始变换：字段缺失/非法时回退默认值（scale 限制 5%~1000%） */
+export function readSpriteTransform(raw: unknown): SpriteTransform | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const obj = raw as Record<string, unknown>
+  const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d)
+  const clampScale = (v: number) => Math.min(1000, Math.max(5, v))
+  const scale = clampScale(num(obj.scale, DEFAULT_SPRITE_TRANSFORM.scale))
+  const sx = clampScale(num(obj.scaleX, scale))
+  const sy = clampScale(num(obj.scaleY, scale))
+  return {
+    x: num(obj.x, DEFAULT_SPRITE_TRANSFORM.x),
+    y: num(obj.y, DEFAULT_SPRITE_TRANSFORM.y),
+    angle: num(obj.angle, DEFAULT_SPRITE_TRANSFORM.angle),
+    scale,
+    // 只在与统一缩放不一致时保留分轴值，减少无意义的字段
+    ...(sx !== scale ? { scaleX: sx } : {}),
+    ...(sy !== scale ? { scaleY: sy } : {}),
+  }
 }
 
 export interface SpriteData {
@@ -62,6 +111,8 @@ export interface SpriteData {
   animations: SpriteAnimation[]
   /** 默认渲染帧（下标）：编辑器选中帧持久化后，引擎初始渲染与缩略图都用它（对齐 Scratch 的"当前造型"语义） */
   defaultFrameIndex?: number
+  /** 场景变换（可选）：x/y 是相对引擎默认出生位置的偏移，写入后才由引擎应用；未写入 = 默认位置 */
+  transform?: SpriteTransform
   /** 仅 .bsf 角色有值 */
   bsf?: BsfMeta
 }
@@ -255,6 +306,8 @@ async function buildBsfSpriteData(manifest: any, sheetImage: HTMLImageElement): 
       manifest.defaultFrame,
       (manifest.frames as BsfFrameMeta[]).map(f => f.name),
     ),
+    // 场景变换（可选）：缺省不写字段 = 引擎默认出生位置（舞台中心）
+    ...(manifest.transform ? { transform: readSpriteTransform(manifest.transform) } : {}),
     bsf: {
       canvas: canvasSize,
       pivot: manifest.pivot || { x: canvasSize.w / 2, y: canvasSize.h / 2 },
@@ -262,6 +315,11 @@ async function buildBsfSpriteData(manifest: any, sheetImage: HTMLImageElement): 
       ...(manifest.collision ? { collision: manifest.collision } : {}),
       ...(manifest.collisionDisabled ? { collisionDisabled: true } : {}),
       ...(manifest.gravity === false ? { gravity: false } : {}),
+      ...(manifest.hidden ? { hidden: true } : {}),
+      ...(manifest.flipX ? { flipX: true } : {}),
+      ...(manifest.flipY ? { flipY: true } : {}),
+      ...(typeof manifest.layer === 'number' ? { layer: manifest.layer } : {}),
+      ...(manifest.ySort ? { ySort: true } : {}),
       ...(manifest.markers ? { markers: manifest.markers } : {}),
     },
   }
@@ -310,10 +368,23 @@ export async function saveBsfManifest(dirPath: string, sprite: SpriteData): Prom
     ...(sprite.bsf.collisionDisabled ? { collisionDisabled: true } : {}),
     // 受重力影响（可选）：false = 不受地图重力；缺省不写字段（= 受重力）
     ...(sprite.bsf.gravity === false ? { gravity: false } : {}),
+    // 初始隐藏（可选）：缺省不写字段（= 可见）
+    ...(sprite.bsf.hidden ? { hidden: true } : {}),
+    // 翻转模式（可选）：缺省不写字段（= 不翻转）
+    ...(sprite.bsf.flipX ? { flipX: true } : {}),
+    ...(sprite.bsf.flipY ? { flipY: true } : {}),
+    // 默认图层（可选）：缺省不写字段（= 0）
+    ...(typeof sprite.bsf.layer === 'number' && sprite.bsf.layer !== 0
+      ? { layer: sprite.bsf.layer }
+      : {}),
+    // Y 轴排序（可选）：缺省不写字段（= 不启用）
+    ...(sprite.bsf.ySort ? { ySort: true } : {}),
     // 挂点（可选）：名字 → 画布坐标；空表不写字段
     ...(sprite.bsf.markers && Object.keys(sprite.bsf.markers).length > 0
       ? { markers: sprite.bsf.markers }
       : {}),
+    // 场景初始变换（可选）：仅用户编辑过后才写入，旧资源保持引擎默认行为
+    ...(sprite.transform ? { transform: sprite.transform } : {}),
     frames: sprite.bsf.frames,
     clips,
     // 默认渲染帧（编辑器选中帧）：可选字段，读取方缺省回退第一帧
@@ -361,6 +432,7 @@ export async function readBgsFile(file: File): Promise<SpriteData> {
     frames,
     animations,
     defaultFrameIndex: resolveDefaultFrameIndex(config.defaultFrame, frameNames),
+    ...(config.transform ? { transform: readSpriteTransform(config.transform) } : {}),
   }
 }
 
@@ -411,6 +483,7 @@ async function readLocalSpriteDir(dirPath: string): Promise<SpriteData> {
     frames,
     animations,
     defaultFrameIndex: resolveDefaultFrameIndex(config.defaultFrame, frameNames),
+    ...(config.transform ? { transform: readSpriteTransform(config.transform) } : {}),
   }
 }
 
@@ -447,6 +520,8 @@ export async function saveSpriteConfig(spritePath: string, sprite: SpriteData): 
   // 默认渲染帧（编辑器选中帧）：可选字段，缺省时读取方回退第一帧
   const defaultFrame = sprite.frames[sprite.defaultFrameIndex ?? 0]?.name
   if (defaultFrame) config.defaultFrame = defaultFrame
+  // 场景初始变换（可选）：仅用户编辑过后才写入
+  if (sprite.transform) config.transform = sprite.transform
 
   const json = JSON.stringify(config, null, 4)
   await invoke('write_file', { path: `${spritePath}/config.json`, content: json })
@@ -466,7 +541,7 @@ export async function readImageAsSprite(path: string): Promise<SpriteData> {
 }
 
 /** 图片非透明内容包围盒（图片坐标）；整图全透明时回退整图 */
-function imageContentBox(img: HTMLImageElement): { x: number; y: number; w: number; h: number } {
+export function imageContentBox(img: HTMLImageElement): { x: number; y: number; w: number; h: number } {
   const canvas = document.createElement('canvas')
   canvas.width = img.naturalWidth || img.width
   canvas.height = img.naturalHeight || img.height

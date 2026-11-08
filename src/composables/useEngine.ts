@@ -68,6 +68,7 @@ export function useEngine() {
           scaleY: cmd.data.scale_y,
           visible: true,
           layer: cmd.data.layer,
+          ySort: cmd.data.y_sort ?? false,
           imagePath: cmd.data.image,
           vox: cmd.data.vox ?? 0,
           voy: cmd.data.voy ?? 0,
@@ -91,6 +92,7 @@ export function useEngine() {
         if (d.scale_y !== undefined) patch.scaleY = d.scale_y
         if (d.visible !== undefined) patch.visible = d.visible
         if (d.layer !== undefined) patch.layer = d.layer
+        if (d.y_sort !== undefined) patch.ySort = d.y_sort
         if (d.image !== undefined) patch.imagePath = d.image
         if (d.vox !== undefined) patch.vox = d.vox
         if (d.voy !== undefined) patch.voy = d.voy

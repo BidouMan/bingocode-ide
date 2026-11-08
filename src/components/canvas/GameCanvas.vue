@@ -466,7 +466,7 @@ async function syncSprites() {
       // 使 fish_2 等非居中素材翻转时不产生视觉跳动
       const pivotX = spriteData.vox ?? 0
       const pivotY = spriteData.voy ?? 0
-      const propsKey = `${spriteData.x.toFixed(1)},${spriteData.y.toFixed(1)},${displayAngle.toFixed(4)},${spriteData.visible},${spriteData.layer},${s.toFixed(4)},${sy.toFixed(4)},${pivotX.toFixed(1)},${pivotY.toFixed(1)}`
+      const propsKey = `${spriteData.x.toFixed(1)},${spriteData.y.toFixed(1)},${displayAngle.toFixed(4)},${spriteData.visible},${spriteData.layer},${spriteData.ySort},${s.toFixed(4)},${sy.toFixed(4)},${pivotX.toFixed(1)},${pivotY.toFixed(1)}`
       if (displayObj._lastPropsKey !== propsKey) {
         displayObj._lastPropsKey = propsKey
         displayObj.x = Math.round(spriteData.x)
@@ -477,7 +477,12 @@ async function syncSprites() {
         displayObj.pivot.x = pivotX
         displayObj.pivot.y = pivotY
         displayObj.visible = spriteData.visible
-        displayObj.zIndex = spriteData.layer
+        // 排序键：图层为主序（每层预留 10000 的偏移空间）；
+        // 勾选「Y轴排序」的角色，同层内按脚底高度排——越靠下（游戏 y 越小）越靠前
+        const ySortOffset = spriteData.ySort
+          ? Math.max(-4000, Math.min(4000, Math.round(-spriteData.y)))
+          : 0
+        displayObj.zIndex = spriteData.layer * 10000 + ySortOffset
       }
     }
   }

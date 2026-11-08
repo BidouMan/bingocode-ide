@@ -12,6 +12,8 @@ export interface SpriteData {
   scaleY: number
   visible: boolean
   layer: number
+  /** 同层内按脚底 Y 坐标排序：越靠下越靠前（编辑器「Y轴排序」勾选项） */
+  ySort: boolean
   imagePath: string
   /** 内容重心相对图片中心的偏移（像素），用于修正翻转/旋转锚点 */
   vox: number
@@ -157,6 +159,7 @@ export const useRenderStore = defineStore('render', () => {
       scaleY: data.scaleY ?? 1,
       visible: data.visible ?? true,
       layer: data.layer ?? 0,
+      ySort: data.ySort ?? false,
       imagePath: data.imagePath ?? '',
       vox: data.vox ?? 0,
       voy: data.voy ?? 0,
