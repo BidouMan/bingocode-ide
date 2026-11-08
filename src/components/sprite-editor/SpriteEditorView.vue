@@ -251,16 +251,6 @@ async function drawSpriteFrame() {
   if (!currentSprite.value?.bsf) measureNonBsfBox()
 }
 
-/** 翻转模式在编辑器里的预览效果：按画布/预览图自身中心镜像，与游戏创建时的朝向一致 */
-const flipPreviewStyle = computed(() => {
-  const bsf = currentSprite.value?.bsf
-  if (!bsf) return {}
-  const sx = bsf.flipX ? -1 : 1
-  const sy = bsf.flipY ? -1 : 1
-  if (sx === 1 && sy === 1) return {}
-  return { transform: `scale(${sx}, ${sy})` }
-})
-
 async function drawPreviewFrame() {
   const el = previewCanvasEl.value
   const frame = currentSprite.value?.frames[selectedFrameIndex.value]
@@ -1672,30 +1662,20 @@ const SCOPE_OPTIONS = [
   { label: '仅当前帧', value: 'one' },
 ]
 
-const FLIP_MODE_OPTIONS = [
-  { label: '不翻转', value: 'none' },
-  { label: '水平翻转', value: 'h' },
-  { label: '垂直翻转', value: 'v' },
-  { label: '水平 + 垂直', value: 'hv' },
+const ROTATION_MODE_OPTIONS = [
+  { label: '任意旋转', value: 'all' },
+  { label: '左右翻转', value: 'left_right' },
+  { label: '不可旋转', value: 'none' },
 ]
 
-/** 翻转模式下拉的当前值（把 flipX / flipY 两个开关合并成一个选项） */
-const flipModeValue = computed(() => {
-  const bsf = currentSprite.value?.bsf
-  if (!bsf) return 'none'
-  if (bsf.flipX && bsf.flipY) return 'hv'
-  if (bsf.flipX) return 'h'
-  if (bsf.flipY) return 'v'
-  return 'none'
-})
+/** 翻转模式下拉的当前值（与 set_rotation_mode() 的三种模式一一对应） */
+const rotationModeValue = computed(() => currentSprite.value?.bsf?.rotationMode ?? 'all')
 
-function onFlipModeSelect(v: string) {
+function onRotationModeSelect(v: string) {
   const bsf = currentSprite.value?.bsf
   if (!bsf) return
-  if (v === 'h' || v === 'hv') bsf.flipX = true
-  else delete bsf.flipX
-  if (v === 'v' || v === 'hv') bsf.flipY = true
-  else delete bsf.flipY
+  if (v === 'left_right' || v === 'none') bsf.rotationMode = v
+  else delete bsf.rotationMode
   scheduleSave()
 }
 
@@ -3519,7 +3499,7 @@ function onWindowBlur() {
             <canvas
               ref="spriteCanvasEl"
               class="canvas-sprite"
-              :style="{ imageRendering: imageRenderingStyle, ...frameCanvasStyle, ...flipPreviewStyle }"
+              :style="{ imageRendering: imageRenderingStyle, ...frameCanvasStyle }"
             />
             <!-- 标注层：画布坐标 + transform 缩放（手柄内部再 1/显示倍率 反向缩放保持屏幕尺寸恒定） -->
             <div
@@ -3721,7 +3701,7 @@ function onWindowBlur() {
               v-if="currentSprite?.frames[selectedFrameIndex]"
               ref="previewCanvasEl"
               class="preview-image"
-              :style="{ imageRendering: imageRenderingStyle, ...flipPreviewStyle }"
+              :style="{ imageRendering: imageRenderingStyle }"
             />
           </div>
           <!-- FPS 控制 (悬浮在预览底部)：左=拖动滑条，右=帧数手动输入；速度按片段独立保存 -->
@@ -4224,14 +4204,14 @@ function onWindowBlur() {
                       />
                     </div>
                   </div>
-                  <!-- 翻转模式：默认朝向与镜像（写入数据，游戏里创建角色时生效） -->
+                  <!-- 翻转模式：与 set_rotation_mode() 的三种旋转模式一致（写入数据，游戏里创建角色时生效） -->
                   <div class="att-row">
                     <span class="att-label">翻转模式</span>
                     <CustomSelect
                       class="att-select"
-                      :model-value="flipModeValue"
-                      :options="FLIP_MODE_OPTIONS"
-                      @update:model-value="onFlipModeSelect"
+                      :model-value="rotationModeValue"
+                      :options="ROTATION_MODE_OPTIONS"
+                      @update:model-value="onRotationModeSelect"
                     />
                   </div>
                   <div class="att-row">

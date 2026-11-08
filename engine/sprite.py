@@ -64,9 +64,6 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
         self._angle = 0
         self._rotation_style = "all"
         self._current_scale_x = 1.0
-        # 默认朝向镜像倍率（编辑器「翻转模式」；±1，缺省 +1 不翻转）
-        self._base_flip_x = 1.0
-        self._base_flip_y = 1.0
         self.hitbox_scale = 1.0
         self._on_ground = False
         # 接触掩码（P4）：本帧 x/y 解算中碰到的方向，按位记录
@@ -139,11 +136,12 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
         # 受重力影响（编辑器「重力」开关 / 代码 sprite.gravity；缺省受重力）
         self._gravity = True
         self.config = self._load_sprite_config()
-        # 翻转模式（编辑器「基础设置」）：创建时按 manifest 设置默认镜像方向
+        # 旋转模式（编辑器「基础设置 → 翻转模式」）：与 set_rotation_mode() 的三种模式一一对应
         if self._is_bsf:
-            self._base_flip_x = -1.0 if bool(getattr(self, "_bsf_flip_x", False)) else 1.0
-            self._base_flip_y = -1.0 if bool(getattr(self, "_bsf_flip_y", False)) else 1.0
-        self._current_scale_x = self._base_flip_x
+            mode = getattr(self, "_bsf_rotation_mode", "all")
+            if mode in ("all", "left_right", "none"):
+                self._rotation_style = mode
+        self._current_scale_x = 1.0
         # .bgs 的 config.json 直接携带 gravity 字段（.bsf 已在 normalize 时读取）
         if self.config and not self._is_bsf:
             self._gravity = bool(self.config.get("gravity", True))
@@ -201,16 +199,25 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
         self._setup_hitbox()
 
         # 5. 向 IDE 发送创建指令
+        # 首帧朝向与 _update_transform 的旋转模式规则一致，避免 CREATE 首帧显示成整体旋转
+        display_angle = self._angle
+        if self._rotation_style == "left_right":
+            display_angle = 0.0
+            norm_angle = self._angle % 360
+            self._current_scale_x = -1.0 if 90 < norm_angle < 270 else 1.0
+        elif self._rotation_style == "none":
+            display_angle = 0.0
+            self._current_scale_x = 1.0
         create_data = {
             # 关键：转为绝对路径确保 IDE 渲染器能跨目录找到文件
             "image": os.path.abspath(self.image),
             "x": self._x,
             "y": self._y,
-            "angle": self._angle,
+            "angle": display_angle,
             "scale": self._scale / 100.0,
             # X 轴最终缩放（含左右翻转样式的镜像），避免 CREATE 首帧忽略缩放/朝向
             "scale_x": (self._scale / 100.0) * self._scale_ratio_x * self._current_scale_x,
-            "scale_y": (self._scale / 100.0) * self._scale_ratio_y * self._base_flip_y,
+            "scale_y": (self._scale / 100.0) * self._scale_ratio_y,
             "visible": self._visible,
             "type": "image",
             "layer": self._layer,  # 默认 0：数字越大越靠前，学生设 1/2 即可盖住别人

@@ -106,10 +106,11 @@ export interface BsfMeta {
   layer?: number
   /** Y 轴排序：true = 同层内按脚底 Y 坐标排序（越靠下越靠前）；缺省不启用 */
   ySort?: boolean
-  /** 水平翻转：true = 创建时左右镜像（素材朝左也能用）；缺省不翻转 */
-  flipX?: boolean
-  /** 垂直翻转：true = 创建时上下镜像；缺省不翻转 */
-  flipY?: boolean
+  /**
+   * 旋转模式（编辑器「基础设置 → 翻转模式」）：与 set_rotation_mode() 的三种模式一致。
+   * 'all' = 任意旋转；'left_right' = 左右翻转；'none' = 不可旋转。缺省不写字段（= 任意旋转）
+   */
+  rotationMode?: 'all' | 'left_right' | 'none'
   /** 统一挂点（按名字，画布坐标）：武器/道具挂载锚点，如 hand_r / head；含编辑器展示设置 */
   markers?: Record<string, SpriteMarkerPoint>
 }
@@ -394,8 +395,9 @@ async function buildBsfSpriteData(manifest: any, sheetImage: HTMLImageElement): 
       ...(typeof manifest.collisionAngle === 'number' ? { collisionAngle: manifest.collisionAngle } : {}),
       ...(manifest.gravity === false ? { gravity: false } : {}),
       ...(manifest.hidden ? { hidden: true } : {}),
-      ...(manifest.flipX ? { flipX: true } : {}),
-      ...(manifest.flipY ? { flipY: true } : {}),
+      ...(manifest.rotationMode === 'left_right' || manifest.rotationMode === 'none'
+        ? { rotationMode: manifest.rotationMode }
+        : {}),
       ...(typeof manifest.layer === 'number' ? { layer: manifest.layer } : {}),
       ...(manifest.ySort ? { ySort: true } : {}),
       ...(manifest.markers ? { markers: manifest.markers } : {}),
@@ -484,9 +486,10 @@ export async function saveBsfManifest(dirPath: string, sprite: SpriteData): Prom
     ...(sprite.bsf.gravity === false ? { gravity: false } : {}),
     // 初始隐藏（可选）：缺省不写字段（= 可见）
     ...(sprite.bsf.hidden ? { hidden: true } : {}),
-    // 翻转模式（可选）：缺省不写字段（= 不翻转）
-    ...(sprite.bsf.flipX ? { flipX: true } : {}),
-    ...(sprite.bsf.flipY ? { flipY: true } : {}),
+    // 旋转模式（可选）：缺省不写字段（= 任意旋转）
+    ...(sprite.bsf.rotationMode === 'left_right' || sprite.bsf.rotationMode === 'none'
+      ? { rotationMode: sprite.bsf.rotationMode }
+      : {}),
     // 默认图层（可选）：缺省不写字段（= 0）
     ...(typeof sprite.bsf.layer === 'number' && sprite.bsf.layer !== 0
       ? { layer: sprite.bsf.layer }

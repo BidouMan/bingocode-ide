@@ -119,9 +119,11 @@ class SpriteAssetsMixin:
         self._gravity = bool(manifest.get("gravity", True))
         # 初始隐藏（可选，编辑器「图层设置」勾选项）：缺省可见
         self._bsf_hidden = bool(manifest.get("hidden", False))
-        # 翻转模式（可选，编辑器「翻转模式」下拉）：flipX / flipY = 创建时镜像
-        self._bsf_flip_x = bool(manifest.get("flipX", False))
-        self._bsf_flip_y = bool(manifest.get("flipY", False))
+        # 旋转模式（可选，编辑器「基础设置 → 翻转模式」）：'all' / 'left_right' / 'none'
+        rotation_mode = manifest.get("rotationMode")
+        self._bsf_rotation_mode = (
+            rotation_mode if rotation_mode in ("all", "left_right", "none") else "all"
+        )
         # 默认图层（可选）：数字越大越靠前，同层按创建顺序；缺省 0
         try:
             self._bsf_layer = int(manifest.get("layer", 0) or 0)
@@ -586,8 +588,8 @@ class SpriteAssetsMixin:
         ratio_x = getattr(self, "_scale_ratio_x", 1.0)
         ratio_y = getattr(self, "_scale_ratio_y", 1.0)
 
-        # 默认情况下，Y轴只受 size 影响（编辑器「翻转模式」选垂直翻转时取 -1）
-        final_scale_y = base_scale * ratio_y * self._base_flip_y
+        # Y轴只受 size 影响（「不可旋转」/「左右翻转」都不改变 Y 方向）
+        final_scale_y = base_scale * ratio_y
         # X轴受 size、自身镜像状态、跟随镜像继承共同影响（Godot 子节点语义）
         final_scale_x = base_scale * ratio_x * self._current_scale_x * self._follow_flip
 
@@ -604,9 +606,8 @@ class SpriteAssetsMixin:
 
         elif self._rotation_style == "none":
             display_angle = 0
-            # "none" = 永不旋转永不翻转（含跟随继承），Scratch「不旋转」语义；
-            # 仍保留角色资源的默认翻转模式（编辑器里显式设置过才生效）
-            final_scale_x = base_scale * ratio_x * self._base_flip_x
+            # "none" = 永不旋转永不翻转（含跟随继承），Scratch「不旋转」语义
+            final_scale_x = base_scale * ratio_x
 
         # 本帧显示镜像倍率：供挂点世界坐标求值与链式跟随读取
         # （除以含分轴比例的基准，保证这里只保留 ±1 的纯镜像语义）
