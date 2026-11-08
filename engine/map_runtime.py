@@ -742,8 +742,8 @@ def _handle_physics_collision():
         # P4：每帧重置接触掩码，再按本帧 x/y 解算结果重新记录
         sprite._contacts = 0
 
-        # 禁用碰撞：不参与重力、落地与墙体修正（照常渲染与按代码移动）
-        if sprite._collision_disabled:
+        # 禁用碰撞 / 感应作用：不参与重力、落地与墙体修正（照常渲染与按代码移动）
+        if sprite._collision_physics_off:
             sprite._on_ground = False
             sprite._update_transform()
             continue

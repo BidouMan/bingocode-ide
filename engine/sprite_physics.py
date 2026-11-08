@@ -15,6 +15,14 @@ import engine_state as st
 class SpritePhysicsMixin:
     """Sprite 物理与碰撞实现（由 sprite.Sprite 继承；方法内 self 即 Sprite 实例）。"""
 
+    @property
+    def _collision_physics_off(self):
+        """碰撞不参与物理阻挡：显式禁用，或作用设为「感应」。
+
+        只影响移动 / 重力 / 推挤；碰到检测（is_touch）与感应事件仍然照常工作。
+        """
+        return self._collision_disabled or getattr(self, "_collision_kind", "solid") == "sensor"
+
     # ---------- 运动模块 ----------
     def _collision_layer_correction(self, layer, axis, layer_index=None):
         """形状层（世界坐标多边形）对当前精灵的轴分离位移量。
@@ -284,7 +292,7 @@ class SpritePhysicsMixin:
           - 每轮取穿透最深的一组，沿法线推出 depth + 少量皮肤
           - 迭代若干轮，处理同时嵌在两个障碍里的极端情况
         """
-        if self._collision_disabled or not st._CURRENT_MAP:
+        if self._collision_physics_off or not st._CURRENT_MAP:
             return False
         static_world = st._CURRENT_MAP.get("static_world")
         if static_world is None:
@@ -329,7 +337,7 @@ class SpritePhysicsMixin:
         resolve_x/resolve_y=False 时对应轴不移动也不解算（set_x/add_x 等单轴操作）。
         位移超过 _MAX_MOVE_STEP 时自动拆成多个子步，避免隧道效应。
         """
-        if self._collision_disabled or not st._CURRENT_MAP:
+        if self._collision_physics_off or not st._CURRENT_MAP:
             if resolve_x:
                 self._x += dx
             if resolve_y:
@@ -392,8 +400,8 @@ class SpritePhysicsMixin:
           - direction=0（传送兜底）：取幅度最小的推挤（最近边）
         """
 
-        # 禁用碰撞：完全不参与地形/边界阻挡（碰到检测仍按碰撞盒工作）
-        if self._collision_disabled:
+        # 禁用碰撞 / 感应作用：完全不参与地形/边界阻挡（碰到检测仍按碰撞盒工作）
+        if self._collision_physics_off:
             return
 
         if not st._CURRENT_MAP:
@@ -836,6 +844,18 @@ class SpritePhysicsMixin:
                                         continue
                                     if _aabb_polygon_mtv(r1, part):
                                         return True
+
+            # 角色标签：其它角色在编辑器里设了「类型」后，同样可被 is_touch("标签") 查到，
+            # 与地图图块 / 形状 tag 使用同一套查询语义
+            if tag:
+                own_shape = self._get_collision_shape()
+                for other in list(st._SPRITES.values()):
+                    if other is self or other._is_deleted or not getattr(other, "_visible", True):
+                        continue
+                    if getattr(other, "_collision_tag", "") != tag:
+                        continue
+                    if shape_overlap(own_shape, other._get_collision_shape()) is not None:
+                        return True
             return False
 
         # 🚀 4. 原有的 Sprite 间碰撞逻辑
@@ -885,7 +905,7 @@ class SpritePhysicsMixin:
             if not hero.sweep_test("right"):
                 hero.add_x(4)
         """
-        if self._is_deleted or self._collision_disabled or not st._CURRENT_MAP:
+        if self._is_deleted or self._collision_physics_off or not st._CURRENT_MAP:
             return False
         world_dir = _parse_direction_world(direction)
         if world_dir is None:

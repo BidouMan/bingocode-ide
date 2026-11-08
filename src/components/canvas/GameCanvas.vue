@@ -6,7 +6,7 @@ import { useEditorStore } from '../../stores/editor'
 import { useSettingsStore } from '../../stores/settings'
 import { useEngine } from '../../composables/useEngine'
 import { signalGameCanvasReady, resetGameCanvasReady } from '../../utils/gameCanvasReady'
-import { effectiveScaleMode } from '../../utils/renderMode'
+import { detectPixelArt, effectiveScaleMode } from '../../utils/renderMode'
 // 模块级共享缓存：MainLayout 同时挂着两个 GameCanvas 实例（预览窗 + 全屏 v-show 窗），
 // 若各实例自持缓存，同一文件会重复走 IPC 加载且渲染 store 的贴图计数器被翻倍登记，
 // 「加载资源中」覆盖层的进度与完成判定随之失真（表现为覆盖层随动画节奏闪烁）。
@@ -199,7 +199,8 @@ function applyRenderMode() {
 }
 
 /**
- * 自动渲染模式：按素材自然尺寸给纹理源定采样方式（小图最近邻、大插画平滑）。
+ * 自动渲染模式：与角色编辑器共用同一套判定——先看画风（像素画/插画），
+ * 画风分析不出时再按素材自然尺寸兜底（小图最近邻、大插画平滑）。
  * 每个纹理源只判定一次，之后每帧只是一次 WeakMap 查表，无逐帧计算。
  */
 function applyAutoScaleMode(
@@ -208,15 +209,21 @@ function applyAutoScaleMode(
 ) {
   const source = texture?.source
   if (!source || editorStore.renderMode !== 'auto') return
-  // 尺寸未知（引擎暂未下发 cw/ch）时不判定，等下一帧有了再说
-  if (!spriteData.frameW || !spriteData.frameH) return
   const cached = autoScaleModes.get(source)
   if (cached) return
   // 矢量素材（SVG）恒平滑：它按目标像素重绘，最近邻会把栅格化锯齿固化下来
   const isVector = !!spriteData.imagePath?.toLowerCase().endsWith('.svg')
+  // 纹理源就是解码后的图片/图集，就地分析画风（.bsf 源是整张 sheet，同一包画风一致）
+  let pixelArt: boolean | null = null
+  if (!isVector) {
+    const res: any = source.resource
+    const w = res?.naturalWidth || res?.videoWidth || res?.width
+    const h = res?.naturalHeight || res?.videoHeight || res?.height
+    if (w && h) pixelArt = detectPixelArt(res as CanvasImageSource, w, h)
+  }
   const mode = isVector
     ? 'linear'
-    : effectiveScaleMode('auto', spriteData.frameW, spriteData.frameH)
+    : effectiveScaleMode('auto', spriteData.frameW, spriteData.frameH, pixelArt)
   autoScaleModes.set(source, mode)
   if (source.scaleMode !== mode) source.scaleMode = mode
 }

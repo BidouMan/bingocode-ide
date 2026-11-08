@@ -128,6 +128,9 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
         self._is_bsf = False
         # 禁用碰撞（编辑器「禁用碰撞」开关；仅 .bsf manifest 提供，缺省开启）
         self._collision_disabled = False
+        # 碰撞作用 / 类型（编辑器「作用 / 类型」；仅 .bsf 提供，缺省 solid / 未命名）
+        self._collision_kind = "solid"
+        self._collision_tag = ""
         # 受重力影响（编辑器「重力」开关 / 代码 sprite.gravity；缺省受重力）
         self._gravity = True
         self.config = self._load_sprite_config()
@@ -355,7 +358,7 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
             self._prev_top_y = hitbox[1]
         self._x = x
         self._y = y
-        if not self._collision_disabled and st._CURRENT_MAP:
+        if not self._collision_physics_off and st._CURRENT_MAP:
             self._depenetrate()
             self._resolve_collision("x")
             self._resolve_collision("y")

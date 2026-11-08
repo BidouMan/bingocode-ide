@@ -6,7 +6,7 @@ import { useResourceStore } from '../../stores/resource'
 import { useMapEditorStore } from '../../stores/mapEditor'
 import CustomSelect from '../common/CustomSelect.vue'
 import { toUserX, toWorldX, toUserY, toWorldY, toUserAngle, toWorldAngle, toUserDeltaY, toWorldDeltaY } from '../../utils/coords'
-import { shapeColorCss, shapeKindLabel } from '../../utils/shapeStyle'
+import { shapeColorCss, shapeKindLabel, SHAPE_TAG_PRESETS } from '../../utils/shapeStyle'
 import iconChevron from '../../assets/icons/right_arrow.svg'
 import iconSettings from '../../assets/icons/icon--settings.svg'
 import iconCopy from '../../assets/icons/copy.svg'
@@ -457,8 +457,6 @@ function onShapeOneWayMarginInput(e: Event) {
 }
 
 // ====== 形状类型：界面叫「类型」，内部/代码里就是 tag（is_touch 查询用） ======
-/** 类型预设：常用玩法分类（按用户确认的顺序） */
-const SHAPE_TAG_PRESETS = ['墙体', '地面', '道具', '机关', '危险区']
 /** 下拉里的「自定义…」入口 */
 const SHAPE_TAG_CUSTOM = '自定义'
 /** 当前是否处于「自定义」输入模式（下拉选中自定义时显示输入框） */

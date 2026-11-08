@@ -71,6 +71,14 @@ export interface BsfMeta {
   frames: BsfFrameMeta[]
   /** 统一碰撞形状：缺省 = 自动碰撞（引擎内容包围盒） */
   collision?: SpriteCollisionShape
+  /**
+   * 碰撞作用（可选）：与地图图块/形状同一套语义。
+   * solid = 碰撞（参与地形/边界物理阻挡）；sensor = 感应（不阻挡，仅可被检测）；
+   * both = 碰撞 + 感应。缺省 solid。
+   */
+  collisionKind?: 'solid' | 'sensor' | 'both'
+  /** 碰撞类型 / 标签（可选）：代码里 is_touch("标签") 查询用；缺省空 = 未命名 */
+  collisionTag?: string
   /** 禁用碰撞：true = 该角色完全不参与地形/边界物理阻挡（不影响碰到检测） */
   collisionDisabled?: boolean
   /** 单向碰撞（可选）：true = 只从一侧挡住；当前仅编辑器保存，运行时尚未接入 */
@@ -344,6 +352,12 @@ async function buildBsfSpriteData(manifest: any, sheetImage: HTMLImageElement): 
       pivotBase: manifest.pivotBase || manifest.pivot || { x: canvasSize.w / 2, y: canvasSize.h / 2 },
       frames: manifest.frames,
       ...(manifest.collision ? { collision: manifest.collision } : {}),
+      ...(manifest.collisionKind === 'sensor' || manifest.collisionKind === 'both'
+        ? { collisionKind: manifest.collisionKind }
+        : {}),
+      ...(typeof manifest.collisionTag === 'string' && manifest.collisionTag.trim()
+        ? { collisionTag: manifest.collisionTag.trim() }
+        : {}),
       ...(manifest.collisionDisabled ? { collisionDisabled: true } : {}),
       ...(manifest.collisionOneWay ? { collisionOneWay: true } : {}),
       ...(manifest.collisionLayersEnabled ? { collisionLayersEnabled: true } : {}),
@@ -400,6 +414,11 @@ export async function saveBsfManifest(dirPath: string, sprite: SpriteData): Prom
     ...(sprite.bsf.pivotBase ? { pivotBase: sprite.bsf.pivotBase } : {}),
     // 自定义碰撞（可选）：无 = 引擎自动碰撞
     ...(sprite.bsf.collision ? { collision: sprite.bsf.collision } : {}),
+    // 碰撞作用 / 类型（可选）：solid 与空标签是默认值，不写字段
+    ...(sprite.bsf.collisionKind && sprite.bsf.collisionKind !== 'solid'
+      ? { collisionKind: sprite.bsf.collisionKind }
+      : {}),
+    ...(sprite.bsf.collisionTag?.trim() ? { collisionTag: sprite.bsf.collisionTag.trim() } : {}),
     // 禁用碰撞（可选）：true = 不参与物理阻挡；缺省不写字段
     ...(sprite.bsf.collisionDisabled ? { collisionDisabled: true } : {}),
     // 单向碰撞 / 碰撞层级 / 旋转（可选）：当前仅编辑器保存，运行时尚未接入

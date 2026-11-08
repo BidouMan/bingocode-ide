@@ -77,6 +77,13 @@ class SpriteAssetsMixin:
         }
         # 自定义碰撞形状（可选）：无/非法 = 自动碰撞（内容包围盒）
         self._bsf_collision = manifest.get("collision")
+        # 碰撞作用（可选）：solid=碰撞 / sensor=感应（不参与物理阻挡，仍可被检测）/ both
+        kind = manifest.get("collisionKind", manifest.get("collision_kind", "solid"))
+        self._collision_kind = kind if kind in ("solid", "sensor", "both") else "solid"
+        # 碰撞类型（tag，可选）：代码里 is_touch("标签") 查询用，空 = 未命名
+        self._collision_tag = str(
+            manifest.get("collisionTag", manifest.get("collision_tag", "") or "")
+        ).strip()
         # 禁用碰撞（可选）：True = 该角色不参与地形/边界物理阻挡，仍可被碰到检测
         self._collision_disabled = bool(
             manifest.get("collisionDisabled", manifest.get("collision_disabled", False))

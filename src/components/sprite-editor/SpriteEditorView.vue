@@ -10,13 +10,15 @@ import type { SpriteCollisionShape } from '../../composables/useSpriteData'
 import { appendFramesToSprite } from '../../composables/appendSpriteFrames'
 import { useFrameReorder } from '../../composables/useFrameReorder'
 import { useSpriteHistory } from './useSpriteHistory'
-import { cssImageRendering } from '../../utils/renderMode'
+import { cssImageRendering, detectPixelArt } from '../../utils/renderMode'
 import { drawImageCrisp } from '../../utils/pixelCanvas'
 import { snapRectOffset, snapThreshold } from '../../utils/smartSnap'
 import FrameUploadDrawer from './FrameUploadDrawer.vue'
 import CollisionShapeOverlay from './CollisionShapeOverlay.vue'
 // 下拉框复用地图编辑器属性面板的自绘组件，保证两个编辑器的控件样式一致
 import CustomSelect from '../common/CustomSelect.vue'
+// 类型（tag）预设与地图编辑器共用同一份，保证两端「类型」可选项一致
+import { SHAPE_TAG_PRESETS } from '../../utils/shapeStyle'
 
 const emit = defineEmits<{
   /** 造型列表抽屉：打开绘制页为当前角色绘制新帧（编辑模式，自动新建空白帧） */
@@ -83,9 +85,19 @@ async function onEmptyUpload() {
 /** 当前角色素材的自然尺寸（.bsf 用 canvas，其余用首帧图片尺寸）：自动渲染模式的判定依据 */
 const spriteNaturalW = ref(0)
 const spriteNaturalH = ref(0)
+/**
+ * 画风判定（像素画 / 插画）：自动模式下优先于尺寸。
+ * null = 尚未分析完成，此时按尺寸兜底（见 utils/renderMode.ts）。
+ */
+const spritePixelArt = ref<boolean | null>(null)
 
 const imageRenderingStyle = computed(() =>
-  cssImageRendering(editorStore.renderMode, spriteNaturalW.value, spriteNaturalH.value),
+  cssImageRendering(
+    editorStore.renderMode,
+    spriteNaturalW.value,
+    spriteNaturalH.value,
+    spritePixelArt.value,
+  ),
 )
 
 /**
@@ -483,23 +495,50 @@ async function persistSprite() {
   }
 }
 
-/** 记录当前角色的自然尺寸（自动渲染模式的判定依据）：.bsf 取画布，其余取首帧图片尺寸 */
+let naturalSizeToken = 0
+
+/**
+ * 记录当前角色的自然尺寸与画风（自动渲染模式的判定依据）。
+ * 尺寸：.bsf 取画布，其余取首帧图片尺寸；画风：分析首帧像素（同一角色各帧画风一致）。
+ */
 async function updateSpriteNaturalSize() {
+  const token = ++naturalSizeToken
   const sprite = currentSprite.value
+  spritePixelArt.value = null
   if (!sprite) return
+  const first = sprite.frames[0]
+  /** 首帧图像：尺寸与画风共用一次解码 */
+  let firstImg: HTMLImageElement | null = null
   if (sprite.bsf) {
     spriteNaturalW.value = sprite.bsf.canvas.w
     spriteNaturalH.value = sprite.bsf.canvas.h
+  } else {
+    try {
+      firstImg = await loadImage(first.blob)
+      if (token !== naturalSizeToken) return
+      spriteNaturalW.value = firstImg.naturalWidth || firstImg.width
+      spriteNaturalH.value = firstImg.naturalHeight || firstImg.height
+    } catch {
+      spriteNaturalW.value = 0
+      spriteNaturalH.value = 0
+    }
+  }
+  // 矢量素材（SVG）按目标像素重绘：最近邻会把栅格化锯齿固化下来，恒平滑
+  if (/\.svg$/i.test(currentSpritePath.value)) {
+    spritePixelArt.value = false
     return
   }
-  try {
-    const img = await loadImage(sprite.frames[0].blob)
-    spriteNaturalW.value = img.naturalWidth || img.width
-    spriteNaturalH.value = img.naturalHeight || img.height
-  } catch {
-    spriteNaturalW.value = 0
-    spriteNaturalH.value = 0
+  if (!first) return
+  if (!firstImg) {
+    try {
+      firstImg = await loadImage(first.blob)
+      if (token !== naturalSizeToken) return
+    } catch {
+      // 分析失败保持 null：自动模式回退到尺寸判定
+      return
+    }
   }
+  spritePixelArt.value = detectPixelArt(firstImg, spriteNaturalW.value, spriteNaturalH.value)
 }
 
 async function loadSprite(item: { id: string; name: string; path: string }) {
@@ -1699,19 +1738,91 @@ const collisionDisabled = computed(() => !!currentSprite.value?.bsf?.collisionDi
 /** 碰撞页分区折叠状态（独立于属性页） */
 const colFold = ref({ basic: true, transform: true })
 
-const COLLISION_PURPOSE_OPTIONS = [
-  { label: '碰撞', value: 'collision' },
-  { label: '不参与', value: 'none' },
+/** 作用：与地图图块/形状同一套语义（碰撞 / 感应 / 碰撞 + 感应） */
+const COLLISION_KIND_OPTIONS = [
+  { label: '碰撞', value: 'solid' },
+  { label: '感应', value: 'sensor' },
+  { label: '碰撞 + 感应', value: 'both' },
 ]
 
-/** 作用：不参与 = 整个角色禁用碰撞（与属性页的「禁用碰撞」同一开关） */
-const collisionPurposeValue = computed(() => (collisionDisabled.value ? 'none' : 'collision'))
+const collisionKindValue = computed(() => currentSprite.value?.bsf?.collisionKind ?? 'solid')
 
-function onCollisionPurposeSelect(v: string) {
+/** 感应角色没有物理阻挡：单向碰撞控件保留但禁用（对齐地图属性面板） */
+const collisionPhysicsDisabled = computed(() => collisionKindValue.value === 'sensor')
+
+function onCollisionKindSelect(v: string) {
   const bsf = currentSprite.value?.bsf
   if (!bsf) return
-  if (v === 'none') bsf.collisionDisabled = true
+  if (v === 'solid') delete bsf.collisionKind
+  else bsf.collisionKind = v as 'sensor' | 'both'
+  scheduleSave()
+}
+
+function onCollisionDisabledChange(e: Event) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  if ((e.target as HTMLInputElement).checked) bsf.collisionDisabled = true
   else delete bsf.collisionDisabled
+  scheduleSave()
+}
+
+/** 类型（tag）：代码里 is_touch("标签") 查询用；下拉预设 + 自定义（与地图属性面板同款交互） */
+const SPRITE_TAG_CUSTOM = '自定义'
+const spriteTagCustomMode = ref(false)
+watch(currentSprite, () => {
+  spriteTagCustomMode.value = false
+})
+
+const collisionTagValue = computed(() =>
+  spriteTagCustomMode.value
+    ? SPRITE_TAG_CUSTOM
+    : (currentSprite.value?.bsf?.collisionTag || '').trim(),
+)
+
+const collisionTagOptions = computed(() => {
+  const current = (currentSprite.value?.bsf?.collisionTag || '').trim()
+  // 旧角色用过的自定义标签也要能在下拉里选到
+  const extra = current && !SHAPE_TAG_PRESETS.includes(current) ? [current] : []
+  return [
+    ...SHAPE_TAG_PRESETS.map(tag => ({ label: tag, value: tag })),
+    ...extra.map(tag => ({ label: tag, value: tag })),
+    { label: '自定义…', value: SPRITE_TAG_CUSTOM },
+  ]
+})
+
+function onCollisionTagSelect(v: string) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  if (v === SPRITE_TAG_CUSTOM) {
+    spriteTagCustomMode.value = true
+    bsf.collisionTag = ''
+  } else {
+    spriteTagCustomMode.value = false
+    if (v) bsf.collisionTag = v
+    else delete bsf.collisionTag
+  }
+  scheduleSave()
+}
+
+const collisionTagDraft = computed(() => currentSprite.value?.bsf?.collisionTag || '')
+
+/** 自定义标签输入：输入过程中原样写入（避免中文输入法组字被打断） */
+function onCollisionTagInput(e: Event) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  bsf.collisionTag = (e.target as HTMLInputElement).value
+  scheduleSave()
+}
+
+function onCollisionTagBlur(e: Event) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  const name = (e.target as HTMLInputElement).value.trim()
+  if (name) bsf.collisionTag = name
+  else {
+    delete bsf.collisionTag
+    spriteTagCustomMode.value = false
+  }
   scheduleSave()
 }
 
@@ -2989,6 +3100,8 @@ watch(
     () => sceneTransform.value.scaleY,
     () => previewScale.value,
     () => editorStore.renderMode,
+    // 画风分析是异步的：结果落地后要按新的采样方式重画 canvas
+    () => spritePixelArt.value,
   ],
   () => redrawSpriteImages(),
   { flush: 'post' },
@@ -3316,6 +3429,7 @@ function onWindowBlur() {
                 :zoom="displayZoom"
                 :angle="sceneTransform.angle"
                 :shape-angle="collisionAngleValue"
+                :kind="collisionKindValue"
                 :disabled="collisionDisabled"
                 @update="onCollisionUpdate"
               />
@@ -3580,7 +3694,7 @@ function onWindowBlur() {
             当前角色还没有可编辑的标注数据（单图角色首次编辑并保存后会自动转为 .bsf）。
           </div>
           <template v-else>
-            <!-- 基础设置：作用 / 类型 / 单向碰撞 / 碰撞层级 -->
+            <!-- 基础设置：作用 / 类型 / 形状 / 单向碰撞 / 碰撞层级 -->
             <div class="att-group">
               <div class="mi-section" :class="{ open: colFold.basic }">
                 <button class="mi-head" type="button" @click="colFold.basic = !colFold.basic">
@@ -3592,13 +3706,35 @@ function onWindowBlur() {
                     <span class="att-label">作用</span>
                     <CustomSelect
                       class="att-select"
-                      :model-value="collisionPurposeValue"
-                      :options="COLLISION_PURPOSE_OPTIONS"
-                      @update:model-value="onCollisionPurposeSelect"
+                      :model-value="collisionKindValue"
+                      :options="COLLISION_KIND_OPTIONS"
+                      @update:model-value="onCollisionKindSelect"
                     />
                   </div>
                   <div class="att-row">
                     <span class="att-label">类型</span>
+                    <CustomSelect
+                      class="att-select"
+                      :model-value="collisionTagValue"
+                      :options="collisionTagOptions"
+                      placeholder="未命名"
+                      @update:model-value="onCollisionTagSelect"
+                    />
+                  </div>
+                  <div v-if="spriteTagCustomMode" class="att-row">
+                    <span class="att-label">类型名</span>
+                    <input
+                      class="att-input"
+                      :value="collisionTagDraft"
+                      maxlength="20"
+                      placeholder="设置类型名"
+                      @input="onCollisionTagInput"
+                      @blur="onCollisionTagBlur"
+                      @keydown.enter="($event.target as HTMLInputElement).blur()"
+                    />
+                  </div>
+                  <div class="att-row">
+                    <span class="att-label">形状</span>
                     <CustomSelect
                       class="att-select"
                       :model-value="collisionTypeValue"
@@ -3609,7 +3745,12 @@ function onWindowBlur() {
                   <div class="att-row">
                     <span class="att-label">单向碰撞</span>
                     <label class="att-checkbox" title="只从一侧挡住（现阶段保存设置，运行时暂未接入）">
-                      <input type="checkbox" :checked="collisionOneWay" @change="onCollisionOneWayChange" />
+                      <input
+                        type="checkbox"
+                        :checked="collisionOneWay"
+                        :disabled="collisionPhysicsDisabled"
+                        @change="onCollisionOneWayChange"
+                      />
                       <span class="att-checkbox-text">启用</span>
                     </label>
                   </div>
@@ -3620,6 +3761,17 @@ function onWindowBlur() {
                         type="checkbox"
                         :checked="collisionLayersEnabled"
                         @change="onCollisionLayersChange"
+                      />
+                      <span class="att-checkbox-text">启用</span>
+                    </label>
+                  </div>
+                  <div class="att-row">
+                    <span class="att-label">禁用碰撞</span>
+                    <label class="att-checkbox" title="整个角色不参与地形/边界物理阻挡（形状保留，取消勾选即恢复）">
+                      <input
+                        type="checkbox"
+                        :checked="collisionDisabled"
+                        @change="onCollisionDisabledChange"
                       />
                       <span class="att-checkbox-text">启用</span>
                     </label>

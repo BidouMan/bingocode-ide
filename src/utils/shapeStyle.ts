@@ -6,6 +6,9 @@ import type { ShapeItem, ShapeKind } from '../stores/map'
  * 避免两边颜色各写一套、改一处漏一处。
  */
 
+/** 类型（tag）预设：地图图块 / 形状 / 角色共用同一份常用玩法分类 */
+export const SHAPE_TAG_PRESETS = ['墙体', '地面', '道具', '机关', '危险区']
+
 /** 作用类型中文名 */
 export const SHAPE_KIND_LABELS: Record<ShapeKind, string> = {
   solid: '碰撞',
