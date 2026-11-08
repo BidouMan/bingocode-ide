@@ -101,6 +101,12 @@ export interface ShapeSaveData {
   oneWayDirY?: number
   /** 单向碰撞厚度容差（像素） */
   oneWayMargin?: number
+  /** 碰撞层级（参考 Unity Physics Layers；仅编辑器保存，运行时未接入） */
+  collisionLayersEnabled?: boolean
+  /** 所在碰撞层 1~8（缺省 1） */
+  collisionLayer?: number
+  /** 可碰撞掩码：1~8 的层号数组（缺省 [1]） */
+  collisionMask?: number[]
   /** 碰撞类型：由 oneWay 推导（引擎用它填 raycast 等 API 的 collision_type）
       旧存档的「跳板」表示单向碰撞，读取时会迁移成 oneWay */
   collisionType?: string
@@ -375,6 +381,14 @@ export function serializeMap(mapData: any): MapSaveData {
         oneWayDirX: shape.oneWayDirX ?? 0,
         oneWayDirY: shape.oneWayDirY ?? 1,
         oneWayMargin: shape.oneWayMargin ?? 0,
+        // 碰撞层级 / 掩码：仅编辑器保存，运行时未接入；缺省不写冗余字段
+        ...(shape.collisionLayersEnabled
+          ? {
+              collisionLayersEnabled: true,
+              collisionLayer: shape.collisionLayer ?? 1,
+              collisionMask: Array.isArray(shape.collisionMask) ? shape.collisionMask : [1],
+            }
+          : {}),
         // 单向形状在引擎/代码里仍报告为「跳板」，普通形状为「墙体」
         collisionType: shape.oneWay === true ? '跳板' : '墙体',
         disabled: shape.disabled === true,
@@ -628,6 +642,19 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
               ? 1
               : Number(p.oneWayDirY) || 0,
             oneWayMargin: Number(p.oneWayMargin) || 0,
+            // 碰撞层级 / 掩码：仅编辑器保存，运行时未接入；损坏值收敛到 1~8
+            ...(p.collisionLayersEnabled === true
+              ? {
+                  collisionLayersEnabled: true,
+                  collisionLayer: Math.min(8, Math.max(1, Number(p.collisionLayer) || 1)),
+                  collisionMask: Array.isArray(p.collisionMask)
+                    ? p.collisionMask
+                        .map(Number)
+                        .filter((n: number) => n >= 1 && n <= 8)
+                        .sort((a: number, b: number) => a - b)
+                    : [1],
+                }
+              : {}),
             disabled: p.disabled === true,
           })),
       })

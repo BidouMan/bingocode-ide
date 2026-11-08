@@ -1004,6 +1004,47 @@
   cursor: not-allowed;
 }
 
+/* ====== 碰撞层级（与地图属性面板同规格：勾选后面板内展开层/掩码网格） ====== */
+.layer-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.layer-block-name {
+  color: #9ca0a4;
+  font-size: 12px;
+  line-height: 18px;
+}
+.layer-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+.layer-cell {
+  height: 26px;
+  background: rgb(34, 37, 43);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  color: #b9bdc2;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  cursor: default;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.layer-cell:hover:not(:disabled):not(.layer-cell-active) {
+  background: var(--border-light);
+}
+.layer-cell-active {
+  background: rgba(91, 251, 132, 0.16);
+  border-color: rgba(91, 251, 132, 0.6);
+  color: #e8eaec;
+  box-shadow: inset 0 0 0 1px rgba(91, 251, 132, 0.25);
+}
+.layer-cell:disabled {
+  opacity: 0.5;
+}
+
 /* ====== 检视器分区（与地图编辑器同规格：整行标题 + 折叠箭头） ====== */
 /* 分区整块：不再画细线，靠标题条本身区分（Godot 检视器风格） */
 .mi-section {

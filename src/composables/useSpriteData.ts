@@ -81,10 +81,19 @@ export interface BsfMeta {
   collisionTag?: string
   /** 禁用碰撞：true = 该角色完全不参与地形/边界物理阻挡（不影响碰到检测） */
   collisionDisabled?: boolean
-  /** 单向碰撞（可选）：true = 只从一侧挡住；当前仅编辑器保存，运行时尚未接入 */
+  /** 单向碰撞（可选）：true = 可当单向碰撞体，只有从「方向」一侧靠近才挡住 */
   collisionOneWay?: boolean
+  /** 单向碰撞方向（可选，世界坐标 y 向下）：缺省 (0,1) = 从上方踩住 */
+  collisionOneWayDirX?: number
+  collisionOneWayDirY?: number
+  /** 单向碰撞厚度（可选，0~8 像素）：越大越容易踩住/挡住；缺省 0 */
+  collisionOneWayMargin?: number
   /** 碰撞层级开关（可选）：当前仅编辑器保存，运行时尚未接入 */
   collisionLayersEnabled?: boolean
+  /** 所在碰撞层（1~8，缺省 1）：仅编辑器保存，运行时尚未接入 */
+  collisionLayer?: number
+  /** 可碰撞掩码（1~8 的层号数组，缺省 [1]）：仅编辑器保存，运行时尚未接入 */
+  collisionMask?: number[]
   /** 碰撞形状旋转角度（度，可选）：当前仅编辑器保存，运行时尚未接入 */
   collisionAngle?: number
   /** 受重力影响：false = 重力地图里也不下坠（撞墙/落地等碰撞照常）；缺省 = 受重力 */
@@ -359,8 +368,27 @@ async function buildBsfSpriteData(manifest: any, sheetImage: HTMLImageElement): 
         ? { collisionTag: manifest.collisionTag.trim() }
         : {}),
       ...(manifest.collisionDisabled ? { collisionDisabled: true } : {}),
-      ...(manifest.collisionOneWay ? { collisionOneWay: true } : {}),
-      ...(manifest.collisionLayersEnabled ? { collisionLayersEnabled: true } : {}),
+      ...(manifest.collisionOneWay
+        ? {
+            collisionOneWay: true,
+            ...(typeof manifest.collisionOneWayDirX === 'number'
+              ? { collisionOneWayDirX: manifest.collisionOneWayDirX }
+              : {}),
+            ...(typeof manifest.collisionOneWayDirY === 'number'
+              ? { collisionOneWayDirY: manifest.collisionOneWayDirY }
+              : {}),
+            ...(typeof manifest.collisionOneWayMargin === 'number'
+              ? { collisionOneWayMargin: manifest.collisionOneWayMargin }
+              : {}),
+          }
+        : {}),
+      ...(manifest.collisionLayersEnabled
+        ? {
+            collisionLayersEnabled: true,
+            collisionLayer: typeof manifest.collisionLayer === 'number' ? manifest.collisionLayer : 1,
+            collisionMask: Array.isArray(manifest.collisionMask) ? manifest.collisionMask : [1],
+          }
+        : {}),
       ...(typeof manifest.collisionAngle === 'number' ? { collisionAngle: manifest.collisionAngle } : {}),
       ...(manifest.gravity === false ? { gravity: false } : {}),
       ...(manifest.hidden ? { hidden: true } : {}),
@@ -421,9 +449,32 @@ export async function saveBsfManifest(dirPath: string, sprite: SpriteData): Prom
     ...(sprite.bsf.collisionTag?.trim() ? { collisionTag: sprite.bsf.collisionTag.trim() } : {}),
     // 禁用碰撞（可选）：true = 不参与物理阻挡；缺省不写字段
     ...(sprite.bsf.collisionDisabled ? { collisionDisabled: true } : {}),
-    // 单向碰撞 / 碰撞层级 / 旋转（可选）：当前仅编辑器保存，运行时尚未接入
-    ...(sprite.bsf.collisionOneWay ? { collisionOneWay: true } : {}),
-    ...(sprite.bsf.collisionLayersEnabled ? { collisionLayersEnabled: true } : {}),
+    // 单向碰撞（可选）：true = 角色可当单向碰撞体；缺省不写字段
+    ...(sprite.bsf.collisionOneWay
+      ? {
+          collisionOneWay: true,
+          // 方向缺省 (0,1) 从上方踩住，不写冗余字段
+          ...(sprite.bsf.collisionOneWayDirX !== undefined
+            && sprite.bsf.collisionOneWayDirY !== undefined
+            && (sprite.bsf.collisionOneWayDirX !== 0 || sprite.bsf.collisionOneWayDirY !== 1)
+            ? {
+                collisionOneWayDirX: sprite.bsf.collisionOneWayDirX,
+                collisionOneWayDirY: sprite.bsf.collisionOneWayDirY,
+              }
+            : {}),
+          ...(sprite.bsf.collisionOneWayMargin
+            ? { collisionOneWayMargin: sprite.bsf.collisionOneWayMargin }
+            : {}),
+        }
+      : {}),
+    // 碰撞层级 / 掩码 / 旋转（可选）：当前仅编辑器保存，运行时尚未接入
+    ...(sprite.bsf.collisionLayersEnabled
+      ? {
+          collisionLayersEnabled: true,
+          collisionLayer: sprite.bsf.collisionLayer ?? 1,
+          collisionMask: sprite.bsf.collisionMask ?? [1],
+        }
+      : {}),
     ...(typeof sprite.bsf.collisionAngle === 'number' && sprite.bsf.collisionAngle !== 0
       ? { collisionAngle: sprite.bsf.collisionAngle }
       : {}),

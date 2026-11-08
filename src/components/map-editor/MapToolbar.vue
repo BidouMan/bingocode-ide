@@ -7,12 +7,7 @@ import CustomSelect from '../common/CustomSelect.vue'
 import ImageLayerTools from './ImageLayerTools.vue'
 import DrawingLayerTools from './DrawingLayerTools.vue'
 import ShapeLayerTools from './ShapeLayerTools.vue'
-import iconGrid from '../../assets/icons/显示网格.svg'
-import iconSnapGrid from '../../assets/icons/吸附锚点.svg'
 import iconMarker from '../../assets/icons/标记.svg'
-import iconShow from '../../assets/icons/icon_show.svg'
-import iconHide from '../../assets/icons/icon_hide.svg'
-import iconPaint from '../../assets/icons/画笔工具.svg'
 
 const props = defineProps<{
   disabled?: boolean
@@ -33,8 +28,6 @@ const resourceStore = useResourceStore()
 
 const isImageLayer = computed(() => mapStore.activeMode === 'image')
 const isShapeLayer = computed(() => mapStore.activeMode === 'shape')
-/** 当前是否选中图像图层：决定「进入绘制页」按钮能否使用 */
-const canEditImage = computed(() => mapStore.activeLayer?.type === 'image')
 
 // 有被隐藏的标记时出现「显示隐藏标记」按钮；全部恢复后自动关掉临时显示，避免状态残留
 const hasHiddenMarkers = computed(() => mapStore.mapData.markers.some(m => m.visible === false))
@@ -73,22 +66,13 @@ function onToolAreaWheel(e: WheelEvent) {
 
 <template>
   <div class="map-toolbar">
-    <!-- 最左：进入绘制页编辑当前图像图层（位置固定，非图像图层时禁用） -->
-    <button
-      class="toolbar-btn"
-      :disabled="disabled || !canEditImage"
-      v-tooltip="canEditImage ? '进入绘制页编辑这张图像' : '先选中图像图层'"
-      @click="emit('edit-image')"
-    >
-      <img :src="iconPaint" class="toolbar-icon" />
-    </button>
-
     <!-- 工具跟着当前图层类型切换：图片=图像工具，形状=形状工具，图块=绘制工具 -->
     <div class="tool-area" @wheel="onToolAreaWheel">
       <ImageLayerTools
         v-if="isImageLayer"
         :disabled="disabled"
         @copy-layer="emit('copy-image-layer')"
+        @edit-image="emit('edit-image')"
         @flip-h="emit('flip-image-h')"
         @flip-v="emit('flip-image-v')"
       />
@@ -98,42 +82,41 @@ function onToolAreaWheel(e: WheelEvent) {
 
     <!-- 标记：紧跟在工具区（自定义形状）右侧 -->
     <button
-      class="toolbar-btn"
-      :class="{ 'toolbar-btn-active': mapEditorStore.markerPlacing }"
+      class="tool-chip"
+      :class="{ active: mapEditorStore.markerPlacing }"
       v-tooltip="mapEditorStore.markerPlacing ? '取消放置标记' : '标记'"
       @click="mapEditorStore.toggleMarkerPlacing()"
     >
-      <img :src="iconMarker" class="toolbar-icon" />
+      <img :src="iconMarker" class="tool-chip-icon ic-marker" />标记
     </button>
 
     <!-- 有被隐藏的标记时才出现：临时把它们弱化显示出来，方便重新选中 -->
     <button
       v-if="hasHiddenMarkers"
-      class="toolbar-btn"
-      :class="{ 'toolbar-btn-active': mapEditorStore.showHiddenMarkers }"
+      class="tool-chip check-chip"
+      :class="{ active: mapEditorStore.showHiddenMarkers }"
       v-tooltip="mapEditorStore.showHiddenMarkers ? '重新隐藏这些标记' : '显示隐藏的标记'"
       @click="mapEditorStore.toggleShowHiddenMarkers()"
     >
-      <img :src="mapEditorStore.showHiddenMarkers ? iconHide : iconShow" class="toolbar-icon" />
+      <span class="chip-check" :class="{ on: mapEditorStore.showHiddenMarkers }"></span>
+      {{ mapEditorStore.showHiddenMarkers ? '恢复隐藏' : '显示隐藏标记' }}
     </button>
 
-    <div class="toolbar-separator" />
-
     <button
-      class="toolbar-btn"
-      :class="{ 'toolbar-btn-active': mapEditorStore.showGrid }"
+      class="tool-chip check-chip"
+      :class="{ active: mapEditorStore.showGrid }"
       v-tooltip="'显示网格'"
       @click="mapEditorStore.toggleGrid()"
     >
-      <img :src="iconGrid" class="toolbar-icon" />
+      <span class="chip-check" :class="{ on: mapEditorStore.showGrid }"></span>网格
     </button>
     <button
-      class="toolbar-btn"
-      :class="{ 'toolbar-btn-active': mapEditorStore.smartSnap }"
+      class="tool-chip check-chip"
+      :class="{ active: mapEditorStore.smartSnap }"
       v-tooltip="'智能吸附（像素 / 网格 / 图像边缘与中心）'"
       @click="mapEditorStore.toggleSmartSnap()"
     >
-      <img :src="iconSnapGrid" class="toolbar-icon" />
+      <span class="chip-check" :class="{ on: mapEditorStore.smartSnap }"></span>吸附
     </button>
 
     <div class="toolbar-spacer" />
@@ -149,83 +132,24 @@ function onToolAreaWheel(e: WheelEvent) {
   display: flex;
   align-items: center;
   height: 44px;
-  padding: 0 8px;
-  gap: 4px;
+  padding: 0 10px;
+  gap: 6px;
   background: var(--bg-root);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-}
-
-.toolbar-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  cursor: default;
-  padding: 0;
-  flex-shrink: 0;
-  transition: background 0.15s;
-}
-
-.toolbar-btn:hover {
-  background: var(--bg-hover);
-}
-
-.toolbar-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.toolbar-btn:disabled:hover {
-  background: transparent;
-}
-
-.toolbar-btn:active {
-  background: rgb(72, 75, 82);
-}
-
-/* 常驻开关（标记 / 网格 / 吸附等）只保留选中底色，不画绿线：
-   绿线专门表示"当前正在使用的工具"，避免和工具切换混淆 */
-.toolbar-btn-active {
-  background: rgb(46, 49, 58);
-  border: 1px solid var(--border-light);
-}
-
-.toolbar-btn-active:hover {
-  background: var(--border-light);
-}
-
-.toolbar-icon {
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-}
-
-.toolbar-separator {
-  width: 1px;
-  height: 20px;
-  background: var(--border-light);
-  margin: 0 2px;
 }
 
 .toolbar-spacer {
   flex: 1;
 }
 
-/* 工具区：内容可横向滚动，滚动条隐藏（滚轮可横向滚动）。
-   上下 padding 留给工具按钮外置的选中指示条（overflow 裁剪边界是 padding box，
-   没有这段 padding 时 bottom:-4px 的绿条会被裁掉） */
+/* 工具区：内容可横向滚动，滚动条隐藏（滚轮可横向滚动） */
 .tool-area {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
   flex: 0 1 auto;
-  padding: 7px 0;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -293,3 +217,5 @@ function onToolAreaWheel(e: WheelEvent) {
   color: var(--text-muted);
 }
 </style>
+
+<style scoped src="./ToolbarChip.css"></style>

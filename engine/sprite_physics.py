@@ -644,6 +644,10 @@ class SpritePhysicsMixin:
                                 is_one_way,
                             )
 
+        # 角色单向碰撞：可作单向跳板 / 单向墙，方向与地图单向碰撞一致
+        if direction != 0:
+            self._resolve_one_way_sprite_platforms(consider, sprite_rect, axis, direction)
+
         # 应用本轴最合理的唯一修正
         self._contacts |= encounter_mask
         if best_delta is not None:
@@ -692,6 +696,89 @@ class SpritePhysicsMixin:
             elif rect[3] > bounds["bottom"]:
                 self._y += bounds["bottom"] - rect[3] - 0.05
                 self._contacts |= self._CONTACT_DOWN
+
+
+    def _resolve_one_way_sprite_platforms(self, consider, sprite_rect, axis, direction):
+        """把开启「单向碰撞」的其它角色当作单向碰撞体。
+
+        语义与地图单向碰撞一致：方向 (0,1)/(0,-1)/(1,0)/(-1,0) 表示
+        「触发碰撞的运动方向」，只有从实心面靠近时才产生修正，另一侧可穿过；
+        厚度 margin 放宽「原本在实心面之外」的判定（0~8 像素）。
+        普通角色互相之间仍不阻挡——角色作单向碰撞体是显式开启的能力。
+        """
+        prev_bottom = self._prev_bottom_y
+        prev_top = self._prev_top_y
+        prev_left = self._prev_left_x
+        prev_right = self._prev_right_x
+        for other in list(st._SPRITES.values()):
+            if other is self or other._is_deleted or not getattr(other, "_visible", True):
+                continue
+            if not getattr(other, "_collision_one_way", False):
+                continue
+            # 感应 / 禁用碰撞的角色不作为单向碰撞体
+            if other._collision_physics_off:
+                continue
+            dir_x, dir_y = getattr(other, "_collision_one_way_dir", (0.0, 1.0))
+            margin = getattr(other, "_collision_one_way_margin", 0.0)
+            plat_rect = other._get_hitbox_rect()
+            if not plat_rect:
+                continue
+            left, top, right, bottom = plat_rect
+
+            if dir_y > 0:
+                # 下落：脚原本在顶面之上（含厚度容差）才算踩住
+                if axis != "y" or direction <= 0 or self._drop_through:
+                    continue
+                if prev_bottom > top + margin:
+                    continue
+                if sprite_rect[2] <= left or sprite_rect[0] >= right:
+                    continue
+                if sprite_rect[3] <= top or sprite_rect[1] >= bottom:
+                    continue
+                correction = top - sprite_rect[3]
+                consider(correction - 0.05, correction, "ground")
+                continue
+
+            if dir_y < 0:
+                # 上升：头原本在底面之下才算顶住
+                if axis != "y" or direction >= 0:
+                    continue
+                if prev_top < bottom - margin:
+                    continue
+                if sprite_rect[2] <= left or sprite_rect[0] >= right:
+                    continue
+                if sprite_rect[3] <= top or sprite_rect[1] >= bottom:
+                    continue
+                correction = bottom - sprite_rect[1]
+                consider(correction + 0.05, correction, "ceiling")
+                continue
+
+            if dir_x > 0:
+                # 向右移动时从左侧挡住
+                if axis != "x" or direction <= 0:
+                    continue
+                if prev_right > left + margin:
+                    continue
+                if sprite_rect[3] <= top or sprite_rect[1] >= bottom:
+                    continue
+                if sprite_rect[2] <= left or sprite_rect[0] >= right:
+                    continue
+                correction = left - sprite_rect[2]
+                consider(correction - 0.05, correction, None)
+                continue
+
+            if dir_x < 0:
+                # 向左移动时从右侧挡住
+                if axis != "x" or direction >= 0:
+                    continue
+                if prev_left < right - margin:
+                    continue
+                if sprite_rect[3] <= top or sprite_rect[1] >= bottom:
+                    continue
+                if sprite_rect[2] <= left or sprite_rect[0] >= right:
+                    continue
+                correction = right - sprite_rect[0]
+                consider(correction + 0.05, correction, None)
 
 
     # ---------- 侦测模块 ----------

@@ -131,6 +131,11 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
         # 碰撞作用 / 类型（编辑器「作用 / 类型」；仅 .bsf 提供，缺省 solid / 身体）
         self._collision_kind = "solid"
         self._collision_tag = "身体"
+        # 单向碰撞（编辑器「单向碰撞」；仅 .bsf 提供，缺省关闭）
+        # true = 该角色可作为单向碰撞体：只有从「方向」一侧靠近时挡住，另一侧可穿过
+        self._collision_one_way = False
+        self._collision_one_way_dir = (0.0, 1.0)
+        self._collision_one_way_margin = 0.0
         # 受重力影响（编辑器「重力」开关 / 代码 sprite.gravity；缺省受重力）
         self._gravity = True
         self.config = self._load_sprite_config()

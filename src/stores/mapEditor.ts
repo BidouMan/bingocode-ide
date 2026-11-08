@@ -19,10 +19,8 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
   const imageTool = ref<'select' | 'reshape' | 'brush' | 'eraser' | 'fill' | 'text' | 'line' | 'rect' | 'ellipse' | 'pen' | 'eyedropper'>('select')
   // 图片绘制模式：位图 / 矢量（默认矢量，与角色编辑器一致）
   const paintMode = ref<'bitmap' | 'vector'>('vector')
-  // 形状层工具：默认鼠标选择；矩形/圆形/胶囊/自定义为绘制工具
+  // 形状层工具：默认鼠标选择；矩形/胶囊/自定义为一次性绘制工具（画完自动回到选择）
   const shapeTool = ref<ShapeTool>('select')
-  // 当前选中的形状创建类型（标签状态）：切换选择/增删锚点工具时保持常亮
-  const shapeDrawTool = ref<'rect' | 'circle' | 'capsule' | 'polygon'>('rect')
   // 当前正在编辑的形状 id（属于当前形状层）；多选时它是「主选中」的那个
   const activeShapeId = ref<string | null>(null)
   // 当前选中的形状集合（Shift / Cmd / Ctrl 多选）；始终包含 activeShapeId
@@ -80,10 +78,6 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
 
   function setShapeTool(tool: ShapeTool) {
     shapeTool.value = tool
-    // 形状按钮独立记忆：只有真正选择形状时才更新，选择/增删锚点不影响常亮状态
-    if (tool === 'rect' || tool === 'circle' || tool === 'capsule' || tool === 'polygon') {
-      shapeDrawTool.value = tool
-    }
   }
 
   function setActiveShapeId(id: string | null) {
@@ -161,7 +155,6 @@ export const useMapEditorStore = defineStore('mapEditor', () => {
     imageTool,
     paintMode,
     shapeTool,
-    shapeDrawTool,
     activeShapeId,
     activeShapeIds,
     setActiveShapeIds,

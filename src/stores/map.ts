@@ -118,6 +118,12 @@ export interface ShapeItem {
   oneWayDirY?: number
   // 单向碰撞的厚度容差（像素）
   oneWayMargin?: number
+  // 碰撞层级（参考 Unity Physics Layers）：当前仅编辑器保存，运行时未接入
+  collisionLayersEnabled?: boolean
+  // 所在碰撞层 1~8（缺省 1）
+  collisionLayer?: number
+  // 可碰撞掩码：1~8 的层号数组（缺省 [1]）
+  collisionMask?: number[]
   // 禁用：勾选后该形状不参与物理与感应判定
   disabled?: boolean
 }
@@ -286,8 +292,8 @@ export function tilePaletteEntryKey(entry: TilePaletteEntry): string {
 
 export type MapTool = 'move' | 'select' | 'draw' | 'line' | 'rect' | 'fill'
 export type CollisionTool = 'move' | 'add' | 'delete' | 'reset'
-// 形状层编辑工具：select=选择/拖动，rect/circle/capsule/polygon=形状，addPoint/deletePoint=锚点增删
-export type ShapeTool = 'select' | 'rect' | 'circle' | 'capsule' | 'polygon' | 'addPoint' | 'deletePoint'
+// 形状层编辑工具：select=选择/拖动，rect/capsule/polygon=形状，addPoint/deletePoint=锚点增删
+export type ShapeTool = 'select' | 'rect' | 'capsule' | 'polygon' | 'addPoint' | 'deletePoint'
 
 export const useMapStore = defineStore('map', () => {
   const settingsStore = useSettingsStore()
@@ -1859,7 +1865,8 @@ export const useMapStore = defineStore('map', () => {
   function updateShapes(
     ids: string[],
     patch: Partial<Pick<ShapeItem,
-      'kind' | 'tag' | 'oneWay' | 'oneWayDirX' | 'oneWayDirY' | 'oneWayMargin' | 'disabled'>>,
+      'kind' | 'tag' | 'oneWay' | 'oneWayDirX' | 'oneWayDirY' | 'oneWayMargin' | 'disabled'
+      | 'collisionLayersEnabled' | 'collisionLayer' | 'collisionMask'>>,
   ) {
     const layer = activeShapeLayer.value
     if (!layer || ids.length === 0) return
@@ -1874,6 +1881,9 @@ export const useMapStore = defineStore('map', () => {
       if (patch.oneWayDirY !== undefined) item.oneWayDirY = patch.oneWayDirY
       if (patch.oneWayMargin !== undefined) item.oneWayMargin = patch.oneWayMargin
       if (patch.disabled !== undefined) item.disabled = patch.disabled
+      if (patch.collisionLayersEnabled !== undefined) item.collisionLayersEnabled = patch.collisionLayersEnabled
+      if (patch.collisionLayer !== undefined) item.collisionLayer = patch.collisionLayer
+      if (patch.collisionMask !== undefined) item.collisionMask = patch.collisionMask
       changed = true
     }
     if (changed) shapeRevision.value++

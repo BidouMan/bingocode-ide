@@ -19,6 +19,8 @@ import CollisionShapeOverlay from './CollisionShapeOverlay.vue'
 import CustomSelect from '../common/CustomSelect.vue'
 // 类型（tag）预设：角色按玩法身份分类，与地图的墙体/地面等类型分开
 import {
+  ONE_WAY_DIRECTIONS,
+  PHYSICS_MATERIAL_OPTIONS,
   SPRITE_COLLISION_TAG_PRESETS,
   SPRITE_DEFAULT_COLLISION_TAG,
 } from '../../utils/shapeStyle'
@@ -1830,27 +1832,98 @@ function onCollisionTagBlur(e: Event) {
   scheduleSave()
 }
 
-/** 单向碰撞 / 碰撞层级 / 旋转：现阶段只保存到 .bsf，运行时暂未接入物理判定 */
+/** 单向碰撞：该角色可当单向碰撞体（把「方向」那一侧当作实心面） */
 const collisionOneWay = computed(() => !!currentSprite.value?.bsf?.collisionOneWay)
 
 function onCollisionOneWayChange(e: Event) {
   const bsf = currentSprite.value?.bsf
   if (!bsf) return
   if ((e.target as HTMLInputElement).checked) bsf.collisionOneWay = true
-  else delete bsf.collisionOneWay
+  else {
+    delete bsf.collisionOneWay
+    delete bsf.collisionOneWayDirX
+    delete bsf.collisionOneWayDirY
+    delete bsf.collisionOneWayMargin
+  }
   scheduleSave()
 }
 
+/** 单向碰撞方向：与地图属性面板同一份选项；缺省 (0,1) 从上方踩住 */
+const collisionOneWayDirValue = computed(() => {
+  const bsf = currentSprite.value?.bsf
+  const dx = bsf?.collisionOneWayDirX ?? 0
+  const dy = bsf?.collisionOneWayDirY ?? 1
+  if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? '1,0' : '-1,0'
+  return dy < 0 ? '0,-1' : '0,1'
+})
+
+const collisionOneWayMargin = computed(() => currentSprite.value?.bsf?.collisionOneWayMargin ?? 0)
+
+function onCollisionOneWayDirChange(v: string) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  const [dx, dy] = v.split(',').map(Number)
+  if (dx === 0 && dy === 1) {
+    delete bsf.collisionOneWayDirX
+    delete bsf.collisionOneWayDirY
+  } else {
+    bsf.collisionOneWayDirX = dx
+    bsf.collisionOneWayDirY = dy
+  }
+  scheduleSave()
+}
+
+function onCollisionOneWayMarginInput(e: Event) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  const raw = Number((e.target as HTMLInputElement).value)
+  const margin = Number.isFinite(raw) ? Math.min(8, Math.max(0, raw)) : 0
+  if (margin > 0) bsf.collisionOneWayMargin = margin
+  else delete bsf.collisionOneWayMargin
+  scheduleSave()
+}
+
+const physicsMaterialOptions = PHYSICS_MATERIAL_OPTIONS
+
+/** 碰撞层级：现阶段只保存到 .bsf，运行时暂未接入（和地图图块/形状面板同一套交互） */
 const collisionLayersEnabled = computed(() => !!currentSprite.value?.bsf?.collisionLayersEnabled)
+/** 所在碰撞层 1~8，缺省 1 */
+const collisionLayer = computed(() => currentSprite.value?.bsf?.collisionLayer ?? 1)
+/** 可碰撞掩码层号数组，缺省 [1] */
+const collisionMask = computed<number[]>(() => currentSprite.value?.bsf?.collisionMask ?? [1])
 
 function onCollisionLayersChange(e: Event) {
   const bsf = currentSprite.value?.bsf
   if (!bsf) return
   if ((e.target as HTMLInputElement).checked) bsf.collisionLayersEnabled = true
-  else delete bsf.collisionLayersEnabled
+  else {
+    delete bsf.collisionLayersEnabled
+    delete bsf.collisionLayer
+    delete bsf.collisionMask
+  }
   scheduleSave()
 }
 
+function onCollisionLayerSelect(n: number) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  // 1 是默认层，不写冗余字段
+  if (n === 1) delete bsf.collisionLayer
+  else bsf.collisionLayer = n
+  scheduleSave()
+}
+
+function toggleCollisionMask(n: number) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  const next = new Set<number>(bsf.collisionMask ?? [1])
+  if (next.has(n)) next.delete(n)
+  else next.add(n)
+  bsf.collisionMask = Array.from(next).sort((a, b) => a - b)
+  scheduleSave()
+}
+
+/** 碰撞形状旋转：现阶段只保存到 .bsf，运行时暂未接入 */
 const collisionAngleValue = computed(() => currentSprite.value?.bsf?.collisionAngle ?? 0)
 
 function onCollisionAngleInput(e: Event) {
@@ -3352,7 +3425,7 @@ function onWindowBlur() {
           title="显示网格"
           @click="showGrid = !showGrid"
         >
-          <span class="chip-check" :class="{ on: showGrid }"></span>显示网格
+          <span class="chip-check" :class="{ on: showGrid }"></span>网格
         </button>
         <button
           class="layer-chip chip-toggle"
@@ -3757,7 +3830,7 @@ function onWindowBlur() {
                   </div>
                   <div class="att-row">
                     <span class="att-label">单向碰撞</span>
-                    <label class="att-checkbox" title="只从一侧挡住（现阶段保存设置，运行时暂未接入）">
+                    <label class="att-checkbox" title="只从「方向」那一侧挡住，另一侧可以穿过">
                       <input
                         type="checkbox"
                         :checked="collisionOneWay"
@@ -3767,6 +3840,31 @@ function onWindowBlur() {
                       <span class="att-checkbox-text">启用</span>
                     </label>
                   </div>
+                  <template v-if="collisionOneWay">
+                    <div class="att-row">
+                      <span class="att-label">方向</span>
+                      <CustomSelect
+                        class="att-select"
+                        :model-value="collisionOneWayDirValue"
+                        :options="ONE_WAY_DIRECTIONS"
+                        :disabled="collisionPhysicsDisabled"
+                        @update:model-value="onCollisionOneWayDirChange"
+                      />
+                    </div>
+                    <div class="att-row">
+                      <span class="att-label">厚度</span>
+                      <input
+                        class="att-input att-input-no-spin"
+                        type="number"
+                        min="0"
+                        max="8"
+                        step="0.5"
+                        :value="collisionOneWayMargin"
+                        :disabled="collisionPhysicsDisabled"
+                        @change="onCollisionOneWayMarginInput"
+                      />
+                    </div>
+                  </template>
                   <div class="att-row">
                     <span class="att-label">碰撞层级</span>
                     <label class="att-checkbox" title="碰撞层级开关（现阶段保存设置，运行时暂未接入）">
@@ -3778,6 +3876,43 @@ function onWindowBlur() {
                       <span class="att-checkbox-text">启用</span>
                     </label>
                   </div>
+                  <template v-if="collisionLayersEnabled">
+                    <div class="layer-block">
+                      <span class="layer-block-name">碰撞层</span>
+                      <div class="layer-grid">
+                        <button
+                          v-for="n in 8"
+                          :key="`sprite-layer-${n}`"
+                          type="button"
+                          class="layer-cell"
+                          :class="{ 'layer-cell-active': collisionLayer === n }"
+                          @click="onCollisionLayerSelect(n)"
+                        >{{ n }}</button>
+                      </div>
+                    </div>
+                    <div class="layer-block">
+                      <span class="layer-block-name">碰撞掩码</span>
+                      <div class="layer-grid">
+                        <button
+                          v-for="n in 8"
+                          :key="`sprite-mask-${n}`"
+                          type="button"
+                          class="layer-cell"
+                          :class="{ 'layer-cell-active': collisionMask.includes(n) }"
+                          @click="toggleCollisionMask(n)"
+                        >{{ n }}</button>
+                      </div>
+                    </div>
+                    <div class="att-row">
+                      <span class="att-label">碰撞材质</span>
+                      <CustomSelect
+                        class="att-select"
+                        model-value="default"
+                        :options="physicsMaterialOptions"
+                        disabled
+                      />
+                    </div>
+                  </template>
                   <div class="att-row">
                     <span class="att-label">禁用碰撞</span>
                     <label class="att-checkbox" title="整个角色不参与地形/边界物理阻挡（形状保留，取消勾选即恢复）">

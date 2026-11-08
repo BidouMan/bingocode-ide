@@ -18,6 +18,24 @@ export const SPRITE_COLLISION_TAG_PRESETS = ['身体', '敌人', '道具', '子�
 /** 角色未设置类型时的默认值（引擎也按这个值处理空类型） */
 export const SPRITE_DEFAULT_COLLISION_TAG = '身体'
 
+/**
+ * 单向碰撞方向四选一：值与引擎 oneWayDirX / oneWayDirY 一致（世界坐标，y 向下）。
+ * 地图属性面板与角色编辑器共用，避免两边的方向含义/文案走样。
+ */
+export const ONE_WAY_DIRECTIONS = [
+  { label: '从上方踩住', value: '0,1' },    // 下落时挡住
+  { label: '从下方顶住', value: '0,-1' },   // 上升时挡住
+  { label: '从左侧挡住', value: '1,0' },    // 向右走时挡住
+  { label: '从右侧挡住', value: '-1,0' },   // 向左走时挡住
+]
+
+/** 碰撞材质选项：当前仅界面展示，运行时尚未接入 */
+export const PHYSICS_MATERIAL_OPTIONS = [
+  { label: '默认', value: 'default' },
+  { label: '弹性', value: 'bouncy' },
+  { label: '粗糙', value: 'friction' },
+]
+
 /** 作用类型中文名 */
 export const SHAPE_KIND_LABELS: Record<ShapeKind, string> = {
   solid: '碰撞',

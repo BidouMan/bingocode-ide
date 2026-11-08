@@ -85,6 +85,32 @@ class SpriteAssetsMixin:
             manifest.get("collisionTag", manifest.get("collision_tag", "") or "")
         ).strip()
         self._collision_tag = tag or "身体"
+        # 单向碰撞（可选）：true = 可作为单向碰撞体；方向与地图 oneWayDirX/Y 同一语义
+        self._collision_one_way = bool(
+            manifest.get("collisionOneWay", manifest.get("collision_one_way", False))
+        )
+        self._collision_one_way_dir = (0.0, 1.0)
+        self._collision_one_way_margin = 0.0
+        if self._collision_one_way:
+            try:
+                dx = float(manifest.get("collisionOneWayDirX") or 0.0)
+                dy = float(manifest.get("collisionOneWayDirY") or 0.0)
+            except (TypeError, ValueError):
+                dx, dy = 0.0, 0.0
+            if dx == 0.0 and dy == 0.0:
+                dy = 1.0
+            # 只支持轴对齐：取绝对值大的分量，另一轴归零（与地图单向碰撞一致）
+            if abs(dx) >= abs(dy):
+                dx, dy = (1.0 if dx > 0 else -1.0), 0.0
+            else:
+                dx, dy = 0.0, (1.0 if dy > 0 else -1.0)
+            self._collision_one_way_dir = (dx, dy)
+            try:
+                self._collision_one_way_margin = max(
+                    0.0, float(manifest.get("collisionOneWayMargin") or 0.0)
+                )
+            except (TypeError, ValueError):
+                self._collision_one_way_margin = 0.0
         # 禁用碰撞（可选）：True = 该角色不参与地形/边界物理阻挡，仍可被碰到检测
         self._collision_disabled = bool(
             manifest.get("collisionDisabled", manifest.get("collision_disabled", False))

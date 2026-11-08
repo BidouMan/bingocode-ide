@@ -6,7 +6,7 @@ import { useResourceStore } from '../../stores/resource'
 import { useMapEditorStore } from '../../stores/mapEditor'
 import CustomSelect from '../common/CustomSelect.vue'
 import { toUserX, toWorldX, toUserY, toWorldY, toUserAngle, toWorldAngle, toUserDeltaY, toWorldDeltaY } from '../../utils/coords'
-import { shapeColorCss, shapeKindLabel, SHAPE_TAG_PRESETS } from '../../utils/shapeStyle'
+import { shapeColorCss, shapeKindLabel, SHAPE_TAG_PRESETS, ONE_WAY_DIRECTIONS, PHYSICS_MATERIAL_OPTIONS } from '../../utils/shapeStyle'
 import iconChevron from '../../assets/icons/right_arrow.svg'
 import iconSettings from '../../assets/icons/icon--settings.svg'
 import iconCopy from '../../assets/icons/copy.svg'
@@ -420,13 +420,7 @@ const shapePhysicsDisabled = computed(() => shapeKindValue.value === 'sensor')
 
 // ====== 单向碰撞（参考 Godot 的 One Way Collision） ======
 const shapeOneWayEnabled = computed(() => selectedShapeItem.value?.oneWay === true)
-/** 方向四选一，值编码成 "dx,dy"（世界坐标，y 向下） */
-const ONE_WAY_DIRECTIONS = [
-  { label: '从上方踩住', value: '0,1' },    // 下落时挡住
-  { label: '从下方顶住', value: '0,-1' },   // 上升时挡住
-  { label: '从左侧挡住', value: '1,0' },    // 向右走时挡住
-  { label: '从右侧挡住', value: '-1,0' },   // 向左走时挡住
-]
+/** 方向四选一，和角色编辑器共用一份定义 */
 const shapeOneWayDirValue = computed(() => {
   const s = selectedShapeItem.value
   const dx = s?.oneWayDirX ?? 0
@@ -454,6 +448,37 @@ function onShapeOneWayMarginInput(e: Event) {
   const raw = Number((e.target as HTMLInputElement).value)
   const margin = Number.isFinite(raw) ? Math.min(8, Math.max(0, raw)) : 0
   mapStore.updateShapes(selectedShapeIds.value, { oneWayMargin: margin })
+}
+
+// ====== 碰撞层级（与图块面板同一套交互；当前只做界面，尚未接入运行时） ======
+/** 勾选后才在下方展开设置 */
+const shapeCollisionLayersEnabled = computed(
+  () => selectedShapeItem.value?.collisionLayersEnabled === true,
+)
+/** 所在碰撞层 1~8，缺省 1 */
+const shapeCollisionLayer = computed(() => selectedShapeItem.value?.collisionLayer ?? 1)
+/** 可碰撞掩码层号集合，缺省 [1] */
+const shapeCollisionMask = computed(
+  () => new Set<number>(selectedShapeItem.value?.collisionMask ?? [1]),
+)
+
+function onShapeCollisionLayersToggle(e: Event) {
+  mapStore.updateShapes(selectedShapeIds.value, {
+    collisionLayersEnabled: (e.target as HTMLInputElement).checked,
+  })
+}
+
+function setShapeCollisionLayer(n: number) {
+  mapStore.updateShapes(selectedShapeIds.value, { collisionLayer: n })
+}
+
+function toggleShapeCollisionMask(n: number) {
+  const next = new Set(shapeCollisionMask.value)
+  if (next.has(n)) next.delete(n)
+  else next.add(n)
+  mapStore.updateShapes(selectedShapeIds.value, {
+    collisionMask: Array.from(next).sort((a, b) => a - b),
+  })
 }
 
 // ====== 形状类型：界面叫「类型」，内部/代码里就是 tag（is_touch 查询用） ======
@@ -1091,11 +1116,7 @@ function onTileOneWayMarginInput(e: Event) {
 const tilePhysicsEnabled = ref(false)
 const tileCollisionLayer = ref(1)
 const tileCollisionMask = reactive(new Set<number>([1]))
-const tilePhysicsMaterialOptions = [
-  { label: '默认', value: 'default' },
-  { label: '弹性', value: 'bouncy' },
-  { label: '粗糙', value: 'friction' },
-]
+const physicsMaterialOptions = PHYSICS_MATERIAL_OPTIONS
 
 function onTilePhysicsToggle(e: Event) {
   tilePhysicsEnabled.value = (e.target as HTMLInputElement).checked
@@ -1634,6 +1655,59 @@ function runTilesetMenu(action: TilesetMenuAction) {
                   :value="shapeOneWayMarginValue"
                   :disabled="disabled || shapePhysicsDisabled"
                   @change="onShapeOneWayMarginInput"
+                />
+              </div>
+            </template>
+
+            <!-- 碰撞层级：勾选后在下方展开（与图块面板同一套交互；当前仅保存设置） -->
+            <div class="att-row">
+              <span class="att-label">碰撞层级</span>
+              <label class="att-checkbox">
+                <input
+                  type="checkbox"
+                  :checked="shapeCollisionLayersEnabled"
+                  :disabled="disabled"
+                  @change="onShapeCollisionLayersToggle"
+                />
+                <span class="att-checkbox-text">启用</span>
+              </label>
+            </div>
+            <template v-if="shapeCollisionLayersEnabled">
+              <div class="layer-block">
+                <span class="layer-block-name">碰撞层</span>
+                <div class="layer-grid">
+                  <button
+                    v-for="n in 8"
+                    :key="`shape-layer-${n}`"
+                    class="layer-cell"
+                    :class="{ 'layer-cell-active': shapeCollisionLayer === n }"
+                    :disabled="disabled"
+                    @click="setShapeCollisionLayer(n)"
+                  >{{ n }}</button>
+                </div>
+              </div>
+
+              <div class="layer-block">
+                <span class="layer-block-name">碰撞掩码</span>
+                <div class="layer-grid">
+                  <button
+                    v-for="n in 8"
+                    :key="`shape-mask-${n}`"
+                    class="layer-cell"
+                    :class="{ 'layer-cell-active': shapeCollisionMask.has(n) }"
+                    :disabled="disabled"
+                    @click="toggleShapeCollisionMask(n)"
+                  >{{ n }}</button>
+                </div>
+              </div>
+
+              <div class="att-row">
+                <span class="att-label">碰撞材质</span>
+                <CustomSelect
+                  class="att-select"
+                  model-value="default"
+                  :options="physicsMaterialOptions"
+                  disabled
                 />
               </div>
             </template>
@@ -2383,7 +2457,7 @@ function runTilesetMenu(action: TilesetMenuAction) {
                 <CustomSelect
                   class="att-select"
                   model-value="default"
-                  :options="tilePhysicsMaterialOptions"
+                  :options="physicsMaterialOptions"
                   disabled
                 />
               </div>

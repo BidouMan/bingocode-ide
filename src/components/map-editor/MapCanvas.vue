@@ -3497,7 +3497,7 @@ function onPointerMove(e: PointerEvent) {
   if (mapStore.activeMode === 'shape') {
     const worldPos = viewport.screenToWorld(e)
     if (worldPos) {
-      collision.pointerMove(worldPos)
+      collision.pointerMove(worldPos, e.shiftKey)
       updateCollisionCursor(worldPos)
     }
     return

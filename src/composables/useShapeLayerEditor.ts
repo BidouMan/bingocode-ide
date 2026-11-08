@@ -30,8 +30,10 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
 
   let rectStart: Point | null = null
   let rectCurrent: Point | null = null
-  // 拖拽创建形状：矩形 / 圆形 / 胶囊
-  let draftShape: 'rect' | 'circle' | 'capsule' | null = null
+  // 拖拽创建形状：矩形 / 胶囊（胶囊工具按住 Shift 时变正圆）
+  let draftShape: 'rect' | 'capsule' | null = null
+  // 本次拖拽是否按住了 Shift（胶囊工具 → 正圆）
+  let draftCircle = false
   let draftPolygon: Point[] = []
   let draftActive = false
   let draftPreview: Point | null = null
@@ -144,11 +146,21 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
     return pts
   }
 
-  function buildShapePoints(shape: 'rect' | 'circle' | 'capsule', x0: number, y0: number, x1: number, y1: number): number[][] {
-    let points: number[][]
-    if (shape === 'circle') points = circlePoints(x0, y0, x1, y1)
-    else if (shape === 'capsule') points = capsulePoints(x0, y0, x1, y1)
-    else points = rectPoints(x0, y0, x1, y1)
+  /** 胶囊按住 Shift：以按下点为一角，把拖拽框约束成正方形（→ 正圆） */
+  function squareCorner(origin: Point, current: Point): Point {
+    const dx = current.x - origin.x
+    const dy = current.y - origin.y
+    const size = Math.max(Math.abs(dx), Math.abs(dy))
+    return {
+      x: origin.x + (dx < 0 ? -size : size),
+      y: origin.y + (dy < 0 ? -size : size),
+    }
+  }
+
+  function buildShapePoints(shape: 'rect' | 'capsule', x0: number, y0: number, x1: number, y1: number): number[][] {
+    const points: number[][] = shape === 'capsule'
+      ? (draftCircle ? circlePoints(x0, y0, x1, y1) : capsulePoints(x0, y0, x1, y1))
+      : rectPoints(x0, y0, x1, y1)
     // 智能吸附开启时生成点取整（像素吸附），关闭时保留自由小数坐标
     if (mapEditorStore.smartSnap) {
       return points.map(p => [Math.round(p[0]), Math.round(p[1])])
@@ -372,15 +384,14 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
     const current = activeLayer()
     if (!current) return
 
-    // 矩形/圆形/胶囊拖拽预览
+    // 矩形/胶囊拖拽预览
     if (rectStart && rectCurrent) {
       const x0 = Math.min(rectStart.x, rectCurrent.x)
       const x1 = Math.max(rectStart.x, rectCurrent.x)
       const y0 = Math.min(rectStart.y, rectCurrent.y)
       const y1 = Math.max(rectStart.y, rectCurrent.y)
-      const preview = (draftShape ?? 'rect') === 'rect'
-        ? [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }]
-        : buildShapePoints(draftShape ?? 'rect', x0, y0, x1, y1).map(p => ({ x: p[0], y: p[1] }))
+      const preview = buildShapePoints(draftShape ?? 'rect', x0, y0, x1, y1)
+        .map(p => ({ x: p[0], y: p[1] }))
       // 框选/绘制预览：与绘制页选择工具一致的淡紫色
       drawPolygon(ctx, preview, SELECTION_COLOR_HEX, SELECTION_FILL_ALPHA, lineWidth, false)
     }
@@ -414,6 +425,7 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
     rectStart = null
     rectCurrent = null
     draftShape = null
+    draftCircle = false
     draftActive = false
     draftPolygon = []
     draftPreview = null
@@ -463,9 +475,10 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
     const tool = mapEditorStore.shapeTool
     const local = snapPoint(world)
 
-    if (tool === 'rect' || tool === 'circle' || tool === 'capsule') {
+    if (tool === 'rect' || tool === 'capsule') {
       if (button !== 0) return
       draftShape = tool
+      draftCircle = false
       rectStart = local
       rectCurrent = local
       drawOverlay()
@@ -585,7 +598,7 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
       }
     }
 
-    // 2) 点到形状 → 选中并整框拖动；点到空白 → 按当前形状标签直接新建
+    // 2) 点到形状 → 选中并整框拖动；点到空白 → 只取消选中（新建需先点创建工具）
     const hit = findPolygonAt(world)
     if (hit) {
       if (additive) {
@@ -617,23 +630,18 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
     } else {
       selectedVertexIndex = -1
       mapEditorStore.setActiveShapeId(null)
-      // 空白处拖拽 = 按当前形状标签直接新建（无需再点形状按钮）
-      const shape = mapEditorStore.shapeDrawTool
-      if (shape !== 'polygon') {
-        draftShape = shape
-        rectStart = local
-        rectCurrent = local
-      }
     }
     drawOverlay()
   }
 
-  function pointerMove(world: Point) {
+  function pointerMove(world: Point, shiftKey = false) {
     const tool = mapEditorStore.shapeTool
     const local = snapPoint(world)
 
     if (rectStart && draftShape) {
-      rectCurrent = local
+      // 胶囊工具按住 Shift：把拖拽框约束成正方形，生成的就是正圆
+      draftCircle = shiftKey && draftShape === 'capsule'
+      rectCurrent = draftCircle ? squareCorner(rectStart, local) : local
       drawOverlay()
       return
     }
@@ -692,11 +700,14 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
       const x1 = Math.max(rectStart.x, rectCurrent.x)
       const y0 = Math.min(rectStart.y, rectCurrent.y)
       const y1 = Math.max(rectStart.y, rectCurrent.y)
+      // 先按本次拖拽状态生成顶点（draftCircle 决定胶囊还是正圆），再清理草稿
+      const points = buildShapePoints(shape, x0, y0, x1, y1)
       rectStart = null
       rectCurrent = null
       draftShape = null
+      draftCircle = false
       if (x1 - x0 >= 2 && y1 - y0 >= 2) {
-        mapStore.addShape(shape, buildShapePoints(shape, x0, y0, x1, y1))
+        mapStore.addShape(shape, points)
         // 创建后立即切到鼠标工具，让新形状处于选中可编辑状态
         mapEditorStore.setShapeTool('select')
       }
@@ -746,6 +757,7 @@ export function useShapeLayerEditor(options: ShapeLayerEditorOptions) {
       rectStart = null
       rectCurrent = null
       draftShape = null
+      draftCircle = false
     }
     draftPreview = null
     drawOverlay()
