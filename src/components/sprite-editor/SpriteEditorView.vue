@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, reactive, computed, watch, watchEffect, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useResourceStore } from '../../stores/resource'
 import { useEditorStore } from '../../stores/editor'
 import { useProjectStore } from '../../stores/project'
@@ -12,6 +12,7 @@ import { useFrameReorder } from '../../composables/useFrameReorder'
 import { useSpriteHistory } from './useSpriteHistory'
 import { cssImageRendering } from '../../utils/renderMode'
 import { drawImageCrisp } from '../../utils/pixelCanvas'
+import { snapRectOffset, snapThreshold } from '../../utils/smartSnap'
 import FrameUploadDrawer from './FrameUploadDrawer.vue'
 import CollisionShapeOverlay from './CollisionShapeOverlay.vue'
 // 下拉框复用地图编辑器属性面板的自绘组件，保证两个编辑器的控件样式一致
@@ -534,11 +535,15 @@ async function loadSprite(item: { id: string; name: string; path: string }) {
     defaultFrameDirty = false
     selectedAnim.value = null
     stopAnimation()
-    annoScope.value = 'all'
-    activeTool.value = 'select'
     cancelMarkerPlacing()
+    selMarkerName.value = null
+    annoScope.value = 'all'
+    // 进入时与右侧面板保持一致：停留在动画面板则不进选择状态（不显示变换手柄）
+    const showAnimationPage = rightTab.value === 'animation'
+    activeTool.value = showAnimationPage ? 'none' : 'select'
+    selectionActive.value = !showAnimationPage
     annoDefaultPivot.value = currentSprite.value.bsf
-      ? { ...currentSprite.value.bsf.pivot }
+      ? { ...(currentSprite.value.bsf.pivotBase || currentSprite.value.bsf.pivot) }
       : null
     // 场景视图：等 DOM 渲染后恢复缩放（首次 100%、之后沿用上次），并把角色包围盒中心放到视口中心
     await nextTick()
@@ -746,13 +751,22 @@ function onCanvasMouseDown(e: MouseEvent) {
     panStartOffsetY.value = canvasPanY.value
     return
   }
-  // 标记放置：左键点一下就在鼠标处落点并退出放置（点已有标记时由标记手柄拦截，不会误加）
+  // 标记放置：左键点一下就在鼠标处落点并结束放置（点已有图钉时由图钉手柄拦截，不会误加）
   if (e.button === 0 && markerPlacing.value) {
-    const p = screenToCanvas(e) ?? ghostPoint
-    if (p) {
-      addMarker(p)
-      cancelMarkerPlacing()
-    }
+    e.preventDefault()
+    placeMarkerAt(screenToCanvas(e) ?? markerGhost.value)
+    return
+  }
+
+  // 选择工具：点空白处取消选中（手柄自身 mousedown 已 stop，不会进到这里）；点角色重新选中
+  // 动画面板下（activeTool = none）同样允许点选，但只改选中状态，不切换右侧面板
+  if (e.button === 0 && (activeTool.value === 'select' || activeTool.value === 'none')) {
+    // 没点在图钉上（图钉已 stopPropagation）= 取消标记选中，回到选角色
+    selMarkerName.value = null
+    const p = screenToCanvas(e)
+    const b = displayFrameBounds.value
+    selectionActive.value = !!p
+      && p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h
   }
 }
 
@@ -762,13 +776,11 @@ function onCanvasMouseMove(e: MouseEvent) {
     canvasPanY.value = panStartOffsetY.value + (e.clientY - panStartY.value)
     return
   }
-  const p = screenToCanvas(e)
-  // 放置中的幽灵图钉跟随鼠标（直接改 DOM 样式，不触发整页重渲染）
+  // 放置中的幽灵图钉跟随鼠标（与地图编辑器一致）
   if (markerPlacing.value) {
-    if (p) {
-      ghostPoint = p
-      applyGhostPosition()
-    }
+    const p = screenToCanvas(e)
+    if (p) lastCanvasPoint = p
+    updateMarkerGhost(e, p)
   }
 }
 
@@ -815,6 +827,24 @@ function hasPivotOverride(i: number): boolean {
 }
 
 const annoPivot = computed(() => effPivot(annoFrameIndex.value))
+
+/** 素材原始中心点：属性面板显示偏移的 0,0 基准（未移动过就是 0,0） */
+const annoPivotBase = computed(() => {
+  const bsf = currentSprite.value?.bsf
+  return bsf ? (bsf.pivotBase || bsf.pivot) : null
+})
+
+/**
+ * 中心点相对素材原始位置的偏移（属性面板显示值）。
+ * 存储仍用画布绝对坐标 pivot（引擎协议不变），只在界面层换算：
+ * 没动过中心点就显示 0,0，避免小学生看到「画布绝对坐标」这类反直觉数字。
+ */
+const annoPivotOffset = computed(() => {
+  const p = annoPivot.value
+  const b = annoPivotBase.value
+  if (!p || !b) return null
+  return { x: p.x - b.x, y: p.y - b.y }
+})
 
 // ═══ 场景视图：角色对象几何 / 网格 / 视图适配 ═══
 
@@ -866,15 +896,20 @@ const spriteSize = computed(() => {
 })
 
 /**
- * 场景对象锚点（画布坐标）= 当前帧包围盒中心。
- * 角色在场景里以「视觉中心」摆放/旋转/缩放，选中框四周对称、正中心正好落在坐标轴上；
- * 角色自身的中心点（pivot）只作为游戏内注册点，由「中心」工具单独显示与编辑。
+ * 拖拽中心点期间的临时锚点：锁定为拖拽开始时的中心点。
+ * 逐帧改中心点 + 逐帧补偿变换会让画面在亚像素间反复取整而抖动；
+ * 拖拽期间改由固定锚点渲染（画面绝对不动，锚点图标跟手），松手时一次性补偿。
  */
-const objectAnchor = computed<{ x: number; y: number }>(() => {
-  const b = displayFrameBounds.value
-  if (b && b.w > 0 && b.h > 0) return { x: b.x + b.w / 2, y: b.y + b.h / 2 }
-  return spritePivot.value
-})
+const pivotViewAnchor = ref<{ x: number; y: number } | null>(null)
+
+/**
+ * 场景对象锚点（画布坐标）= 角色中心点（pivot），与 Godot 一致：
+ * 节点原点就是中心点，图片围绕它摆放/旋转/缩放。
+ * 所以中心点在 0,0、变换位置也在 0,0 时，图像一定会以中心点压在坐标原点上。
+ */
+const objectAnchor = computed<{ x: number; y: number }>(
+  () => pivotViewAnchor.value ?? spritePivot.value,
+)
 
 /** 世界原点在场景视口中的屏幕位置 */
 const originScreen = computed(() => ({
@@ -882,30 +917,92 @@ const originScreen = computed(() => ({
   y: viewSize.value.h / 2 + canvasPanY.value,
 }))
 
-/** 网格步长（世界像素）：保证屏幕上不小于 8px，随缩放自适应 1/2/4/8/16… */
+/**
+ * 网格基准格距（世界像素）：100% 缩放下的一格大小，也是「缩小视图」时的固定世界步长。
+ * 参考 Godot：缩小画面时网格跟随世界一起变小变密，而不是立刻换成更粗的格子。
+ */
+const GRID_BASE_STEP = 32
+/** 放大方向的最小屏幕间距（px）：格线保持 24~48px，不会越放越密 */
+const GRID_MIN_SCREEN_PX = 24
+/** 缩小方向的格线最小可见间距（px）：低于它才并入更粗的格子，避免糊成一片 */
+const GRID_MIN_VISIBLE_PX = 8
+
+/**
+ * 网格步长（世界像素），缩小时与放大时行为不同：
+ * - 放大（zoom ≥ 1）：取 1/2/4/8… 中屏幕间距 ≥ 24px 的最小步长（当前效果，格线间距恒定）
+ * - 缩小（zoom < 1）：固定 32 世界像素一格，格子随缩放一起变小变密；
+ *   只有屏幕间距小于 8px 时才并入更粗的格子，保证还能看清
+ */
 function gridStepWorld(zoom: number): number {
-  let step = 1
-  while (step * zoom < 8) step *= 2
+  if (zoom >= 1) {
+    let step = 1
+    while (step * zoom < GRID_MIN_SCREEN_PX) step *= 2
+    return step
+  }
+  let step = GRID_BASE_STEP
+  while (step * zoom < GRID_MIN_VISIBLE_PX) step *= 2
   return step
 }
 
-const sceneGridStyle = computed(() => {
-  const z = canvasZoom.value
-  const step = gridStepWorld(z)
-  const minor = step * z
-  const major = minor * 8
+/** 场景显示开关：网格默认显示；碰撞盒默认不勾选（只查看，不切碰撞工具） */
+const showGrid = ref(true)
+const showCollisionBox = ref(false)
+/** 智能吸附（与地图编辑器 / 绘制页同一套算法）：拖动角色时对齐世界原点轴与网格线 */
+const snapEnabled = ref(true)
+
+/**
+ * 网格用 canvas 自绘，而不是 CSS background 平铺：
+ * 分数格距时 CSS 平铺会在每个 tile 边缘产生“两条几乎重叠的线”（滚轮缩放的瞬间特别明显），
+ * 逐条线按设备像素取整绘制可以完全避开这个接缝，线距也更均匀（Godot 的观感）。
+ */
+const gridCanvasEl = ref<HTMLCanvasElement | null>(null)
+
+function drawSceneGrid() {
+  const el = gridCanvasEl.value
+  if (!el) return
+  const { w, h } = viewSize.value
+  if (w <= 0 || h <= 0) return
+  const dpr = window.devicePixelRatio || 1
+  const pw = Math.max(1, Math.round(w * dpr))
+  const ph = Math.max(1, Math.round(h * dpr))
+  if (el.width !== pw || el.height !== ph) {
+    el.width = pw
+    el.height = ph
+  }
+  const ctx = el.getContext('2d')
+  if (!ctx) return
+  ctx.clearRect(0, 0, pw, ph)
+  if (!showGrid.value) return
+
+  const spacing = gridStepWorld(canvasZoom.value) * canvasZoom.value
+  if (!Number.isFinite(spacing) || spacing < 1) return
   const ox = originScreen.value.x
   const oy = originScreen.value.y
-  const minorLineH = 'linear-gradient(to right, rgba(255,255,255,0.045) 1px, transparent 1px)'
-  const minorLineV = 'linear-gradient(to bottom, rgba(255,255,255,0.045) 1px, transparent 1px)'
-  const majorLineH = 'linear-gradient(to right, rgba(255,255,255,0.09) 1px, transparent 1px)'
-  const majorLineV = 'linear-gradient(to bottom, rgba(255,255,255,0.09) 1px, transparent 1px)'
-  return {
-    backgroundImage: `${minorLineH}, ${minorLineV}, ${majorLineH}, ${majorLineV}`,
-    backgroundSize: `${minor}px ${minor}px, ${minor}px ${minor}px, ${major}px ${major}px, ${major}px ${major}px`,
-    backgroundPosition: `${ox}px ${oy}px, ${ox}px ${oy}px, ${ox}px ${oy}px, ${ox}px ${oy}px`,
+  // 1 CSS 像素粗的线（高分屏按设备像素放大，保持清晰）
+  const lw = Math.max(1, Math.round(dpr))
+  const minorCol = 'rgba(255, 255, 255, 0.045)'
+  const majorCol = 'rgba(255, 255, 255, 0.09)'
+
+  // 竖线：世界原点出发，每 8 格一条粗线
+  const kStartX = Math.floor(-ox / spacing)
+  const kEndX = Math.ceil((w - ox) / spacing)
+  for (let k = kStartX; k <= kEndX; k++) {
+    const x = Math.round((ox + k * spacing) * dpr)
+    ctx.fillStyle = Math.abs(k % 8) === 0 ? majorCol : minorCol
+    ctx.fillRect(x, 0, lw, ph)
   }
-})
+  // 横线
+  const kStartY = Math.floor(-oy / spacing)
+  const kEndY = Math.ceil((h - oy) / spacing)
+  for (let k = kStartY; k <= kEndY; k++) {
+    const y = Math.round((oy + k * spacing) * dpr)
+    ctx.fillStyle = Math.abs(k % 8) === 0 ? majorCol : minorCol
+    ctx.fillRect(0, y, pw, lw)
+  }
+}
+
+// 缩放 / 平移 / 改尺寸 / 开关网格时实时重绘（canvas 引用就绪时也会自动重跑一次）
+watchEffect(drawSceneGrid)
 
 /** 把角色包围盒中心对齐到视口中心（保持给定缩放） */
 function centerOnSprite(zoom = canvasZoom.value) {
@@ -1023,15 +1120,26 @@ function unitStyleAfterText(
   return { left: `${Math.min(desired, Math.max(startPx, maxLeft))}px` }
 }
 
-/** 单位定位依赖输入框实际宽度：跟随面板缩放实时更新 */
-const unitFieldWidth = reactive({ x: 0, y: 0, angle: 0 })
+/** 单位定位依赖输入框实际宽度：跟随面板缩放实时更新
+ *  碰撞页的位置 / 旋转输入框与属性页同款，各自取自己的实测宽度 */
+const unitFieldWidth = reactive({
+  x: 0, y: 0, angle: 0, pivotX: 0, pivotY: 0,
+  colPosX: 0, colPosY: 0, colAngle: 0,
+})
 const xFieldEl = ref<HTMLElement | null>(null)
 const yFieldEl = ref<HTMLElement | null>(null)
 const angleFieldEl = ref<HTMLElement | null>(null)
+const pivotXFieldEl = ref<HTMLElement | null>(null)
+const pivotYFieldEl = ref<HTMLElement | null>(null)
+const colPosXFieldEl = ref<HTMLElement | null>(null)
+const colPosYFieldEl = ref<HTMLElement | null>(null)
+const colAngleFieldEl = ref<HTMLElement | null>(null)
 let unitResizeObserver: ResizeObserver | null = null
 
 function observeUnitFields() {
   if (typeof ResizeObserver === 'undefined') return
+  // 属性页 / 碰撞页同时只有一页挂载，切换页时重新吸附当前这页的输入框
+  unitResizeObserver?.disconnect()
   unitResizeObserver = new ResizeObserver((entries) => {
     for (const entry of entries) {
       const el = entry.target as HTMLElement
@@ -1039,9 +1147,18 @@ function observeUnitFields() {
       if (el === xFieldEl.value) unitFieldWidth.x = width
       else if (el === yFieldEl.value) unitFieldWidth.y = width
       else if (el === angleFieldEl.value) unitFieldWidth.angle = width
+      else if (el === pivotXFieldEl.value) unitFieldWidth.pivotX = width
+      else if (el === pivotYFieldEl.value) unitFieldWidth.pivotY = width
+      else if (el === colPosXFieldEl.value) unitFieldWidth.colPosX = width
+      else if (el === colPosYFieldEl.value) unitFieldWidth.colPosY = width
+      else if (el === colAngleFieldEl.value) unitFieldWidth.colAngle = width
     }
   })
-  for (const el of [xFieldEl.value, yFieldEl.value, angleFieldEl.value]) {
+  const fields = [
+    xFieldEl.value, yFieldEl.value, angleFieldEl.value, pivotXFieldEl.value, pivotYFieldEl.value,
+    colPosXFieldEl.value, colPosYFieldEl.value, colAngleFieldEl.value,
+  ]
+  for (const el of fields) {
     if (el) unitResizeObserver.observe(el)
   }
 }
@@ -1131,6 +1248,16 @@ function angleUnitStyle(value: number): Record<string, string> {
     7,
     unitFieldWidth.angle,
     '°',
+  )
+}
+
+/** 中心点单位：与输入框显示文本共用同一字符串（编辑中 = 原文，否则 = 格式化值） */
+function pivotUnitStyle(key: 'px' | 'py', value: number): Record<string, string> {
+  return unitStyleAfterText(
+    draftText[key] ?? formatFieldText(value),
+    28,
+    key === 'px' ? unitFieldWidth.pivotX : unitFieldWidth.pivotY,
+    'px',
   )
 }
 
@@ -1259,6 +1386,18 @@ function onTransformInput(field: keyof SpriteTransform, e: Event) {
   clearDraft(field)
 }
 
+/** 中心点各轴是否偏离素材原始位置：改动过才在对应输入框内显示重置图标 */
+const pivotXDirty = computed(() => (annoPivotOffset.value?.x ?? 0) !== 0)
+const pivotYDirty = computed(() => (annoPivotOffset.value?.y ?? 0) !== 0)
+
+/** 重置单轴中心点：回到素材原始位置（该轴偏移 = 0） */
+function resetPivotAxis(axis: 'x' | 'y') {
+  const cur = annoPivot.value
+  const base = annoPivotBase.value
+  if (!cur || !base) return
+  setPivot(axis === 'x' ? { x: base.x, y: cur.y } : { x: cur.x, y: base.y })
+}
+
 // ═══ 变换手柄（「选择」工具）：移动 / 等比缩放 / 旋转 ═══
 
 type GizmoCorner = 'tl' | 'tr' | 'br' | 'bl'
@@ -1275,7 +1414,15 @@ type GizmoDrag = {
 
 const gizmoDrag = ref<GizmoDrag | null>(null)
 
-const gizmoVisible = computed(() => activeTool.value === 'select' && !!currentSprite.value)
+/** 选择工具的选中状态：点空白取消（手柄隐藏），点角色或切回「选择」恢复 */
+const selectionActive = ref(true)
+
+const gizmoVisible = computed(
+  () =>
+    (activeTool.value === 'select' || activeTool.value === 'none') &&
+    selectionActive.value &&
+    !!currentSprite.value,
+)
 
 const sceneGizmoLayerStyle = computed(() => ({
   transform: `translate(${canvasPanX.value}px, ${canvasPanY.value}px)`,
@@ -1291,6 +1438,23 @@ const gizmoRootStyle = computed(() => {
 const gizmoRotatorStyle = computed(() => ({
   transform: `rotate(${-sceneTransform.value.angle}deg)`,
 }))
+
+/**
+ * 中心锚点图标位置：真实中心点相对包围盒中心的偏移（屏幕像素）。
+ * 之前图标固定画在包围盒中心，点「脚底」等预设改了中心点却看不出变化；
+ * 现在图标跟随 pivot，预设与拖动都能直接看到锚点移动。
+ */
+const gizmoAnchorIconStyle = computed(() => {
+  const p = spritePivot.value
+  const a = objectAnchor.value
+  if (!p || !a) return {}
+  const dzx = displayZoomX.value
+  const dzy = displayZoomY.value
+  return {
+    left: `${(p.x - a.x) * dzx - 9}px`,
+    top: `${(p.y - a.y) * dzy - 9}px`,
+  }
+})
 
 /** 选择框相对场景锚点（包围盒中心）的偏移与尺寸（显示倍率 = 场景缩放 × 角色缩放，分轴） */
 const gizmoFrameStyle = computed(() => {
@@ -1340,15 +1504,40 @@ function gizmoHandleStyle(corner: GizmoCorner) {
   }
 }
 
-function setPivot(p: { x: number; y: number }) {
+/** 中心点位移补偿到变换位置：dx/dy 为画布坐标增量，让图像画面保持不动 */
+function compensatePivotDelta(dx: number, dy: number) {
+  if (!dx && !dy) return
+  const t = ensureTransform()
+  if (!t) return
+  const sx = (t.scaleX ?? t.scale) / 100
+  const sy = (t.scaleY ?? t.scale) / 100
+  t.x += dx * sx
+  t.y -= dy * sy
+  clearDraft('x')
+  clearDraft('y')
+}
+
+function setPivot(p: { x: number; y: number }, compensate = true) {
   const bsf = currentSprite.value?.bsf
   if (!bsf) return
+  // 改动前的有效中心点：用于补偿变换位置，让角色画面保持不动（只移动锚点）
+  const oldP = annoPivot.value ? { ...annoPivot.value } : null
   if (annoScope.value === 'all') {
     bsf.pivot = { x: p.x, y: p.y }
   } else {
     const f = bsf.frames[annoFrameIndex.value]
     if (f) f.pivot = { x: p.x, y: p.y }
   }
+  // 场景以中心点为原点：中心点一动图像就会跟着飘。
+  // 这里反向补偿变换位置（世界坐标），使拖拽中心点/应用预设时角色停在原地。
+  // 拖拽过程中锚点被 pivotViewAnchor 锁住，逐帧补偿会在亚像素间反复取整产生抖动，
+  // 所以拖拽时跳过、松手时一次性补偿。
+  if (compensate && oldP && (oldP.x !== p.x || oldP.y !== p.y)) {
+    compensatePivotDelta(p.x - oldP.x, p.y - oldP.y)
+  }
+  // 拖拽手柄 / 预设会绕过输入框：清掉残留的编辑文本，避免输入框显示旧数字
+  clearDraft('px')
+  clearDraft('py')
   scheduleSave()
 }
 
@@ -1359,21 +1548,12 @@ function clearPivotOverride() {
   scheduleSave()
 }
 
-/** 重置：统一值回到加载时快照，并清除全部帧的单帧覆盖 */
-function resetAnno() {
-  const bsf = currentSprite.value?.bsf
-  if (!bsf || !annoDefaultPivot.value) return
-  bsf.pivot = { ...annoDefaultPivot.value }
-  for (const f of bsf.frames) delete f.pivot
-  scheduleSave()
-}
-
 // ═══ 碰撞标注（.bsf / 单图角色；无自定义 = 引擎自动碰撞，学生默认路径） ═══
 
-/** 当前激活的标注图层：中心 / 碰撞 / 标记（单选，同一套画布框架） */
-const activeTool = ref<'select' | 'pivot' | 'collision' | 'marker'>('select')
+/** 当前激活的标注图层：中心 / 碰撞（单选，同一套画布框架；none = 只显示动画面板） */
+const activeTool = ref<'none' | 'select' | 'pivot' | 'collision'>('select')
 
-/** 右侧面板标签页：动画（预览 + 片段）/ 属性（角色检视器，配合工具栏当前工具） */
+/** 右侧面板标签页：动画（预览 + 片段）/ 碰撞（点击工具条「碰撞」进入）/ 属性（角色检视器，选中标记时整页切为标记管理） */
 const RIGHT_TAB_KEY = 'bingo-ide-sprite-right-tab'
 function readSavedRightTab(): 'animation' | 'props' {
   try {
@@ -1382,17 +1562,28 @@ function readSavedRightTab(): 'animation' | 'props' {
     return 'animation' // 首次进入默认「动画」页
   }
 }
-const rightTab = ref<'animation' | 'props'>(readSavedRightTab())
+const rightTab = ref<'animation' | 'collision' | 'props'>(readSavedRightTab())
 
-/** 工具条切换工具：同时把右侧面板切到「属性」页——该工具的详细设置都在那里 */
-function pickTool(tool: 'select' | 'pivot' | 'collision' | 'marker') {
+/** 第一个标签随当前工具变化：碰撞工具显示「碰撞」，其余显示「动画」 */
+const rightContextTab = computed<'animation' | 'collision'>(() =>
+  activeTool.value === 'collision' ? 'collision' : 'animation',
+)
+
+/** 工具条切换工具：碰撞工具进「碰撞」页，其余进「属性」页 */
+function pickTool(tool: 'select' | 'pivot' | 'collision') {
+  cancelMarkerPlacing()
+  selMarkerName.value = null
   activateCanvasTool(tool)
-  rightTab.value = 'props'
+  rightTab.value = tool === 'collision' ? 'collision' : 'props'
 }
 
-/** 工具条「动画」：只切右侧面板到「动画」页，不改变画布当前工具 */
+/** 工具条「动画」：只切右侧面板到「动画」页，并退出「选择」工具的选中高亮 */
 function pickAnimation() {
+  cancelMarkerPlacing()
+  selMarkerName.value = null
   rightTab.value = 'animation'
+  activeTool.value = 'none'
+  selectionActive.value = false
 }
 
 /** 属性面板分区折叠状态：与地图编辑器检视器一致的可折叠分区，默认全部展开 */
@@ -1401,8 +1592,10 @@ const propFold = ref({
   transform: true,
   pivot: true,
   collision: true,
-  marker: true,
-  markerDetail: true,
+  // 标记页的三个分区
+  markerInfo: true,
+  markerDisplay: true,
+  markerList: true,
 })
 
 /** 属性面板下拉选项：与地图编辑器属性面板共用 CustomSelect，选项统一在脚本里定义 */
@@ -1482,13 +1675,6 @@ function onCollisionUpdate(shape: SpriteCollisionShape) {
   setCollision(shape)
 }
 
-function clearCollisionOverride() {
-  const f = currentSprite.value?.bsf?.frames[annoFrameIndex.value]
-  if (!f) return
-  delete f.collision
-  scheduleSave()
-}
-
 /** 自动：删除自定义碰撞（统一值 + 全部帧覆盖），回引擎内容包围盒默认 */
 function resetCollisionToAuto() {
   const bsf = currentSprite.value?.bsf
@@ -1510,11 +1696,266 @@ function onCollisionTypeSelect(value: string) {
 /** 禁用碰撞：整角色不参与地形/边界物理阻挡（碰撞形状保留，重新勾选即恢复） */
 const collisionDisabled = computed(() => !!currentSprite.value?.bsf?.collisionDisabled)
 
-function onCollisionDisabledChange(e: Event) {
+/** 碰撞页分区折叠状态（独立于属性页） */
+const colFold = ref({ basic: true, transform: true })
+
+const COLLISION_PURPOSE_OPTIONS = [
+  { label: '碰撞', value: 'collision' },
+  { label: '不参与', value: 'none' },
+]
+
+/** 作用：不参与 = 整个角色禁用碰撞（与属性页的「禁用碰撞」同一开关） */
+const collisionPurposeValue = computed(() => (collisionDisabled.value ? 'none' : 'collision'))
+
+function onCollisionPurposeSelect(v: string) {
   const bsf = currentSprite.value?.bsf
   if (!bsf) return
-  bsf.collisionDisabled = (e.target as HTMLInputElement).checked
+  if (v === 'none') bsf.collisionDisabled = true
+  else delete bsf.collisionDisabled
   scheduleSave()
+}
+
+/** 单向碰撞 / 碰撞层级 / 旋转：现阶段只保存到 .bsf，运行时暂未接入物理判定 */
+const collisionOneWay = computed(() => !!currentSprite.value?.bsf?.collisionOneWay)
+
+function onCollisionOneWayChange(e: Event) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  if ((e.target as HTMLInputElement).checked) bsf.collisionOneWay = true
+  else delete bsf.collisionOneWay
+  scheduleSave()
+}
+
+const collisionLayersEnabled = computed(() => !!currentSprite.value?.bsf?.collisionLayersEnabled)
+
+function onCollisionLayersChange(e: Event) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  if ((e.target as HTMLInputElement).checked) bsf.collisionLayersEnabled = true
+  else delete bsf.collisionLayersEnabled
+  scheduleSave()
+}
+
+const collisionAngleValue = computed(() => currentSprite.value?.bsf?.collisionAngle ?? 0)
+
+function onCollisionAngleInput(e: Event) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return
+  let n = Number((e.target as HTMLInputElement).value)
+  if (!Number.isFinite(n)) n = 0
+  n = Math.max(-180, Math.min(180, Math.round(n)))
+  if (n === 0) delete bsf.collisionAngle
+  else bsf.collisionAngle = n
+  clearDraft('colAngle')
+  scheduleSave()
+}
+
+/** 单位标签定位：与属性页同款按数字宽度计算（位置 px / 旋转 °） */
+function collisionUnitStyleFor(axis: 'x' | 'y', value: number): Record<string, string> {
+  return unitStyleAfterText(
+    draftText[axis === 'x' ? 'colPosX' : 'colPosY'] ?? formatFieldText(value),
+    28,
+    axis === 'x' ? unitFieldWidth.colPosX : unitFieldWidth.colPosY,
+    'px',
+  )
+}
+
+function collisionAngleUnitStyle(): Record<string, string> {
+  return unitStyleAfterText(
+    draftText.colAngle ?? formatFieldText(collisionAngleValue.value),
+    7,
+    unitFieldWidth.colAngle,
+    '°',
+  )
+}
+
+/** 碰撞变换各轴是否偏离默认值：偏离时才显示输入框内的重置图标 */
+const collisionPosXDirty = computed(() => collisionPosX.value !== 0)
+const collisionPosYDirty = computed(() => collisionPosY.value !== 0)
+const collisionScaleXDirty = computed(() => collisionScaleX.value !== 100)
+const collisionScaleYDirty = computed(() => collisionScaleY.value !== 100)
+const collisionAngleDirty = computed(() => collisionAngleValue.value !== 0)
+
+/** 重置单个碰撞轴：位置回 0、缩放回 100%、旋转回 0° */
+function resetCollisionAxis(field: 'posX' | 'posY' | 'scaleX' | 'scaleY' | 'angle') {
+  if (field === 'angle') {
+    const bsf = currentSprite.value?.bsf
+    if (!bsf) return
+    delete bsf.collisionAngle
+    clearDraft('colAngle')
+    scheduleSave()
+    return
+  }
+  // 自动碰撞态这些值本来就是默认值，无需转成自定义形状
+  const shape = effCol.value
+  if (!shape) return
+  if (field === 'posX' || field === 'posY') {
+    const base = collisionBase.value
+    if (!base) return
+    const cur = collisionShapeBounds(shape)
+    const dx = field === 'posX' ? base.cx - cur.cx : 0
+    const dy = field === 'posY' ? base.cy - cur.cy : 0
+    setCollision(translateCollisionShape(shape, dx, dy))
+    clearDraft(field === 'posX' ? 'colPosX' : 'colPosY')
+    return
+  }
+  let fx = 1
+  let fy = 1
+  if (collisionScaleLocked.value) {
+    // 约束比例时两轴一起回到 100%
+    fx = 100 / Math.max(1, collisionScaleX.value)
+    fy = 100 / Math.max(1, collisionScaleY.value)
+    clearDraft('colScaleX')
+    clearDraft('colScaleY')
+  } else if (field === 'scaleX') {
+    fx = 100 / Math.max(1, collisionScaleX.value)
+    clearDraft('colScaleX')
+  } else {
+    fy = 100 / Math.max(1, collisionScaleY.value)
+    clearDraft('colScaleY')
+  }
+  setCollision(scaleCollisionShape(shape, fx, fy))
+}
+
+/** 碰撞面板位置 / 缩放的基准：当前帧内容框（自动碰撞实际使用的框） */
+const collisionBase = computed(() => {
+  const f = currentSprite.value?.bsf?.frames[annoFrameIndex.value]
+  if (!f) return null
+  return {
+    cx: f.offset.x + f.rect.w / 2,
+    cy: f.offset.y + f.rect.h / 2,
+    w: Math.max(1, f.rect.w),
+    h: Math.max(1, f.rect.h),
+  }
+})
+
+/** 碰撞形状的包围盒（polygon 取点集 AABB；胶囊取外接矩形） */
+function collisionShapeBounds(shape: SpriteCollisionShape) {
+  if (shape.type === 'rect') {
+    return { cx: shape.cx, cy: shape.cy, w: Math.max(1, shape.w), h: Math.max(1, shape.h) }
+  }
+  if (shape.type === 'capsule') {
+    return { cx: shape.cx, cy: shape.cy, w: Math.max(1, shape.radius * 2), h: Math.max(1, shape.height) }
+  }
+  const xs = shape.points.map(pt => pt[0])
+  const ys = shape.points.map(pt => pt[1])
+  if (xs.length === 0) return { cx: 0, cy: 0, w: 1, h: 1 }
+  const x0 = Math.min(...xs)
+  const x1 = Math.max(...xs)
+  const y0 = Math.min(...ys)
+  const y1 = Math.max(...ys)
+  return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) }
+}
+
+const collisionBoundsBox = computed(() => collisionShapeBounds(collisionDisplay.value))
+
+const collisionPosX = computed(() => {
+  const base = collisionBase.value
+  return base ? Math.round((collisionBoundsBox.value.cx - base.cx) * 10) / 10 : 0
+})
+
+const collisionPosY = computed(() => {
+  const base = collisionBase.value
+  // 画布坐标 y 向下，面板按「向上为正」显示（与场景变换一行保持同一习惯）
+  return base ? Math.round((base.cy - collisionBoundsBox.value.cy) * 10) / 10 : 0
+})
+
+const collisionScaleX = computed(() => {
+  const base = collisionBase.value
+  return base ? Math.round((collisionBoundsBox.value.w / base.w) * 100) : 100
+})
+
+const collisionScaleY = computed(() => {
+  const base = collisionBase.value
+  return base ? Math.round((collisionBoundsBox.value.h / base.h) * 100) : 100
+})
+
+/** 约束比例：改一轴时另一轴同步（与截图默认勾选一致） */
+const collisionScaleLocked = ref(true)
+
+function onCollisionScaleLockChange(e: Event) {
+  collisionScaleLocked.value = (e.target as HTMLInputElement).checked
+}
+
+/** 自动态下改位置 / 缩放：以内容框为初值转成自定义形状（与画布拖手柄的转正逻辑一致） */
+function ensureCustomCollision(): SpriteCollisionShape | null {
+  if (!canAnno.value) return null
+  const existing = effCol.value
+  if (existing) return existing
+  const shape = frameContentCollision()
+  setCollision(shape)
+  return shape
+}
+
+function translateCollisionShape(shape: SpriteCollisionShape, dx: number, dy: number): SpriteCollisionShape {
+  if (shape.type === 'polygon') {
+    return {
+      type: 'polygon',
+      points: shape.points.map(([x, y]) => [x + dx, y + dy] as [number, number]),
+    }
+  }
+  return { ...shape, cx: shape.cx + dx, cy: shape.cy + dy }
+}
+
+function scaleCollisionShape(shape: SpriteCollisionShape, fx: number, fy: number): SpriteCollisionShape {
+  if (shape.type === 'rect') {
+    return { ...shape, w: Math.max(1, shape.w * fx), h: Math.max(1, shape.h * fy) }
+  }
+  if (shape.type === 'capsule') {
+    return {
+      ...shape,
+      radius: Math.max(1, shape.radius * ((fx + fy) / 2)),
+      height: Math.max(2, shape.height * fy),
+    }
+  }
+  const b = collisionShapeBounds(shape)
+  return {
+    type: 'polygon',
+    points: shape.points.map(([x, y]) => [b.cx + (x - b.cx) * fx, b.cy + (y - b.cy) * fy] as [number, number]),
+  }
+}
+
+/** 位置输入：值 = 相对自动碰撞框中心的偏移（px，向右 / 向上为正） */
+function onCollisionPosChange(axis: 0 | 1, e: Event) {
+  const base = collisionBase.value
+  const shape = ensureCustomCollision()
+  if (!base || !shape) return
+  const n = Number((e.target as HTMLInputElement).value)
+  if (!Number.isFinite(n)) return
+  const v = Math.min(MAX_POSITION, Math.max(-MAX_POSITION, n))
+  const cur = collisionShapeBounds(shape)
+  const dx = axis === 0 ? v - (cur.cx - base.cx) : 0
+  // 面板 Y 向上为正，画布坐标 y 向下 → 取反
+  const dy = axis === 1 ? (base.cy - v) - cur.cy : 0
+  setCollision(translateCollisionShape(shape, dx, dy))
+  clearDraft(axis === 0 ? 'colPosX' : 'colPosY')
+}
+
+/** 缩放输入：值 = 相对自动碰撞框的百分比（100 = 原尺寸） */
+function onCollisionScaleChange(axis: 0 | 1, e: Event) {
+  const shape = ensureCustomCollision()
+  if (!shape) return
+  const n = Number((e.target as HTMLInputElement).value)
+  if (!Number.isFinite(n) || n <= 0) return
+  const v = Math.min(1000, Math.max(1, n))
+  const curPct = axis === 0 ? collisionScaleX.value : collisionScaleY.value
+  const factor = v / Math.max(1, curPct)
+  let fx = 1
+  let fy = 1
+  if (axis === 0) {
+    fx = factor
+    if (collisionScaleLocked.value) fy = factor
+  } else {
+    fy = factor
+    if (collisionScaleLocked.value) fx = factor
+  }
+  setCollision(scaleCollisionShape(shape, fx, fy))
+  if (collisionScaleLocked.value) {
+    clearDraft('colScaleX')
+    clearDraft('colScaleY')
+  } else {
+    clearDraft(axis === 0 ? 'colScaleX' : 'colScaleY')
+  }
 }
 
 /** 受重力影响：缺省受重力（勾选）；不勾选 = 重力地图里也不下坠，撞墙/落地照常 */
@@ -1581,10 +2022,10 @@ function frameContentCollision(): SpriteCollisionShape {
   }
 }
 
-function activateCanvasTool(layer: 'select' | 'pivot' | 'collision' | 'marker') {
-  // 幽灵图钉只在标记图层有效，切到别的图层先退出放置
-  if (layer !== 'marker') cancelMarkerPlacing()
+function activateCanvasTool(layer: 'select' | 'pivot' | 'collision') {
   activeTool.value = layer
+  // 切回「选择」= 重新选中角色（把变换手柄显示出来）
+  if (layer === 'select') selectionActive.value = true
   if (layer === 'collision') {
     const bsf = currentSprite.value?.bsf
     if (!bsf) return
@@ -1599,14 +2040,6 @@ function activateCanvasTool(layer: 'select' | 'pivot' | 'collision' | 'marker') 
       scheduleSave()
     }
     return
-  }
-  if (layer === 'marker') {
-    if (!currentSprite.value?.bsf) return
-    // 只切换工具页：没有选中项时落到第一个标记，右侧改名/删除按钮不至于凭空消失。
-    // 放置标记由此面板里的「添加标记」按钮负责，避免同一个按钮既切页又进入放置、语义冲突
-    if (!selMarkerName.value || !markerNames.value.includes(selMarkerName.value)) {
-      selMarkerName.value = markerNames.value[0] ?? null
-    }
   }
 }
 
@@ -1660,14 +2093,15 @@ function collisionBBox(shape: SpriteCollisionShape): { x0: number; y0: number; x
 
 const selMarkerName = ref<string | null>(null)
 
-/**
- * 标记名称输入草稿：输入框必须用本地状态（v-model），
- * 不能单向绑定 :value——动画播放时组件每帧重渲染会把用户正在删改的文字重置回原名
- */
+/** 标记名称输入草稿（输入框用本地状态 v-model，失焦 / 回车才提交，避免每敲一个字就写盘） */
 const markerNameDraft = ref('')
-watch(selMarkerName, (name) => {
-  markerNameDraft.value = name ?? ''
-}, { immediate: true })
+watch(
+  selMarkerName,
+  (name) => {
+    markerNameDraft.value = name ?? ''
+  },
+  { immediate: true },
+)
 
 /** 全部标记名（统一值 key ∪ 各帧覆盖 key——被删统一值但帧覆盖仍在的名字也要能清除） */
 const markerNames = computed(() => {
@@ -1681,7 +2115,161 @@ const markerNames = computed(() => {
   return [...names]
 })
 
-/** 第 i 帧某标记的有效位置：帧覆盖 > 统一值 > null */
+/** 画布上要显示的标记名（「显示与锁定」里关掉显示的标记只留在管理列表里） */
+const visibleMarkerNames = computed(() => markerNames.value.filter(n => markerFlag(n, 'visible')))
+
+/** 标记展示 / 锁定设置（只读统一值；缺省：显示、名称、坐标都开，不锁定） */
+function markerFlag(name: string | null, key: 'visible' | 'showLabel' | 'showCoords' | 'locked'): boolean {
+  if (!name) return false
+  const m = currentSprite.value?.bsf?.markers?.[name]
+  return m?.[key] ?? (key !== 'locked')
+}
+
+function setMarkerFlag(
+  name: string | null,
+  key: 'visible' | 'showLabel' | 'showCoords' | 'locked',
+  value: boolean,
+) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf || !name) return
+  const p = effMarker(name, annoFrameIndex.value)
+  if (!p) return
+  if (!bsf.markers) bsf.markers = {}
+  // 只存在帧覆盖的名字没有统一值：补一条承载展示设置
+  if (!bsf.markers[name]) bsf.markers[name] = { x: p.x, y: p.y }
+  bsf.markers[name][key] = value
+  scheduleSave()
+}
+
+/** 「显示与锁定」勾选（作用于当前选中的标记） */
+function onMarkerFlagChange(
+  key: 'visible' | 'showLabel' | 'showCoords' | 'locked',
+  e: Event,
+) {
+  setMarkerFlag(selMarkerName.value, key, (e.target as HTMLInputElement).checked)
+}
+
+/** 角色标记常用类型（兼作常用挂点名：选了就把还是默认名的标记顺手改名） */
+const MARKER_TYPE_PRESETS = ['右手', '左手', '头部', '背部', '脚底', '发射点', '特效点']
+const markerTypeSelectOptions = [
+  { value: '未分类', label: '未分类' },
+  ...MARKER_TYPE_PRESETS.map(t => ({ value: t, label: t })),
+  { value: '__custom__', label: '自定义…' },
+]
+const markerTypeEditing = ref(false)
+const markerTypeDraft = ref('')
+const markerTypeInputEl = ref<HTMLInputElement | null>(null)
+const markerTypeFilter = ref('all')
+
+const selMarkerRawType = computed(() => {
+  const n = selMarkerName.value
+  return n ? (currentSprite.value?.bsf?.markers?.[n]?.type ?? '') : ''
+})
+const selMarkerType = computed(() =>
+  markerTypeEditing.value ? '__custom__' : selMarkerRawType.value || '未分类',
+)
+watch(selMarkerName, () => {
+  markerTypeEditing.value = false
+  markerTypeDraft.value = selMarkerRawType.value
+}, { immediate: true })
+
+/** 写入标记类型（存统一值；只有帧覆盖的名字会补一条统一值承载类型） */
+function setMarkerType(value: string) {
+  const bsf = currentSprite.value?.bsf
+  const name = selMarkerName.value
+  if (!bsf || !name) return
+  const p = effMarker(name, annoFrameIndex.value)
+  if (!p) return
+  if (!bsf.markers) bsf.markers = {}
+  if (!bsf.markers[name]) bsf.markers[name] = { x: p.x, y: p.y }
+  bsf.markers[name].type = value || undefined
+  // 选了常用类型、名字还是自动生成的「标记 / 标记N」→ 顺手改成常用名（重名则加序号）
+  if (value && MARKER_TYPE_PRESETS.includes(value) && /^标记\d*$/.test(name)) {
+    let target = value
+    let i = 2
+    while (markerNames.value.includes(target)) {
+      target = `${value}${i}`
+      i++
+    }
+    renameMarker(name, target)
+    return
+  }
+  scheduleSave()
+}
+
+/** 类型下拉：预设 / 未分类直接写入，自定义则展开输入框 */
+function onMarkerTypeSelect(value: string) {
+  if (value === '__custom__') {
+    markerTypeEditing.value = true
+    markerTypeDraft.value = MARKER_TYPE_PRESETS.includes(selMarkerRawType.value) ? '' : selMarkerRawType.value
+    nextTick(() => {
+      markerTypeInputEl.value?.focus()
+      markerTypeInputEl.value?.select()
+    })
+    return
+  }
+  markerTypeEditing.value = false
+  setMarkerType(value === '未分类' ? '' : value)
+}
+
+/** 提交自定义类型（失焦 / 回车） */
+function commitMarkerTypeDraft() {
+  setMarkerType(markerTypeDraft.value.trim())
+  markerTypeEditing.value = false
+}
+
+/** 标记管理列表的类型筛选项：全部 + 未分类 + 常用类型 + 已有的自定义类型 */
+const markerTypeFilterOptions = computed(() => {
+  const bsf = currentSprite.value?.bsf
+  const extra = new Set<string>()
+  for (const n of markerNames.value) {
+    const t = bsf?.markers?.[n]?.type
+    if (t && !MARKER_TYPE_PRESETS.includes(t)) extra.add(t)
+  }
+  return [
+    { value: 'all', label: '全部类型' },
+    { value: '未分类', label: '未分类' },
+    ...MARKER_TYPE_PRESETS.map(t => ({ value: t, label: t })),
+    ...[...extra].map(t => ({ value: t, label: t })),
+  ]
+})
+const filteredMarkerNames = computed(() => {
+  if (markerTypeFilter.value === 'all') return markerNames.value
+  const bsf = currentSprite.value?.bsf
+  return markerNames.value.filter(
+    n => (bsf?.markers?.[n]?.type || '未分类') === markerTypeFilter.value,
+  )
+})
+
+/** 复制标记：名字加「副本」并避开重名，展示设置一起复制 */
+function duplicateMarker(name: string | null) {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf || !name) return
+  const src = effMarker(name, annoFrameIndex.value)
+  if (!src) return
+  const entry = bsf.markers?.[name]
+  const base = `${name}副本`
+  let newName = base
+  let i = 2
+  while (markerNames.value.includes(newName)) {
+    newName = `${base}${i}`
+    i++
+  }
+  if (!bsf.markers) bsf.markers = {}
+  bsf.markers[newName] = {
+    x: src.x,
+    y: src.y,
+    ...(entry?.type ? { type: entry.type } : {}),
+    ...(entry?.visible === false ? { visible: false } : {}),
+    ...(entry?.showLabel === false ? { showLabel: false } : {}),
+    ...(entry?.showCoords === false ? { showCoords: false } : {}),
+    ...(entry?.locked ? { locked: true } : {}),
+  }
+  selMarkerName.value = newName
+  scheduleSave()
+}
+
+/** 当前帧某标记的有效位置：帧覆盖 > 统一值 > null */
 function effMarker(name: string, i: number): { x: number; y: number } | null {
   const bsf = currentSprite.value?.bsf
   if (!bsf || i < 0 || i >= bsf.frames.length) return null
@@ -1698,19 +2286,23 @@ function hasAnyMarkerOverride(i: number): boolean {
   return !!m && Object.keys(m).length > 0
 }
 
+/** 任意画布坐标 → 图钉 style（放置中的幽灵图钉复用同一套定位） */
+function markerPointStyle(p: { x: number; y: number } | null) {
+  return p ? { left: `${p.x}px`, top: `${p.y}px` } : { display: 'none' }
+}
+
+/** 坐标文本（标记列表 / 幽灵图钉标签共用；取整像素，与场景信息栏一致） */
+function markerCoordText(p: { x: number; y: number } | null): string {
+  return p ? `${Math.round(p.x)}, ${Math.round(p.y)}` : ''
+}
+
+/** 选中标记在当前帧的有效位置（标记设置里的坐标输入用） */
 const selMarkerPos = computed(() =>
   selMarkerName.value ? effMarker(selMarkerName.value, annoFrameIndex.value) : null,
 )
 
-/** 属性面板标记列表：坐标文本（整数像素，与场景信息栏一致） */
-function markerCoordText(name: string): string {
-  const p = effMarker(name, annoFrameIndex.value)
-  return p ? `${Math.round(p.x)}, ${Math.round(p.y)}` : '—'
-}
-
 function markerHandleStyle(name: string) {
-  const p = effMarker(name, annoFrameIndex.value)
-  return p ? { left: `${p.x}px`, top: `${p.y}px` } : { display: 'none' }
+  return markerPointStyle(effMarker(name, annoFrameIndex.value))
 }
 
 /**
@@ -1738,72 +2330,112 @@ function setMarkerPos(name: string, p: { x: number; y: number }) {
   scheduleSave()
 }
 
-function onMarkerCoordChange(axis: 'x' | 'y', e: Event) {
-  const v = Number((e.target as HTMLInputElement).value)
-  const cur = selMarkerPos.value
-  if (!selMarkerName.value || !cur || !Number.isFinite(v)) return
-  setMarkerPos(selMarkerName.value, axis === 'x' ? { x: v, y: cur.y } : { x: cur.x, y: v })
-}
+/** 「标记设置」名称输入框（双击图钉聚焦改名用） */
+const markerNameInputEl = ref<HTMLInputElement | null>(null)
 
-/** 当前帧内容框中心（放置幽灵图钉的默认落点） */
-function frameContentCenter(): { x: number; y: number } | null {
+/** 当前帧内容框中心：工具栏新建标记的默认落点（建完可直接拖到想要的位置） */
+function frameContentCenter(): { x: number; y: number } {
   const bsf = currentSprite.value?.bsf
-  if (!bsf) return null
+  if (!bsf) return { x: 0, y: 0 }
   const f = bsf.frames[annoFrameIndex.value]
   return f
     ? { x: Math.round(f.offset.x + f.rect.w / 2), y: Math.round(f.offset.y + f.rect.h / 2) }
     : { x: Math.round(bsf.canvas.w / 2), y: Math.round(bsf.canvas.h / 2) }
 }
 
-/** 新增标记：唯一命名 标记 / 标记1 / 标记2 / ...；不传坐标时落在当前帧内容框中心 */
-function addMarker(at?: { x: number; y: number }) {
-  const bsf = currentSprite.value?.bsf
-  if (!bsf) return
-  if (!bsf.markers) bsf.markers = {}
-  const existing = new Set(markerNames.value)
-  let name = '标记'
-  let n = 1
-  while (existing.has(name)) { name = `标记${n}`; n++ }
-  const pos = at ?? frameContentCenter()
-  if (!pos) return
-  bsf.markers[name] = { x: pos.x, y: pos.y }
-  selMarkerName.value = name
-  scheduleSave()
-}
+// ── 标记放置（一次性）：点工具栏「标记」→ 半透明图钉跟随鼠标 → 画布点一下落点并结束 ──
 
-// ====== 标记放置：点「添加标记」后，半透明图钉跟随鼠标，点一下落点并退出 ======
 const markerPlacing = ref(false)
-/** 幽灵图钉的 DOM：位置直接改 style，不走响应式，避免鼠标一动整页重渲染、图钉 SVG 反复重建导致闪烁 */
-const markerGhostEl = ref<HTMLDivElement | null>(null)
-/** 最近一次的落点（画布坐标，普通变量即可） */
-let ghostPoint: { x: number; y: number } | null = null
-
-/** 把幽灵图钉挪到最近落点（首次挂载时顺便显示出来） */
-function applyGhostPosition() {
-  const el = markerGhostEl.value
-  if (!el || !ghostPoint) return
-  // 用 transform 移动（合成层内平移），不触发每帧重排/重绘，避免跟随鼠标时闪烁
-  el.style.transform = `translate3d(${ghostPoint.x}px, ${ghostPoint.y}px, 0)`
-  el.style.opacity = '0.55'
-}
+/** 幽灵图钉落点（画布坐标，只用于显示坐标文字）；null = 不在放置状态 */
+const markerGhost = ref<{ x: number; y: number } | null>(null)
+/**
+ * 幽灵图钉的屏幕位置（相对画布容器，CSS px）。
+ * 屏幕空间渲染 = 不参与世界缩放/角色旋转/标注层缩放，避免多层 transform 里逐帧改 left/top 造成重绘闪烁（与地图编辑器一致）。
+ */
+const markerGhostScreen = ref<{ x: number; y: number } | null>(null)
+/** 最近一次鼠标所在画布坐标：进入放置时鼠标还没动过也能先显示在图钉位置 */
+let lastCanvasPoint: { x: number; y: number } | null = null
 
 function startMarkerPlacing() {
   if (!currentSprite.value?.bsf) return
+  // 标记不是一种工具：放置期间用「选择」工具，落点后能立刻点选、拖动
+  activeTool.value = 'select'
+  // 落点后会选中新标记，属性面板整页切到「标记管理」，先保证停在属性标签
+  rightTab.value = 'props'
+  selectionActive.value = false
+  selMarkerName.value = null
   markerPlacing.value = true
-  ghostPoint = ghostPoint ?? frameContentCenter()
-  // 等幽灵图钉挂载到 DOM 后再写样式，避免先在左上角闪一下
-  nextTick(applyGhostPosition)
+  const p0 = lastCanvasPoint ?? frameContentCenter()
+  markerGhost.value = p0
+  markerGhostScreen.value = canvasToScreen(p0)
 }
 
 function cancelMarkerPlacing() {
   markerPlacing.value = false
-  ghostPoint = null
+  markerGhost.value = null
+  markerGhostScreen.value = null
 }
 
-/** 「添加标记」按钮：再点一次可取消放置 */
+/** 工具栏「标记」：点一下进入一次性放置（只建一个），再点一下取消 */
 function toggleMarkerPlacing() {
   if (markerPlacing.value) cancelMarkerPlacing()
   else startMarkerPlacing()
+}
+
+/** 放置中的幽灵图钉跟随鼠标（直接落在光标处） */
+function updateMarkerGhost(e: MouseEvent, p: { x: number; y: number } | null) {
+  if (!markerPlacing.value) return
+  const rect = canvasRef.value?.getBoundingClientRect()
+  if (p) markerGhost.value = p
+  markerGhostScreen.value = rect
+    ? { x: e.clientX - rect.left, y: e.clientY - rect.top }
+    : null
+}
+
+/** 画布落点（唯一入口）：建标记 → 选中 → 退出放置 → 打开右侧标记设置 */
+function placeMarkerAt(p: { x: number; y: number } | null) {
+  if (!p) return
+  const name = addMarker(p)
+  cancelMarkerPlacing()
+  if (!name) return
+  selectMarker(name)
+  focusMarkerName()
+}
+
+/** 新增标记：唯一命名 标记 / 标记1 / 标记2 ...；统一值（全部帧共用） */
+function addMarker(p: { x: number; y: number }): string | null {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf) return null
+  if (!bsf.markers) bsf.markers = {}
+  const used = new Set(markerNames.value)
+  let name = '标记'
+  let n = 1
+  while (used.has(name)) {
+    name = `标记${n}`
+    n++
+  }
+  bsf.markers[name] = { x: p.x, y: p.y }
+  selMarkerName.value = name
+  scheduleSave()
+  return name
+}
+
+/** 从列表 / 画布选中一个标记：高亮它并收起角色的变换手柄 */
+function selectMarker(name: string) {
+  selMarkerName.value = name
+  selectionActive.value = false
+  // 选中标记 → 属性面板整页切换为「标记管理」
+  if (name) rightTab.value = 'props'
+}
+
+/** 选中标记后把焦点交给右侧「标记管理」的名称输入（双击图钉用） */
+function focusMarkerName() {
+  if (!selMarkerName.value) return
+  rightTab.value = 'props'
+  nextTick(() => {
+    markerNameInputEl.value?.focus()
+    markerNameInputEl.value?.select()
+  })
 }
 
 /** 重命名标记：统一值与全部帧覆盖同步改 key；空/重名不生效 */
@@ -1826,7 +2458,7 @@ function renameMarker(name: string, newName: string) {
   scheduleSave()
 }
 
-/** 提交标记改名（失焦/回车）：空名或重名时回显原名，不生效 */
+/** 提交标记改名（失焦 / 回车）：空名或重名时回显原名，不生效 */
 function commitMarkerRename() {
   const name = selMarkerName.value
   if (!name) return
@@ -1869,32 +2501,65 @@ function clearMarkerOverride() {
   scheduleSave()
 }
 
-/** 「脚底」预设：所有帧内容包围盒的底部中心（贴地角色锚点） */
-function feetPresetPoint(): { x: number; y: number } {
-  const bsf = currentSprite.value?.bsf!
-  let maxX = 0
-  let maxY = 0
-  for (const f of bsf.frames) {
-    maxX = Math.max(maxX, f.offset.x + f.rect.w)
-    maxY = Math.max(maxY, f.offset.y + f.rect.h)
-  }
-  return { x: Math.round(maxX / 2), y: maxY }
+/** 坐标输入：改选中标记在「作用范围」下的位置 */
+function onMarkerCoordChange(axis: 'x' | 'y', e: Event) {
+  const v = Number((e.target as HTMLInputElement).value)
+  const cur = selMarkerPos.value
+  if (!selMarkerName.value || !cur || !Number.isFinite(v)) return
+  setMarkerPos(selMarkerName.value, axis === 'x' ? { x: v, y: cur.y } : { x: cur.x, y: v })
 }
 
+/**
+ * 「脚底」预设：所有帧内容包围盒并集的「水平中心 + 最低点」。
+ * 用并集而不是当前帧，避免逐帧覆盖后锚点随动画上下跳动；
+ * 水平方向取内容并集的中心，角色左右对称、脚底贴地。
+ */
+function feetPresetPoint(): { x: number; y: number } {
+  const bsf = currentSprite.value?.bsf
+  if (!bsf || bsf.frames.length === 0) return { x: 0, y: 0 }
+  let minX = Infinity
+  let maxX = -Infinity
+  let maxBottom = -Infinity
+  for (const f of bsf.frames) {
+    const left = f.offset.x
+    const right = f.offset.x + f.rect.w
+    const bottom = f.offset.y + f.rect.h
+    if (left < minX) minX = left
+    if (right > maxX) maxX = right
+    if (bottom > maxBottom) maxBottom = bottom
+  }
+  return { x: (minX + maxX) / 2, y: maxBottom }
+}
+
+/** 预设：中心 = 回到素材原始中心点（偏移 0,0）；脚底 = 内容并集底部中心 */
 function applyPivotPreset(kind: 'center' | 'feet') {
   const bsf = currentSprite.value?.bsf
   if (!bsf) return
+  const base = bsf.pivotBase || bsf.pivot
   const p = kind === 'center'
-    ? { x: Math.round(bsf.canvas.w / 2), y: Math.round(bsf.canvas.h / 2) }
+    ? { x: base.x, y: base.y }
     : feetPresetPoint()
   setPivot(p)
 }
 
+/**
+ * 中心点位置输入：界面值是相对素材原始中心点的偏移，写回时换算成画布绝对坐标。
+ * 兜底：中心点被限制在画布范围内（乱输入超长数字不会把它甩到画布外）。
+ */
 function onCoordChange(axis: 'x' | 'y', e: Event) {
-  const v = Number((e.target as HTMLInputElement).value)
+  const raw = Number((e.target as HTMLInputElement).value)
   const cur = annoPivot.value
-  if (!cur || !Number.isFinite(v)) return
-  setPivot(axis === 'x' ? { x: v, y: cur.y } : { x: cur.x, y: v })
+  const base = annoPivotBase.value
+  const canvas = currentSprite.value?.bsf?.canvas
+  clearDraft(axis === 'x' ? 'px' : 'py')
+  if (!cur || !base || !Number.isFinite(raw)) return
+  const clamp = (v: number, max: number) => Math.min(max, Math.max(0, v))
+  const targetX = axis === 'x' ? raw + base.x : cur.x
+  const targetY = axis === 'y' ? raw + base.y : cur.y
+  setPivot({
+    x: canvas ? clamp(targetX, canvas.w) : targetX,
+    y: canvas ? clamp(targetY, canvas.h) : targetY,
+  })
 }
 
 /** 洋葱皮幽灵：相邻帧有效中心点与当前帧不同时显示，防碰撞框/重心抖动 */
@@ -1946,21 +2611,52 @@ function screenToCanvas(e: MouseEvent): { x: number; y: number } | null {
   return { x: Math.round((vx + p.x) * 2) / 2, y: Math.round((vy + p.y) * 2) / 2 }
 }
 
+/** 逻辑画布坐标 → 画布容器内的屏幕坐标（screenToCanvas 的正向变换；幽灵图钉用） */
+function canvasToScreen(p: { x: number; y: number }): { x: number; y: number } | null {
+  const sprite = currentSprite.value
+  const rect = canvasRef.value?.getBoundingClientRect()
+  if (!sprite || !rect) return null
+  const t = sceneTransform.value
+  const z = canvasZoom.value
+  const dz = displayZoom.value
+  if (dz <= 0) return null
+  const a = t.angle * Math.PI / 180
+  const cos = Math.cos(a)
+  const sin = Math.sin(a)
+  const o = objectAnchor.value
+  const dx = (p.x - o.x) * dz
+  const dy = (p.y - o.y) * dz
+  return {
+    x: rect.width / 2 + canvasPanX.value + t.x * z + (dx * cos + dy * sin),
+    y: rect.height / 2 + canvasPanY.value - t.y * z + (-dx * sin + dy * cos),
+  }
+}
+
 function onPivotMouseDown(e: MouseEvent) {
   if (e.button !== 0) return // 中键放行画布平移，仅左键起拖
   e.stopPropagation()
   e.preventDefault()
+  // 锁定拖拽期间的外层锚点：角色画面绝对不动，只有锚点图标跟手（避免逐帧补偿抖动）
+  const p = annoPivot.value
+  pivotViewAnchor.value = p ? { ...p } : null
   isPivotDragging.value = true
 }
 
 function onPivotDragMove(e: MouseEvent) {
   if (!isPivotDragging.value) return
   const p = screenToCanvas(e)
-  if (p) setPivot(p)
+  if (p) setPivot(p, false)
 }
 
 function onPivotDragUp() {
+  if (!isPivotDragging.value) return
   isPivotDragging.value = false
+  // 松手：把拖拽期间累计的中心点位移一次性补偿进变换位置
+  const base = pivotViewAnchor.value
+  const cur = annoPivot.value
+  pivotViewAnchor.value = null
+  if (base && cur) compensatePivotDelta(cur.x - base.x, cur.y - base.y)
+  scheduleSave()
 }
 
 // ── 标记拖拽（选中 + 拖动；复用中心的全局监听模式） ──
@@ -1969,12 +2665,15 @@ const isMarkerDragging = ref(false)
 
 function onMarkerMouseDown(name: string, e: MouseEvent) {
   if (e.button !== 0) return
+  // 只有「选择 / 动画」工具下图钉可交互；中心、碰撞工具下只做展示，点击穿透给对应手柄
+  if (activeTool.value !== 'select' && activeTool.value !== 'none') return
   e.stopPropagation()
   e.preventDefault()
-  // 点已有标记时退出放置，避免误加新点
+  // 放置中点已有图钉 = 放弃这次放置，直接选中它
   if (markerPlacing.value) cancelMarkerPlacing()
-  selMarkerName.value = name
-  isMarkerDragging.value = true
+  selectMarker(name)
+  // 锁定位置：可以选中查看，但不进入拖动
+  isMarkerDragging.value = !markerFlag(name, 'locked')
 }
 
 function onMarkerDragMove(e: MouseEvent) {
@@ -1992,6 +2691,33 @@ function onMarkerDragUp() {
 function normalizeAngle(a: number): number {
   const n = (((a + 180) % 360) + 360) % 360 - 180
   return Math.round((Math.abs(n) === 180 ? 180 : n) * 10) / 10
+}
+
+/**
+ * 角色包围盒在「场景屏幕坐标」下的轴对齐矩形（y 向下，与 CSS 一致）。
+ * 智能吸附用它把包围盒的边 / 中心对齐到世界原点轴与网格线。
+ */
+function frameWorldRect(t: SpriteTransform): { left: number; top: number; right: number; bottom: number } | null {
+  const b = displayFrameBounds.value
+  const p = objectAnchor.value
+  if (b.w <= 0 || b.h <= 0) return null
+  const sx = Math.max(5, t.scaleX ?? t.scale) / 100
+  const sy = Math.max(5, t.scaleY ?? t.scale) / 100
+  // 内容框中心相对角色原点（中心点）的偏移 → 分轴缩放 → 旋转（CSS 用 -angle）
+  const cx = (b.x + b.w / 2 - p.x) * sx
+  const cy = (b.y + b.h / 2 - p.y) * sy
+  const rad = (-t.angle * Math.PI) / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
+  const rx = cx * cos - cy * sin
+  const ry = cx * sin + cy * cos
+  const hw0 = (b.w * sx) / 2
+  const hh0 = (b.h * sy) / 2
+  const hw = Math.abs(hw0 * cos) + Math.abs(hh0 * sin)
+  const hh = Math.abs(hw0 * sin) + Math.abs(hh0 * cos)
+  const centerX = t.x + rx
+  const centerY = -t.y + ry
+  return { left: centerX - hw, top: centerY - hh, right: centerX + hw, bottom: centerY + hh }
 }
 
 /** 手柄拖动开始：内部=移动，四角=等比缩放，顶部圆点=旋转 */
@@ -2034,8 +2760,20 @@ function onGizmoDragMove(e: MouseEvent) {
       if (Math.abs(dx) >= Math.abs(dy)) dy = 0
       else dx = 0
     }
-    t.x = Math.round(d.start.x + dx)
-    t.y = Math.round(d.start.y + dy)
+    let nx = d.start.x + dx
+    let ny = d.start.y + dy
+    if (snapEnabled.value) {
+      // 智能吸附：包围盒的边 / 中心就近对齐世界原点轴（x=0 / y=0）与网格线；
+      // 附近没有候选线时 snapRectOffset 会回退成整数像素吸附
+      const rect = frameWorldRect({ ...d.start, x: nx, y: ny })
+      if (rect) {
+        const off = snapRectOffset(rect, { xs: [0], ys: [0] }, gridStepWorld(z), snapThreshold(z))
+        nx += off.dx
+        ny -= off.dy // 场景屏幕坐标 y 向下 → 用户坐标 y 向上
+      }
+    }
+    t.x = Math.round(nx)
+    t.y = Math.round(ny)
   } else if (d.kind === 'scale') {
     const dist = Math.hypot(e.clientX - d.pivotClientX, e.clientY - d.pivotClientY)
     const ratio = d.startDistance > 0 ? dist / d.startDistance : 1
@@ -2225,13 +2963,15 @@ function closeContextMenus() {
 // 记住用户最后一次的场景缩放（切换角色 / 重新进入角色编辑器时沿用）
 watch(canvasZoom, z => saveSceneZoom(z))
 
-// 记住用户最后停留的右侧面板页（首次进入默认「动画」页）
+// 记住用户最后停留的右侧面板页（首次进入默认「动画」页；碰撞页不作为常驻页记忆）
 watch(rightTab, tab => {
   try {
-    localStorage.setItem(RIGHT_TAB_KEY, tab)
+    localStorage.setItem(RIGHT_TAB_KEY, tab === 'collision' ? 'props' : tab)
   } catch {
     // localStorage 不可用时忽略
   }
+  // 属性页 / 碰撞页切换后输入框是新建的节点，重新吸附才能测到宽度
+  nextTick(observeUnitFields)
 })
 
 // 帧切换 / 缩放 / 预览倍率 / 渲染模式变化 → 重绘（flush: post 保证 canvas 已挂载）
@@ -2304,7 +3044,6 @@ onBeforeUnmount(() => {
 })
 
 function onEditorKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape' && markerPlacing.value) cancelMarkerPlacing()
   if (e.key === 'Escape' && gizmoDrag.value) cancelGizmoDrag()
   // 空格临时平移（输入框里敲空格不拦截；不 preventDefault，避免抢掉按钮的键盘激活）
   if (e.code === 'Space' && !isTypingTarget(e.target)) {
@@ -2313,6 +3052,24 @@ function onEditorKeydown(e: KeyboardEvent) {
   }
   // 输入框里的按键留给输入框（原生撤销/重做、F 输入文字都不能被抢走）
   if (isTypingTarget(e.target)) return
+
+  // 标记：Esc 退出放置 / 取消选中；Delete 删除选中（与地图编辑器一致）
+  if (e.key === 'Escape') {
+    if (markerPlacing.value) {
+      cancelMarkerPlacing()
+      e.preventDefault()
+      return
+    }
+    if (selMarkerName.value) {
+      selMarkerName.value = null
+      return
+    }
+  }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && selMarkerName.value) {
+    deleteMarker(selMarkerName.value)
+    e.preventDefault()
+    return
+  }
 
   // 撤销 / 重做（与绘制页、地图编辑器一致）：
   // macOS = Cmd+Z / Cmd+Shift+Z；Windows = Ctrl+Z / Ctrl+Y（同时兼容 Ctrl+Shift+Z）
@@ -2443,11 +3200,42 @@ function onWindowBlur() {
         <button
           v-if="canAnno"
           class="layer-chip"
-          :class="{ active: activeTool === 'marker' }"
+          :class="{ active: markerPlacing }"
           type="button"
-          @click="pickTool('marker')"
+          :title="markerPlacing ? '取消放置标记' : '标记：点一下后图钉跟随鼠标，在画布上点一下完成创建'"
+          @click="toggleMarkerPlacing"
         >
           <img :src="iconMarker" class="layer-chip-icon" alt="" />标记
+        </button>
+        <!-- 常驻显示开关：碰撞盒 / 网格 / 智能吸附（与地图编辑器、绘制页同一套开关语义） -->
+        <span class="anno-toolbar-sep"></span>
+        <button
+          v-if="canAnno"
+          class="layer-chip chip-toggle"
+          :class="{ active: showCollisionBox }"
+          type="button"
+          title="显示碰撞形状（只查看，需切到「碰撞」工具才能拖动）"
+          @click="showCollisionBox = !showCollisionBox"
+        >
+          <span class="chip-check" :class="{ on: showCollisionBox }"></span>显示碰撞
+        </button>
+        <button
+          class="layer-chip chip-toggle"
+          :class="{ active: showGrid }"
+          type="button"
+          title="显示网格"
+          @click="showGrid = !showGrid"
+        >
+          <span class="chip-check" :class="{ on: showGrid }"></span>显示网格
+        </button>
+        <button
+          class="layer-chip chip-toggle"
+          :class="{ active: snapEnabled }"
+          type="button"
+          title="智能吸附：拖动角色时对齐世界原点轴与网格线"
+          @click="snapEnabled = !snapEnabled"
+        >
+          <span class="chip-check" :class="{ on: snapEnabled }"></span>吸附
         </button>
         <!-- 详细设置集中在右侧「属性」面板：随当前工具联动 -->
       </div>
@@ -2457,8 +3245,8 @@ function onWindowBlur() {
         class="sprite-canvas scene-viewport"
         :class="{
           'is-panning': isPanning,
-          'is-marker-placing': markerPlacing,
           'is-space-ready': spaceHeld && !isPanning,
+          'is-marker-placing': markerPlacing,
         }"
         @wheel.prevent="onCanvasWheel"
         @mousedown="onCanvasMouseDown"
@@ -2467,7 +3255,7 @@ function onWindowBlur() {
         @dblclick="resetCanvas"
       >
         <!-- 无限网格 + 世界原点轴（类似地图编辑器的工作区，不画舞台边界） -->
-        <div class="scene-grid" :style="sceneGridStyle"></div>
+        <canvas v-show="showGrid" ref="gridCanvasEl" class="scene-grid-canvas"></canvas>
         <div class="scene-axis scene-axis-x" :style="{ top: `${originScreen.y}px` }"></div>
         <div class="scene-axis scene-axis-y" :style="{ left: `${originScreen.x}px` }"></div>
         <div
@@ -2520,43 +3308,17 @@ function onWindowBlur() {
               </div>
               <!-- 碰撞形状叠加层（自动态显示引擎内容框；拖动手柄立即转为自定义） -->
               <CollisionShapeOverlay
-                v-if="activeTool === 'collision'"
+                v-if="activeTool === 'collision' || showCollisionBox"
+                :class="{ 'collision-preview': activeTool !== 'collision' }"
                 :canvas-w="currentSprite.bsf.canvas.w"
                 :canvas-h="currentSprite.bsf.canvas.h"
                 :shape="collisionDisplay"
                 :zoom="displayZoom"
                 :angle="sceneTransform.angle"
+                :shape-angle="collisionAngleValue"
                 :disabled="collisionDisabled"
                 @update="onCollisionUpdate"
               />
-              <!-- 放置中的幽灵图钉：位置由 JS 直接改 style（不参与响应式，鼠标移动不会闪烁） -->
-              <div
-                v-if="markerPlacing"
-                ref="markerGhostEl"
-                class="marker-handle is-ghost"
-              >
-                <div class="marker-visual" :style="{ transform: `scale(${1 / displayZoom}) rotate(${sceneTransform.angle}deg)` }">
-                  <div class="marker-icon" v-html="markerIconSvg"></div>
-                  <span class="marker-label">新标记</span>
-                </div>
-              </div>
-              <!-- 标记手柄：标记.svg 图钉（图标配色独立于 svg 填充，mask 上色），画布点选/拖拽 -->
-              <div
-                v-for="name in (activeTool === 'marker' ? markerNames : [])"
-                :key="name"
-                class="marker-handle"
-                :class="{
-                  'is-selected': name === selMarkerName,
-                  'is-override': hasMarkerOverride(name, annoFrameIndex),
-                }"
-                :style="markerHandleStyle(name)"
-                @mousedown="onMarkerMouseDown(name, $event)"
-              >
-                <div class="marker-visual" :style="{ transform: `scale(${1 / displayZoom}) rotate(${sceneTransform.angle}deg)` }">
-                  <div class="marker-icon" v-html="markerIconSvg"></div>
-                  <span class="marker-label">{{ name }}</span>
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -2596,8 +3358,59 @@ function onWindowBlur() {
             <div
               class="gizmo-anchor-icon"
               v-html="pivotAnchorMarkup"
+              :style="gizmoAnchorIconStyle"
               title="旋转中心：中心点"
             ></div>
+          </div>
+        </div>
+
+        <!-- 标记图钉层：与角色变换完全同步，但绘制在变换手柄之上
+             （否则悬停在角色范围内时命中带 cursor:move 的变换框，无法直接点选标记） -->
+        <div
+          v-if="canAnno && markerNames.length"
+          class="scene-world marker-world"
+          :style="sceneWorldStyle"
+        >
+          <div class="sprite-object" :style="spriteObjectStyle">
+            <div class="canvas-anno-layer" :style="annoLayerStyle">
+              <div
+                v-for="name in visibleMarkerNames"
+                :key="name"
+                class="marker-handle"
+                :class="{
+                  'is-selected': name === selMarkerName,
+                  'is-override': hasMarkerOverride(name, annoFrameIndex),
+                  'is-interactive': activeTool === 'select' || activeTool === 'none',
+                  'is-locked': markerFlag(name, 'locked'),
+                }"
+                :style="markerHandleStyle(name)"
+                @mousedown="onMarkerMouseDown(name, $event)"
+                @dblclick.stop="focusMarkerName"
+              >
+                <div class="marker-visual" :style="{ transform: `scale(${1 / displayZoom}) rotate(${sceneTransform.angle}deg)` }">
+                  <div class="marker-icon" v-html="markerIconSvg"></div>
+                  <span
+                    v-if="markerFlag(name, 'showLabel') || markerFlag(name, 'showCoords')"
+                    class="marker-label"
+                  >
+                    <b v-if="markerFlag(name, 'showLabel')">{{ name }}</b>
+                    <span v-if="markerFlag(name, 'showCoords')">({{ markerCoordText(effMarker(name, annoFrameIndex)) }})</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 放置中的幽灵图钉：屏幕空间跟随鼠标（不放进缩放/旋转图层，避免逐帧重绘闪烁；与地图编辑器同款） -->
+        <div
+          v-if="markerPlacing && markerGhostScreen"
+          class="marker-handle is-ghost is-ghost-overlay"
+          :style="{ transform: `translate(${markerGhostScreen.x}px, ${markerGhostScreen.y}px)` }"
+        >
+          <div class="marker-visual">
+            <div class="marker-icon" v-html="markerIconSvg"></div>
+            <span class="marker-label"><b>新标记</b><span v-if="markerGhost">({{ markerCoordText(markerGhost) }})</span></span>
           </div>
         </div>
 
@@ -2635,15 +3448,15 @@ function onWindowBlur() {
       </div>
     </div>
 
-    <!-- 右: 面板（动画 / 属性 两页切换，272px） -->
+    <!-- 右: 面板（第一个标签随工具在 动画/碰撞 之间切换，另有属性页；选中标记时属性页整体切为标记管理；272px） -->
     <div class="preview-panel">
       <div class="right-tabs">
         <button
           class="right-tab"
-          :class="{ active: rightTab === 'animation' }"
+          :class="{ active: rightTab === rightContextTab }"
           type="button"
-          @click="rightTab = 'animation'"
-        >动画</button>
+          @click="rightTab = rightContextTab"
+        >{{ rightContextTab === 'collision' ? '碰撞' : '动画' }}</button>
         <button
           class="right-tab"
           :class="{ active: rightTab === 'props' }"
@@ -2760,9 +3573,250 @@ function onWindowBlur() {
       </div>
       </template>
 
-      <!-- 属性页：所有分区放在同一页（排版对齐地图编辑器属性面板） -->
+      <!-- 碰撞页：点击工具条「碰撞」进入；内容全部针对碰撞，排版对齐属性面板 -->
+      <div v-else-if="rightTab === 'collision'" class="props-scroll">
+        <div class="att-frame">
+          <div v-if="!canAnno" class="mi-list-empty">
+            当前角色还没有可编辑的标注数据（单图角色首次编辑并保存后会自动转为 .bsf）。
+          </div>
+          <template v-else>
+            <!-- 基础设置：作用 / 类型 / 单向碰撞 / 碰撞层级 -->
+            <div class="att-group">
+              <div class="mi-section" :class="{ open: colFold.basic }">
+                <button class="mi-head" type="button" @click="colFold.basic = !colFold.basic">
+                  <img :src="iconChevron" class="mi-chevron" alt="" />
+                  <span class="mi-head-title">基础设置</span>
+                </button>
+                <div v-if="colFold.basic" class="mi-body">
+                  <div class="att-row">
+                    <span class="att-label">作用</span>
+                    <CustomSelect
+                      class="att-select"
+                      :model-value="collisionPurposeValue"
+                      :options="COLLISION_PURPOSE_OPTIONS"
+                      @update:model-value="onCollisionPurposeSelect"
+                    />
+                  </div>
+                  <div class="att-row">
+                    <span class="att-label">类型</span>
+                    <CustomSelect
+                      class="att-select"
+                      :model-value="collisionTypeValue"
+                      :options="COLLISION_TYPE_OPTIONS"
+                      @update:model-value="onCollisionTypeSelect"
+                    />
+                  </div>
+                  <div class="att-row">
+                    <span class="att-label">单向碰撞</span>
+                    <label class="att-checkbox" title="只从一侧挡住（现阶段保存设置，运行时暂未接入）">
+                      <input type="checkbox" :checked="collisionOneWay" @change="onCollisionOneWayChange" />
+                      <span class="att-checkbox-text">启用</span>
+                    </label>
+                  </div>
+                  <div class="att-row">
+                    <span class="att-label">碰撞层级</span>
+                    <label class="att-checkbox" title="碰撞层级开关（现阶段保存设置，运行时暂未接入）">
+                      <input
+                        type="checkbox"
+                        :checked="collisionLayersEnabled"
+                        @change="onCollisionLayersChange"
+                      />
+                      <span class="att-checkbox-text">启用</span>
+                    </label>
+                  </div>
+                  <div v-if="collisionTypeValue !== 'auto'" class="mi-actions">
+                    <button class="mi-btn" type="button" @click="resetCollisionToAuto">恢复自动碰撞</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 变换：位置 / 缩放（约束比例）/ 旋转，均相对自动碰撞框 -->
+            <div class="att-group">
+              <div class="mi-section" :class="{ open: colFold.transform }">
+                <button class="mi-head" type="button" @click="colFold.transform = !colFold.transform">
+                  <img :src="iconChevron" class="mi-chevron" alt="" />
+                  <span class="mi-head-title">变换</span>
+                </button>
+                <div v-if="colFold.transform" class="mi-body">
+                  <div class="att-row att-row-stacked has-reset">
+                    <span class="att-label">位置</span>
+                    <div class="att-axis-group">
+                      <div class="att-axis-row">
+                        <div class="att-axis-field has-unit" ref="colPosXFieldEl">
+                          <span class="att-axis-tag is-x">X</span>
+                          <input
+                            class="att-input att-input-no-spin"
+                            type="text"
+                            inputmode="decimal"
+                            title="相对自动碰撞框中心的左右偏移：0 = 没动过，正数向右"
+                            :value="draftValue('colPosX', collisionPosX)"
+                            @focus="selectOnFocus"
+                            @input="onFieldDraft('colPosX', $event)"
+                            @blur="clearDraft('colPosX')"
+                            @change="onCollisionPosChange(0, $event)"
+                          />
+                          <span class="att-axis-unit" :style="collisionUnitStyleFor('x', collisionPosX)">px</span>
+                          <!-- X 被改动过才显示：单独重置水平偏移 -->
+                          <button
+                            class="att-reset"
+                            :class="{ 'is-dirty': collisionPosXDirty }"
+                            type="button"
+                            :disabled="!collisionPosXDirty"
+                            title="重置 X（回到自动碰撞框中心）"
+                            @click="resetCollisionAxis('posX')"
+                          >
+                            <img :src="iconReset" alt="" />
+                          </button>
+                        </div>
+                      </div>
+                      <div class="att-axis-row">
+                        <div class="att-axis-field has-unit" ref="colPosYFieldEl">
+                          <span class="att-axis-tag is-y">Y</span>
+                          <input
+                            class="att-input att-input-no-spin"
+                            type="text"
+                            inputmode="decimal"
+                            title="相对自动碰撞框中心的上下偏移：0 = 没动过，正数向上"
+                            :value="draftValue('colPosY', collisionPosY)"
+                            @focus="selectOnFocus"
+                            @input="onFieldDraft('colPosY', $event)"
+                            @blur="clearDraft('colPosY')"
+                            @change="onCollisionPosChange(1, $event)"
+                          />
+                          <span class="att-axis-unit" :style="collisionUnitStyleFor('y', collisionPosY)">px</span>
+                          <button
+                            class="att-reset"
+                            :class="{ 'is-dirty': collisionPosYDirty }"
+                            type="button"
+                            :disabled="!collisionPosYDirty"
+                            title="重置 Y（回到自动碰撞框中心）"
+                            @click="resetCollisionAxis('posY')"
+                          >
+                            <img :src="iconReset" alt="" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="att-row att-row-stacked has-reset">
+                    <span class="att-label">缩放</span>
+                    <div class="att-axis-group">
+                      <div class="att-axis-row">
+                        <div class="att-axis-field">
+                          <span class="att-axis-tag is-x">X</span>
+                          <input
+                            class="att-input att-input-no-spin"
+                            type="text"
+                            inputmode="decimal"
+                            title="水平缩放百分比，100 = 自动碰撞框原宽"
+                            :value="draftValue('colScaleX', collisionScaleX)"
+                            @focus="selectOnFocus"
+                            @input="onFieldDraft('colScaleX', $event)"
+                            @blur="clearDraft('colScaleX')"
+                            @change="onCollisionScaleChange(0, $event)"
+                          />
+                          <!-- X 缩放被改动过才显示 -->
+                          <button
+                            class="att-reset"
+                            :class="{ 'is-dirty': collisionScaleXDirty }"
+                            type="button"
+                            :disabled="!collisionScaleXDirty"
+                            title="重置水平缩放（回到 100%）"
+                            @click="resetCollisionAxis('scaleX')"
+                          >
+                            <img :src="iconReset" alt="" />
+                          </button>
+                        </div>
+                      </div>
+                      <div class="att-axis-row">
+                        <div class="att-axis-field">
+                          <span class="att-axis-tag is-y">Y</span>
+                          <input
+                            class="att-input att-input-no-spin"
+                            type="text"
+                            inputmode="decimal"
+                            title="垂直缩放百分比，100 = 自动碰撞框原高"
+                            :value="draftValue('colScaleY', collisionScaleY)"
+                            @focus="selectOnFocus"
+                            @input="onFieldDraft('colScaleY', $event)"
+                            @blur="clearDraft('colScaleY')"
+                            @change="onCollisionScaleChange(1, $event)"
+                          />
+                          <button
+                            class="att-reset"
+                            :class="{ 'is-dirty': collisionScaleYDirty }"
+                            type="button"
+                            :disabled="!collisionScaleYDirty"
+                            title="重置垂直缩放（回到 100%）"
+                            @click="resetCollisionAxis('scaleY')"
+                          >
+                            <img :src="iconReset" alt="" />
+                          </button>
+                        </div>
+                      </div>
+                      <div class="att-axis-row att-axis-lock">
+                        <label class="att-checkbox" title="勾选时 X / Y 同步缩放">
+                          <input
+                            type="checkbox"
+                            :checked="collisionScaleLocked"
+                            @change="onCollisionScaleLockChange($event)"
+                          />
+                        </label>
+                        <span class="att-checkbox-text">约束比例</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 旋转：滑条内嵌在数字框底部；现阶段仅保存设置，运行时暂未接入 -->
+                  <div class="att-row att-row-stacked has-reset">
+                    <span class="att-label">旋转</span>
+                    <div class="att-slider-field" ref="colAngleFieldEl">
+                      <input
+                        class="att-input att-input-no-spin"
+                        type="text"
+                        inputmode="decimal"
+                        title="逆时针为正（现阶段保存设置，运行时暂未接入）"
+                        :value="draftValue('colAngle', collisionAngleValue)"
+                        @focus="selectOnFocus"
+                        @input="onFieldDraft('colAngle', $event)"
+                        @blur="clearDraft('colAngle')"
+                        @change="onCollisionAngleInput"
+                      />
+                      <span class="att-axis-unit is-degree" :style="collisionAngleUnitStyle()">°</span>
+                      <input
+                        class="att-range"
+                        type="range"
+                        min="-180"
+                        max="180"
+                        step="1"
+                        :value="collisionAngleValue"
+                        @input="onCollisionAngleInput"
+                      />
+                      <button
+                        class="att-reset"
+                        :class="{ 'is-dirty': collisionAngleDirty }"
+                        type="button"
+                        :disabled="!collisionAngleDirty"
+                        title="重置旋转（回到 0°）"
+                        @click="resetCollisionAxis('angle')"
+                      >
+                        <img :src="iconReset" alt="" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- 属性页：未选中标记时显示角色检视器；选中标记后整页内容切换为「标记管理」 -->
       <div v-else class="props-scroll">
         <div class="att-frame">
+          <template v-if="!(canAnno && selMarkerName)">
           <!-- 基础设置：名称（可改） / 尺寸 / 图层 / 翻转 -->
           <div class="att-group">
             <div class="mi-section" :class="{ open: propFold.basic }">
@@ -2772,22 +3826,22 @@ function onWindowBlur() {
               </button>
               <div v-if="propFold.basic" class="mi-body">
                 <div class="att-row">
-                  <span class="att-label">名称</span>
+                  <span class="att-label">图像名称</span>
                   <input
                     v-model="spriteNameDraft"
                     class="att-input"
-                    title="角色名称，改完按回车或点别处生效"
+                    title="角色图像名称，改完按回车或点别处生效"
                     @blur="commitSpriteRename"
                     @keydown.enter="($event.target as HTMLInputElement).blur()"
                     @keydown.escape="spriteNameDraft = spriteDisplayName"
                   />
                 </div>
-                <!-- 尺寸：只读信息（.bsf 用画布尺寸，图片角色用当前帧内容框） -->
+                <!-- 画布尺寸：只读信息（.bsf 用画布尺寸，图片角色用当前帧内容框） -->
                 <div class="att-row">
-                  <span class="att-label">尺寸</span>
+                  <span class="att-label">画布尺寸</span>
                   <div class="att-size-group">
                     <div class="att-axis-field">
-                      <span class="att-axis-tag">X</span>
+                      <span class="att-axis-tag is-x">X</span>
                       <input
                         class="att-input att-input-no-spin"
                         type="number"
@@ -2798,7 +3852,7 @@ function onWindowBlur() {
                       />
                     </div>
                     <div class="att-axis-field">
-                      <span class="att-axis-tag">Y</span>
+                      <span class="att-axis-tag is-y">Y</span>
                       <input
                         class="att-input att-input-no-spin"
                         type="number"
@@ -3065,31 +4119,63 @@ function onWindowBlur() {
               </button>
               <div v-if="propFold.pivot" class="mi-body">
                 <template v-if="canAnno">
-                  <div class="att-row att-row-stacked">
+                  <div class="att-row att-row-stacked has-reset">
                     <span class="att-label">位置</span>
                     <div class="att-axis-group">
                       <div class="att-axis-row">
-                        <div class="att-axis-field">
-                          <span class="att-axis-tag">X</span>
+                        <div class="att-axis-field has-unit" ref="pivotXFieldEl">
+                          <span class="att-axis-tag is-x">X</span>
                           <input
                             class="att-input att-input-no-spin"
-                            type="number"
-                            step="0.5"
-                            :value="annoPivot ? annoPivot.x.toFixed(1) : ''"
+                            type="text"
+                            inputmode="decimal"
+                            title="相对素材原始中心点的左右偏移：0 = 没动过，正数向右"
+                            :value="annoPivotOffset ? draftValue('px', annoPivotOffset.x) : ''"
+                            @focus="selectOnFocus"
+                            @input="onFieldDraft('px', $event)"
+                            @blur="clearDraft('px')"
                             @change="onCoordChange('x', $event)"
                           />
+                          <span class="att-axis-unit" :style="annoPivotOffset ? pivotUnitStyle('px', annoPivotOffset.x) : {}">px</span>
+                          <!-- X 被改动过才显示：单独重置水平偏移 -->
+                          <button
+                            class="att-reset"
+                            :class="{ 'is-dirty': pivotXDirty }"
+                            type="button"
+                            :disabled="!pivotXDirty"
+                            title="重置 X（回到素材原始位置）"
+                            @click="resetPivotAxis('x')"
+                          >
+                            <img :src="iconReset" alt="" />
+                          </button>
                         </div>
                       </div>
                       <div class="att-axis-row">
-                        <div class="att-axis-field">
-                          <span class="att-axis-tag">Y</span>
+                        <div class="att-axis-field has-unit" ref="pivotYFieldEl">
+                          <span class="att-axis-tag is-y">Y</span>
                           <input
                             class="att-input att-input-no-spin"
-                            type="number"
-                            step="0.5"
-                            :value="annoPivot ? annoPivot.y.toFixed(1) : ''"
+                            type="text"
+                            inputmode="decimal"
+                            title="相对素材原始中心点的上下偏移：0 = 没动过，正数向下"
+                            :value="annoPivotOffset ? draftValue('py', annoPivotOffset.y) : ''"
+                            @focus="selectOnFocus"
+                            @input="onFieldDraft('py', $event)"
+                            @blur="clearDraft('py')"
                             @change="onCoordChange('y', $event)"
                           />
+                          <span class="att-axis-unit" :style="annoPivotOffset ? pivotUnitStyle('py', annoPivotOffset.y) : {}">px</span>
+                          <!-- Y 被改动过才显示：单独重置垂直偏移 -->
+                          <button
+                            class="att-reset"
+                            :class="{ 'is-dirty': pivotYDirty }"
+                            type="button"
+                            :disabled="!pivotYDirty"
+                            title="重置 Y（回到素材原始位置）"
+                            @click="resetPivotAxis('y')"
+                          >
+                            <img :src="iconReset" alt="" />
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -3106,9 +4192,6 @@ function onWindowBlur() {
                   <div class="mi-actions">
                     <button class="mi-btn" type="button" @click="applyPivotPreset('center')">中心</button>
                     <button class="mi-btn" type="button" @click="applyPivotPreset('feet')">脚底</button>
-                  </div>
-                  <div class="mi-actions">
-                    <button class="mi-btn" type="button" @click="resetAnno">重置</button>
                     <button
                       v-if="hasPivotOverride(annoFrameIndex)"
                       class="mi-btn"
@@ -3122,23 +4205,80 @@ function onWindowBlur() {
             </div>
           </div>
 
-          <!-- 碰撞（所有工具共用同一页） -->
-          <div class="att-group">
-            <div class="mi-section" :class="{ open: propFold.collision }">
-              <button class="mi-head" type="button" @click="propFold.collision = !propFold.collision">
-                <img :src="iconChevron" class="mi-chevron" alt="" />
-                <span class="mi-head-title">碰撞</span>
-              </button>
-              <div v-if="propFold.collision" class="mi-body">
-                <template v-if="canAnno">
+          </template>
+
+          <!-- 标记页：选中标记后属性页整体切换到这里（三个可折叠分区） -->
+          <template v-if="canAnno && selMarkerName">
+            <div class="att-group">
+              <!-- 标记信息 -->
+              <div class="mi-section" :class="{ open: propFold.markerInfo }">
+                <button class="mi-head" type="button" @click="propFold.markerInfo = !propFold.markerInfo">
+                  <img :src="iconChevron" class="mi-chevron" alt="" />
+                  <span class="mi-head-title">标记信息</span>
+                </button>
+                <div v-if="propFold.markerInfo" class="mi-body">
+                  <div class="att-row">
+                    <span class="att-label">名称</span>
+                    <input
+                      ref="markerNameInputEl"
+                      v-model="markerNameDraft"
+                      class="att-input"
+                      title="标记名称"
+                      @focus="selectOnFocus"
+                      @blur="commitMarkerRename"
+                      @keydown.enter="($event.target as HTMLInputElement).blur()"
+                      @keydown.escape="cancelMarkerRename"
+                    />
+                  </div>
                   <div class="att-row">
                     <span class="att-label">类型</span>
                     <CustomSelect
                       class="att-select"
-                      :model-value="collisionTypeValue"
-                      :options="COLLISION_TYPE_OPTIONS"
-                      @update:model-value="onCollisionTypeSelect"
+                      :model-value="selMarkerType"
+                      :options="markerTypeSelectOptions"
+                      @update:model-value="onMarkerTypeSelect"
                     />
+                  </div>
+                  <div v-if="markerTypeEditing" class="att-row">
+                    <span class="att-label"></span>
+                    <input
+                      ref="markerTypeInputEl"
+                      v-model="markerTypeDraft"
+                      class="att-input"
+                      placeholder="输入自定义类型"
+                      @focus="selectOnFocus"
+                      @blur="commitMarkerTypeDraft"
+                      @keydown.enter="($event.target as HTMLInputElement).blur()"
+                    />
+                  </div>
+                  <div class="att-row att-row-stacked">
+                    <span class="att-label">位置</span>
+                    <div class="att-axis-group">
+                      <div class="att-axis-row">
+                        <div class="att-axis-field">
+                          <span class="att-axis-tag is-x">X</span>
+                          <input
+                            class="att-input att-input-no-spin"
+                            type="number"
+                            step="0.5"
+                            :value="selMarkerPos ? selMarkerPos.x.toFixed(1) : ''"
+                            @change="onMarkerCoordChange('x', $event)"
+                          />
+                        </div>
+                      </div>
+                      <div class="att-axis-row">
+                        <div class="att-axis-field">
+                          <span class="att-axis-tag is-y">Y</span>
+                          <input
+                            class="att-input att-input-no-spin"
+                            type="number"
+                            step="0.5"
+                            :value="selMarkerPos ? selMarkerPos.y.toFixed(1) : ''"
+                            @change="onMarkerCoordChange('y', $event)"
+                          />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                   <div class="att-row">
                     <span class="att-label">作用范围</span>
@@ -3149,128 +4289,106 @@ function onWindowBlur() {
                       @update:model-value="onScopeSelect"
                     />
                   </div>
+                </div>
+              </div>
+
+              <!-- 显示与锁定 -->
+              <div class="mi-section" :class="{ open: propFold.markerDisplay }">
+                <button class="mi-head" type="button" @click="propFold.markerDisplay = !propFold.markerDisplay">
+                  <img :src="iconChevron" class="mi-chevron" alt="" />
+                  <span class="mi-head-title">显示与锁定</span>
+                </button>
+                <div v-if="propFold.markerDisplay" class="mi-body">
                   <div class="att-row">
-                    <span class="att-label">禁用碰撞</span>
-                    <label class="att-checkbox" title="关闭后不参与物理：不会被墙壁、地面挡住，也无法站在地上">
-                      <input type="checkbox" :checked="collisionDisabled" @change="onCollisionDisabledChange" />
+                    <span class="att-label">显示</span>
+                    <label class="att-checkbox" title="关闭后画布上不显示这个标记，但仍可在管理列表里找到并修改">
+                      <input
+                        type="checkbox"
+                        :checked="markerFlag(selMarkerName, 'visible')"
+                        @change="onMarkerFlagChange('visible', $event)"
+                      />
                     </label>
                   </div>
-                  <div v-if="hasCollisionOverride(annoFrameIndex)" class="mi-actions">
-                    <button class="mi-btn" type="button" @click="clearCollisionOverride">恢复统一</button>
+                  <div class="att-row">
+                    <span class="att-label">名称</span>
+                    <label class="att-checkbox" title="图钉下方的标签是否显示标记名字">
+                      <input
+                        type="checkbox"
+                        :checked="markerFlag(selMarkerName, 'showLabel')"
+                        @change="onMarkerFlagChange('showLabel', $event)"
+                      />
+                    </label>
                   </div>
-                </template>
-                <div v-else class="mi-list-empty">单图角色保存标注后会自动转为 .bsf，之后才能编辑碰撞。</div>
+                  <div class="att-row">
+                    <span class="att-label">坐标</span>
+                    <label class="att-checkbox" title="图钉下方的标签是否显示坐标">
+                      <input
+                        type="checkbox"
+                        :checked="markerFlag(selMarkerName, 'showCoords')"
+                        @change="onMarkerFlagChange('showCoords', $event)"
+                      />
+                    </label>
+                  </div>
+                  <div class="att-row">
+                    <span class="att-label">锁定</span>
+                    <label class="att-checkbox" title="锁定后图钉只能点选查看，不能拖动位置">
+                      <input
+                        type="checkbox"
+                        :checked="markerFlag(selMarkerName, 'locked')"
+                        @change="onMarkerFlagChange('locked', $event)"
+                      />
+                    </label>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
 
-          <!-- 标记（所有工具共用同一页） -->
-          <div class="att-group">
-            <div class="mi-section" :class="{ open: propFold.marker }">
-              <button class="mi-head" type="button" @click="propFold.marker = !propFold.marker">
-                <img :src="iconChevron" class="mi-chevron" alt="" />
-                <span class="mi-head-title">标记</span>
-                <span v-if="canAnno && markerNames.length" class="mi-count">{{ markerNames.length }}</span>
-              </button>
-              <div v-if="propFold.marker" class="mi-body">
-                <template v-if="canAnno">
-                  <div class="mi-actions">
-                    <button
-                      class="mi-btn"
-                      type="button"
-                      :class="{ 'is-on': markerPlacing }"
-                      title="点一下进入放置，再在画布上点一下放好标记"
-                      @click="toggleMarkerPlacing"
-                    >{{ markerPlacing ? '点击画布放置…' : '添加标记' }}</button>
+              <!-- 标记管理：类型筛选 + 标记列表 + 复制 / 删除 -->
+              <div class="mi-section" :class="{ open: propFold.markerList }">
+                <button class="mi-head" type="button" @click="propFold.markerList = !propFold.markerList">
+                  <img :src="iconChevron" class="mi-chevron" alt="" />
+                  <span class="mi-head-title">标记管理</span>
+                  <span class="mi-count">{{ filteredMarkerNames.length }}</span>
+                </button>
+                <div v-if="propFold.markerList" class="mi-body">
+                  <div class="att-row">
+                    <span class="att-label">标记类型</span>
+                    <CustomSelect
+                      class="att-select"
+                      :model-value="markerTypeFilter"
+                      :options="markerTypeFilterOptions"
+                      @update:model-value="v => (markerTypeFilter = v)"
+                    />
                   </div>
-                  <div v-if="markerNames.length" class="mi-list">
+                  <div v-if="filteredMarkerNames.length" class="mi-list">
                     <button
-                      v-for="name in markerNames"
+                      v-for="name in filteredMarkerNames"
                       :key="name"
                       class="mi-list-row"
                       :class="{ 'is-selected': name === selMarkerName }"
                       type="button"
-                      @click="selMarkerName = name"
+                      @click="selectMarker(name)"
                     >
                       <span class="mi-list-dot"></span>
                       <span class="mi-list-name">{{ name }}</span>
-                      <span class="mi-list-coord">{{ markerCoordText(name) }}</span>
+                      <span class="mi-list-coord">{{ markerCoordText(effMarker(name, annoFrameIndex)) }}</span>
                     </button>
                   </div>
-                  <div v-else class="mi-list-empty">还没有标记。点「添加标记」后在画布上点一下放置。</div>
-                </template>
-                <div v-else class="mi-list-empty">单图角色保存标注后会自动转为 .bsf，之后才能编辑标记。</div>
-              </div>
-            </div>
-
-            <!-- 选中标记后的详细设置（与地图编辑器「标记检视器」一致的第二个分区） -->
-            <div v-if="canAnno && selMarkerName" class="mi-section" :class="{ open: propFold.markerDetail }">
-              <button class="mi-head" type="button" @click="propFold.markerDetail = !propFold.markerDetail">
-                <img :src="iconChevron" class="mi-chevron" alt="" />
-                <span class="mi-head-title">标记设置</span>
-              </button>
-              <div v-if="propFold.markerDetail" class="mi-body">
-                <div class="att-row">
-                  <span class="att-label">名称</span>
-                  <input
-                    v-model="markerNameDraft"
-                    class="att-input"
-                    title="标记名称"
-                    @blur="commitMarkerRename"
-                    @keydown.enter="($event.target as HTMLInputElement).blur()"
-                    @keydown.escape="cancelMarkerRename"
-                  />
-                </div>
-                <div class="att-row att-row-stacked">
-                  <span class="att-label">坐标</span>
-                  <div class="att-axis-group">
-                    <div class="att-axis-row">
-                      <div class="att-axis-field">
-                        <span class="att-axis-tag">X</span>
-                        <input
-                          class="att-input att-input-no-spin"
-                          type="number"
-                          step="0.5"
-                          :value="selMarkerPos ? selMarkerPos.x.toFixed(1) : ''"
-                          @change="onMarkerCoordChange('x', $event)"
-                        />
-                      </div>
-                    </div>
-                    <div class="att-axis-row">
-                      <div class="att-axis-field">
-                        <span class="att-axis-tag">Y</span>
-                        <input
-                          class="att-input att-input-no-spin"
-                          type="number"
-                          step="0.5"
-                          :value="selMarkerPos ? selMarkerPos.y.toFixed(1) : ''"
-                          @change="onMarkerCoordChange('y', $event)"
-                        />
-                      </div>
-                    </div>
+                  <div v-else class="mi-list-empty">这个类型下没有标记。</div>
+                  <div class="mi-actions">
+                    <button class="mi-btn" type="button" @click="duplicateMarker(selMarkerName)">复制</button>
+                    <button class="mi-btn mi-btn-danger" type="button" @click="deleteMarker(selMarkerName)">删除</button>
+                    <button
+                      v-if="hasMarkerOverride(selMarkerName, annoFrameIndex)"
+                      class="mi-btn"
+                      type="button"
+                      @click="clearMarkerOverride"
+                    >恢复统一</button>
                   </div>
                 </div>
-                <div class="att-row">
-                  <span class="att-label">作用范围</span>
-                  <CustomSelect
-                    class="att-select"
-                    :model-value="annoScope"
-                    :options="SCOPE_OPTIONS"
-                    @update:model-value="onScopeSelect"
-                  />
-                </div>
-                <div class="mi-actions">
-                  <button class="mi-btn mi-btn-danger" type="button" @click="deleteMarker(selMarkerName)">删除标记</button>
-                  <button
-                    v-if="hasMarkerOverride(selMarkerName, annoFrameIndex)"
-                    class="mi-btn"
-                    type="button"
-                    @click="clearMarkerOverride"
-                  >恢复统一</button>
-                </div>
               </div>
             </div>
-          </div>
+          </template>
+
         </div>
       </div>
     </div>

@@ -17,6 +17,8 @@ const props = defineProps<{
   zoom: number
   /** 角色旋转角度（用户坐标，逆时针为正）；用于反向换算鼠标坐标 */
   angle?: number
+  /** 碰撞形状自身的旋转角度（度，逆时针为正；绕形状包围盒中心旋转） */
+  shapeAngle?: number
   /** 禁用碰撞：形状仍显示但整体置灰（与地图编辑器禁用碰撞体同观感） */
   disabled?: boolean
 }>()
@@ -81,6 +83,14 @@ const polyPointsStr = computed(() =>
   props.shape.type === 'polygon' ? props.shape.points.map(p => `${p[0]},${p[1]}`).join(' ') : '',
 )
 
+/** 碰撞形状自身旋转：绕包围盒中心（SVG 正角为屏幕顺时针，用户角度逆时针为正 → 取负） */
+const contentTransform = computed(() => {
+  const a = props.shapeAngle || 0
+  if (!a) return undefined
+  const b = box.value
+  return `rotate(${-a} ${b.cx} ${b.cy})`
+})
+
 // ── 屏幕坐标 → 画布逻辑坐标（根元素可能被旋转/缩放，用中心点 + 反向旋转还原） ──
 /** 返回画布坐标 + 实际屏幕缩放倍率（命中容差按屏幕像素换算要用） */
 function clientToCanvas(e: MouseEvent): { x: number; y: number; scale: number } | null {
@@ -98,11 +108,21 @@ function clientToCanvas(e: MouseEvent): { x: number; y: number; scale: number } 
   const sin = Math.sin(a)
   const dx = e.clientX - cx
   const dy = e.clientY - cy
-  return {
-    x: (dx * cos - dy * sin) / scale + props.canvasW / 2,
-    y: (dx * sin + dy * cos) / scale + props.canvasH / 2,
-    scale,
+  let x = (dx * cos - dy * sin) / scale + props.canvasW / 2
+  let y = (dx * sin + dy * cos) / scale + props.canvasH / 2
+  // 形状自身旋转的正运算（渲染时 rotate(-角度)），这里按 +角度 绕包围盒中心反向还原，
+  // 让命中判定 / 拖拽始终在未旋转的形状数据上计算
+  const sa = (props.shapeAngle || 0) * Math.PI / 180
+  if (sa) {
+    const b = box.value
+    const ox = x - b.cx
+    const oy = y - b.cy
+    const c2 = Math.cos(sa)
+    const s2 = Math.sin(sa)
+    x = b.cx + ox * c2 - oy * s2
+    y = b.cy + ox * s2 + oy * c2
   }
+  return { x, y, scale }
 }
 
 // ── 手柄定义 ──
@@ -430,6 +450,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
       :height="canvasH"
       :viewBox="`0 0 ${canvasW} ${canvasH}`"
     >
+      <g :transform="contentTransform">
       <!-- 形状本体：只负责绘制，交互统一由根元素命中判定（避免细小手柄抢不到事件） -->
       <template v-if="shape.type === 'rect'">
         <rect
@@ -519,6 +540,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
             />
           </template>
         </template>
+      </g>
       </g>
     </svg>
   </div>

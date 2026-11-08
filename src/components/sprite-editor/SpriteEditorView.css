@@ -141,14 +141,22 @@
 .sprite-canvas.is-space-ready {
   cursor: grab;
 }
-/* 标记放置中：十字光标提示"点击落点" */
+/* 放置标记中：隐藏系统光标，由跟随鼠标的幽灵图钉充当指针（与地图编辑器一致） */
 .sprite-canvas.is-marker-placing {
-  cursor: crosshair;
+  cursor: none;
 }
-/* 网格两层：细格 + 8 倍粗格，对齐世界原点 */
-.scene-grid {
+/* 放置中按住空格/中键平移时仍显示抓取光标（平移优先） */
+.sprite-canvas.is-marker-placing.is-panning {
+  cursor: grabbing;
+}
+/* 网格：canvas 自绘（细格 + 每 8 格一条粗格，对齐世界原点）
+   不用 CSS 平铺是因为分数格距时会出现两条几乎重叠的线；逐条按设备像素取整绘制没有接缝 */
+.scene-grid-canvas {
   position: absolute;
   inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
 }
 /* 坐标轴：X 轴红、Y 轴绿（与常见 3D/2D 编辑器一致，方向一眼可辨） */
@@ -379,6 +387,47 @@
 .layer-chip:disabled { opacity: 0.4; cursor: not-allowed; }
 .layer-chip .soon { font-size: 9px; opacity: 0.7; margin-left: 2px; }
 .layer-chip-icon { width: 14px; height: 14px; flex-shrink: 0; }
+
+/* 常驻显示开关（碰撞 / 网格 / 吸附）：小方框勾选；激活时不画绿框绿字，
+   绿框只表示"当前工具"，避免和开关状态混淆（与地图编辑器常驻开关语义一致） */
+.layer-chip.chip-toggle { padding: 4px 8px; gap: 6px; }
+.layer-chip.chip-toggle.active {
+  border-color: var(--border-light);
+  color: #c9ced7;
+  background: rgba(255, 255, 255, 0.03);
+}
+.layer-chip.chip-toggle.active:hover { background: var(--bg-hover); color: #fff; }
+.chip-check {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 1px solid #6a6f78;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.chip-check.on { border-color: var(--accent); background: rgba(91, 251, 132, 0.14); }
+.chip-check.on::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 1px;
+  width: 4px;
+  height: 7px;
+  border-right: 1.5px solid var(--accent);
+  border-bottom: 1.5px solid var(--accent);
+  transform: rotate(45deg);
+}
+/* 工具组与常驻开关之间的分割线（与地图编辑器工具栏一致） */
+.anno-toolbar-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border-light);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+/* 勾选「显示碰撞」但不在碰撞工具时：叠加层只看不拖 */
+:deep(.cso-root.collision-preview) { pointer-events: none; }
 /* 工具条只放工具切换（选择 / 中心 / 碰撞 / 标记），详细设置集中在右侧「属性」面板 */
 
 /* 中心点手柄（锚点为逻辑坐标，反向缩放保持屏幕大小恒定） */
@@ -479,7 +528,8 @@
   color: var(--mk-ink);
   pointer-events: auto;
   cursor: default;
-  transition: color 0.16s ease, transform 0.16s ease;
+  /* 只做颜色过渡：选中时不要给图标加 transform（在多层缩放图层里会触发重新光栅化，所有图钉会一起跳动一下） */
+  transition: color 0.16s ease;
 }
 .marker-icon :deep(svg) {
   width: 100%;
@@ -498,11 +548,9 @@
 .marker-handle.is-override .marker-icon {
   color: var(--mk-override);
 }
-/* 选中态：只让图标变红并轻微放大，标签始终深色底 */
+/* 选中态：只让图标变红（不加放大：放大等于给图标加 transform，会让整个图钉层重新光栅化并集体跳动一下） */
 .marker-handle.is-selected .marker-icon {
   color: var(--mk-red);
-  transform: scale(1.07);
-  transform-origin: 50% 88%; /* 钉尖固定，放大时不脱离锚点 */
 }
 /* 标签在图钉下方：只显示标记名（不显示坐标） */
 .marker-label {
@@ -522,18 +570,49 @@
   pointer-events: none;
   user-select: none;
 }
-/* 放置预览：默认透明，由 JS 定位后显示；不拦截事件，点画布即落点 */
+/* 中心 / 碰撞工具下标记只做展示，不拦截鼠标；选择 / 动画工具下可点选、拖动 */
+.marker-handle:not(.is-interactive),
+.marker-handle:not(.is-interactive) .marker-icon {
+  pointer-events: none;
+}
+/* 选择 / 动画工具下：悬停图钉用普通箭头指针，点一下就选中该标记 */
+.marker-handle.is-interactive,
+.marker-handle.is-interactive .marker-icon {
+  cursor: default;
+}
+/* 标签也参与命中：点名字同样能选中标记 */
+.marker-handle.is-interactive .marker-label {
+  pointer-events: auto;
+  cursor: default;
+}
+/* 标记图钉层：与角色变换同步，但排在变换手柄之后绘制，悬停/点击优先命中图钉 */
+.marker-world {
+  z-index: 8;
+}
+/* 放置预览：半透明、不拦截事件，点画布即落点 */
 .marker-handle.is-ghost {
+  opacity: 0.55;
+  pointer-events: none;
+}
+/* 幽灵图钉放在屏幕空间（画布容器直属子元素，不在缩放/旋转图层里）：
+   left/top 固定为 0，只改 transform，移动走合成层，不会逐帧触发布局重绘（原先会疯狂闪烁） */
+.marker-handle.is-ghost-overlay {
   left: 0;
   top: 0;
-  opacity: 0;
-  pointer-events: none;
-  /* 跟随鼠标时只改 transform，交给合成层处理，不重排不闪 */
+  z-index: 20;
   will-change: transform;
 }
 .marker-handle.is-ghost .marker-icon {
   pointer-events: none;
-  transition: none;
+}
+/* 幽灵图钉标签：名称加粗 + 落点坐标（与地图编辑器「新标记 (x,y)」同款） */
+.marker-label b {
+  font-weight: 700;
+  margin-right: 5px;
+}
+.marker-label span {
+  color: #9aa3af;
+  font-weight: 500;
 }
 /* 造型列表：单帧覆盖角标（蓝=中心点，橙=碰撞） */
 .costume-item { position: relative; }
@@ -605,7 +684,11 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* 隐藏面板滚动条占位（滚轮照常可滚）：
+     有/无滚动条都不改变内容宽度，右侧留白只由 .att-frame 的内边距决定 */
+  scrollbar-width: none;
 }
+.props-scroll::-webkit-scrollbar { width: 0; height: 0; }
 
 /* 属性容器：与地图编辑器同间距（面板自身已有 8px 内边距，这里只补到总计 16px）
    左侧保持 4px（整体左边界不变），标题框内部留白负责箭头/文字的呼吸感 */
@@ -613,8 +696,8 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
-  /* 左侧 4px，右侧保留 8px 给滚动条留白 */
-  padding: 10px 8px 12px 4px;
+  /* 左右内边距一致（各 4px）：滚动条已隐藏占位，右侧不会再多出宽度 */
+  padding: 10px 4px 12px 4px;
   background: var(--bg-root);
 }
 .att-group {
@@ -741,6 +824,12 @@
 }
 .att-row-stacked > .att-label {
   line-height: 24px;
+}
+/* 属性行下方的说明文字（弱化灰、与输入框同列） */
+.att-hint {
+  color: #7e838a;
+  font-size: 11px;
+  line-height: 1.3;
 }
 /* 变换行独立重置图标（Godot 风格）：贴在输入框内部右侧，只占第一行；
    默认隐藏，出现/消失不影响布局（X/Y 共用一个） */

@@ -29,6 +29,24 @@ export type SpriteCollisionShape =
   | { type: 'capsule'; cx: number; cy: number; radius: number; height: number }
   | { type: 'polygon'; points: [number, number][] }
 
+/**
+ * 标记（挂点）条目：画布坐标 + 编辑器展示设置。
+ * 展示设置只存在统一值（BsfMeta.markers）上，帧覆盖仍只记坐标。
+ * 缺省：显示、标签、坐标都开，不锁定。
+ */
+export interface SpriteMarkerPoint {
+  x: number
+  y: number
+  /** false = 画布上不显示该图钉（仍可在「标记管理」页里选中编辑） */
+  visible?: boolean
+  /** false = 图钉标签不显示名字 */
+  showLabel?: boolean
+  /** false = 图钉标签不显示坐标 */
+  showCoords?: boolean
+  /** true = 锁定位置：可点选但不能拖动 */
+  locked?: boolean
+}
+
 export interface BsfFrameMeta {
   name: string
   rect: { x: number; y: number; w: number; h: number }
@@ -45,11 +63,22 @@ export interface BsfFrameMeta {
 export interface BsfMeta {
   canvas: { w: number; h: number }
   pivot: { x: number; y: number }
+  /**
+   * 素材原始中心点（画布坐标）：编辑器「中心点」面板显示偏移量的基准，
+   * 未移动过中心点时显示 0,0。老文件缺省 = 当前 pivot。
+   */
+  pivotBase?: { x: number; y: number }
   frames: BsfFrameMeta[]
   /** 统一碰撞形状：缺省 = 自动碰撞（引擎内容包围盒） */
   collision?: SpriteCollisionShape
   /** 禁用碰撞：true = 该角色完全不参与地形/边界物理阻挡（不影响碰到检测） */
   collisionDisabled?: boolean
+  /** 单向碰撞（可选）：true = 只从一侧挡住；当前仅编辑器保存，运行时尚未接入 */
+  collisionOneWay?: boolean
+  /** 碰撞层级开关（可选）：当前仅编辑器保存，运行时尚未接入 */
+  collisionLayersEnabled?: boolean
+  /** 碰撞形状旋转角度（度，可选）：当前仅编辑器保存，运行时尚未接入 */
+  collisionAngle?: number
   /** 受重力影响：false = 重力地图里也不下坠（撞墙/落地等碰撞照常）；缺省 = 受重力 */
   gravity?: boolean
   /** 初始隐藏：true = 角色创建时不可见（代码里 show() 后出现）；缺省 = 可见 */
@@ -62,8 +91,8 @@ export interface BsfMeta {
   flipX?: boolean
   /** 垂直翻转：true = 创建时上下镜像；缺省不翻转 */
   flipY?: boolean
-  /** 统一挂点（按名字，画布坐标）：武器/道具挂载锚点，如 hand_r / head */
-  markers?: Record<string, { x: number; y: number }>
+  /** 统一挂点（按名字，画布坐标）：武器/道具挂载锚点，如 hand_r / head；含编辑器展示设置 */
+  markers?: Record<string, SpriteMarkerPoint>
 }
 
 /**
@@ -311,9 +340,14 @@ async function buildBsfSpriteData(manifest: any, sheetImage: HTMLImageElement): 
     bsf: {
       canvas: canvasSize,
       pivot: manifest.pivot || { x: canvasSize.w / 2, y: canvasSize.h / 2 },
+      // 素材原始中心点（编辑器「中心点」显示 0,0 的基准）：老文件没有该字段时以当前 pivot 为基准
+      pivotBase: manifest.pivotBase || manifest.pivot || { x: canvasSize.w / 2, y: canvasSize.h / 2 },
       frames: manifest.frames,
       ...(manifest.collision ? { collision: manifest.collision } : {}),
       ...(manifest.collisionDisabled ? { collisionDisabled: true } : {}),
+      ...(manifest.collisionOneWay ? { collisionOneWay: true } : {}),
+      ...(manifest.collisionLayersEnabled ? { collisionLayersEnabled: true } : {}),
+      ...(typeof manifest.collisionAngle === 'number' ? { collisionAngle: manifest.collisionAngle } : {}),
       ...(manifest.gravity === false ? { gravity: false } : {}),
       ...(manifest.hidden ? { hidden: true } : {}),
       ...(manifest.flipX ? { flipX: true } : {}),
@@ -362,10 +396,18 @@ export async function saveBsfManifest(dirPath: string, sprite: SpriteData): Prom
     sheet: 'sheet.png',
     canvas: sprite.bsf.canvas,
     pivot: sprite.bsf.pivot,
+    // 素材原始中心点（编辑器显示偏移的基准）：持久化后再次打开仍能看出累计移动量
+    ...(sprite.bsf.pivotBase ? { pivotBase: sprite.bsf.pivotBase } : {}),
     // 自定义碰撞（可选）：无 = 引擎自动碰撞
     ...(sprite.bsf.collision ? { collision: sprite.bsf.collision } : {}),
     // 禁用碰撞（可选）：true = 不参与物理阻挡；缺省不写字段
     ...(sprite.bsf.collisionDisabled ? { collisionDisabled: true } : {}),
+    // 单向碰撞 / 碰撞层级 / 旋转（可选）：当前仅编辑器保存，运行时尚未接入
+    ...(sprite.bsf.collisionOneWay ? { collisionOneWay: true } : {}),
+    ...(sprite.bsf.collisionLayersEnabled ? { collisionLayersEnabled: true } : {}),
+    ...(typeof sprite.bsf.collisionAngle === 'number' && sprite.bsf.collisionAngle !== 0
+      ? { collisionAngle: sprite.bsf.collisionAngle }
+      : {}),
     // 受重力影响（可选）：false = 不受地图重力；缺省不写字段（= 受重力）
     ...(sprite.bsf.gravity === false ? { gravity: false } : {}),
     // 初始隐藏（可选）：缺省不写字段（= 可见）
