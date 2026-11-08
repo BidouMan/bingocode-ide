@@ -275,6 +275,12 @@ def start_game(project_dir=None, target_file=None):
         }
         exec(script_content, exec_globals)
 
+    # 初始化阶段产生的变换（goto / scale / angle / 可见性等）都进了帧缓冲，
+    # 必须在通知就绪前刷出去：否则性能模式隔帧发送会跳过第一次 flush，
+    # 而「没有 generator、也没有活跃行为」时主循环第一步就正常退出，
+    # 这些初始设置就永远发不出去——前端只看到 CREATE 里的默认位置/大小/角度。
+    _flush_frame_updates()
+
     # 初始化完成：通知 IDE 结束启动加载页（旧 run() 模式已在 run() 内部发过，不会重复）
     _notify_ready()
     _wait_for_start()
@@ -288,6 +294,7 @@ def start_game(project_dir=None, target_file=None):
         # 用户可能用 `from bingo_engine import *` 拿到只设置 _STOPPED 的 stop()，
         # 与 exec_globals 里抛 GameStop 的版本并存，两种都要能真正结束游戏
         if st._STOPPED:
+            _flush_frame_updates()  # 退出前补发最后一帧，性能模式可能刚跳过这次发送
             return
 
         now = time.perf_counter()
@@ -313,6 +320,7 @@ def start_game(project_dir=None, target_file=None):
                     st._generators.remove(gen)
                 except GameStop:
                     st._generators.clear()
+                    _flush_frame_updates()  # 退出前补发最后一帧
                     return
                 except Exception as e:
                     print(f"[错误] Generator 错误: {e}")
@@ -332,6 +340,8 @@ def start_game(project_dir=None, target_file=None):
                         for s in st._SPRITES.values() if not s._is_deleted
                     )
                     if not _has_active:
+                        # 程序自然结束：补发最后一帧，性能模式隔帧发送不能吞掉最终画面
+                        _flush_frame_updates()
                         return
 
             _end_physics_step()

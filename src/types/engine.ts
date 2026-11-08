@@ -16,6 +16,8 @@ export interface CreateCommand extends EngineCommand {
     scale_y: number
     type: string
     layer: number
+    /** 初始可见（编辑器「初始隐藏」；缺省 true） */
+    visible?: boolean
     /** 同层内按脚底 Y 坐标排序（编辑器「Y轴排序」） */
     y_sort?: boolean
     vox: number

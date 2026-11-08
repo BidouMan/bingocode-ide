@@ -66,7 +66,7 @@ export function useEngine() {
           scale: cmd.data.scale,
           scaleX: cmd.data.scale_x,
           scaleY: cmd.data.scale_y,
-          visible: true,
+          visible: cmd.data.visible ?? true,
           layer: cmd.data.layer,
           ySort: cmd.data.y_sort ?? false,
           imagePath: cmd.data.image,
