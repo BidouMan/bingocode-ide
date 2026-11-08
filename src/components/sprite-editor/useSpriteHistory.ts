@@ -21,12 +21,24 @@ const HISTORY_LIMIT = 50
 /** 连续修改合并窗口：一次拖动（mousemove 连续触发）或连续输入只记一步 */
 const COMMIT_DELAY = 250
 
+interface SpriteHistoryOptions {
+  /**
+   * 回写快照时逐帧处理：帧的 objectURL 可能在删除造型时被主动释放，
+   * 撤销/重做复原时用它按 blob 重建 URL（否则会出现裂图）。
+   */
+  restoreFrame?: (frame: SpriteFrame) => SpriteFrame
+}
+
 /**
  * 角色编辑器的撤销 / 重做。
  * 监听整份可编辑状态的变化，停顿 COMMIT_DELAY 后把「修改前」的快照压栈；
  * 撤销 = 整体回写快照（帧列表、动画、变换、.bsf 标注一起复原）。
  */
-export function useSpriteHistory(getSprite: () => SpriteData | null, onApply: () => void) {
+export function useSpriteHistory(
+  getSprite: () => SpriteData | null,
+  onApply: () => void,
+  options: SpriteHistoryOptions = {},
+) {
   const undoStack = shallowRef<SpriteSnapshot[]>([])
   const redoStack = shallowRef<SpriteSnapshot[]>([])
 
@@ -110,7 +122,10 @@ export function useSpriteHistory(getSprite: () => SpriteData | null, onApply: ()
       ...a,
       frameNames: a.frameNames ? [...a.frameNames] : undefined,
     }))
-    sprite.frames = snap.frames.map(f => ({ ...f }))
+    sprite.frames = snap.frames.map(f => {
+      const copy = { ...f }
+      return options.restoreFrame ? options.restoreFrame(copy) : copy
+    })
     return true
   }
 

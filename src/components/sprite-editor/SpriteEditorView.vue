@@ -2,9 +2,8 @@
 import { ref, reactive, computed, watch, watchEffect, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useResourceStore } from '../../stores/resource'
 import { useEditorStore } from '../../stores/editor'
-import { useProjectStore } from '../../stores/project'
 import { invoke } from '@tauri-apps/api/core'
-import type { SpriteData, SpriteAnimation, SpriteTransform } from '../../composables/useSpriteData'
+import type { SpriteData, SpriteAnimation, SpriteTransform, SpriteFrame } from '../../composables/useSpriteData'
 import { readSpriteFromPath, revokeSpriteUrls, saveSpriteConfig, saveBsfManifest, isImageSpritePath, buildSingleFrameBsfMeta, imageSpriteToBsfDir, loadImage, DEFAULT_SPRITE_TRANSFORM, imageContentBox } from '../../composables/useSpriteData'
 import type { SpriteCollisionShape } from '../../composables/useSpriteData'
 import { appendFramesToSprite } from '../../composables/appendSpriteFrames'
@@ -70,7 +69,6 @@ import iconChevron from '../../assets/icons/right_arrow.svg'
 
 const resourceStore = useResourceStore()
 const editorStore = useEditorStore()
-const projectStore = useProjectStore()
 const fileDialog = useFileDialog()
 
 /** 中心锚点图形标记：去掉 XML 声明、给根 svg 内联尺寸，直接内联进 DOM（画布与变换手柄中心共用）
@@ -309,34 +307,43 @@ watch(
   { immediate: true },
 )
 
+const SPRITE_IMAGE_EXT = /\.(png|jpg|jpeg|gif|bmp|webp)$/i
+
+/** 改名输入校验：只允许单层名字——空名、`.`、`..`、含路径分隔符一律拒绝（防路径穿越） */
+function normalizeSpriteName(raw: string): string | null {
+  const val = raw.trim()
+  if (!val || val === '.' || val === '..') return null
+  if (/[/\\]/.test(val)) return null
+  return val
+}
+
 /** 改名提交：先迁移磁盘路径（目录角色整体改名，图片角色保留扩展名），成功后再改显示名 */
 async function commitSpriteRename() {
   const sprite = currentSprite.value
   const id = currentSpriteId.value
   const item = id ? resourceStore.sprites.find(s => s.id === id) : null
   if (!sprite || !item) return
-  const val = spriteNameDraft.value.trim()
   const oldName = item.name
-  if (!val) { spriteNameDraft.value = oldName; return }
-  if (val === oldName) return
+  const val = normalizeSpriteName(spriteNameDraft.value)
+  if (!val || val === oldName) { spriteNameDraft.value = oldName; return }
 
   let newPath: string | null = null
-  const base = projectStore.root ? `${projectStore.root}/assets/sprites` : ''
-  if (base) {
+  // 以资源项的真实路径为准（显示名可能与磁盘名不一致），并只改同级的名字，不改变所在目录
+  const srcPath = item.path
+  if (srcPath) {
     try {
-      const oldDir = `${base}/${oldName}`
-      if (await invoke<boolean>('path_exists', { path: oldDir })) {
-        await invoke('rename_path', { oldPath: oldDir, newPath: `${base}/${val}` })
-        newPath = `${base}/${val}`
-      } else {
-        for (const ext of ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']) {
-          const oldFile = `${base}/${oldName}${ext}`
-          if (await invoke<boolean>('path_exists', { path: oldFile })) {
-            await invoke('rename_path', { oldPath: oldFile, newPath: `${base}/${val}${ext}` })
-            newPath = `${base}/${val}${ext}`
-            break
-          }
-        }
+      if (await invoke<boolean>('path_exists', { path: srcPath })) {
+        const sepIdx = Math.max(srcPath.lastIndexOf('/'), srcPath.lastIndexOf('\\'))
+        if (sepIdx < 0) throw new Error('资源路径无效')
+        const sep = srcPath[sepIdx]
+        const parent = srcPath.slice(0, sepIdx)
+        const ext = SPRITE_IMAGE_EXT.exec(srcPath)?.[0] ?? ''
+        const target = `${parent}${sep}${val}${ext}`
+        if (target === srcPath) { spriteNameDraft.value = oldName; return }
+        // 目标已存在时拒绝，避免把别人的角色覆盖/合并
+        if (await invoke<boolean>('path_exists', { path: target })) throw new Error('同名角色已存在')
+        await invoke('rename_path', { oldPath: srcPath, newPath: target })
+        newPath = target
       }
     } catch (e) {
       console.error('[SpriteEditor] 重命名角色失败:', e)
@@ -365,6 +372,14 @@ const previewBgIndex = ref(0)
 
 // ─── 撤销 / 重做（右下角浮动工具条）：整份可编辑状态快照 ───
 // 一次拖动（连续 mousemove）或一次停顿内的连续输入合并成一步，见 useSpriteHistory
+/** 删除造型时被主动释放的帧 objectURL：撤销/重做复原该帧时按 blob 重建，既回收内存又不会裂图 */
+const revokedFrameUrls = new Set<string>()
+function restoreFrameUrl(frame: SpriteFrame): SpriteFrame {
+  if (!frame.url || !revokedFrameUrls.has(frame.url) || !frame.blob) return frame
+  revokedFrameUrls.delete(frame.url)
+  frameImages.delete(frame.url)
+  return { ...frame, url: URL.createObjectURL(frame.blob) }
+}
 const { canUndo, canRedo, undo, redo, reset: resetHistory } = useSpriteHistory(
   () => currentSprite.value,
   () => {
@@ -385,6 +400,7 @@ const { canUndo, canRedo, undo, redo, reset: resetHistory } = useSpriteHistory(
     defaultFrameDirty = true
     scheduleSave()
   },
+  { restoreFrame: restoreFrameUrl },
 )
 
 // 场景视图：缩放和平移（世界坐标系与游戏一致：x 向右、y 向上）
@@ -547,11 +563,19 @@ async function updateSpriteNaturalSize() {
 }
 
 async function loadSprite(item: { id: string; name: string; path: string }) {
-  // 防重复加载：同一个角色不重新加载
-  if (currentSpritePath.value === item.path && currentSprite.value) return
+  // 防重复加载：同一个角色不重新加载（早退也要清掉上一次的载入错误，否则错误横幅会一直残留）
+  if (currentSpritePath.value === item.path && currentSprite.value) {
+    loadError.value = null
+    return
+  }
   try {
-    // 释放旧的 ObjectURL 防止内存泄漏
-    revokeSpriteUrls(currentSprite.value)
+    // 先把旧角色从视图摘除（模板立即重渲染），等 DOM 换掉后再回收 ObjectURL：
+    // 否则旧帧 <img>/canvas 还指向已释放的 blob，会出现瞬态 ERR_FILE_NOT_FOUND 裂图
+    const previous = currentSprite.value
+    currentSprite.value = null
+    frameImages.clear()
+    await nextTick()
+    revokeSpriteUrls(previous)
     // 图片角色 → 单帧；.bsf 目录 → manifest + sheet 裁帧；.bgs 目录 → config.json
     currentSprite.value = await readSpriteFromPath(item.path)
     // 单图角色（单张 png/jpg 贴图）：内存合成单帧 .bsf 元数据，让中心/碰撞/标记工具可用；
@@ -1752,8 +1776,10 @@ const COLLISION_KIND_OPTIONS = [
 
 const collisionKindValue = computed(() => currentSprite.value?.bsf?.collisionKind ?? 'solid')
 
-/** 感应角色没有物理阻挡：单向碰撞控件保留但禁用（对齐地图属性面板） */
-const collisionPhysicsDisabled = computed(() => collisionKindValue.value === 'sensor')
+/** 感应角色 / 已禁用碰撞的角色没有物理阻挡：单向碰撞控件保留但禁用（对齐地图属性面板） */
+const collisionPhysicsDisabled = computed(
+  () => collisionKindValue.value === 'sensor' || collisionDisabled.value,
+)
 
 function onCollisionKindSelect(v: string) {
   const bsf = currentSprite.value?.bsf
@@ -3118,16 +3144,30 @@ function onCostumeContextMenu(e: MouseEvent, index: number) {
 }
 
 function deleteCostume(index: number) {
-  if (!currentSprite.value) return
-  currentSprite.value.frames.splice(index, 1)
-  for (const anim of currentSprite.value.animations) {
-    if (anim.end > currentSprite.value.frames.length) {
-      anim.end = currentSprite.value.frames.length
+  const sprite = currentSprite.value
+  if (!sprite) return
+  const [removed] = sprite.frames.splice(index, 1)
+  // .bsf 帧元数据与帧列表一一对应：必须同步删除，否则保存 manifest 时会把已删帧写回去
+  if (sprite.bsf && index < sprite.bsf.frames.length) {
+    sprite.bsf.frames.splice(index, 1)
+  }
+  // 回收该帧的 objectURL（撤销恢复时由 useSpriteHistory 的 restoreFrame 用 blob 重建）
+  if (removed?.url) {
+    revokedFrameUrls.add(removed.url)
+    frameImages.delete(removed.url)
+    URL.revokeObjectURL(removed.url)
+  }
+  for (const anim of sprite.animations) {
+    if (anim.end > sprite.frames.length) {
+      anim.end = sprite.frames.length
     }
     if (anim.start > anim.end) anim.start = anim.end
   }
-  if (selectedFrameIndex.value >= currentSprite.value.frames.length) {
-    selectedFrameIndex.value = Math.max(0, currentSprite.value.frames.length - 1)
+  if (sprite.defaultFrameIndex != null && sprite.defaultFrameIndex >= sprite.frames.length) {
+    sprite.defaultFrameIndex = Math.max(0, sprite.frames.length - 1)
+  }
+  if (selectedFrameIndex.value >= sprite.frames.length) {
+    selectedFrameIndex.value = Math.max(0, sprite.frames.length - 1)
   }
   costumeContextMenu.value.show = false
   scheduleSave()
@@ -3139,6 +3179,11 @@ function onAnimContextMenu(e: MouseEvent, name: string) {
 }
 
 let wasPlayingBeforeRename = false
+
+/** 重命名输入框的 ref 用函数式绑定：它位于 v-for 内，模板 ref 会被 Vue 收集成数组，不能直接 .focus() */
+function setRenameInput(el: unknown) {
+  renameInputRef.value = (el as HTMLInputElement | null) || null
+}
 
 function startRename(animName: string) {
   wasPlayingBeforeRename = isPlaying.value
@@ -3732,7 +3777,7 @@ function onWindowBlur() {
           <div class="anim-item-row">
             <template v-if="renamingAnim === anim.name">
               <input
-                ref="renameInputRef"
+                :ref="setRenameInput"
                 class="anim-rename-input"
                 :value="anim.name"
                 @blur="renameAnimation(anim.name, ($event.target as HTMLInputElement).value)"

@@ -37,6 +37,8 @@ export type SpriteCollisionShape =
 export interface SpriteMarkerPoint {
   x: number
   y: number
+  /** 标记类型（如「手持点」「头部」；缺省显示「未分类」），只存在统一值上 */
+  type?: string
   /** false = 画布上不显示该图钉（仍可在「标记管理」页里选中编辑） */
   visible?: boolean
   /** false = 图钉标签不显示名字 */

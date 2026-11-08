@@ -102,12 +102,19 @@ function positionTooltip(
 
 function showTooltip(el: TooltipElement, text: string, position: TooltipPosition): void {
   if (!text) return
-  
-  // Clear any pending hide
+
+  // 清掉上一次的隐藏定时器
   if (el._tooltip?.hideTimeout) {
     clearTimeout(el._tooltip.hideTimeout)
+    el._tooltip.hideTimeout = 0
   }
-  
+  // 同一元素可能连续触发（mouseenter + focus）：先清掉未执行的显示定时器，
+  // 否则会同时排队多个回调，只有最后一个能取消，其余会在 tooltip 删除后误访问 undefined
+  if (el._tooltip?.showTimeout) {
+    clearTimeout(el._tooltip.showTimeout)
+    el._tooltip.showTimeout = 0
+  }
+
   // Create tooltip if not exists
   if (!el._tooltip) {
     const tooltipEl = createTooltipElement(text)
@@ -118,36 +125,45 @@ function showTooltip(el: TooltipElement, text: string, position: TooltipPosition
       hideTimeout: 0
     }
   }
-  
+
   // Update text if changed
   const tooltip = el._tooltip!
   if (tooltip.element.textContent !== text) {
     tooltip.element.textContent = text
   }
-  
-  // Position and show after delay
+
+  // Position and show after delay（闭包捕获元素，回调时再校验身份，避免访问已删除的 tooltip）
+  const tooltipEl = tooltip.element
   tooltip.showTimeout = setTimeout(() => {
-    positionTooltip(el, el._tooltip!.element, position)
-    el._tooltip!.element.style.opacity = '1'
+    if (!el._tooltip || el._tooltip.element !== tooltipEl) return
+    positionTooltip(el, tooltipEl, position)
+    tooltipEl.style.opacity = '1'
+    el._tooltip.showTimeout = 0
   }, 500)
 }
 
 function hideTooltip(el: TooltipElement): void {
   if (!el._tooltip) return
-  
+
   // Clear any pending show
   if (el._tooltip.showTimeout) {
     clearTimeout(el._tooltip.showTimeout)
+    el._tooltip.showTimeout = 0
   }
-  
+  // 清掉上一次的移除定时器，避免它把稍后重新显示的 tooltip 提前删掉
+  if (el._tooltip.hideTimeout) {
+    clearTimeout(el._tooltip.hideTimeout)
+    el._tooltip.hideTimeout = 0
+  }
+
   // Hide immediately
-  el._tooltip.element.style.opacity = '0'
-  
+  const tooltipEl = el._tooltip.element
+  tooltipEl.style.opacity = '0'
+
   // Remove from DOM after transition
   el._tooltip.hideTimeout = setTimeout(() => {
-    if (el._tooltip?.element.parentNode) {
-      el._tooltip.element.parentNode.removeChild(el._tooltip.element)
-    }
+    if (!el._tooltip || el._tooltip.element !== tooltipEl) return
+    if (tooltipEl.parentNode) tooltipEl.parentNode.removeChild(tooltipEl)
     delete el._tooltip
   }, 150)
 }
