@@ -30,6 +30,51 @@ fn is_macos_system_noise(line: &str) -> bool {
         || line.contains("IMKInputController")
 }
 
+/// 逐行读取子进程输出并转发给前端。
+///
+/// 必须按字节读到换行再解码：`read_line` 遇到非法 UTF-8 会直接返回 Err，
+/// 旧实现 `Err(_) => break` 等于把整条流永久掐断——Windows 中文系统上
+/// 子进程一旦输出非 UTF-8 字节（如 GBK 中文），控制台从此再无任何输出，
+/// 游戏也像卡死一样。这里用 lossy 解码，坏字节不会中断后续输出。
+fn pipe_lines<R: std::io::Read + Send + 'static>(
+    reader: R,
+    app: AppHandle,
+    event: &'static str,
+    run_id: u32,
+    skip_macos_noise: bool,
+    emit_end: bool,
+) {
+    std::thread::spawn(move || {
+        use std::io::{BufRead, BufReader};
+        let mut buf_reader = BufReader::new(reader);
+        let mut raw: Vec<u8> = Vec::new();
+        loop {
+            raw.clear();
+            match buf_reader.read_until(b'\n', &mut raw) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let line = String::from_utf8_lossy(&raw).to_string();
+                    if line.is_empty() {
+                        continue;
+                    }
+                    if skip_macos_noise && is_macos_system_noise(&line) {
+                        continue;
+                    }
+                    let _ = app.emit_to(
+                        "main",
+                        event,
+                        SessionEvent { run_id, data: line },
+                    );
+                }
+                Err(_) => break,
+            }
+        }
+        if emit_end {
+            let _ = app.emit_to("main", "engine:stdout:end", SessionEnd { run_id });
+        }
+    });
+}
+
 #[tauri::command]
 pub fn run_script(
     app: AppHandle,
@@ -79,50 +124,9 @@ pub fn run_script(
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
     let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
 
-    // stdout 读取线程
-    let app_stdout = app.clone();
-    let rid = run_id;
-    std::thread::spawn(move || {
-        use std::io::{BufRead, BufReader};
-        let reader = stdout;
-        let mut buf_reader = BufReader::new(reader);
-        let mut line = String::new();
-        loop {
-            line.clear();
-            match buf_reader.read_line(&mut line) {
-                Ok(0) => break,
-                Ok(_) => {
-                    if !line.is_empty() {
-                        let _ = app_stdout.emit_to("main", "engine:stdout", SessionEvent { run_id: rid, data: line.clone() });
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-        let _ = app_stdout.emit_to("main", "engine:stdout:end", SessionEnd { run_id: rid });
-    });
-
-    // stderr 读取线程
-    let app_stderr = app.clone();
-    let rid = run_id;
-    std::thread::spawn(move || {
-        use std::io::{BufRead, BufReader};
-        let reader = stderr;
-        let mut buf_reader = BufReader::new(reader);
-        let mut line = String::new();
-        loop {
-            line.clear();
-            match buf_reader.read_line(&mut line) {
-                Ok(0) => break,
-                Ok(_) => {
-                    if !line.is_empty() && !is_macos_system_noise(&line) {
-                        let _ = app_stderr.emit_to("main", "engine:stderr", SessionEvent { run_id: rid, data: line.clone() });
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-    });
+    // stdout / stderr 读取线程
+    pipe_lines(stdout, app.clone(), "engine:stdout", run_id, false, true);
+    pipe_lines(stderr, app.clone(), "engine:stderr", run_id, true, false);
 
     // 保存 stdin 和 pid 供 send_stdin/stop_script 使用
     *process_guard = Some(RunningProcess { stdin, pid });
@@ -330,50 +334,9 @@ pub fn run_script_file(
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
     let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
 
-    // stdout 读取线程
-    let app_stdout = app.clone();
-    let rid = run_id;
-    std::thread::spawn(move || {
-        use std::io::{BufRead, BufReader};
-        let reader = stdout;
-        let mut buf_reader = BufReader::new(reader);
-        let mut line = String::new();
-        loop {
-            line.clear();
-            match buf_reader.read_line(&mut line) {
-                Ok(0) => break,
-                Ok(_) => {
-                    if !line.is_empty() {
-                        let _ = app_stdout.emit_to("main", "engine:stdout", SessionEvent { run_id: rid, data: line.clone() });
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-        let _ = app_stdout.emit_to("main", "engine:stdout:end", SessionEnd { run_id: rid });
-    });
-
-    // stderr 读取线程
-    let app_stderr = app.clone();
-    let rid = run_id;
-    std::thread::spawn(move || {
-        use std::io::{BufRead, BufReader};
-        let reader = stderr;
-        let mut buf_reader = BufReader::new(reader);
-        let mut line = String::new();
-        loop {
-            line.clear();
-            match buf_reader.read_line(&mut line) {
-                Ok(0) => break,
-                Ok(_) => {
-                    if !line.is_empty() && !is_macos_system_noise(&line) {
-                        let _ = app_stderr.emit_to("main", "engine:stderr", SessionEvent { run_id: rid, data: line.clone() });
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-    });
+    // stdout / stderr 读取线程
+    pipe_lines(stdout, app.clone(), "engine:stdout", run_id, false, true);
+    pipe_lines(stderr, app.clone(), "engine:stderr", run_id, true, false);
 
     // 保存 stdin 和 pid 供 send_stdin/stop_script 使用
     *process_guard = Some(RunningProcess { stdin, pid });

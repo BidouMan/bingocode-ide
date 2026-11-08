@@ -1,15 +1,23 @@
 """
-多文件发现与拼接模块：自动发现项目 .py 文件，自动注入 import
+多文件发现与编译模块：自动发现项目 .py 文件，逐个编译成可执行代码对象
+
+每个文件单独编译、在同一个 globals 里按顺序执行（与旧「拼接成一个大脚本」
+行为一致），好处是运行时报错能定位到具体文件和学生编辑器里的真实行号。
 """
 import os
 import ast
 import keyword
-from code_transform import transform_while_true, _has_while_true, _has_top_level_loop
+from code_transform import build_transformed_tree
 
 
-def _is_valid_identifier(name: str) -> bool:
-    """检查是否是合法的 Python 标识符"""
-    return name.isidentifier() and not keyword.iskeyword(name)
+class CodeErrors(Exception):
+    """学生代码有语法错误：errors = [(文件名, 行号, 说明)]"""
+
+    def __init__(self, errors):
+        self.errors = errors
+        super().__init__(
+            '; '.join(f'{name} 第 {line} 行 {msg}' for name, line, msg in errors)
+        )
 
 
 # 运行清单：IDE 每次运行前写入，列出本次项目真正要执行的 .py 文件名（每行一个）。
@@ -45,7 +53,7 @@ def _auto_import_offset(content: str) -> int:
     """计算 IDE 自动插入的 import 头占了几行。
 
     游戏模式运行前，前端会在每个代码文件开头加 4 行（sys.path + from bingo_engine import *）。
-    语法错误的行号要减掉这 4 行，否则学生在编辑器里找不到报错的那一行。
+    编译前要去掉这 4 行，否则报错行号会比学生编辑器里看到的行号大 4。
     """
     lines = content.splitlines()
     if len(lines) < 4:
@@ -60,45 +68,62 @@ def _auto_import_offset(content: str) -> int:
     return 0
 
 
-def discover_and_merge(project_dir: str, target_file: str = None) -> str:
-    """
-    发现项目所有 .py 文件并合并为一个脚本
+def _func_name(display_name: str, index: int) -> str:
+    """用文件名生成 generator 函数名（去掉 .py 后缀），非法时用序号兜底"""
+    name = f'__game_{display_name[:-3]}__'
+    if not name.isidentifier() or keyword.iskeyword(name):
+        return f'__game_{index}__'
+    return name
 
-    Args:
-        project_dir: 项目目录
-        target_file: 指定要运行的文件路径（只运行这一个文件）
+
+def _compile_file(filepath: str, display_name: str, index: int):
+    """读取并编译单个文件。
+
+    返回 (代码对象, None)；语法错误时返回 (None, (文件名, 行号, 说明))，
+    不抛异常，方便一次性收集所有写错的文件。
+    """
+    with open(filepath, 'r', encoding='utf-8') as fh:
+        content = fh.read()
+
+    # 去掉前端注入的 import 头，让行号与编辑器一致
+    offset = _auto_import_offset(content)
+    if offset:
+        content = '\n'.join(content.splitlines()[offset:])
+
+    try:
+        tree = ast.parse(content, filename=filepath)
+    except SyntaxError as e:
+        return None, (display_name, max(1, e.lineno or 1), e.msg or '语法错误')
+
+    # 含 while True 或顶层循环的文件转 generator（循环逐帧可见）
+    new_tree = build_transformed_tree(tree, _func_name(display_name, index))
+    if new_tree is None:
+        new_tree = tree
+
+    try:
+        return compile(new_tree, filepath, 'exec'), None
+    except SyntaxError as e:
+        # ast.parse 放行、compile 才报的语法问题（如模块级 return）
+        return None, (display_name, max(1, e.lineno or 1), e.msg or '语法错误')
+
+
+def load_scripts(project_dir: str, target_file: str = None) -> list:
+    """发现并编译本次要运行的所有 .py，返回 [(文件路径, 代码对象)]。
 
     策略：每个文件的 while True 都变成独立的 generator，各自注册到调度器。
+    任何一个文件有语法错误都抛 CodeErrors（一次性列全，学生改起来更省事）。
     """
     # 如果指定了目标文件，只运行这一个文件
     if target_file and os.path.isfile(target_file):
-        with open(target_file, 'r', encoding='utf-8') as fh:
-            content = fh.read()
-        try:
-            tree = ast.parse(content)
-        except SyntaxError as e:
-            offset = _auto_import_offset(content)
-            raise SyntaxError(
-                f"{os.path.basename(target_file)} 第 {max(1, e.lineno - offset)} 行语法错误：{e.msg}"
-            ) from None
-
-        # 含 while True 或顶层循环的文件都转 generator（循环逐帧可见）
-        if _has_while_true(tree) or _has_top_level_loop(tree):
-            module_name = os.path.basename(target_file)[:-3]
-            func_name = f'__game_{module_name}__'
-            if not _is_valid_identifier(func_name):
-                func_name = '__game_main__'
-            return transform_while_true(content, func_name=func_name)
-        return content
+        code, error = _compile_file(target_file, os.path.basename(target_file), 0)
+        if error:
+            raise CodeErrors([error])
+        return [(target_file, code)]
 
     # 确定扫描目录：优先 code/ 子目录
     code_dir = os.path.join(project_dir, 'code')
-    if os.path.isdir(code_dir):
-        search_dir = code_dir
-    else:
-        search_dir = project_dir
+    search_dir = code_dir if os.path.isdir(code_dir) else project_dir
 
-    # 查找所有 .py 文件
     py_files = _list_py_files(search_dir)
 
     # 有运行清单时只执行清单里的文件：避免目录里的杂项 .py 被拼进来导致游戏跑不动
@@ -107,67 +132,27 @@ def discover_and_merge(project_dir: str, target_file: str = None) -> str:
         available = set(py_files)
         py_files = [name for name in manifest if name in available]
 
-    if not py_files:
-        return ''
-
-    # 收集所有 import 语句（去重）
-    all_imports = []
-    seen_imports = set()
-
-    # 收集所有非 import 代码块
-    code_blocks = []
-
-    for f in py_files:
+    results = []
+    errors = []
+    for index, f in enumerate(py_files):
         filepath = os.path.join(search_dir, f)
-        with open(filepath, 'r', encoding='utf-8') as fh:
-            content = fh.read()
-
-        try:
-            tree = ast.parse(content)
-        except SyntaxError as e:
-            # 任何一个文件有语法错误都直接报出来并停止运行。
-            # 以前是跳过这个文件、继续跑其它文件：学生代码写了一半（少冒号/括号）时，
-            # 坏文件被悄悄丢掉，剩下的文件照常运行，看起来像 IDE 卡住且没有任何提示。
-            offset = _auto_import_offset(content)
-            raise SyntaxError(f"{f} 第 {max(1, e.lineno - offset)} 行语法错误：{e.msg}") from None
-
-        # 提取 import 语句
-        for node in tree.body:
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                stmt_str = ast.unparse(node)
-                if stmt_str not in seen_imports:
-                    seen_imports.add(stmt_str)
-                    all_imports.append(stmt_str)
-
-        # 含 while True 或顶层循环的文件转 generator（循环逐帧可见）
-        if _has_while_true(tree) or _has_top_level_loop(tree):
-            # 用文件名作为 generator 函数名（去掉 .py 后缀）
-            module_name = f[:-3]
-            func_name = f'__game_{module_name}__'
-            # 确保函数名合法
-            if not _is_valid_identifier(func_name):
-                func_name = f'__game_{py_files.index(f)}__'
-            transformed = transform_while_true(content, func_name=func_name)
-            code_blocks.append(transformed)
+        code, error = _compile_file(filepath, f, index)
+        if error:
+            errors.append(error)
         else:
-            # 纯函数/常量定义文件，直接作为模块级代码
-            code_blocks.append(content)
+            results.append((filepath, code))
 
-    # 拼接：import 语句 + 所有代码块
-    parts = []
-    if all_imports:
-        parts.append('\n'.join(all_imports))
-    parts.extend(code_blocks)
-
-    return '\n\n'.join(parts)
+    if errors:
+        raise CodeErrors(errors)
+    return results
 
 
 if __name__ == '__main__':
     import sys
-    if len(sys.argv) > 1:
-        project_dir = sys.argv[1]
-    else:
-        project_dir = os.getcwd()
-
-    result = discover_and_merge(project_dir)
-    print(result)
+    project_dir = sys.argv[1] if len(sys.argv) > 1 else os.getcwd()
+    try:
+        for path, code in load_scripts(project_dir):
+            print(path, code.co_filename)
+    except CodeErrors as err:
+        for name, line, msg in err.errors:
+            print(f'{name} 第 {line} 行 {msg}')

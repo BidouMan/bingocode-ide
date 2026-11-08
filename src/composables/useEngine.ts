@@ -315,6 +315,12 @@ export function useEngine() {
       if (editorStore.isGameMode) {
         terminalStore.consoleVisible = true
       }
+      // 引擎已经格式化成中文的报错（带文件名和编辑器里的真实行号），
+      // 原样红色显示即可；再按关键字改写会把定位信息冲掉
+      if (msg.trimStart().startsWith('[错误]')) {
+        terminalStore.handleStderr(msg)
+        return
+      }
       // 学生友好的错误提示
       if (msg.includes('KeyboardInterrupt')) {
         // 用户主动中断，静默处理

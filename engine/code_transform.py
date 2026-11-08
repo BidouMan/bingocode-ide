@@ -227,43 +227,36 @@ class _GlobalToNonlocal(ast.NodeTransformer):
         return nodes or node
 
 
-def transform_while_true(source_code: str, func_name: str = '__game__') -> str:
+def build_transformed_tree(tree: ast.Module, func_name: str = '__game__'):
     """
-    将源代码转换为 generator，循环每轮让出一帧（Scratch 语义）
+    把已解析的模块 AST 转换成 generator 结构，循环每轮让出一帧（Scratch 语义）
+
+    返回新的 Module AST；不需要转换时返回 None（调用方直接用原 AST 编译）。
+    直接返回 AST（而不是反序列化成源码）是为了保留每条语句原始的 lineno：
+    compile() 之后运行时报错的行号就是学生编辑器里看到的行号。
 
     两类脚本会被转换：
     1. 含 while True: 的游戏主循环脚本（原逻辑）
     2. 无 while True 但顶层含 for / while 循环的启动脚本
        （如 `for i in range(10): f.x += 5`——否则整段在启动瞬间同步跑完）
-
-    Args:
-        source_code: Python 源代码
-        func_name: 生成的 generator 函数名
     """
-    try:
-        tree = ast.parse(source_code)
-    except SyntaxError:
-        return source_code
-
     if not _has_while_true(tree) and not _has_top_level_loop(tree):
-        return source_code
+        return None
 
     # 分离 import 语句和非 import 语句
     import_stmts = []
     other_stmts = []
     for node in tree.body:
         if isinstance(node, (ast.Import, ast.ImportFrom)):
-            import_stmts.append(ast.unparse(node))
+            import_stmts.append(node)
         else:
             other_stmts.append(node)
 
     if not other_stmts:
-        return source_code
+        return None
 
     # 构建新模块：import 语句 + def func_name(): + 注册调用
-    new_body = []
-    for stmt in import_stmts:
-        new_body.append(ast.parse(stmt).body[0])
+    new_body = list(import_stmts)
 
     # 创建 def func_name(): 函数节点
     func_def = ast.FunctionDef(
@@ -288,9 +281,9 @@ def transform_while_true(source_code: str, func_name: str = '__game__') -> str:
     # 一次 yield 都没插进去时（例如脚本只有「顶层 for 批量创建角色」），
     # 这个函数就不是 generator，调用后立刻返回 None，
     # register_generator(None) 会让主循环报「'NoneType' object is not an iterator」。
-    # 这类脚本本来就是一帧跑完，直接返回原源码同步执行即可。
+    # 这类脚本本来就是一帧跑完，直接返回原 AST 同步执行即可。
     if not _has_own_yield(func_def.body):
-        return source_code
+        return None
 
     new_body.append(func_def)
 
@@ -302,6 +295,19 @@ def transform_while_true(source_code: str, func_name: str = '__game__') -> str:
 
     new_tree = ast.Module(body=new_body, type_ignores=[])
     ast.fix_missing_locations(new_tree)
+    return new_tree
+
+
+def transform_while_true(source_code: str, func_name: str = '__game__') -> str:
+    """调试用：把转换结果反序列化成源码（运行时代码走 build_transformed_tree）"""
+    try:
+        tree = ast.parse(source_code)
+    except SyntaxError:
+        return source_code
+
+    new_tree = build_transformed_tree(tree, func_name)
+    if new_tree is None:
+        return source_code
     return ast.unparse(new_tree)
 
 

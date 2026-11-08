@@ -4,6 +4,7 @@
 GameStop 定义在这里，被主循环与事件广播共同使用。"""
 import inspect
 import json
+from user_error import report_user_error
 import engine_state as st
 
 
@@ -61,7 +62,7 @@ def broadcast(event_name):
         except GameStop:
             raise
         except Exception as e:
-            print(f"[错误] 广播「{event_name}」的处理函数出错: {e}")
+            report_user_error(e)
 
 
 def receive(event_name):
@@ -120,4 +121,4 @@ def _safe_call(callback, *args):
     except GameStop:
         raise
     except Exception as e:
-        print(f"[错误] 回调出错: {e}")
+        report_user_error(e)

@@ -18,8 +18,17 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-# 设置标准输出为无缓冲模式
-sys.stdout = os.fdopen(sys.stdout.fileno(), "w", buffering=1)
+# 设置标准输出为无缓冲模式。
+# 必须显式指定 utf-8：Windows 中文系统的默认编码是 GBK，os.fdopen 不传 encoding
+# 会沿用系统编码，中文提示变成 GBK 字节后 Rust 侧按 UTF-8 解码失败，
+# 整条 stdout 流会中断——表现为游戏没反应、控制台一个字都没有。
+try:
+    sys.stdout = os.fdopen(
+        sys.stdout.fileno(), "w", encoding="utf-8", errors="replace", buffering=1
+    )
+except Exception:
+    # stdout 被重定向成非文件对象时（个别嵌入式环境）保持原样即可
+    pass
 
 # 各实现模块（暴露为 bingo_engine.xxx 便于调试/定位，不要在用户脚本里使用）
 import audio  # noqa: E402,F401

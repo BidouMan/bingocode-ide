@@ -14,6 +14,7 @@ from input_api import _custom_input, _sync_input_frame, key_down, key_pressed, k
 from map_runtime import _handle_physics_collision, _process_sensor_events, load_map
 from sprite import Sprite
 from timing import Timer, time_passed, wait
+from user_error import report_code_errors, report_error, report_user_error
 import engine_state as st
 
 
@@ -229,14 +230,15 @@ def start_game(project_dir=None, target_file=None):
 
     # 如果提供了项目目录，使用脚本发现模块
     if project_dir:
-        from script_runner import discover_and_merge
+        from script_runner import CodeErrors, load_scripts
         try:
-            script_content = discover_and_merge(project_dir, target_file)
-        except SyntaxError as e:
-            print(f"[错误] {e}")
+            scripts = load_scripts(project_dir, target_file)
+        except CodeErrors as err:
+            # 语法错误一次性全部列出（文件 + 编辑器里的真实行号）
+            report_code_errors(err.errors)
             return
-        if not script_content:
-            print("[错误] 没有找到 Python 文件")
+        if not scripts:
+            report_error("没有找到 Python 文件")
             return
 
         # 执行脚本，注册 generator
@@ -273,7 +275,16 @@ def start_game(project_dir=None, target_file=None):
             "stop": stop_game,
             "register_generator": register_generator,
         }
-        exec(script_content, exec_globals)
+        # 逐文件执行（共用同一个 globals，跨文件变量照常可见）。
+        # 每个文件单独编译并带文件名/真实行号，出错时能直接定位到学生写的那一行。
+        for _file_path, _code in scripts:
+            try:
+                exec(_code, exec_globals)
+            except GameStop:
+                return
+            except Exception as e:
+                report_user_error(e)
+                return
 
     # 初始化阶段产生的变换（goto / scale / angle / 可见性等）都进了帧缓冲，
     # 必须在通知就绪前刷出去：否则性能模式隔帧发送会跳过第一次 flush，
@@ -323,7 +334,8 @@ def start_game(project_dir=None, target_file=None):
                     _flush_frame_updates()  # 退出前补发最后一帧
                     return
                 except Exception as e:
-                    print(f"[错误] Generator 错误: {e}")
+                    # 报错带文件名和真实行号，中小学生在控制台能直接找到写错的那一行
+                    report_user_error(e)
                     st._generators.remove(gen)
 
             if not st._PAUSED:

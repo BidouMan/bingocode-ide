@@ -72,7 +72,15 @@ export const useTerminalStore = defineStore('terminal', () => {
 
   // 立即写入终端（不走 RAF 缓冲），用于需要即时显示的内容
   function writeImmediate(text: string) {
-    if (!terminalInstance) return
+    // 终端还没创建时先缓冲（首次运行报错会自动弹出控制台，面板晚一拍才挂载）。
+    // 以前这里直接 return，最先到达的报错会被丢掉，学生只看到「运行没反应」。
+    if (!terminalInstance) {
+      pendingWrite += text
+      if (pendingWrite.length > 65536) {
+        pendingWrite = pendingWrite.slice(-65536)
+      }
+      return
+    }
     const filtered = filterEngineJson(text)
     if (filtered) {
       terminalInstance.write(filtered)
