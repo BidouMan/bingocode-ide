@@ -274,45 +274,62 @@
   user-select: none;
 }
 
-/* ─── 右下角缩放条 ─── */
+/* ─── 右下角浮动视图工具条（与地图编辑器画布悬浮条一致） ─── */
 .scene-zoom-bar {
   position: absolute;
-  right: 10px;
-  bottom: 10px;
+  right: 12px;
+  bottom: 12px;
   display: flex;
   align-items: center;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: rgba(26, 28, 33, 0.92);
-  overflow: hidden;
-  z-index: 6;
+  gap: 0;
+  background: rgba(30, 32, 40, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 4px;
+  z-index: 30;
 }
-.scene-zoom-btn {
-  width: 26px;
-  height: 26px;
+.scene-float-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: none;
+  min-width: 30px;
+  height: 26px;
+  padding: 0 6px;
   background: transparent;
-  cursor: pointer;
+  border: none;
+  border-radius: 6px;
+  cursor: default;
+  transition: background 0.15s ease;
 }
-.scene-zoom-btn:hover { background: var(--bg-hover); }
-.scene-zoom-btn img { width: 13px; height: 13px; opacity: 0.75; }
-.scene-zoom-btn:hover img { opacity: 1; }
-.scene-zoom-value {
-  min-width: 46px;
+.scene-float-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); }
+.scene-float-btn:active:not(:disabled) { background: rgba(255, 255, 255, 0.12); }
+.scene-float-btn:disabled { opacity: 0.35; cursor: default; }
+.scene-float-zoom {
+  min-width: 44px;
   height: 26px;
   padding: 0 4px;
-  border: none;
-  border-left: 1px solid var(--border);
-  border-right: 1px solid var(--border);
   background: transparent;
-  color: #abb2bf;
+  border: none;
+  border-radius: 6px;
   font-size: 11px;
-  cursor: pointer;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: default;
+  white-space: nowrap;
+  transition: color 0.15s, background 0.15s;
 }
-.scene-zoom-value:hover { background: var(--bg-hover); color: #fff; }
+.scene-float-zoom:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+}
+.scene-float-divider {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 4px;
+}
 
 /* ─── 场景信息栏 ─── */
 .scene-info-bar {
@@ -605,12 +622,13 @@
   overflow-y: auto;
 }
 
-/* 属性容器：与地图编辑器同间距（面板自身已有 8px 内边距，这里只补到总计 16px） */
+/* 属性容器：与地图编辑器同间距（面板自身已有 8px 内边距，这里只补到总计 16px）
+   左侧保持 4px（整体左边界不变），标题框内部留白负责箭头/文字的呼吸感 */
 .att-frame {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  /* 左侧收紧到 4px，右侧保留 8px 给滚动条留白 */
+  /* 左侧 4px，右侧保留 8px 给滚动条留白 */
   padding: 10px 8px 12px 4px;
   background: var(--bg-root);
 }
@@ -645,6 +663,10 @@
   color: white;
   padding: 0 6px;
   font-size: 12px;
+  /* 与单位文字保持完全一致的字体，并用等宽数字：
+     单位位置按字符宽（ch）计算，字体不一致会让单位贴得太近甚至压到数字 */
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
   outline: none;
   box-sizing: border-box;
 }
@@ -700,7 +722,9 @@
 }
 /* 带单位的轴输入（位置用 px）：右侧预留少量空间，避免长数字与单位重叠 */
 .att-axis-field.has-unit .att-input {
-  padding-right: 20px;
+  /* 右侧留出单位 + 重置图标的位置：数字长度到这里就被裁切，
+     单位再往右移也会停在这条边界左侧，长数字不会和单位叠在一起 */
+  padding-right: 52px;
 }
 .att-axis-tag {
   position: absolute;
@@ -733,6 +757,47 @@
 .att-row-stacked > .att-label {
   line-height: 24px;
 }
+/* 变换行独立重置图标（Godot 风格）：贴在输入框内部右侧，只占第一行；
+   默认隐藏，出现/消失不影响布局（X/Y 共用一个） */
+.att-row-stacked.has-reset {
+  position: relative;
+}
+.att-row-stacked.has-reset .att-input {
+  /* 右侧留出图标位置，长数字不会压到重置图标 */
+  padding-right: 24px;
+}
+.att-reset {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  /* 输入框所在容器是定位元素，这里必须抬高层级，否则图标会被输入框盖住 */
+  z-index: 2;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  opacity: 0;
+  visibility: hidden;
+  cursor: pointer;
+}
+.att-reset.is-dirty {
+  opacity: 0.8;
+  visibility: visible;
+}
+.att-reset img {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+.att-reset:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.06);
+}
 .att-axis-group {
   display: flex;
   flex-direction: column;
@@ -752,11 +817,84 @@
   width: 100%;
   min-width: 0;
 }
-/* 旋转滑条：排在数字框下方，按自身高度撑开 */
+/* 旋转框内嵌滑条：图标上移并收小，避免压住底部滑条 */
+.att-slider-field .att-reset {
+  top: 0;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+}
+/* 旋转框内嵌滑条版：数字区在滑条上方，单位跟着数字垂直居中（下移避开滑条） */
+.att-slider-field .att-axis-unit.is-degree {
+  top: 11px;
+}
+/* 旋转数值框：滑条内嵌在框内底部（Godot 风格），数字仍可直接编辑 */
+.att-slider-field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.att-slider-field .att-input {
+  /* 比常规输入框高一点：上半部分放数字、底部留给滑条 */
+  height: 30px;
+  padding-bottom: 9px;
+  /* 右侧留出度数单位的位置，数字过长时被裁切，不会压到单位 */
+  padding-right: 46px;
+  line-height: normal;
+}
+/* 滑条压在输入框内部底边：只占据底部一条，左右留出圆角内的边距 */
 .att-range {
-  flex: 0 0 auto;
-  width: 100%;
-  margin: 3px 0 1px;
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 4px;
+  width: auto;
+  height: 8px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  outline: none;
+  cursor: pointer;
+}
+/* 轨道：深灰细线（比输入框底色亮一档，保证能和背景区分） */
+.att-range::-webkit-slider-runnable-track {
+  height: 2px;
+  border-radius: 1px;
+  background: rgb(74, 79, 90);
+}
+.att-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 8px;
+  height: 8px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: #5bfb84;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.att-range:hover::-webkit-slider-thumb,
+.att-range:active::-webkit-slider-thumb {
+  background: #7dffa8;
+}
+/* 兼容 Chromium 内核（Windows WebView2）的旧式伪元素写法 */
+.att-range::-moz-range-track {
+  height: 2px;
+  border-radius: 1px;
+  background: rgb(74, 79, 90);
+}
+.att-range::-moz-range-progress {
+  height: 2px;
+  border-radius: 1px;
+  background: rgb(74, 79, 90);
+}
+.att-range::-moz-range-thumb {
+  width: 8px;
+  height: 8px;
+  border: none;
+  border-radius: 50%;
+  background: #5bfb84;
 }
 /* 约束比例：勾选框与上方 X / Y 输入框左边缘对齐，文字紧跟其后 */
 .att-axis-lock {
@@ -800,7 +938,8 @@
   width: 100%;
   height: 30px;
   margin: 0;
-  padding: 0;
+  /* 内部左右留白：折叠箭头不贴标题框边角，和文字之间有呼吸感 */
+  padding: 0 6px;
   /* 边框算进宽度，避免 width:100% 再多出描边导致右端超宽 */
   box-sizing: border-box;
   background: rgb(48, 51, 60);
@@ -842,8 +981,9 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  /* 标题条下方 6px、内容底部不留白（分区间距由 att-frame 统一给） */
-  padding: 6px 0 0;
+  /* 上方 6px；左侧 7px = 标题边框 1px + 内部留白 6px，
+     让正文标签与折叠箭头落在同一条左基线上；内容底部不留白（分区间距由 att-frame 统一给） */
+  padding: 6px 0 0 7px;
 }
 .mi-actions { display: flex; gap: 8px; }
 /* 分区标题右侧的数量（如标记个数） */

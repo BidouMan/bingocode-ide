@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useResourceStore } from '../../stores/resource'
 import { useEditorStore } from '../../stores/editor'
 import { useProjectStore } from '../../stores/project'
@@ -9,6 +9,7 @@ import { readSpriteFromPath, revokeSpriteUrls, saveSpriteConfig, saveBsfManifest
 import type { SpriteCollisionShape } from '../../composables/useSpriteData'
 import { appendFramesToSprite } from '../../composables/appendSpriteFrames'
 import { useFrameReorder } from '../../composables/useFrameReorder'
+import { useSpriteHistory } from './useSpriteHistory'
 import { cssImageRendering } from '../../utils/renderMode'
 import { drawImageCrisp } from '../../utils/pixelCanvas'
 import FrameUploadDrawer from './FrameUploadDrawer.vue'
@@ -45,12 +46,16 @@ import iconCenterPivot from '../../assets/icons/中心点.svg'
 // ?raw：中心锚点图形直接内联成 <svg> 元素（不依赖 <img> 资源加载，避免 WebView 里加载/解码失败导致不可见）
 import iconPivotAnchorSvgRaw from '../../assets/icons/中心锚点.svg?raw'
 import iconResetAnchor from '../../assets/icons/重置锚点.svg'
+// 变换行独立重置图标（Godot 风格）
+import iconReset from '../../assets/icons/重置.svg'
 import iconMarker from '../../assets/icons/标记.svg'
 import iconMarkerRaw from '../../assets/icons/标记.svg?raw'
 import iconSpriteEmpty from '../../assets/icons/角色精灵.svg'
 import iconSelectTool from '../../assets/icons/选取工具.svg'
 import iconZoomIn from '../../assets/icons/add-one.svg'
 import iconZoomOut from '../../assets/icons/reduce-one.svg'
+import iconUndo from '../../assets/icons/undo.svg'
+import iconRedo from '../../assets/icons/redo.svg'
 // 属性面板分区折叠箭头（与地图编辑器检视器同一个图标）
 import iconChevron from '../../assets/icons/right_arrow.svg'
 
@@ -339,6 +344,30 @@ const costumeHighlightIndex = ref(0)
 const canvasDisplayIndex = ref(0)
 const previewBgIndex = ref(0)
 
+// ─── 撤销 / 重做（右下角浮动工具条）：整份可编辑状态快照 ───
+// 一次拖动（连续 mousemove）或一次停顿内的连续输入合并成一步，见 useSpriteHistory
+const { canUndo, canRedo, undo, redo, reset: resetHistory } = useSpriteHistory(
+  () => currentSprite.value,
+  () => {
+    // 快照回写后校正依赖选中项：帧下标、动画选中、标记选中
+    const sprite = currentSprite.value
+    if (!sprite) return
+    const maxFrame = Math.max(0, sprite.frames.length - 1)
+    selectedFrameIndex.value = Math.min(selectedFrameIndex.value, maxFrame)
+    canvasDisplayIndex.value = Math.min(canvasDisplayIndex.value, maxFrame)
+    costumeHighlightIndex.value = Math.min(costumeHighlightIndex.value, maxFrame)
+    if (selectedAnim.value) {
+      const name = selectedAnim.value.name
+      selectedAnim.value = sprite.animations.find(a => a.name === name) ?? null
+    }
+    if (selMarkerName.value && !markerNames.value.includes(selMarkerName.value)) {
+      selMarkerName.value = null
+    }
+    defaultFrameDirty = true
+    scheduleSave()
+  },
+)
+
 // 场景视图：缩放和平移（世界坐标系与游戏一致：x 向右、y 向上）
 const canvasZoom = ref(1)
 const canvasPanX = ref(0)
@@ -391,6 +420,7 @@ watch(
       currentSpritePath.value = ''
       currentSpriteId.value = null
       loadError.value = null
+      resetHistory()
       return
     }
     const item = resourceStore.sprites.find(s => s.id === id)
@@ -511,11 +541,11 @@ async function loadSprite(item: { id: string; name: string; path: string }) {
     annoDefaultPivot.value = currentSprite.value.bsf
       ? { ...currentSprite.value.bsf.pivot }
       : null
-    // 场景视图：等 DOM 渲染后按角色尺寸适配缩放，并把角色包围盒中心放到视口中心
+    // 场景视图：等 DOM 渲染后恢复缩放（首次 100%、之后沿用上次），并把角色包围盒中心放到视口中心
     await nextTick()
     if (viewSize.value.w > 0) {
       sceneFitPending.value = false
-      fitSceneView()
+      applyInitialSceneView()
     } else {
       sceneFitPending.value = true
     }
@@ -525,9 +555,12 @@ async function loadSprite(item: { id: string; name: string; path: string }) {
       fpsValue.value = first.fps || 10
       startAnimation(first)
     }
+    // 角色切换 / 重载完成：当前状态作为撤销历史的起点
+    resetHistory()
   } catch (e) {
     console.error('Failed to load sprite:', e)
     loadError.value = e instanceof Error ? e.message : String(e)
+    resetHistory()
   }
 }
 
@@ -896,16 +929,31 @@ function centerOnSprite(zoom = canvasZoom.value) {
   canvasPanY.value = t.y * zoom - ry
 }
 
-/** 进入角色时适配：按包围盒留出 30% 边距，缩放不超过 8× */
-function fitSceneView() {
+/** 场景缩放记忆：首次进入 100%，之后沿用用户最后一次的缩放 */
+const SCENE_ZOOM_KEY = 'bingo-ide-sprite-scene-zoom'
+function readSavedSceneZoom(): number | null {
+  try {
+    const raw = localStorage.getItem(SCENE_ZOOM_KEY)
+    if (!raw) return null
+    const z = Number(raw)
+    return Number.isFinite(z) && z > 0 ? z : null
+  } catch {
+    return null
+  }
+}
+function saveSceneZoom(z: number) {
+  try {
+    localStorage.setItem(SCENE_ZOOM_KEY, String(z))
+  } catch {
+    // localStorage 不可用时忽略（仅影响记忆，不影响编辑）
+  }
+}
+
+/** 进入角色时恢复视图：首次 100%，之后用上次的缩放；角色始终放到视口中心 */
+function applyInitialSceneView() {
   if (!currentSprite.value) return
-  const vw = viewSize.value.w || canvasRef.value?.clientWidth || 640
-  const vh = viewSize.value.h || canvasRef.value?.clientHeight || 480
-  const b = displayFrameBounds.value
-  const sf = Math.max(5, sceneTransform.value.scale) / 100
-  const w = Math.max(1, b.w * sf)
-  const h = Math.max(1, b.h * sf)
-  const z = Math.min(8, Math.max(ZOOM_MIN, Math.min((vw * 0.7) / w, (vh * 0.7) / h)))
+  const saved = readSavedSceneZoom()
+  const z = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, saved ?? 1))
   canvasZoom.value = z
   centerOnSprite(z)
 }
@@ -934,17 +982,157 @@ function ensureTransform(): SpriteTransform | null {
   return sprite.transform
 }
 
+/** 隐藏测量元素：与数字输入框同一套字体，用 DOM 实测文本宽度（canvas 里字体设置容易失效） */
+let unitMeasureEl: HTMLSpanElement | null = null
+
+function ensureUnitMeasureEl(): HTMLSpanElement {
+  if (!unitMeasureEl) {
+    unitMeasureEl = document.createElement('span')
+    // 与 .att-input 保持一致的字体设置；white-space:pre 让空格/小数点按原样占宽
+    unitMeasureEl.style.cssText =
+      'position:absolute;left:-9999px;top:0;visibility:hidden;white-space:pre;'
+      + 'font-size:12px;font-family:inherit;font-variant-numeric:tabular-nums'
+    document.body.appendChild(unitMeasureEl)
+  }
+  return unitMeasureEl
+}
+
+/** 文本实际宽度（px）：'1' 比 '0' 窄，按字符数估算会累积偏差，必须实测 */
+function textWidthPx(text: string): number {
+  const el = ensureUnitMeasureEl()
+  el.textContent = text || '0'
+  return el.getBoundingClientRect().width
+}
+
+onBeforeUnmount(() => unitMeasureEl?.remove())
+
 /**
- * 单位文字（px）定位：紧跟在数字后面，只留 6px 间隙。
- * 输入框是固定宽度、数字左对齐，用「字符宽（ch）」估算数字占位，
- * 这样 1 位数和 4 位数都能让 px 贴在自己后面，不会飞到输入框右边缘。
+ * 单位文字定位：紧跟在数字后面，只留 8px 呼吸间距。
+ * 用真实测量出的数字宽度定位（而不是按字符数 × ch 估算），
+ * 这样无论输入 0 还是 1、正数还是负数，单位都贴住最后一个数字。
+ * 数字超长时单位最多移动到输入框边缘就锁住（配合输入框右侧内边距，
+ * 数字会先被裁切，因此两者永远不会重叠）。
+ * @param text 当前显示/编辑中的数字文本
+ * @param startPx 数字起始位置（输入框边框 + 左内边距）
+ * @param fieldWidth 整个输入框的实际宽度（0 = 还没测到，先用理想位置）
+ * @param unitText 单位文字（px / °），用于预留自身宽度
  */
-function axisUnitLeft(value: number): string {
-  const text = String(Math.round(Number.isFinite(value) ? value : 0))
-  const digits = text.replace('-', '').length
-  // 负号比数字窄，按 0.6 个字符宽计入
-  const signWidth = text.startsWith('-') ? 0.6 : 0
-  return `calc(28px + ${digits + signWidth}ch + 6px)`
+function unitStyleAfterText(
+  text: string,
+  startPx: number,
+  fieldWidth: number,
+  unitText = 'px',
+): Record<string, string> {
+  const desired = startPx + textWidthPx(text) + 8
+  if (!fieldWidth) return { left: `${desired}px` }
+  // 单位最远停到输入框右缘（右侧 24px 内边距 + 自身宽度 + 6px 间隔）
+  const maxLeft = fieldWidth - 24 - textWidthPx(unitText) - 6
+  return { left: `${Math.min(desired, Math.max(startPx, maxLeft))}px` }
+}
+
+/** 单位定位依赖输入框实际宽度：跟随面板缩放实时更新 */
+const unitFieldWidth = reactive({ x: 0, y: 0, angle: 0 })
+const xFieldEl = ref<HTMLElement | null>(null)
+const yFieldEl = ref<HTMLElement | null>(null)
+const angleFieldEl = ref<HTMLElement | null>(null)
+let unitResizeObserver: ResizeObserver | null = null
+
+function observeUnitFields() {
+  if (typeof ResizeObserver === 'undefined') return
+  unitResizeObserver = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      const el = entry.target as HTMLElement
+      const width = entry.contentRect.width
+      if (el === xFieldEl.value) unitFieldWidth.x = width
+      else if (el === yFieldEl.value) unitFieldWidth.y = width
+      else if (el === angleFieldEl.value) unitFieldWidth.angle = width
+    }
+  })
+  for (const el of [xFieldEl.value, yFieldEl.value, angleFieldEl.value]) {
+    if (el) unitResizeObserver.observe(el)
+  }
+}
+
+onMounted(() => nextTick(observeUnitFields))
+onBeforeUnmount(() => unitResizeObserver?.disconnect())
+
+/**
+ * 编辑期间的临时文本：单位位置跟随用户正在输入的内容一起右移，
+ * 提交（change/blur）后清空，回到以真实值为准。
+ */
+const draftText = reactive<Record<string, string | null>>({})
+
+/** 输入位数上限：10 位（负号和小数点不计入），右侧还要留出重置按钮的空间 */
+const MAX_INPUT_DIGITS = 10
+
+/**
+ * 清理输入文本：只保留数字、开头负号、一个小数点，总位数不超过上限。
+ * 输入框用 type="text" 而不是 type="number"：number 输入框在输入 “-” / “12.” 这类
+ * 中间状态时 value 会变空，导致单位定位和显示对不上（小数输入时会重叠）。
+ */
+function sanitizeNumericInput(raw: string): string {
+  const negative = raw.trimStart().startsWith('-')
+  const body = raw.replace(/[^\d.]/g, '')
+  let out = ''
+  let digits = 0
+  for (const ch of body) {
+    if (ch === '.') {
+      if (!out.includes('.')) out += ch
+      continue
+    }
+    if (digits >= MAX_INPUT_DIGITS) continue
+    out += ch
+    digits++
+  }
+  // 负号单独存在时也保留，否则没法开始输入负数
+  return (negative ? '-' : '') + out
+}
+
+function onFieldDraft(key: string, e: Event) {
+  const el = e.target as HTMLInputElement
+  const cleaned = sanitizeNumericInput(el.value)
+  // 立即修正输入框内容，避免非法字符先闪一帧再被绑定值覆盖
+  if (cleaned !== el.value) el.value = cleaned
+  draftText[key] = cleaned
+}
+
+function clearDraft(key: string) {
+  draftText[key] = null
+}
+
+/**
+ * 输入框显示值：正在编辑时用用户输入的原文，否则用真实数据。
+ * 必须这样绑定——如果只绑真实值，每次按键引起的重渲染都会把输入框内容重置回旧值。
+ */
+function draftValue(key: string, value: number): string | number {
+  return draftText[key] ?? value
+}
+
+/** 聚焦即全选当前数值：直接输入就能整体替换 */
+function selectOnFocus(e: Event) {
+  const el = e.target as HTMLInputElement
+  // 鼠标点击会在 focus 之后才把光标落位，延后一帧再全选，避免选择被点击取消
+  setTimeout(() => el.select(), 0)
+}
+
+/** 位置单位：拖拽/改值用真实值，正在输入时跟着输入内容走 */
+function axisUnitStyleFor(key: 'x' | 'y', value: number): Record<string, string> {
+  return unitStyleAfterText(
+    draftText[key] ?? String(Math.round(value)),
+    28,
+    unitFieldWidth[key],
+    'px',
+  )
+}
+
+/** 旋转单位：编辑期间跟着输入内容 */
+function angleUnitStyle(value: number): Record<string, string> {
+  return unitStyleAfterText(
+    draftText.angle ?? String(Math.round(value)),
+    7,
+    unitFieldWidth.angle,
+    '°',
+  )
 }
 
 /** 缩放 X / Y 的显示值：分轴字段缺省时等于统一缩放 */
@@ -992,8 +1180,14 @@ function onScaleInput(axis: 'x' | 'y', e: Event) {
   } else {
     t.scaleY = v
   }
+  clearDraft(axis === 'x' ? 'scaleX' : 'scaleY')
   scheduleSave()
 }
+
+/** 位置坐标的安全范围：超出这个范围的坐标在 640×480 舞台上毫无意义，防止乱输入把角色丢出画面 */
+const MAX_POSITION = 4000
+/** 旋转兜底上限：10 圈以内，超长数字输入也不会让角色转到看不出角度 */
+const MAX_ANGLE = 3600
 
 /** 写入单个变换字段（拖拽手柄 / 滑条共用；改统一缩放时清掉分轴值） */
 function setTransformField(field: keyof SpriteTransform, value: number) {
@@ -1004,14 +1198,45 @@ function setTransformField(field: keyof SpriteTransform, value: number) {
     t.scale = Math.min(1000, Math.max(5, value))
     delete t.scaleX
     delete t.scaleY
+  } else if (field === 'x' || field === 'y') {
+    // 位置超长数字收回到安全范围，避免角色被甩到看不见的地方
+    t[field] = Math.max(-MAX_POSITION, Math.min(MAX_POSITION, value))
+  } else if (field === 'angle') {
+    // 角度同样兜底：微小滑动/超长数字都不会转成无意义的圈数
+    t.angle = Math.max(-MAX_ANGLE, Math.min(MAX_ANGLE, value))
   } else t[field] = value
+  // 拖拽手柄 / 滑条改值后，输入框里残留的编辑文本作废，显示最新值
+  clearDraft(field)
+  if (field === 'scale') {
+    clearDraft('scaleX')
+    clearDraft('scaleY')
+  }
   scheduleSave()
 }
 
-function resetSceneTransform() {
-  const sprite = currentSprite.value
-  if (!sprite) return
-  sprite.transform = { ...DEFAULT_SPRITE_TRANSFORM }
+/** 每个输入框是否已偏离默认值：只有某轴改动过，才在那个输入框内部显示自己的重置图标 */
+const xDirty = computed(() => sceneTransform.value.x !== 0)
+const yDirty = computed(() => sceneTransform.value.y !== 0)
+const scaleXDirty = computed(() => scaleXValue.value !== 100)
+const scaleYDirty = computed(() => scaleYValue.value !== 100)
+const rotationDirty = computed(() => sceneTransform.value.angle !== 0)
+
+/** 重置单个输入框：X / Y / 角度回 0，缩放轴回 100%；全部回默认值时不再保留 transform 字段 */
+function resetTransformAxis(field: 'x' | 'y' | 'angle' | 'scaleX' | 'scaleY') {
+  const t = ensureTransform()
+  if (!t) return
+  if (field === 'scaleX' || field === 'scaleY') t[field] = 100
+  else t[field] = 0
+  clearDraft(field)
+  // 分轴值与统一缩放相同时不留冗余字段
+  if (t.scaleX !== undefined && t.scaleX === t.scale) delete t.scaleX
+  if (t.scaleY !== undefined && t.scaleY === t.scale) delete t.scaleY
+  const allDefault = t.x === 0 && t.y === 0 && t.angle === 0
+    && t.scale === 100 && t.scaleX === undefined && t.scaleY === undefined
+  if (allDefault) {
+    const sprite = currentSprite.value
+    if (sprite) sprite.transform = undefined
+  }
   scheduleSave()
 }
 
@@ -1019,6 +1244,7 @@ function onTransformInput(field: keyof SpriteTransform, e: Event) {
   const v = Number((e.target as HTMLInputElement).value)
   if (!Number.isFinite(v)) return
   setTransformField(field, v)
+  clearDraft(field)
 }
 
 // ═══ 变换手柄（「选择」工具）：移动 / 等比缩放 / 旋转 ═══
@@ -1983,6 +2209,9 @@ function closeContextMenus() {
   animContextMenu.value.show = false
 }
 
+// 记住用户最后一次的场景缩放（切换角色 / 重新进入角色编辑器时沿用）
+watch(canvasZoom, z => saveSceneZoom(z))
+
 // 帧切换 / 缩放 / 预览倍率 / 渲染模式变化 → 重绘（flush: post 保证 canvas 已挂载）
 // 注意：必须放在所有 ref/computed 声明之后——watch 创建时会立即求值一次来源，
 // 提前注册会在 setup 阶段抛 TDZ（Cannot access 'canvasZoom' before initialization），
@@ -2029,7 +2258,7 @@ onMounted(() => {
     redrawSpriteImages()
     if (sceneFitPending.value) {
       sceneFitPending.value = false
-      fitSceneView()
+      applyInitialSceneView()
     }
   })
 })
@@ -2058,6 +2287,33 @@ function onEditorKeydown(e: KeyboardEvent) {
   // 空格临时平移（输入框里敲空格不拦截；不 preventDefault，避免抢掉按钮的键盘激活）
   if (e.code === 'Space' && !isTypingTarget(e.target)) {
     spaceHeld.value = true
+    return
+  }
+  // 输入框里的按键留给输入框（原生撤销/重做、F 输入文字都不能被抢走）
+  if (isTypingTarget(e.target)) return
+
+  // 撤销 / 重做（与绘制页、地图编辑器一致）：
+  // macOS = Cmd+Z / Cmd+Shift+Z；Windows = Ctrl+Z / Ctrl+Y（同时兼容 Ctrl+Shift+Z）
+  const mod = e.ctrlKey || e.metaKey
+  if (mod) {
+    const key = e.key.toLowerCase()
+    if (key === 'z') {
+      if (e.shiftKey) redo()
+      else undo()
+      e.preventDefault()
+      return
+    }
+    if (key === 'y' && !e.shiftKey) {
+      redo()
+      e.preventDefault()
+      return
+    }
+  }
+
+  // F：角色回到视口中心，并把缩放恢复成 100%
+  if (!mod && !e.altKey && !e.shiftKey && (e.key === 'f' || e.key === 'F')) {
+    if (currentSprite.value) resetCanvas()
+    e.preventDefault()
   }
 }
 
@@ -2316,16 +2572,35 @@ function onWindowBlur() {
           </div>
         </div>
 
-        <!-- 右下角缩放条（与地图编辑器一致） -->
+        <!-- 右下角浮动视图工具条：缩放 / 撤销 / 重做（与地图编辑器一致） -->
         <div class="scene-zoom-bar" @mousedown.stop @dblclick.stop>
-          <button class="scene-zoom-btn" type="button" title="缩小" @click="zoomBy(0.9)">
-            <img :src="iconZoomOut" alt="" />
+          <button class="scene-float-btn" type="button" v-tooltip="'缩小'" @click="zoomBy(0.9)">
+            <img :src="iconZoomOut" width="16" height="16" draggable="false" />
           </button>
-          <button class="scene-zoom-value" type="button" title="重置视图（100%）" @click="resetCanvas">
+          <button class="scene-float-zoom" type="button" v-tooltip="'重置视图（100%）'" @click="resetCanvas">
             {{ zoomPercent }}%
           </button>
-          <button class="scene-zoom-btn" type="button" title="放大" @click="zoomBy(1.1)">
-            <img :src="iconZoomIn" alt="" />
+          <button class="scene-float-btn" type="button" v-tooltip="'放大'" @click="zoomBy(1.1)">
+            <img :src="iconZoomIn" width="16" height="16" draggable="false" />
+          </button>
+          <div class="scene-float-divider"></div>
+          <button
+            class="scene-float-btn"
+            type="button"
+            :disabled="!canUndo"
+            v-tooltip="'撤销（Ctrl+Z）'"
+            @click="undo()"
+          >
+            <img :src="iconUndo" width="14" height="14" draggable="false" />
+          </button>
+          <button
+            class="scene-float-btn"
+            type="button"
+            :disabled="!canRedo"
+            v-tooltip="'重做（Ctrl+Shift+Z）'"
+            @click="redo()"
+          >
+            <img :src="iconRedo" width="14" height="14" draggable="false" />
           </button>
         </div>
       </div>
@@ -2584,42 +2859,70 @@ function onWindowBlur() {
               </button>
               <div v-if="propFold.transform" class="mi-body">
                 <!-- 位置：X / Y 分两行，X 红、Y 绿（与画布坐标轴颜色一致） -->
-                <div class="att-row att-row-stacked">
+                <div class="att-row att-row-stacked has-reset">
                   <span class="att-label">位置</span>
                   <div class="att-axis-group">
                     <div class="att-axis-row">
-                      <div class="att-axis-field has-unit">
+                      <div class="att-axis-field has-unit" ref="xFieldEl">
                         <span class="att-axis-tag is-x">X</span>
                         <input
                           class="att-input att-input-no-spin"
-                          type="number"
-                          step="1"
+                          type="text"
+                          inputmode="decimal"
                           title="相对默认出生位置的水平偏移（向右为正）"
-                          :value="sceneTransform.x"
+                          :value="draftValue('x', sceneTransform.x)"
+                          @focus="selectOnFocus"
+                          @input="onFieldDraft('x', $event)"
+                          @blur="clearDraft('x')"
                           @change="onTransformInput('x', $event)"
                         />
-                        <span class="att-axis-unit" :style="{ left: axisUnitLeft(sceneTransform.x) }">px</span>
+                        <span class="att-axis-unit" :style="axisUnitStyleFor('x', sceneTransform.x)">px</span>
+                        <!-- X 被改动过才显示：单独重置水平位置 -->
+                        <button
+                          class="att-reset"
+                          :class="{ 'is-dirty': xDirty }"
+                          type="button"
+                          :disabled="!xDirty"
+                          title="重置 X（回到 0）"
+                          @click="resetTransformAxis('x')"
+                        >
+                          <img :src="iconReset" alt="" />
+                        </button>
                       </div>
                     </div>
                     <div class="att-axis-row">
-                      <div class="att-axis-field has-unit">
+                      <div class="att-axis-field has-unit" ref="yFieldEl">
                         <span class="att-axis-tag is-y">Y</span>
                         <input
                           class="att-input att-input-no-spin"
-                          type="number"
-                          step="1"
+                          type="text"
+                          inputmode="decimal"
                           title="相对默认出生位置的垂直偏移（向上为正）"
-                          :value="sceneTransform.y"
+                          :value="draftValue('y', sceneTransform.y)"
+                          @focus="selectOnFocus"
+                          @input="onFieldDraft('y', $event)"
+                          @blur="clearDraft('y')"
                           @change="onTransformInput('y', $event)"
                         />
-                        <span class="att-axis-unit" :style="{ left: axisUnitLeft(sceneTransform.y) }">px</span>
+                        <span class="att-axis-unit" :style="axisUnitStyleFor('y', sceneTransform.y)">px</span>
+                        <!-- Y 被改动过才显示：单独重置垂直位置 -->
+                        <button
+                          class="att-reset"
+                          :class="{ 'is-dirty': yDirty }"
+                          type="button"
+                          :disabled="!yDirty"
+                          title="重置 Y（回到 0）"
+                          @click="resetTransformAxis('y')"
+                        >
+                          <img :src="iconReset" alt="" />
+                        </button>
                       </div>
                     </div>
                   </div>
                 </div>
 
                 <!-- 缩放：X / Y 两行（百分比，100 = 原尺寸）；取消「约束比例」可分别设置 -->
-                <div class="att-row att-row-stacked">
+                <div class="att-row att-row-stacked has-reset">
                   <span class="att-label">缩放</span>
                   <div class="att-axis-group">
                     <div class="att-axis-row">
@@ -2627,14 +2930,26 @@ function onWindowBlur() {
                         <span class="att-axis-tag is-x">X</span>
                         <input
                           class="att-input att-input-no-spin"
-                          type="number"
-                          step="1"
-                          min="5"
-                          max="1000"
+                          type="text"
+                          inputmode="decimal"
                           title="水平缩放百分比，100 = 原尺寸"
-                          :value="scaleXValue"
+                          :value="draftValue('scaleX', scaleXValue)"
+                          @focus="selectOnFocus"
+                          @input="onFieldDraft('scaleX', $event)"
+                          @blur="clearDraft('scaleX')"
                           @change="onScaleInput('x', $event)"
                         />
+                        <!-- X 缩放被改动过才显示 -->
+                        <button
+                          class="att-reset"
+                          :class="{ 'is-dirty': scaleXDirty }"
+                          type="button"
+                          :disabled="!scaleXDirty"
+                          title="重置水平缩放（回到 100%）"
+                          @click="resetTransformAxis('scaleX')"
+                        >
+                          <img :src="iconReset" alt="" />
+                        </button>
                       </div>
                     </div>
                     <div class="att-axis-row">
@@ -2642,14 +2957,26 @@ function onWindowBlur() {
                         <span class="att-axis-tag is-y">Y</span>
                         <input
                           class="att-input att-input-no-spin"
-                          type="number"
-                          step="1"
-                          min="5"
-                          max="1000"
+                          type="text"
+                          inputmode="decimal"
                           title="垂直缩放百分比，100 = 原尺寸"
-                          :value="scaleYValue"
+                          :value="draftValue('scaleY', scaleYValue)"
+                          @focus="selectOnFocus"
+                          @input="onFieldDraft('scaleY', $event)"
+                          @blur="clearDraft('scaleY')"
                           @change="onScaleInput('y', $event)"
                         />
+                        <!-- Y 缩放被改动过才显示 -->
+                        <button
+                          class="att-reset"
+                          :class="{ 'is-dirty': scaleYDirty }"
+                          type="button"
+                          :disabled="!scaleYDirty"
+                          title="重置垂直缩放（回到 100%）"
+                          @click="resetTransformAxis('scaleY')"
+                        >
+                          <img :src="iconReset" alt="" />
+                        </button>
                       </div>
                     </div>
                     <div class="att-axis-row att-axis-lock">
@@ -2661,18 +2988,26 @@ function onWindowBlur() {
                   </div>
                 </div>
 
-                <!-- 旋转：数字框在上、滑条在下（单位是度，不写 °） -->
-                <div class="att-row att-row-stacked">
+                <!-- 旋转：滑条内嵌在数字框底部（Godot 风格），数值仍可直接输入 -->
+                <div class="att-row att-row-stacked has-reset">
                   <span class="att-label">旋转</span>
-                  <div class="att-axis-group">
+                  <div class="att-slider-field" ref="angleFieldEl">
                     <input
                       class="att-input att-input-no-spin"
-                      type="number"
-                      step="1"
+                      type="text"
+                      inputmode="decimal"
                       title="逆时针为正"
-                      :value="sceneTransform.angle"
+                      :value="draftValue('angle', sceneTransform.angle)"
+                      @focus="selectOnFocus"
+                      @input="onFieldDraft('angle', $event)"
+                      @blur="clearDraft('angle')"
                       @change="onTransformInput('angle', $event)"
                     />
+                    <!-- 角度单位：紧跟数字后面 -->
+                    <span
+                      class="att-axis-unit is-degree"
+                      :style="angleUnitStyle(sceneTransform.angle)"
+                    >°</span>
                     <input
                       class="att-range"
                       type="range"
@@ -2682,11 +3017,18 @@ function onWindowBlur() {
                       :value="sceneTransform.angle"
                       @input="onTransformInput('angle', $event)"
                     />
+                    <!-- 旋转被改动后才显示：一键回到 0° -->
+                    <button
+                      class="att-reset"
+                      :class="{ 'is-dirty': rotationDirty }"
+                      type="button"
+                      :disabled="!rotationDirty"
+                      title="重置旋转（回到 0°）"
+                      @click="resetTransformAxis('angle')"
+                    >
+                      <img :src="iconReset" alt="" />
+                    </button>
                   </div>
-                </div>
-
-                <div class="mi-actions">
-                  <button class="mi-btn" type="button" title="回到默认位置（原点）、0°、100%" @click="resetSceneTransform">重置变换</button>
                 </div>
               </div>
             </div>
