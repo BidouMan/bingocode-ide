@@ -799,8 +799,8 @@ function gameLoop() {
   // 游戏未运行时跳过高开销的同步操作：sprites/tiles 不会变化，
   // PixiJS 会自动保留最后一帧画面。避免空转占满 CPU（低端机器尤其明显）。
   if (!editorStore.isRunning) {
-    // 仍需收尾启动加载页（贴图加载完成时隐藏）
-    renderStore.tryFinishStartup()
+    // 仍需推进启动加载状态机（reveal delay + min visible duration）
+    renderStore.advanceStartupLoading()
     return
   }
 
@@ -820,8 +820,8 @@ function gameLoop() {
   syncSayTexts()
   syncDrawTexts()
   syncHitboxes()
-  // 启动加载页收尾：引擎就绪 + 贴图全部就绪 + 本帧场景已同步，才撤掉覆盖层
-  renderStore.tryFinishStartup()
+  // 启动加载状态机：reveal delay + min visible duration
+  renderStore.advanceStartupLoading()
 }
 
 function onKeyDown(e: KeyboardEvent) {

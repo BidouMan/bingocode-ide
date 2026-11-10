@@ -78,8 +78,23 @@ export interface TileSetInfo {
   tileHeight: number
 }
 
-/** 启动加载页最短显示时间：快电脑上避免一闪而过（慢电脑实际耗时更长，不受影响） */
-const MIN_STARTUP_MS = 500
+/**
+ * 启动加载页显示策略 —— 2D 游戏行业标准（Godot / Unity / Three.js LoadingManager 模式）：
+ *
+ *   进度条从点击运行开始就显示（isLoadingTextures = true），
+ *   按已知的 textureTotal / textureLoaded 实时推进，
+ *   覆盖层在三者同时满足后才关闭：
+ *     1. 引擎 GAME_READY 已到
+ *     2. GAME_READY 后 ENGINE_READY_WINDOW_MS 已过（给帧循环时间把所有纹理登记完，
+ *        之前的竞态根因：引擎 CREATE 指令 print 在 GAME_READY 之前，但前端要等 ticker
+ *        下一帧 syncSprites 才调 setTextureTotal，tryFinishStartup 在这之前就判定会看到错误的 total）
+ *     3. textureLoaded >= textureTotal（纹理全部加载完）
+ *
+ *   与 web spinner 不同：游戏启动本来就需要几秒，进度条是真实有意义的反馈，
+ *   不是"怕闪一下就掩盖"的加载指示器。
+ */
+const ENGINE_READY_WINDOW_MS = 150   // GAME_READY 后等纹理登记完整的窗口（≈9帧@60fps）
+const MIN_VISIBLE_MS = 200           // 加载页显示过之后至少保留的时间（保底）
 
 export const useRenderStore = defineStore('render', () => {
   const sprites = ref<Map<string, SpriteData>>(new Map())
@@ -121,12 +136,11 @@ export const useRenderStore = defineStore('render', () => {
   const textureTotal = ref(0)
   const textureLoaded = ref(0)
   const isLoadingTextures = ref(false)
-  // 启动加载：点击运行就立即显示加载页，避免先露出默认背景色再闪一下加载页；
-  // 结束条件 = 引擎初始化完成（GAME_READY）+ 贴图全部就绪 + 帧循环已同步场景，
-  // 且加载页至少显示 MIN_STARTUP_MS，避免快电脑上一闪而过被看成故障闪烁
-  const startupPending = ref(false)
-  const engineReady = ref(false)
-  let startupStartedAt = 0
+  // 启动加载状态（状态机由 GameCanvas 帧循环驱动）
+  const startupPending = ref(false)     // 本次运行还在等待加载完成
+  const engineReady = ref(false)        // 引擎已发 GAME_READY
+  let startupStartedAt = 0              // 点击运行的时间戳
+  let engineReadyAt = 0                 // GAME_READY 到达前端的时间戳（0 = 还没到）
 
   function createSprite(id: string, data: Partial<SpriteData>) {
     sprites.value.set(id, {
@@ -232,50 +246,59 @@ export const useRenderStore = defineStore('render', () => {
     isLoadingTextures.value = false
     startupPending.value = false
     engineReady.value = false
+    engineReadyAt = 0
   }
 
-  /** 点击运行立刻进入加载页（游戏模式），覆盖 Python 启动期间的默认背景色空档 */
+  /** 点击运行：立即显示加载页，等引擎 GAME_READY + 纹理全部加载完再关 */
   function beginStartupLoading() {
     textureTotal.value = 0
     textureLoaded.value = 0
     engineReady.value = false
+    engineReadyAt = 0
     startupPending.value = true
     startupStartedAt = performance.now()
-    isLoadingTextures.value = true
+    isLoadingTextures.value = true  // 立即显示，让进度条从 0% 开始推进
   }
 
   /** 引擎初始化完成（GAME_READY） */
   function noteEngineReady() {
     engineReady.value = true
+    engineReadyAt = performance.now()
+    console.log(`[noteEngineReady] 引擎就绪, textureTotal=${textureTotal.value}, textureLoaded=${textureLoaded.value}, 耗时=${Math.round(performance.now() - startupStartedAt)}ms`)
   }
 
   /**
-   * 启动加载收尾：由 GameCanvas 在每帧同步完场景后调用。
-   * 条件都满足才隐藏覆盖层：引擎就绪、贴图全部加载完、本帧已完成场景同步，
-   * 并且加载页已显示满 MIN_STARTUP_MS（快电脑也别一闪而过；慢电脑本来就超过，不受影响）。
-   * 放在帧末而不是贴图计数回调里，避免「最后一张贴图刚解码完、还没贴到显示对象上」
-   * 就提前撤销覆盖层，露出占位画面。
+   * 启动加载状态机 —— 由 GameCanvas 每帧调用。
+   *
+   * 关闭加载页的条件链（同时满足）：
+   *   1. GAME_READY 已到（引擎 exec 用户代码完成）
+   *   2. GAME_READY 后等 ENGINE_READY_WINDOW_MS：给 ticker 帧循环时间把所有纹理总数登记完
+   *      （引擎 CREATE 指令 print 在 GAME_READY 之前，但前端要等 syncSprites/syncTiles
+   *       才调 setTextureTotal，tryFinishStartup 在这之前判定会拿到错误的 total）
+   *   3. textureLoaded >= textureTotal（纹理全部加载完）
    */
-  function tryFinishStartup() {
+  function advanceStartupLoading() {
     if (!startupPending.value || !engineReady.value) return
+
+    // 阶段 1：GAME_READY 后等帧循环把纹理总数登记完整
+    if (engineReadyAt > 0 && performance.now() - engineReadyAt < ENGINE_READY_WINDOW_MS) return
+
+    // 阶段 2：纹理全部加载完
     if (textureTotal.value > 0 && textureLoaded.value < textureTotal.value) return
-    if (performance.now() - startupStartedAt < MIN_STARTUP_MS) return
+
+    // 全部 ready，关闭
+    const elapsed = performance.now() - startupStartedAt
+    console.log(`[advanceStartupLoading] 关闭加载页: ${textureLoaded.value}/${textureTotal.value}, 总耗时=${Math.round(elapsed)}ms`)
     startupPending.value = false
     isLoadingTextures.value = false
   }
 
   function setTextureTotal(total: number) {
     textureTotal.value = total
-    isLoadingTextures.value = total > 0
   }
 
   function incrementTextureLoaded() {
     textureLoaded.value++
-    // 启动阶段不在计数回调里收尾，交给帧循环的 tryFinishStartup
-    if (startupPending.value) return
-    if (textureLoaded.value >= textureTotal.value && textureTotal.value > 0) {
-      isLoadingTextures.value = false
-    }
   }
 
   function setLoadingState(loading: boolean) {
@@ -403,7 +426,7 @@ export const useRenderStore = defineStore('render', () => {
     resetTextureLoading,
     beginStartupLoading,
     noteEngineReady,
-    tryFinishStartup,
+    advanceStartupLoading,
     setTextureTotal,
     incrementTextureLoaded,
     setLoadingState,
