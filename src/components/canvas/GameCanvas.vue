@@ -67,6 +67,13 @@ const LOGIC_H = 480
 // 游戏画面在容器内的偏移（用于统计面板定位）
 const stageOffsetX = ref(0)
 const stageOffsetY = ref(0)
+const stageScale = ref(1)  // 舞台实际缩放（= stageOffset 里的 scale）
+
+// loading进度（和 MainLayout 里的 loadingProgress 逻辑一致）
+const loadingProgress = computed(() => {
+  if (renderStore.textureTotal === 0) return 0
+  return Math.floor((renderStore.textureLoaded / renderStore.textureTotal) * 100)
+})
 
 async function initPixi() {
   if (!containerRef.value) return
@@ -168,6 +175,7 @@ function fitStage() {
   const scaleX = vp.clientWidth / LOGIC_W
   const scaleY = vp.clientHeight / LOGIC_H
   const scale = Math.min(scaleX, scaleY)
+  stageScale.value = scale
   stageContainer.x = (vp.clientWidth - LOGIC_W * scale) / 2
   stageContainer.y = (vp.clientHeight - LOGIC_H * scale) / 2
   stageContainer.scale.set(scale)
@@ -1197,6 +1205,33 @@ function getGroupSprites(name: string) {
           </div>
         </div>
       </template>
+
+      <!-- 启动加载覆盖层（对齐游戏舞台区域，预览/全屏都正确） -->
+      <Transition name="loading-fade">
+        <div
+          v-if="renderStore.isLoadingTextures"
+          class="loading-overlay"
+          :style="{
+            top: stageOffsetY + 'px',
+            left: stageOffsetX + 'px',
+            width: (LOGIC_W * stageScale) + 'px',
+            height: (LOGIC_H * stageScale) + 'px',
+          }"
+        >
+          <div class="loading-content">
+            <div class="loading-balls">
+              <div class="ball ball-1"></div>
+              <div class="ball ball-2"></div>
+              <div class="ball ball-3"></div>
+            </div>
+            <div class="loading-text">加载资源中...</div>
+            <div class="loading-progress">{{ loadingProgress }}%</div>
+            <div class="loading-bar">
+              <div class="loading-bar-fill" :style="{ width: loadingProgress + '%' }"></div>
+            </div>
+          </div>
+        </div>
+      </Transition>
     </div>
   </div>
 </template>
@@ -1307,5 +1342,75 @@ function getGroupSprites(name: string) {
 .stats-child {
   font-size: 10px;
   color: #5a6270;
+}
+
+/* Loading覆盖层 —— 对齐游戏舞台（4:3逻辑区域），预览/全屏都正确 */
+.loading-overlay {
+  position: absolute;
+  background: #1a1c21;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.loading-fade-leave-active {
+  transition: opacity 0.15s ease;
+}
+.loading-fade-leave-to {
+  opacity: 0;
+}
+.loading-content {
+  text-align: center;
+  color: white;
+}
+.loading-balls {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.ball {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: bounce 1.4s ease-in-out infinite;
+}
+.ball-1 { animation-delay: -0.32s; }
+.ball-2 { animation-delay: -0.16s; }
+@keyframes bounce {
+  0%, 80%, 100% {
+    transform: scale(0.6);
+    opacity: 0.5;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.loading-text {
+  font-size: 12px;
+  margin-bottom: 6px;
+  color: rgba(255, 255, 255, 0.8);
+}
+.loading-progress {
+  font-size: 10px;
+  color: var(--accent);
+  font-family: monospace;
+  margin-bottom: 6px;
+}
+.loading-bar {
+  width: 120px;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  overflow: hidden;
+  margin: 0 auto;
+}
+.loading-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.2s ease;
 }
 </style>
