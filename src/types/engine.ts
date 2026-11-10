@@ -172,6 +172,17 @@ export interface FpsUpdateCommand extends EngineCommand {
   data: { fps: number }
 }
 
+/** 引擎逻辑耗时统计（每 0.5 秒一条，与 FPS 同频） */
+export interface PerfStatsCommand extends EngineCommand {
+  type: 'PERF_STATS'
+  data: {
+    /** 主循环一帧平均实际耗时（物理步进 + 用户代码 + 序列化 + 输出），不含末尾 sleep */
+    logic_avg_ms: number
+    /** 同一窗口内最慢一帧的耗时，用于暴露周期性卡顿 */
+    logic_max_ms: number
+  }
+}
+
 export interface PauseStateCommand extends EngineCommand {
   type: 'PAUSE_STATE'
   data: { paused: boolean }
@@ -207,6 +218,7 @@ export type AnyEngineCommand =
   | DrawTextCommand
   | ScreenShakeCommand
   | FpsUpdateCommand
+  | PerfStatsCommand
   | PauseStateCommand
   | UICommandCommand
   | ShowCollisionCommand

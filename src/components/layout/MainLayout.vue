@@ -90,7 +90,11 @@ watch(() => renderStore.startupPending, (pending, wasPending) => {
   if (wasPending && !pending && editorStore.isRunning) engine.sendStart()
 })
 
-// loading进度已移到 GameCanvas 组件内部（对齐舞台区域定位）
+// loading进度
+const loadingProgress = computed(() => {
+  if (renderStore.textureTotal === 0) return 0
+  return Math.floor((renderStore.textureLoaded / renderStore.textureTotal) * 100)
+})
 
 // change_page: 0=编辑器, 1=全屏, 2=地图库, 3=角色库, 4=素材库, 5=声音库, 6=角色绘制器, 7=造型选帧库, 8=素材整理(dev)
 const currentPage = ref(0)
@@ -154,6 +158,12 @@ function onToggleGameMode() {
   editorStore.toggleGameMode()
 }
 const canvasOffsetX = ref(0)
+// 全屏 GameCanvas 的舞台定位（给 loading overlay 用）
+const fullscreenStage = ref({ x: 0, y: 0, scale: 1 })
+// 预览 GameCanvas 的舞台定位
+const previewStage = ref({ x: 0, y: 0, scale: 1 })
+const LOGIC_W = 640
+const LOGIC_H = 480
 const consoleExpanded = ref(true)
 const fileMenuVisible = ref(false)
 const settingsMenuVisible = ref(false)
@@ -2405,7 +2415,30 @@ function spriteDisplayName(name: string) {
             </div>
             <div class="game-preview-wrapper">
               <div class="game-preview-container">
-                <GameCanvas class="game-preview-canvas" :active="currentPage === 0" />
+                <GameCanvas class="game-preview-canvas" :active="currentPage === 0" @offset-update="previewStage = $event" />
+                <!-- Loading覆盖层（兄弟元素，用舞台定位精确对齐游戏画面区域） -->
+                <Transition name="loading-fade">
+                  <div v-if="renderStore.isLoadingTextures" class="loading-overlay"
+                       :style="{
+                         top: previewStage.y + 'px',
+                         left: previewStage.x + 'px',
+                         width: (LOGIC_W * previewStage.scale) + 'px',
+                         height: (LOGIC_H * previewStage.scale) + 'px',
+                       }">
+                    <div class="loading-content">
+                      <div class="loading-balls">
+                        <div class="ball ball-1"></div>
+                        <div class="ball ball-2"></div>
+                        <div class="ball ball-3"></div>
+                      </div>
+                      <div class="loading-text">加载资源中...</div>
+                      <div class="loading-progress">{{ loadingProgress }}%</div>
+                      <div class="loading-bar">
+                        <div class="loading-bar-fill" :style="{ width: loadingProgress + '%' }"></div>
+                      </div>
+                    </div>
+                  </div>
+                </Transition>
               </div>
             </div>
             <div class="outline-tabs">
@@ -2696,7 +2729,30 @@ function spriteDisplayName(name: string) {
           </div>
         </div>
         <div class="fullscreen-stage-area">
-          <GameCanvas v-show="currentPage === 1" :active="currentPage === 1" @offset-update="canvasOffsetX = $event" />
+          <GameCanvas v-show="currentPage === 1" :active="currentPage === 1" @offset-update="fullscreenStage = $event; canvasOffsetX = $event.x" />
+          <!-- Loading覆盖层（兄弟元素，用舞台定位精确对齐游戏画面区域） -->
+          <Transition name="loading-fade">
+            <div v-if="renderStore.isLoadingTextures" class="loading-overlay"
+                 :style="{
+                   top: fullscreenStage.y + 'px',
+                   left: fullscreenStage.x + 'px',
+                   width: (LOGIC_W * fullscreenStage.scale) + 'px',
+                   height: (LOGIC_H * fullscreenStage.scale) + 'px',
+                 }">
+              <div class="loading-content">
+                <div class="loading-balls">
+                  <div class="ball ball-1"></div>
+                  <div class="ball ball-2"></div>
+                  <div class="ball ball-3"></div>
+                </div>
+                <div class="loading-text">加载资源中...</div>
+                <div class="loading-progress">{{ loadingProgress }}%</div>
+                <div class="loading-bar">
+                  <div class="loading-bar-fill" :style="{ width: loadingProgress + '%' }"></div>
+                </div>
+              </div>
+            </div>
+          </Transition>
         </div>
       </div>
 

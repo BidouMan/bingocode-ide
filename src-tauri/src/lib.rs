@@ -10,6 +10,7 @@ mod pip;
 mod project;
 mod python_env;
 mod shell;
+mod sysstat;
 
 /// 创建 Command 时自动添加 CREATE_NO_WINDOW 标志（Windows）
 /// 防止任何子进程弹出系统终端窗口
@@ -52,6 +53,7 @@ pub fn run() {
         .manage(ShellState {
             pty: Mutex::new(None),
         })
+        .manage(sysstat::SysStatState::new())
         .invoke_handler(tauri::generate_handler![
             // 文件系统
             fs_ops::read_file,
@@ -93,6 +95,8 @@ pub fn run() {
             engine::send_stdin,
             engine::send_stdin_data,
             engine::run_script_file,
+            // 性能监控
+            sysstat::get_app_resource_stats,
             // pip
             pip::pip_list_installed,
             pip::pip_list_all,

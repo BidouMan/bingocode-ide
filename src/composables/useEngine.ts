@@ -197,6 +197,10 @@ export function useEngine() {
         renderStore.setFps(cmd.data.fps)
         break
 
+      case 'PERF_STATS':
+        renderStore.setEnginePerf(cmd.data.logic_avg_ms, cmd.data.logic_max_ms)
+        break
+
       case 'SHOW_COLLISION':
         renderStore.showCollision = cmd.data.visible
         break
