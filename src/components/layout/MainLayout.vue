@@ -2450,7 +2450,7 @@ function spriteDisplayName(name: string) {
           <img :src="iconCodeRun" class="menu-icon" />
           <span>运行</span>
         </button>
-        <button v-if="editorStore.isRunning" class="menu-btn" @click="engine.stop()" v-tooltip="'停止'">
+        <button class="menu-btn" @click="engine.stop()" v-tooltip="'停止'">
           <img :src="iconCodeStop" class="menu-icon" />
           <span>停止</span>
         </button>

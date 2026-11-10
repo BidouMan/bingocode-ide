@@ -224,6 +224,7 @@ pub fn run_script_file(
     working_dir: String,
     python_path: String,
     script_path: String,
+    source_path: Option<String>,
     run_id: u32,
 ) -> Result<(), String> {
     let mut process_guard = state.process.lock().map_err(|e| e.to_string())?;
@@ -232,11 +233,36 @@ pub fn run_script_file(
         stop_script_process(&mut process_guard)?;
     }
 
+    // 只确认脚本存在：内容交给包装脚本自己读取，这样 compile() 的文件名和行号
+    // 才能和编辑器里学生看到的完全一致
+    std::fs::metadata(&script_path).map_err(|e| format!("Failed to read script: {}", e))?;
+
+    // 学生代码的执行块：用 exec(compile(src, 真实文件名, 'exec')) 运行，
+    // 绝不能把源码直接拼进包装脚本——那样报错行号会整体后移（包装头有几十行），
+    // 学生看到的行号和编辑器对不上。路径通过 sys.argv 传入，避免 Windows 路径的
+    // 反斜杠被当成 Python 字符串转义（C:\Users 的 \U）。
+    let run_user_block = r#"_bingo_path = _sys.argv[1]
+_bingo_name = _sys.argv[2] or _bingo_path
+_sys.argv = [_bingo_name]
+with open(_bingo_path, 'rb') as _bingo_fh:
+    _bingo_src = _bingo_fh.read()
+_bingo_g = {'__name__': '__main__', '__file__': _bingo_name}
+try:
+    exec(compile(_bingo_src, _bingo_name, 'exec'), _bingo_g)
+except SystemExit:
+    raise
+except BaseException:
+    _bt, _bv, _btb = _sys.exc_info()
+    _self_file = _os.path.abspath(__file__)
+    while _btb is not None and _os.path.abspath(_btb.tb_frame.f_code.co_filename) == _self_file:
+        _btb = _btb.tb_next
+    _traceback.print_exception(_bt, _bv, _btb)
+    _sys.exit(1)
+"#;
+
     // 包装脚本：覆盖 builtins.input 以优雅处理 EOFError（Windows 停止进程时 stdin 关闭）
-    let script_content = std::fs::read_to_string(&script_path)
-        .map_err(|e| format!("Failed to read script: {}", e))?;
     let wrapped_script = format!(
-        "import builtins as _bi, sys as _sys, os as _os\n\
+        "import builtins as _bi, sys as _sys, os as _os, traceback as _traceback\n\
          _input_ref = _sys.stdin\n\
          _write_ref = _sys.stdout.write\n\
          _flush_ref = _sys.stdout.flush\n\
@@ -305,7 +331,7 @@ pub fn run_script_file(
          \x20       \x20   _tm.mainloop()\n\
          except Exception:\n\
          \x20   pass\n",
-        script_content
+        run_user_block
     );
     let wrapped_path = format!("{}.wrapped.py", script_path);
     std::fs::write(&wrapped_path, &wrapped_script)
@@ -314,6 +340,9 @@ pub fn run_script_file(
     let mut cmd = Command::new(&python_path);
     cmd.arg("-u")
         .arg(&wrapped_path)
+        // argv[1] = 本次要运行的临时脚本；argv[2] = 学生真实文件路径（用于报错定位）
+        .arg(&script_path)
+        .arg(source_path.unwrap_or_default())
         .current_dir(&working_dir)
         .env("PYTHONUNBUFFERED", "1")
         .env("PYTHONIOENCODING", "utf-8")

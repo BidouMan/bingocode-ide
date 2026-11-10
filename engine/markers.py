@@ -149,7 +149,7 @@ def get_marker(name):
         more = "…" if len(markers) > 8 else ""
         print(f"[警告] 没有名为 '{name}' 的标记（已有标记：{'、'.join(known)}{more}）")
     else:
-        print("[警告] 这张地图还没有标记，先在地图编辑器里点「标记」放一个")
+        print("[警告] 这张地图还没有标记，先在地图编辑器里点标记按钮放一个")
     return None
 
 

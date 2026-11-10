@@ -328,7 +328,7 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
             w.follow(player.get_marker('标记2'))
         """
         if not getattr(self, "_is_bsf", False):
-            print("[警告] 标记仅 .bsf 角色支持（先在角色编辑器「标记」图层添加）")
+            print("[警告] 标记仅 .bsf 角色支持（先在角色编辑器的标记图层添加）")
             return None
         if self._marker_world_xy(name) is None:
             known = sorted((getattr(self, "_bsf_markers", None) or {}).keys())

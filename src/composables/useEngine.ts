@@ -311,10 +311,10 @@ export function useEngine() {
     const unlisten2 = await listen<{ run_id: number; data: string }>('engine:stderr', (event) => {
       if (event.payload.run_id !== myRunId) return
       const msg = event.payload.data
-      // 出错必须让用户看到：自动弹出控制台（仅游戏模式）
-      if (editorStore.isGameMode) {
-        terminalStore.consoleVisible = true
-      }
+      // 出错必须让用户看到：无论代码模式还是游戏模式，收到 stderr 都自动弹出控制台。
+      // 代码模式（IDE）出错时如果没有这行，控制台会一直保持收起状态，
+      // 学生得自己点开才发现「原来是报错了」
+      terminalStore.consoleVisible = true
       // 引擎已经格式化成中文的报错（带文件名和编辑器里的真实行号），
       // 原样红色显示即可；再按关键字改写会把定位信息冲掉
       if (msg.trimStart().startsWith('[错误]')) {
@@ -683,11 +683,15 @@ export function useEngine() {
           workingDir: runWorkingDir,
           pythonPath: env.python_path,
           scriptPath: tempScriptPath,
+          // 传真实文件路径：报错时按学生编辑器里的文件名和行号定位
+          sourcePath: tab.path || '',
           runId: runGeneration,
         })
       }
     } catch (err) {
       terminalStore.appendLine(`\x1b[31m启动失败: ${err}\x1b[0m`)
+      // 启动失败同样是用户必须看到的错误，自动弹出控制台
+      terminalStore.consoleVisible = true
       terminalStore.terminalMode = 'shell'
       editorStore.setRunning(false)
       renderStore.resetTextureLoading()
