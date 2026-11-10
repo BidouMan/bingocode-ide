@@ -185,11 +185,7 @@ onBeforeUnmount(() => {
 
 // ====== 选中 / 重命名 ======
 function selectLayer(index: number) {
-  if (suppressClick) {
-    suppressClick = false
-    return
-  }
-  mapStore.setActiveLayer(index)
+  if (mapStore.activeLayerIndex !== index) mapStore.setActiveLayer(index)
 }
 
 /** 双击图像图层行：进入绘制页编辑该图片（双击名称仍是重命名） */
@@ -220,73 +216,379 @@ function cancelRename() {
   editingLayerIndex.value = null
 }
 
-// ====== 拖拽排序 ======
-const draggingIndex = ref(-1)
-const dropDisplayIndex = ref(-1)
+// ====== 拖拽排序（Pointer Events + 浮动幽灵 + 空隙让位） ======
+/** 拖拽中的显示层索引（-1 = 未拖拽），模板用它隐藏原行占位 */
 const dragging = ref(false)
-let dragStartY = 0
-let suppressClick = false
+const dragFromDisplay = ref(-1)
+const dragTargetDisplay = ref(-1)
 
-function onRowPointerDown(e: MouseEvent, modelIndex: number) {
-  if (e.button !== 0) return
-  if ((e.target as HTMLElement).closest('button,input')) return
-  if (mapStore.mapData.layers.length < 2) return
-  dragStartY = e.clientY
-  dragging.value = false
-  draggingIndex.value = modelIndex
-  document.addEventListener('mousemove', onDragMove)
-  document.addEventListener('mouseup', onDragEnd)
+interface DragRow { el: HTMLElement; top: number; height: number }
+
+let dragStartY = 0
+let dragStartX = 0
+let grabOffsetY = 0
+let dragModelIndex = -1
+let draggingStarted = false
+let lastPointerY = 0
+/** 拖动开始时的行几何（内容坐标系，滚动后依旧有效） */
+let baseRows: DragRow[] = []
+/** 每行当前的让位位移（非响应式：拖拽中直接改行内联 transform，绕开 Vue 的样式 patch） */
+let currentShifts: number[] = []
+/** 拖拽期间列表可视区（拖拽中不会变，缓存后避免每帧读布局） */
+let listViewTop = 0
+let listViewBottom = 0
+let ghostEl: HTMLElement | null = null
+let ghostBaseTop = 0
+/** 幽灵当前位移，用于判断落位是否需要动画 */
+let ghostCurrentDy = 0
+let autoScrollRaf = 0
+let settleTimer: ReturnType<typeof setTimeout> | null = null
+/** 松手后的落位收尾（等幽灵滑进空位再提交），下一次按下要立即冲刷掉，避免漏提交或幽灵残留 */
+let pendingSettle: (() => void) | null = null
+let dragPointerId: number | null = null
+
+/** 直接给行写位移：不走响应式渲染，避免每次换位触发整列表重渲染 */
+function setRowShift(dIdx: number, shift: number) {
+  if (currentShifts[dIdx] === shift) return
+  currentShifts[dIdx] = shift
+  baseRows[dIdx].el.style.transform = shift ? `translateY(${shift}px)` : ''
 }
 
-function onDragMove(e: MouseEvent) {
-  if (!dragging.value && Math.abs(e.clientY - dragStartY) < 4) return
+function onRowPointerDown(e: PointerEvent, modelIndex: number) {
+  if (e.button !== 0) return
+  const target = e.target as HTMLElement
+  if (target.closest('button,input,textarea')) return
+  // 按下即选中（与主流图层/资源列表一致），拖拽过程中不会出现"选中了别的层"的错位感
+  selectLayer(modelIndex)
+  if (props.disabled || mapStore.mapData.layers.length < 2) return
+  // 上一轮落位动画还没走完就再次按下：立即完成上一轮的提交
+  flushSettle()
+  dragModelIndex = modelIndex
+  dragPointerId = e.pointerId
+  dragStartY = e.clientY
+  dragStartX = e.clientX
+  lastPointerY = e.clientY
+  draggingStarted = false
+  window.addEventListener('pointermove', onWindowPointerMove, { passive: false })
+  window.addEventListener('pointerup', onWindowPointerUp)
+  window.addEventListener('pointercancel', onWindowPointerCancel)
+  window.addEventListener('blur', onWindowBlur)
+}
+
+function onWindowPointerMove(e: PointerEvent) {
+  if (dragModelIndex < 0) return
+  // 拖动阶段统一阻止默认行为：避免拖到文本上变成选中文字、拖到图片上触发原生拖拽
+  if (draggingStarted) e.preventDefault()
+  if (!draggingStarted) {
+    if (Math.abs(e.clientY - dragStartY) < 4 && Math.abs(e.clientX - dragStartX) < 4) return
+    if (!startDrag()) return
+  }
+  lastPointerY = e.clientY
+  updateGhost(e.clientY)
+  updateDragTarget(e.clientY)
+}
+
+/** 开始拖拽：缓存行几何、创建跟随指针的幽灵行、给原行留空位 */
+function startDrag(): boolean {
+  const list = listRef.value
+  if (!list) return false
+  // 防御：清掉任何历史遗留的幽灵行，确保屏幕上永远只有一个拖拽浮层
+  document.querySelectorAll('.layer-drag-ghost').forEach(el => el.remove())
+  const rowEls = Array.from(list.querySelectorAll<HTMLElement>('.layer-item'))
+  if (rowEls.length !== displayLayers.value.length) return false
+  const fromDisplay = displayLayers.value.findIndex(it => it.index === dragModelIndex)
+  if (fromDisplay < 0) return false
+
+  const listRect = list.getBoundingClientRect()
+  listViewTop = listRect.top
+  listViewBottom = listRect.bottom
+  baseRows = rowEls.map(el => {
+    const rect = el.getBoundingClientRect()
+    return { el, top: rect.top - listRect.top + list.scrollTop, height: rect.height }
+  })
+  // 清掉上一轮可能残留的位移，位移状态从 0 重新开始
+  currentShifts = new Array(baseRows.length).fill(0)
+  baseRows.forEach(row => { row.el.style.transform = '' })
+
+  const rowRect = rowEls[fromDisplay].getBoundingClientRect()
+  grabOffsetY = dragStartY - rowRect.top
+  ghostBaseTop = rowRect.top
+
+  const ghost = rowEls[fromDisplay].cloneNode(true) as HTMLElement
+  ghost.classList.remove('layer-item-active')
+  ghost.classList.add('layer-drag-ghost')
+  // 原生 title 提示会跟着克隆体在拖拽中反复弹出，去掉
+  ghost.removeAttribute('title')
+  ghost.style.left = `${rowRect.left}px`
+  ghost.style.top = `${rowRect.top}px`
+  ghost.style.width = `${rowRect.width}px`
+  ghost.style.height = `${rowRect.height}px`
+  document.body.appendChild(ghost)
+  ghostEl = ghost
+  ghostCurrentDy = 0
+
+  // 指针捕获：拖到窗口外松手也能收到 pointerup，不会卡在拖拽状态
+  if (dragPointerId !== null) {
+    try { rowEls[fromDisplay].setPointerCapture(dragPointerId) } catch { /* 忽略不支持捕获的环境 */ }
+  }
+
+  draggingStarted = true
   dragging.value = true
-  const rows = listRef.value?.querySelectorAll<HTMLElement>('.layer-item')
-  if (!rows || rows.length === 0) return
-  let insert = rows.length
-  for (let i = 0; i < rows.length; i++) {
-    const rect = rows[i].getBoundingClientRect()
-    if (e.clientY < rect.top + rect.height / 2) {
-      insert = i
-      break
+  dragFromDisplay.value = fromDisplay
+  dragTargetDisplay.value = fromDisplay
+  document.body.classList.add('layer-dragging-cursor')
+  startAutoScroll()
+  return true
+}
+
+/** 幽灵行跟随指针（竖直方向 1:1 跟手，无延迟无惯性） */
+function updateGhost(pointerY: number) {
+  if (!ghostEl) return
+  ghostCurrentDy = pointerY - grabOffsetY - ghostBaseTop
+  ghostEl.style.transform = `translate3d(0, ${ghostCurrentDy}px, 0)`
+}
+
+/** 用指针在"内容坐标系"里的位置算最终插入位置（滚动时也能正确落位） */
+function updateDragTarget(pointerY: number) {
+  const list = listRef.value
+  if (!list || baseRows.length === 0) return
+  const contentY = pointerY - listViewTop + list.scrollTop
+  let target = 0
+  for (let i = 0; i < baseRows.length; i++) {
+    if (i === dragFromDisplay.value) continue
+    const row = baseRows[i]
+    if (contentY > row.top + row.height / 2) target++
+  }
+  if (target === dragTargetDisplay.value) return
+  dragTargetDisplay.value = target
+  // 被让位的行整体平移一格，形成平滑滑动的空位（位移由 CSS transition 补间）
+  const h = baseRows[dragFromDisplay.value]?.height ?? 54
+  for (let i = 0; i < baseRows.length; i++) {
+    let shift = 0
+    if (dragFromDisplay.value < target && i > dragFromDisplay.value && i <= target) shift = -h
+    else if (dragFromDisplay.value > target && i >= target && i < dragFromDisplay.value) shift = h
+    setRowShift(i, shift)
+  }
+}
+
+// ====== 拖到列表上下边缘时自动滚动 ======
+function startAutoScroll() {
+  stopAutoScroll()
+  const step = () => {
+    autoScrollRaf = requestAnimationFrame(step)
+    const list = listRef.value
+    if (!list) return
+    const scrollBefore = list.scrollTop
+    const edge = 28
+    let dy = 0
+    if (lastPointerY < listViewTop + edge) {
+      dy = -Math.min(14, (listViewTop + edge - lastPointerY) * 0.6)
+    } else if (lastPointerY > listViewBottom - edge) {
+      dy = Math.min(14, (lastPointerY - (listViewBottom - edge)) * 0.6)
+    }
+    if (dy) list.scrollTop += dy
+    // 滚轮 / 自动滚动都会改 scrollTop：内容坐标变了，落位要跟着重算
+    if (list.scrollTop !== scrollBefore) updateDragTarget(lastPointerY)
+  }
+  autoScrollRaf = requestAnimationFrame(step)
+}
+
+function stopAutoScroll() {
+  if (autoScrollRaf) cancelAnimationFrame(autoScrollRaf)
+  autoScrollRaf = 0
+}
+
+function removeWindowListeners() {
+  window.removeEventListener('pointermove', onWindowPointerMove)
+  window.removeEventListener('pointerup', onWindowPointerUp)
+  window.removeEventListener('pointercancel', onWindowPointerCancel)
+  window.removeEventListener('blur', onWindowBlur)
+}
+
+function onWindowPointerUp() {
+  removeWindowListeners()
+  if (!draggingStarted) {
+    resetDragState()
+    return
+  }
+  settleDrag()
+}
+
+function onWindowPointerCancel() {
+  removeWindowListeners()
+  if (!draggingStarted) {
+    resetDragState()
+    return
+  }
+  cancelDrag()
+}
+
+function onWindowBlur() {
+  removeWindowListeners()
+  if (draggingStarted) cancelDrag()
+  else resetDragState()
+}
+
+/** 松手：幽灵滑到空位后提交顺序（视觉上原行正好出现在幽灵落点，无跳动） */
+function settleDrag() {
+  stopAutoScroll()
+  releasePointerCapture()
+  const list = listRef.value
+  const target = dragTargetDisplay.value
+  const ghost = ghostEl
+  const canCommit = !!list && target >= 0 && ghost
+  let hasMotion = false
+  if (ghost && canCommit) {
+    const listRect = list!.getBoundingClientRect()
+    const gapTop = listRect.top - list!.scrollTop + (baseRows[target]?.top ?? 0)
+    const targetDy = gapTop - ghostBaseTop
+    hasMotion = Math.abs(targetDy - ghostCurrentDy) > 0.5
+    if (hasMotion) {
+      ghost.style.transition = 'transform 0.14s cubic-bezier(0.2, 0, 0, 1)'
+      ghost.style.transform = `translate3d(0, ${targetDy}px, 0)`
+      ghostCurrentDy = targetDy
     }
   }
-  dropDisplayIndex.value = insert
-}
-
-function onDragEnd() {
-  document.removeEventListener('mousemove', onDragMove)
-  document.removeEventListener('mouseup', onDragEnd)
-  suppressClick = dragging.value
-  if (suppressClick) {
-    // 拖拽结束时 click 可能落在容器上，延迟复位避免吞掉下一次正常点击
-    setTimeout(() => { suppressClick = false }, 0)
-  }
-  if (dragging.value && dropDisplayIndex.value >= 0 && draggingIndex.value >= 0) {
-    applyReorder(draggingIndex.value, dropDisplayIndex.value)
-  }
-  draggingIndex.value = -1
-  dropDisplayIndex.value = -1
-  dragging.value = false
-}
-
-onBeforeUnmount(() => {
-  document.removeEventListener('mousemove', onDragMove)
-  document.removeEventListener('mouseup', onDragEnd)
-})
-
-// displayIndex 是"插入到显示列表的第几个位置"（0 表示最上层之上）
-function applyReorder(from: number, insertDisplayIndex: number) {
+  const modelFrom = dragModelIndex
   const count = mapStore.mapData.layers.length
-  const displayOrder = Array.from({ length: count }, (_, d) => count - 1 - d)
-  const fromDisplay = displayOrder.indexOf(from)
-  const rest = displayOrder.filter(i => i !== from)
-  const insertAt = insertDisplayIndex > fromDisplay ? insertDisplayIndex - 1 : insertDisplayIndex
-  rest.splice(Math.max(0, Math.min(insertAt, rest.length)), 0, from)
-  // rest 是最终显示顺序（顶→底），换算成模型索引（底→顶）
-  const to = rest.length - 1 - rest.indexOf(from)
-  if (to !== from) mapStore.moveLayerTo(from, to)
+  discardSettle()
+  pendingSettle = () => {
+    if (ghost) ghost.remove()
+    ghostEl = null
+    if (canCommit && modelFrom >= 0) commitReorder(modelFrom, count - 1 - target)
+    finishDragState()
+  }
+  if (ghost && hasMotion) {
+    // 幽灵滑到空位（transform 补间结束）再提交，避免提前移除造成落点前一小段跳动
+    ghost.addEventListener('transitionend', (ev) => {
+      if ((ev as TransitionEvent).propertyName === 'transform') flushSettle()
+    }, { once: true })
+  }
+  settleTimer = setTimeout(flushSettle, ghost && hasMotion ? 320 : 0)
 }
+
+function commitReorder(fromModel: number, toModel: number) {
+  const list = listRef.value
+  if (!list) return
+  const rows = baseRows
+  // 位移完全走行内联样式（模板不再绑定 :style），Vue 的 class/style patch 碰不到它：
+  // 1) 给每行内联关过渡，2) 同步清掉让位位移，3) 强制一次样式计算。
+  // 这样"清位移"确定发生在无过渡状态，不会留下任何补间，落点零动画。
+  for (const row of rows) {
+    row.el.style.transition = 'none'
+    row.el.style.transform = ''
+  }
+  currentShifts = new Array(rows.length).fill(0)
+  void list.offsetHeight
+  // 提交真实顺序：Vue 只移动 DOM 节点，不再改 transform
+  if (fromModel !== toModel) mapStore.moveLayerTo(fromModel, toModel)
+  nextTick(() => {
+    // 换位后的布局已在"无过渡"下完成一次样式计算，此时恢复过渡不会触发补间
+    const el = listRef.value
+    if (el) void el.offsetHeight
+    for (const row of rows) row.el.style.transition = ''
+  })
+}
+
+/** 取消（Esc / 窗口失焦 / 触摸被打断）：幽灵归位，行动画复原 */
+function cancelDrag() {
+  stopAutoScroll()
+  releasePointerCapture()
+  // 让位行恢复原位：CSS 过渡会把它们平滑滑回去
+  for (let i = 0; i < baseRows.length; i++) setRowShift(i, 0)
+  const list = listRef.value
+  const ghost = ghostEl
+  let hasMotion = false
+  if (ghost && list) {
+    const listRect = list.getBoundingClientRect()
+    const originTop = listRect.top - list.scrollTop + (baseRows[dragFromDisplay.value]?.top ?? 0)
+    const originDy = originTop - ghostBaseTop
+    hasMotion = Math.abs(originDy - ghostCurrentDy) > 0.5
+    if (hasMotion) {
+      ghost.style.transition = 'transform 0.14s cubic-bezier(0.2, 0, 0, 1), opacity 0.14s ease'
+      ghost.style.transform = `translate3d(0, ${originDy}px, 0)`
+      ghost.style.opacity = '0'
+    }
+  }
+  discardSettle()
+  pendingSettle = () => {
+    ghost?.remove()
+    ghostEl = null
+    finishDragState()
+  }
+  settleTimer = setTimeout(flushSettle, ghost && hasMotion ? 320 : 0)
+}
+
+function finishDragState() {
+  draggingStarted = false
+  dragging.value = false
+  dragFromDisplay.value = -1
+  dragTargetDisplay.value = -1
+  currentShifts = []
+  dragModelIndex = -1
+  dragPointerId = null
+  baseRows = []
+  document.body.classList.remove('layer-dragging-cursor')
+}
+
+function resetDragState() {
+  discardSettle()
+  stopAutoScroll()
+  ghostEl?.remove()
+  ghostEl = null
+  finishDragState()
+}
+
+/** 立即执行待提交的落位收尾（不丢上一次排序结果） */
+function flushSettle() {
+  if (settleTimer) {
+    clearTimeout(settleTimer)
+    settleTimer = null
+  }
+  const fn = pendingSettle
+  pendingSettle = null
+  fn?.()
+}
+
+/** 丢弃落位收尾（组件卸载等场景，不再提交） */
+function discardSettle() {
+  if (settleTimer) {
+    clearTimeout(settleTimer)
+    settleTimer = null
+  }
+  pendingSettle = null
+}
+
+function releasePointerCapture() {
+  const list = listRef.value
+  if (dragPointerId === null || !list) return
+  const rowEls = list.querySelectorAll<HTMLElement>('.layer-item')
+  rowEls.forEach(el => {
+    try {
+      if (el.hasPointerCapture?.(dragPointerId!)) el.releasePointerCapture(dragPointerId!)
+    } catch { /* 忽略 */ }
+  })
+}
+
+/** Esc 取消拖拽 */
+function onDragKeyDown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && draggingStarted) {
+    e.preventDefault()
+    removeWindowListeners()
+    cancelDrag()
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', onDragKeyDown))
+onBeforeUnmount(() => {
+  removeWindowListeners()
+  window.removeEventListener('keydown', onDragKeyDown)
+  discardSettle()
+  stopAutoScroll()
+  ghostEl?.remove()
+  ghostEl = null
+  document.body.classList.remove('layer-dragging-cursor')
+})
 
 defineExpose({ setLayerThumb })
 </script>
@@ -321,20 +623,17 @@ defineExpose({ setLayerThumb })
       </button>
     </div>
 
-    <div ref="listRef" class="layer-list">
+    <div ref="listRef" class="layer-list" :class="{ 'is-dragging': dragging }">
       <div
         v-for="(item, dIdx) in displayLayers"
         :key="item.layer.id"
         class="layer-item"
         :class="{
           'layer-item-active': mapStore.activeLayerIndex === item.index,
-          'layer-item-dragging': dragging && draggingIndex === item.index,
-          'insert-before': dragging && dropDisplayIndex === dIdx,
-          'insert-after': dragging && dropDisplayIndex === displayLayers.length && dIdx === displayLayers.length - 1,
+          'layer-item-placeholder': dragging && dragFromDisplay === dIdx,
         }"
-        @click="selectLayer(item.index)"
+        @pointerdown="onRowPointerDown($event, item.index)"
         @dblclick="onRowDblClick(item.index)"
-        @mousedown="onRowPointerDown($event, item.index)"
         :title="item.layer.type === 'image' ? '双击进入绘制页编辑这张图片（双击名称可重命名）' : ''"
       >
         <div class="layer-thumb">
@@ -453,40 +752,64 @@ defineExpose({ setLayerThumb })
   padding: 0 6px;
   border-radius: 4px;
   cursor: default;
-  transition: background 0.12s;
+  /* 让位位移的补间：短、阻尼感强，接近原生列表的手感 */
+  transition: background 0.12s, transform 0.15s cubic-bezier(0.2, 0, 0, 1);
   position: relative;
 }
 
+/* 悬停只作用于未选中的行；选中行本身就是高亮态，不再叠加第二层底色 */
 .layer-item:hover {
   background: rgb(40, 43, 52);
 }
 
-.layer-item-active {
+.layer-item-active,
+.layer-item-active:hover {
   background: rgb(60, 65, 75);
 }
 
-.layer-item-dragging {
-  opacity: 0.45;
+/* 拖拽中：原行隐形留位，其他行不响应悬停高亮 */
+.layer-item-placeholder {
+  opacity: 0;
+  pointer-events: none;
 }
 
-/* 拖拽插入位置指示线 */
-.insert-before::before,
-.insert-after::after {
-  content: '';
-  position: absolute;
-  left: 2px;
-  right: 2px;
-  height: 2px;
-  background: var(--accent);
-  border-radius: 1px;
+.layer-list.is-dragging .layer-item {
+  will-change: transform;
 }
 
-.insert-before::before {
-  top: -1px;
+.layer-list.is-dragging .layer-item:hover {
+  background: transparent;
 }
 
-.insert-after::after {
-  bottom: -1px;
+.layer-list.is-dragging .layer-item-active,
+.layer-list.is-dragging .layer-item-active:hover {
+  background: rgb(60, 65, 75);
+}
+
+/* 跟随指针的幽灵行（克隆自行本身，保留缩略图与图标） */
+.layer-drag-ghost {
+  position: fixed;
+  margin: 0;
+  border: none;
+  z-index: 9999;
+  box-sizing: border-box;
+  background: rgb(52, 56, 66);
+  border-radius: 4px;
+  pointer-events: none;
+  opacity: 0.97;
+  /* 关键：跟手阶段绝不能有过渡，否则幽灵会拖尾 */
+  transition: none;
+  /* 阴影用负扩散 + 内描边：卡片视觉尺寸严格等于行本身，不会溢出左右面板边框 */
+  box-shadow: 0 6px 12px -6px rgba(0, 0, 0, 0.65), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+:global(body.layer-dragging-cursor) {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+:global(body.layer-dragging-cursor *) {
+  cursor: grabbing !important;
 }
 
 .layer-thumb {
