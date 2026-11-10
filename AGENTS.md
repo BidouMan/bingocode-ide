@@ -105,6 +105,8 @@ engine/
 | 文字/震动/随机数/显示碰撞 | `effects.py` |
 | 碰撞几何纯算法 | `collision_geometry.py` |
 | 跨模块共享状态（`_SPRITES`/`_STOPPED`…） | `engine_state.py` |
+| 多文件发现 / 语法检查 / 逐文件编译（行号对齐编辑器） | `script_runner.py` + `code_transform.py` |
+| 学生代码报错 → 中文提示（文件 + 行号，写 stderr） | `user_error.py` |
 
 - **共享状态只能 `import engine_state as st` + `st._X`**，禁止 `from engine_state import _X`（值拷贝不同步）。
 - **依赖单向**：`bingo_engine → game_loop → camera/map/sprite/effects → … → engine_state`；反向引用用函数内局部导入并注释原因。

@@ -806,8 +806,8 @@ export function useBitmapCanvas(
     const nl = Math.hypot(nx, ny) || 1
     nx /= nl
     ny /= nl
-    // 旋转柄：顶边中点沿外法线，外偏移按 1/zoom 屏幕恒定约 14px
-    const rotOff = 14 / Math.max(0.1, store.zoom)
+    // 旋转柄：顶边中点沿外法线，外偏移按 1/zoom 屏幕恒定约 24px（与矢量一致）
+    const rotOff = 24 / Math.max(0.1, store.zoom)
     store.transformBox = {
       corners: cs,
       handles: [
@@ -921,25 +921,16 @@ export function useBitmapCanvas(
     c.restore()
   }
 
-  /** 手柄命中检测：rotate > 缩放角/边 > 框内(move) > outside */
+  /** 手柄命中检测：缩放角/边 > 旋转柄 > 框内(move) > outside
+      （缩放优先，避免旋转柄圆点命中区吞掉顶边中点手柄） */
   function hitTestFloat(p: { x: number; y: number }): 'rotate' | 'scale' | 'move' | 'outside' {
     if (!floatCanvas) return 'outside'
     const z = Math.max(0.1, store.zoom)
     const cs = floatCorners()
     if (cs.length !== 4) return 'outside'
 
-    // 旋转柄
-    const topMid = { x: (cs[0].x + cs[1].x) / 2, y: (cs[0].y + cs[1].y) / 2 }
-    let nx = topMid.x - floatXf.cx
-    let ny = topMid.y - floatXf.cy
-    const nl = Math.hypot(nx, ny) || 1
-    nx /= nl
-    ny /= nl
-    const rot = { x: topMid.x + nx * (14 / z), y: topMid.y + ny * (14 / z) }
-    if (Math.hypot(p.x - rot.x, p.y - rot.y) <= Math.max(6, 8 / z)) return 'rotate'
-
-    // 缩放手柄（角+边中点），命中区放大一倍
-    const hs = Math.max(4, 10 / z)
+    // 缩放手柄（角+边中点），命中区按屏幕恒定（不设 world 下限，否则高倍缩放会盖住旋转柄）
+    const hs = 10 / z
     const handlePts = [
       cs[0], cs[1], cs[2], cs[3],
       { x: (cs[0].x + cs[1].x) / 2, y: (cs[0].y + cs[1].y) / 2 },
@@ -951,6 +942,16 @@ export function useBitmapCanvas(
       if (Math.abs(p.x - hp.x) <= hs / 2 && Math.abs(p.y - hp.y) <= hs / 2) return 'scale'
     }
 
+    // 旋转柄（命中半径按屏幕恒定约 10px）
+    const topMid = { x: (cs[0].x + cs[1].x) / 2, y: (cs[0].y + cs[1].y) / 2 }
+    let nx = topMid.x - floatXf.cx
+    let ny = topMid.y - floatXf.cy
+    const nl = Math.hypot(nx, ny) || 1
+    nx /= nl
+    ny /= nl
+    const rot = { x: topMid.x + nx * (24 / z), y: topMid.y + ny * (24 / z) }
+    if (Math.hypot(p.x - rot.x, p.y - rot.y) <= 10 / z) return 'rotate'
+
     if (inPolygon(p, cs)) return 'move'
     return 'outside'
   }
@@ -959,7 +960,7 @@ export function useBitmapCanvas(
   function scaleHandleInfo(p: { x: number; y: number }) {
     if (!floatCanvas) return null
     const z = Math.max(0.1, store.zoom)
-    const hs = Math.max(4, 10 / z)
+    const hs = 10 / z
     const cs = floatCorners()
     // 半尺寸取绝对值：翻转（负缩放）状态下手柄/锚点定义仍按视觉尺寸
     const hw = Math.abs((floatCanvas.width * floatXf.sx) / 2)
@@ -1681,6 +1682,27 @@ export function useBitmapCanvas(
       commitBitmapText()
     },
     isTextEditing: () => textAnchor !== null,
+    /**
+     * 画板外起笔 / 续笔 / 收笔（PaintArtboard 舞台层转发）：
+     * 画板外按下的 pointerdown 落不到 canvas 上，由舞台接管后把坐标转发至此。
+     * 起点坐标允许为负/越界，画板外的笔画部分由 canvas 自身裁剪，天然不可见。
+     */
+    freehandBegin: (point: { x: number; y: number }) => {
+      if (activeOp !== 'none') return
+      // 与画布内 pointerdown 同序：先收口浮动选框（否则浮动像素会漏进笔画层）
+      if (floatCanvas && store.floatActive) {
+        commitFloatNow()
+        setSelection(null)
+        updateCursor()
+      }
+      beginFreeStroke(point)
+    },
+    freehandContinue: (point: { x: number; y: number }) => {
+      if (activeOp === 'free') continueFreeStroke(point)
+    },
+    freehandEnd: () => {
+      if (activeOp === 'free') endFreeStroke()
+    },
     /** 位图钢笔：Enter 闭合 / Esc 丢弃（PaintArtboard 键盘转发） */
     penFinish: () => bitmapPen.finish(),
     penCancel: () => bitmapPen.cancel(),

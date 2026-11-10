@@ -9,21 +9,38 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { pointInPolygon } from '../../utils/mapImageGeometry'
 import type { SpriteCollisionShape } from '../../composables/useSpriteData'
+// 碰撞作用颜色直接取地图碰撞图层的同一份常量，保证两端颜色完全一致
+import { SHAPE_DISABLED_COLOR_HEX, SHAPE_KIND_COLORS_HEX } from '../../utils/shapeStyle'
+import type { ShapeKind } from '../../stores/map'
 
 const props = defineProps<{
   canvasW: number
   canvasH: number
   shape: SpriteCollisionShape
   zoom: number
+  /** 角色旋转角度（用户坐标，逆时针为正）；用于反向换算鼠标坐标 */
+  angle?: number
+  /** 碰撞形状自身的旋转角度（度，逆时针为正；绕形状包围盒中心旋转） */
+  shapeAngle?: number
+  /** 碰撞作用：感应形状用主题绿色（与地图编辑器碰撞图层同一套观感） */
+  kind?: 'solid' | 'sensor' | 'both'
   /** 禁用碰撞：形状仍显示但整体置灰（与地图编辑器禁用碰撞体同观感） */
   disabled?: boolean
 }>()
 const emit = defineEmits<{ update: [shape: SpriteCollisionShape] }>()
 
-// Godot 编辑器钢蓝（边框/形状描边）；禁用时转为灰色
-const COL = computed(() => (props.disabled ? '#8a8f98' : '#478CBF'))
-// Scratch 风格半透明蓝填充；禁用时转为低透明度灰
-const FILL = computed(() => (props.disabled ? 'rgba(160,160,170,0.14)' : 'rgba(76,151,255,0.28)'))
+// 碰撞作用颜色：与地图碰撞图层共用 SHAPE_KIND_COLORS_HEX（碰撞红 / 感应绿 / 组合蓝），禁用统一灰
+const colorHex = computed(() => {
+  if (props.disabled) return SHAPE_DISABLED_COLOR_HEX
+  return SHAPE_KIND_COLORS_HEX[(props.kind ?? 'solid') as ShapeKind] ?? SHAPE_KIND_COLORS_HEX.solid
+})
+const COL = computed(() => `#${colorHex.value.toString(16).padStart(6, '0')}`)
+// 填充透明度与地图碰撞图层一致（选中态 0.26；禁用态 0.16）
+const FILL = computed(() => {
+  const hex = colorHex.value
+  const alpha = props.disabled ? 0.16 : 0.26
+  return `rgba(${(hex >> 16) & 0xff}, ${(hex >> 8) & 0xff}, ${hex & 0xff}, ${alpha})`
+})
 const snap = (v: number) => Math.round(v * 2) / 2
 
 const rootRef = ref<HTMLDivElement | null>(null)
@@ -79,15 +96,46 @@ const polyPointsStr = computed(() =>
   props.shape.type === 'polygon' ? props.shape.points.map(p => `${p[0]},${p[1]}`).join(' ') : '',
 )
 
-// ── 屏幕坐标 → 画布逻辑坐标（根元素被 zoom 变换，用自身 rect 反推） ──
+/** 碰撞形状自身旋转：绕包围盒中心（SVG 正角为屏幕顺时针，用户角度逆时针为正 → 取负） */
+const contentTransform = computed(() => {
+  const a = props.shapeAngle || 0
+  if (!a) return undefined
+  const b = box.value
+  return `rotate(${-a} ${b.cx} ${b.cy})`
+})
+
+// ── 屏幕坐标 → 画布逻辑坐标（根元素可能被旋转/缩放，用中心点 + 反向旋转还原） ──
 /** 返回画布坐标 + 实际屏幕缩放倍率（命中容差按屏幕像素换算要用） */
 function clientToCanvas(e: MouseEvent): { x: number; y: number; scale: number } | null {
   const el = rootRef.value
   if (!el) return null
   const r = el.getBoundingClientRect()
-  if (r.width === 0) return null
-  const scale = r.width / props.canvasW
-  return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale, scale }
+  if (r.width === 0 || r.height === 0) return null
+  // 旋转不改变元素中心；缩放倍率由父级传入（旋转后的包围盒宽度不是真实比例）
+  const scale = Math.max(0.001, props.zoom)
+  const cx = r.left + r.width / 2
+  const cy = r.top + r.height / 2
+  // 角色以 CSS -angle 旋转，逆运算 +angle
+  const a = (props.angle || 0) * Math.PI / 180
+  const cos = Math.cos(a)
+  const sin = Math.sin(a)
+  const dx = e.clientX - cx
+  const dy = e.clientY - cy
+  let x = (dx * cos - dy * sin) / scale + props.canvasW / 2
+  let y = (dx * sin + dy * cos) / scale + props.canvasH / 2
+  // 形状自身旋转的正运算（渲染时 rotate(-角度)），这里按 +角度 绕包围盒中心反向还原，
+  // 让命中判定 / 拖拽始终在未旋转的形状数据上计算
+  const sa = (props.shapeAngle || 0) * Math.PI / 180
+  if (sa) {
+    const b = box.value
+    const ox = x - b.cx
+    const oy = y - b.cy
+    const c2 = Math.cos(sa)
+    const s2 = Math.sin(sa)
+    x = b.cx + ox * c2 - oy * s2
+    y = b.cy + ox * s2 + oy * c2
+  }
+  return { x, y, scale }
 }
 
 // ── 手柄定义 ──
@@ -404,7 +452,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
     ref="rootRef"
     class="cso-root"
     :class="{ 'cso-disabled': disabled }"
-    :style="{ width: `${canvasW}px`, height: `${canvasH}px`, cursor: hoverCursor }"
+    :style="{ width: `${canvasW}px`, height: `${canvasH}px`, cursor: hoverCursor, '--cso-color': COL }"
     @mousedown="onRootDown"
     @mousemove="onRootMove"
     @mouseleave="onRootLeave"
@@ -415,6 +463,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
       :height="canvasH"
       :viewBox="`0 0 ${canvasW} ${canvasH}`"
     >
+      <g :transform="contentTransform">
       <!-- 形状本体：只负责绘制，交互统一由根元素命中判定（避免细小手柄抢不到事件） -->
       <template v-if="shape.type === 'rect'">
         <rect
@@ -492,7 +541,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
               :cx="p[0]"
               :cy="p[1]"
               :r="halfSize * 1.8"
-              fill="rgba(71,140,191,0.55)"
+              :fill="FILL"
             />
             <circle
               class="cso-handle"
@@ -504,6 +553,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
             />
           </template>
         </template>
+      </g>
       </g>
     </svg>
   </div>
@@ -531,7 +581,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
   stroke: #23272e;
 }
 .cso-vtx-sel {
-  fill: #478cbf;
+  fill: var(--cso-color);
   stroke: #ffffff;
 }
 /* 禁用碰撞：形状整体置灰（手柄半透明，仍可编辑） */

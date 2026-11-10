@@ -132,6 +132,7 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 
 ### 侦测
 - hero.is_touch(target) — 碰撞检测。target 可以是：另一个 Sprite、mouse 对象、字符串标签。返回 True/False
+- hero.is_clicked() — 这一帧鼠标左键是否点到这个角色（按看得见的图片算，碰撞盒不影响）。一次点击只算一次，按住不放不会一直触发；重叠时只有最上层（后创建）的角色算点中
 - hero.is_touch_edge() — 是否碰到地图边界
 - hero.is_out_screen() — 是否整个角色都飞出游戏画面（地图再大也只看一屏）
 - hero.distance_to(target) — 返回到另一个 Sprite 或 mouse 的像素距离
@@ -152,6 +153,7 @@ const SYSTEM_PROMPT = `你是 BingoCodeIDE 的 AI 编程助手，专为教师设
 - is_paused() — 检查是否暂停
 - stop() — 结束游戏，退出循环
 - hero.on_touch_group("组名") — 注册碰撞：对方要先 add_to_group("组名")。对同一个角色注册一次即可（不要每帧调用）；每次新建的子弹需在创建后各注册一次。注册后碰到组内成员时，引擎自动把「自己」和「对方」一起删除，无需再写 is_touch_group 判断和 delete()。要自定义（加分/播声音/扣血）就传函数：on_touch_group("组名", 函数)，函数参数为 (自己, 碰到的角色)
+- hero.on_clicked(函数) — 角色被鼠标左键点中时执行函数（写在 while True 外面注册一次，重复注册会覆盖）。函数可以不写参数，或写 1 个参数（被点的角色）。点击范围与 is_clicked() 相同：按看得见的图片算，重叠时只有最上层角色触发。简单场景直接用 if hero.is_clicked()
 - hero.add_to_group("组名") — 把角色加入组（如 "enemies"、"bullets"）
 - broadcast("事件名") — 发送广播消息
 - if hero.receive("事件名") — 检查这一帧有没有收到广播（入门写法，不需要写函数）。广播发出后的下一帧返回一次 True，必须写在 while True 里

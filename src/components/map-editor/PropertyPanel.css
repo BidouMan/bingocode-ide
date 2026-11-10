@@ -3,13 +3,23 @@
   flex-direction: column;
   /* 与滚动内容同色：面板全部折叠后下方空白不能变成另一种颜色 */
   background: var(--bg-root);
+  /* 隐藏面板滚动条占位（滚轮照常可滚）：有/无滚动条都不改变内容宽度，
+     右侧留白只由 .att-frame 的内边距决定（与角色编辑器属性面板同一做法） */
+  scrollbar-width: none;
+}
+
+.property-panel::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .att-frame {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 12px 16px 16px 16px;
+  /* 分组之间 14px，与角色编辑器属性面板一致 */
+  gap: 14px;
+  /* 左右内边距一致（各 12px）：滚动条已隐藏占位，右侧不会再多出宽度 */
+  padding: 10px 12px 12px 12px;
   background: var(--bg-root);
 }
 
@@ -25,6 +35,8 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  /* 统一行高：输入框 / 下拉 / 复选框行都是 24px，纵向节奏一致 */
+  min-height: 24px;
 }
 
 /* 下拉框：固定占满标签右侧剩余宽度，右边缘对齐属性区 */
@@ -44,13 +56,16 @@
   border-left: 1px solid rgba(255, 255, 255, 0.09);
 }
 
-/* 标签列：最长的标签是 4 个字，列宽按此收紧，控件左边缘不再离得太远 */
+/* 标签列：固定宽度，保证每一行控件左边缘都在同一条竖线上（与角色编辑器一致） */
 .att-label {
   color: #9ca0a4;
   font-size: 12px;
-  min-width: 50px;
+  width: 60px;
+  min-width: 60px;
   flex-shrink: 0;
   white-space: nowrap;
+  /* 与 24px 的行高对齐，单行/多行标题都在同一基线上 */
+  line-height: 24px;
 }
 
 /* 行尾设置按钮：相机 / 下滑详细参数的入口，hover 与展开时用底色提示状态 */
@@ -58,8 +73,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   margin-left: auto;
   background: transparent;
@@ -105,6 +120,9 @@
   color: white;
   padding: 0 6px;
   font-size: 12px;
+  /* 与角色编辑器属性面板一致：数字用等宽字形，单位定位才不会偏 */
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
   outline: none;
   box-sizing: border-box;
 }
@@ -271,16 +289,40 @@
   min-width: 0;
 }
 
-/* 缩放下方「约束比例」行：文字跟 X / Y 同列，选框紧跟其后 */
-.att-axis-lock {
-  gap: 8px;
+/* X / Y 轴输入：轴标签画在输入框内部，左右边界与同一列其他控件对齐 */
+.att-axis-field {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
 }
 
-/* 旋转滑条：竖排在输入框下方，按自身 3px 高度撑开，不再参与拉伸分配 */
-.att-axis-group .att-range {
-  flex: 0 0 auto;
+.att-axis-field .att-input {
+  flex: 1 1 0;
   width: 100%;
-  margin: 3px 0 1px;
+  min-width: 0;
+  /* 给内部轴标签留出呼吸感 */
+  padding-left: 28px;
+}
+
+.att-axis-tag {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  line-height: 1;
+  color: #7c818a;
+  pointer-events: none;
+}
+
+/* 位置行：X 轴红、Y 轴绿，与画布坐标轴颜色一致 */
+.att-axis-tag.is-x { color: #ff6b6b; }
+.att-axis-tag.is-y { color: #56d68a; }
+
+/* 缩放下方「约束比例」行：选框与上方 X / Y 输入框左边缘对齐，文字紧跟其后 */
+.att-axis-lock {
+  gap: 4px;
 }
 
 .att-size-label {
@@ -315,10 +357,95 @@
 }
 
 
-/* 占位控件：禁用态（功能开发中） */
+/* 旋转框内嵌滑条（Godot 风格）：数字在上，滑条贴住框底，
+   与角色编辑器属性面板同一套做法 */
+.att-slider-field {
+  position: relative;
+  display: block;
+  flex: 1;
+  min-width: 0;
+}
+
+.att-slider-field .att-input {
+  /* 块级显示：去掉 inline-block 基线留出的空隙 */
+  display: block;
+  width: 100%;
+  /* 比常规输入框高一点：上半部分放数字、底部留给滑条 */
+  height: 34px;
+  padding-bottom: 7px;
+  line-height: normal;
+}
+
+/* 数值单位（如旋转的 °）：紧跟数字后面，位置由模板按数字位数写入 left */
+.att-axis-unit {
+  position: absolute;
+  top: 13px;
+  transform: translateY(-50%);
+  font-size: 12px;
+  line-height: 1;
+  color: #7c818a;
+  pointer-events: none;
+}
+
+/* 滑条压在输入框内部底边：只占据底部一条，左右留出圆角内的边距 */
+.att-slider-field .att-range {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 4px;
+  width: auto;
+  height: 8px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+
+/* 滑条：细深灰轨道 + 绿色小圆点滑块（不要又粗又大） */
 .att-range {
   flex: 1;
   min-width: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  outline: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.att-range::-webkit-slider-runnable-track {
+  height: 2px;
+  border-radius: 1px;
+  background: rgb(74, 79, 90);
+}
+
+.att-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 8px;
+  height: 8px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: #5bfb84;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.att-range:hover::-webkit-slider-thumb,
+.att-range:active::-webkit-slider-thumb {
+  background: #7dffa8;
+}
+
+/* 兼容 Chromium 内核（Windows WebView2）的旧式伪元素写法 */
+.att-range::-moz-range-track {
+  height: 2px;
+  border-radius: 1px;
+  background: rgb(74, 79, 90);
+}
+
+.att-range::-moz-range-thumb {
+  width: 8px;
+  height: 8px;
+  border: none;
+  border-radius: 50%;
+  background: #5bfb84;
 }
 
 .att-range:disabled {
@@ -326,43 +453,43 @@
   cursor: not-allowed;
 }
 
-/* ====== 标记检视器（Godot / Unity 风格的可折叠分区） ====== */
-.marker-inspector {
-  gap: 0;
-}
+/* ====== 标记 / 形状检视器（Godot 风格可折叠分区，与角色编辑器同一套规格） ====== */
+/* 分组间距沿用 .att-group 的 12px，分节之间靠标题条本身区分 */
 
+/* 分区整块：不画细线，靠标题条底色区分（Godot 检视器风格） */
 .mi-section {
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-/* 第一块分区不画上分割线，避免紧贴上方标签栏形成多余线条 */
-.att-frame > .att-group:first-child > .mi-section:first-child {
   border-top: none;
 }
 
-/* 分区标题：整行可点，左侧箭头指示展开状态（参考 Godot / Unity 检视器） */
+/* 分区标题：整行浅底色 + 微微内描边，与正文形成明显分界 */
 .mi-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  width: calc(100% + 16px);
+  gap: 8px;
+  /* 与正文同宽：左边缘对齐标签列、右边缘对齐输入框 */
+  width: 100%;
   height: 30px;
-  margin: 0 -8px;
-  padding: 0 8px;
-  background: transparent;
-  border: none;
+  margin: 0;
+  /* 内部左右留白：折叠箭头不贴标题框边角，和文字之间有呼吸感 */
+  padding: 0 6px;
+  /* 边框算进宽度，避免 width:100% 再多出描边导致右端超宽 */
+  box-sizing: border-box;
+  background: rgb(48, 51, 60);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 4px;
-  color: #9ea3aa;
+  color: #e2e5e9;
   font-size: 12px;
+  font-weight: 600;
   font-family: inherit;
+  line-height: 1;
   text-align: left;
   cursor: default;
   transition: background 0.12s ease, color 0.12s ease;
 }
 
 .mi-head:hover {
-  background: rgba(255, 255, 255, 0.045);
-  color: #e2e5e9;
+  background: rgb(60, 64, 74);
+  color: #ffffff;
 }
 
 .mi-head:disabled {
@@ -371,13 +498,14 @@
 }
 
 .mi-head:disabled:hover {
-  background: transparent;
-  color: #9ea3aa;
+  background: rgb(48, 51, 60);
+  color: #e2e5e9;
 }
 
-/* 展开中的分区标题更亮，让"当前展开哪一组"一眼可见 */
+/* 展开中的分区标题底色再抬一档 */
 .mi-section.open > .mi-head {
-  color: #d5d8dc;
+  background: rgb(54, 58, 68);
+  color: #ffffff;
 }
 
 /* 收起时朝右 >，展开时朝下 v；与帮助面板、素材栏的箭头保持同一套动作 */
@@ -385,17 +513,17 @@
   flex-shrink: 0;
   width: 14px;
   height: 14px;
-  opacity: 0.5;
+  opacity: 0.7;
   transition: transform 0.18s ease, opacity 0.18s ease;
 }
 
 .mi-section.open > .mi-head .mi-chevron {
   transform: rotate(90deg);
-  opacity: 0.8;
+  opacity: 1;
 }
 
 .mi-head:hover .mi-chevron {
-  opacity: 0.9;
+  opacity: 1;
 }
 
 .mi-head-title {
@@ -405,8 +533,10 @@
 .mi-body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 2px 0 12px;
+  gap: 8px;
+  /* 左侧 7px = 标题边框 1px + 内部留白 6px，
+     让正文标签与折叠箭头落在同一条左基线上；内容底部不留白 */
+  padding: 6px 0 0 7px;
 }
 
 .mi-actions {
@@ -443,7 +573,8 @@
   align-items: center;
   gap: 7px;
   width: 100%;
-  height: 26px;
+  /* 与输入框同高：列表卡片、下拉、输入框统一 24px */
+  height: 24px;
   padding: 0 6px;
   border: 1px solid transparent;
   border-radius: 4px;
@@ -499,7 +630,8 @@
   justify-content: center;
   gap: 5px;
   flex: 1;
-  height: 26px;
+  /* 统一控件高度：按钮与输入框、下拉都是 24px */
+  height: 24px;
   padding: 0 8px;
   background: rgb(48, 51, 60);
   border: 1px solid var(--border-light);
@@ -596,6 +728,16 @@
   color: #fff;
 }
 
+/* 不可用的菜单项（如锁定后不能隐藏 / 删除） */
+.mi-menu-item:disabled {
+  opacity: 0.4;
+}
+
+.mi-menu-item:disabled:hover {
+  background: transparent;
+  color: #cfd3d9;
+}
+
 .mi-menu-sep {
   height: 1px;
   margin: 4px 6px;
@@ -607,18 +749,8 @@
   color: #ffb4ab;
 }
 
-/* ====== 形状管理：列表行 / 批量设置 ====== */
-.sm-row {
-  gap: 6px;
-  padding: 0 4px;
-}
-
-.sm-check {
-  flex-shrink: 0;
-  width: 13px;
-  height: 13px;
-  accent-color: #528bff;
-}
+/* ====== 形状列表：卡片 / 底部操作 ====== */
+/* 卡片沿用 .mi-list-row 的统一行高与内边距，多选改为 Shift / Cmd / Ctrl 点选 */
 
 .sm-main {
   display: flex;
@@ -645,17 +777,7 @@
   border-radius: 50%;
 }
 
-.sm-index {
-  flex-shrink: 0;
-  min-width: 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 10px;
-  color: #8f959d;
-}
-
-.sm-kind { flex-shrink: 0; font-size: 11px; color: #cfd3d9; }
-
-.sm-tag {
+.sm-name {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -663,61 +785,108 @@
   white-space: nowrap;
   font-size: 11px;
   color: #d7dbe1;
+  text-align: left;
 }
 
-.sm-tag.empty { color: #6f747c; }
+.sm-name.empty { color: #6f747c; }
 
-/* 批量设置区：勾选后展开 */
-.sm-batch {
+/* 卡片右侧的形状类型（只读） */
+.sm-kind { flex-shrink: 0; font-size: 10px; color: #8f959d; }
+
+/* 已禁用的形状：名称变淡，一眼能区分 */
+.sm-row.is-off .sm-name,
+.sm-row.is-off .sm-dot { opacity: 0.5; }
+
+/* 底部操作区：全选 / 清空 / 禁用（启用） / 删除 排成一行 */
+.sm-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* 面板较窄时四个按钮平分宽度，不靠内容撑开 */
+.sm-actions .mi-btn {
+  min-width: 0;
+  padding: 0 4px;
+}
+
+/* ====== 图块集列表 ====== */
+/* 行结构：圆点（选中=主题绿，未选中=灰） + 名称 + 图块尺寸 + 锁定状态 */
+.tileset-dot {
+  background: #98a0aa;
+}
+
+.tileset-row.is-selected .tileset-dot {
+  background: #5BFB84;
+}
+
+.tileset-size {
+  flex-shrink: 0;
+  color: #9ca0a4;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* 已禁用的图块集：名称与圆点变淡，一眼能区分 */
+.tileset-row.is-off .mi-list-name,
+.tileset-row.is-off .tileset-dot {
+  opacity: 0.5;
+}
+
+.tileset-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.tileset-actions .mi-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  justify-content: center;
+  padding: 0 4px;
+}
+
+/* ====== 碰撞层级（勾选后在面板内展开，和单向碰撞一致） ====== */
+.layer-block {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-top: 8px;
+  gap: 6px;
+  margin-bottom: 8px;
 }
 
-.sm-batch-head { display: flex; align-items: center; gap: 8px; }
-
-.sm-batch-count { flex: 1; font-size: 11px; color: #9ca0a4; }
-
-.sm-batch-link {
-  height: 20px;
-  padding: 0 6px;
-  background: transparent;
-  border: none;
-  border-radius: 3px;
-  color: #8fb8ff;
-  font-size: 11px;
-  font-family: inherit;
-  cursor: default;
+.layer-block-name {
+  color: #9ca0a4;
+  font-size: 12px;
+  line-height: 18px;
 }
 
-.sm-batch-link:hover { background: rgb(61, 64, 72); }
-.sm-batch-link:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.sm-batch-del { flex: 0 0 auto; margin-left: auto; }
-
-.sm-hint { padding: 2px 0; font-size: 11px; color: #7c818a; }
-
-/* 已有标签候选：点击直接复用，避免手打拼错（跨平台不依赖原生 datalist） */
-.tag-chips {
-  display: flex;
-  flex-wrap: wrap;
+.layer-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   gap: 4px;
 }
 
-.tag-chip {
-  height: 20px;
-  padding: 0 7px;
-  background: rgb(48, 51, 60);
+.layer-cell {
+  height: 26px;
+  background: rgb(34, 37, 43);
   border: 1px solid var(--border-light);
-  border-radius: 999px;
-  color: #a7acb4;
+  border-radius: 4px;
+  color: #b9bdc2;
   font-size: 11px;
-  font-family: inherit;
-  white-space: nowrap;
+  font-family: 'JetBrains Mono', monospace;
   cursor: default;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
-.tag-chip:hover { background: rgb(61, 64, 72); color: #fff; }
-.tag-chip:disabled { opacity: 0.5; cursor: not-allowed; }
+.layer-cell:hover:not(:disabled):not(.layer-cell-active) {
+  background: var(--border-light);
+}
+
+.layer-cell-active {
+  background: rgba(91, 251, 132, 0.16);
+  border-color: rgba(91, 251, 132, 0.6);
+  color: #e8eaec;
+  box-shadow: inset 0 0 0 1px rgba(91, 251, 132, 0.25);
+}
+
+.layer-cell:disabled {
+  opacity: 0.5;
+}

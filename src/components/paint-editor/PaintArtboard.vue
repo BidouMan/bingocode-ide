@@ -36,6 +36,9 @@ const {
   getCanvas,
   textEditInput: bitmapTextInput, textEditCommit: bitmapTextCommit,
   penFinish: bitmapPenFinish, penCancel: bitmapPenCancel,
+  freehandBegin: bitmapFreehandBegin,
+  freehandContinue: bitmapFreehandContinue,
+  freehandEnd: bitmapFreehandEnd,
 } = useBitmapCanvas(bitmapCanvas, { smartSnap: paintSnapInfo })
 
 // 矢量绘制引擎（paper 场景图/对象操作/多帧 JSON 快照），坐标与位图同源（clientToArtboard）
@@ -57,7 +60,7 @@ const vectorEngine = usePaperScope(vectorCanvas, bitmapCanvas, {
 
 /**
  * 绘制页智能吸附候选：画板边界与中心 + 其它对象的边/中心（与地图编辑器同一套阈值），
- * 不做网格吸附（角色画板没有网格）；附近没有候选线时由吸附工具兜底为整数像素。
+ * 显示网格时同时吸附网格线；附近没有候选线时由吸附工具兜底为整数像素。
  */
 function paintSnapInfo(): SnapInfo | null {
   if (!store.smartSnap) return null
@@ -71,7 +74,8 @@ function paintSnapInfo(): SnapInfo | null {
   }
   return {
     lines: { xs, ys },
-    grid: 0,
+    // 网格吸附仅在网格可见时生效（避免吸到看不见的网格线）
+    grid: store.showGrid ? Math.max(1, Math.round(store.gridSize) || 16) : 0,
     threshold: snapThreshold(store.zoom),
   }
 }
@@ -186,6 +190,8 @@ function drawPickLens(clientX: number, clientY: number) {
 
 function onStagePointerLeavePick() {
   if (store.eyedropperActive) pickLensPos.value = null
+  // 鼠标离开整个舞台：笔刷圈一并隐藏（回到舞台后由 pointermove 重建）
+  store.cursorPos = null
 }
 
 // 激活/退出拾色：构建/释放合成缓存（首次 move 前镜不显示）
@@ -276,6 +282,122 @@ const artboardStyle = computed(() => {
   }
   return style
 })
+
+// ─── 显示网格（格子尺寸在 store 中，默认取地图编辑器的图块尺寸）───
+/** 网格线位置（画板逻辑坐标）：只画内部线，避免与画板边框重叠；
+    屏幕间距过密（<5px）时不画，避免几千条 SVG 线拖慢缩放与拖动 */
+const gridLines = computed(() => {
+  const vertical: number[] = []
+  const horizontal: number[] = []
+  if (!store.showGrid) return { vertical, horizontal }
+  const t = Math.max(1, Math.round(store.gridSize) || 16)
+  if (t * store.zoom < 5) return { vertical, horizontal }
+  for (let x = t; x < store.artboardWidth; x += t) vertical.push(x)
+  for (let y = t; y < store.artboardHeight; y += t) horizontal.push(y)
+  return { vertical, horizontal }
+})
+/** 线宽按屏幕像素恒定：画板整体被 zoom 缩放，这里反向除以 zoom */
+const gridStroke = computed(() => 1 / Math.max(0.1, store.zoom))
+
+/**
+ * 画板外起笔（对齐专业绘图软件）：画笔/橡皮在画板外的灰色舞台区按下后，
+ * 拖入画板即可正常绘制。画板外按下的 pointerdown 落不到位图 canvas 上，
+ * 矢量 canvas 又被 clip-path 裁到画板视觉盒、画板外同样命中不到，故统一在此接管：
+ * 按下先记起点并捕获指针，指针进入画板才真正落笔（按下点→入板点的线段由 canvas
+ * 裁剪，只显示画板内部分）；未进入画板就松开 = 什么都没发生（不压撤销步、不弄脏画板）。
+ */
+let outsideStroke: {
+  pointerId: number
+  /** 按下时的画板坐标（可为负/越界） */
+  start: { x: number; y: number }
+  /** 是否已真正开始绘制 */
+  started: boolean
+} | null = null
+
+function isFreehandTool() {
+  return store.activeTool === 'brush' || store.activeTool === 'eraser'
+}
+
+function isInsideArtboard(p: { x: number; y: number }) {
+  return p.x >= 0 && p.y >= 0 && p.x <= store.artboardWidth && p.y <= store.artboardHeight
+}
+
+/** 自由笔画按模式分派到对应引擎（矢量/位图同参） */
+function freehandBeginAt(p: { x: number; y: number }) {
+  if (store.mode === 'vector') vectorEngine.freehandBegin(p)
+  else bitmapFreehandBegin(p)
+}
+function freehandContinueAt(p: { x: number; y: number }) {
+  if (store.mode === 'vector') vectorEngine.freehandContinue(p)
+  else bitmapFreehandContinue(p)
+}
+function freehandEndAt() {
+  if (store.mode === 'vector') vectorEngine.freehandEnd()
+  else bitmapFreehandEnd()
+}
+
+/** 舞台 pointerdown：拾色优先，其后处理画板外起笔 */
+function onStagePointerDown(e: PointerEvent) {
+  onStagePointerDownForPick(e)
+  if (store.eyedropperActive) return
+  if (e.button !== 0 || !isFreehandTool()) return
+  if (store.cropMode || store.textEdit) return
+  const el = e.target as Element | null
+  // 画板内（canvas 铺满画板）、两块绘制画布、舞台浮动工具条上的按下不归这里管
+  if (!el || typeof el.closest !== 'function') return
+  if (el === vectorCanvas.value || el === bitmapCanvas.value) return
+  if (el.closest('.artboard') || el.closest('.view-float-bar')) return
+  const p = clientToArtboard(e.clientX, e.clientY)
+  if (!p) return
+  outsideStroke = { pointerId: e.pointerId, start: p, started: false }
+  stageRef.value?.setPointerCapture(e.pointerId)
+  e.preventDefault()
+}
+
+function onStagePointerMoveDraw(e: PointerEvent) {
+  // 画笔/橡皮：笔刷圈跟随鼠标，画板外（灰色舞台区）同样显示（专业软件同款）
+  if (showBrushCursor.value) {
+    const el = e.target as Element | null
+    const overUi = !!(el && typeof el.closest === 'function' && el.closest('.view-float-bar'))
+    store.cursorPos = overUi ? null : clientToArtboard(e.clientX, e.clientY)
+  }
+  if (!outsideStroke || e.pointerId !== outsideStroke.pointerId) return
+  if (e.buttons !== 1) {
+    // 左键已松开（pointerup 意外丢失）：收口已开始的笔画并放弃这次起笔，
+    // 避免"悬停即在画板上落笔"
+    const id = e.pointerId
+    if (outsideStroke.started) freehandEndAt()
+    outsideStroke = null
+    const stage = stageRef.value
+    if (stage?.hasPointerCapture(id)) stage.releasePointerCapture(id)
+    return
+  }
+  const p = clientToArtboard(e.clientX, e.clientY)
+  if (!p) return
+  if (!outsideStroke.started) {
+    if (!isInsideArtboard(p)) return
+    freehandBeginAt(outsideStroke.start)
+    outsideStroke.started = true
+  }
+  freehandContinueAt(p)
+}
+
+function onStagePointerUpDraw(e: PointerEvent) {
+  if (!outsideStroke || e.pointerId !== outsideStroke.pointerId) return
+  const s = outsideStroke
+  outsideStroke = null
+  const p = clientToArtboard(e.clientX, e.clientY)
+  // 按下在外、松开在内且中途没有 move 采样：补一笔，保证「点进画板」也能落点
+  if (!s.started && p && isInsideArtboard(p)) {
+    freehandBeginAt(s.start)
+    s.started = true
+    freehandContinueAt(p)
+  }
+  if (s.started) freehandEndAt()
+  const stage = stageRef.value
+  if (stage?.hasPointerCapture(e.pointerId)) stage.releasePointerCapture(e.pointerId)
+  store.cursorPos = p && isInsideArtboard(p) ? p : null
+}
 
 // ─── 手动裁切（拖拽锚点调整画布尺寸，回车确认）───
 /** 裁切框边命中方向（true = 该边跟随指针移动） */
@@ -635,6 +757,13 @@ const brushCursorStyle = computed(() => {
   }
 })
 
+/** 画笔/橡皮选中：舞台范围内隐藏系统光标，只显示自绘笔刷圈（对齐专业绘图软件） */
+const showBrushCursor = computed(() =>
+  !store.eyedropperActive &&
+  !store.cropMode &&
+  (store.activeTool === 'brush' || store.activeTool === 'eraser')
+)
+
 function focusStage() {
   stageRef.value?.focus()
 }
@@ -648,6 +777,11 @@ function onZoomIn() {
 }
 function onZoomOut() {
   store.setZoom(Math.round((store.zoom - 0.1) * 100) / 100)
+}
+/** 画布回到视口中心（保持当前缩放，对齐常见绘图软件「居中」行为） */
+function centerView() {
+  store.panX = 0
+  store.panY = 0
 }
 
 // ─── 拾色（吸管）：从合成缓存读点击点像素色，写入目标通道后退出 ───
@@ -721,6 +855,30 @@ function onStageKeydown(e: KeyboardEvent) {
       cancelCrop()
       e.preventDefault()
     }
+    return
+  }
+
+  // 撤销/重做（通用习惯）：
+  // macOS = Cmd+Z / Cmd+Shift+Z；Windows = Ctrl+Z / Ctrl+Y（同时兼容 Ctrl+Shift+Z）
+  if (mod) {
+    const key = e.key.toLowerCase()
+    if (key === 'z') {
+      if (e.shiftKey) redoActive()
+      else undoActive()
+      e.preventDefault()
+      return
+    }
+    if (key === 'y' && !e.shiftKey) {
+      redoActive()
+      e.preventDefault()
+      return
+    }
+  }
+
+  // F：画布回到视口中心（不改变缩放）
+  if (!mod && !e.altKey && (e.key === 'f' || e.key === 'F')) {
+    centerView()
+    e.preventDefault()
     return
   }
 
@@ -848,15 +1006,24 @@ function moveFrame(from: number, to: number) {
   store.selectFrame(to)
 }
 
-/** 整体载入（编辑既有角色）：既有帧均为纯位图，矢量槽重置 */
+/**
+ * 整体载入（编辑既有角色）：位图帧来自角色文件；
+ * vectors 非空时同时恢复侧车里的矢量快照（对象保持独立可编辑）。
+ */
 function loadFrames(
   canvases: HTMLCanvasElement[],
   names: (string | null)[],
-  activeIndex: number
+  activeIndex: number,
+  vectors?: (string | null)[]
 ) {
   commitTextEdit() // 载入前收口编辑中的文字
   bitmapLoadFrames(canvases, names, activeIndex)
   vectorEngine.onLoadFrames(canvases.length)
+  if (vectors && vectors.some((v) => v)) {
+    vectorEngine.loadVectorFrames(vectors)
+    // 位图载入时缩略图只含位图层，矢量恢复后补画当前帧
+    regenThumb(store.activeFrameIndex)
+  }
 }
 
 /**
@@ -1113,6 +1280,10 @@ defineExpose({
   moveFrame,
   loadFrames,
   getFrameCanvases: getFrameCanvasesComposed,
+  /** 纯位图层帧（保存绘制侧车底图用：不含矢量，移动对象不会残留旧像素） */
+  getFrameCanvasesBitmap: bitmapGetFrameCanvases,
+  /** 每帧矢量快照（保存绘制侧车用，与 getFrameCanvasesBitmap 下标对齐） */
+  getFrameVectors: () => vectorEngine.exportAllFrameVectors(),
   getFrameNames,
   copySelection: copyActive,
   pasteClipboard: pasteActive,
@@ -1133,14 +1304,17 @@ defineExpose({
   <div
     ref="stageRef"
     class="paint-stage"
-    :class="{ picking: store.eyedropperActive }"
+    :class="{ picking: store.eyedropperActive, 'show-brush-cursor': showBrushCursor }"
     tabindex="0"
     @wheel.prevent="onStageWheel"
     @mousedown="onStageMouseDown"
     @mousemove="onStageMouseMove"
     @mouseup="isPanning = false"
     @dblclick="onStageDblClick"
-    @pointerdown="onStagePointerDownForPick"
+    @pointerdown="onStagePointerDown"
+    @pointermove="onStagePointerMoveDraw"
+    @pointerup="onStagePointerUpDraw"
+    @pointercancel="onStagePointerUpDraw"
     @pointerleave="onStagePointerLeavePick"
     @keydown="onStageKeydown"
   >
@@ -1174,6 +1348,35 @@ defineExpose({
          浮于矢量画布之上——选区框必须盖住两层内容 -->
     <div class="paint-overlay">
       <div class="paint-overlay-box" :style="artboardStyle">
+        <!-- 网格 overlay：格子尺寸与「网格尺寸」输入值一致，作为绘制/吸附参考，
+             不写进画板像素；盖在内容之上、选区框之下 -->
+        <svg
+          v-if="store.showGrid && (gridLines.vertical.length || gridLines.horizontal.length)"
+          class="grid-overlay"
+          :viewBox="`0 0 ${store.artboardWidth} ${store.artboardHeight}`"
+          preserveAspectRatio="none"
+        >
+          <line
+            v-for="x in gridLines.vertical"
+            :key="`v${x}`"
+            :x1="x"
+            y1="0"
+            :x2="x"
+            :y2="store.artboardHeight"
+            stroke="rgba(51, 51, 51, 0.55)"
+            :stroke-width="gridStroke"
+          />
+          <line
+            v-for="y in gridLines.horizontal"
+            :key="`h${y}`"
+            x1="0"
+            :y1="y"
+            :x2="store.artboardWidth"
+            :y2="y"
+            stroke="rgba(51, 51, 51, 0.55)"
+            :stroke-width="gridStroke"
+          />
+        </svg>
         <!-- 选区框（仅框选拖动中的进行态预览，样式与地图/形状图层统一） -->
         <div v-if="selectionStyle && !store.floatActive" class="selection-marquee" :style="selectionStyle"></div>
         <!-- 矢量选中变换框：定向矩形（可带旋转角）+ 8 缩放手柄 + 旋转柄，
@@ -1579,6 +1782,15 @@ defineExpose({
   cursor: none !important;
 }
 
+/* 画笔/橡皮选中：舞台内（含画板外的灰色区域）隐藏系统光标，
+   只显示自绘笔刷圈（对齐专业绘图软件；带自身 cursor 的按钮不受影响） */
+.paint-stage.show-brush-cursor {
+  cursor: none;
+}
+.paint-stage.show-brush-cursor .view-float-bar {
+  cursor: default;
+}
+
 /* ─── 拾色放大镜 ─── */
 .pick-lens {
   position: absolute;
@@ -1673,6 +1885,18 @@ defineExpose({
   position: relative;
   transform-origin: center center;
   pointer-events: none;
+}
+
+/* 网格 overlay：铺满画板、屏幕恒定 1px 线宽（线宽在组件内按 zoom 反算），
+   z-index 低于选区/变换框，任何模式下都不拦截指针 */
+.grid-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 4;
+  overflow: hidden;
 }
 
 /* 选区框（框选拖动态）：与地图编辑器 / 形状图层统一的靛蓝实线 + 10% 填充 */

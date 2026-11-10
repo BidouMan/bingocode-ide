@@ -6,6 +6,8 @@ import {
   derivedTilePath,
   detectSingleTileSize,
   fitTileSheet,
+  isValidAssetTileSize,
+  isValidMapTileSize,
   loadImageElement,
 } from '../utils/tileAssetFit'
 
@@ -37,6 +39,12 @@ export interface ImportedTileAsset {
 }
 
 /**
+ * 已占用的目标文件名（含并发导入中、还没写进 resources 的），按「项目|地图」分组。
+ * 放在模块级：不同页面各自调用 useTileAssetImport() 时也能互相防重名。
+ */
+const reservedCopyNames = new Set<string>()
+
+/**
  * 图块素材导入：所有素材最终都换算成地图唯一的格子尺寸。
  *
  * 规则（对使用者透明，不需要理解尺寸）：
@@ -63,26 +71,51 @@ export function useTileAssetImport() {
     return !data.layers.some(l => l.type === 'drawing' && Object.keys(l.tiles ?? {}).length > 0)
   }
 
+  /** 路径段是否安全：不允许分隔符、控制字符、`.` 与 `..`（防止写到项目目录之外） */
+  function isSafePathSegment(seg: string): boolean {
+    return !!seg
+      && seg !== '.'
+      && seg !== '..'
+      && !/[\\/:*?"<>|\x00-\x1f]/.test(seg)
+  }
+
   /** 复制到当前地图目录；同名不覆盖，自动加 -2 / -3 后缀 */
   async function copyToMapDir(absSrcPath: string, rawName: string): Promise<string> {
     const projectRoot = projectStore.root
     const mapName = mapStore.mapData.name
     if (!projectRoot || !mapName) throw new Error('地图未就绪')
+    if (!isSafePathSegment(mapName)) {
+      throw new Error(`地图名包含非法字符，无法导入图块: ${mapName}`)
+    }
 
-    const dot = rawName.lastIndexOf('.')
-    const base = dot > 0 ? rawName.slice(0, dot) : rawName
-    const ext = dot > 0 ? rawName.slice(dot) : '.png'
+    // 文件名里的非法字符统一替换，避免在 Windows / macOS 上写失败或产生奇怪路径
+    const safeName = rawName.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_') || 'tile.png'
+    const dot = safeName.lastIndexOf('.')
+    const base = dot > 0 ? safeName.slice(0, dot) : safeName
+    const ext = dot > 0 ? safeName.slice(dot) : '.png'
+
+    const scope = `${projectRoot}|${mapName}`
     const used = new Set(mapStore.mapData.resources.map(r => r.path.split('/').pop() || ''))
     let fileName = `${base}${ext}`
     let seq = 2
-    while (used.has(fileName)) fileName = `${base}-${seq++}${ext}`
+    // 同时检查「已经在用的」和「正在并发导入、尚未落进 resources 的」名字
+    while (used.has(fileName) || reservedCopyNames.has(`${scope}|${fileName}`)) {
+      fileName = `${base}-${seq++}${ext}`
+    }
+    reservedCopyNames.add(`${scope}|${fileName}`)
 
     const relativePath = `assets/maps/${mapName}/images/${fileName}`
-    await invoke<string>('copy_file_to_project', {
-      src: absSrcPath,
-      projectRoot,
-      relativePath,
-    })
+    try {
+      await invoke<string>('copy_file_to_project', {
+        src: absSrcPath,
+        projectRoot,
+        relativePath,
+      })
+    } catch (e) {
+      // 复制失败释放占位，下次重试可以继续使用这个名字
+      reservedCopyNames.delete(`${scope}|${fileName}`)
+      throw e
+    }
     return relativePath
   }
 
@@ -105,8 +138,19 @@ export function useTileAssetImport() {
       return null
     }
 
+    if (img.width <= 0 || img.height <= 0) {
+      console.error('[TileImport] 图片尺寸无效，已跳过:', absSrcPath, img.width, img.height)
+      return null
+    }
+
     const rawName = options.fileName?.split(/[\\/]/).pop() || 'tile.png'
     const kind = options.kind ?? (detectSingleTileSize(img.width, img.height) ? 'tile' : 'tileset')
+
+    // 单图块必须是正方形：否则按一格切片会悄悄裁掉一半内容
+    if (kind === 'tile' && img.width !== img.height) {
+      console.error('[TileImport] 单图块必须是正方形图片，已跳过:', absSrcPath, `${img.width}×${img.height}`)
+      return null
+    }
 
     let originPath: string
     try {
@@ -116,12 +160,14 @@ export function useTileAssetImport() {
       return null
     }
 
-    // 原始每格尺寸：图集取素材库设定值（0 = 未知）；单图块取图片边长
+    // 原始每格尺寸：图集取素材库设定值（只认常见取值，非法值按「未知」处理）；单图块取图片边长
     const native = kind === 'tileset'
-      ? (options.tileSize && Number.isFinite(options.tileSize) ? Math.round(options.tileSize) : 0)
-      : (img.width === img.height
-        ? img.width
-        : (detectSingleTileSize(img.width, img.height) ?? mapStore.mapData.tileSize))
+      ? (isValidAssetTileSize(options.tileSize) ? options.tileSize : 0)
+      : img.width
+
+    if (kind === 'tileset' && native <= 0) {
+      console.warn('[TileImport] 图集未设定图块尺寸，按当前格子 1:1 切割:', absSrcPath)
+    }
 
     // 第一次导入图块素材：用素材尺寸决定地图格子并锁定，之后导入不再改格子
     if (native > 0 && isFirstTileImport()) {
@@ -162,20 +208,14 @@ export function useTileAssetImport() {
           assetKind: kind,
         }
       } catch (e) {
-        console.error('[TileImport] 写入尺寸适配图失败:', e)
+        console.error('[TileImport] 写入尺寸适配图失败，已取消导入:', e)
+        return null
       }
     }
 
-    // 归一化失败（写入失败 / 画布超限）：保留原始像素按素材尺寸切，至少内容完整
-    console.warn('[TileImport] 图块尺寸归一化失败，按原始尺寸导入:', absSrcPath, cut, grid)
-    return {
-      path: originPath,
-      tileWidth: cut,
-      tileHeight: cut,
-      originPath,
-      ...(native > 0 ? { nativeTileSize: native } : {}),
-      assetKind: kind,
-    }
+    // 归一化失败（画布超限 / 尺寸异常）：拒绝导入，避免图块跨格导致碰撞错位
+    console.error('[TileImport] 图块尺寸归一化失败（图片过大或尺寸异常），已取消导入:', absSrcPath, cut, grid)
+    return null
   }
 
   async function fitOrNull(dataUrl: string, native: number, grid: number) {
@@ -194,7 +234,7 @@ export function useTileAssetImport() {
    */
   async function refitTilesetsToGrid(targetGrid: number): Promise<void> {
     const projectRoot = projectStore.root
-    if (!projectRoot || !Number.isFinite(targetGrid) || targetGrid <= 0) return
+    if (!projectRoot || !isValidMapTileSize(targetGrid)) return
 
     const resources = mapStore.mapData.resources.filter(
       r => r.resourceType !== 'image' && r.path.startsWith('assets/'),
@@ -228,7 +268,12 @@ export function useTileAssetImport() {
       if (!resource.originPath) continue
 
       if (targetGrid === native) {
-        if (resource.path === originPath && resource.tileWidth === native) continue
+        if (
+          resource.path === originPath
+          && resource.tileWidth === native
+          && resource.tileHeight === native
+          && resource.nativeTileSize === native
+        ) continue
         mapStore.setResourceAsset(resource.id, {
           path: originPath,
           tileWidth: native,
@@ -240,6 +285,15 @@ export function useTileAssetImport() {
         continue
       }
 
+      // 已经是当前目标格子的派生图：跳过，避免重复读图 / 重复写盘
+      const derivedPath = derivedTilePath(originPath, targetGrid)
+      if (
+        resource.path === derivedPath
+        && resource.tileWidth === targetGrid
+        && resource.tileHeight === targetGrid
+        && resource.nativeTileSize === native
+      ) continue
+
       let dataUrl: string
       try {
         dataUrl = await invoke<string>('read_image_as_data_url', { path: `${projectRoot}/${originPath}` })
@@ -250,7 +304,6 @@ export function useTileAssetImport() {
       const fitted = await fitOrNull(dataUrl, native, targetGrid)
       if (!fitted) continue
 
-      const derivedPath = derivedTilePath(originPath, targetGrid)
       try {
         await invoke('write_binary', {
           path: `${projectRoot}/${derivedPath}`,

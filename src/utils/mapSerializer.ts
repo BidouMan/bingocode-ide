@@ -1,6 +1,7 @@
 import * as pako from 'pako'
 import type { TilePaletteEntry } from '../stores/map'
 import { imageLocalToWorld } from './mapImageGeometry'
+import { isValidMapTileSize } from './tileAssetFit'
 
 export interface MapSaveData {
   name: string
@@ -100,6 +101,12 @@ export interface ShapeSaveData {
   oneWayDirY?: number
   /** 单向碰撞厚度容差（像素） */
   oneWayMargin?: number
+  /** 碰撞层级（参考 Unity Physics Layers；仅编辑器保存，运行时未接入） */
+  collisionLayersEnabled?: boolean
+  /** 所在碰撞层 1~8（缺省 1） */
+  collisionLayer?: number
+  /** 可碰撞掩码：1~8 的层号数组（缺省 [1]） */
+  collisionMask?: number[]
   /** 碰撞类型：由 oneWay 推导（引擎用它填 raycast 等 API 的 collision_type）
       旧存档的「跳板」表示单向碰撞，读取时会迁移成 oneWay */
   collisionType?: string
@@ -374,6 +381,14 @@ export function serializeMap(mapData: any): MapSaveData {
         oneWayDirX: shape.oneWayDirX ?? 0,
         oneWayDirY: shape.oneWayDirY ?? 1,
         oneWayMargin: shape.oneWayMargin ?? 0,
+        // 碰撞层级 / 掩码：仅编辑器保存，运行时未接入；缺省不写冗余字段
+        ...(shape.collisionLayersEnabled
+          ? {
+              collisionLayersEnabled: true,
+              collisionLayer: shape.collisionLayer ?? 1,
+              collisionMask: Array.isArray(shape.collisionMask) ? shape.collisionMask : [1],
+            }
+          : {}),
         // 单向形状在引擎/代码里仍报告为「跳板」，普通形状为「墙体」
         collisionType: shape.oneWay === true ? '跳板' : '墙体',
         disabled: shape.disabled === true,
@@ -479,9 +494,11 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
 
   // 统一解析素材：补全 id/firstgid，并与 tileset 一一配对
   const resolveResource = (r: any): any => {
+    const isImage = r.resourceType === 'image'
     let matched: any = null
-    if (r.id) matched = tileSets.find(ts => ts.id === r.id) ?? null
-    if (!matched && r.firstgid != null) {
+    // 图片素材不参与图块集配对：它没有图块的 GID 空间，配上去会把真正的图块集顶掉
+    if (r.id && !isImage) matched = tileSets.find(ts => ts.id === r.id) ?? null
+    if (!matched && !isImage && r.firstgid != null) {
       matched = tileSets.find(ts => ts.firstgid === r.firstgid) ?? null
     }
     if (!matched) {
@@ -520,8 +537,10 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
         collisionEnabled: r.collisionEnabled || false,
         tiles: [],
       }
-      tileSets.push(matched)
-      claimedTileSets.add(matched)
+      if (!isImage) {
+        tileSets.push(matched)
+        claimedTileSets.add(matched)
+      }
     }
 
     return {
@@ -568,6 +587,12 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
     seenImagePaths.add(r.path)
     return true
   })
+
+  // 旧存档里图片素材也被建成了图块集：它们会按 firstgid 抢在真正的图块集前面被匹配到，
+  // 导致图块画上去什么都不显示。这里按「素材 id 或同名同图」把它们剔除
+  const cleanTileSets = tileSets.filter(ts => !resources.some(r =>
+    r.resourceType === 'image' && ((ts.id && r.id === ts.id) || (r.path === ts.imagePath && r.name === ts.name)),
+  ))
 
   // 扁平模型：旧存档一个 imagelayer 里的多张图片，拆成多个独立图片图层
   const layers: any[] = []
@@ -617,6 +642,19 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
               ? 1
               : Number(p.oneWayDirY) || 0,
             oneWayMargin: Number(p.oneWayMargin) || 0,
+            // 碰撞层级 / 掩码：仅编辑器保存，运行时未接入；损坏值收敛到 1~8
+            ...(p.collisionLayersEnabled === true
+              ? {
+                  collisionLayersEnabled: true,
+                  collisionLayer: Math.min(8, Math.max(1, Number(p.collisionLayer) || 1)),
+                  collisionMask: Array.isArray(p.collisionMask)
+                    ? p.collisionMask
+                        .map(Number)
+                        .filter((n: number) => n >= 1 && n <= 8)
+                        .sort((a: number, b: number) => a - b)
+                    : [1],
+                }
+              : {}),
             disabled: p.disabled === true,
           })),
       })
@@ -706,7 +744,8 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
     version: 5,
     width: data.width,
     height: data.height,
-    tileSize: data.tileSize,
+    // 存档里的格子尺寸必须校验：损坏 / 手改的 1000000 会让地图直接崩掉
+    tileSize: isValidMapTileSize(data.tileSize) ? data.tileSize : 32,
     // 只有真的锁定过（手动改格子或首次导入素材）才算「已指定」；
     // 不能把默认的 32 也当成锁定，否则重新打开地图后就再也没机会按素材尺寸初始化。
     tileSizeExplicit: data.tileSizeExplicit === true,
@@ -719,7 +758,7 @@ export function deserializeMap(data: MapSaveData): MapLoadData {
     collisionEnabled: data.collisionEnabled || false,
     resources,
     layers,
-    tileSets,
+    tileSets: cleanTileSets,
     tilesetGroups: Array.isArray(data.tilesetGroups)
       ? data.tilesetGroups.map(g => ({
           id: String(g.id),

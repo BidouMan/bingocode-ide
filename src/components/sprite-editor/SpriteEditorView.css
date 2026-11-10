@@ -124,48 +124,219 @@
   margin-top: 2px;
 }
 
-/* ═══ 中: 画布 ═══ */
+/* ═══ 中: 场景画布（无限深色工作区 + 网格 + 世界原点） ═══ */
 .sprite-canvas {
   position: relative;
   flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-root);
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
+  background: #1e1e1e;
   cursor: default;
 }
 .sprite-canvas.is-panning {
   cursor: grabbing;
 }
-/* 标记放置中：十字光标提示"点击落点" */
+/* 按住空格：可平移提示 */
+.sprite-canvas.is-space-ready {
+  cursor: grab;
+}
+/* 放置标记中：隐藏系统光标，由跟随鼠标的幽灵图钉充当指针（与地图编辑器一致） */
 .sprite-canvas.is-marker-placing {
-  cursor: crosshair;
+  cursor: none;
 }
-.canvas-center-anchor {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/* 放置中按住空格/中键平移时仍显示抓取光标（平移优先） */
+.sprite-canvas.is-marker-placing.is-panning {
+  cursor: grabbing;
 }
-.canvas-sprite-wrapper {
-  position: relative;
-  /* 以中心为原点缩放：超出光栅上限的余量由外层 transform 补齐时仍然居中 */
-  transform-origin: center center;
+/* 网格：canvas 自绘（细格 + 每 8 格一条粗格，对齐世界原点）
+   不用 CSS 平铺是因为分数格距时会出现两条几乎重叠的线；逐条按设备像素取整绘制没有接缝 */
+.scene-grid-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+/* 坐标轴：X 轴红、Y 轴绿（与常见 3D/2D 编辑器一致，方向一眼可辨） */
+.scene-axis {
+  position: absolute;
+  pointer-events: none;
+}
+.scene-axis-x { left: 0; right: 0; height: 1px; background: rgba(255, 107, 107, 0.55); }
+.scene-axis-y { top: 0; bottom: 0; width: 1px; background: rgba(86, 214, 138, 0.55); }
+.scene-origin-dot {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: rgba(200, 210, 230, 0.75);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+/* 世界层：位于视口中心，pan/zoom 由 transform 提供；子元素使用世界坐标 */
+.scene-world {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+}
+/* 角色对象：原点 = 中心点（pivot），自身承担旋转 + 剩余缩放 */
+.sprite-object {
+  position: absolute;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+}
+.canvas-sprite {
+  position: absolute;
+  display: block;
 }
 /* 标注层：尺寸=画布坐标尺寸，zoom 由 transform 提供（只放大矢量 UI，不影响图片采样） */
 .canvas-anno-layer {
   position: absolute;
-  left: 0;
-  top: 0;
   transform-origin: 0 0;
   pointer-events: none;
 }
 .canvas-anno-layer > * { pointer-events: auto; }
-.canvas-sprite {
-  display: block;
-  background-color: #ffffff;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='16' height='16' fill='%23fff'/%3E%3Crect width='8' height='8' fill='%23e0e0e0'/%3E%3Crect x='8' y='8' width='8' height='8' fill='%23e0e0e0'/%3E%3C/svg%3E");
+
+/* ─── 变换手柄（屏幕空间） ─── */
+.scene-gizmo-layer {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  transform-origin: 0 0;
+}
+.gizmo-root {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.gizmo-rotator {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+.gizmo-frame {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid rgba(91, 251, 132, 0.75);
+  background: rgba(91, 251, 132, 0.04);
+  cursor: move;
+  pointer-events: auto;
+}
+.gizmo-handle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border: 1px solid #22252b;
+  border-radius: 1px;
+  background: #5bfb84;
+  pointer-events: auto;
+}
+.gizmo-handle:hover { background: #8dffb0; }
+.gizmo-handle:nth-child(1) { cursor: nwse-resize; }
+.gizmo-handle:nth-child(2) { cursor: nesw-resize; }
+.gizmo-handle:nth-child(3) { cursor: nwse-resize; }
+.gizmo-handle:nth-child(4) { cursor: nesw-resize; }
+.gizmo-arm {
+  position: absolute;
+  width: 1px;
+  height: 22px;
+  background: rgba(91, 251, 132, 0.75);
+  pointer-events: none;
+}
+.gizmo-knob {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border: 1px solid #22252b;
+  border-radius: 50%;
+  background: #5bfb84;
+  cursor: grab;
+  pointer-events: auto;
+}
+.gizmo-knob:hover { background: #8dffb0; }
+.gizmo-knob:active { cursor: grabbing; }
+/* 中心锚点图标（场景变换手柄中心）：屏幕空间固定 18px（Godot 原点十字视觉等效尺寸），画布缩放不影响 */
+.gizmo-anchor-icon {
+  position: absolute;
+  left: -9px;
+  top: -9px;
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ─── 右下角浮动视图工具条（与地图编辑器画布悬浮条一致） ─── */
+.scene-zoom-bar {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: rgba(30, 32, 40, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 4px;
+  z-index: 30;
+}
+.scene-float-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 26px;
+  padding: 0 6px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: default;
+  transition: background 0.15s ease;
+}
+.scene-float-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); }
+.scene-float-btn:active:not(:disabled) { background: rgba(255, 255, 255, 0.12); }
+.scene-float-btn:disabled { opacity: 0.35; cursor: default; }
+.scene-float-zoom {
+  min-width: 44px;
+  height: 26px;
+  padding: 0 4px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: default;
+  white-space: nowrap;
+  transition: color 0.15s, background 0.15s;
+}
+.scene-float-zoom:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+}
+.scene-float-divider {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 4px;
 }
 
 /* ═══ 中: 画布列 — 标注图层 ═══ */
@@ -175,9 +346,11 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 .anno-toolbar {
-  height: 36px;
+  /* 与地图编辑器顶部工具栏同高（44px） */
+  height: 44px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -214,11 +387,48 @@
 .layer-chip:disabled { opacity: 0.4; cursor: not-allowed; }
 .layer-chip .soon { font-size: 9px; opacity: 0.7; margin-left: 2px; }
 .layer-chip-icon { width: 14px; height: 14px; flex-shrink: 0; }
-/* 工具条内的标注控件紧凑排布（36px 行高） */
-.anno-toolbar .coord-input { height: 20px; padding: 0 4px; }
-.anno-toolbar .scope-seg button { padding: 3px 8px; }
-.anno-toolbar .preset-btn,
-.anno-toolbar .clear-override-btn { padding: 3px 8px; }
+
+/* 常驻显示开关（碰撞 / 网格 / 吸附）：小方框勾选；激活时不画绿框绿字，
+   绿框只表示"当前工具"，避免和开关状态混淆（与地图编辑器常驻开关语义一致） */
+.layer-chip.chip-toggle { padding: 4px 8px; gap: 6px; }
+.layer-chip.chip-toggle.active {
+  border-color: var(--border-light);
+  color: #c9ced7;
+  background: rgba(255, 255, 255, 0.03);
+}
+.layer-chip.chip-toggle.active:hover { background: var(--bg-hover); color: #fff; }
+.chip-check {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 1px solid #6a6f78;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.chip-check.on { border-color: var(--accent); background: rgba(91, 251, 132, 0.14); }
+.chip-check.on::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 1px;
+  width: 4px;
+  height: 7px;
+  border-right: 1.5px solid var(--accent);
+  border-bottom: 1.5px solid var(--accent);
+  transform: rotate(45deg);
+}
+/* 工具组与常驻开关之间的分割线（与地图编辑器工具栏一致） */
+.anno-toolbar-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border-light);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+/* 勾选「显示碰撞」但不在碰撞工具时：叠加层只看不拖 */
+:deep(.cso-root.collision-preview) { pointer-events: none; }
+/* 工具条只放工具切换（选择 / 中心 / 碰撞 / 标记），详细设置集中在右侧「属性」面板 */
 
 /* 中心点手柄（锚点为逻辑坐标，反向缩放保持屏幕大小恒定） */
 /* 中心点手柄：锚点光标用箭头（拖拽区=形状内部才用移动图标） */
@@ -229,41 +439,42 @@
   cursor: default;
   z-index: 5;
 }
+/* 命中区：图标本身 pointer-events:none，用伪元素给锚点一个 24px 的可拖动区域（继承父级 pointer-events） */
+.pivot-handle::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: -12px;
+  width: 24px;
+  height: 24px;
+  /* 普通箭头指针（不用抓手），拖动时保持箭头 */
+  cursor: default;
+}
 .pivot-visual {
   position: absolute;
   left: 0;
   top: 0;
   transform-origin: 0 0;
 }
-.pivot-ring {
+/* 中心锚点图标：固定 18px 屏幕大小（外层按 1/canvasLayoutZoom 反缩放），图形中心即锚点 */
+.pivot-anchor-icon {
   position: absolute;
-  left: -11px;
-  top: -11px;
-  width: 22px;
-  height: 22px;
-  border: 2px solid var(--accent);
-  border-radius: 50%;
-  background: rgba(91, 251, 132, 0.12);
-  box-shadow: 0 0 6px rgba(91, 251, 132, 0.5);
+  left: -9px;
+  top: -9px;
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+  user-select: none;
 }
-.pivot-ring::before,
-.pivot-ring::after {
-  content: "";
-  position: absolute;
-  background: var(--accent);
+/* 内联 SVG 的尺寸写在注入标记的 style 上（v-html 节点不受 scoped 样式影响），此处无需再写 */
+/* 单帧覆盖模式：手柄蓝色光晕（区别于统一绿） */
+.pivot-handle.is-override .pivot-anchor-icon {
+  filter: drop-shadow(0 0 3px rgba(97, 175, 239, 0.95)) drop-shadow(0 0 7px rgba(97, 175, 239, 0.55));
 }
-.pivot-ring::before { left: 50%; top: -6px; width: 1.5px; height: 32px; margin-left: -0.75px; }
-.pivot-ring::after { top: 50%; left: -6px; height: 1.5px; width: 32px; margin-top: -0.75px; }
-/* 单帧覆盖模式：手柄变蓝（区别于统一绿） */
-.pivot-handle.is-override .pivot-ring {
-  border-color: #61afef;
-  background: rgba(97, 175, 239, 0.12);
-  box-shadow: 0 0 6px rgba(97, 175, 239, 0.5);
-}
-.pivot-handle.is-override .pivot-ring::before,
-.pivot-handle.is-override .pivot-ring::after { background: #61afef; }
-/* 碰撞图层激活时中心点手柄弱化（仅作位置参考，不响应交互） */
-.pivot-handle.is-inactive { pointer-events: none; opacity: 0.4; }
+/* 选择工具下由场景手柄中心图标代替，避免两个锚点图标重叠 */
+.pivot-handle.is-select { display: none; }
+/* 碰撞 / 标记图层下中心点手柄弱化（仅作位置参考，不响应交互） */
+.pivot-handle.is-inactive { pointer-events: none; opacity: 0.55; }
 
 /* 洋葱皮幽灵（相邻帧有效中心点） */
 .pivot-ghost {
@@ -317,7 +528,8 @@
   color: var(--mk-ink);
   pointer-events: auto;
   cursor: default;
-  transition: color 0.16s ease, transform 0.16s ease;
+  /* 只做颜色过渡：选中时不要给图标加 transform（在多层缩放图层里会触发重新光栅化，所有图钉会一起跳动一下） */
+  transition: color 0.16s ease;
 }
 .marker-icon :deep(svg) {
   width: 100%;
@@ -336,11 +548,9 @@
 .marker-handle.is-override .marker-icon {
   color: var(--mk-override);
 }
-/* 选中态：只让图标变红并轻微放大，标签始终深色底 */
+/* 选中态：只让图标变红（不加放大：放大等于给图标加 transform，会让整个图钉层重新光栅化并集体跳动一下） */
 .marker-handle.is-selected .marker-icon {
   color: var(--mk-red);
-  transform: scale(1.07);
-  transform-origin: 50% 88%; /* 钉尖固定，放大时不脱离锚点 */
 }
 /* 标签在图钉下方：只显示标记名（不显示坐标） */
 .marker-label {
@@ -360,124 +570,50 @@
   pointer-events: none;
   user-select: none;
 }
-/* 放置预览：默认透明，由 JS 定位后显示；不拦截事件，点画布即落点 */
+/* 中心 / 碰撞工具下标记只做展示，不拦截鼠标；选择 / 动画工具下可点选、拖动 */
+.marker-handle:not(.is-interactive),
+.marker-handle:not(.is-interactive) .marker-icon {
+  pointer-events: none;
+}
+/* 选择 / 动画工具下：悬停图钉用普通箭头指针，点一下就选中该标记 */
+.marker-handle.is-interactive,
+.marker-handle.is-interactive .marker-icon {
+  cursor: default;
+}
+/* 标签也参与命中：点名字同样能选中标记 */
+.marker-handle.is-interactive .marker-label {
+  pointer-events: auto;
+  cursor: default;
+}
+/* 标记图钉层：与角色变换同步，但排在变换手柄之后绘制，悬停/点击优先命中图钉 */
+.marker-world {
+  z-index: 8;
+}
+/* 放置预览：半透明、不拦截事件，点画布即落点 */
 .marker-handle.is-ghost {
+  opacity: 0.55;
+  pointer-events: none;
+}
+/* 幽灵图钉放在屏幕空间（画布容器直属子元素，不在缩放/旋转图层里）：
+   left/top 固定为 0，只改 transform，移动走合成层，不会逐帧触发布局重绘（原先会疯狂闪烁） */
+.marker-handle.is-ghost-overlay {
   left: 0;
   top: 0;
-  opacity: 0;
-  pointer-events: none;
-  /* 跟随鼠标时只改 transform，交给合成层处理，不重排不闪 */
+  z-index: 20;
   will-change: transform;
 }
 .marker-handle.is-ghost .marker-icon {
   pointer-events: none;
-  transition: none;
 }
-/* 标记改名输入框 */
-.marker-rename-input {
-  width: 76px;
-  height: 22px;
-  padding: 0 5px;
-  border-radius: 4px;
-  border: 1px solid var(--border-light);
-  background: var(--bg-root);
-  color: #fff;
-  font-size: 11px;
+/* 幽灵图钉标签：名称加粗 + 落点坐标（与地图编辑器「新标记 (x,y)」同款） */
+.marker-label b {
+  font-weight: 700;
+  margin-right: 5px;
 }
-.marker-rename-input:focus {
-  outline: none;
-  border-color: var(--accent);
+.marker-label span {
+  color: #9aa3af;
+  font-weight: 500;
 }
-.anno-toolbar .marker-rename-input { height: 20px; }
-
-.props-sep { width: 1px; height: 18px; background: var(--border-light); flex-shrink: 0; }
-.coord-group { display: flex; align-items: center; gap: 4px; }
-.coord-group label { color: #8a8f98; font-size: 12px; }
-.coord-input {
-  width: 54px;
-  padding: 3px 5px;
-  border-radius: 3px;
-  border: 1px solid var(--border-light);
-  background: var(--bg-root);
-  color: #fff;
-  font-size: 12px;
-  text-align: right;
-  outline: none;
-  -moz-appearance: textfield;
-}
-.coord-input::-webkit-outer-spin-button,
-.coord-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.coord-input:focus { border-color: var(--accent); }
-.scope-seg {
-  display: flex;
-  border: 1px solid var(--border-light);
-  border-radius: 4px;
-  overflow: hidden;
-  flex-shrink: 0;
-}
-.scope-seg button {
-  padding: 4px 10px;
-  border: none;
-  background: transparent;
-  color: #8a8f98;
-  cursor: pointer;
-  font-size: 12px;
-  white-space: nowrap;
-}
-.scope-seg button:hover { background: var(--bg-hover); }
-.scope-seg button.on { background: var(--accent); color: #10131a; font-weight: 600; }
-.scope-seg button.on-blue { background: #61afef; }
-/* 禁用碰撞开关（与地图编辑器碰撞层工具栏同款） */
-.anno-checkbox {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  user-select: none;
-  color: #9ca0a4;
-  font-size: 12px;
-  white-space: nowrap;
-}
-.anno-checkbox input[type="checkbox"] {
-  width: 14px;
-  height: 14px;
-  margin: 0;
-  accent-color: #528bff;
-  cursor: pointer;
-}
-.preset-btn {
-  padding: 4px 10px;
-  border-radius: 4px;
-  font-size: 12px;
-  cursor: pointer;
-  border: 1px solid var(--border-light);
-  background: transparent;
-  color: #ddd;
-  white-space: nowrap;
-}
-.preset-btn:hover { background: var(--bg-hover); border-color: #8a8f98; }
-/* 放置中：按钮保持高亮，提示"正在等你在画布上点一下" */
-.preset-btn.is-active {
-  border-color: #5bfb84;
-  background: rgba(91, 251, 132, 0.12);
-  color: #5bfb84;
-}
-.preset-btn.is-active:hover {
-  background: rgba(91, 251, 132, 0.2);
-  border-color: #5bfb84;
-}
-.clear-override-btn {
-  padding: 4px 10px;
-  border-radius: 4px;
-  font-size: 12px;
-  cursor: pointer;
-  border: 1px solid #61afef;
-  background: rgba(97, 175, 239, 0.1);
-  color: #61afef;
-  white-space: nowrap;
-}
-.clear-override-btn:hover { background: rgba(97, 175, 239, 0.22); }
-
 /* 造型列表：单帧覆盖角标（蓝=中心点，橙=碰撞） */
 .costume-item { position: relative; }
 .pivot-override-badge {
@@ -513,8 +649,8 @@
 
 /* ═══ 右: 预览面板 ═══ */
 .preview-panel {
-  width: 264px;
-  min-width: 264px;
+  width: 272px;
+  min-width: 272px;
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -522,23 +658,566 @@
   padding: 0 8px;
 }
 
-.preview-label {
-  color: #00FF8C;
-  font-size: 12px;
-  text-align: center;
-  /* 与画布顶部标注工具条等高，横向分隔线对齐 */
-  height: 36px;
-  line-height: 36px;
-  padding: 0;
-  margin: 0;
-  border: none;
-  background: var(--bg-root);
+/* 面板顶部标签页（动画 / 属性）：与地图编辑器右侧面板同一套标签样式
+   —— 44px 高、激活项用底色 + 白字，不使用下划线绿条 */
+.right-tabs {
+  display: flex;
+  height: 44px;
   flex-shrink: 0;
+  /* 抵消面板左右内边距，让分隔线贯穿整块面板 */
+  margin: 0 -8px;
+  border-bottom: 1px solid rgb(45, 45, 45);
+}
+.right-tab {
+  flex: 1;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #9ca0a4;
+  font-size: 12px;
+  cursor: default;
+}
+.right-tab.active { color: #fff; background: rgb(46, 49, 58); }
+
+/* ─── 属性页：角色检视器（规格与地图编辑器属性面板一致：att-* / mi-*） ─── */
+.props-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* 隐藏面板滚动条占位（滚轮照常可滚）：
+     有/无滚动条都不改变内容宽度，右侧留白只由 .att-frame 的内边距决定 */
+  scrollbar-width: none;
+}
+.props-scroll::-webkit-scrollbar { width: 0; height: 0; }
+
+/* 属性容器：与地图编辑器同间距（面板自身已有 8px 内边距，这里只补到总计 16px）
+   左侧保持 4px（整体左边界不变），标题框内部留白负责箭头/文字的呼吸感 */
+.att-frame {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  /* 左右内边距一致（各 4px）：滚动条已隐藏占位，右侧不会再多出宽度 */
+  padding: 10px 4px 12px 4px;
+  background: var(--bg-root);
+}
+.att-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* 统一行高：输入框 / 下拉 / 复选框行都是 24px，纵向节奏一致 */
+.att-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 24px;
+}
+/* 标签列：固定宽度，保证每一行控件左边缘都在同一条竖线上 */
+.att-label {
+  color: #9ca0a4;
+  font-size: 12px;
+  width: 60px;
+  min-width: 60px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  line-height: 24px;
+}
+.att-input {
+  width: 100%;
+  height: 24px;
+  background: rgb(40, 43, 52);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  color: white;
+  padding: 0 6px;
+  font-size: 12px;
+  /* 与单位文字保持完全一致的字体，并用等宽数字：
+     单位位置按字符宽（ch）计算，字体不一致会让单位贴得太近甚至压到数字 */
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+  box-sizing: border-box;
+}
+.att-input:hover {
+  background: rgb(50, 53, 62);
+  border: 1px solid rgb(65, 69, 82);
+}
+.att-input:focus {
+  background: var(--border-light);
+  border: 1px solid rgb(65, 69, 82);
+  color: white;
+}
+/* 数字框隐藏原生上下箭头（与地图编辑器一致） */
+.att-input-no-spin::-webkit-inner-spin-button,
+.att-input-no-spin::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.att-input-no-spin[type="number"] {
+  -moz-appearance: textfield;
+}
+/* 下拉框（CustomSelect）占满标签右侧剩余宽度，右边缘对齐属性区 */
+.att-select {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+}
+/* 同一行 输入框 + 单位（° / %） */
+.att-size-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.att-size-group .att-input {
+  flex: 1 1 0;
+  width: 100%;
+  min-width: 0;
+}
+/* X / Y 成对数字框：轴标签画在输入框内部，左右边界与同一列其他控件对齐 */
+.att-axis-field {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+}
+.att-axis-field .att-input {
+  flex: 1 1 0;
+  width: 100%;
+  min-width: 0;
+  /* 给轴标签和数字之间留出呼吸感 */
+  padding-left: 28px;
+}
+/* 带单位的轴输入（位置用 px）：右侧预留少量空间，避免长数字与单位重叠 */
+.att-axis-field.has-unit .att-input {
+  /* 右侧留出单位 + 重置图标的位置：数字长度到这里就被裁切，
+     单位再往右移也会停在这条边界左侧，长数字不会和单位叠在一起 */
+  padding-right: 52px;
+}
+.att-axis-tag {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  line-height: 1;
+  color: #7c818a;
+  pointer-events: none;
+}
+/* 数值单位：紧跟数字后面（left 由组件按数字位数计算），颜色弱化
+   font-size 与数字一致，ch 单位才能准确对应数字宽度 */
+.att-axis-unit {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 12px;
+  line-height: 1;
+  color: #7c818a;
+  pointer-events: none;
+}
+/* 位置行：X 轴红、Y 轴绿，与场景坐标轴颜色一致 */
+.att-axis-tag.is-x { color: #ff6b6b; }
+.att-axis-tag.is-y { color: #56d68a; }
+/* X / Y 分两行：标签贴住第一行，两行输入框左边缘对齐 */
+.att-row-stacked {
+  align-items: flex-start;
+}
+.att-row-stacked > .att-label {
+  line-height: 24px;
+}
+/* 属性行下方的说明文字（弱化灰、与输入框同列） */
+.att-hint {
+  color: #7e838a;
+  font-size: 11px;
+  line-height: 1.3;
+}
+/* 变换行独立重置图标（Godot 风格）：贴在输入框内部右侧，只占第一行；
+   默认隐藏，出现/消失不影响布局（X/Y 共用一个） */
+.att-row-stacked.has-reset {
+  position: relative;
+}
+.att-row-stacked.has-reset .att-input {
+  /* 右侧留出图标位置，长数字不会压到重置图标 */
+  padding-right: 24px;
+}
+.att-reset {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  /* 输入框所在容器是定位元素，这里必须抬高层级，否则图标会被输入框盖住 */
+  z-index: 2;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  opacity: 0;
+  visibility: hidden;
+  cursor: pointer;
+}
+.att-reset.is-dirty {
+  opacity: 0.8;
+  visibility: visible;
+}
+.att-reset img {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+.att-reset:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.06);
+}
+.att-axis-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.att-axis-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+.att-axis-row .att-input {
+  flex: 1 1 0;
+  width: 100%;
+  min-width: 0;
+}
+/* 旋转框内嵌滑条：重置图标与数字文字垂直对齐（数字在滑条上方的文字区居中） */
+.att-slider-field .att-reset {
+  top: 13px;
+  transform: translateY(-50%);
+  right: 4px;
+  width: 18px;
+  height: 18px;
+}
+/* 旋转框内嵌滑条版：单位与数字同一水平线 */
+.att-slider-field .att-axis-unit.is-degree {
+  top: 13px;
+}
+/* 旋转数值框：滑条内嵌在框内底部（Godot 风格），数字仍可直接编辑 */
+.att-slider-field {
+  position: relative;
+  display: block;
+  flex: 1;
+  min-width: 0;
+}
+.att-slider-field .att-input {
+  /* 块级显示：去掉 inline-block 基线留出的空隙，容器高度与输入框完全一致 */
+  display: block;
+  width: 100%;
+  /* 比常规输入框高一点：上半部分放数字、底部留给滑条。
+     底部留白 7px，数字区中心到上边框和到滑条中心距离一致（视觉对称） */
+  height: 34px;
+  padding-bottom: 7px;
+  /* 右侧留出度数单位和重置图标的位置，数字过长时被裁切，不会压到它们 */
+  padding-right: 46px;
+  line-height: normal;
+}
+/* 滑条压在输入框内部底边：只占据底部一条，左右留出圆角内的边距 */
+.att-range {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 4px;
+  width: auto;
+  height: 8px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  outline: none;
+  cursor: pointer;
+}
+/* 轨道：深灰细线（比输入框底色亮一档，保证能和背景区分） */
+.att-range::-webkit-slider-runnable-track {
+  height: 2px;
+  border-radius: 1px;
+  background: rgb(74, 79, 90);
+}
+.att-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 8px;
+  height: 8px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: #5bfb84;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.att-range:hover::-webkit-slider-thumb,
+.att-range:active::-webkit-slider-thumb {
+  background: #7dffa8;
+}
+/* 兼容 Chromium 内核（Windows WebView2）的旧式伪元素写法 */
+.att-range::-moz-range-track {
+  height: 2px;
+  border-radius: 1px;
+  background: rgb(74, 79, 90);
+}
+.att-range::-moz-range-progress {
+  height: 2px;
+  border-radius: 1px;
+  background: rgb(74, 79, 90);
+}
+.att-range::-moz-range-thumb {
+  width: 8px;
+  height: 8px;
+  border: none;
+  border-radius: 50%;
+  background: #5bfb84;
+}
+/* 约束比例：勾选框与上方 X / Y 输入框左边缘对齐，文字紧跟其后 */
+.att-axis-lock {
+  gap: 4px;
+}
+.att-checkbox-text {
+  color: #9ca0a4;
+  font-size: 12px;
+}
+/* 复选框：与地图编辑器碰撞开关同款 */
+.att-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: default;
+}
+.att-checkbox input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: #528bff;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.att-checkbox input[type="checkbox"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
-/* 预览背景 */
-.preview-bg {
+/* ====== 碰撞层级（与地图属性面板同规格：勾选后面板内展开层/掩码网格） ====== */
+.layer-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.layer-block-name {
+  color: #9ca0a4;
+  font-size: 12px;
+  line-height: 18px;
+}
+.layer-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+.layer-cell {
+  height: 26px;
+  background: rgb(34, 37, 43);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  color: #b9bdc2;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  cursor: default;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.layer-cell:hover:not(:disabled):not(.layer-cell-active) {
+  background: var(--border-light);
+}
+.layer-cell-active {
+  background: rgba(91, 251, 132, 0.16);
+  border-color: rgba(91, 251, 132, 0.6);
+  color: #e8eaec;
+  box-shadow: inset 0 0 0 1px rgba(91, 251, 132, 0.25);
+}
+.layer-cell:disabled {
+  opacity: 0.5;
+}
+
+/* ====== 检视器分区（与地图编辑器同规格：整行标题 + 折叠箭头） ====== */
+/* 分区整块：不再画细线，靠标题条本身区分（Godot 检视器风格） */
+.mi-section {
+  border-top: none;
+}
+/* 分类标题条：整行浅底色 + 微微内描边，和正文内容形成明显分界 */
+.mi-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* 与正文同宽：左边缘对齐标签列、右边缘对齐输入框（滚动条由面板内边距隔开） */
+  width: 100%;
+  height: 30px;
   margin: 0;
+  /* 内部左右留白：折叠箭头不贴标题框边角，和文字之间有呼吸感 */
+  padding: 0 6px;
+  /* 边框算进宽度，避免 width:100% 再多出描边导致右端超宽 */
+  box-sizing: border-box;
+  background: rgb(48, 51, 60);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  color: #e2e5e9;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  line-height: 1;
+  text-align: left;
+  cursor: default;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.mi-head:hover {
+  background: rgb(60, 64, 74);
+  color: #ffffff;
+}
+/* 展开中的分区标题更亮，底色再抬一档 */
+.mi-section.open > .mi-head {
+  background: rgb(54, 58, 68);
+  color: #ffffff;
+}
+/* 收起 > 展开 v（与地图编辑器、素材栏箭头同一套动作） */
+.mi-chevron {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  opacity: 0.7;
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+.mi-section.open > .mi-head .mi-chevron {
+  transform: rotate(90deg);
+  opacity: 1;
+}
+.mi-head:hover .mi-chevron { opacity: 1; }
+.mi-head-title { flex: 1; }
+.mi-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* 上方 6px；左侧 7px = 标题边框 1px + 内部留白 6px，
+     让正文标签与折叠箭头落在同一条左基线上；内容底部不留白（分区间距由 att-frame 统一给） */
+  padding: 6px 0 0 7px;
+}
+.mi-actions { display: flex; gap: 8px; }
+/* 分区标题右侧的数量（如标记个数） */
+.mi-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 15px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #a7acb4;
+  font-size: 10px;
+  line-height: 1;
+}
+
+/* ====== 列表与按钮（标记检视器，与地图编辑器同规格） ====== */
+.mi-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+.mi-list-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: default;
+}
+.mi-list-row:hover { background: rgb(48, 51, 60); }
+.mi-list-row.is-selected {
+  background: rgb(46, 49, 58);
+  border-color: var(--border-light);
+}
+.mi-list-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #98a0aa;
+}
+.mi-list-row.is-selected .mi-list-dot { background: #ff5252; }
+.mi-list-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: #d7dbe1;
+}
+.mi-list-coord {
+  flex-shrink: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  color: #8f959d;
+}
+.mi-list-empty {
+  padding: 6px 2px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #7c818a;
+}
+.mi-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex: 1;
+  height: 26px;
+  padding: 0 8px;
+  background: rgb(48, 51, 60);
+  border: 1px solid var(--border-light);
+  border-radius: 5px;
+  color: #cfd3d9;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: default;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.mi-btn:hover {
+  background: rgb(61, 64, 72);
+  color: #fff;
+}
+/* 放置标记中：按钮保持高亮，提示"正在等你在画布上点一下" */
+.mi-btn.is-on {
+  border-color: #5bfb84;
+  background: rgba(91, 251, 132, 0.12);
+  color: #5bfb84;
+}
+.mi-btn.is-on:hover {
+  background: rgba(91, 251, 132, 0.2);
+  border-color: #5bfb84;
+}
+.mi-btn-danger:hover {
+  background: rgba(95, 45, 39, 0.75);
+  border-color: rgba(224, 92, 78, 0.5);
+  color: #ffb4ab;
+}
+
+/* 预览背景：上/下/左/右留白统一 8px（左右来自面板 padding，上下在这里补） */
+.preview-bg {
+  margin: 8px 0 0;
   padding: 0;
 }
 .preview-image-box {
@@ -606,13 +1285,13 @@
 }
 .fps-slider:disabled { cursor: not-allowed; }
 
-/* 按钮栏 */
+/* 按钮栏：预览框与按钮之间同样留 8px */
 .preview-btns {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
-  padding: 6px 0;
+  padding: 8px 0;
 }
 .prev-btn {
   width: 38px;

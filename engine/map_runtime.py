@@ -742,8 +742,8 @@ def _handle_physics_collision():
         # P4：每帧重置接触掩码，再按本帧 x/y 解算结果重新记录
         sprite._contacts = 0
 
-        # 禁用碰撞：不参与重力、落地与墙体修正（照常渲染与按代码移动）
-        if sprite._collision_disabled:
+        # 禁用碰撞 / 感应作用：不参与重力、落地与墙体修正（照常渲染与按代码移动）
+        if sprite._collision_physics_off:
             sprite._on_ground = False
             sprite._update_transform()
             continue
@@ -769,6 +769,28 @@ def _handle_physics_collision():
                 sprite._smart_jump_active = False
         sprite._smart_jump_called = False
 
+        # 移动平台跟随：上一帧踩在某个角色平台（单向或实心碰撞）上时，本帧跟着它一起移动。
+        # 平台在用户代码 / set_speed 里已经先走了一步，这里把同样的位移补给站在上面的角色；
+        # 之后照常走重力和碰撞（被墙挡住就停下，被平台带离边缘就自然掉下去）。
+        # 跳跃起跳时 jump() 已把 _on_ground 置 False，所以跳离平台不会被拖走。
+        platform = sprite._ground_platform
+        platform_vx = 0.0
+        if sprite._on_ground and platform is not None and platform is not sprite:
+            if (
+                platform._is_deleted
+                or not getattr(platform, "_visible", True)
+                or platform._collision_physics_off
+            ):
+                sprite._ground_platform = None
+            else:
+                platform_dx = platform._x - platform._frame_start_x
+                platform_dy = platform._y - platform._frame_start_y
+                if abs(platform_dx) > 1e-6 or abs(platform_dy) > 1e-6:
+                    sprite.move_and_slide(platform_dx, platform_dy, axis_order="yx")
+                # 记录平台横向速度：jump() 据此在下一次起跳时继承「甩出去」的惯性
+                platform_vx = platform_dx
+        sprite._platform_vx = platform_vx
+
         sprite._on_ground = False
 
         if st._CURRENT_MAP.get("gravity", False) and sprite._gravity:
@@ -785,7 +807,8 @@ def _handle_physics_collision():
 
         x_before = sprite._x
         # 唯一入口：先纵向再横向（与旧物理步顺序一致），内部会先 depenetrate
-        sprite.move_and_slide(0.0, sprite._vy, axis_order="yx")
+        # 横向同时带上从移动平台起跳继承的惯性（_launch_vx），碰墙会被正常挡住
+        sprite.move_and_slide(sprite._launch_vx, sprite._vy, axis_order="yx")
         # 禁止下滑：本步学生代码与自动移动都没动过 x 时，
         # 落地状态下撤销重力+碰撞推挤带来的水平漂移（即 Godot floor_stop_on_slope 语义）
         if stop_on_slope and sprite._on_ground and x_before == sprite._frame_start_x:
@@ -793,6 +816,13 @@ def _handle_physics_collision():
         if sprite._on_ground:
             sprite._vy = 0
             sprite._jump_cut = False
+            # 落地后横向惯性消失（避免落地后一直滑）
+            sprite._launch_vx = 0.0
+        elif sprite._launch_vx:
+            # 空中惯性逐帧衰减：每帧剩 90%，约半秒衰减到可以忽略
+            sprite._launch_vx *= 0.9
+            if abs(sprite._launch_vx) < 0.05:
+                sprite._launch_vx = 0.0
 
         sprite._update_transform()
 
@@ -887,6 +917,9 @@ def _render_map():
             for image_idx, image in enumerate(layer["images"]):
                 # 生成唯一的图像ID
                 sprite_id = f"image_{layer_idx}_{image_idx}"
+                # 相机移动会多次调用本函数：已经发过的图像不再重发（否则每走半格就全量重发整张地图）
+                if sprite_id in st._MAP_SPRITES:
+                    continue
 
                 # 获取图像位置
                 position = image.get("position", [0, 0])
@@ -989,6 +1022,10 @@ def _render_map():
 
                 sprite_id = f"tile_{layer_idx}_{x}_{y}"
                 tile_key = (layer_idx, x, y)
+                # 相机移动会多次调用本函数：已经发过的图块不再重发
+                # （地图是静态的，首次加载发全量，之后只补新增图块）
+                if sprite_id in st._MAP_SPRITES:
+                    continue
 
                 # 获取瓦片集的具体瓦片大小（图块实际大小）
                 tile_set_size_w = tile_size  # 默认使用地图的全局tile_size
@@ -1055,6 +1092,10 @@ def _render_map():
         # 使用地图的全局tile_size作为数据包的tile_size（格子大小）
         # 这样图块始终在原来的格子位置上
         packet_tile_size = tile_size
+
+        # 相机移动时如果没有新图块要画，就不要每半格都发一个空包
+        if not batch_commands:
+            return
 
         packet = {
             "type": "CREATE_BATCH",

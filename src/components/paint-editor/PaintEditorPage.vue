@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { ask } from '@tauri-apps/plugin-dialog'
-import { usePaintStore, ARTBOARD_MAX } from '../../stores/paint'
+import { ask, message } from '@tauri-apps/plugin-dialog'
+import { usePaintStore } from '../../stores/paint'
+import { useMapStore } from '../../stores/map'
 import { useResourceStore } from '../../stores/resource'
 import { useProjectStore } from '../../stores/project'
 import {
@@ -10,7 +11,15 @@ import {
   loadImage,
   revokeSpriteUrls,
 } from '../../composables/useSpriteData'
-import { rewriteSpriteFrames, normalizeFrameToCanvas } from '../../composables/appendSpriteFrames'
+import {
+  rewriteSpriteFrames,
+  normalizeFrameToCanvas,
+  readPaintSidecar,
+  readPaintSidecarAt,
+  writePaintSidecar,
+  deletePaintSidecar,
+  type PaintSidecarFrame,
+} from '../../composables/appendSpriteFrames'
 import { exportCanvasPngBlob, exportArtboardPngBlob } from './utils/artboardExport'
 import { packDrawnFrames, buildDrawnBsfManifest } from '../../utils/bsfPacker'
 import PaintTopBar from './PaintTopBar.vue'
@@ -37,17 +46,26 @@ const props = defineProps<{
   mode?: 'sprite' | 'mapImage'
   /** mapImage 模式的画板尺寸（通常等于地图像素尺寸） */
   mapImageSize?: { w: number; h: number }
+  /** mapImage 模式：要再次编辑的既有地图图像绝对路径；空 = 新建空白画板 */
+  mapImageAbsPath?: string | null
 }>()
 
 const emit = defineEmits<{
   close: []
   /** 保存完成：新建返回新角色 id；编辑返回原角色 id */
   saved: [id: string, name: string]
-  /** 地图图像保存：输出单帧 PNG，由外层写入地图目录并注册素材 */
-  'saved-map-image': [blob: Blob, width: number, height: number]
+  /** 地图图像保存：输出单帧 PNG，由外层写入地图目录并注册素材
+   *  侧车（纯位图层 + 矢量快照）由外层写到图像旁的 .paint.json，保证再次进入仍可编辑对象 */
+  'saved-map-image': [
+    blob: Blob,
+    width: number,
+    height: number,
+    sidecar: PaintSidecarFrame[] | null,
+  ]
 }>()
 
 const store = usePaintStore()
+const mapStore = useMapStore()
 const resourceStore = useResourceStore()
 const projectStore = useProjectStore()
 
@@ -65,19 +83,120 @@ async function frameBlobToCanvas(blob: Blob, w: number, h: number): Promise<HTML
   return c
 }
 
+/** data URL（侧车里保存的纯位图底图）→ 目标尺寸画布；只接受 PNG data URL，异常返回 null */
+async function dataUrlToCanvas(url: string, w: number, h: number): Promise<HTMLCanvasElement | null> {
+  if (!/^data:image\/png;base64,/.test(url)) return null
+  try {
+    const img = await loadImage(url)
+    const c = document.createElement('canvas')
+    c.width = w
+    c.height = h
+    c.getContext('2d')!.drawImage(img, 0, 0)
+    return c
+  } catch {
+    return null
+  }
+}
+
+const IMAGE_PATH_RE = /\.(png|jpe?g|gif|bmp|webp)$/i
+
+/** 角色路径对应的目录（图片文件无侧车可存，返回 null） */
+function spriteDirOf(path: string): string | null {
+  return IMAGE_PATH_RE.test(path) ? null : path
+}
+
+/**
+ * 组装绘制侧车帧数据：为有矢量内容的帧额外保存「纯位图底图」，
+ * 保证重新打开后矢量对象可分别选中，且移动对象不会残留烘焙像素。
+ */
+function collectPaintSidecarFrames(): { frames: PaintSidecarFrame[]; hasVector: boolean } | null {
+  const vectors = artboardRef.value?.getFrameVectors()
+  const bitmaps = artboardRef.value?.getFrameCanvasesBitmap()
+  if (!vectors || !bitmaps) return null
+  const frames: PaintSidecarFrame[] = vectors.map((vector, i) => (
+    vector
+      ? { vector, bitmap: bitmaps[i]?.toDataURL('image/png') }
+      : { vector: null }
+  ))
+  return { frames, hasVector: frames.some((f) => f.vector) }
+}
+
+/** 保存绘制侧车：有矢量内容则覆盖写入，否则删除过期文件（矢量已清空/烘焙）；
+    侧车写入失败只降级为纯位图编辑，不让已写好的角色/图像被判为保存失败 */
+async function persistPaintSidecar(dirPath: string | null) {
+  if (!dirPath) return
+  const built = collectPaintSidecarFrames()
+  if (!built) return
+  try {
+    if (built.hasVector) await writePaintSidecar(dirPath, built.frames)
+    else await deletePaintSidecar(dirPath)
+  } catch (e) {
+    console.warn('[PaintEditor] 绘制侧车写入失败:', e)
+  }
+}
+
 // MainLayout 用 :key 递增保证每次打开全新实例；store 是全局的，挂载时重置
 onMounted(async () => {
   store.reset()
-  // 地图背景：单画板，尺寸锁定为地图像素尺寸
+  // 网格尺寸默认跟随当前地图编辑器的图块尺寸（顶栏可手动改）
+  store.gridSize = Math.max(1, Math.round(Number(mapStore.mapData.tileSize) || 16))
+  // 地图背景：单画板，尺寸锁定（新建=地图像素尺寸；编辑已有图片=图片自身像素尺寸）
   if (props.mode === 'mapImage') {
-    const size = props.mapImageSize
-    if (size) {
-      const clamp = (v: number) => Math.min(ARTBOARD_MAX, Math.max(1, Math.round(v)))
-      store.artboardWidth = clamp(size.w)
-      store.artboardHeight = clamp(size.h)
+    let w = props.mapImageSize?.w
+    let h = props.mapImageSize?.h
+    let frame: HTMLCanvasElement | null = null
+    if (props.mapImageAbsPath) {
+      try {
+        const src = await invoke<string>('read_image_as_data_url', { path: props.mapImageAbsPath })
+        const img = await loadImage(src)
+        w = img.naturalWidth || img.width
+        h = img.naturalHeight || img.height
+        frame = document.createElement('canvas')
+        frame.width = Math.max(1, Math.round(w))
+        frame.height = Math.max(1, Math.round(h))
+        frame.getContext('2d')!.drawImage(img, 0, 0)
+      } catch (e) {
+        console.error('[PaintEditor] 载入地图图像失败:', e)
+      }
     }
-    store.sizeForced = true
+    // 地图画板可远大于像素图上限：按浏览器画布安全面积（约 1600 万像素）等比缩放，
+    // 常见的大地图（如 6540×480）仍按原尺寸打开
+    const MAX_MAP_SIDE = 16384
+    const MAX_MAP_AREA = 16_000_000
+    const fitMapSide = (side: number, other: number) => {
+      let value = Math.min(MAX_MAP_SIDE, Math.max(1, side))
+      const area = value * Math.max(1, Math.round(other))
+      if (area > MAX_MAP_AREA) {
+        value = Math.max(1, value * Math.sqrt(MAX_MAP_AREA / area))
+      }
+      return Math.max(1, Math.round(value))
+    }
+    let boardW = Math.round(w ?? 640)
+    let boardH = Math.round(h ?? 480)
+    boardW = fitMapSide(boardW, boardH)
+    boardH = fitMapSide(boardH, boardW)
+    store.artboardWidth = boardW
+    store.artboardHeight = boardH
+    // 地图图像不锁定画布尺寸：可按需改尺寸/裁切，保存后图层尺寸同步更新
+    store.sizeForced = false
     store.resetView()
+    if (frame) {
+      // 再次编辑：优先用图像旁的 .paint.json 侧车恢复「纯位图底图 + 矢量对象」，
+      // 否则矢量对象只能以整张位图形式出现（无法再分别选中）
+      let base = frame
+      let vectors: (string | null)[] = [null]
+      if (props.mapImageAbsPath) {
+        const sc = (await readPaintSidecarAt(`${props.mapImageAbsPath}.paint.json`))?.frames[0]
+        const restored = sc?.bitmap ? await dataUrlToCanvas(sc.bitmap, frame.width, frame.height) : null
+        if (restored) base = restored
+        vectors = [typeof sc?.vector === 'string' ? sc.vector : null]
+      }
+      // 画板可能还没完成挂载（ref 为空时直接跳过会让画板空着 → 保存静默失败），
+      // 这里多等几拍直到 ref 就绪再载入帧
+      for (let i = 0; i < 6 && !artboardRef.value; i++) await nextTick()
+      await nextTick()
+      artboardRef.value?.loadFrames([base], ['地图图像'], 0, vectors)
+    }
     return
   }
 
@@ -105,16 +224,27 @@ onMounted(async () => {
       store.sizeForced = true
       store.resetView()
 
+      const dirPath = spriteDirOf(target.path)
+      const sidecar = dirPath ? await readPaintSidecar(dirPath) : null
+
       const canvases: HTMLCanvasElement[] = []
-      for (const f of sprite.frames) {
-        canvases.push(await frameBlobToCanvas(f.blob, store.artboardWidth, store.artboardHeight))
+      const vectors: (string | null)[] = []
+      for (let i = 0; i < sprite.frames.length; i++) {
+        const f = sprite.frames[i]
+        const sc = sidecar?.frames[i]
+        // 有矢量内容的帧用侧车里的「纯位图底图」；其余帧直接用角色文件里的合成图
+        const restored = sc?.bitmap
+          ? await dataUrlToCanvas(sc.bitmap, store.artboardWidth, store.artboardHeight)
+          : null
+        canvases.push(restored ?? await frameBlobToCanvas(f.blob, store.artboardWidth, store.artboardHeight))
+        vectors.push(typeof sc?.vector === 'string' ? sc.vector : null)
       }
       const names = sprite.frames.map(f => f.name)
       const activeIndex = props.openMode === 'edit'
         ? Math.min(Math.max(0, props.initialFrameIndex ?? 0), canvases.length - 1)
         : canvases.length - 1
       await nextTick() // 等画板 canvas 尺寸属性绑定生效后再载入
-      artboardRef.value?.loadFrames(canvases, names, activeIndex)
+      artboardRef.value?.loadFrames(canvases, names, activeIndex, vectors)
 
       // 抽屉「绘制新帧」：载入后自动追加一张空白帧并选中
       if (props.openMode === 'newFrame') {
@@ -158,18 +288,29 @@ async function onClose() {
 
 /** 保存当前编辑；返回是否成功（失败时调用方不应离开页面） */
 async function saveArtwork(): Promise<boolean> {
-  if (store.dirty === false) return true
-  const canvases = artboardRef.value?.getFrameCanvases()
-  const names = artboardRef.value?.getFrameNames()
-  if (!canvases || !names || canvases.length === 0) return false
+  // 地图图像即使未落笔也要产出（新建空白图层需要把空白画板落盘）
+  if (props.mode !== 'mapImage' && store.dirty === false) return true
 
   try {
+    const canvases = artboardRef.value?.getFrameCanvases()
+    const names = artboardRef.value?.getFrameNames()
+    if (!canvases || !names || canvases.length === 0) {
+      console.error('[PaintEditor] 画板未就绪，无法保存')
+      return false
+    }
+
     // ─── 地图背景：只导出当前画板为 PNG，由外层写入地图目录 ───
     if (props.mode === 'mapImage') {
       const canvas = canvases[Math.min(Math.max(0, store.activeFrameIndex), canvases.length - 1)]
-      if (!canvas) return false
+      if (!canvas) {
+        console.error('[PaintEditor] 地图画板帧缺失，无法导出')
+        return false
+      }
       const blob = await exportArtboardPngBlob(canvas, store.artboardWidth, store.artboardHeight)
-      emit('saved-map-image', blob, store.artboardWidth, store.artboardHeight)
+      // 侧车交给外层写到图像旁（.paint.json）；无矢量内容时传 null → 外层删除过期侧车
+      const built = collectPaintSidecarFrames()
+      const sidecar = built?.hasVector ? built.frames : null
+      emit('saved-map-image', blob, store.artboardWidth, store.artboardHeight, sidecar)
       return true
     }
 
@@ -181,6 +322,8 @@ async function saveArtwork(): Promise<boolean> {
       if (res.newPath) {
         resourceStore.updateItemPath(target.id, res.newPath)
       }
+      // 侧车写入角色目录（图片角色转正 → 用新目录），保留矢量对象可编辑结构
+      await persistPaintSidecar(res.newPath ?? spriteDirOf(target.path))
       resourceStore.bumpSpriteThumb(target.id)
       emit('saved', target.id, target.name)
       return true
@@ -208,18 +351,31 @@ async function saveArtwork(): Promise<boolean> {
       path: `${dirPath}/manifest.json`,
       content: JSON.stringify(manifest, null, 2),
     })
+    await persistPaintSidecar(dirPath)
 
     const id = resourceStore.addItem({ name: spriteName, type: 'sprite', path: dirPath })
     emit('saved', id, spriteName)
     return true
   } catch (e) {
-    console.error('[PaintEditor] 保存角色失败:', e)
+    console.error('[PaintEditor] 保存失败:', e)
     return false
   }
 }
 
-function onSave() {
-  saveArtwork()
+async function onSave() {
+  try {
+    const ok = await saveArtwork()
+    if (ok) return
+  } catch (e) {
+    console.error('[PaintEditor] 保存失败:', e)
+  }
+  // 失败必须给出可见反馈，不能"点了没反应"
+  await message(
+    props.mode === 'mapImage'
+      ? '保存地图图像失败，请重试。如果一直失败，请把控制台里的错误信息反馈给我们。'
+      : '保存角色失败，请重试。如果一直失败，请把控制台里的错误信息反馈给我们。',
+    { title: props.mode === 'mapImage' ? '地图绘制' : '角色绘制', kind: 'error' },
+  )
 }
 
 /** 顶部菜单切换页面时调用：自动保存当前编辑，成功后才允许离开 */
@@ -234,6 +390,7 @@ defineExpose({ saveBeforeLeave })
   <div class="paint-page">
     <PaintTopBar
       :save-title="mode === 'mapImage' ? '保存为地图图像' : (targetSprite ? '保存回角色' : undefined)"
+      :can-save="mode === 'mapImage' ? true : undefined"
       @close="onClose"
       @save="onSave"
       @crop="artboardRef?.beginCrop()"

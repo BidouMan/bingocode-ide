@@ -8,7 +8,8 @@ import { useEditorStore } from '../../stores/editor'
 import { useProjectStore } from '../../stores/project'
 
 import iconFileUpload from '../../assets/icons/icon--file-upload.svg'
-import iconPaint from '../../assets/icons/icon--paint.svg'
+import iconPaint from '../../assets/icons/画笔工具.svg'
+import iconEdit from '../../assets/icons/编辑.svg'
 import iconSelectSprite from '../../assets/icons/icon--select--sprite.svg'
 import iconSpriteUpload from '../../assets/icons/sprite_upload.svg'
 import iconMapUpload from '../../assets/icons/map_upload.svg'
@@ -40,7 +41,7 @@ const acceptMap: Record<string, string> = {
   code: '.py',
 }
 
-const menuConfig: Record<string, { items: { key: string; icon: string }[]; uploadIcon: string }> = {
+const menuConfig: Record<string, { items: { key: string; icon: string; compactIcon?: boolean }[]; uploadIcon: string }> = {
   sprite: {
     items: [
       { key: 'import', icon: iconFileUpload },
@@ -50,9 +51,12 @@ const menuConfig: Record<string, { items: { key: string; icon: string }[]; uploa
     uploadIcon: iconSpriteUpload,
   },
   map: {
+    // 顺序：上传地图 / 创建地图 / 绘制地图 / 打开地图
     items: [
       { key: 'import', icon: iconFileUpload },
-      { key: 'create', icon: iconPaint },
+      // 编辑图标本身几乎占满画布，比其他图标显大，单独缩小保持视觉一致
+      { key: 'create', icon: iconEdit, compactIcon: true },
+      { key: 'paint', icon: iconPaint },
       { key: 'library', icon: iconSelectSprite },
     ],
     uploadIcon: iconMapUpload,
@@ -78,7 +82,7 @@ const config = computed(() => menuConfig[props.type])
 // 抽屉按钮功能提示文案（Scratch 风格 tooltip，悬停时显示在按钮左侧）
 const tipTextMap: Record<string, Record<string, string>> = {
   sprite: { import: '上传角色', paint: '绘制角色', library: '选择角色' },
-  map: { import: '上传地图', create: '绘制地图', library: '选择地图' },
+  map: { import: '上传地图', create: '创建地图', paint: '绘制地图', library: '打开地图' },
   sound: { import: '上传声音', library: '选择声音' },
   code: { import: '上传代码文件', new: '新建代码文件' },
 }
@@ -203,8 +207,8 @@ async function handleAction(key: string) {
       }
       break
     case 'paint':
-      // 角色的 paint 按钮 = 打开绘制编辑器；其他类型暂与 library 行为一致
-      if (props.type === 'sprite') {
+      // 角色的 paint = 新建角色绘制；地图的 paint = 进入绘制页画一张新地图
+      if (props.type === 'sprite' || props.type === 'map') {
         emit('openPaint', props.type)
       } else {
         emit('openLibrary', props.type)
@@ -236,7 +240,7 @@ async function handleAction(key: string) {
           @mouseenter="showTip($event, item.key)"
           @mouseleave="hideTip"
         >
-          <img :src="item.icon" class="drawer-btn-icon" />
+          <img :src="item.icon" class="drawer-btn-icon" :class="{ 'drawer-btn-icon-compact': item.compactIcon }" />
         </button>
         <!-- 填充抽屉和按钮之间的缝隙 -->
         <div class="drawer-gap-fill"></div>
@@ -307,6 +311,12 @@ async function handleAction(key: string) {
 .drawer-btn-icon {
   width: 20px;
   height: 20px;
+}
+
+/* 内容占满画布的图标（如编辑笔）略缩小，视觉大小与其他按钮一致 */
+.drawer-btn-icon-compact {
+  width: 16px;
+  height: 16px;
 }
 
 /* 缝隙填充 */

@@ -29,6 +29,26 @@ export type SpriteCollisionShape =
   | { type: 'capsule'; cx: number; cy: number; radius: number; height: number }
   | { type: 'polygon'; points: [number, number][] }
 
+/**
+ * 标记（挂点）条目：画布坐标 + 编辑器展示设置。
+ * 展示设置只存在统一值（BsfMeta.markers）上，帧覆盖仍只记坐标。
+ * 缺省：显示、标签、坐标都开，不锁定。
+ */
+export interface SpriteMarkerPoint {
+  x: number
+  y: number
+  /** 标记类型（如「手持点」「头部」；缺省显示「未分类」），只存在统一值上 */
+  type?: string
+  /** false = 画布上不显示该图钉（仍可在「标记管理」页里选中编辑） */
+  visible?: boolean
+  /** false = 图钉标签不显示名字 */
+  showLabel?: boolean
+  /** false = 图钉标签不显示坐标 */
+  showCoords?: boolean
+  /** true = 锁定位置：可点选但不能拖动 */
+  locked?: boolean
+}
+
 export interface BsfFrameMeta {
   name: string
   rect: { x: number; y: number; w: number; h: number }
@@ -45,15 +65,98 @@ export interface BsfFrameMeta {
 export interface BsfMeta {
   canvas: { w: number; h: number }
   pivot: { x: number; y: number }
+  /**
+   * 素材原始中心点（画布坐标）：编辑器「中心点」面板显示偏移量的基准，
+   * 未移动过中心点时显示 0,0。老文件缺省 = 当前 pivot。
+   */
+  pivotBase?: { x: number; y: number }
   frames: BsfFrameMeta[]
   /** 统一碰撞形状：缺省 = 自动碰撞（引擎内容包围盒） */
   collision?: SpriteCollisionShape
+  /**
+   * 碰撞作用（可选）：与地图图块/形状同一套语义。
+   * solid = 碰撞（参与地形/边界物理阻挡）；sensor = 感应（不阻挡，仅可被检测）；
+   * both = 碰撞 + 感应。缺省 solid。
+   */
+  collisionKind?: 'solid' | 'sensor' | 'both'
+  /** 碰撞类型 / 标签（可选）：代码里 is_touch("标签") 查询用；缺省「默认」 */
+  collisionTag?: string
   /** 禁用碰撞：true = 该角色完全不参与地形/边界物理阻挡（不影响碰到检测） */
   collisionDisabled?: boolean
+  /** 单向碰撞（可选）：true = 可当单向碰撞体，只有从「方向」一侧靠近才挡住 */
+  collisionOneWay?: boolean
+  /** 单向碰撞方向（可选，世界坐标 y 向下）：缺省 (0,1) = 从上方踩住 */
+  collisionOneWayDirX?: number
+  collisionOneWayDirY?: number
+  /** 单向碰撞厚度（可选，0~8 像素）：越大越容易踩住/挡住；缺省 0 */
+  collisionOneWayMargin?: number
+  /**
+   * 移动平台（可选）：true = 由代码驱动的平台角色，移动时不会被其它角色顶住，
+   * 反而会推开/托着角色走（专业引擎里的运动学平台）；缺省关闭
+   */
+  collisionMovingPlatform?: boolean
+  /** 碰撞层级开关（可选）：当前仅编辑器保存，运行时尚未接入 */
+  collisionLayersEnabled?: boolean
+  /** 所在碰撞层（1~8，缺省 1）：仅编辑器保存，运行时尚未接入 */
+  collisionLayer?: number
+  /** 可碰撞掩码（1~8 的层号数组，缺省 [1]）：仅编辑器保存，运行时尚未接入 */
+  collisionMask?: number[]
+  /** 碰撞形状旋转角度（度，可选）：当前仅编辑器保存，运行时尚未接入 */
+  collisionAngle?: number
   /** 受重力影响：false = 重力地图里也不下坠（撞墙/落地等碰撞照常）；缺省 = 受重力 */
   gravity?: boolean
-  /** 统一挂点（按名字，画布坐标）：武器/道具挂载锚点，如 hand_r / head */
-  markers?: Record<string, { x: number; y: number }>
+  /** 初始隐藏：true = 角色创建时不可见（代码里 show() 后出现）；缺省 = 可见 */
+  hidden?: boolean
+  /** 默认图层：数字越大越靠前，同层按创建顺序；缺省 0 */
+  layer?: number
+  /** Y 轴排序：true = 同层内按脚底 Y 坐标排序（越靠下越靠前）；缺省不启用 */
+  ySort?: boolean
+  /**
+   * 旋转模式（编辑器「基础设置 → 翻转模式」）：与 set_rotation_mode() 的三种模式一致。
+   * 'all' = 任意旋转；'left_right' = 左右翻转；'none' = 不可旋转。缺省不写字段（= 任意旋转）
+   */
+  rotationMode?: 'all' | 'left_right' | 'none'
+  /** 统一挂点（按名字，画布坐标）：武器/道具挂载锚点，如 hand_r / head；含编辑器展示设置 */
+  markers?: Record<string, SpriteMarkerPoint>
+}
+
+/**
+ * 角色场景变换（角色自己的局部坐标系，原点 = 引擎默认出生位置）：
+ * x 向右、y 向上为正，表示相对默认出生位置的偏移；angle 逆时针为正（度）；
+ * scale 为百分比（100 = 原始大小）。
+ * 缺省（未写入数据）= 0,0 / 0° / 100%，即完全不改变引擎的默认出生位置。
+ */
+export interface SpriteTransform {
+  x: number
+  y: number
+  angle: number
+  scale: number
+  /** 非等比缩放（百分比）：仅「约束比例」取消勾选且 X / Y 不同时写入；缺省 = 用 scale */
+  scaleX?: number
+  scaleY?: number
+}
+
+/** 默认变换 = 原点、不旋转、100% 缩放（不写数据时引擎出生在舞台中心 320,240 的行为不变） */
+export const DEFAULT_SPRITE_TRANSFORM: SpriteTransform = { x: 0, y: 0, angle: 0, scale: 100 }
+
+/** 读取并校验角色初始变换：字段缺失/非法时回退默认值（scale 限制 5%~1000%） */
+export function readSpriteTransform(raw: unknown): SpriteTransform | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const obj = raw as Record<string, unknown>
+  const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d)
+  const clampScale = (v: number) => Math.min(1000, Math.max(5, v))
+  const scale = clampScale(num(obj.scale, DEFAULT_SPRITE_TRANSFORM.scale))
+  const sx = clampScale(num(obj.scaleX, scale))
+  const sy = clampScale(num(obj.scaleY, scale))
+  return {
+    x: num(obj.x, DEFAULT_SPRITE_TRANSFORM.x),
+    y: num(obj.y, DEFAULT_SPRITE_TRANSFORM.y),
+    angle: num(obj.angle, DEFAULT_SPRITE_TRANSFORM.angle),
+    scale,
+    // 只在与统一缩放不一致时保留分轴值，减少无意义的字段
+    ...(sx !== scale ? { scaleX: sx } : {}),
+    ...(sy !== scale ? { scaleY: sy } : {}),
+  }
 }
 
 export interface SpriteData {
@@ -62,6 +165,8 @@ export interface SpriteData {
   animations: SpriteAnimation[]
   /** 默认渲染帧（下标）：编辑器选中帧持久化后，引擎初始渲染与缩略图都用它（对齐 Scratch 的"当前造型"语义） */
   defaultFrameIndex?: number
+  /** 场景变换（可选）：x/y 是相对引擎默认出生位置的偏移，写入后才由引擎应用；未写入 = 默认位置 */
+  transform?: SpriteTransform
   /** 仅 .bsf 角色有值 */
   bsf?: BsfMeta
 }
@@ -255,13 +360,52 @@ async function buildBsfSpriteData(manifest: any, sheetImage: HTMLImageElement): 
       manifest.defaultFrame,
       (manifest.frames as BsfFrameMeta[]).map(f => f.name),
     ),
+    // 场景变换（可选）：缺省不写字段 = 引擎默认出生位置（舞台中心）
+    ...(manifest.transform ? { transform: readSpriteTransform(manifest.transform) } : {}),
     bsf: {
       canvas: canvasSize,
       pivot: manifest.pivot || { x: canvasSize.w / 2, y: canvasSize.h / 2 },
+      // 素材原始中心点（编辑器「中心点」显示 0,0 的基准）：老文件没有该字段时以当前 pivot 为基准
+      pivotBase: manifest.pivotBase || manifest.pivot || { x: canvasSize.w / 2, y: canvasSize.h / 2 },
       frames: manifest.frames,
       ...(manifest.collision ? { collision: manifest.collision } : {}),
+      ...(manifest.collisionKind === 'sensor' || manifest.collisionKind === 'both'
+        ? { collisionKind: manifest.collisionKind }
+        : {}),
+      ...(typeof manifest.collisionTag === 'string' && manifest.collisionTag.trim()
+        ? { collisionTag: manifest.collisionTag.trim() }
+        : {}),
       ...(manifest.collisionDisabled ? { collisionDisabled: true } : {}),
+      ...(manifest.collisionOneWay
+        ? {
+            collisionOneWay: true,
+            ...(typeof manifest.collisionOneWayDirX === 'number'
+              ? { collisionOneWayDirX: manifest.collisionOneWayDirX }
+              : {}),
+            ...(typeof manifest.collisionOneWayDirY === 'number'
+              ? { collisionOneWayDirY: manifest.collisionOneWayDirY }
+              : {}),
+            ...(typeof manifest.collisionOneWayMargin === 'number'
+              ? { collisionOneWayMargin: manifest.collisionOneWayMargin }
+              : {}),
+          }
+        : {}),
+      ...(manifest.collisionMovingPlatform ? { collisionMovingPlatform: true } : {}),
+      ...(manifest.collisionLayersEnabled
+        ? {
+            collisionLayersEnabled: true,
+            collisionLayer: typeof manifest.collisionLayer === 'number' ? manifest.collisionLayer : 1,
+            collisionMask: Array.isArray(manifest.collisionMask) ? manifest.collisionMask : [1],
+          }
+        : {}),
+      ...(typeof manifest.collisionAngle === 'number' ? { collisionAngle: manifest.collisionAngle } : {}),
       ...(manifest.gravity === false ? { gravity: false } : {}),
+      ...(manifest.hidden ? { hidden: true } : {}),
+      ...(manifest.rotationMode === 'left_right' || manifest.rotationMode === 'none'
+        ? { rotationMode: manifest.rotationMode }
+        : {}),
+      ...(typeof manifest.layer === 'number' ? { layer: manifest.layer } : {}),
+      ...(manifest.ySort ? { ySort: true } : {}),
       ...(manifest.markers ? { markers: manifest.markers } : {}),
     },
   }
@@ -304,16 +448,68 @@ export async function saveBsfManifest(dirPath: string, sprite: SpriteData): Prom
     sheet: 'sheet.png',
     canvas: sprite.bsf.canvas,
     pivot: sprite.bsf.pivot,
+    // 素材原始中心点（编辑器显示偏移的基准）：持久化后再次打开仍能看出累计移动量
+    ...(sprite.bsf.pivotBase ? { pivotBase: sprite.bsf.pivotBase } : {}),
     // 自定义碰撞（可选）：无 = 引擎自动碰撞
     ...(sprite.bsf.collision ? { collision: sprite.bsf.collision } : {}),
+    // 碰撞作用 / 类型（可选）：solid 与空标签是默认值，不写字段
+    ...(sprite.bsf.collisionKind && sprite.bsf.collisionKind !== 'solid'
+      ? { collisionKind: sprite.bsf.collisionKind }
+      : {}),
+    ...(sprite.bsf.collisionTag?.trim() ? { collisionTag: sprite.bsf.collisionTag.trim() } : {}),
     // 禁用碰撞（可选）：true = 不参与物理阻挡；缺省不写字段
     ...(sprite.bsf.collisionDisabled ? { collisionDisabled: true } : {}),
+    // 单向碰撞（可选）：true = 角色可当单向碰撞体；缺省不写字段
+    ...(sprite.bsf.collisionOneWay
+      ? {
+          collisionOneWay: true,
+          // 方向缺省 (0,1) 从上方踩住，不写冗余字段
+          ...(sprite.bsf.collisionOneWayDirX !== undefined
+            && sprite.bsf.collisionOneWayDirY !== undefined
+            && (sprite.bsf.collisionOneWayDirX !== 0 || sprite.bsf.collisionOneWayDirY !== 1)
+            ? {
+                collisionOneWayDirX: sprite.bsf.collisionOneWayDirX,
+                collisionOneWayDirY: sprite.bsf.collisionOneWayDirY,
+              }
+            : {}),
+          ...(sprite.bsf.collisionOneWayMargin
+            ? { collisionOneWayMargin: sprite.bsf.collisionOneWayMargin }
+            : {}),
+        }
+      : {}),
+    // 移动平台（可选）：true = 代码驱动的平台不被其它角色推动；缺省不写字段
+    ...(sprite.bsf.collisionMovingPlatform ? { collisionMovingPlatform: true } : {}),
+    // 碰撞层级 / 掩码 / 旋转（可选）：当前仅编辑器保存，运行时尚未接入
+    ...(sprite.bsf.collisionLayersEnabled
+      ? {
+          collisionLayersEnabled: true,
+          collisionLayer: sprite.bsf.collisionLayer ?? 1,
+          collisionMask: sprite.bsf.collisionMask ?? [1],
+        }
+      : {}),
+    ...(typeof sprite.bsf.collisionAngle === 'number' && sprite.bsf.collisionAngle !== 0
+      ? { collisionAngle: sprite.bsf.collisionAngle }
+      : {}),
     // 受重力影响（可选）：false = 不受地图重力；缺省不写字段（= 受重力）
     ...(sprite.bsf.gravity === false ? { gravity: false } : {}),
+    // 初始隐藏（可选）：缺省不写字段（= 可见）
+    ...(sprite.bsf.hidden ? { hidden: true } : {}),
+    // 旋转模式（可选）：缺省不写字段（= 任意旋转）
+    ...(sprite.bsf.rotationMode === 'left_right' || sprite.bsf.rotationMode === 'none'
+      ? { rotationMode: sprite.bsf.rotationMode }
+      : {}),
+    // 默认图层（可选）：缺省不写字段（= 0）
+    ...(typeof sprite.bsf.layer === 'number' && sprite.bsf.layer !== 0
+      ? { layer: sprite.bsf.layer }
+      : {}),
+    // Y 轴排序（可选）：缺省不写字段（= 不启用）
+    ...(sprite.bsf.ySort ? { ySort: true } : {}),
     // 挂点（可选）：名字 → 画布坐标；空表不写字段
     ...(sprite.bsf.markers && Object.keys(sprite.bsf.markers).length > 0
       ? { markers: sprite.bsf.markers }
       : {}),
+    // 场景初始变换（可选）：仅用户编辑过后才写入，旧资源保持引擎默认行为
+    ...(sprite.transform ? { transform: sprite.transform } : {}),
     frames: sprite.bsf.frames,
     clips,
     // 默认渲染帧（编辑器选中帧）：可选字段，读取方缺省回退第一帧
@@ -361,6 +557,7 @@ export async function readBgsFile(file: File): Promise<SpriteData> {
     frames,
     animations,
     defaultFrameIndex: resolveDefaultFrameIndex(config.defaultFrame, frameNames),
+    ...(config.transform ? { transform: readSpriteTransform(config.transform) } : {}),
   }
 }
 
@@ -411,6 +608,7 @@ async function readLocalSpriteDir(dirPath: string): Promise<SpriteData> {
     frames,
     animations,
     defaultFrameIndex: resolveDefaultFrameIndex(config.defaultFrame, frameNames),
+    ...(config.transform ? { transform: readSpriteTransform(config.transform) } : {}),
   }
 }
 
@@ -447,6 +645,8 @@ export async function saveSpriteConfig(spritePath: string, sprite: SpriteData): 
   // 默认渲染帧（编辑器选中帧）：可选字段，缺省时读取方回退第一帧
   const defaultFrame = sprite.frames[sprite.defaultFrameIndex ?? 0]?.name
   if (defaultFrame) config.defaultFrame = defaultFrame
+  // 场景初始变换（可选）：仅用户编辑过后才写入
+  if (sprite.transform) config.transform = sprite.transform
 
   const json = JSON.stringify(config, null, 4)
   await invoke('write_file', { path: `${spritePath}/config.json`, content: json })
@@ -466,7 +666,7 @@ export async function readImageAsSprite(path: string): Promise<SpriteData> {
 }
 
 /** 图片非透明内容包围盒（图片坐标）；整图全透明时回退整图 */
-function imageContentBox(img: HTMLImageElement): { x: number; y: number; w: number; h: number } {
+export function imageContentBox(img: HTMLImageElement): { x: number; y: number; w: number; h: number } {
   const canvas = document.createElement('canvas')
   canvas.width = img.naturalWidth || img.width
   canvas.height = img.naturalHeight || img.height

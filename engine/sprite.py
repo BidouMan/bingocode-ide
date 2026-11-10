@@ -58,14 +58,23 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
         self._x = 320
         self._y = 240
         self._scale = 100
+        # 分轴缩放比例（编辑器取消「约束比例」时写入）：相对 _scale 的倍数，1.0 = 跟随统一缩放
+        self._scale_ratio_x = 1.0
+        self._scale_ratio_y = 1.0
         self._angle = 0
         self._rotation_style = "all"
         self._current_scale_x = 1.0
         self.hitbox_scale = 1.0
         self._on_ground = False
+        # 当前踩着的「角色平台」（其它参与物理碰撞的 Sprite）：移动平台跟随用
+        self._ground_platform = None
         # 接触掩码（P4）：本帧 x/y 解算中碰到的方向，按位记录
         self._contacts = 0
         self._vy = 0
+        # 从移动平台起跳时继承的横向速度（像素/帧），在空中逐帧衰减；0 = 无惯性
+        self._launch_vx = 0.0
+        # 上一帧脚下平台的横向位移（像素/帧），jump() 用它计算继承速度
+        self._platform_vx = 0.0
         self._prev_bottom_y = 0
         # 本步移动前的内容盒上沿：与 _prev_bottom_y 一起判断「从上方落地 / 从下方撞头」
         self._prev_top_y = 0
@@ -87,9 +96,13 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
         self._is_deleted = False
         self._layer = 0
         self._speed = 0
-        # 本物理步学生代码执行前的 x：用于区分主动移动与斜面碰撞推挤下滑
+        # 本物理步学生代码执行前的 x/y：x 用于区分主动移动与斜面碰撞推挤下滑，
+        # y 与 x 一起算出平台本帧走了多远，供站在平台上的角色跟随
         self._frame_start_x = 0.0
+        self._frame_start_y = 0.0
         self._on_hit_callbacks = []
+        # 鼠标点击回调（on_clicked）：一个角色只保留最后一次注册
+        self._click_callback = None
         # 感应区进出回调：[(tag, callback)]；_sensor_active_tags 记录当前仍在区域内的标签，
         # 用于「只在从无到有 / 从有到无时各触发一次」
         self._sensor_enter_callbacks = []
@@ -122,12 +135,46 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
         self._is_bsf = False
         # 禁用碰撞（编辑器「禁用碰撞」开关；仅 .bsf manifest 提供，缺省开启）
         self._collision_disabled = False
+        # 碰撞作用 / 类型（编辑器「作用 / 类型」；仅 .bsf 提供，缺省 solid / 默认）
+        # （空类型由 sprite_assets 补成「默认」）
+        self._collision_kind = "solid"
+        self._collision_tag = "默认"
+        # 单向碰撞（编辑器「单向碰撞」；仅 .bsf 提供，缺省关闭）
+        # true = 该角色可作为单向碰撞体：只有从「方向」一侧靠近时挡住，另一侧可穿过
+        self._collision_one_way = False
+        self._collision_one_way_dir = (0.0, 1.0)
+        self._collision_one_way_margin = 0.0
+        # 移动平台（编辑器「移动平台」开关；仅 .bsf 提供，缺省关闭）
+        # true = 由代码驱动的平台：移动时不被其它角色顶住，反而会推开/托着角色走
+        self._collision_moving_platform = False
         # 受重力影响（编辑器「重力」开关 / 代码 sprite.gravity；缺省受重力）
         self._gravity = True
         self.config = self._load_sprite_config()
+        # 旋转模式（编辑器「基础设置 → 翻转模式」）：与 set_rotation_mode() 的三种模式一一对应
+        if self._is_bsf:
+            mode = getattr(self, "_bsf_rotation_mode", "all")
+            if mode in ("all", "left_right", "none"):
+                self._rotation_style = mode
+        self._current_scale_x = 1.0
         # .bgs 的 config.json 直接携带 gravity 字段（.bsf 已在 normalize 时读取）
         if self.config and not self._is_bsf:
             self._gravity = bool(self.config.get("gravity", True))
+
+        # 场景初始变换（可选，编辑器「选择」图层保存）：用户坐标 / 角度逆时针 / 缩放百分比。
+        # 缺省不写字段 = 保持引擎默认（舞台中心 320,240 / 0° / 100%），旧角色行为完全不变。
+        raw_transform = None
+        if self._is_bsf:
+            raw_transform = getattr(self, "_bsf_transform", None)
+        elif self.config:
+            raw_transform = self.config.get("transform")
+        self._apply_initial_transform(raw_transform)
+
+        # 初始可见 / 默认图层（编辑器「图层设置」；缺省 = 可见、层级 0）
+        if self._is_bsf:
+            self._visible = not bool(getattr(self, "_bsf_hidden", False))
+            self._layer = int(getattr(self, "_bsf_layer", 0))
+        elif self.config:
+            self._visible = not bool(self.config.get("hidden", False))
 
         if self.config:
             # 如果是 BGS 角色包格式
@@ -166,17 +213,29 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
         self._setup_hitbox()
 
         # 5. 向 IDE 发送创建指令
+        # 首帧朝向与 _update_transform 的旋转模式规则一致，避免 CREATE 首帧显示成整体旋转
+        display_angle = self._angle
+        if self._rotation_style == "left_right":
+            display_angle = 0.0
+            norm_angle = self._angle % 360
+            self._current_scale_x = -1.0 if 90 < norm_angle < 270 else 1.0
+        elif self._rotation_style == "none":
+            display_angle = 0.0
+            self._current_scale_x = 1.0
         create_data = {
             # 关键：转为绝对路径确保 IDE 渲染器能跨目录找到文件
             "image": os.path.abspath(self.image),
             "x": self._x,
             "y": self._y,
-            "angle": self._angle,
+            "angle": display_angle,
             "scale": self._scale / 100.0,
-            "scale_x": 1.0,
-            "scale_y": 1.0,
+            # X 轴最终缩放（含左右翻转样式的镜像），避免 CREATE 首帧忽略缩放/朝向
+            "scale_x": (self._scale / 100.0) * self._scale_ratio_x * self._current_scale_x,
+            "scale_y": (self._scale / 100.0) * self._scale_ratio_y,
+            "visible": self._visible,
             "type": "image",
             "layer": self._layer,  # 默认 0：数字越大越靠前，学生设 1/2 即可盖住别人
+            "y_sort": bool(getattr(self, "_bsf_y_sort", False)),  # 同层按脚底 Y 排序
             "vox": self._visual_offset_x,
             "voy": self._visual_offset_y,
             "raw_cw": self._content_w,
@@ -203,6 +262,45 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
         # 立即调用_get_hitbox_rect，确保碰撞盒信息已计算
         self._get_hitbox_rect()
 
+
+    def _apply_initial_transform(self, raw):
+        """应用角色场景变换（可选字段；角色局部坐标：x 右 / y 上 / 角度逆时针 / 缩放百分比）
+
+        编辑器保存的 x/y 是「相对引擎默认出生位置的偏移」，所以 0,0 等价于没设置：
+        没编辑过位置的角色仍从舞台中心出生，不会被挪到地图角落。
+        """
+        if not isinstance(raw, dict):
+            return
+        try:
+            dx = float(raw.get("x", 0.0))
+            dy = float(raw.get("y", 0.0))
+            angle = float(raw.get("angle", 0.0))
+            scale = float(raw.get("scale", 100.0))
+        except (TypeError, ValueError):
+            return
+        if not all(math.isfinite(v) for v in (dx, dy, angle, scale)):
+            return
+        # 分轴缩放（可选）：编辑器取消「约束比例」后写入 scaleX/scaleY（百分比）。
+        # 统一缩放仍是 _scale，分轴只记录相对倍数，运行时 sprite.scale 改动照常生效。
+        ratio_x, ratio_y = 1.0, 1.0
+        try:
+            sx_raw = raw.get("scaleX", scale)
+            sy_raw = raw.get("scaleY", scale)
+            sx = min(max(float(sx_raw), 5.0), 1000.0)
+            sy = min(max(float(sy_raw), 5.0), 1000.0)
+            if math.isfinite(sx) and math.isfinite(sy):
+                base = min(max(scale, 5.0), 1000.0)
+                ratio_x = sx / base if base else 1.0
+                ratio_y = sy / base if base else 1.0
+        except (TypeError, ValueError):
+            ratio_x, ratio_y = 1.0, 1.0
+        # 偏移叠加在 __init__ 的默认出生位置 (320, 240) 上；增量转换不带原点平移
+        self._x += to_world_dx(dx)
+        self._y += to_world_dy(dy)
+        self._angle = to_world_angle(angle)
+        self._scale = min(max(scale, 5.0), 1000.0)
+        self._scale_ratio_x = ratio_x
+        self._scale_ratio_y = ratio_y
 
     def goto(self, x, y=None):
         """移到指定坐标；也接受标记引用或另一个角色（注册点对齐）
@@ -286,7 +384,7 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
             self._prev_top_y = hitbox[1]
         self._x = x
         self._y = y
-        if not self._collision_disabled and st._CURRENT_MAP:
+        if not self._collision_physics_off and st._CURRENT_MAP:
             self._depenetrate()
             self._resolve_collision("x")
             self._resolve_collision("y")
@@ -324,12 +422,22 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
     def jump(self, power=10):
         """角色跳跃
 
+        站在会移动的角色平台上起跳时，会自动继承平台的水平速度，
+        带着一点「甩出去」的惯性（空中慢慢减弱，落地后消失）。
+
         Args:
             power: 跳跃力度（默认10，越大跳得越高）
         """
         self._vy = -power
         self._on_ground = False
         self._jump_cut = False
+        # 从移动平台起跳：继承平台的横向速度，带一点「甩出去」的惯性
+        platform_vx = self._platform_vx if self._ground_platform is not None else 0.0
+        if abs(platform_vx) > 0.05:
+            # 上限 6 像素/帧：平台速度被学生调得特别快时也不至于甩飞
+            self._launch_vx = max(-6.0, min(6.0, platform_vx))
+        else:
+            self._launch_vx = 0.0
 
 
     def stop_jump(self):
@@ -448,6 +556,29 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
             item for item in self._sensor_exit_callbacks if item[0] != tag
         ]
         self._sensor_exit_callbacks.append((tag, callback))
+
+
+    def is_clicked(self):
+        """这一帧鼠标左键是不是正好点到这个角色（按看得见的图片算）
+
+        一次按下只算一次点击，按住不放不会一直返回 True；
+        两个角色叠在一起时，只有最上面（后创建）的那个算点中。
+        """
+        if self._is_deleted or not self._visible:
+            return False
+        return _resolve_click_target() == self.id
+
+
+    def on_clicked(self, callback):
+        """当这个角色被鼠标点中时执行 callback（注册一次即可，写在 while True 外面）
+
+        回调可以不写参数，也可以写 1 个参数（被点的角色自己）。
+        同一个角色重复注册会覆盖上一次：写在循环里也不会越积越多。
+        """
+        if not callable(callback):
+            print("[提示] on_clicked 需要传一个函数，例如：大鲨鱼.on_clicked(被点到了)")
+            return
+        self._click_callback = callback
 
 
     def broadcast(self, event_name):
@@ -800,3 +931,30 @@ def _resolve_target_xy(target):
         # 必须读世界坐标：target.x/y 是用户空间，会翻转 y
         return (target._x, target._y)
     return None
+
+
+def _resolve_click_target():
+    """返回本次点击命中的角色 id；没点中角色返回 None。
+
+    每次真实按下只解析一次（按 press_seq 缓存），使 is_clicked / on_clicked
+    看到的是同一个结果。判定用可见内容框，重叠时保留最后命中的那个
+    （_SPRITES 是插入顺序 = 创建顺序，后创建的画在上面）。
+    """
+    seq = st._CLICK_STATE["active_seq"]
+    if seq < 0:
+        return None
+    if st._CLICK_STATE["resolved_seq"] == seq:
+        return st._CLICK_STATE["target_id"]
+
+    mx = st._MOUSE_STATE["x"]
+    my = st._MOUSE_STATE["y"]
+    target_id = None
+    for sprite in st._SPRITES.values():
+        if sprite._is_deleted or not sprite._visible:
+            continue
+        if sprite._point_inside_visual(mx, my):
+            target_id = sprite.id
+
+    st._CLICK_STATE["target_id"] = target_id
+    st._CLICK_STATE["resolved_seq"] = seq
+    return target_id

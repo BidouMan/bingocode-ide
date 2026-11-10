@@ -5,6 +5,7 @@ import { useProjectStore } from './project'
 import { useSettingsStore } from './settings'
 import { setUserOriginY, defaultMapGridSize } from '../utils/coords'
 import { tileBaseGid } from '../utils/tileGid'
+import { isValidMapTileSize } from '../utils/tileAssetFit'
 import { deleteUnreferencedTileImages } from '../utils/tileFileCleanup'
 
 export interface TileData {
@@ -117,6 +118,12 @@ export interface ShapeItem {
   oneWayDirY?: number
   // 单向碰撞的厚度容差（像素）
   oneWayMargin?: number
+  // 碰撞层级（参考 Unity Physics Layers）：当前仅编辑器保存，运行时未接入
+  collisionLayersEnabled?: boolean
+  // 所在碰撞层 1~8（缺省 1）
+  collisionLayer?: number
+  // 可碰撞掩码：1~8 的层号数组（缺省 [1]）
+  collisionMask?: number[]
   // 禁用：勾选后该形状不参与物理与感应判定
   disabled?: boolean
 }
@@ -200,6 +207,12 @@ export interface CameraSettings {
   limitBounds: boolean
 }
 
+/**
+ * 地图单边最大格子数：学生乱画到很远的位置时，避免地图尺寸被撑到无限大
+ * （超出部分不落笔，由绘制工具提示用户，而不是静默生成超大坐标）。
+ */
+export const MAX_MAP_SIDE_CELLS = 4096
+
 export const DEFAULT_CAMERA_SETTINGS: CameraSettings = {
   enabled: false,
   target: '',
@@ -279,8 +292,8 @@ export function tilePaletteEntryKey(entry: TilePaletteEntry): string {
 
 export type MapTool = 'move' | 'select' | 'draw' | 'line' | 'rect' | 'fill'
 export type CollisionTool = 'move' | 'add' | 'delete' | 'reset'
-// 形状层编辑工具：select=选择/拖动，rect/circle/capsule/polygon=形状，addPoint/deletePoint=锚点增删
-export type ShapeTool = 'select' | 'rect' | 'circle' | 'capsule' | 'polygon' | 'addPoint' | 'deletePoint'
+// 形状层编辑工具：select=选择/拖动，rect/capsule/polygon=形状，addPoint/deletePoint=锚点增删
+export type ShapeTool = 'select' | 'rect' | 'capsule' | 'polygon' | 'addPoint' | 'deletePoint'
 
 export const useMapStore = defineStore('map', () => {
   const settingsStore = useSettingsStore()
@@ -328,6 +341,9 @@ export const useMapStore = defineStore('map', () => {
 
   // Revision counters for cheap watcher dependency tracking (avoid expensive JSON.stringify in watcher getters)
   const tileRevision = ref(0)
+  // 图块批量变更计数器：删素材 / 清空集合 / 删分组会一次性改动多个图层，
+  // 图层缩略图需要按这个信号全量刷新（普通绘制只刷当前层）
+  const tileBulkRevision = ref(0)
   const imageRevision = ref(0)
   // 形状数据变更计数器（只触发叠加层重绘，不触发整图重渲染）
   const shapeRevision = ref(0)
@@ -408,6 +424,12 @@ export const useMapStore = defineStore('map', () => {
       ? mapData.value.tileSets.find(ts => ts.id === resource.id)
       : undefined
     if (byId) return byId
+    // 图片素材的 firstgid 只是占位值，不能拿去匹配图块集，否则会误伤 firstgid 相同的图块
+    if (resource.resourceType === 'image') {
+      return mapData.value.tileSets.find(ts => ts.imagePath === resource.path && ts.name === resource.name)
+        ?? mapData.value.tileSets.find(ts => ts.imagePath === resource.path)
+        ?? null
+    }
     return mapData.value.tileSets.find(ts => ts.firstgid === resource.firstgid)
       ?? mapData.value.tileSets.find(ts => ts.imagePath === resource.path && ts.name === resource.name)
       ?? mapData.value.tileSets.find(ts => ts.imagePath === resource.path)
@@ -576,6 +598,7 @@ export const useMapStore = defineStore('map', () => {
       selectedTileIndex.value = -1
     }
     tileRevision.value++
+    tileBulkRevision.value++
     cleanupTileImages(doomedPaths)
     return true
   }
@@ -864,6 +887,9 @@ export const useMapStore = defineStore('map', () => {
     tileHistoryTick.value++
   }
 
+  /** 超出上限的告警只打一次，避免拖动时刷屏 */
+  let tileOutOfRangeWarned = false
+
   function setTile(x: number, y: number, tileId: number) {
     const layer = activeLayer.value
     if (!layer || layer.type !== 'drawing' || layer.locked) return
@@ -878,6 +904,14 @@ export const useMapStore = defineStore('map', () => {
     if (tileId === 0) {
       delete layer.tiles[key]
     } else {
+      // 防御：超出单边上限的格子不落笔，避免地图被撑到超大尺寸
+      if (x >= MAX_MAP_SIDE_CELLS || y >= MAX_MAP_SIDE_CELLS) {
+        if (!tileOutOfRangeWarned) {
+          tileOutOfRangeWarned = true
+          console.warn('[Map] 图块坐标超出地图尺寸上限，已忽略:', x, y)
+        }
+        return
+      }
       layer.tiles[key] = tileId
       // 自动扩展地图尺寸以容纳超出边界的砖块
       if (x + 1 > mapData.value.width) {
@@ -1145,9 +1179,11 @@ export const useMapStore = defineStore('map', () => {
   }
 
   function addResource(input: MapResourceInput): string {
-    // firstgid 只在创建时分配一次，之后不再随图层/素材顺序变化
-    const nextFirstgid = mapData.value.tileSets.length > 0
-      ? Math.max(...mapData.value.tileSets.map(ts => ts.firstgid)) + 10000
+    // firstgid 只在创建时分配一次，之后不再随图层/素材顺序变化。
+    // 只按图块素材分配 GID：图片素材不参与图块渲染，混进来会把图块集的 firstgid 撞掉
+    const tileResources = mapData.value.resources.filter(r => r.resourceType !== 'image')
+    const nextFirstgid = tileResources.length > 0
+      ? Math.max(...tileResources.map(r => r.firstgid)) + 10000
       : 1
     const resource: MapResource = {
       ...input,
@@ -1172,6 +1208,8 @@ export const useMapStore = defineStore('map', () => {
       resource.groupId = groupId
     }
     mapData.value.resources.push(resource)
+    // 图片素材不建图块集：它没有图块的 GID 空间，建出来只会顶掉同 firstgid 的图块集
+    if (resource.resourceType === 'image') return resource.id
     mapData.value.tileSets.push({
       id: resource.id,
       name: resource.name,
@@ -1211,8 +1249,7 @@ export const useMapStore = defineStore('map', () => {
     if (patch.originPath !== undefined) resource.originPath = patch.originPath
     if (patch.nativeTileSize === null) delete resource.nativeTileSize
     else if (patch.nativeTileSize !== undefined) resource.nativeTileSize = patch.nativeTileSize
-    const tileSet = mapData.value.tileSets.find(ts => ts.id === id)
-      ?? mapData.value.tileSets.find(ts => ts.firstgid === resource.firstgid)
+    const tileSet = getTileSetForResource(resource)
     if (tileSet) {
       tileSet.imagePath = patch.path
       tileSet.tileWidth = patch.tileWidth
@@ -1471,7 +1508,10 @@ export const useMapStore = defineStore('map', () => {
       }
     }
     // 瓦片被移除后必须通知画布重绘，否则残留的 sprite 不会消失
-    if (tilesChanged) tileRevision.value++
+    if (tilesChanged) {
+      tileRevision.value++
+      tileBulkRevision.value++
+    }
 
     // 选中的是过滤后的列表下标，删除后需要修正
     if (selectedResourceIndex.value === index) {
@@ -1483,15 +1523,47 @@ export const useMapStore = defineStore('map', () => {
     cleanupTileImages(doomedPaths)
   }
 
+  /**
+   * 按 GID 区间清理所有图层里属于被删图块集的图块。
+   * 多个图块图层默认共用同一个图块集，只清当前图层会把别的图层留下「孤儿 GID」：
+   * 这些格子已经画不出东西，却会在 GID 空间被重新分配后突然显示成别的图块。
+   */
+  function pruneTilesOfTileSets(doomedTileSets: TileSet[]): boolean {
+    if (doomedTileSets.length === 0) return false
+    // 每个被删图块集的 GID 上界 = 比它大的最小 firstgid（没有更大的就是无穷）
+    const ranges = doomedTileSets.map(ts => ({
+      start: ts.firstgid,
+      end: (() => {
+        const higher = mapData.value.tileSets.map(t => t.firstgid).filter(g => g > ts.firstgid)
+        return higher.length > 0 ? Math.min(...higher) : Infinity
+      })(),
+    }))
+    let changed = false
+    for (const l of mapData.value.layers) {
+      if (l.type !== 'drawing') continue
+      for (const key of Object.keys(l.tiles)) {
+        // 先去掉镜像高位，否则翻转过的图块会漏删
+        const base = tileBaseGid(l.tiles[key])
+        if (ranges.some(r => base >= r.start && base < r.end)) {
+          delete l.tiles[key]
+          changed = true
+        }
+      }
+    }
+    return changed
+  }
+
   function clearResources() {
     const layer = activeLayer.value
     if (!layer) return
     const removed = activeLayerResources.value
     const removedIds = new Set(removed.map(r => r.id))
-    const removedFirstgids = new Set(removed.map(r => r.firstgid))
-    const doomedTileSets = mapData.value.tileSets.filter(
-      ts => removedIds.has(ts.id) || removedFirstgids.has(ts.firstgid),
-    )
+    // 图片素材没有对应的 tileset（它们的 firstgid 只是占位值，常常也是 1）：
+    // 只按图片素材的 firstgid 去匹配图块集，会连带删掉 firstgid 相同的图块集
+    const doomedTileSets = removed
+      .filter(r => r.resourceType !== 'image')
+      .map(r => getTileSetForResource(r))
+      .filter((ts): ts is TileSet => !!ts)
     const doomedPaths = [
       ...removed.flatMap(r => [r.path, r.originPath]),
       ...doomedTileSets.map(ts => ts.imagePath),
@@ -1501,21 +1573,32 @@ export const useMapStore = defineStore('map', () => {
     // 移除对应图块笔刷
     mapData.value.tilePalette = (mapData.value.tilePalette ?? [])
       .filter(e => !removedIds.has(e.resourceId))
-    // 按素材自身的 id/firstgid 精确移除对应 tileset
-    mapData.value.tileSets = mapData.value.tileSets.filter(
-      ts => !removedIds.has(ts.id) && !removedFirstgids.has(ts.firstgid),
-    )
+    // 先清理所有图层里属于这些图块集的图块（必须在移除图块集之前算 GID 上界）
+    const prunedTiles = pruneTilesOfTileSets(doomedTileSets)
+    let tilesChanged = prunedTiles
+    // 按 tileset 对象自身精确移除（不能用 firstgid：不同素材的 firstgid 可能重复）
+    mapData.value.tileSets = mapData.value.tileSets.filter(ts => !doomedTileSets.includes(ts))
     selectedResourceIndex.value = -1
     selectedTileIndex.value = -1
     // 清空该图层的所有瓦片
     if (layer.type === 'drawing') {
       layer.tiles = {}
+      tilesChanged = true
+    }
+    // 有格子被清掉时必须通知画布重绘，否则残留的 sprite 不会消失
+    if (tilesChanged) {
       tileRevision.value++
+      // 跨图层清理（共用同一图块集的其它图层也被清空）时，图层缩略图要一起刷新
+      if (prunedTiles) tileBulkRevision.value++
     }
     cleanupTileImages(doomedPaths)
   }
 
   function updateMapProperty(key: keyof MapData, value: any) {
+    // 地图单边尺寸设上限：误输入超大值会让坐标系、缩略图和引擎内存全部失控
+    if ((key === 'width' || key === 'height') && typeof value === 'number') {
+      value = Math.max(1, Math.min(MAX_MAP_SIDE_CELLS, Math.round(value)))
+    }
     ;(mapData.value as any)[key] = value
   }
 
@@ -1531,8 +1614,21 @@ export const useMapStore = defineStore('map', () => {
    * @param explicit 是否是用户手动设定：是则标记为「已指定」，导入素材时不再自动改回素材尺寸
    */
   function updateTileSize(newSize: number, explicit = false) {
+    // 防御：异常尺寸（NaN / 小数 / 0 / 过大）直接忽略，避免把地图宽高压成 1×1
+    if (!isValidMapTileSize(newSize)) {
+      console.warn('[Map] 忽略非法的图块尺寸:', newSize)
+      return
+    }
+
     const oldSize = mapData.value.tileSize
-    if (!Number.isFinite(newSize) || newSize <= 0 || newSize === oldSize) {
+    // 旧数据本身已损坏时无法换算，直接采用新值（宽高保持现状，避免二次破坏）
+    if (!isValidMapTileSize(oldSize)) {
+      mapData.value.tileSize = newSize
+      if (explicit) mapData.value.tileSizeExplicit = true
+      tileRevision.value++
+      return
+    }
+    if (newSize === oldSize) {
       if (explicit) mapData.value.tileSizeExplicit = true
       return
     }
@@ -1769,7 +1865,8 @@ export const useMapStore = defineStore('map', () => {
   function updateShapes(
     ids: string[],
     patch: Partial<Pick<ShapeItem,
-      'kind' | 'tag' | 'oneWay' | 'oneWayDirX' | 'oneWayDirY' | 'oneWayMargin' | 'disabled'>>,
+      'kind' | 'tag' | 'oneWay' | 'oneWayDirX' | 'oneWayDirY' | 'oneWayMargin' | 'disabled'
+      | 'collisionLayersEnabled' | 'collisionLayer' | 'collisionMask'>>,
   ) {
     const layer = activeShapeLayer.value
     if (!layer || ids.length === 0) return
@@ -1784,6 +1881,9 @@ export const useMapStore = defineStore('map', () => {
       if (patch.oneWayDirY !== undefined) item.oneWayDirY = patch.oneWayDirY
       if (patch.oneWayMargin !== undefined) item.oneWayMargin = patch.oneWayMargin
       if (patch.disabled !== undefined) item.disabled = patch.disabled
+      if (patch.collisionLayersEnabled !== undefined) item.collisionLayersEnabled = patch.collisionLayersEnabled
+      if (patch.collisionLayer !== undefined) item.collisionLayer = patch.collisionLayer
+      if (patch.collisionMask !== undefined) item.collisionMask = patch.collisionMask
       changed = true
     }
     if (changed) shapeRevision.value++
@@ -2012,6 +2112,7 @@ export const useMapStore = defineStore('map', () => {
     updateShapes,
     removeShapes,
     tileRevision,
+    tileBulkRevision,
     imageRevision,
     shapeRevision,
     mapLoadCount,

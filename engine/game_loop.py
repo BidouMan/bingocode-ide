@@ -12,8 +12,9 @@ from effects import random_float, random_int, shake, show_collision, show_text
 from game_control import GameStop, _promote_event_frame, _safe_call, broadcast, is_paused, on_receive, pause, receive, resume, show_fps, stop_game
 from input_api import _custom_input, _sync_input_frame, key_down, key_pressed, key_up, mouse, mouse_down, mouse_pressed, mouse_up
 from map_runtime import _handle_physics_collision, _process_sensor_events, load_map
-from sprite import Sprite
+from sprite import Sprite, _resolve_click_target
 from timing import Timer, time_passed, wait
+from user_error import report_code_errors, report_error, report_user_error
 import engine_state as st
 
 
@@ -44,8 +45,10 @@ def _notify_ready():
     print(json.dumps({"type": "GAME_READY", "data": {}}))
 
 
-# 前端异常时不要永远卡住：最多等 5 秒就自己开始
-_START_GATE_TIMEOUT = 5.0
+# 前端异常时不要永远卡住：最多等这么久就自己开始。
+# 旧机器上贴图解码 + 首帧渲染可能明显超过 5 秒，超时太短会在加载页还盖着时
+# 就悄悄开跑，撤掉加载页的瞬间角色已经移动了一段（看起来像闪了一下旧画面）。
+_START_GATE_TIMEOUT = 15.0
 
 
 def _wait_for_start():
@@ -113,8 +116,31 @@ def _begin_physics_step():
             _update_sprite_animation(sprite)
     if st._CURRENT_MAP is not None:
         for sprite in st._SPRITES.values():
-            # 禁止下滑功能据此区分主动移动与斜面推挤下滑
+            # 禁止下滑功能据此区分主动移动与斜面推挤下滑；
+            # _frame_start_y 供「移动平台跟随」算平台本帧走了多远
             sprite._frame_start_x = sprite._x
+            sprite._frame_start_y = sprite._y
+
+
+def _process_click_events():
+    """把本物理步的鼠标点击派发给命中的角色（on_clicked 回调）。
+
+    和 is_clicked 共用 _resolve_click_target 的解析结果，一次按下只触发一次；
+    暂停中也照常派发，与 mouse_pressed() 的语义保持一致。
+    """
+    seq = st._CLICK_STATE["active_seq"]
+    if seq < 0 or st._CLICK_STATE["dispatched_seq"] == seq:
+        return
+    st._CLICK_STATE["dispatched_seq"] = seq
+    target_id = _resolve_click_target()
+    if target_id is None:
+        return
+    sprite = st._SPRITES.get(target_id)
+    if sprite is None or sprite._is_deleted or not sprite._visible:
+        return
+    callback = getattr(sprite, "_click_callback", None)
+    if callback:
+        _safe_call(callback, sprite)
 
 
 def _end_physics_step():
@@ -160,8 +186,10 @@ def _end_physics_step():
 
 def run():
     st._MOUSE_STATE["down"] = False
+    st._MOUSE_STATE["down_step_prev"] = False
     st._MOUSE_STATE["released"] = False
     st._MOUSE_STATE["released_frame"] = False
+    st._CLICK_STATE.update(press_seq=0, active_seq=-1, resolved_seq=-1, target_id=None, dispatched_seq=-1)
     st._GAME_TIME = 0.0
     st._WAIT_TIMERS.clear()
     st._EVENT_PENDING.clear()
@@ -192,6 +220,7 @@ def run():
             # 暂停时也要同步输入快照：用户代码需要靠按键检测来调用 resume()
             _sync_input_frame()
             _promote_event_frame()
+            _process_click_events()
 
             _begin_physics_step()
             main_module.loop()
@@ -271,14 +300,15 @@ def start_game(project_dir=None, target_file=None):
 
     # 如果提供了项目目录，使用脚本发现模块
     if project_dir:
-        from script_runner import discover_and_merge
+        from script_runner import CodeErrors, load_scripts
         try:
-            script_content = discover_and_merge(project_dir, target_file)
-        except SyntaxError as e:
-            print(f"[错误] {e}")
+            scripts = load_scripts(project_dir, target_file)
+        except CodeErrors as err:
+            # 语法错误一次性全部列出（文件 + 编辑器里的真实行号）
+            report_code_errors(err.errors)
             return
-        if not script_content:
-            print("[错误] 没有找到 Python 文件")
+        if not scripts:
+            report_error("没有找到 Python 文件")
             return
 
         # 执行脚本，注册 generator
@@ -315,7 +345,22 @@ def start_game(project_dir=None, target_file=None):
             "stop": stop_game,
             "register_generator": register_generator,
         }
-        exec(script_content, exec_globals)
+        # 逐文件执行（共用同一个 globals，跨文件变量照常可见）。
+        # 每个文件单独编译并带文件名/真实行号，出错时能直接定位到学生写的那一行。
+        for _file_path, _code in scripts:
+            try:
+                exec(_code, exec_globals)
+            except GameStop:
+                return
+            except Exception as e:
+                report_user_error(e)
+                return
+
+    # 初始化阶段产生的变换（goto / scale / angle / 可见性等）都进了帧缓冲，
+    # 必须在通知就绪前刷出去：否则性能模式隔帧发送会跳过第一次 flush，
+    # 而「没有 generator、也没有活跃行为」时主循环第一步就正常退出，
+    # 这些初始设置就永远发不出去——前端只看到 CREATE 里的默认位置/大小/角度。
+    _flush_frame_updates()
 
     # 初始化完成：通知 IDE 结束启动加载页（旧 run() 模式已在 run() 内部发过，不会重复）
     _notify_ready()
@@ -330,6 +375,7 @@ def start_game(project_dir=None, target_file=None):
         # 用户可能用 `from bingo_engine import *` 拿到只设置 _STOPPED 的 stop()，
         # 与 exec_globals 里抛 GameStop 的版本并存，两种都要能真正结束游戏
         if st._STOPPED:
+            _flush_frame_updates()  # 退出前补发最后一帧，性能模式可能刚跳过这次发送
             return
 
         now = time.perf_counter()
@@ -343,6 +389,7 @@ def start_game(project_dir=None, target_file=None):
             # 暂停时也要同步输入快照：学生代码需要靠按键检测来调用 resume()
             _sync_input_frame()
             _promote_event_frame()
+            _process_click_events()
 
             _begin_physics_step()
 
@@ -355,9 +402,11 @@ def start_game(project_dir=None, target_file=None):
                     st._generators.remove(gen)
                 except GameStop:
                     st._generators.clear()
+                    _flush_frame_updates()  # 退出前补发最后一帧
                     return
                 except Exception as e:
-                    print(f"[错误] Generator 错误: {e}")
+                    # 报错带文件名和真实行号，中小学生在控制台能直接找到写错的那一行
+                    report_user_error(e)
                     st._generators.remove(gen)
 
             if not st._PAUSED:
@@ -368,12 +417,15 @@ def start_game(project_dir=None, target_file=None):
                         (s._speed > 0) or
                         (getattr(s, "animation_state", None) and s.animation_state.get("is_playing", False)) or
                         bool(s._on_hit_callbacks) or
+                        bool(getattr(s, "_click_callback", None)) or
                         bool(s._sensor_enter_callbacks) or
                         bool(s._sensor_exit_callbacks) or
                         s._follow_ref is not None
                         for s in st._SPRITES.values() if not s._is_deleted
                     )
                     if not _has_active:
+                        # 程序自然结束：补发最后一帧，性能模式隔帧发送不能吞掉最终画面
+                        _flush_frame_updates()
                         return
 
             _end_physics_step()

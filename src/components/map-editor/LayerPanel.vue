@@ -23,6 +23,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   paint: []
+  /** 双击图像图层：进入绘制页再次编辑 */
+  'edit-image': [layerId: number]
   'open-library': []
   'upload-image': []
 }>()
@@ -49,11 +51,14 @@ const displayLayers = computed(() => {
 // ====== 图片图层缩略图 ======
 const thumbUrls = ref<Map<number, string>>(new Map())
 const urlCache = new Map<string, string>()
+/** 纯 ASCII 路径：这种路径下 asset 协议还能用；含中文的路径回退一定加载失败 */
+const ASCII_PATH = /^[\x20-\x7E]*$/
 
 async function resolveThumbUrl(path: string): Promise<string> {
   const cached = urlCache.get(path)
   if (cached !== undefined) return cached
   let url: string
+  let cacheable = true
   if (path.startsWith('/maps/')) {
     try {
       const engineDir = await invoke<string>('get_engine_assets_dir')
@@ -66,16 +71,20 @@ async function resolveThumbUrl(path: string): Promise<string> {
     try {
       url = await invoke<string>('read_image_as_data_url', { path: fullPath })
     } catch {
-      url = convertFileSrc(fullPath)
+      // 读盘失败：中文路径下 convertFileSrc 必然加载失败，只会显示成“？”
+      // 失败结果不进缓存，下次刷新重新读盘——文件恢复后缩略图自己会回来
+      url = ASCII_PATH.test(fullPath) ? convertFileSrc(fullPath) : ''
+      cacheable = false
     }
   } else {
     try {
       url = await invoke<string>('read_image_as_data_url', { path })
     } catch {
-      url = convertFileSrc(path)
+      url = ASCII_PATH.test(path) ? convertFileSrc(path) : ''
+      cacheable = false
     }
   }
-  urlCache.set(path, url)
+  if (cacheable) urlCache.set(path, url)
   return url
 }
 
@@ -114,6 +123,19 @@ async function refreshTileThumbs() {
   thumbUrls.value = next
 }
 
+/** 批量清理（删素材 / 清空集合 / 删分组）会同时改动多个图层：所有图块图层的缩略图都要重算 */
+async function refreshAllTileThumbs() {
+  if (!props.getLayerThumbnail) return
+  const next = new Map(thumbUrls.value)
+  for (const layer of mapStore.mapData.layers) {
+    if (layer.type !== 'drawing') continue
+    const url = await props.getLayerThumbnail(layer.id)
+    if (url) next.set(layer.id, url)
+    else next.delete(layer.id)
+  }
+  thumbUrls.value = next
+}
+
 /** 图片绘制中由 MapCanvas 推送当前图层缩略图：只更新这一条，避免全量读盘 */
 function setLayerThumb(layerId: number, dataUrl: string) {
   if (!mapStore.mapData.layers.some(l => l.id === layerId)) return
@@ -145,10 +167,20 @@ watch(() => mapStore.tileRevision, () => {
     refreshTileThumbs()
   }, 120)
 })
+// 删素材 / 清空集合 / 删分组会一次改动多个图层，刷新全部图块图层缩略图
+let bulkThumbTimer: ReturnType<typeof setTimeout> | null = null
+watch(() => mapStore.tileBulkRevision, () => {
+  if (bulkThumbTimer) clearTimeout(bulkThumbTimer)
+  bulkThumbTimer = setTimeout(() => {
+    bulkThumbTimer = null
+    refreshAllTileThumbs()
+  }, 120)
+})
 onMounted(refreshThumbs)
 onBeforeUnmount(() => {
   if (tileThumbTimer) clearTimeout(tileThumbTimer)
   if (loadThumbTimer) clearTimeout(loadThumbTimer)
+  if (bulkThumbTimer) clearTimeout(bulkThumbTimer)
 })
 
 // ====== 选中 / 重命名 ======
@@ -158,6 +190,14 @@ function selectLayer(index: number) {
     return
   }
   mapStore.setActiveLayer(index)
+}
+
+/** 双击图像图层行：进入绘制页编辑该图片（双击名称仍是重命名） */
+function onRowDblClick(index: number) {
+  const layer = mapStore.mapData.layers[index]
+  if (!layer || layer.type !== 'image' || layer.locked) return
+  selectLayer(index)
+  emit('edit-image', layer.id)
 }
 
 function startRename(index: number) {
@@ -293,7 +333,9 @@ defineExpose({ setLayerThumb })
           'insert-after': dragging && dropDisplayIndex === displayLayers.length && dIdx === displayLayers.length - 1,
         }"
         @click="selectLayer(item.index)"
+        @dblclick="onRowDblClick(item.index)"
         @mousedown="onRowPointerDown($event, item.index)"
+        :title="item.layer.type === 'image' ? '双击进入绘制页编辑这张图片（双击名称可重命名）' : ''"
       >
         <div class="layer-thumb">
           <img

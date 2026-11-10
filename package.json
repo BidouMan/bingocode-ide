@@ -1,7 +1,7 @@
 {
   "name": "bingo-ide",
   "private": true,
-  "version": "0.7.7-beta.5",
+  "version": "0.7.8-beta.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -52,6 +52,7 @@
     "highlight.js": "^11.11.1",
     "marked": "^18.0.6",
     "pinyin-pro": "^3.29.5",
+    "playwright-core": "^1.65.0",
     "tailwindcss": "^4.3.1",
     "tsx": "^4.23.0",
     "typescript": "~6.0.2",

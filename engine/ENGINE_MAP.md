@@ -22,6 +22,8 @@
 | 计时器与游戏时间 | [timing.py](timing.py) |
 | 碰撞几何纯算法（三角化/MTV/内容框） | [collision_geometry.py](collision_geometry.py) |
 | 共享可变状态（`_SPRITES`/`_STOPPED`…） | [engine_state.py](engine_state.py) |
+| 学生代码报错的中文提示 / 出错文件与行号 | [user_error.py](user_error.py) |
+| 多文件发现、语法检查、编译（逐文件保留行号） | [script_runner.py](script_runner.py) / [code_transform.py](code_transform.py) |
 | Python 子进程入口 / 导出面 | [bingo_engine.py](bingo_engine.py) |
 
 ## 1. 分层与依赖方向（必须保持单向）
@@ -40,6 +42,8 @@ bingo_engine.py            门面：sys.path 引导 + stdout 无缓冲 + 重导�
     │   ├── sprite_assets.py     素材装载/碰撞盒/挂点
     │   └── sprite_animation.py  动画/说话（依赖 timing.Timer）
     ├── input_api.py / timing.py / game_control.py / audio.py
+    ├── script_runner.py   多文件发现 + 逐文件编译（行号与编辑器一致）
+    ├── user_error.py      学生代码报错 → 中文提示（文件 + 行号），只输出到 stderr
     └── engine_state.py    所有跨模块共享的可变状态（最底层，不 import 任何人）
 ```
 
@@ -66,6 +70,9 @@ bingo_engine.py            门面：sys.path 引导 + stdout 无缓冲 + 重导�
 | `effects.py` | ~51 | `show_text`/`shake`/`random_*`/`show_collision` | 文字、震动、随机数 |
 | `collision_geometry.py` | ~430 | 多边形三角化、MTV、图片内容框、可玩边界 | 纯几何 bug（可单测） |
 | `engine_state.py` | ~80 | 共享可变状态（唯一存放处） | 新增跨模块状态 |
+| `script_runner.py` | ~140 | 发现项目 `.py`、语法检查、逐文件 `compile()`（保留原始行号） | 运行清单、语法错误收集 |
+| `code_transform.py` | ~315 | `while True` / 循环 → generator 的 AST 转换 | 循环逐帧语义、global→nonlocal |
+| `user_error.py` | ~145 | 学生代码报错 → 中文提示（文件 + 行号），统一写 stderr | 报错文案、错误类型映射 |
 
 ## 3. 公共 API → 文件
 

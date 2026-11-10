@@ -17,6 +17,7 @@ import iconDelete from '../../assets/icons/icon--delete.svg'
 import iconSettings from '../../assets/icons/icon--settings.svg'
 import iconMove from '../../assets/icons/新建地图.svg'
 import CustomSelect from '../common/CustomSelect.vue'
+import JSZip from 'jszip'
 
 /**
  * 开发模式专用：内置素材整理页（多选 / 批量改目录 / 批量打标签 / 改名）。
@@ -1620,6 +1621,27 @@ async function onTagDrop(tag: string, e: DragEvent) {
 
 // ─── 单个改名 ───
 
+/**
+ * 改名时同步包内名字：.bsf 写 manifest.json 的 name，.bgs 写 config.json 的 name。
+ * 只重写这一个 JSON，sheet.png / 帧图等其它条目原样保留。
+ * 返回新的包字节（无需改时返回 null），非包文件也返回 null。
+ */
+async function buildRenamedPackage(path: string, base: string): Promise<number[] | null> {
+  if (!SPRITE_PACKAGE_EXTS.test(path)) return null
+  const entryName = /\.bsf$/i.test(path) ? 'manifest.json' : 'config.json'
+  const bytes = await invoke<number[]>('read_binary', { path })
+  const zip = await JSZip.loadAsync(new Uint8Array(bytes))
+  const entry = zip.file(entryName)
+  if (!entry) return null
+  const json = JSON.parse(await entry.async('text')) as { name?: string }
+  if (json.name === base) return null
+  json.name = base
+  // JSON 用 DEFLATE、图片用 STORE，与原包保持一致，避免改名后体积变大
+  zip.file(entryName, JSON.stringify(json, null, 2), { compression: 'DEFLATE' })
+  const out = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' })
+  return Array.from(out)
+}
+
 /** 文件名校验：返回错误原因或 null（防抖保存时静默用，避免每敲一个字符就弹错） */
 function validateFileName(base: string): string | null {
   if (!base) return '文件名不能为空'
@@ -1663,8 +1685,30 @@ async function saveFileName() {
     return
   }
   const newRel = buildItemRel(item, base)
+  const dir = store.categoryDir(activeCategory.value)
+
+  // 先按旧路径读出包内新名字（.bsf/.bgs），失败则不动物理文件
+  let renamedPackage: number[] | null = null
+  try {
+    renamedPackage = await buildRenamedPackage(joinPath(dir, item.rel), base)
+  } catch (e) {
+    error.value = `素材包名字同步失败：${e}`
+    fileInput.value = currentBase
+    return
+  }
 
   if (!(await moveOne(item.rel, newRel))) return
+  // 文件改名成功后写回包内名字；失败则回滚文件名，保证内外一致
+  if (renamedPackage) {
+    try {
+      await invoke('write_binary', { path: joinPath(dir, newRel), data: renamedPackage })
+    } catch (e) {
+      await moveOne(newRel, item.rel)
+      error.value = `素材包名字同步失败：${e}`
+      fileInput.value = currentBase
+      return
+    }
+  }
   // 显示名直接跟随文件名：不再单独维护中文名
   const pin = await computePinyin(base)
   const meta = ensureEntry(newRel)

@@ -1,0 +1,101 @@
+/* 画布上方工具栏的「图标 + 文字」按钮（与角色编辑器工具条同一套样式） */
+.tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border-light);
+  background: transparent;
+  color: #8a8f98;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.tool-chip:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: #fff;
+}
+
+/* 绿框专门表示「当前正在使用的工具」，避免和常驻开关混淆 */
+.tool-chip.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(91, 251, 132, 0.08);
+}
+
+.tool-chip:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.tool-chip-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+/* 各图标在自身 SVG 画布里的留白比例不同（有的几乎撑满、有的缩在中间），
+   直接统一成 14px 会显得忽大忽小。这里按内容实际占比做「光学尺寸」补偿，
+   让每个图标可见部分的视觉大小基本一致（改图标素材时按需微调这里） */
+.tool-chip-icon.ic-paint { width: 16px; height: 16px; }
+.tool-chip-icon.ic-line { width: 16.5px; height: 16.5px; }
+.tool-chip-icon.ic-rect { width: 14.5px; height: 14.5px; }
+.tool-chip-icon.ic-move { width: 14.5px; height: 14.5px; }
+.tool-chip-icon.ic-select { width: 13.5px; height: 13.5px; }
+.tool-chip-icon.ic-copy { width: 15px; height: 15px; }
+.tool-chip-icon.ic-flip-h { width: 14.5px; height: 14.5px; }
+.tool-chip-icon.ic-flip-v { width: 14.5px; height: 14.5px; }
+.tool-chip-icon.ic-add { width: 15px; height: 15px; }
+.tool-chip-icon.ic-del { width: 15.5px; height: 15.5px; }
+.tool-chip-icon.ic-marker { width: 13.5px; height: 13.5px; }
+.tool-chip-icon.ic-round { width: 14.5px; height: 14.5px; }
+.tool-chip-icon.ic-pen { width: 13.5px; height: 13.5px; }
+
+/* 常驻开关（擦除 / 显示隐藏标记 / 网格 / 吸附）：小方框勾选；
+   开关状态不用绿框绿字，只用浅底色，避免和「当前工具」混淆 */
+.tool-chip.check-chip {
+  padding: 4px 8px;
+  gap: 6px;
+}
+
+.tool-chip.check-chip.active {
+  border-color: var(--border-light);
+  color: #c9ced7;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tool-chip.check-chip.active:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: #fff;
+}
+
+.chip-check {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 1px solid #6a6f78;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.chip-check.on {
+  border-color: var(--accent);
+  background: rgba(91, 251, 132, 0.14);
+}
+
+.chip-check.on::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 1px;
+  width: 4px;
+  height: 7px;
+  border-right: 1.5px solid var(--accent);
+  border-bottom: 1.5px solid var(--accent);
+  transform: rotate(45deg);
+}

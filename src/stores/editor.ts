@@ -87,7 +87,8 @@ export const useEditorStore = defineStore('editor', () => {
   const activeEditorMode = ref<EditorMode>('code')
   const isRunning = ref(false)
   const resourceTab = ref<ResourceTab>('sprite')
-  // 默认「自动」：按素材自然尺寸判定（小图走最近邻，大插画走平滑，见 utils/renderMode.ts）
+  // 默认「自动」：先判画风（像素画走最近邻、插画走平滑），判不出来才按自然尺寸兜底，
+  // 所有显示位置共用 utils/renderMode.ts 的同一套判定
   const renderMode = ref<RenderMode>('auto')
   const focusMode = ref(loadFocusMode())
   const savedZoom = loadSavedZoom()

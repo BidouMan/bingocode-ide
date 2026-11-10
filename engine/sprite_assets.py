@@ -5,7 +5,7 @@
 import json
 import math
 import os
-from models.shape_kernel import aabb_shape, capsule_shape, polygon_shape
+from models.shape_kernel import aabb_shape, capsule_shape, point_inside, polygon_shape
 from collision_geometry import _image_bbox_info
 import engine_state as st
 
@@ -77,14 +77,70 @@ class SpriteAssetsMixin:
         }
         # 自定义碰撞形状（可选）：无/非法 = 自动碰撞（内容包围盒）
         self._bsf_collision = manifest.get("collision")
+        # 碰撞作用（可选）：solid=碰撞 / sensor=感应（不参与物理阻挡，仍可被检测）/ both
+        kind = manifest.get("collisionKind", manifest.get("collision_kind", "solid"))
+        self._collision_kind = kind if kind in ("solid", "sensor", "both") else "solid"
+        # 碰撞类型（tag，可选）：代码里 is_touch("标签") 查询用；空 = 默认「默认」
+        tag = str(
+            manifest.get("collisionTag", manifest.get("collision_tag", "") or "")
+        ).strip()
+        self._collision_tag = tag or "默认"
+        # 单向碰撞（可选）：true = 可作为单向碰撞体；方向与地图 oneWayDirX/Y 同一语义
+        self._collision_one_way = bool(
+            manifest.get("collisionOneWay", manifest.get("collision_one_way", False))
+        )
+        self._collision_one_way_dir = (0.0, 1.0)
+        self._collision_one_way_margin = 0.0
+        if self._collision_one_way:
+            try:
+                dx = float(manifest.get("collisionOneWayDirX") or 0.0)
+                dy = float(manifest.get("collisionOneWayDirY") or 0.0)
+            except (TypeError, ValueError):
+                dx, dy = 0.0, 0.0
+            if dx == 0.0 and dy == 0.0:
+                dy = 1.0
+            # 只支持轴对齐：取绝对值大的分量，另一轴归零（与地图单向碰撞一致）
+            if abs(dx) >= abs(dy):
+                dx, dy = (1.0 if dx > 0 else -1.0), 0.0
+            else:
+                dx, dy = 0.0, (1.0 if dy > 0 else -1.0)
+            self._collision_one_way_dir = (dx, dy)
+            try:
+                self._collision_one_way_margin = max(
+                    0.0, float(manifest.get("collisionOneWayMargin") or 0.0)
+                )
+            except (TypeError, ValueError):
+                self._collision_one_way_margin = 0.0
         # 禁用碰撞（可选）：True = 该角色不参与地形/边界物理阻挡，仍可被碰到检测
         self._collision_disabled = bool(
             manifest.get("collisionDisabled", manifest.get("collision_disabled", False))
         )
+        # 移动平台（可选）：True = 由代码驱动的平台，移动时不被其它角色顶住（运动学平台）
+        self._collision_moving_platform = bool(
+            manifest.get(
+                "collisionMovingPlatform", manifest.get("collision_moving_platform", False)
+            )
+        )
         # 受重力影响（可选）：False = 重力地图里也不下坠，撞墙/落地等碰撞照常
         self._gravity = bool(manifest.get("gravity", True))
+        # 初始隐藏（可选，编辑器「图层设置」勾选项）：缺省可见
+        self._bsf_hidden = bool(manifest.get("hidden", False))
+        # 旋转模式（可选，编辑器「基础设置 → 翻转模式」）：'all' / 'left_right' / 'none'
+        rotation_mode = manifest.get("rotationMode")
+        self._bsf_rotation_mode = (
+            rotation_mode if rotation_mode in ("all", "left_right", "none") else "all"
+        )
+        # 默认图层（可选）：数字越大越靠前，同层按创建顺序；缺省 0
+        try:
+            self._bsf_layer = int(manifest.get("layer", 0) or 0)
+        except (TypeError, ValueError):
+            self._bsf_layer = 0
+        # Y 轴排序（可选）：true = 同层内按脚底 Y 坐标排序；缺省不启用
+        self._bsf_y_sort = bool(manifest.get("ySort", False))
         # 挂点（可选）：名字 → {x, y}（画布坐标）；帧级覆盖在 frames[i].markers
         self._bsf_markers = manifest.get("markers") or {}
+        # 场景初始变换（可选，用户坐标）：缺省 = 引擎默认舞台中心/0°/100%
+        self._bsf_transform = manifest.get("transform")
         self._bsf_clips = {
             c.get("name"): c
             for c in manifest.get("clips", [])
@@ -163,14 +219,14 @@ class SpriteAssetsMixin:
             return None
         # 显示缩放/镜像（与 _update_transform 一致；_display_flip 含跟随继承）
         base_scale = self._scale / 100.0
-        sx = base_scale * getattr(self, "_display_flip", self._current_scale_x)
-        sy = base_scale
+        sx = base_scale * getattr(self, "_scale_ratio_x", 1.0) * getattr(self, "_display_flip", self._current_scale_x)
+        sy = base_scale * getattr(self, "_scale_ratio_y", 1.0)
         style = self._rotation_style
         if style == "left_right":
             display_angle = 0.0
         elif style == "none":
             display_angle = 0.0
-            sx = base_scale
+            sx = base_scale * getattr(self, "_scale_ratio_x", 1.0)
         else:
             display_angle = float(self._angle)
         rad = math.radians(display_angle)
@@ -420,9 +476,9 @@ class SpriteAssetsMixin:
             # 减去 pivot（内容重心）
             px = lx - vox
             py = ly - voy
-            # 缩放（含水平翻转）
-            sx = px * s * flip_x
-            sy = py * s
+            # 缩放（含水平翻转与分轴缩放比例）
+            sx = px * s * getattr(self, "_scale_ratio_x", 1.0) * flip_x
+            sy = py * s * getattr(self, "_scale_ratio_y", 1.0)
             # 旋转
             rx = sx * cos_a - sy * sin_a
             ry = sx * sin_a + sy * cos_a
@@ -453,15 +509,46 @@ class SpriteAssetsMixin:
           - 普通图片用非透明内容框
         形状随位置/缩放/翻转/旋转一起烘焙，不再降级成世界 AABB。
         """
-        self._setup_hitbox()
+        return self._shape_from_points(self._collision_local_points())
 
-        # 局部顶点：优先自定义碰撞，否则内容框
-        points = None
+
+    def _get_visual_shape(self):
+        """角色「看得到的部分」的世界形状（鼠标点击判定用，不受自定义碰撞盒影响）。"""
+        return self._shape_from_points(self._visual_local_points(), visual=True)
+
+
+    def _point_inside_visual(self, x, y):
+        """点是否落在角色可见内容框内（点击判定用，旋转/缩放后也准确）。"""
+        return point_inside(self._get_visual_shape(), (x, y))
+
+
+    def _collision_local_points(self):
+        """碰撞判定的局部顶点：优先 .bsf 自定义碰撞，否则内容框。"""
+        self._setup_hitbox()
         if getattr(self, "_is_bsf", False) and getattr(self, "_local_collision_points", None):
-            points = tuple(self._local_collision_points)
-        elif hasattr(self, "_content_bbox") and self._content_bbox:
-            b = self._content_bbox
-            points = ((b[0], b[1]), (b[2], b[1]), (b[2], b[3]), (b[0], b[3]))
+            return tuple(self._local_collision_points)
+        return self._content_points()
+
+
+    def _visual_local_points(self):
+        """可见内容框的局部顶点（与碰撞盒无关）。"""
+        self._setup_hitbox()
+        return self._content_points()
+
+
+    def _content_points(self):
+        b = getattr(self, "_content_bbox", None)
+        if not b:
+            return None
+        return ((b[0], b[1]), (b[2], b[1]), (b[2], b[3]), (b[0], b[3]))
+
+
+    def _shape_from_points(self, points, visual=False):
+        """把局部顶点烘焙成世界形状（含缩放/翻转/旋转），按帧缓存。
+
+        碰撞形状与可见形状各用一份缓存，点击查询不会覆盖物理碰撞缓存。
+        """
+        self._setup_hitbox()
 
         if not points or len(points) < 3:
             rect = self._get_hitbox_rect()
@@ -470,6 +557,7 @@ class SpriteAssetsMixin:
                 return aabb_shape(self._x, self._y, self._x, self._y)
             return aabb_shape(rect[0], rect[1], rect[2], rect[3])
 
+        cache = "_cached_visual_shape" if visual else "_cached_shape"
         s = self._scale / 100.0
         flip_x = getattr(self, "_display_flip", getattr(self, "_current_scale_x", 1))
         rot_style = getattr(self, "_rotation_style", "all around")
@@ -485,15 +573,15 @@ class SpriteAssetsMixin:
             self.image,
         )
         if (
-            getattr(self, "_cached_shape", None) is not None
-            and getattr(self, "_cached_shape_key", None) == cache_key
-            and abs(self._cached_shape_x - self._x) < 0.01
-            and abs(self._cached_shape_y - self._y) < 0.01
-            and self._cached_shape_scale == self._scale
-            and getattr(self, "_cached_shape_flip", 1) == flip_x
-            and getattr(self, "_cached_shape_angle", 0) == effective_angle
+            getattr(self, cache, None) is not None
+            and getattr(self, cache + "_key", None) == cache_key
+            and abs(getattr(self, cache + "_x", 0) - self._x) < 0.01
+            and abs(getattr(self, cache + "_y", 0) - self._y) < 0.01
+            and getattr(self, cache + "_scale", 0) == self._scale
+            and getattr(self, cache + "_flip", 1) == flip_x
+            and getattr(self, cache + "_angle", 0) == effective_angle
         ):
-            return self._cached_shape
+            return getattr(self, cache)
 
         img_w, img_h = self._orig_w, self._orig_h
         vox = getattr(self, "_visual_offset_x", 0.0)
@@ -507,8 +595,8 @@ class SpriteAssetsMixin:
             ly = by - img_h / 2.0
             px = lx - vox
             py = ly - voy
-            sx = px * s * flip_x
-            sy = py * s
+            sx = px * s * getattr(self, "_scale_ratio_x", 1.0) * flip_x
+            sy = py * s * getattr(self, "_scale_ratio_y", 1.0)
             rx = sx * cos_a - sy * sin_a
             ry = sx * sin_a + sy * cos_a
             world_points.append((self._x + rx, self._y + ry))
@@ -520,26 +608,28 @@ class SpriteAssetsMixin:
             shape = (aabb_shape(rect[0], rect[1], rect[2], rect[3]) if rect
                      else aabb_shape(self._x, self._y, self._x, self._y))
 
-        self._cached_shape = shape
-        self._cached_shape_key = cache_key
-        self._cached_shape_x = self._x
-        self._cached_shape_y = self._y
-        self._cached_shape_scale = self._scale
-        self._cached_shape_flip = flip_x
-        self._cached_shape_angle = effective_angle
+        setattr(self, cache, shape)
+        setattr(self, cache + "_key", cache_key)
+        setattr(self, cache + "_x", self._x)
+        setattr(self, cache + "_y", self._y)
+        setattr(self, cache + "_scale", self._scale)
+        setattr(self, cache + "_flip", flip_x)
+        setattr(self, cache + "_angle", effective_angle)
         return shape
 
 
     def _update_transform(self):
         """统一处理旋转、缩放和镜像逻辑"""
         display_angle = self._angle
-        # 计算基础缩放比例（百分比转为小数）
+        # 计算基础缩放比例（百分比转为小数）；分轴缩放比例乘在各自轴上
         base_scale = self._scale / 100.0
+        ratio_x = getattr(self, "_scale_ratio_x", 1.0)
+        ratio_y = getattr(self, "_scale_ratio_y", 1.0)
 
-        # 默认情况下，Y轴只受 size 影响
-        final_scale_y = base_scale
+        # Y轴只受 size 影响（「不可旋转」/「左右翻转」都不改变 Y 方向）
+        final_scale_y = base_scale * ratio_y
         # X轴受 size、自身镜像状态、跟随镜像继承共同影响（Godot 子节点语义）
-        final_scale_x = base_scale * self._current_scale_x * self._follow_flip
+        final_scale_x = base_scale * ratio_x * self._current_scale_x * self._follow_flip
 
         if self._rotation_style == "left_right":
             norm_angle = self._angle % 360
@@ -549,16 +639,18 @@ class SpriteAssetsMixin:
                 self._current_scale_x = 1.0
 
             # 重新计算镜像后的 X 缩放（含跟随继承）
-            final_scale_x = base_scale * self._current_scale_x * self._follow_flip
+            final_scale_x = base_scale * ratio_x * self._current_scale_x * self._follow_flip
             display_angle = 0
 
         elif self._rotation_style == "none":
             display_angle = 0
             # "none" = 永不旋转永不翻转（含跟随继承），Scratch「不旋转」语义
-            final_scale_x = base_scale
+            final_scale_x = base_scale * ratio_x
 
         # 本帧显示镜像倍率：供挂点世界坐标求值与链式跟随读取
-        self._display_flip = final_scale_x / base_scale if base_scale else 1.0
+        # （除以含分轴比例的基准，保证这里只保留 ±1 的纯镜像语义）
+        denom = base_scale * ratio_x
+        self._display_flip = final_scale_x / denom if denom else 1.0
 
         # 🚀 缓存比对：如果上次发送值相同，跳过发送以减少管道压力
         current_key = (

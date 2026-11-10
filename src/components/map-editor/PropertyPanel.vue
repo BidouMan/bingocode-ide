@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { useMapStore, DEFAULT_CAMERA_SETTINGS, type ShapeKind, type ShapeItem, type TileData } from '../../stores/map'
+import { useMapStore, DEFAULT_CAMERA_SETTINGS, MAX_MAP_SIDE_CELLS, type ShapeKind, type ShapeItem, type TileData } from '../../stores/map'
 import { useEditorStore } from '../../stores/editor'
 import { useResourceStore } from '../../stores/resource'
 import { useMapEditorStore } from '../../stores/mapEditor'
 import CustomSelect from '../common/CustomSelect.vue'
 import { toUserX, toWorldX, toUserY, toWorldY, toUserAngle, toWorldAngle, toUserDeltaY, toWorldDeltaY } from '../../utils/coords'
-import { shapeColorCss, shapeKindLabel } from '../../utils/shapeStyle'
+import { shapeColorCss, shapeKindLabel, SHAPE_TAG_PRESETS, ONE_WAY_DIRECTIONS, PHYSICS_MATERIAL_OPTIONS } from '../../utils/shapeStyle'
 import iconChevron from '../../assets/icons/right_arrow.svg'
 import iconSettings from '../../assets/icons/icon--settings.svg'
 import iconCopy from '../../assets/icons/copy.svg'
@@ -390,6 +390,12 @@ function blurPanelInput(e: KeyboardEvent) {
   (e.target as HTMLInputElement).blur()
 }
 
+/** 旋转单位 ° 的定位：跟随数字位数右移（与角色编辑器属性面板同一做法） */
+function degreeUnitStyle(value: number) {
+  const len = String(value).length
+  return { left: `${10 + len * 7.4}px` }
+}
+
 /** 相机 / 下滑的详细参数：点行尾的设置按钮展开，避免和分区折叠重复 */
 const showCameraSettings = ref(false)
 const showSlopeSettings = ref(false)
@@ -414,13 +420,7 @@ const shapePhysicsDisabled = computed(() => shapeKindValue.value === 'sensor')
 
 // ====== 单向碰撞（参考 Godot 的 One Way Collision） ======
 const shapeOneWayEnabled = computed(() => selectedShapeItem.value?.oneWay === true)
-/** 方向四选一，值编码成 "dx,dy"（世界坐标，y 向下） */
-const ONE_WAY_DIRECTIONS = [
-  { label: '从上方踩住', value: '0,1' },    // 下落时挡住
-  { label: '从下方顶住', value: '0,-1' },   // 上升时挡住
-  { label: '从左侧挡住', value: '1,0' },    // 向右走时挡住
-  { label: '从右侧挡住', value: '-1,0' },   // 向左走时挡住
-]
+/** 方向四选一，和角色编辑器共用一份定义 */
 const shapeOneWayDirValue = computed(() => {
   const s = selectedShapeItem.value
   const dx = s?.oneWayDirX ?? 0
@@ -450,9 +450,38 @@ function onShapeOneWayMarginInput(e: Event) {
   mapStore.updateShapes(selectedShapeIds.value, { oneWayMargin: margin })
 }
 
+// ====== 碰撞层级（与图块面板同一套交互；当前只做界面，尚未接入运行时） ======
+/** 勾选后才在下方展开设置 */
+const shapeCollisionLayersEnabled = computed(
+  () => selectedShapeItem.value?.collisionLayersEnabled === true,
+)
+/** 所在碰撞层 1~8，缺省 1 */
+const shapeCollisionLayer = computed(() => selectedShapeItem.value?.collisionLayer ?? 1)
+/** 可碰撞掩码层号集合，缺省 [1] */
+const shapeCollisionMask = computed(
+  () => new Set<number>(selectedShapeItem.value?.collisionMask ?? [1]),
+)
+
+function onShapeCollisionLayersToggle(e: Event) {
+  mapStore.updateShapes(selectedShapeIds.value, {
+    collisionLayersEnabled: (e.target as HTMLInputElement).checked,
+  })
+}
+
+function setShapeCollisionLayer(n: number) {
+  mapStore.updateShapes(selectedShapeIds.value, { collisionLayer: n })
+}
+
+function toggleShapeCollisionMask(n: number) {
+  const next = new Set(shapeCollisionMask.value)
+  if (next.has(n)) next.delete(n)
+  else next.add(n)
+  mapStore.updateShapes(selectedShapeIds.value, {
+    collisionMask: Array.from(next).sort((a, b) => a - b),
+  })
+}
+
 // ====== 形状类型：界面叫「类型」，内部/代码里就是 tag（is_touch 查询用） ======
-/** 类型预设：常用玩法分类（按用户确认的顺序） */
-const SHAPE_TAG_PRESETS = ['墙体', '地面', '道具', '机关', '危险区']
 /** 下拉里的「自定义…」入口 */
 const SHAPE_TAG_CUSTOM = '自定义'
 /** 当前是否处于「自定义」输入模式（下拉选中自定义时显示输入框） */
@@ -781,19 +810,30 @@ function setImageScale(axis: 'x' | 'y', e: Event) {
 }
 
 
-/** 地图尺寸提交：输入过程中不实时生效，失焦/回车时统一校验后调整，
- *  避免逐字输入（如 40 → 450）触发多次画板重建与内容裁剪 */
+/** 地图尺寸按像素显示：格子数 × 图块尺寸（16px 的默认地图即 640 × 480） */
+const mapTilePixels = computed(() => Math.max(1, Math.round(mapStore.mapData.tileSize) || 1))
+const mapPixelWidth = computed(() => Math.round(mapStore.mapData.width * mapTilePixels.value))
+const mapPixelHeight = computed(() => Math.round(mapStore.mapData.height * mapTilePixels.value))
+const maxMapPixelSide = computed(() => MAX_MAP_SIDE_CELLS * mapTilePixels.value)
+
+/** 地图尺寸提交：输入的是像素值，内部换算回格子数。
+ *  输入过程中不实时生效，失焦/回车时统一校验后调整，
+ *  避免逐字输入（如 640 → 7200）触发多次画板重建与内容裁剪 */
 function commitMapSize(axis: 'width' | 'height', e: Event) {
   const el = e.target as HTMLInputElement
   const parsed = Number(el.value)
+  const tile = mapTilePixels.value
   const current = axis === 'width' ? mapStore.mapData.width : mapStore.mapData.height
-  const value = Number.isFinite(parsed) && parsed >= 1 ? Math.round(parsed) : current
-  if (value !== current) mapStore.updateMapProperty(axis, value)
+  const currentPixels = current * tile
+  const pixels = Number.isFinite(parsed) && parsed >= 1 ? Math.round(parsed) : currentPixels
+  // 非整格像素（如格子 32 时输入 650）就近对齐到最近的整格
+  const cells = Math.max(1, Math.min(MAX_MAP_SIDE_CELLS, Math.round(pixels / tile)))
+  if (cells !== current) mapStore.updateMapProperty(axis, cells)
   // 非法/空值回填当前合法值，避免输入框与实际地图尺寸不一致
-  el.value = String(value)
+  el.value = String(cells * tile)
 }
 
-/** 地图尺寸上下箭头：按 1 个单位增减，最小 1，走和手动输入相同的校验 */
+/** 地图尺寸上下箭头：按 1 个格子（= 1 个图块尺寸像素）增减，最小 1 格 */
 function stepMapSize(axis: 'width' | 'height', delta: number) {
   const current = axis === 'width' ? mapStore.mapData.width : mapStore.mapData.height
   const value = Math.round(current) + delta
@@ -1076,11 +1116,7 @@ function onTileOneWayMarginInput(e: Event) {
 const tilePhysicsEnabled = ref(false)
 const tileCollisionLayer = ref(1)
 const tileCollisionMask = reactive(new Set<number>([1]))
-const tilePhysicsMaterialOptions = [
-  { label: '默认', value: 'default' },
-  { label: '弹性', value: 'bouncy' },
-  { label: '粗糙', value: 'friction' },
-]
+const physicsMaterialOptions = PHYSICS_MATERIAL_OPTIONS
 
 function onTilePhysicsToggle(e: Event) {
   tilePhysicsEnabled.value = (e.target as HTMLInputElement).checked
@@ -1368,25 +1404,33 @@ function runTilesetMenu(action: TilesetMenuAction) {
                 @keydown.enter="blurPanelInput"
               />
             </div>
-            <div class="att-row">
+            <div class="att-row att-row-stacked">
               <span class="att-label">位置</span>
-              <div class="att-size-group">
-                <span class="att-size-label">X</span>
-                <input
-                  class="att-input att-input-no-spin"
-                  type="number"
-                  :value="Math.round(toUserX(selectedMarker?.x ?? 0))"
-                  :disabled="disabled"
-                  @change="onMarkerCoord('x', $event)"
-                />
-                <span class="att-size-label">Y</span>
-                <input
-                  class="att-input att-input-no-spin"
-                  type="number"
-                  :value="Math.round(toUserY(selectedMarker?.y ?? 0))"
-                  :disabled="disabled"
-                  @change="onMarkerCoord('y', $event)"
-                />
+              <div class="att-axis-group">
+                <div class="att-axis-row">
+                  <div class="att-axis-field">
+                    <span class="att-axis-tag is-x">X</span>
+                    <input
+                      class="att-input att-input-no-spin"
+                      type="number"
+                      :value="Math.round(toUserX(selectedMarker?.x ?? 0))"
+                      :disabled="disabled"
+                      @change="onMarkerCoord('x', $event)"
+                    />
+                  </div>
+                </div>
+                <div class="att-axis-row">
+                  <div class="att-axis-field">
+                    <span class="att-axis-tag is-y">Y</span>
+                    <input
+                      class="att-input att-input-no-spin"
+                      type="number"
+                      :value="Math.round(toUserY(selectedMarker?.y ?? 0))"
+                      :disabled="disabled"
+                      @change="onMarkerCoord('y', $event)"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1614,6 +1658,59 @@ function runTilesetMenu(action: TilesetMenuAction) {
                 />
               </div>
             </template>
+
+            <!-- 碰撞层级：勾选后在下方展开（与图块面板同一套交互；当前仅保存设置） -->
+            <div class="att-row">
+              <span class="att-label">碰撞层级</span>
+              <label class="att-checkbox">
+                <input
+                  type="checkbox"
+                  :checked="shapeCollisionLayersEnabled"
+                  :disabled="disabled"
+                  @change="onShapeCollisionLayersToggle"
+                />
+                <span class="att-checkbox-text">启用</span>
+              </label>
+            </div>
+            <template v-if="shapeCollisionLayersEnabled">
+              <div class="layer-block">
+                <span class="layer-block-name">碰撞层</span>
+                <div class="layer-grid">
+                  <button
+                    v-for="n in 8"
+                    :key="`shape-layer-${n}`"
+                    class="layer-cell"
+                    :class="{ 'layer-cell-active': shapeCollisionLayer === n }"
+                    :disabled="disabled"
+                    @click="setShapeCollisionLayer(n)"
+                  >{{ n }}</button>
+                </div>
+              </div>
+
+              <div class="layer-block">
+                <span class="layer-block-name">碰撞掩码</span>
+                <div class="layer-grid">
+                  <button
+                    v-for="n in 8"
+                    :key="`shape-mask-${n}`"
+                    class="layer-cell"
+                    :class="{ 'layer-cell-active': shapeCollisionMask.has(n) }"
+                    :disabled="disabled"
+                    @click="toggleShapeCollisionMask(n)"
+                  >{{ n }}</button>
+                </div>
+              </div>
+
+              <div class="att-row">
+                <span class="att-label">碰撞材质</span>
+                <CustomSelect
+                  class="att-select"
+                  model-value="default"
+                  :options="physicsMaterialOptions"
+                  disabled
+                />
+              </div>
+            </template>
           </div>
         </div>
 
@@ -1629,24 +1726,28 @@ function runTilesetMenu(action: TilesetMenuAction) {
               <span class="att-label">位置</span>
               <div class="att-axis-group">
                 <div class="att-axis-row">
-                  <span class="att-size-label">X</span>
-                  <input
-                    class="att-input att-input-no-spin"
-                    type="number"
-                    :value="shapePosX"
-                    :disabled="disabled || shapeTransformDisabled"
-                    @change="setShapePosition(0, $event)"
-                  />
+                  <div class="att-axis-field">
+                    <span class="att-axis-tag is-x">X</span>
+                    <input
+                      class="att-input att-input-no-spin"
+                      type="number"
+                      :value="shapePosX"
+                      :disabled="disabled || shapeTransformDisabled"
+                      @change="setShapePosition(0, $event)"
+                    />
+                  </div>
                 </div>
                 <div class="att-axis-row">
-                  <span class="att-size-label">Y</span>
-                  <input
-                    class="att-input att-input-no-spin"
-                    type="number"
-                    :value="shapePosY"
-                    :disabled="disabled || shapeTransformDisabled"
-                    @change="setShapePosition(1, $event)"
-                  />
+                  <div class="att-axis-field">
+                    <span class="att-axis-tag is-y">Y</span>
+                    <input
+                      class="att-input att-input-no-spin"
+                      type="number"
+                      :value="shapePosY"
+                      :disabled="disabled || shapeTransformDisabled"
+                      @change="setShapePosition(1, $event)"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
@@ -1656,29 +1757,32 @@ function runTilesetMenu(action: TilesetMenuAction) {
               <span class="att-label">大小</span>
               <div class="att-axis-group">
                 <div class="att-axis-row">
-                  <span class="att-size-label">宽</span>
-                  <input
-                    class="att-input att-input-no-spin"
-                    type="number"
-                    step="1"
-                    :value="shapeSizeW"
-                    :disabled="disabled || shapeTransformDisabled"
-                    @change="setShapeSize('w', $event)"
-                  />
+                  <div class="att-axis-field">
+                    <span class="att-axis-tag">宽</span>
+                    <input
+                      class="att-input att-input-no-spin"
+                      type="number"
+                      step="1"
+                      :value="shapeSizeW"
+                      :disabled="disabled || shapeTransformDisabled"
+                      @change="setShapeSize('w', $event)"
+                    />
+                  </div>
                 </div>
                 <div class="att-axis-row">
-                  <span class="att-size-label">高</span>
-                  <input
-                    class="att-input att-input-no-spin"
-                    type="number"
-                    step="1"
-                    :value="shapeSizeH"
-                    :disabled="disabled || shapeTransformDisabled"
-                    @change="setShapeSize('h', $event)"
-                  />
+                  <div class="att-axis-field">
+                    <span class="att-axis-tag">高</span>
+                    <input
+                      class="att-input att-input-no-spin"
+                      type="number"
+                      step="1"
+                      :value="shapeSizeH"
+                      :disabled="disabled || shapeTransformDisabled"
+                      @change="setShapeSize('h', $event)"
+                    />
+                  </div>
                 </div>
                 <div class="att-axis-row att-axis-lock">
-                  <span class="att-size-label">约束比例</span>
                   <label class="att-checkbox">
                     <input
                       type="checkbox"
@@ -1686,22 +1790,25 @@ function runTilesetMenu(action: TilesetMenuAction) {
                       :disabled="disabled || shapeTransformDisabled"
                     />
                   </label>
+                  <span class="att-checkbox-text">约束比例</span>
                 </div>
               </div>
             </div>
 
-            <!-- 旋转：数字框在上、滑条在下（单位是度，不写 °） -->
+            <!-- 旋转：滑条内嵌在数字框底部（Godot 风格），数值仍可直接输入 -->
             <div class="att-row att-row-stacked">
               <span class="att-label">旋转</span>
-              <div class="att-axis-group">
+              <div class="att-slider-field">
                 <input
                   class="att-input att-input-no-spin"
                   type="number"
                   step="1"
+                  title="逆时针为正"
                   :value="shapeRotation"
                   :disabled="disabled || shapeTransformDisabled"
                   @change="setShapeRotation"
                 />
+                <span class="att-axis-unit" :style="degreeUnitStyle(shapeRotation)">°</span>
                 <input
                   class="att-range"
                   type="range"
@@ -1747,9 +1854,10 @@ function runTilesetMenu(action: TilesetMenuAction) {
                   <input
                     class="att-input att-input-no-spin"
                     type="number"
-                    min="1"
-                    step="1"
-                    :value="mapStore.mapData.width"
+                    :min="mapTilePixels"
+                    :max="maxMapPixelSide"
+                    :step="mapTilePixels"
+                    :value="mapPixelWidth"
                     :disabled="disabled"
                     @change="commitMapSize('width', $event)"
                   />
@@ -1767,9 +1875,10 @@ function runTilesetMenu(action: TilesetMenuAction) {
                   <input
                     class="att-input att-input-no-spin"
                     type="number"
-                    min="1"
-                    step="1"
-                    :value="mapStore.mapData.height"
+                    :min="mapTilePixels"
+                    :max="maxMapPixelSide"
+                    :step="mapTilePixels"
+                    :value="mapPixelHeight"
                     :disabled="disabled"
                     @change="commitMapSize('height', $event)"
                   />
@@ -2114,24 +2223,28 @@ function runTilesetMenu(action: TilesetMenuAction) {
           <span class="att-label">位置</span>
           <div class="att-axis-group">
             <div class="att-axis-row">
-              <span class="att-size-label">X</span>
-              <input
-                class="att-input att-input-no-spin"
-                type="number"
-                :value="imagePosX"
-                :disabled="disabled || transformDisabled"
-                @change="setImagePosition(0, $event)"
-              />
+              <div class="att-axis-field">
+                <span class="att-axis-tag is-x">X</span>
+                <input
+                  class="att-input att-input-no-spin"
+                  type="number"
+                  :value="imagePosX"
+                  :disabled="disabled || transformDisabled"
+                  @change="setImagePosition(0, $event)"
+                />
+              </div>
             </div>
             <div class="att-axis-row">
-              <span class="att-size-label">Y</span>
-              <input
-                class="att-input att-input-no-spin"
-                type="number"
-                :value="imagePosY"
-                :disabled="disabled || transformDisabled"
-                @change="setImagePosition(1, $event)"
-              />
+              <div class="att-axis-field">
+                <span class="att-axis-tag is-y">Y</span>
+                <input
+                  class="att-input att-input-no-spin"
+                  type="number"
+                  :value="imagePosY"
+                  :disabled="disabled || transformDisabled"
+                  @change="setImagePosition(1, $event)"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -2141,29 +2254,32 @@ function runTilesetMenu(action: TilesetMenuAction) {
           <span class="att-label">缩放</span>
           <div class="att-axis-group">
             <div class="att-axis-row">
-              <span class="att-size-label">X</span>
-              <input
-                class="att-input att-input-no-spin"
-                type="number"
-                step="1"
-                :value="imageScaleX"
-                :disabled="disabled || transformDisabled"
-                @change="setImageScale('x', $event)"
-              />
+              <div class="att-axis-field">
+                <span class="att-axis-tag is-x">X</span>
+                <input
+                  class="att-input att-input-no-spin"
+                  type="number"
+                  step="1"
+                  :value="imageScaleX"
+                  :disabled="disabled || transformDisabled"
+                  @change="setImageScale('x', $event)"
+                />
+              </div>
             </div>
             <div class="att-axis-row">
-              <span class="att-size-label">Y</span>
-              <input
-                class="att-input att-input-no-spin"
-                type="number"
-                step="1"
-                :value="imageScaleY"
-                :disabled="disabled || transformDisabled"
-                @change="setImageScale('y', $event)"
-              />
+              <div class="att-axis-field">
+                <span class="att-axis-tag is-y">Y</span>
+                <input
+                  class="att-input att-input-no-spin"
+                  type="number"
+                  step="1"
+                  :value="imageScaleY"
+                  :disabled="disabled || transformDisabled"
+                  @change="setImageScale('y', $event)"
+                />
+              </div>
             </div>
             <div class="att-axis-row att-axis-lock">
-              <span class="att-size-label">约束比例</span>
               <label class="att-checkbox">
                 <input
                   type="checkbox"
@@ -2171,22 +2287,25 @@ function runTilesetMenu(action: TilesetMenuAction) {
                   :disabled="disabled || transformDisabled"
                 />
               </label>
+              <span class="att-checkbox-text">约束比例</span>
             </div>
           </div>
         </div>
 
-        <!-- 旋转：放最后一行，数字框在上、滑条在下（单位就是度，不写 °） -->
+        <!-- 旋转：滑条内嵌在数字框底部（Godot 风格），数值仍可直接输入 -->
         <div class="att-row att-row-stacked">
           <span class="att-label">旋转</span>
-          <div class="att-axis-group">
+          <div class="att-slider-field">
             <input
               class="att-input att-input-no-spin"
               type="number"
               step="1"
+              title="逆时针为正"
               :value="imageRotation"
               :disabled="disabled || transformDisabled"
               @change="setImageRotation"
             />
+            <span class="att-axis-unit" :style="degreeUnitStyle(imageRotation)">°</span>
             <input
               class="att-range"
               type="range"
@@ -2338,7 +2457,7 @@ function runTilesetMenu(action: TilesetMenuAction) {
                 <CustomSelect
                   class="att-select"
                   model-value="default"
-                  :options="tilePhysicsMaterialOptions"
+                  :options="physicsMaterialOptions"
                   disabled
                 />
               </div>
@@ -2357,24 +2476,28 @@ function runTilesetMenu(action: TilesetMenuAction) {
               <span class="att-label">位置</span>
               <div class="att-axis-group">
                 <div class="att-axis-row">
-                  <span class="att-size-label">X</span>
-                  <input
-                    class="att-input att-input-no-spin"
-                    type="number"
-                    :value="tileLayerOffsetX"
-                    :disabled="disabled || !activeDrawingLayer"
-                    @change="onTileLayerOffsetChange('x', $event)"
-                  />
+                  <div class="att-axis-field">
+                    <span class="att-axis-tag is-x">X</span>
+                    <input
+                      class="att-input att-input-no-spin"
+                      type="number"
+                      :value="tileLayerOffsetX"
+                      :disabled="disabled || !activeDrawingLayer"
+                      @change="onTileLayerOffsetChange('x', $event)"
+                    />
+                  </div>
                 </div>
                 <div class="att-axis-row">
-                  <span class="att-size-label">Y</span>
-                  <input
-                    class="att-input att-input-no-spin"
-                    type="number"
-                    :value="tileLayerOffsetY"
-                    :disabled="disabled || !activeDrawingLayer"
-                    @change="onTileLayerOffsetChange('y', $event)"
-                  />
+                  <div class="att-axis-field">
+                    <span class="att-axis-tag is-y">Y</span>
+                    <input
+                      class="att-input att-input-no-spin"
+                      type="number"
+                      :value="tileLayerOffsetY"
+                      :disabled="disabled || !activeDrawingLayer"
+                      @change="onTileLayerOffsetChange('y', $event)"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
@@ -2383,29 +2506,32 @@ function runTilesetMenu(action: TilesetMenuAction) {
               <span class="att-label">缩放</span>
               <div class="att-axis-group">
                 <div class="att-axis-row">
-                  <span class="att-size-label">X</span>
-                  <input
-                    class="att-input att-input-no-spin"
-                    type="number"
-                    step="1"
-                    :value="tileLayerScaleX"
-                    :disabled="disabled || !activeDrawingLayer"
-                    @change="onTileLayerScaleChange('x', $event)"
-                  />
+                  <div class="att-axis-field">
+                    <span class="att-axis-tag is-x">X</span>
+                    <input
+                      class="att-input att-input-no-spin"
+                      type="number"
+                      step="1"
+                      :value="tileLayerScaleX"
+                      :disabled="disabled || !activeDrawingLayer"
+                      @change="onTileLayerScaleChange('x', $event)"
+                    />
+                  </div>
                 </div>
                 <div class="att-axis-row">
-                  <span class="att-size-label">Y</span>
-                  <input
-                    class="att-input att-input-no-spin"
-                    type="number"
-                    step="1"
-                    :value="tileLayerScaleY"
-                    :disabled="disabled || !activeDrawingLayer"
-                    @change="onTileLayerScaleChange('y', $event)"
-                  />
+                  <div class="att-axis-field">
+                    <span class="att-axis-tag is-y">Y</span>
+                    <input
+                      class="att-input att-input-no-spin"
+                      type="number"
+                      step="1"
+                      :value="tileLayerScaleY"
+                      :disabled="disabled || !activeDrawingLayer"
+                      @change="onTileLayerScaleChange('y', $event)"
+                    />
+                  </div>
                 </div>
                 <div class="att-axis-row att-axis-lock">
-                  <span class="att-size-label">约束比例</span>
                   <label class="att-checkbox">
                     <input
                       type="checkbox"
@@ -2413,21 +2539,24 @@ function runTilesetMenu(action: TilesetMenuAction) {
                       :disabled="disabled || !activeDrawingLayer"
                     />
                   </label>
+                  <span class="att-checkbox-text">约束比例</span>
                 </div>
               </div>
             </div>
 
             <div class="att-row att-row-stacked">
               <span class="att-label">旋转</span>
-              <div class="att-axis-group">
+              <div class="att-slider-field">
                 <input
                   class="att-input att-input-no-spin"
                   type="number"
                   step="1"
+                  title="逆时针为正"
                   :value="tileLayerRotation"
                   :disabled="disabled || !activeDrawingLayer"
                   @change="onTileLayerRotationChange"
                 />
+                <span class="att-axis-unit" :style="degreeUnitStyle(tileLayerRotation)">°</span>
                 <input
                   class="att-range"
                   type="range"
@@ -2633,771 +2762,4 @@ function runTilesetMenu(action: TilesetMenuAction) {
   </div>
 </template>
 
-<style scoped>
-.property-panel {
-  display: flex;
-  flex-direction: column;
-  /* 与滚动内容同色：面板全部折叠后下方空白不能变成另一种颜色 */
-  background: var(--bg-root);
-}
-
-.att-frame {
-  display: flex;
-  flex-direction: column;
-  /* 统一标准：分组之间与分节之间一样，都是 12px */
-  gap: 12px;
-  padding: 12px 16px 16px 16px;
-  background: var(--bg-root);
-}
-
-/* 属性分组：地图 / 图层 / 变换（不显示分组标题，仅用间距区分） */
-.att-group {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-/* 标签与控件之间收紧：标签只有两个字时也不会拉开一大片空白 */
-.att-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  /* 统一行高：输入框 / 下拉 / 复选框行都是 24px，纵向节奏一致 */
-  min-height: 24px;
-}
-
-/* 下拉框：固定占满标签右侧剩余宽度，右边缘对齐属性区 */
-.att-select {
-  flex: 1;
-  width: 100%;
-  min-width: 0;
-}
-
-/* 子菜单：开关开启后展开的从属设置（缩进 + 左侧竖线，表明从属于上方开关） */
-.att-subgroup {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-left: 2px;
-  padding: 2px 0 2px 12px;
-  border-left: 1px solid rgba(255, 255, 255, 0.09);
-}
-
-/* 标签列：最长的标签是 4 个字，列宽按此收紧，控件左边缘不再离得太远 */
-.att-label {
-  color: #9ca0a4;
-  font-size: 12px;
-  min-width: 50px;
-  flex-shrink: 0;
-  white-space: nowrap;
-  /* 与 24px 的行高对齐，单行/多行标题都在同一基线上 */
-  line-height: 24px;
-}
-
-/* 行尾设置按钮：相机 / 下滑详细参数的入口，hover 与展开时用底色提示状态 */
-.att-gear-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  margin-left: auto;
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  cursor: default;
-  flex-shrink: 0;
-}
-
-.att-gear-btn img {
-  width: 14px;
-  height: 14px;
-  opacity: 0.55;
-}
-
-.att-gear-btn:hover {
-  background: rgb(61, 64, 72);
-}
-
-.att-gear-btn:hover img {
-  opacity: 0.9;
-}
-
-.att-gear-btn.active {
-  background: rgb(61, 64, 72);
-}
-
-.att-gear-btn.active img {
-  opacity: 1;
-}
-
-.att-gear-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.att-input {
-  width: 100%;
-  height: 24px;
-  background: rgb(40, 43, 52);
-  border: 1px solid var(--border-light);
-  border-radius: 4px;
-  color: white;
-  padding: 0 6px;
-  font-size: 12px;
-  outline: none;
-  box-sizing: border-box;
-}
-
-.att-input:hover {
-  background: rgb(50, 53, 62);
-  border: 1px solid rgb(65, 69, 82);
-}
-
-.att-input:focus {
-  background: var(--border-light);
-  border: 1px solid rgb(65, 69, 82);
-  color: white;
-}
-
-/* 输入框 + 下方提示（如重名警告）的纵向容器 */
-.att-field {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.att-input-warn {
-  border-color: rgb(140, 70, 60);
-}
-
-.att-warn {
-  font-size: 11px;
-  line-height: 1.2;
-  color: #e08874;
-}
-
-.att-input-no-spin::-webkit-inner-spin-button,
-.att-input-no-spin::-webkit-outer-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-
-.att-input-no-spin[type="number"] {
-  -moz-appearance: textfield;
-}
-
-.att-input:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.att-checkbox input[type="checkbox"]:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.att-size-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-}
-
-/* 同一行两个数值输入（地图尺寸等）等分剩余宽度 */
-.att-size-group .att-input {
-  flex: 1 1 0;
-  width: 100%;
-  min-width: 0;
-}
-
-/* 数字框 + 行尾上下箭头（自绘，macOS 上原生箭头不悬停不显示） */
-.att-spin {
-  position: relative;
-  display: flex;
-  flex: 1 1 0;
-  width: 100%;
-  min-width: 0;
-}
-
-.att-spin .att-input {
-  padding-right: 17px;
-}
-
-.att-spin-btns {
-  position: absolute;
-  top: 1px;
-  right: 1px;
-  bottom: 1px;
-  width: 14px;
-  display: flex;
-  flex-direction: column;
-  border-radius: 0 3px 3px 0;
-  overflow: hidden;
-  background: rgba(255, 255, 255, 0.045);
-}
-
-.att-spin-btn {
-  flex: 1 1 0;
-  min-height: 0;
-  padding: 0;
-  border: none;
-  background: transparent;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: default;
-}
-
-.att-spin-btn + .att-spin-btn {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.att-spin-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.att-spin-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-/* 复用分区标题的小箭头，转成上下两个方向 */
-.att-spin-arrow {
-  width: 8px;
-  height: 8px;
-  opacity: 0.75;
-}
-
-.att-spin-arrow.up {
-  transform: rotate(-90deg);
-}
-
-.att-spin-arrow.down {
-  transform: rotate(90deg);
-}
-
-/* X / Y 分两行：标签贴住第一行，两行输入框左边缘对齐 */
-.att-row-stacked {
-  align-items: flex-start;
-}
-
-.att-row-stacked > .att-label {
-  line-height: 24px;
-}
-
-.att-axis-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
-}
-
-/* 刻度标签与输入框的间距跟「地图尺寸」那一行保持一致（8px） */
-.att-axis-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-width: 0;
-}
-
-.att-axis-row .att-input {
-  flex: 1 1 0;
-  width: 100%;
-  min-width: 0;
-}
-
-/* 缩放下方「约束比例」行：文字跟 X / Y 同列，选框紧跟其后 */
-.att-axis-lock {
-  gap: 8px;
-}
-
-/* 旋转滑条：竖排在输入框下方，按自身 3px 高度撑开，不再参与拉伸分配 */
-.att-axis-group .att-range {
-  flex: 0 0 auto;
-  width: 100%;
-  margin: 3px 0 1px;
-}
-
-.att-size-label {
-  color: #9ca0a4;
-  font-size: 12px;
-}
-
-.att-checkbox {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  cursor: default;
-}
-
-.att-checkbox input[type="checkbox"] {
-  width: 14px;
-  height: 14px;
-  accent-color: #528bff;
-  border-radius: 3px;
-}
-
-.att-checkbox-text {
-  color: #9ca0a4;
-  font-size: 12px;
-}
-
-/* 只读信息值（瓦片数量 / 图片尺寸 / 形状数量等） */
-.att-value {
-  color: #d5d8dc;
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-
-/* 占位控件：禁用态（功能开发中） */
-.att-range {
-  flex: 1;
-  min-width: 0;
-}
-
-.att-range:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-/* ====== 标记 / 形状检视器（Godot / Unity 风格的可折叠分区） ====== */
-/* 分组间距沿用 .att-group 的 12px：分节之间 = 底部留白 12 + 分组间距 12 = 24px，
-   与「地图 / 场景 / 图层」等页面完全一致（这里不要再单独压成 0） */
-
-.mi-section {
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-/* 第一块分区不画上分割线，避免紧贴上方标签栏形成多余线条 */
-.att-frame > .att-group:first-child > .mi-section:first-child {
-  border-top: none;
-}
-
-/* 分区标题：整行可点，左侧箭头指示展开状态（参考 Godot / Unity 检视器） */
-.mi-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: calc(100% + 16px);
-  height: 30px;
-  margin: 0 -8px;
-  padding: 0 8px;
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  color: #9ea3aa;
-  font-size: 12px;
-  font-family: inherit;
-  text-align: left;
-  cursor: default;
-  transition: background 0.12s ease, color 0.12s ease;
-}
-
-.mi-head:hover {
-  background: rgba(255, 255, 255, 0.045);
-  color: #e2e5e9;
-}
-
-.mi-head:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.mi-head:disabled:hover {
-  background: transparent;
-  color: #9ea3aa;
-}
-
-/* 展开中的分区标题更亮，让"当前展开哪一组"一眼可见 */
-.mi-section.open > .mi-head {
-  color: #d5d8dc;
-}
-
-/* 收起时朝右 >，展开时朝下 v；与帮助面板、素材栏的箭头保持同一套动作 */
-.mi-chevron {
-  flex-shrink: 0;
-  width: 14px;
-  height: 14px;
-  opacity: 0.5;
-  transition: transform 0.18s ease, opacity 0.18s ease;
-}
-
-.mi-section.open > .mi-head .mi-chevron {
-  transform: rotate(90deg);
-  opacity: 0.8;
-}
-
-.mi-head:hover .mi-chevron {
-  opacity: 0.9;
-}
-
-.mi-head-title {
-  flex: 1;
-}
-
-.mi-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 2px 0 12px;
-}
-
-.mi-actions {
-  display: flex;
-  gap: 8px;
-}
-
-/* 分区标题右侧的数量（如标记个数） */
-.mi-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 15px;
-  padding: 0 5px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #a7acb4;
-  font-size: 10px;
-  line-height: 1;
-}
-
-/* 标记管理列表：当前地图的全部标记，点一行就选中对应图钉 */
-.mi-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 168px;
-  overflow-y: auto;
-}
-
-.mi-list-row {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  width: 100%;
-  /* 与输入框同高：列表卡片、下拉、输入框统一 24px */
-  height: 24px;
-  padding: 0 6px;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: transparent;
-  font-family: inherit;
-  text-align: left;
-  cursor: default;
-}
-
-.mi-list-row:hover { background: rgb(48, 51, 60); }
-.mi-list-row.is-selected {
-  background: rgb(46, 49, 58);
-  border-color: var(--border-light);
-}
-.mi-list-row.is-hidden { opacity: 0.45; }
-.mi-list-row:disabled { opacity: 0.4; }
-
-.mi-list-dot {
-  flex-shrink: 0;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #98a0aa;
-}
-.mi-list-row.is-selected .mi-list-dot { background: #ff5252; }
-
-.mi-list-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  color: #d7dbe1;
-}
-
-.mi-list-coord {
-  flex-shrink: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 10px;
-  color: #8f959d;
-}
-
-.mi-list-empty {
-  padding: 6px 2px;
-  font-size: 11px;
-  color: #7c818a;
-}
-
-.mi-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  flex: 1;
-  /* 统一控件高度：按钮与输入框、下拉都是 24px */
-  height: 24px;
-  padding: 0 8px;
-  background: rgb(48, 51, 60);
-  border: 1px solid var(--border-light);
-  border-radius: 5px;
-  color: #cfd3d9;
-  font-size: 12px;
-  font-family: inherit;
-  cursor: default;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-}
-
-.mi-btn img {
-  width: 13px;
-  height: 13px;
-  opacity: 0.75;
-}
-
-.mi-btn:hover {
-  background: rgb(61, 64, 72);
-  color: #fff;
-}
-
-.mi-btn:hover img {
-  opacity: 1;
-}
-
-.mi-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.mi-btn-danger:hover {
-  background: rgba(95, 45, 39, 0.75);
-  border-color: rgba(224, 92, 78, 0.5);
-  color: #ffb4ab;
-}
-
-/* 标记管理顶部的类型筛选 */
-.mi-filter {
-  width: 100%;
-}
-
-/* 行内改名：与列表行同高，输入框占满名称位置 */
-.mi-list-row-edit {
-  background: rgb(46, 49, 58);
-  border-color: var(--border-light);
-}
-
-.mi-list-rename {
-  flex: 1;
-  min-width: 0;
-  height: 20px;
-  padding: 0 4px;
-  background: rgb(40, 43, 52);
-  border: 1px solid rgb(65, 69, 82);
-  border-radius: 3px;
-  color: #fff;
-  font-size: 12px;
-  font-family: inherit;
-  outline: none;
-  box-sizing: border-box;
-}
-
-/* 列表右键菜单：fixed 定位在鼠标处，由 clampMarkerMenu 收进窗口内 */
-.mi-menu {
-  position: fixed;
-  z-index: 3000;
-  min-width: 148px;
-  padding: 4px;
-  background: var(--bg-root);
-  border: 1px solid var(--border-light);
-  border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-}
-
-.mi-menu-item {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  height: 26px;
-  padding: 0 8px;
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  color: #cfd3d9;
-  font-size: 12px;
-  font-family: inherit;
-  text-align: left;
-  cursor: default;
-}
-
-.mi-menu-item:hover {
-  background: rgb(61, 64, 72);
-  color: #fff;
-}
-
-/* 不可用的菜单项（如锁定后不能隐藏 / 删除） */
-.mi-menu-item:disabled {
-  opacity: 0.4;
-}
-
-.mi-menu-item:disabled:hover {
-  background: transparent;
-  color: #cfd3d9;
-}
-
-.mi-menu-sep {
-  height: 1px;
-  margin: 4px 6px;
-  background: rgba(255, 255, 255, 0.07);
-}
-
-.mi-menu-danger:hover {
-  background: rgba(95, 45, 39, 0.75);
-  color: #ffb4ab;
-}
-
-/* ====== 形状列表：卡片 / 底部操作 ====== */
-/* 卡片沿用 .mi-list-row 的统一行高与内边距，多选改为 Shift / Cmd / Ctrl 点选 */
-
-.sm-main {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  padding: 0;
-  background: transparent;
-  border: none;
-  color: inherit;
-  font-family: inherit;
-  text-align: left;
-  cursor: default;
-}
-
-.sm-main:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.sm-dot {
-  flex-shrink: 0;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-
-.sm-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  color: #d7dbe1;
-  text-align: left;
-}
-
-.sm-name.empty { color: #6f747c; }
-
-/* 卡片右侧的形状类型（只读） */
-.sm-kind { flex-shrink: 0; font-size: 10px; color: #8f959d; }
-
-/* 已禁用的形状：名称变淡，一眼能区分 */
-.sm-row.is-off .sm-name,
-.sm-row.is-off .sm-dot { opacity: 0.5; }
-
-/* 底部操作区：全选 / 清空 / 禁用（启用） / 删除 排成一行 */
-.sm-actions {
-  display: flex;
-  gap: 6px;
-}
-
-/* 面板较窄时四个按钮平分宽度，不靠内容撑开 */
-.sm-actions .mi-btn {
-  min-width: 0;
-  padding: 0 4px;
-}
-
-/* ====== 图块集列表 ====== */
-/* 行结构：圆点（选中=主题绿，未选中=灰） + 名称 + 图块尺寸 + 锁定状态 */
-.tileset-dot {
-  background: #98a0aa;
-}
-
-.tileset-row.is-selected .tileset-dot {
-  background: #5BFB84;
-}
-
-.tileset-size {
-  flex-shrink: 0;
-  color: #9ca0a4;
-  font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
-}
-
-/* 已禁用的图块集：名称与圆点变淡，一眼能区分 */
-.tileset-row.is-off .mi-list-name,
-.tileset-row.is-off .tileset-dot {
-  opacity: 0.5;
-}
-
-.tileset-actions {
-  display: flex;
-  gap: 6px;
-}
-
-.tileset-actions .mi-btn {
-  flex: 1 1 0;
-  min-width: 0;
-  justify-content: center;
-  padding: 0 4px;
-}
-
-/* ====== 碰撞层级（勾选后在面板内展开，和单向碰撞一致） ====== */
-.layer-block {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.layer-block-name {
-  color: #9ca0a4;
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.layer-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 4px;
-}
-
-.layer-cell {
-  height: 26px;
-  background: rgb(34, 37, 43);
-  border: 1px solid var(--border-light);
-  border-radius: 4px;
-  color: #b9bdc2;
-  font-size: 11px;
-  font-family: 'JetBrains Mono', monospace;
-  cursor: default;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-}
-
-.layer-cell:hover:not(:disabled):not(.layer-cell-active) {
-  background: var(--border-light);
-}
-
-.layer-cell-active {
-  background: rgba(91, 251, 132, 0.16);
-  border-color: rgba(91, 251, 132, 0.6);
-  color: #e8eaec;
-  box-shadow: inset 0 0 0 1px rgba(91, 251, 132, 0.25);
-}
-
-.layer-cell:disabled {
-  opacity: 0.5;
-}
-</style>
+<style scoped src="./PropertyPanel.css"></style>

@@ -166,6 +166,15 @@ export function createBitmapPen(host: BitmapPenHost) {
     drawPreview(p)
   }
 
+  /** 画布扩展后平移所有锚点（画布像素坐标整体偏移） */
+  function offsetBy(dx: number, dy: number) {
+    if (!base) return
+    for (const a of anchors) {
+      a.x += dx
+      a.y += dy
+    }
+  }
+
   /** 锚点包围盒（画布像素，按落色外扩 pad）——用于闭合后自动建立编辑选框 */
   function anchorBounds(pad: number) {
     let minX = Infinity
@@ -237,5 +246,5 @@ export function createBitmapPen(host: BitmapPenHost) {
     return true
   }
 
-  return { isActive, press, move, finish, cancel }
+  return { isActive, press, move, finish, cancel, offsetBy }
 }

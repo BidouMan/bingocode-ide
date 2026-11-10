@@ -438,14 +438,19 @@
 /* Loading覆盖层 */
 .loading-overlay {
   position: absolute;
-  background: #1a1c21;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  /* 全不透明：加载完成前完全遮住游戏画面，完成后才"进入"游戏 */
+  background: rgb(54, 58, 69);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 100;
 }
 
-/* 加载页淡出 */
+/* 加载页淡出：快电脑上不会「啪」地瞬间消失，避免被看成闪烁 */
 .loading-fade-leave-active {
   transition: opacity 0.15s ease;
 }
@@ -512,8 +517,12 @@
 .loading-bar-fill {
   height: 100%;
   background: var(--accent);
-  border-radius: 2px;
   transition: width 0.3s ease;
+}
+
+/* 就绪收尾：直接补满，不再等 0.3s 过渡（否则淡出时进度条只走一半就消失） */
+.loading-bar-fill.is-complete {
+  transition: none;
 }
 
 /* 资源标签 */

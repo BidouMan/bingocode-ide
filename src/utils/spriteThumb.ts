@@ -12,9 +12,18 @@
  */
 import { loadImage } from '../composables/useSpriteData'
 import { contentBBox } from './bsfPacker'
-import { SMALL_ART_MAX_SIDE } from './renderMode'
+import { detectPixelArt, SMALL_ART_MAX_SIDE } from './renderMode'
 
 interface RectBox { x: number; y: number; w: number; h: number }
+
+/** 读取解码后图片/画布的像素尺寸（HTMLImageElement / ImageBitmap / Canvas 都适用） */
+function imageSourceSize(src: CanvasImageSource): { w: number; h: number } {
+  const s: any = src
+  return {
+    w: s.naturalWidth || s.videoWidth || s.width || 0,
+    h: s.naturalHeight || s.videoHeight || s.height || 0,
+  }
+}
 
 /** 缩略图画布边长（正方形）：所有素材共用，保证列表里视觉大小一致 */
 const THUMB_SIZE = 160
@@ -44,8 +53,15 @@ export function renderNormalizedBsfFrames(
 ): HTMLCanvasElement[] {
   const inner = Math.round(THUMB_SIZE * contentRatio)
   const scale = Math.min(inner / anchor.w, inner / anchor.h)
-  // 判定是否像素画：用锚定帧最长边（整包美术风格统一，避免同包帧的采样方式不一致）
-  const smoothing = Math.max(anchor.w, anchor.h) > SMALL_ART_MAX_SIDE
+  // 判定是否像素画：优先看整张 sheet 的画风（与角色编辑器/游戏内同一套判定）；
+  // 分析不出时按锚定帧最长边兜底（整包美术风格统一，避免同包帧采样方式不一致）
+  const sheetSize = imageSourceSize(sheet)
+  const pixelArt = sheetSize.w && sheetSize.h
+    ? detectPixelArt(sheet, sheetSize.w, sheetSize.h)
+    : null
+  const smoothing = pixelArt === null
+    ? Math.max(anchor.w, anchor.h) > SMALL_ART_MAX_SIDE
+    : pixelArt === false
   // 锚定帧内容居中放置
   const originX = (THUMB_SIZE - anchor.w * scale) / 2
   const originY = (THUMB_SIZE - anchor.h * scale) / 2
@@ -100,9 +116,13 @@ export async function normalizeSpriteThumb(
     out.width = THUMB_SIZE
     out.height = THUMB_SIZE
     const ctx = out.getContext('2d')!
-    // 小素材（像素画）放大走最近邻，否则缩略图自己就被抹糊了
+    // 画风优先（与角色编辑器/游戏内同一套判定）：像素画放大走最近邻，
+    // 插画走平滑；分析不出时按内容最长边兜底
+    const pixelArt = detectPixelArt(img, w, h)
     const contentMax = Math.max(box.w, box.h) / scanScale
-    ctx.imageSmoothingEnabled = contentMax > SMALL_ART_MAX_SIDE
+    ctx.imageSmoothingEnabled = pixelArt === null
+      ? contentMax > SMALL_ART_MAX_SIDE
+      : pixelArt === false
     ctx.drawImage(
       scan,
       box.x, box.y, box.w, box.h,

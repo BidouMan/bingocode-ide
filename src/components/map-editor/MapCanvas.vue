@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, type CSSProperties } from 'vue'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { useMapStore, type MapResource, type ImageData as MapImageData, type SceneMarker } from '../../stores/map'
+import { useResourceStore } from '../../stores/resource'
 import { useMapEditorStore } from '../../stores/mapEditor'
 import { useProjectStore } from '../../stores/project'
 import { useEditorStore } from '../../stores/editor'
@@ -59,8 +60,9 @@ const collisionOverlayRef = ref<HTMLCanvasElement>()
 let PIXI: any = null
 let app: any = null
 let tileContainer: any = null
-// Pixi v8 的 resizeTo 只监听 window resize，页面从隐藏切到显示时不会重新量尺寸，
-// 这里自行监听容器尺寸变化，避免画布小于容器导致网格显示不全
+// 画布尺寸完全交给 ResizeObserver 管理（不使用 Pixi 的 resizeTo）：
+// resizeTo 会在 window resize 时抢先改 app.screen，导致下面的尺寸比较提前返回，
+// 网格只画到旧画布范围——放大窗口后网格显示不全，必须拖动一下画布才刷新
 let resizeObserver: ResizeObserver | null = null
 
 const mapStore = useMapStore()
@@ -68,6 +70,7 @@ const mapEditorStore = useMapEditorStore()
 const projectStore = useProjectStore()
 const editorStore = useEditorStore()
 const paintStore = usePaintStore()
+const resourceStore = useResourceStore()
 
 // 解析资源路径为浏览器可加载的 URL
 const resolvedPathCache = new Map<string, string>()
@@ -95,13 +98,14 @@ async function resolveImagePath(path: string): Promise<string> {
     try {
       url = await invoke<string>('read_image_as_data_url', { path: fullPath })
     } catch {
-      url = convertFileSrc(fullPath)
+      // 读盘失败的地址不缓存：否则文件补回来后画面也永远回不来
+      return convertFileSrc(fullPath)
     }
   } else {
     try {
       url = await invoke<string>('read_image_as_data_url', { path })
     } catch {
-      url = convertFileSrc(path)
+      return convertFileSrc(path)
     }
   }
 
@@ -114,6 +118,8 @@ let layerContainers: Map<number, any> = new Map()
 let tileSprites: Map<string, any> = new Map() // "layerId:x,y" -> Sprite
 let tileTextures: Map<string, any> = new Map() // "resourcePath:tileIndex" -> Texture
 let sourceImageCache: Map<string, any> = new Map() // "resourcePath" -> HTMLImageElement
+/** 已渲染的图块内容：layerId → ("x,y" → GID)，用于增量比对，只重建真正变化的格子 */
+let renderedTileGids: Map<number, Map<string, number>> = new Map()
 
 // ─── 增量渲染状态（切层/重渲染不再清空全部容器，避免画面闪烁、图层"打架"）───
 /** 图层 id → 已渲染内容签名；签名未变则复用现有精灵 */
@@ -142,11 +148,14 @@ async function initPixi() {
   app = new PIXI.Application()
   await app.init({
     background: '#1e1e1e',
-    resizeTo: canvasRef.value,
     antialias: true,
     resolution: window.devicePixelRatio || 1,
     autoDensity: true,
   })
+  // 初始化时按容器量一次尺寸（未用 resizeTo，Pixi 默认 800×600）
+  const initW = canvasRef.value.clientWidth
+  const initH = canvasRef.value.clientHeight
+  if (initW > 0 && initH > 0) app.renderer.resize(initW, initH)
   // 地图编辑器是按需渲染（手动调用 app.render()），不需要 PixiJS 持续 ticker。
   // 不停止的话，即使切到代码页面（v-show 隐藏），ticker 仍以 60fps 渲染空场景，
   // WebView2 GPU 进程会持续占满 CPU。
@@ -219,7 +228,11 @@ async function loadImage(src: string): Promise<HTMLImageElement> {
       sourceImageCache.set(url, img)
       resolve(img)
     }
-    img.onerror = reject
+    img.onerror = () => {
+      // 失败多半是读盘失败后的回退地址：清掉路径缓存，下次重新读盘再试
+      resolvedPathCache.delete(src)
+      reject(new Error(`无法加载图片: ${src}`))
+    }
     img.src = url
   })
 }
@@ -281,6 +294,7 @@ function clearLayerContainer(layerId: number) {
     if (key.startsWith(`${layerId}:`)) keysToRemove.push(key)
   }
   for (const key of keysToRemove) tileSprites.delete(key)
+  renderedTileGids.delete(layerId)
 }
 
 /** 图片图层的渲染签名：路径/几何/透明度/采样方式变化时才重建精灵 */
@@ -306,10 +320,10 @@ function layerTransformKey(layer: any): string {
   ].join(',')
 }
 
-/** 图层内容签名：图块层按 tileRevision + 整层变换整体重建，图片层按自身签名，形状层无内容 */
+/** 图层内容签名：图块层只跟整层变换 / 采样方式走（图块内容由增量比对，不再整层重建），图片层按自身签名，形状层无内容 */
 function layerContentKey(layer: any): string {
   if (layer.type === 'drawing') {
-    return `tiles:${mapStore.tileRevision}:${currentScaleMode}:${layerTransformKey(layer)}`
+    return `tiles:${currentScaleMode}:${layerTransformKey(layer)}`
   }
   if (layer.type === 'image') return `img:${imageLayerSignature(layer.image)}`
   return ''
@@ -371,11 +385,14 @@ async function renderTile(layerId: number, x: number, y: number, tileId: number)
   if (!matchedTileSet) return
   const tileIndex = baseGid - matchedTileSet.firstgid
 
-  // 在地图级素材库中优先按 firstgid 精确匹配，回退到路径匹配
+  // 在地图级素材库中优先按 id/firstgid 精确匹配，回退到路径匹配。
+  // 必须排除图片素材：它们的 firstgid 只是占位值，抢到匹配会画出空白/巨大图
   const resource: MapResource | null = mapStore.mapData.resources.find(
-    (r: MapResource) => r.firstgid === matchedTileSet.firstgid
+    (r: MapResource) => r.resourceType !== 'image' && r.id === matchedTileSet.id
   ) ?? mapStore.mapData.resources.find(
-    (r: MapResource) => r.path === matchedTileSet.imagePath
+    (r: MapResource) => r.resourceType !== 'image' && r.firstgid === matchedTileSet.firstgid
+  ) ?? mapStore.mapData.resources.find(
+    (r: MapResource) => r.resourceType !== 'image' && r.path === matchedTileSet.imagePath
   ) ?? null
   if (!resource) return
 
@@ -409,6 +426,13 @@ async function renderTile(layerId: number, x: number, y: number, tileId: number)
   const sy = (st.scaleY < 0 ? -1 : 1) * (flags.flipV ? -1 : 1)
   sprite.scale.x = Math.abs(sprite.scale.x) * sx
   sprite.scale.y = Math.abs(sprite.scale.y) * sy
+  // 记录已渲染的 GID：下一次增量比对时内容没变就不再碰它
+  let gids = renderedTileGids.get(layerId)
+  if (!gids) {
+    gids = new Map<string, number>()
+    renderedTileGids.set(layerId, gids)
+  }
+  gids.set(`${x},${y}`, tileId)
 }
 
 function removeTile(layerId: number, x: number, y: number) {
@@ -419,6 +443,7 @@ function removeTile(layerId: number, x: number, y: number) {
     sprite.destroy()
     tileSprites.delete(key)
   }
+  renderedTileGids.get(layerId)?.delete(`${x},${y}`)
 }
 
 async function renderAllLayers() {
@@ -446,6 +471,7 @@ async function renderAllLayers() {
       container.destroy({ children: true })
       layerContainers.delete(id)
       layerRenderKeys.delete(id)
+      renderedTileGids.delete(id)
     }
   }
 
@@ -469,6 +495,8 @@ async function renderAllLayers() {
     if (layerRenderKeys.get(layer.id) !== key) {
       if (layer.type === 'drawing') {
         clearLayerContainer(layer.id)
+        const gids = new Map<string, number>()
+        renderedTileGids.set(layer.id, gids)
         for (const [posKey, tileId] of Object.entries(layer.tiles)) {
           const [x, y] = posKey.split(',').map(Number)
           await renderTile(layer.id, x, y, tileId)
@@ -479,6 +507,9 @@ async function renderAllLayers() {
         await renderImageLayer(container, layer.image, layer.id)
       }
       if (app) layerRenderKeys.set(layer.id, key)
+    } else if (layer.type === 'drawing') {
+      // 图块内容变了（画/擦/撤销）：只处理真正变化的格子，不再整层销毁重建
+      await syncLayerTiles(layer)
     } else if (layer.type === 'image') {
       // 内容未变：复用现有精灵，只确保会话纹理与命中缓存仍指向当前图层
       const sprite = findLayerSprite(layer.id)
@@ -503,8 +534,80 @@ async function renderAllLayers() {
 
   // 图像精灵重建后重绘碰撞叠加层
   collision.drawOverlay()
+  // 视口裁剪放到下一帧统一处理，避免每次落笔都遍历全部精灵
+  scheduleSpriteVisibility()
   // 矢量模式下把当前图层之上的图层叠回矢量画布之上，保持整张画布仍按图层顺序显示
   refreshUpperLayerSnapshot()
+}
+
+/**
+ * 图块层增量同步：只重建与上次渲染不一致的格子。
+ * 遍历开销是 O(已画格数)（只是 Map 比对，不分配精灵），真正变化的才 await 重建。
+ */
+async function syncLayerTiles(layer: any) {
+  let gids = renderedTileGids.get(layer.id)
+  if (!gids) {
+    gids = new Map<string, number>()
+    renderedTileGids.set(layer.id, gids)
+  }
+
+  // 1) 新增格子 / 内容变化（画、填充、改朝向、撤销恢复）
+  for (const posKey in layer.tiles) {
+    const tileId = layer.tiles[posKey]
+    if (gids.get(posKey) === tileId) continue
+    const comma = posKey.indexOf(',')
+    const x = Number(posKey.slice(0, comma))
+    const y = Number(posKey.slice(comma + 1))
+    await renderTile(layer.id, x, y, tileId)
+  }
+
+  // 2) 已删除的格子（擦除、撤销、图层批量删除）——迭代中删除 Map 是安全的
+  for (const posKey of gids.keys()) {
+    if (posKey in layer.tiles) continue
+    const comma = posKey.indexOf(',')
+    const x = Number(posKey.slice(0, comma))
+    const y = Number(posKey.slice(comma + 1))
+    removeTile(layer.id, x, y)
+  }
+}
+
+// ─── 视口裁剪：屏幕外的图块精灵不参与绘制 ───
+/** 缩略图截图期间暂停裁剪，保证截图包含整张地图 */
+let thumbnailCaptureDepth = 0
+let visibilityFrame = 0
+
+function updateSpriteVisibility() {
+  if (!app || thumbnailCaptureDepth > 0) return
+  const scale = Math.max(0.05, viewport.currentScale.value)
+  const pad = mapStore.mapData.tileSize * 2
+  const left = -app.stage.x / scale - pad
+  const top = -app.stage.y / scale - pad
+  const right = left + app.screen.width / scale + pad * 2
+  const bottom = top + app.screen.height / scale + pad * 2
+  for (const sprite of tileSprites.values()) {
+    if (!sprite || sprite.destroyed) continue
+    // 移动工具正在拖拽的原始图块被工具临时隐藏，不要在这里翻出来
+    if (sprite.__toolHidden) continue
+    // 旋转 / 镜像时用旋转后的包围盒近似（多算一点没关系，宁可多画不可漏画）
+    const w = Math.abs(sprite.width || 0)
+    const h = Math.abs(sprite.height || 0)
+    const rot = Math.abs(sprite.rotation || 0)
+    const cos = Math.abs(Math.cos(rot))
+    const sin = Math.abs(Math.sin(rot))
+    const hw = (w * cos + h * sin) / 2
+    const hh = (w * sin + h * cos) / 2
+    sprite.visible = sprite.x + hw > left && sprite.x - hw < right
+      && sprite.y + hh > top && sprite.y - hh < bottom
+  }
+}
+
+/** 每帧最多做一次裁剪计算（平移/缩放的每一帧都能跟上，又不重复计算） */
+function scheduleSpriteVisibility() {
+  if (visibilityFrame || thumbnailCaptureDepth > 0) return
+  visibilityFrame = requestAnimationFrame(() => {
+    visibilityFrame = 0
+    updateSpriteVisibility()
+  })
 }
 
 async function renderImageLayer(container: any, imgData: any, layerId: number) {
@@ -1305,7 +1408,11 @@ function resizeCollisionOverlay() {
 }
 
 function pickPaintSavePath(path: string, layerId: number): string {
-  const base = (path.split('/').pop() || '图像').replace(/\.[^.]+$/, '')
+  // 去掉历史会话叠加的后缀：老逻辑每次会话都在当前文件名后面再拼一段
+  // -L<id>-draw-<ts>，名字会越滚越长（超过系统 255 字节上限后写盘直接失败）
+  const base = (path.split('/').pop() || '图像')
+    .replace(/\.[^.]+$/, '')
+    .replace(/(-L\d+-(draw|vecbase)-[0-9a-z]+)+$/, '')
   // 文件名带图层 id：不同图层即使同名/同一毫秒开始绘制也不会写到同一个文件
   return `assets/maps/${mapStore.mapData.name}/images/${base}-L${layerId}-draw-${Date.now().toString(36)}.png`
 }
@@ -1616,34 +1723,46 @@ async function startPaintSession(): Promise<boolean> {
   const PIXI_ = PIXI
   if (!PIXI_) return false
   try {
-    const source = await loadImage(img.imagePath)
+    const source = await loadImage(img.imagePath).catch(() => null)
+    if (!source) {
+      // 图片文件丢失（项目目录被重置 / 被外部清理）时不能直接判定会话失败，
+      // 否则这一层的所有绘制工具都会永久失效。确认文件确实不在后用图层记录的尺寸重建空白画板
+      const fullPath = img.imagePath.startsWith('assets/')
+        ? `${projectStore.root}/${img.imagePath}`
+        : img.imagePath
+      const exists = await invoke<boolean>('path_exists', { path: fullPath }).catch(() => true)
+      if (exists) throw new Error(`无法加载图片: ${img.imagePath}`)
+      console.warn('[MapCanvas] 绘制图层图片不存在，已重建空白画板:', img.imagePath)
+    }
     if (mapStore.selectedImageLayerId !== layerId) return false
-    const srcW = source.naturalWidth || source.width
-    const srcH = source.naturalHeight || source.height
-    // 绘制图层：可绘制范围 = 地图尺寸 + 四周出血（各半个地图），允许内容画到地图边界之外
+    // 绘制图层：画布尺寸 = 地图尺寸（不再设固定出血区，超出范围由落笔时自动扩展，见 ensurePaintCanvasCoversWorld）
     const isBackground = !!img.background
     const mapW = Math.max(1, mapStore.mapData.width * mapStore.mapData.tileSize)
     const mapH = Math.max(1, mapStore.mapData.height * mapStore.mapData.tileSize)
+    // 图片丢失时按图层记录的尺寸复原画板，保持原来的绘制范围
+    const srcW = source ? (source.naturalWidth || source.width) : Math.max(1, Math.round(img.width || mapW))
+    const srcH = source ? (source.naturalHeight || source.height) : Math.max(1, Math.round(img.height || mapH))
     // 已有矢量内容（底稿/矢量坐标以画布像素为准）时保持原画布原点，避免内容错位
     const hasVectorContent = !!img.vectorData || !!img.vectorBasePath || vectorLayerCache.has(layerId)
     const canRepad = isBackground && !hasVectorContent
     const offsetX = img.position?.[0] ?? 0
     const offsetY = img.position?.[1] ?? 0
-    // 出血区 = 半个地图，上限 512px（避免大尺寸地图导致画布过大、内存暴涨）
-    const padX = Math.min(Math.round(mapW / 2), 512)
-    const padY = Math.min(Math.round(mapH / 2), 512)
-    // 已有内容平移到新画布：世界坐标保持不变（世界原点落在画布 padX/padY 处）
-    // 矢量图层不做平移，直接沿用原画布原点
-    const drawX = canRepad ? padX + offsetX : 0
-    const drawY = canRepad ? padY + offsetY : 0
     let canvasW = srcW
     let canvasH = srcH
+    let drawX = 0
+    let drawY = 0
+    let newPosX = offsetX
+    let newPosY = offsetY
     if (isBackground) {
       if (canRepad) {
-        // 背景画板严格等于「地图尺寸 + 四周出血」：地图缩小时画板同步收缩，
-        // 超出新画板的内容被裁掉（与 Tiled 调整地图尺寸行为一致）
-        canvasW = mapW + padX * 2
-        canvasH = mapH + padY * 2
+        // 背景画板 = 地图尺寸；旧版「出血区」图层迁移：内容按原 position 偏移画入，
+        // 超出地图范围的旧出血区内容被裁掉，原点归零与地图左上角对齐
+        canvasW = mapW
+        canvasH = mapH
+        drawX = offsetX
+        drawY = offsetY
+        newPosX = 0
+        newPosY = 0
       } else {
         // 矢量内容以画板像素坐标为基准：画板只扩不缩，避免矢量路径错位
         canvasW = Math.max(srcW, mapW)
@@ -1654,12 +1773,12 @@ async function startPaintSession(): Promise<boolean> {
     canvas.width = canvasW
     canvas.height = canvasH
     if (canvas.width <= 0 || canvas.height <= 0) return false
-    canvas.getContext('2d')!.drawImage(source, drawX, drawY)
-    if (isBackground && (canvasW !== srcW || canvasH !== srcH || drawX !== 0 || drawY !== 0)) {
+    if (source) canvas.getContext('2d')!.drawImage(source, drawX, drawY)
+    const geometryChanged = isBackground && canRepad && (canvasW !== srcW || canvasH !== srcH || offsetX !== 0 || offsetY !== 0)
+    if (geometryChanged) {
       img.width = canvasW
       img.height = canvasH
-      // 只有重新排版时才移动原点；矢量图层沿用原原点，防止底稿与矢量路径错位
-      if (canRepad) img.position = [-padX, -padY]
+      img.position = [newPosX, newPosY]
       img.scaleX = 1
       img.scaleY = 1
       img.scale = 1
@@ -1673,7 +1792,6 @@ async function startPaintSession(): Promise<boolean> {
     for (const child of container?.children ?? []) {
       if (child instanceof PIXI_.Sprite) { sprite = child; break }
     }
-    const geometryChanged = isBackground && (canvasW !== srcW || canvasH !== srcH || drawX !== 0 || drawY !== 0)
     paintSession = {
       layerId,
       mapName: mapStore.mapData.name,
@@ -1683,12 +1801,13 @@ async function startPaintSession(): Promise<boolean> {
       lastPoint: null,
       startPoint: null,
       snapshot: null,
-      // 画布几何变化（加了出血区）时必须立刻落盘，否则存盘里的尺寸/位置与 PNG 不一致
-      dirty: geometryChanged,
+      // 画布几何变化（尺寸/位置重排）时必须立刻落盘，否则存盘里的尺寸/位置与 PNG 不一致；
+      // 原图丢失时也要立刻落盘，把图层指向的文件名修正到新文件
+      dirty: geometryChanged || !source,
       savePath: pickPaintSavePath(img.imagePath, layerId),
     }
     if (sprite) bindPaintTexture(sprite, img)
-    if (geometryChanged) schedulePaintSave()
+    if (geometryChanged || !source) schedulePaintSave()
     paintUndo = []
     paintRedo = []
     bumpPaintHistory()
@@ -1704,6 +1823,91 @@ async function startPaintSession(): Promise<boolean> {
 
 function paintCtx(): CanvasRenderingContext2D | null {
   return paintSession?.canvas.getContext('2d') ?? null
+}
+
+/** 绘制画布单边上限（WebGL 纹理常见上限 8192，保守取值，避免大纹理上传失败） */
+const MAX_PAINT_CANVAS_SIDE = 8192
+/** 绘制画布总面积上限（≈ 122MB RGBA8，防止内存暴涨） */
+const MAX_PAINT_CANVAS_AREA = 32_000_000
+/** 画布自动扩展步长：对齐到 256px，减少频繁重建开销 */
+const PAINT_EXPAND_STEP = 256
+
+/**
+ * 确保绘制画布覆盖指定的世界坐标矩形。
+ * 超出当前画布范围时自动向外扩展（按步长对齐），触达上限时提示并返回 null。
+ * 返回 { dx, dy } 表示画布像素坐标需要整体平移的量（用于同步钢笔锚点等）；
+ * 返回 null 表示未扩展或被上限拦截。
+ * 注意：扩展后画布像素坐标已变化，调用方需重新调用 toCanvasPoint 获取最新坐标。
+ */
+function ensurePaintCanvasCoversWorld(worldRect: { x: number; y: number; w: number; h: number }): { dx: number; dy: number } | null {
+  const s = paintSession
+  const img = sessionImage()
+  const PIXI_ = PIXI
+  if (!s || !img || !sessionMatchesSelection() || !PIXI_) return null
+
+  // 世界矩形 → 画布像素矩形：px = (world.x - pos.x) / scaleX
+  const posX = img.position?.[0] ?? 0
+  const posY = img.position?.[1] ?? 0
+  const scaleX = Math.abs(img.scaleX ?? img.scale ?? 1) || 1
+  const scaleY = Math.abs(img.scaleY ?? img.scale ?? 1) || 1
+  const px0 = (worldRect.x - posX) / scaleX
+  const py0 = (worldRect.y - posY) / scaleY
+  const px1 = (worldRect.x + worldRect.w - posX) / scaleX
+  const py1 = (worldRect.y + worldRect.h - posY) / scaleY
+
+  const left = Math.min(px0, px1)
+  const right = Math.max(px0, px1)
+  const top = Math.min(py0, py1)
+  const bottom = Math.max(py0, py1)
+
+  const cw = s.canvas.width
+  const ch = s.canvas.height
+  const expandLeft = left < 0 ? Math.ceil(-left / PAINT_EXPAND_STEP) * PAINT_EXPAND_STEP : 0
+  const expandTop = top < 0 ? Math.ceil(-top / PAINT_EXPAND_STEP) * PAINT_EXPAND_STEP : 0
+  const expandRight = right > cw ? Math.ceil((right - cw) / PAINT_EXPAND_STEP) * PAINT_EXPAND_STEP : 0
+  const expandBottom = bottom > ch ? Math.ceil((bottom - ch) / PAINT_EXPAND_STEP) * PAINT_EXPAND_STEP : 0
+
+  if (expandLeft === 0 && expandTop === 0 && expandRight === 0 && expandBottom === 0) return null
+
+  const newW = cw + expandLeft + expandRight
+  const newH = ch + expandTop + expandBottom
+
+  // 上限保护
+  if (newW > MAX_PAINT_CANVAS_SIDE || newH > MAX_PAINT_CANVAS_SIDE) {
+    mapEditorStore.showHint('画布已达最大尺寸，无法继续向外扩展')
+    return null
+  }
+  if (newW * newH > MAX_PAINT_CANVAS_AREA) {
+    mapEditorStore.showHint('画布面积已达上限，无法继续向外扩展')
+    return null
+  }
+
+  // 新画布：旧内容平移到 (expandLeft, expandTop)，保持世界坐标不变
+  const newCanvas = document.createElement('canvas')
+  newCanvas.width = newW
+  newCanvas.height = newH
+  newCanvas.getContext('2d')!.drawImage(s.canvas, expandLeft, expandTop)
+
+  // 替换纹理
+  const newTexture = PIXI_.Texture.from(newCanvas)
+  newTexture.source.scaleMode = currentScaleMode
+  const oldTexture = s.texture
+  s.canvas = newCanvas
+  s.texture = newTexture
+  if (s.sprite) s.sprite.texture = newTexture
+  oldTexture.destroy()
+
+  // 更新图层几何：原点向左上扩展时 position 相应减小，向右下扩展时不变
+  img.width = newW
+  img.height = newH
+  if (expandLeft !== 0 || expandTop !== 0) {
+    img.position = [posX - expandLeft, posY - expandTop]
+  }
+  mapStore.markMapDataDirty()
+  s.dirty = true
+  schedulePaintSave()
+  // 返回画布像素坐标需整体平移的量（向左/上扩展时，已有像素坐标需加对应偏移）
+  return { dx: expandLeft, dy: expandTop }
 }
 
 function paintBrushAt(px: number, py: number, from: { x: number; y: number } | null) {
@@ -1766,9 +1970,12 @@ function drawShapePreview(px: number, py: number, shift = false) {
   const s = paintSession
   const ctx = paintCtx()
   if (!s || !ctx || !s.startPoint) return
+  // startPoint 存世界坐标，画布可能已扩展，每次重算画布像素坐标
+  const start = toCanvasPoint(s.startPoint)
+  if (!start) return
   restorePaintSnapshot()
-  const end = constrainPoint({ x: px, y: py }, s.startPoint, shift)
-  paintShapeInto(ctx, s.startPoint, end)
+  const end = constrainPoint({ x: px, y: py }, start, shift)
+  paintShapeInto(ctx, start, end)
 }
 
 /**
@@ -1936,10 +2143,24 @@ function paintBegin(world: { x: number; y: number }) {
   if (floatCanvas) bakeFloatingSelection()
   const s = paintSession
   const ctx = paintCtx()
-  const p = toCanvasPoint(world)
-  if (!s || !ctx || !p) return
-  pushPaintUndo()
+  if (!s || !ctx) return
   const tool = mapEditorStore.imageTool
+  // 落笔前确保画布覆盖落点范围（画笔半径 / 形状描边半径），超出时自动扩展
+  if (tool === 'brush' || tool === 'eraser') {
+    const r = (paintStore.brushSize || 1) / 2
+    ensurePaintCanvasCoversWorld({ x: world.x - r, y: world.y - r, w: r * 2, h: r * 2 })
+  } else if (tool !== 'fill') {
+    const lw = tool === 'line'
+      ? Math.max(1, paintStore.lineWidth)
+      : (paintStore.strokeWidth > 0 ? paintStore.strokeWidth : 1)
+    const r = lw / 2
+    ensurePaintCanvasCoversWorld({ x: world.x - r, y: world.y - r, w: r * 2, h: r * 2 })
+  } else {
+    ensurePaintCanvasCoversWorld({ x: world.x - 1, y: world.y - 1, w: 2, h: 2 })
+  }
+  const p = toCanvasPoint(world)
+  if (!p) return
+  pushPaintUndo()
   if (tool === 'fill') {
     floodFillAt(p.x, p.y)
     s.dirty = true
@@ -1949,11 +2170,13 @@ function paintBegin(world: { x: number; y: number }) {
   }
   if (tool === 'brush' || tool === 'eraser') {
     paintBrushAt(p.x, p.y, null)
-    s.lastPoint = p
+    // lastPoint 存世界坐标：画布自动扩展后像素坐标会变，世界坐标保持不变
+    s.lastPoint = { x: world.x, y: world.y }
   } else {
     s.snapshot = ctx.getImageData(0, 0, s.canvas.width, s.canvas.height)
-    s.startPoint = p
-    s.lastPoint = p
+    // startPoint / lastPoint 存世界坐标，避免拖拽扩展画布后形状起点错位
+    s.startPoint = { x: world.x, y: world.y }
+    s.lastPoint = { x: world.x, y: world.y }
     // 图形工具拖拽创建中的实时宽高（画布像素）
     paintStore.liveShapeSize = { x: p.x, y: p.y, w: 0, h: 0 }
   }
@@ -1963,25 +2186,46 @@ function paintBegin(world: { x: number; y: number }) {
 
 function paintMove(world: { x: number; y: number }, shift = false) {
   const s = paintSession
-  const p = toCanvasPoint(world)
-  if (!s || !p) return
+  if (!s) return
   const tool = mapEditorStore.imageTool
+  // 移动中持续确保画布覆盖当前点（画笔连续绘制 / 形状拖拽），超出时自动扩展
   if (tool === 'brush' || tool === 'eraser') {
-    paintBrushAt(p.x, p.y, s.lastPoint)
-    s.lastPoint = p
+    const r = (paintStore.brushSize || 1) / 2
+    ensurePaintCanvasCoversWorld({ x: world.x - r, y: world.y - r, w: r * 2, h: r * 2 })
+  } else if (s.startPoint) {
+    // 形状拖拽：覆盖起点到当前点的外接矩形（含描边外扩）
+    const lw = tool === 'line'
+      ? Math.max(1, paintStore.lineWidth)
+      : (paintStore.strokeWidth > 0 ? paintStore.strokeWidth : 1)
+    const r = lw / 2
+    const minX = Math.min(s.startPoint.x, world.x) - r
+    const minY = Math.min(s.startPoint.y, world.y) - r
+    const maxX = Math.max(s.startPoint.x, world.x) + r
+    const maxY = Math.max(s.startPoint.y, world.y) + r
+    ensurePaintCanvasCoversWorld({ x: minX, y: minY, w: maxX - minX, h: maxY - minY })
+  }
+  const p = toCanvasPoint(world)
+  if (!p) return
+  if (tool === 'brush' || tool === 'eraser') {
+    // lastPoint 存的是世界坐标，转回画布像素坐标作为 from（画布可能刚扩展过）
+    const from = s.lastPoint ? toCanvasPoint(s.lastPoint) : null
+    paintBrushAt(p.x, p.y, from)
+    s.lastPoint = { x: world.x, y: world.y }
   } else {
-    drawShapePreview(p.x, p.y, shift)
-    // 实时宽高：按起止点轴对齐外框（每次赋新对象触发响应式）
-    if (s.startPoint) {
-      const end = constrainPoint(p, s.startPoint, shift)
+    // startPoint 是世界坐标，拖拽中画布可能扩展，每次都重算画布像素坐标
+    const start = s.startPoint ? toCanvasPoint(s.startPoint) : null
+    if (start) {
+      drawShapePreview(p.x, p.y, shift)
+      // 实时宽高：按起止点轴对齐外框（每次赋新对象触发响应式）
+      const end = constrainPoint(p, start, shift)
       paintStore.liveShapeSize = {
-        x: Math.min(s.startPoint.x, end.x),
-        y: Math.min(s.startPoint.y, end.y),
-        w: Math.abs(end.x - s.startPoint.x),
-        h: Math.abs(end.y - s.startPoint.y),
+        x: Math.min(start.x, end.x),
+        y: Math.min(start.y, end.y),
+        w: Math.abs(end.x - start.x),
+        h: Math.abs(end.y - start.y),
       }
     }
-    s.lastPoint = p
+    s.lastPoint = { x: world.x, y: world.y }
   }
   s.dirty = true
   s.texture.source.update()
@@ -2064,11 +2308,14 @@ function paintEnd(world?: { x: number; y: number }, shift = false) {
   const s = paintSession
   if (!s) return
   if (s.startPoint) {
-    const start = s.startPoint
+    // startPoint / lastPoint 存世界坐标，落定时统一转画布像素坐标
+    const start = toCanvasPoint(s.startPoint)
     const origin = s.snapshot
-    const p = world ? toCanvasPoint(world) : s.lastPoint
+    const p = world
+      ? toCanvasPoint(world)
+      : (s.lastPoint ? toCanvasPoint(s.lastPoint) : null)
     restorePaintSnapshot()
-    if (!p || !origin) {
+    if (!start || !p || !origin) {
       paintUndo.pop()
       bumpPaintHistory()
     } else {
@@ -2110,6 +2357,8 @@ async function flushPaintSave(session: ImagePaintSession, finalize: boolean) {
   session.dirty = false
   const root = projectStore.root
   if (!root) return
+  // 这张地图已被从素材列表删除：绝不能再落盘，否则会把删掉的地图目录（含 images）重新造出来
+  if (!resourceStore.maps.some(m => m.name === session.mapName)) return
   try {
     const blob: Blob | null = await new Promise(r => session.canvas.toBlob(r, 'image/png'))
     if (!blob) return
@@ -2170,7 +2419,12 @@ function undoPaint() {
   if (!s || !ctx || paintUndo.length === 0) return
   resetFloatingSelection()
   paintRedo.push(ctx.getImageData(0, 0, s.canvas.width, s.canvas.height))
-  ctx.putImageData(paintUndo.pop()!, 0, 0)
+  const snapshot = paintUndo.pop()!
+  // 画布可能因自动扩展而变大，旧快照尺寸小于当前画布时先清空再贴回，避免残留
+  if (snapshot.width !== s.canvas.width || snapshot.height !== s.canvas.height) {
+    ctx.clearRect(0, 0, s.canvas.width, s.canvas.height)
+  }
+  ctx.putImageData(snapshot, 0, 0)
   bumpPaintHistory()
   s.texture.source.update()
   s.dirty = true
@@ -2187,7 +2441,11 @@ function redoPaint() {
   if (!s || !ctx || paintRedo.length === 0) return
   resetFloatingSelection()
   paintUndo.push(ctx.getImageData(0, 0, s.canvas.width, s.canvas.height))
-  ctx.putImageData(paintRedo.pop()!, 0, 0)
+  const snapshot = paintRedo.pop()!
+  if (snapshot.width !== s.canvas.width || snapshot.height !== s.canvas.height) {
+    ctx.clearRect(0, 0, s.canvas.width, s.canvas.height)
+  }
+  ctx.putImageData(snapshot, 0, 0)
   bumpPaintHistory()
   s.texture.source.update()
   s.dirty = true
@@ -2236,6 +2494,8 @@ const painter = useTilePainter({
   onTilePainted: (x, y, tileId) => emit('tile-painted', x, y, tileId),
   onTileErased: (x, y) => emit('tile-erased', x, y),
   onRenderRequest: () => scheduleRender(),
+  // 幽灵预览跟随鼠标：只重出一帧舞台，不能走 scheduleRender（会重建所有图层）
+  onPreviewChange: () => requestStageRender(),
 })
 
 // ====== 矢量绘制（覆盖层 + Paper.js 引擎） ======
@@ -2673,6 +2933,16 @@ function refreshUpperLayerSnapshot() {
     return
   }
 
+  // 视口裁剪会让屏幕外的上方图块不可见：快照要覆盖整块画板，先临时全部可见，渲染完恢复
+  const upperLayerIds = new Set(upperLayers.map(l => l.id))
+  const forcedSprites: { sprite: any; visible: boolean }[] = []
+  for (const [key, sprite] of tileSprites) {
+    const layerId = Number(key.slice(0, key.indexOf(':')))
+    if (!upperLayerIds.has(layerId) || !sprite || sprite.destroyed) continue
+    forcedSprites.push({ sprite, visible: sprite.visible })
+    sprite.visible = true
+  }
+
   // 世界坐标 → 画板坐标（画板 = 矢量图层的绘制画布像素）
   const scale = frame.scale
   const sx = frame.stageX - m.tx
@@ -2743,6 +3013,11 @@ function refreshUpperLayerSnapshot() {
   } catch (e) {
     console.error('[MapCanvas] 上方图层快照渲染失败:', e)
     clearUpperSnapshot()
+  } finally {
+    // 恢复快照前的可见性（图块是否可见由视口裁剪决定）
+    for (const item of forcedSprites) {
+      if (!item.sprite.destroyed) item.sprite.visible = item.visible
+    }
   }
 }
 
@@ -3155,26 +3430,6 @@ function onPointerDown(e: PointerEvent) {
   // 画布空白处左键：取消标记选中
   if (e.button === 0) mapEditorStore.setSelectedMarkerId(null)
 
-  // 位图取色：点击画布读取像素色并结束会话
-  if (mapStore.activeMode === 'image' && paintStore.eyedropperActive) {
-    const worldPos = viewport.screenToWorld(e)
-    const p = worldPos ? toCanvasPoint(worldPos) : null
-    const s = paintSession
-    const ctx = paintCtx()
-    if (p && s && ctx) {
-      const x = Math.max(0, Math.min(s.canvas.width - 1, Math.floor(p.x)))
-      const y = Math.max(0, Math.min(s.canvas.height - 1, Math.floor(p.y)))
-      const d = ctx.getImageData(x, y, 1, 1).data
-      paintStore.endEyedropper()
-      if (d[3] >= 16) {
-        const hex = '#' + [d[0], d[1], d[2]].map(v => v.toString(16).padStart(2, '0')).join('')
-        if (paintStore.eyedropperTarget === 'stroke') paintStore.strokeColor = hex
-        else paintStore.fillColor = hex
-      }
-      return
-    }
-  }
-
   // 形状层：指针事件全部交给形状层编辑器
   if (mapStore.activeMode === 'shape') {
     // 清掉可能残留的平移状态，避免普通拖动带动整块画布
@@ -3192,57 +3447,18 @@ function onPointerDown(e: PointerEvent) {
   // 点击变换手柄时交给变换逻辑，避免与选区框选冲突
   if (transform.isTransformBusy()) return
 
-  // 图片模式的选择工具：像素/矢量选取
-  if (mapStore.activeMode === 'image' && mapEditorStore.imageTool === 'select') {
+  // 图片模式：只做整图的选中 / 移动 / 缩放 / 旋转（像素绘制已迁到绘制页）
+  if (mapStore.activeMode === 'image') {
     if (e.button !== 0) return
-    const worldPos = viewport.screenToWorld(e)
-    if (!mapStore.selectedImage) return
-    // 开始框选时收起整图变换框，避免两个框同时出现
-    transform.removeTransformBox()
-    if (worldPos) {
-      if (sessionMatchesSelection()) {
-        handleSelectPointerDown(worldPos)
-      } else {
-        void startPaintSession().then(ok => {
-          if (ok) handleSelectPointerDown(worldPos)
-        })
-      }
-    }
+    const layer = mapStore.activeLayer
+    if (layer && layer.type === 'image') transform.handleSelectPointerDown(e, layer)
+    // 命中图片会创建变换框，手动补一帧
+    requestStageRender()
     return
   }
 
+  // 图块模式：左键绘制
   if (e.button === 0 && !e.altKey && !viewport.isSpacePressed()) {
-    // 图片模式：直接在画布上绘制
-    if (isImagePaintTool()) {
-      const worldPos = viewport.screenToWorld(e)
-      if (worldPos) {
-        const startAndHandle = (handler: () => void) => {
-          if (sessionMatchesSelection()) handler()
-          else void startPaintSession().then(ok => { if (ok) handler() })
-        }
-        // 图形创建后自动出现的编辑选框：优先响应手柄/内部拖动（任意位图绘制工具下）
-        if (floatCanvas && floatOp === 'none' && hitTestFloat(worldPos).kind !== 'outside') {
-          // 浮动选区必然属于当前会话：同步处理，避免异步建会话后鼠标已松开导致手势卡住
-          if (sessionMatchesSelection()) handleSelectPointerDown(worldPos)
-          capturePointer(app?.canvas as HTMLCanvasElement | undefined, e.pointerId)
-          return
-        }
-        startAndHandle(() => {
-          // 点击选框外 = 完成确定（落定像素），随后继续当前工具的正常行为
-          if (floatCanvas) bakeFloatingSelection()
-          // 位图钢笔：单击落锚（不是拖拽笔画），需要绘制会话才能写像素
-          if (mapEditorStore.imageTool === 'pen' && mapEditorStore.paintMode === 'bitmap') {
-            const p = toCanvasPoint(worldPos)
-            if (p) bitmapPen.press(p, e.detail)
-          } else {
-            paintBegin(worldPos)
-          }
-        })
-        return
-      }
-    }
-
-    // 图片模式选择工具只做像素框选，不再做整图点选（位图/矢量模式行为一致）
     const pos = pointerToTile(e)
     if (pos) {
       // 捕获指针：拖到画布外也能收到 pointerup，直线/矩形不会因为快速松开而丢笔
@@ -3276,6 +3492,8 @@ function onPointerMove(e: PointerEvent) {
     syncVectorGeometry()
     // 叠加层在屏幕坐标绘制，平移后需要重绘
     collision.drawOverlay()
+    // ticker 已停：平移只改 stage，必须手动补一帧
+    requestStageRender()
     return
   }
 
@@ -3283,48 +3501,21 @@ function onPointerMove(e: PointerEvent) {
   if (mapStore.activeMode === 'shape') {
     const worldPos = viewport.screenToWorld(e)
     if (worldPos) {
-      collision.pointerMove(worldPos)
+      collision.pointerMove(worldPos, e.shiftKey)
       updateCollisionCursor(worldPos)
     }
     return
   }
 
-  // 整图变换框拖动（拖动图片本体 / 缩放 / 旋转）优先于选区逻辑
-  if (transform.handleTransformPointerMove(e)) return
-
-  // 图片模式选取工具：更新框选矩形 / 拖动浮动选区（移动、缩放、旋转）
-  if (mapStore.activeMode === 'image' && mapEditorStore.imageTool === 'select' && mapStore.selectedImage) {
-    if (floatOp !== 'none') {
-      const worldPos = viewport.screenToWorld(e)
-      if (worldPos) handleSelectPointerMove(worldPos, e.shiftKey)
-    }
+  // 整图变换框拖动（拖动图片本体 / 缩放 / 旋转）优先于区块逻辑
+  if (transform.handleTransformPointerMove(e)) {
+    // ticker 已停：变换只改精灵属性，必须手动补一帧
+    requestStageRender()
     return
   }
 
-  // 图片模式绘制工具：圆圈光标跟随鼠标并绘制
-  if (isImagePaintTool()) {
-    // 自动编辑选框的拖动（移动/缩放/旋转）优先
-    if (floatOp !== 'none') {
-      const worldPos = viewport.screenToWorld(e)
-      if (worldPos) handleSelectPointerMove(worldPos, e.shiftKey)
-      return
-    }
-    if (isBrushCursorActive()) drawBrushCursorAt(e.clientX, e.clientY)
-    // 位图钢笔：橡皮筋预览跟随光标（无需按住鼠标）
-    if (mapEditorStore.imageTool === 'pen' && mapEditorStore.paintMode === 'bitmap') {
-      if (sessionMatchesSelection()) {
-        const worldPos = viewport.screenToWorld(e)
-        const p = worldPos ? toCanvasPoint(worldPos) : null
-        if (p) bitmapPen.move(p)
-      }
-      return
-    }
-    if (e.buttons === 1 && sessionMatchesSelection()) {
-      const worldPos = viewport.screenToWorld(e)
-      if (worldPos) paintMove(worldPos, e.shiftKey)
-    }
-    return
-  }
+  // 图片模式只处理整图变换，像素绘制已迁到绘制页
+  if (mapStore.activeMode === 'image') return
 
   let gridPos = pointerToTile(e)
   // 指针捕获后可能拖到画布外：按画布边界裁掉，保持和未捕获时一样不会画出画布
@@ -3357,32 +3548,14 @@ function onPointerUp(e: PointerEvent) {
     return
   }
 
-  // 整图变换框拖动结束优先处理，避免被选区逻辑吞掉
+  // 整图变换框拖动结束优先处理
   if (transform.handleTransformPointerUp()) return
 
-  // 图片模式选取工具：结束框选 / 结束移动缩放旋转
-  if (mapStore.activeMode === 'image' && mapEditorStore.imageTool === 'select' && mapStore.selectedImage) {
-    if (e.button === 0) handleSelectPointerUp()
+  // 图片模式：只收尾平移 / 指针，像素绘制已迁到绘制页
+  if (mapStore.activeMode === 'image') {
+    releasePointer(app?.canvas as HTMLCanvasElement | undefined, e.pointerId)
     viewport.endPan()
-    return
-  }
-
-  // 自动编辑选框的拖动收尾（移动/缩放/旋转）
-  if (isImagePaintTool() && floatOp !== 'none') {
-    handleSelectPointerUp()
-    viewport.endPan()
-    return
-  }
-
-  // 位图钢笔：落锚靠点击，不走拖拽笔画的收尾逻辑
-  if (isImagePaintTool() && mapEditorStore.imageTool === 'pen' && mapEditorStore.paintMode === 'bitmap') {
-    viewport.endPan()
-    return
-  }
-
-  if (isImagePaintTool() && sessionMatchesSelection()) {
-    paintEnd(viewport.screenToWorld(e) ?? undefined, e.shiftKey)
-    viewport.endPan()
+    viewport.setCursor('default')
     return
   }
 
@@ -3410,12 +3583,6 @@ function onPointerLeave(e: PointerEvent) {
   emit('cursor-leave')
   painter.hidePreview()
   hideBrushCursor()
-  // 绘制中离开画布：结束当前笔画（钢笔保留已落锚点，等用户回来继续）
-  if (isImagePaintTool() && mapEditorStore.imageTool !== 'pen' && sessionMatchesSelection()) paintEnd()
-  // 框选中离开画布：按当前尺寸收口，避免选框悬空
-  if (mapStore.activeMode === 'image' && mapEditorStore.imageTool === 'select' && floatOp === 'create') {
-    handleSelectPointerUp()
-  }
   // 松手状态下离开画布才取消未完成的碰撞草稿；拖拽中（按钮仍按下）继续由指针捕获接管
   if (mapStore.activeMode === 'shape' && e.buttons === 0) {
     collision.resetOnLeave()
@@ -3459,6 +3626,8 @@ function setupInteraction() {
 
 function onWheel(e: WheelEvent) {
   viewport.onWheel(e)
+  // ticker 已停：缩放只改 stage，必须手动补一帧
+  requestStageRender()
 }
 
 function onScratchDrop(e: CustomEvent) {
@@ -3555,124 +3724,16 @@ function onKeyDown(e: KeyboardEvent) {
     viewport.onSpaceDown()
     return
   }
-  // 矢量模式快捷键：与角色绘制页一致（对象操作优先，屏蔽地图快捷键）
-  if (vectorActive.value && paintStore.mode === 'vector') {
-    const tag = (e.target as HTMLElement).tagName
-    if (tag === 'INPUT' || tag === 'TEXTAREA') return
-    const mod = e.ctrlKey || e.metaKey
-    if (paintStore.eyedropperActive) {
-      paintStore.endEyedropper()
+  // 图片模式快捷键：Esc 取消整图选框（像素级快捷键已迁到绘制页）
+  if (mapStore.activeMode === 'image') {
+    if (e.key === 'Escape' && !typing) {
       e.preventDefault()
-      return
-    }
-    // 钢笔：Esc 取消半成品、Enter 直接闭合收尾
-    if (paintStore.activeTool === 'pen') {
-      if (e.key === 'Escape' && vectorEngine.penCancel()) {
-        e.preventDefault()
-        return
-      }
-      if (e.key === 'Enter' && vectorEngine.penFinish()) {
-        e.preventDefault()
-        return
-      }
-    }
-    if (e.key === 'Escape') {
-      if (!vectorEngine.reshapeEscape()) vectorEngine.deselect()
-      // 整图变换框也一并清除，避免选框残留无法取消
       transform.removeTransformBox()
-      e.preventDefault()
-      return
-    }
-    if (e.key === 'Delete' || e.key === 'Backspace') {
-      if (vectorEngine.reshapeDeletePoints()) {
-        e.preventDefault()
-      } else if (paintStore.vectorSelectedCount > 0) {
-        vectorEngine.deleteSelection()
-        e.preventDefault()
-      }
-      return
-    }
-    if (e.key.startsWith('Arrow')) {
-      if (vectorEngine.reshapeNudge(e.key, e.repeat)) e.preventDefault()
-      return
-    }
-    if (mod && (e.key === 'c' || e.key === 'C')) {
-      vectorEngine.copySelection()
-      e.preventDefault()
-      return
-    }
-    if (mod && (e.key === 'x' || e.key === 'X')) {
-      vectorEngine.cutSelection()
-      e.preventDefault()
-      return
-    }
-    if (mod && (e.key === 'v' || e.key === 'V')) {
-      if (paintStore.hasVectorClipboard) vectorEngine.pasteClipboard()
-      e.preventDefault()
+      mapStore.clearImageSelection()
       return
     }
     return
   }
-  // 图片模式选取工具：Esc 取消浮动选区 / 框选 / 整图选框，Delete 删除选区内容
-  if (mapStore.activeMode === 'image' && mapEditorStore.imageTool === 'select') {
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      if (floatCanvas) cancelFloatingSelection()
-      else if (pixelSelection) clearPixelSelection()
-      else transform.removeTransformBox()
-      return
-    }
-    if ((e.key === 'Delete' || e.key === 'Backspace') && floatCanvas) {
-      e.preventDefault()
-      deleteFloatingPixels()
-      return
-    }
-  }
-  // 图片模式：Ctrl/Cmd+C/V 复制粘贴选区（任意绘制工具下均可用）
-  if (mapStore.activeMode === 'image' && (e.metaKey || e.ctrlKey)) {
-    const tag = (e.target as HTMLElement).tagName
-    if (tag === 'INPUT' || tag === 'TEXTAREA') return
-    const key = e.key.toLowerCase()
-    if (key === 'c' && floatCanvas) {
-      e.preventDefault()
-      copyFloatingSelection()
-      return
-    }
-    if (key === 'v' && paintClipboard) {
-      e.preventDefault()
-      pasteFloatingSelection()
-      return
-    }
-  }
-  // 位图模式钢笔：Enter 闭合收尾、Esc 丢弃半成品（与矢量模式一致）
-  if (mapStore.activeMode === 'image' && mapEditorStore.paintMode === 'bitmap'
-    && mapEditorStore.imageTool === 'pen'
-    && (e.target as HTMLElement).tagName !== 'INPUT'
-    && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
-    if (e.key === 'Escape' && bitmapPen.cancel()) {
-      e.preventDefault()
-      return
-    }
-    if (e.key === 'Enter' && bitmapPen.finish()) {
-      e.preventDefault()
-      return
-    }
-  }
-  // 图形刚创建后的自动编辑选框：Esc 取消（回到创建前），Delete 删除该图形
-  if (mapStore.activeMode === 'image' && floatCanvas && floatOp === 'none') {
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      cancelFloatingSelection()
-      return
-    }
-    if (e.key === 'Delete' || e.key === 'Backspace') {
-      e.preventDefault()
-      deleteFloatingPixels()
-      return
-    }
-  }
-  // 绘制模式下不响应地图快捷键（避免误删图层/切工具）
-  if (isImagePaintTool()) return
   // Tool shortcuts (only when not typing in an input)
   if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return
 
@@ -3695,8 +3756,19 @@ function onKeyUp(e: KeyboardEvent) {
   }
 }
 
+/** 轻量重绘：只把当前 stage 出一帧（平移/缩放等场景，不重建图层） */
+let stageRenderFrame: number | null = null
+function requestStageRender() {
+  if (stageRenderFrame !== null || thumbnailCaptureDepth > 0) return
+  stageRenderFrame = requestAnimationFrame(() => {
+    stageRenderFrame = null
+    if (app) app.render()
+  })
+}
+
 function redraw() {
   viewport.redraw()
+  requestStageRender()
 }
 
 // ─── 画布缩放（悬浮工具条）───
@@ -3726,6 +3798,7 @@ function setZoomAtCenter(next: number) {
   syncVectorGeometry()
   // 工具条缩放停下后按新倍率重拍上方图层快照
   scheduleUpperSnapshotRefresh()
+  requestStageRender()
 }
 
 function zoomIn() {
@@ -3820,83 +3893,13 @@ watch(
   }
 )
 
-// 矢量/位图模式切换：默认矢量；无选中图片时保持矢量 UI，选中图层后自动进入
-watch(
-  () => mapEditorStore.paintMode,
-  async (mode) => {
-    // 切换图层时同步模式不算用户操作：跳过，避免把矢量图层烘焙成位图
-    if (suppressPaintModeWatch) {
-      suppressPaintModeWatch = false
-      return
-    }
-    // 用户主动切换：记录到当前图层，切走后仍按各自模式恢复
-    const img = mapStore.selectedImage
-    if (img) img.paintMode = mode
-    if (mode === 'vector') {
-      const ok = await enterVectorMode()
-      if (ok) transform.removeTransformBox()
-    } else {
-      await exitVectorMode()
-    }
-    // 模式切换后统一选取工具光标（避免位图侧遗留十字/圆圈）
-    if (mapEditorStore.imageTool === 'select') syncSelectCursor()
-  }
-)
-
+// 图片模式工具同步：仅剩「选择/移动」，统一光标即可
 watch(
   () => mapEditorStore.imageTool,
-  (tool) => {
+  () => {
     if (mapStore.activeMode !== 'image') return
-    // 切走钢笔：丢弃未闭合的半成品，避免预览线残留在像素里
-    if (tool !== 'pen') bitmapPen.cancel()
-    // 选取工具：两种模式统一光标，避免从画笔切过来遗留圆圈/十字
-    if (tool === 'select') {
-      syncSelectCursor()
-      if (!(vectorActive.value && paintStore.mode === 'vector')) {
-        // 位图模式选取工具需要绘制会话才能读写图片像素
-        void startPaintSession()
-      }
-      return
-    }
-    if (vectorActive.value && paintStore.mode === 'vector') {
-      // 切到画笔/橡皮但还没移动鼠标时先给十字，避免原生指针被隐藏后完全看不到
-      if ((tool === 'brush' || tool === 'eraser') && !vectorCursorPos.value && vectorCanvasRef.value) {
-        vectorCanvasRef.value.style.cursor = 'crosshair'
-      }
-      return
-    }
-    // 切换绘制工具前先落定浮动选区
-    bakeFloatingSelection()
-    clearPixelSelection()
-    transform.removeTransformBox()
-    viewport.setCursor('crosshair')
-    void startPaintSession().then(() => updatePaintCursor())
-    updatePaintCursor()
+    syncSelectCursor()
   }
-)
-
-// 矢量引擎主动切工具（如文字编辑结束）→ 同步地图工具栏高亮与光标：
-// 工具栏读的是 imageTool，引擎只改 paintStore.activeTool，不同步就会出现
-// “工具已变、图标还停在原来那个”
-watch(
-  () => paintStore.activeTool,
-  (tool) => {
-    if (!vectorActive.value || paintStore.mode !== 'vector') return
-    if (mapEditorStore.imageTool === tool) return
-    mapEditorStore.setImageTool(tool)
-  }
-)
-
-// 矢量画布挂载期间始终保证 paintStore.mode 为 vector：
-// Paper 的指针处理依赖该状态，任何异步时序导致 mode 落后都会让选取/框选"失效"
-watch(vectorActive, (active) => {
-  if (active) paintStore.mode = 'vector'
-})
-
-// 笔刷粗细变化 → 圆圈光标直径同步
-watch(
-  () => paintStore.brushSize,
-  () => redrawBrushCursor()
 )
 
 watch(
@@ -3951,6 +3954,8 @@ watch(
     }
     collision.cancelDraft()
     collision.drawOverlay()
+    // 变换框可能被移除，需要刷新一帧
+    requestStageRender()
   }
 )
 
@@ -3963,6 +3968,8 @@ watch(
     collision.drawOverlay()
     // 矢量模式下上方图层集合随可见性变化，快照需同步重拍
     refreshUpperLayerSnapshot()
+    // 图层显隐只改容器 visible，需手动刷新一帧
+    requestStageRender()
   }
 )
 
@@ -3994,6 +4001,12 @@ watch(
   }
 )
 
+// 平移 / 缩放后重新计算视口裁剪（每帧最多一次，避免整张地图的精灵全部提交给 GPU）
+watch(
+  () => viewport.viewVersion.value,
+  () => { scheduleSpriteVisibility() }
+)
+
 // Watch image changes
 watch(
   () => mapStore.imageRevision,
@@ -4009,48 +4022,20 @@ watch(
   () => [mapStore.selectedImageLayerId, mapStore.mapLoadCount] as const,
   async () => {
     const selImg = mapStore.selectedImage
-    // 同步清空选区：此时 selectedImage 已指向新图层，
-    // 若等到 await 之后再清，旧图层的浮动选区会短暂挂到新图层上（串层）
     resetFloatingSelection()
     paintClipboard = null
     pasteCount = 0
     mapEditorStore.hasPaintClipboard = false
-    // 切换图层只切换绘制目标：整图变换框仅在用户主动点选图片时保留
-    if (!transform.isSelectedImage(selImg)) transform.removeTransformBox()
-    // 图层自身的编辑模式：显式记录优先，旧存档按是否有矢量数据推导
-    const cached = cachedVectorEntry(mapStore.selectedImageLayerId, selImg)
-    const layerMode: 'bitmap' | 'vector' = selImg
-      ? (selImg.paintMode ?? ((selImg.vectorData || cached) ? 'vector' : 'bitmap'))
-      : 'bitmap'
-    const keepVector = layerMode === 'vector'
-    // 工具栏模式跟随图层自身模式（立即同步 UI）；抑制 watcher，避免把切层误判成用户切位图而烘焙
-    // 选中图块图层时（selImg 为空）不改变全局模式，避免影响后续新建绘制图层的默认模式
-    if (selImg && mapEditorStore.paintMode !== layerMode) {
-      suppressPaintModeWatch = true
-      mapEditorStore.setPaintMode(layerMode)
-    }
-    // 切换图层前只暂存矢量内容（不烘焙）：每个图层保留自己的矢量数据，切回仍可编辑
-    if (vectorActive.value) await exitVectorMode(false)
     collision.cancelDraft()
-    // 切换图片图层：先落盘旧图层，再为新图层建会话 / 重新进入矢量模式
-    const proceed = () => {
-      if (mapStore.activeMode !== 'image' || !mapStore.selectedImage) return
-      // 会话/画布启动前就锁定该图层的编辑模式，避免异步过程中沿用上一图层的模式
-      paintStore.mode = layerMode
-      if (keepVector) {
-        void enterVectorMode()
-      } else {
-        void startPaintSession()
-      }
-      // 切层后按新模式统一选取工具光标（位图/矢量保持一致）
-      if (mapEditorStore.imageTool === 'select') syncSelectCursor()
+    // 选中图片时直接显示整图变换框（移动 / 缩放 / 旋转）；像素编辑去绘制页
+    if (selImg && mapStore.activeMode === 'image') {
+      transform.showTransformBox(selImg)
+      syncSelectCursor()
+    } else {
+      transform.removeTransformBox()
     }
-    if (paintSession && paintSession.layerId !== mapStore.selectedImageLayerId) {
-      void commitPaintSession(false).then(proceed)
-    } else if (mapStore.activeMode === 'image' && mapStore.selectedImage) {
-      // 图片模式下选中图层即预建会话，保证首次框选/绘制立即可用
-      proceed()
-    }
+    // 变换框是 Pixi 显示对象，创建/移除后必须刷新一帧
+    requestStageRender()
   }
 )
 
@@ -4089,6 +4074,10 @@ function scheduleRender() {
         await renderAllLayers()
         // 图片变换 / 图层重渲染后同步矢量覆盖层矩阵
         syncVectorGeometry()
+        // 本画布是手动渲染（ticker 已停）：构建完显示对象后必须真正出一帧，
+        // 否则从绘制页返回等场景会出现"图层已存在但画布不显示"，要手动点一下才刷新
+        // 缩略图截图期间跳过（此时图层可见性被临时改写，出屏会闪）
+        if (app && thumbnailCaptureDepth === 0) app.render()
       }
     } finally {
       // 锁必须保持到渲染真正结束，否则 await 期间又会被新任务插进来并发渲染
@@ -4140,11 +4129,36 @@ async function resetCanvasState() {
   vectorLayerCache.clear()
 }
 
+// 地图图像素材被绘制页覆盖保存后：清掉路径缓存并重建图像图层纹理
+function reloadImages() {
+  resolvedPathCache.clear()
+  for (const layer of mapStore.mapData.layers) {
+    if (layer.type === 'image') layerRenderKeys.delete(layer.id)
+  }
+  mapStore.imageRevision++
+  scheduleRender()
+}
+
+/** 外部（绘制页保存返回）强制刷新一帧：等图层重建完成后再真正渲染 */
+async function renderNow() {
+  scheduleRender()
+  await whenRenderIdle()
+  if (app) app.render()
+}
+
+/** 绘制页改过画布尺寸返回后：选中图片的变换框按最新宽高重建（不等用户重新点选） */
+function refreshTransformBox() {
+  // 只有图片模式才显示整图变换框（图块模式下不弹框）
+  if (mapStore.activeMode !== 'image') return
+  transform.restoreSelectedImageUI()
+  requestStageRender()
+}
+
 onMounted(() => {
-  // 默认矢量模式：Pixi 就绪后尝试进入（无图片图层时保持矢量 UI，选中图层后自动进入）
+  // Pixi 就绪后强制渲染一次（绘制功能已迁往绘制页，这里只做地编渲染）
   nextTick(async () => {
     await initPixi()
-    if (mapEditorStore.paintMode === 'vector' && !vectorActive.value) void enterVectorMode()
+    scheduleRender()
   })
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
@@ -4223,15 +4237,19 @@ async function getLayerThumbnailDataUrl(layerId: number): Promise<string | null>
       if (gid >= tilesets[i].firstgid) { matched = tilesets[i]; break }
     }
     if (!matched) return null
-    const resource = mapStore.mapData.resources.find(r => r.firstgid === matched.firstgid)
-      ?? mapStore.mapData.resources.find(r => r.path === matched.imagePath)
+    const resource = mapStore.mapData.resources.find(r => r.resourceType !== 'image' && r.firstgid === matched.firstgid)
+      ?? mapStore.mapData.resources.find(r => r.resourceType !== 'image' && r.path === matched.imagePath)
     if (!resource) return null
     return { resource, tileIndex: gid - matched.firstgid, ...tileFlipFlags(rawGid) }
   }
 
   const canvas = document.createElement('canvas')
-  canvas.width = mapW
-  canvas.height = mapH
+  // 缩略图不需要原图尺寸：按比例缩到安全边长，避免大地图创建超大 canvas（WebKit 有面积上限）
+  const FULL_THUMB_MAX = 512
+  const thumbScale = Math.min(1, FULL_THUMB_MAX / Math.max(mapW, mapH))
+  const drawTs = ts * thumbScale
+  canvas.width = Math.max(1, Math.round(mapW * thumbScale))
+  canvas.height = Math.max(1, Math.round(mapH * thumbScale))
   const ctx = canvas.getContext('2d')
   if (!ctx) return null
   ctx.imageSmoothingEnabled = false
@@ -4255,13 +4273,13 @@ async function getLayerThumbnailDataUrl(layerId: number): Promise<string | null>
     const flipH = hit.flipH === true
     const flipV = hit.flipV === true
     ctx.save()
-    ctx.translate(x * ts + (flipH ? ts : 0), y * ts + (flipV ? ts : 0))
+    ctx.translate(x * drawTs + (flipH ? drawTs : 0), y * drawTs + (flipV ? drawTs : 0))
     ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1)
     ctx.drawImage(
       img,
       col * hit.resource.tileWidth, row * hit.resource.tileHeight,
       hit.resource.tileWidth, hit.resource.tileHeight,
-      0, 0, ts, ts,
+      0, 0, drawTs, drawTs,
     )
     ctx.restore()
   }
@@ -4315,6 +4333,9 @@ async function getThumbnailDataUrl(): Promise<string | null> {
   if (!app || !PIXI || !app.renderer) return null
   // 矢量编辑时上方图层被移出舞台单独渲染成快照：截图期间先归位，避免缩略图缺层
   const needSnapshotRestore = (upperSnapshotContainer?.children.length ?? 0) > 0
+  // 截图期间关闭视口裁剪，并把屏幕外的图块临时置为可见，否则缩略图会缺块
+  let savedVisibility: Map<any, boolean> | null = null
+  thumbnailCaptureDepth++
   try {
     // 渲染时会先清空图层容器再异步重建图片；必须等这次重建结束，
     // 否则保存时拍到的是全透明的空容器，缩略图就会变空白
@@ -4325,9 +4346,35 @@ async function getThumbnailDataUrl(): Promise<string | null> {
     const mapH = mapStore.mapData.height * tileSize
     if (mapW <= 0 || mapH <= 0) return null
 
-    // Render only the tile container to a render texture at map size
-    const rt = PIXI.RenderTexture.create({ width: Math.ceil(mapW), height: Math.ceil(mapH) })
-    app.renderer.render(tileContainer, { renderTexture: rt })
+    savedVisibility = new Map()
+    for (const sprite of tileSprites.values()) {
+      if (!sprite || sprite.destroyed || sprite.__toolHidden) continue
+      savedVisibility.set(sprite, sprite.visible)
+      sprite.visible = true
+    }
+
+    // 大地图直接建 map 尺寸的 RenderTexture 会超过 WebKit 的 canvas 面积上限：
+    // 超过安全边长时把整层临时放进一个缩放容器里，按缩放后的尺寸出图
+    const MAX_THUMB_SIDE = 2048
+    const thumbScale = Math.min(1, MAX_THUMB_SIDE / Math.max(mapW, mapH))
+    const rt = PIXI.RenderTexture.create({
+      width: Math.max(1, Math.ceil(mapW * thumbScale)),
+      height: Math.max(1, Math.ceil(mapH * thumbScale)),
+    })
+    if (thumbScale === 1) {
+      app.renderer.render(tileContainer, { renderTexture: rt })
+    } else {
+      const parent = tileContainer.parent
+      const index = parent ? parent.getChildIndex(tileContainer) : -1
+      parent?.removeChild(tileContainer)
+      const wrapper = new PIXI.Container()
+      wrapper.scale.set(thumbScale)
+      wrapper.addChild(tileContainer)
+      app.renderer.render(wrapper, { renderTexture: rt })
+      wrapper.removeChild(tileContainer)
+      wrapper.destroy()
+      if (parent && index >= 0) parent.addChildAt(tileContainer, index)
+    }
     const canvas = app.renderer.extract.canvas(rt)
     const dataUrl = canvas.toDataURL('image/png')
     rt.destroy(true)
@@ -4335,6 +4382,13 @@ async function getThumbnailDataUrl(): Promise<string | null> {
   } catch {
     return null
   } finally {
+    thumbnailCaptureDepth--
+    if (savedVisibility) {
+      for (const [sprite, visible] of savedVisibility) {
+        if (!sprite.destroyed) sprite.visible = visible
+      }
+    }
+    updateSpriteVisibility()
     if (needSnapshotRestore) refreshUpperLayerSnapshot()
   }
 }
@@ -4538,6 +4592,9 @@ defineExpose({
   showTransformBox: transform.showTransformBox,
   removeTransformBox: transform.removeTransformBox,
   resetCanvasState,
+  reloadImages,
+  renderNow,
+  refreshTransformBox,
   getThumbnailDataUrl,
   getLayerThumbnailDataUrl,
   placeImageFromPath,

@@ -1314,6 +1314,13 @@ function isCanvasEmpty(canvas: HTMLCanvasElement): boolean {
   return true
 }
 
+/** 两个 Map 的键集合是否完全相同（不能只比 size，见下方 changed 的说明） */
+function sameMapKeys(a: Map<string, unknown>, b: Map<string, unknown>): boolean {
+  if (a.size !== b.size) return false
+  for (const key of a.keys()) if (!b.has(key)) return false
+  return true
+}
+
 async function generateTileThumbnails() {
   const batchCounts = new Map<string, number>()
   const batchCols = new Map<string, number>()
@@ -1373,13 +1380,15 @@ async function generateTileThumbnails() {
     }
   }
 
-  // 内容有变化才替换响应式 Map：切图层时全部命中缓存，跳过赋值可避免整块调色板重绘
+  // 内容有变化才替换响应式 Map：切图层时全部命中缓存，跳过赋值可避免整块调色板重绘。
+  // 不能只比 size：复制图块集后切回原集合时，两个集合素材数量相同但 id 全不同，
+  // 只比 size 会漏替换，原集合就会因为查不到切片数量而显示成空。
   const changed =
     cacheMissed ||
-    batchCounts.size !== tileCounts.value.size ||
-    batchCols.size !== tileCols.value.size ||
-    batchThumbs.size !== tileThumbs.value.size ||
-    batchEmpty.size !== tileEmpty.value.size
+    !sameMapKeys(batchCounts, tileCounts.value) ||
+    !sameMapKeys(batchCols, tileCols.value) ||
+    !sameMapKeys(batchThumbs, tileThumbs.value) ||
+    !sameMapKeys(batchEmpty, tileEmpty.value)
   if (changed) {
     tileCounts.value = batchCounts
     tileCols.value = batchCols

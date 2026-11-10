@@ -2,8 +2,6 @@
 import { computed } from 'vue'
 import { usePaintStore, ARTBOARD_MAX } from '../../stores/paint'
 
-import iconClose from '../../assets/icons/关闭.svg'
-import iconSave from '../../assets/icons/保存.svg'
 import iconCrop from '../../assets/icons/裁切画板.svg'
 import iconCopy from '../../assets/icons/copy.svg'
 import iconPaste from '../../assets/icons/粘贴.svg'
@@ -17,11 +15,17 @@ import iconLayerDown from '../../assets/icons/下移图层.svg'
 import iconCurve from '../../assets/icons/曲线.svg'
 import iconStraight from '../../assets/icons/折线.svg'
 import iconSnap from '../../assets/icons/吸附锚点.svg'
+import iconGrid from '../../assets/icons/显示网格.svg'
 
 const props = defineProps<{
   /** 保存按钮提示（编辑模式为「保存回角色」） */
   saveTitle?: string
+  /** 是否允许保存（地图绘制即使未落笔也要能把画板落盘；未传则按画板 dirty 判断） */
+  canSave?: boolean
 }>()
+
+/** 保存按钮可用性：外部显式指定优先（地图绘制恒可保存） */
+const saveAllowed = computed(() => props.canSave ?? store.dirty)
 
 const emit = defineEmits<{
   close: []
@@ -46,6 +50,16 @@ const emit = defineEmits<{
 }>()
 
 const store = usePaintStore()
+
+/** 网格尺寸输入：clamp 1~ARTBOARD_MAX，失焦/回车提交（默认值 = 当前地图图块尺寸） */
+function commitGridSize(e: Event) {
+  const el = e.target as HTMLInputElement
+  let v = Math.round(Number(el.value))
+  if (!Number.isFinite(v)) v = store.gridSize
+  v = Math.min(ARTBOARD_MAX, Math.max(1, v))
+  store.gridSize = v
+  el.value = String(v)
+}
 
 // ─── 模式感知的可用状态（位图看选区/剪贴板，矢量看对象选中/矢量剪贴板）───
 const isVector = () => store.mode === 'vector'
@@ -227,7 +241,9 @@ function commitSize(axis: 'w' | 'h', e: Event) {
         :class="{ 'icon-btn-active': store.smartSnap }"
         v-tooltip="
           store.smartSnap
-            ? '智能吸附已开启（拖动/缩放时对齐画板的边与中心、其它图形的边与中心）'
+            ? (store.showGrid
+              ? '智能吸附已开启（对齐画板的边与中心、其它图形，以及网格线）'
+              : '智能吸附已开启（拖动/缩放时对齐画板的边与中心、其它图形的边与中心）')
             : '智能吸附已关闭（完全自由移动）'
         "
         @click="store.toggleSmartSnap()"
@@ -236,21 +252,47 @@ function commitSize(axis: 'w' | 'h', e: Event) {
       </button>
     </div>
 
+    <!-- 网格开关组（吸附按钮右侧）：开启后显示网格线，并在右侧出现「网格尺寸」输入框；
+         与吸附按钮保持 4px 同组间距，输入控件展开后自带 4px 间距，不再额外加分割线 -->
+    <div class="grid-group">
+      <button
+        class="icon-btn"
+        :class="{ 'icon-btn-active': store.showGrid }"
+        v-tooltip="store.showGrid ? '隐藏网格' : '显示网格（按地图图块的网格尺寸）'"
+        @click="store.toggleGrid()"
+      >
+        <img :src="iconGrid" class="icon-sm" draggable="false" />
+      </button>
+      <template v-if="store.showGrid">
+        <span class="grid-label">网格尺寸</span>
+        <input
+          class="size-input grid-size-input"
+          type="number"
+          min="1"
+          :max="ARTBOARD_MAX"
+          :value="store.gridSize"
+          title="网格尺寸（px，失焦或回车生效）"
+          aria-label="网格尺寸"
+          @change="commitGridSize"
+          @keydown.enter="commitGridSize"
+        />
+        <span class="size-unit">px</span>
+      </template>
+    </div>
+
     <div class="topbar-spacer"></div>
 
     <!-- 最右：关闭 + 保存 -->
     <div class="topbar-actions">
       <button class="back-btn" v-tooltip="'关闭'" @click="emit('close')">
-        <img :src="iconClose" class="icon-sm icon-close" draggable="false" />
         <span>关闭</span>
       </button>
       <button
         class="save-btn"
-        :disabled="!store.dirty"
-        :title="store.dirty ? (props.saveTitle || '保存为新角色') : '画板为空，先画点什么'"
+        :disabled="!saveAllowed"
+        :title="saveAllowed ? (props.saveTitle || '保存为新角色') : '画板为空，先画点什么'"
         @click="emit('save')"
       >
-        <img :src="iconSave" class="icon-sm" draggable="false" />
         <span>保存</span>
       </button>
     </div>
@@ -259,11 +301,14 @@ function commitSize(axis: 'w' | 'h', e: Event) {
 
 <style scoped>
 .paint-topbar {
+  --ctl-h: 30px; /* 顶栏所有按钮/输入框统一高度 */
   display: flex;
   align-items: center;
   height: 44px;
   padding: 0 10px 0 4px;
-  gap: 10px;
+  /* 统一间距基准：工具栏内按钮/控件/分组之间、分隔线两侧一律 4px
+     （矢量|位图 属于整体分段控件，其内部 2px 缝隙保持不变） */
+  gap: 4px;
   background: var(--bg-base);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
@@ -280,8 +325,8 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: var(--ctl-h);
+  height: var(--ctl-h);
   background: transparent;
   border: none;
   border-radius: 6px;
@@ -308,15 +353,12 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   height: 18px;
   pointer-events: none;
 }
-/* 关闭图标单独缩小（须在 .icon-sm 之后，同权重后者生效） */
-.icon-close {
-  width: 13px;
-  height: 13px;
-}
 
 /* 矢量|位图 分段切换（不参与压缩：窄窗口下文字不竖排） */
 .mode-switch {
   display: flex;
+  align-items: center;
+  height: var(--ctl-h);
   background: var(--bg-panel);
   border-radius: 6px;
   padding: 2px;
@@ -325,8 +367,10 @@ function commitSize(axis: 'w' | 'h', e: Event) {
 }
 
 .mode-btn {
-  padding: 4px 12px;
+  height: calc(var(--ctl-h) - 4px);
+  padding: 0 12px;
   font-size: 12px;
+  line-height: calc(var(--ctl-h) - 4px);
   color: var(--text-muted);
   background: transparent;
   border: none;
@@ -358,7 +402,7 @@ function commitSize(axis: 'w' | 'h', e: Event) {
 
 .size-input {
   width: 54px;
-  height: 26px;
+  height: var(--ctl-h);
   padding: 0 6px;
   font-size: 12px;
   color: var(--text-secondary);
@@ -396,20 +440,39 @@ function commitSize(axis: 'w' | 'h', e: Event) {
 .size-unit {
   font-size: 11px;
   color: var(--text-muted);
-  margin-left: -2px;
 }
 
 .topbar-spacer {
   flex: 1;
 }
 
+/* 网格开关组：紧跟吸附按钮，间距与其它按钮一致（4px） */
+.grid-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* 网格尺寸标签（仅网格开启时出现在开关右侧） */
+.grid-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.grid-size-input {
+  width: 52px;
+}
+
 /* 选区/对象操作组 */
 .op-group {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding-left: 8px;
-  margin-left: 4px;
+  gap: 4px;
+  /* 与组内间距一致：分割线左侧 4px（由顶栏 gap 提供），右侧 4px */
+  padding-left: 4px;
   border-left: 1px solid var(--border-light);
   flex-shrink: 0;
 }
@@ -417,18 +480,19 @@ function commitSize(axis: 'w' | 'h', e: Event) {
 .op-divider {
   width: 1px;
   height: 16px;
-  margin: 0 4px;
+  margin: 0;
   background: var(--border-light);
 }
 
-/* 最右关闭/保存组：钉成与下方颜色面板同宽的列（左缘=面板左边框 200px，右缘=顶栏内边距） */
+/* 最右关闭/保存组：与下方 200px 颜色面板左右各留 10px，
+   两个按钮等宽并与颜色面板整体水平居中 */
 .topbar-actions {
   position: absolute;
   right: 10px;
-  width: 190px; /* 面板 200px − 顶栏右 padding 10px */
+  width: 180px; /* 面板 200px − 左右各 10px 间距 */
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   flex-shrink: 0;
 }
 
@@ -437,9 +501,8 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  height: 30px;
-  flex: 1;
+  height: var(--ctl-h);
+  flex: 1 1 0;
   min-width: 0;
   padding: 0 8px;
   font-size: 12px;
@@ -458,14 +521,13 @@ function commitSize(axis: 'w' | 'h', e: Event) {
   border-color: var(--text-muted);
 }
 
-/* 保存：主操作（中深绿底 + 纯白图标/文字；brightness 1.15 = 背景与前景整体提亮 15%） */
+/* 保存：主操作（中深绿底 + 纯白文字；brightness 1.15 = 背景与前景整体提亮 15%） */
 .save-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  height: 30px;
-  flex: 1; /* 与关闭等宽 */
+  height: var(--ctl-h);
+  flex: 1 1 0; /* 与关闭等宽 */
   min-width: 0;
   padding: 0 8px;
   font-size: 12px;

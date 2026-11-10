@@ -6,7 +6,7 @@ import { useEditorStore } from '../../stores/editor'
 import { useSettingsStore } from '../../stores/settings'
 import { useEngine } from '../../composables/useEngine'
 import { signalGameCanvasReady, resetGameCanvasReady } from '../../utils/gameCanvasReady'
-import { effectiveScaleMode } from '../../utils/renderMode'
+import { detectPixelArt, effectiveScaleMode } from '../../utils/renderMode'
 // 模块级共享缓存：MainLayout 同时挂着两个 GameCanvas 实例（预览窗 + 全屏 v-show 窗），
 // 若各实例自持缓存，同一文件会重复走 IPC 加载且渲染 store 的贴图计数器被翻倍登记，
 // 「加载资源中」覆盖层的进度与完成判定随之失真（表现为覆盖层随动画节奏闪烁）。
@@ -33,7 +33,7 @@ const engine = useEngine()
 const containerRef = ref<HTMLDivElement>()
 
 const emit = defineEmits<{
-  'offset-update': [info: { x: number; y: number; scale: number }]
+  'offset-update': [offset: number]
 }>()
 
 // 当前画布是否处于可见/激活状态。MainLayout 同时挂两个 GameCanvas（预览窗 + 全屏窗），
@@ -73,13 +73,6 @@ const LOGIC_H = 480
 // 游戏画面在容器内的偏移（用于统计面板定位）
 const stageOffsetX = ref(0)
 const stageOffsetY = ref(0)
-const stageScale = ref(1)  // 舞台实际缩放（= stageOffset 里的 scale）
-
-// loading进度（和 MainLayout 里的 loadingProgress 逻辑一致）
-const loadingProgress = computed(() => {
-  if (renderStore.textureTotal === 0) return 0
-  return Math.floor((renderStore.textureLoaded / renderStore.textureTotal) * 100)
-})
 
 async function initPixi() {
   if (!containerRef.value) return
@@ -181,13 +174,12 @@ function fitStage() {
   const scaleX = vp.clientWidth / LOGIC_W
   const scaleY = vp.clientHeight / LOGIC_H
   const scale = Math.min(scaleX, scaleY)
-  stageScale.value = scale
   stageContainer.x = (vp.clientWidth - LOGIC_W * scale) / 2
   stageContainer.y = (vp.clientHeight - LOGIC_H * scale) / 2
   stageContainer.scale.set(scale)
   stageOffsetX.value = stageContainer.x
   stageOffsetY.value = stageContainer.y
-  emit('offset-update', { x: stageContainer.x, y: stageContainer.y, scale })
+  emit('offset-update', stageContainer.x)
 }
 
 function applyRenderMode() {
@@ -213,7 +205,8 @@ function applyRenderMode() {
 }
 
 /**
- * 自动渲染模式：按素材自然尺寸给纹理源定采样方式（小图最近邻、大插画平滑）。
+ * 自动渲染模式：与角色编辑器共用同一套判定——先看画风（像素画/插画），
+ * 画风分析不出时再按素材自然尺寸兜底（小图最近邻、大插画平滑）。
  * 每个纹理源只判定一次，之后每帧只是一次 WeakMap 查表，无逐帧计算。
  */
 function applyAutoScaleMode(
@@ -222,15 +215,21 @@ function applyAutoScaleMode(
 ) {
   const source = texture?.source
   if (!source || editorStore.renderMode !== 'auto') return
-  // 尺寸未知（引擎暂未下发 cw/ch）时不判定，等下一帧有了再说
-  if (!spriteData.frameW || !spriteData.frameH) return
   const cached = autoScaleModes.get(source)
   if (cached) return
   // 矢量素材（SVG）恒平滑：它按目标像素重绘，最近邻会把栅格化锯齿固化下来
   const isVector = !!spriteData.imagePath?.toLowerCase().endsWith('.svg')
+  // 纹理源就是解码后的图片/图集，就地分析画风（.bsf 源是整张 sheet，同一包画风一致）
+  let pixelArt: boolean | null = null
+  if (!isVector) {
+    const res: any = source.resource
+    const w = res?.naturalWidth || res?.videoWidth || res?.width
+    const h = res?.naturalHeight || res?.videoHeight || res?.height
+    if (w && h) pixelArt = detectPixelArt(res as CanvasImageSource, w, h)
+  }
   const mode = isVector
     ? 'linear'
-    : effectiveScaleMode('auto', spriteData.frameW, spriteData.frameH)
+    : effectiveScaleMode('auto', spriteData.frameW, spriteData.frameH, pixelArt)
   autoScaleModes.set(source, mode)
   if (source.scaleMode !== mode) source.scaleMode = mode
 }
@@ -489,7 +488,7 @@ async function syncSprites() {
       // 使 fish_2 等非居中素材翻转时不产生视觉跳动
       const pivotX = spriteData.vox ?? 0
       const pivotY = spriteData.voy ?? 0
-      const propsKey = `${spriteData.x.toFixed(1)},${spriteData.y.toFixed(1)},${displayAngle.toFixed(4)},${spriteData.visible},${spriteData.layer},${s.toFixed(4)},${sy.toFixed(4)},${pivotX.toFixed(1)},${pivotY.toFixed(1)}`
+      const propsKey = `${spriteData.x.toFixed(1)},${spriteData.y.toFixed(1)},${displayAngle.toFixed(4)},${spriteData.visible},${spriteData.layer},${spriteData.ySort},${s.toFixed(4)},${sy.toFixed(4)},${pivotX.toFixed(1)},${pivotY.toFixed(1)}`
       if (displayObj._lastPropsKey !== propsKey) {
         displayObj._lastPropsKey = propsKey
         displayObj.x = Math.round(spriteData.x)
@@ -500,7 +499,12 @@ async function syncSprites() {
         displayObj.pivot.x = pivotX
         displayObj.pivot.y = pivotY
         displayObj.visible = spriteData.visible
-        displayObj.zIndex = spriteData.layer
+        // 排序键：图层为主序（每层预留 10000 的偏移空间）；
+        // 勾选「Y轴排序」的角色，同层内按脚底高度排——越靠下（游戏 y 越小）越靠前
+        const ySortOffset = spriteData.ySort
+          ? Math.max(-4000, Math.min(4000, Math.round(-spriteData.y)))
+          : 0
+        displayObj.zIndex = spriteData.layer * 10000 + ySortOffset
       }
     }
   }
@@ -822,8 +826,8 @@ function gameLoop() {
   // 游戏未运行时跳过高开销的同步操作：sprites/tiles 不会变化，
   // PixiJS 会自动保留最后一帧画面。避免空转占满 CPU（低端机器尤其明显）。
   if (!editorStore.isRunning) {
-    // 仍需推进启动加载状态机（reveal delay + min visible duration）
-    renderStore.advanceStartupLoading()
+    // 仍需收尾启动加载页（贴图加载完成时隐藏）
+    renderStore.tryFinishStartup()
     return
   }
 
@@ -844,8 +848,9 @@ function gameLoop() {
   syncSayTexts()
   syncDrawTexts()
   syncHitboxes()
-  // 启动加载状态机：reveal delay + min visible duration
-  renderStore.advanceStartupLoading()
+  // 启动加载页收尾：引擎就绪 + 贴图全部就绪 + 本帧场景已同步，才撤掉覆盖层
+  // （进度条本身由 MainLayout 自己的帧循环推进，不依赖画布 ticker 是否在跑）
+  renderStore.tryFinishStartup()
 }
 
 function onKeyDown(e: KeyboardEvent) {
@@ -1037,6 +1042,18 @@ watch(
     } else {
       app.ticker.stop()
     }
+  }
+)
+
+// 未运行时的清场（新建 / 打开项目）：此时 ticker 已停止，gameLoop 不会处理场景代次，
+// 画布会一直保留上一个项目的最后一帧。这里主动销毁残留显示对象并重绘一帧。
+watch(
+  () => renderStore.sceneEpoch,
+  () => {
+    if (editorStore.isRunning || !app) return
+    appliedSceneEpoch = renderStore.sceneEpoch
+    resetDisplayObjects()
+    app.renderer.render(app.stage)
   }
 )
 

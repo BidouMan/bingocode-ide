@@ -58,6 +58,9 @@ def _input_sync_listener():
             elif clean_line.startswith("M_DOWN:"):
                 old_value = st._MOUSE_STATE["down"]
                 st._MOUSE_STATE["down"] = True
+                # 只在真正的按下上升沿分配点击序号：按住不放不会算成多次点击
+                if not old_value:
+                    st._CLICK_STATE["press_seq"] += 1
 
             elif clean_line.startswith("M_UP:"):
                 old_value = st._MOUSE_STATE["down"]
@@ -179,3 +182,12 @@ def _sync_input_frame():
     # 鼠标松开同样用「事件累积 + 本步快照」，避免异步事件落在两步之间被漏掉
     st._MOUSE_STATE["released_frame"] = st._MOUSE_STATE["released"]
     st._MOUSE_STATE["released"] = False
+
+    # 点击按物理步标记：一帧补算多个物理步时，同一次按下只在第一步有效，
+    # 避免 is_clicked / on_clicked 重复触发
+    down_now = st._MOUSE_STATE["down"]
+    if down_now and not st._MOUSE_STATE["down_step_prev"]:
+        st._CLICK_STATE["active_seq"] = st._CLICK_STATE["press_seq"]
+    else:
+        st._CLICK_STATE["active_seq"] = -1
+    st._MOUSE_STATE["down_step_prev"] = down_now
