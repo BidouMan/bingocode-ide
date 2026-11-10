@@ -60,6 +60,7 @@ import iconMarkerRaw from '../../assets/icons/标记.svg?raw'
 import iconAnimation from '../../assets/icons/动画.svg'
 import iconSpriteEmpty from '../../assets/icons/角色精灵.svg'
 import iconSelectTool from '../../assets/icons/选择箭头.svg'
+import iconPaint from '../../assets/icons/画笔工具.svg'
 import iconZoomIn from '../../assets/icons/add-one.svg'
 import iconZoomOut from '../../assets/icons/reduce-one.svg'
 import iconUndo from '../../assets/icons/undo.svg'
@@ -3405,6 +3406,14 @@ function onWindowBlur() {
           @click="pickTool('select')"
         >
           <img :src="iconSelectTool" class="layer-chip-icon" alt="" />选择
+        </button>
+        <button
+          class="layer-chip"
+          type="button"
+          title="进入绘制页面，编辑当前选中的帧"
+          @click="emit('openPaintEdit', costumeHighlightIndex)"
+        >
+          <img :src="iconPaint" class="layer-chip-icon" alt="" />绘制
         </button>
         <button
           v-if="canAnno"
