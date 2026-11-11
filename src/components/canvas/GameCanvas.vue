@@ -33,7 +33,8 @@ const engine = useEngine()
 const containerRef = ref<HTMLDivElement>()
 
 const emit = defineEmits<{
-  'offset-update': [offset: number]
+  /** 实际游戏画面区域（640×480 等比缩放后在容器内的矩形），用于工具栏对齐与加载遮罩定位 */
+  'offset-update': [rect: { left: number; top: number; width: number; height: number }]
 }>()
 
 // 当前画布是否处于可见/激活状态。MainLayout 同时挂两个 GameCanvas（预览窗 + 全屏窗），
@@ -179,7 +180,12 @@ function fitStage() {
   stageContainer.scale.set(scale)
   stageOffsetX.value = stageContainer.x
   stageOffsetY.value = stageContainer.y
-  emit('offset-update', stageContainer.x)
+  emit('offset-update', {
+    left: stageContainer.x,
+    top: stageContainer.y,
+    width: LOGIC_W * scale,
+    height: LOGIC_H * scale,
+  })
 }
 
 function applyRenderMode() {

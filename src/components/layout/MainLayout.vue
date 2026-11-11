@@ -201,6 +201,23 @@ function onToggleGameMode() {
   editorStore.toggleGameMode()
 }
 const canvasOffsetX = ref(0)
+/** 全屏页实际游戏画面矩形：加载遮罩只覆盖这块，不铺满整个窗口 */
+const canvasRect = ref<{ left: number; top: number; width: number; height: number } | null>(null)
+function onCanvasRectUpdate(rect: { left: number; top: number; width: number; height: number }) {
+  canvasOffsetX.value = rect.left
+  canvasRect.value = rect
+}
+/** 全屏加载遮罩定位到游戏画面区域；矩形未知时退化为铺满 */
+const fullscreenLoadingStyle = computed(() => {
+  const r = canvasRect.value
+  if (!r || r.width <= 0 || r.height <= 0) return {}
+  return {
+    left: `${r.left}px`,
+    top: `${r.top}px`,
+    width: `${r.width}px`,
+    height: `${r.height}px`,
+  }
+})
 const consoleExpanded = ref(true)
 const fileMenuVisible = ref(false)
 const settingsMenuVisible = ref(false)
@@ -2946,10 +2963,10 @@ function spriteDisplayName(name: string) {
           </div>
         </div>
         <div class="fullscreen-stage-area">
-          <GameCanvas v-show="currentPage === 1" :active="currentPage === 1" @offset-update="canvasOffsetX = $event" />
-          <!-- 启动遮罩：先纯色盖住画布，超过 200ms 才显示加载页 -->
+          <GameCanvas v-show="currentPage === 1" :active="currentPage === 1" @offset-update="onCanvasRectUpdate" />
+          <!-- 启动遮罩：先纯色盖住画布，超过 200ms 才显示加载页；只覆盖实际游戏画面区域 -->
           <Transition name="loading-fade">
-            <div v-if="renderStore.isLoadingTextures" class="loading-overlay">
+            <div v-if="renderStore.isLoadingTextures" class="loading-overlay" :style="fullscreenLoadingStyle">
               <div v-if="renderStore.startupPageVisible" class="loading-content">
                 <div class="loading-balls">
                   <div class="ball ball-1"></div>
