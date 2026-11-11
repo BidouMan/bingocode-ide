@@ -111,6 +111,8 @@ export const useRenderStore = defineStore('render', () => {
   const targetCamera = ref<CameraData>({ ...camera.value })
   const cameraUpdateTime = ref(0)
   const fps = ref(0)
+  /** 引擎侧逻辑耗时（由引擎 PERF_STATS 上报） */
+  const enginePerf = ref<{ avgMs: number; maxMs: number } | null>(null)
   const isPaused = ref(false)
   // 场景代次：每次清场（clearAll）自增，GameCanvas 据此在下一帧先销毁全部显示对象再同步新数据。
   // 必须有这一层：新一次运行创建的角色 id 会与上一轮残留的显示对象撞号
@@ -242,6 +244,7 @@ export const useRenderStore = defineStore('render', () => {
     targetCamera.value = { ...camera.value }
     cameraUpdateTime.value = 0
     fps.value = 0
+    enginePerf.value = null
     isPaused.value = false
     showFps.value = false
     showCollision.value = false
@@ -413,6 +416,10 @@ export const useRenderStore = defineStore('render', () => {
     fps.value = value
   }
 
+  function setEnginePerf(avgMs: number, maxMs: number) {
+    enginePerf.value = { avgMs, maxMs }
+  }
+
   function triggerShake(intensity: number, duration: number) {
     shakeIntensity.value = intensity
     shakeDuration.value = duration
@@ -483,6 +490,7 @@ export const useRenderStore = defineStore('render', () => {
     hitboxes,
     camera,
     fps,
+    enginePerf,
     isPaused,
     sceneEpoch,
     showFps,
@@ -502,6 +510,7 @@ export const useRenderStore = defineStore('render', () => {
     updateCamera,
     getInterpolatedCamera,
     setFps,
+    setEnginePerf,
     triggerShake,
     getShakeOffset,
     setSayText,

@@ -18,6 +18,12 @@ import {
   sharedFrameTextureCache as frameTextureCache,
   sharedInFlightTextures,
 } from '../../utils/gameTextures'
+import {
+  processStats,
+  startProcessStatsPolling,
+  stopProcessStatsPolling,
+  PROCESS_GROUP_LABELS,
+} from '../../utils/processStats'
 
 const renderStore = useRenderStore()
 const editorStore = useEditorStore()
@@ -228,14 +234,23 @@ function applyAutoScaleMode(
   if (source.scaleMode !== mode) source.scaleMode = mode
 }
 
+// 纹理缓存命中统计（性能面板用）：命中率高说明换帧/多精灵共用正常，
+// 反复未命中往往意味着动画逐帧走了不同的文件路径
+const texStats = { hit: 0, miss: 0 }
+
 function getTexture(imagePath: string): Promise<any> {
   if (textureCache.has(imagePath)) {
+    texStats.hit++
     return Promise.resolve(textureCache.get(imagePath))
   }
   // 同帧/并发对同一路径的请求合并为一次加载、一次计数
   const pending = sharedInFlightTextures.get(imagePath)
-  if (pending) return pending
+  if (pending) {
+    texStats.hit++
+    return pending
+  }
 
+  texStats.miss++
   const promise = loadTexture(imagePath).finally(() => {
     sharedInFlightTextures.delete(imagePath)
   })
@@ -819,6 +834,7 @@ function gameLoop() {
   // 更新帧耗时（仅在性能面板开启时计算，避免不必要的开销）
   if (renderStore.showStats) {
     updateFrameTime(app.ticker.deltaMS)
+    updatePerfPanel()
   }
 
   const cam = renderStore.getInterpolatedCamera()
@@ -1050,6 +1066,16 @@ watch(
   }
 )
 
+// 性能面板开关：只在面板打开时轮询进程树资源（避免常驻后台采样）
+// 模块级单例保证两个 GameCanvas 实例只发起一份轮询
+watch(
+  () => renderStore.showStats,
+  (on) => {
+    if (on) startProcessStatsPolling()
+    else stopProcessStatsPolling()
+  }
+)
+
 onBeforeUnmount(() => {
   removeGameListeners()
   resizeObserver?.disconnect()
@@ -1084,15 +1110,119 @@ const frameTime = ref(0)  // 显示用的平均帧耗时
 let frameTimeAccum = 0    // 累计帧耗时
 let frameTimeCount = 0    // 累计帧数
 
+// 最近 120 帧耗时（ms）：用于「平均帧率」「1% Low」和帧耗时曲线
+const FRAME_HISTORY = 120
+const frameHistory: number[] = []
+const fpsAvg = ref(0)
+const fpsLow1 = ref(0)
+const frameGraphRef = ref<HTMLCanvasElement | null>(null)
+let frameGraphDrawnAt = 0
+
+// 内存 / 显存 / 缓存命中：低频采样（遍历缓存不能每帧做）
+const heapMB = ref(0)
+const vramMB = ref(0)
+const textureCount = ref(0)
+const cacheHitRate = ref(0)
+let memorySampledAt = 0
+
+/** 采样 JS 堆内存与纹理显存估算（width × height × 4 字节，RGBA8） */
+function sampleMemory() {
+  const memory = (performance as any).memory
+  heapMB.value = memory ? memory.usedJSHeapSize / 1048576 : 0
+
+  let bytes = 0
+  let count = 0
+  // 只统计基础纹理：tileset 分帧与 .bsf UV 帧都是这些 BaseTexture 的子纹理，
+  // 重复计入会把显存估算翻好几倍
+  for (const tex of textureCache.values()) {
+    if (!tex) continue
+    bytes += (tex.width || 0) * (tex.height || 0) * 4
+    count++
+  }
+  vramMB.value = bytes / 1048576
+  textureCount.value = count
+
+  const total = texStats.hit + texStats.miss
+  cacheHitRate.value = total > 0 ? (texStats.hit / total) * 100 : 100
+}
+
 function updateFrameTime(dt: number) {
   frameTimeAccum += dt
   frameTimeCount++
+  frameHistory.push(dt)
+  if (frameHistory.length > FRAME_HISTORY) frameHistory.shift()
+
   if (frameTimeCount >= 30) {
     frameTime.value = Math.round(frameTimeAccum / frameTimeCount * 100) / 100
     frameTimeAccum = 0
     frameTimeCount = 0
+
+    const sum = frameHistory.reduce((a, b) => a + b, 0)
+    fpsAvg.value = sum > 0 ? Math.round(frameHistory.length / (sum / 1000)) : 0
+    // 1% Low：最慢的 1% 帧对应的瞬时帧率，比平均帧率更能暴露卡顿
+    const sorted = [...frameHistory].sort((a, b) => a - b)
+    const worst = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.99))] || 0
+    fpsLow1.value = worst > 0 ? Math.round(1000 / worst) : 0
   }
 }
+
+/** 绘制帧耗时曲线（50ms 封顶，绿/黄/红对应 60/30fps 以上与掉帧） */
+function drawFrameGraph() {
+  const el = frameGraphRef.value
+  if (!el) return
+  const now = performance.now()
+  if (now - frameGraphDrawnAt < 100) return
+  frameGraphDrawnAt = now
+
+  const ctx = el.getContext('2d')
+  if (!ctx) return
+  const w = el.width
+  const h = el.height
+  ctx.clearRect(0, 0, w, h)
+
+  // 16.7ms（60fps）参考线
+  const refY = h - (16.7 / 50) * h
+  ctx.strokeStyle = 'rgba(80, 255, 120, 0.18)'
+  ctx.beginPath()
+  ctx.moveTo(0, refY)
+  ctx.lineTo(w, refY)
+  ctx.stroke()
+
+  const barW = w / FRAME_HISTORY
+  for (let i = 0; i < frameHistory.length; i++) {
+    const ms = frameHistory[i]
+    const barH = Math.max(1, Math.min(ms / 50, 1) * h)
+    ctx.fillStyle = ms <= 20 ? '#50ff78' : ms <= 33 ? '#f0c040' : '#ff5050'
+    ctx.fillRect(i * barW, h - barH, Math.max(1, barW - 0.4), barH)
+  }
+}
+
+/** 性能面板的低频刷新（曲线 10Hz、内存 2Hz） */
+function updatePerfPanel() {
+  drawFrameGraph()
+  const now = performance.now()
+  if (now - memorySampledAt >= 500) {
+    memorySampledAt = now
+    sampleMemory()
+  }
+}
+
+/** 进程树资源（主进程 + WebView2 + Python）：轮询结果的展示投影 */
+const procView = computed(() => {
+  const s = processStats.value
+  if (!s) return null
+  return {
+    totalMemMB: s.total_memory / 1048576,
+    totalCpu: s.total_cpu,
+    count: s.process_count,
+    groups: s.groups.map(g => ({
+      kind: g.kind,
+      label: PROCESS_GROUP_LABELS[g.kind] ?? g.kind,
+      cpu: g.cpu,
+      memMB: g.memory / 1048576,
+    })),
+  }
+})
 
 /** 从图片路径提取精灵名称 */
 function extractSpriteName(imagePath: string): string {
@@ -1170,14 +1300,76 @@ function getGroupSprites(name: string) {
           </span>
         </div>
         <div class="stats-row">
+          <span class="stats-label">FPS 平均</span>
+          <span class="stats-value" :class="fpsAvg >= 55 ? 'text-green' : fpsAvg >= 30 ? 'text-yellow' : 'text-red'">
+            {{ fpsAvg }}
+          </span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">1% Low</span>
+          <span class="stats-value" :class="fpsLow1 >= 50 ? 'text-green' : fpsLow1 >= 28 ? 'text-yellow' : 'text-red'">
+            {{ fpsLow1 }}
+          </span>
+        </div>
+        <div class="stats-row">
           <span class="stats-label">帧耗时</span>
           <span class="stats-value" :class="frameTime <= 20 ? 'text-green' : frameTime <= 33 ? 'text-yellow' : 'text-red'">
             {{ frameTime }} ms
           </span>
         </div>
+        <canvas ref="frameGraphRef" class="stats-graph" width="240" height="40"></canvas>
+        <div class="stats-row">
+          <span class="stats-label">逻辑耗时</span>
+          <span class="stats-value"
+                :class="!renderStore.enginePerf ? '' : renderStore.enginePerf.avgMs <= 8 ? 'text-green' : renderStore.enginePerf.avgMs <= 16 ? 'text-yellow' : 'text-red'">
+            {{ renderStore.enginePerf ? renderStore.enginePerf.avgMs.toFixed(2) + ' ms' : '—' }}
+            <span class="stats-sub">(峰值 {{ renderStore.enginePerf ? renderStore.enginePerf.maxMs.toFixed(1) : '—' }})</span>
+          </span>
+        </div>
         <div class="stats-row">
           <span class="stats-label">Camera</span>
           <span class="stats-value">{{ statsInfo.cameraX }}, {{ statsInfo.cameraY }}</span>
+        </div>
+      </div>
+      <div class="stats-divider"></div>
+      <div class="stats-section">
+        <div class="stats-subheader">内存</div>
+        <div class="stats-row">
+          <span class="stats-label">JS 堆</span>
+          <span class="stats-value">{{ heapMB.toFixed(1) }} MB</span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">纹理显存</span>
+          <span class="stats-value">{{ vramMB.toFixed(1) }} MB <span class="stats-sub">({{ textureCount }} 张)</span></span>
+        </div>
+        <div class="stats-row">
+          <span class="stats-label">缓存命中</span>
+          <span class="stats-value" :class="cacheHitRate >= 90 ? 'text-green' : cacheHitRate >= 60 ? 'text-yellow' : 'text-red'">
+            {{ cacheHitRate.toFixed(0) }}%
+          </span>
+        </div>
+      </div>
+      <div class="stats-divider"></div>
+      <div class="stats-section">
+        <div class="stats-subheader">进程</div>
+        <template v-if="procView">
+          <div class="stats-row">
+            <span class="stats-label">内存合计</span>
+            <span class="stats-value">{{ procView.totalMemMB.toFixed(0) }} MB <span class="stats-sub">({{ procView.count }} 个)</span></span>
+          </div>
+          <div class="stats-row">
+            <span class="stats-label">CPU 合计</span>
+            <span class="stats-value" :class="procView.totalCpu <= 40 ? 'text-green' : procView.totalCpu <= 70 ? 'text-yellow' : 'text-red'">
+              {{ procView.totalCpu.toFixed(0) }}%
+            </span>
+          </div>
+          <div v-for="g in procView.groups" :key="g.kind" class="stats-row stats-child">
+            <span class="stats-label">{{ g.label }}</span>
+            <span class="stats-value">{{ g.cpu.toFixed(0) }}% · {{ g.memMB.toFixed(0) }}MB</span>
+          </div>
+        </template>
+        <div v-else class="stats-row">
+          <span class="stats-label">采样中…</span>
         </div>
       </div>
       <div class="stats-divider"></div>
@@ -1301,6 +1493,18 @@ function getGroupSprites(name: string) {
   color: #7a8290;
   letter-spacing: 0.5px;
   margin-bottom: 2px;
+}
+.stats-sub {
+  color: #5a6270;
+  font-size: 10px;
+}
+.stats-graph {
+  display: block;
+  width: 100%;
+  height: 40px;
+  margin: 3px 0;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 2px;
 }
 .stats-clickable {
   cursor: pointer;

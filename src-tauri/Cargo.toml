@@ -24,6 +24,7 @@ libc = "0.2"
 zip = "0.6"
 base64 = "0.22"
 tauri-plugin-updater = "2.10.1"
+sysinfo = "0.33"
 
 [profile.release]
 panic = "abort"

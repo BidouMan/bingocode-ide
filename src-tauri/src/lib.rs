@@ -14,6 +14,7 @@ mod pip;
 mod project;
 mod python_env;
 mod shell;
+mod sysstat;
 
 /// 上次退出时的窗口尺寸（逻辑像素，跨不同缩放比例的显示器一致）+ 是否最大化
 #[derive(Clone, Copy, Default, Serialize, Deserialize)]
@@ -155,6 +156,7 @@ pub fn run() {
         .manage(ShellState {
             pty: Mutex::new(None),
         })
+        .manage(sysstat::SysStatState::new())
         .manage(WindowSizeState::default())
         .setup(|app| {
             // 恢复上次退出时的窗口大小（首次启动保持配置默认尺寸）
@@ -214,6 +216,8 @@ pub fn run() {
             engine::send_stdin,
             engine::send_stdin_data,
             engine::run_script_file,
+            // 性能监控
+            sysstat::get_app_resource_stats,
             // pip
             pip::pip_list_installed,
             pip::pip_list_all,

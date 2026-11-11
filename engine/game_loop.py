@@ -64,6 +64,48 @@ def _send_fps_to_ide(fps):
     print(json.dumps(packet))
 
 
+def _reset_perf_window():
+    """重置 FPS / 逻辑耗时的统计窗口（每次运行开始时调用）"""
+    st._PERF_STATS["last_time"] = time.time()
+    st._PERF_STATS["frame_count"] = 0
+    st._PERF_STATS["logic_sum"] = 0.0
+    st._PERF_STATS["logic_max"] = 0.0
+    st._PERF_STATS["logic_frames"] = 0
+
+
+def _record_logic_time(dt):
+    """累计本帧逻辑耗时（秒）。窗口统计由 _send_perf_stats 汇总上报。"""
+    stats = st._PERF_STATS
+    stats["logic_sum"] = stats.get("logic_sum", 0.0) + dt
+    stats["logic_frames"] = stats.get("logic_frames", 0) + 1
+    if dt > stats.get("logic_max", 0.0):
+        stats["logic_max"] = dt
+
+
+def _send_perf_stats(fps):
+    """随 FPS 刷新一并上报逻辑耗时统计（每 0.5 秒一条，开销可忽略）。
+
+    IDE 性能面板用它区分「渲染慢」还是「游戏逻辑慢」：
+    逻辑耗时 = 主循环一帧实际花掉的时间（物理步进 + 用户 generator + 更新序列化 + 输出），
+    不含末尾的 time.sleep 等待。
+    """
+    stats = st._PERF_STATS
+    frames = stats.get("logic_frames", 0)
+    if frames <= 0:
+        return
+    packet = {
+        "type": "PERF_STATS",
+        "data": {
+            "logic_avg_ms": round(stats.get("logic_sum", 0.0) / frames * 1000.0, 2),
+            "logic_max_ms": round(stats.get("logic_max", 0.0) * 1000.0, 2),
+        },
+    }
+    print(json.dumps(packet))
+    stats["logic_sum"] = 0.0
+    stats["logic_max"] = 0.0
+    stats["logic_frames"] = 0
+
+
 def _begin_physics_step():
     """物理步开始（未暂停时）：推进游戏时间、更新动画、记录本步初始 x。"""
     if st._PAUSED:
@@ -156,7 +198,7 @@ def run():
     if not hasattr(main_module, "loop"):
         return
 
-    st._PERF_STATS["last_time"] = time.time()
+    _reset_perf_window()
 
     _notify_ready()
     _wait_for_start()
@@ -207,6 +249,7 @@ def run():
             st._PERF_STATS["last_fps"] = round(fps, 1)
             if st._SHOW_FPS:
                 _send_fps_to_ide(fps)
+            _send_perf_stats(fps)
             st._PERF_STATS["frame_count"] = 0
             st._PERF_STATS["last_time"] = t
 
@@ -220,6 +263,7 @@ def run():
         # time.sleep 精度虽不如自旋，但省电优先；帧率偶尔波动远比 CPU 100% 好。
         target_frame_time = 1.0 / 60.0
         elapsed = time.perf_counter() - now
+        _record_logic_time(elapsed)
         remaining = target_frame_time - elapsed
         if remaining > 0:
             time.sleep(remaining)
@@ -323,7 +367,7 @@ def start_game(project_dir=None, target_file=None):
     _wait_for_start()
 
     # 主循环
-    st._PERF_STATS["last_time"] = time.time()
+    _reset_perf_window()
     accumulator = 0.0
     prev_time = time.perf_counter()
 
@@ -411,6 +455,7 @@ def start_game(project_dir=None, target_file=None):
             st._PERF_STATS["last_fps"] = round(fps, 1)
             if st._SHOW_FPS:
                 _send_fps_to_ide(fps)
+            _send_perf_stats(fps)
             st._PERF_STATS["frame_count"] = 0
             st._PERF_STATS["last_time"] = t
 
@@ -422,6 +467,7 @@ def start_game(project_dir=None, target_file=None):
         # 帧率限制：纯 time.sleep()，不 busy-wait 自旋（理由同 run()）
         target_frame_time = 1.0 / 60.0
         elapsed = time.perf_counter() - now
+        _record_logic_time(elapsed)
         remaining = target_frame_time - elapsed
         if remaining > 0:
             time.sleep(remaining)
