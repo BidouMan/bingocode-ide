@@ -61,7 +61,8 @@ def _has_step_op(stmts, funcs: dict, seen=None) -> bool:
 
     规则对齐学生写法：增量动作（move / add_x / s.x += 5 / say / play）逐帧，
     绝对动作（Sprite() 创建、s.x = 30、goto、delete）同一帧直接生效。
-    嵌套循环体内的动作由嵌套循环自己让出帧，这里不重复计算；
+    嵌套 for 自己不再让帧，所以循环体里的动作要算进最外层 for（否则顶层
+    「for 里套 for 做动画」会一帧瞬移）；嵌套 while 自己每轮让帧，不重复计算。
     调用用户自定义函数时递归穿透函数体（函数体不会被插入 yield）。
     """
     seen = seen or frozenset()
@@ -71,9 +72,13 @@ def _has_step_op(stmts, funcs: dict, seen=None) -> bool:
         # 函数/类定义不在本层执行，交给调用处穿透分析
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
             continue
-        if isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
-            # 嵌套循环自己会 yield，只看它的迭代/条件表达式
-            stack.append(node.iter if isinstance(node, ast.For) else node.test)
+        if isinstance(node, ast.While):
+            # while 自己每轮都会 yield，只看条件表达式
+            stack.append(node.test)
+            continue
+        if isinstance(node, (ast.For, ast.AsyncFor)):
+            # 嵌套 for 不再自己 yield，循环体里的动作要算进最外层 for
+            stack.extend(ast.iter_child_nodes(node))
             continue
         if isinstance(node, ast.Call):
             name = _call_name(node)
@@ -97,7 +102,8 @@ def _insert_loop_yields(node: ast.AST, funcs: dict = None, loop_depth: int = 0):
 
     - 最外层 for（loop_depth == 0）：循环体里有「看得见的过程」（增量移动 /
       say / play）才逐帧，纯创建/摆位/计算仍在一帧内跑完，避免批量创建角色
-      一个一个蹦出来
+      一个一个蹦出来。yield 插在循环体开头：continue 不会跳过帧让出
+      （插在末尾时 continue 会把整轮动画压回一帧）
     - 嵌套 for（loop_depth > 0）：普通遍历，同一帧内跑完。专业引擎（Unity /
       Godot）的脚本在一帧内同步执行，循环不会隐式让帧——嵌套 for 再让帧会
       把「遍历所有角色逐个 move」拆成 N 帧，整个主循环被拖慢
@@ -113,7 +119,8 @@ def _insert_loop_yields(node: ast.AST, funcs: dict = None, loop_depth: int = 0):
             continue
         if isinstance(child, ast.For):
             if loop_depth == 0 and _has_step_op(child.body, funcs):
-                child.body.append(_make_yield())
+                # 插在开头：continue 不会跳过后面的 yield
+                child.body.insert(0, _make_yield())
             _insert_loop_yields(child, funcs, loop_depth + 1)
         elif isinstance(child, ast.While):
             # while True 与条件 while 均在开头 yield：帧循环 + 等待原语
