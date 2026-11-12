@@ -1,6 +1,12 @@
 """
 AST 代码转换模块：将 while True: 循环转换为 generator
-循环语义对齐 Scratch——for / while 循环每轮让出一帧，移动过程动画可见
+
+帧语义（对齐 Unity / Godot 这类专业引擎）：
+- 帧边界只有一个：最外层循环就是帧循环，每轮让出一帧；
+- 嵌套 for 是普通遍历，必须在同一帧内跑完，不能再隐式让帧
+  （否则「遍历 10 条鱼逐个 move」会被拆成 10 帧，主循环整体被拖慢）；
+- while 在任意层级都每轮让出一帧，作为帧循环 / 显式等待原语
+  （用于「while not 按键: continue」这类等待写法，避免单帧死循环）。
 """
 import ast
 
@@ -85,16 +91,18 @@ def _has_step_op(stmts, funcs: dict, seen=None) -> bool:
     return False
 
 
-def _insert_loop_yields(node: ast.AST, funcs: dict = None):
+def _insert_loop_yields(node: ast.AST, funcs: dict = None, loop_depth: int = 0):
     """
-    递归在循环体中插入 yield（Scratch 语义：循环每轮让出一帧）。
+    递归在循环体中插入 yield。
 
-    - for：只有循环体里有「看得见的过程」（增量移动 / say / play / 等待）
-      才在每轮结束 yield；纯创建、纯摆位、纯计算、纯列表操作同一帧跑完，
-      否则 for 批量创建角色会一个一个蹦出来
-    - while（含 while True 和条件 while）：循环体开头 yield（保持原有
-      while True 时序；并让 "while not 按键: continue" 这类等待写法
-      不会在单帧内死循环卡死引擎）
+    - 最外层 for（loop_depth == 0）：循环体里有「看得见的过程」（增量移动 /
+      say / play）才逐帧，纯创建/摆位/计算仍在一帧内跑完，避免批量创建角色
+      一个一个蹦出来
+    - 嵌套 for（loop_depth > 0）：普通遍历，同一帧内跑完。专业引擎（Unity /
+      Godot）的脚本在一帧内同步执行，循环不会隐式让帧——嵌套 for 再让帧会
+      把「遍历所有角色逐个 move」拆成 N 帧，整个主循环被拖慢
+    - while（任意层级）：循环体开头 yield，作为帧循环 / 显式等待原语，
+      并让 "while not 按键: continue" 这类等待写法不会单帧死循环
 
     不进入函数/类定义——用户函数体里插 yield 会把函数变成 generator，
     调用处拿到 generator 对象而不再执行（旧式 def loop()+run() 写法同理保留）。
@@ -104,16 +112,15 @@ def _insert_loop_yields(node: ast.AST, funcs: dict = None):
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
             continue
         if isinstance(child, ast.For):
-            if _has_step_op(child.body, funcs):
+            if loop_depth == 0 and _has_step_op(child.body, funcs):
                 child.body.append(_make_yield())
-            _insert_loop_yields(child, funcs)
+            _insert_loop_yields(child, funcs, loop_depth + 1)
         elif isinstance(child, ast.While):
-            # while True 与条件 while 均在开头 yield：保持原有 while True 时序，
-            # 并让 "while not 按键: continue" 这类等待写法不会单帧死循环
+            # while True 与条件 while 均在开头 yield：帧循环 + 等待原语
             child.body.insert(0, _make_yield())
-            _insert_loop_yields(child, funcs)
+            _insert_loop_yields(child, funcs, loop_depth + 1)
         else:
-            _insert_loop_yields(child, funcs)
+            _insert_loop_yields(child, funcs, loop_depth)
 
 
 def _has_own_yield(stmts) -> bool:

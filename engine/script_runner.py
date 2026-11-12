@@ -256,6 +256,44 @@ def _check_bare_call(tree, lines, display_name):
     )
 
 
+def _check_while_in_function(tree, lines, display_name):
+    """自定义函数里禁止写 while 循环（对初学者统一的最粗规则）。
+
+    函数体是普通 Python：调用它必须当帧返回，循环没有机会让出一帧。
+    只要 while 的条件没在当帧变成 False（等按键、等碰撞、条件写错），
+    整个游戏就会卡死在这一帧。与其让学生理解"等待型 while vs 有限 while"，
+    不如统一规定：函数里只写 for，重复/等待的动作放回 while True 主循环。
+    """
+    hits = []  # [(while 节点, 函数名)]
+
+    def visit(node, func_name):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                visit(child, child.name)
+            elif isinstance(child, ast.While):
+                if func_name:
+                    hits.append((child, func_name))
+                visit(child, func_name)
+            else:
+                visit(child, func_name)
+
+    visit(tree, "")
+    if not hits:
+        return None
+
+    node, func_name = min(hits, key=lambda item: item[0].lineno)
+    lineno = node.lineno
+    text = lines[lineno - 1] if 0 < lineno <= len(lines) else ''
+    return (
+        display_name,
+        lineno,
+        f'自定义函数「{func_name}」里不能写 while 循环，游戏会卡在这一帧。'
+        '要重复执行请写在 while True 主循环里，固定次数请用 for i in range(...)',
+        text,
+        '',
+    )
+
+
 def _compile_file(filepath: str, display_name: str, index: int):
     """读取并编译单个文件。
 
@@ -286,6 +324,11 @@ def _compile_file(filepath: str, display_name: str, index: int):
     bare_call = _check_bare_call(tree, lines, display_name)
     if bare_call:
         return None, bare_call
+
+    # 自定义函数里不允许 while（函数体不会让出帧，容易把整个游戏卡死）
+    while_in_function = _check_while_in_function(tree, lines, display_name)
+    if while_in_function:
+        return None, while_in_function
 
     # 含 while True 或顶层循环的文件转 generator（循环逐帧可见）
     new_tree = build_transformed_tree(tree, _func_name(display_name, index))
