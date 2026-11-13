@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { useMapStore, DEFAULT_CAMERA_SETTINGS, MAX_MAP_SIDE_CELLS, type ShapeKind, type ShapeItem, type TileData } from '../../stores/map'
+import { useMapStore, DEFAULT_CAMERA_SETTINGS, MAX_MAP_SIDE_CELLS, type ShapeItem, type TileData } from '../../stores/map'
 import { useEditorStore } from '../../stores/editor'
 import { useResourceStore } from '../../stores/resource'
 import { useMapEditorStore } from '../../stores/mapEditor'
@@ -409,13 +409,15 @@ const isImageMode = computed(() => mapStore.activeMode === 'image')
 // ====== 形状检视器：顶部切到「形状」分页时，和形状列表一起展示 ======
 const selectedShapeItem = computed(() => mapStore.activeShape)
 const shapeFold = reactive({ basic: true, transform: true, manager: true })
+/** 碰撞模式：阻挡 / 重叠（与角色编辑器同一套语义；旧数据的 both 按阻挡显示） */
 const shapeKindOptions = [
-  { label: '碰撞', value: 'solid' },
-  { label: '感应', value: 'sensor' },
-  { label: '碰撞 + 感应', value: 'both' },
+  { label: '阻挡', value: 'solid' },
+  { label: '重叠', value: 'sensor' },
 ]
-const shapeKindValue = computed(() => selectedShapeItem.value?.kind || 'solid')
-/** 感应形状没有物理行为：单向碰撞相关控件保留但禁用，避免面板忽隐忽现 */
+const shapeKindValue = computed<'solid' | 'sensor'>(() =>
+  selectedShapeItem.value?.kind === 'sensor' ? 'sensor' : 'solid',
+)
+/** 重叠形状没有物理行为：单向碰撞相关控件保留但禁用，避免面板忽隐忽现 */
 const shapePhysicsDisabled = computed(() => shapeKindValue.value === 'sensor')
 
 // ====== 单向碰撞（参考 Godot 的 One Way Collision） ======
@@ -433,7 +435,12 @@ const shapeOneWayMarginValue = computed(() => selectedShapeItem.value?.oneWayMar
 
 function onShapeKindChange(val: string) {
   // 多选时一起改：面板显示的是主选中形状的当前值
-  mapStore.updateShapes(selectedShapeIds.value, { kind: val as ShapeKind })
+  // 切成「重叠」时清掉依赖阻挡的单向碰撞（与角色编辑器一致）
+  if (val === 'sensor') {
+    mapStore.updateShapes(selectedShapeIds.value, { kind: 'sensor', oneWay: false })
+  } else {
+    mapStore.updateShapes(selectedShapeIds.value, { kind: 'solid' })
+  }
 }
 function onShapeOneWayToggle(e: Event) {
   mapStore.updateShapes(selectedShapeIds.value, {
@@ -550,7 +557,8 @@ const listedShapes = computed(() => {
   const list = mapStore.activeShapes
   const filter = shapeKindFilter.value
   if (filter === SHAPE_KIND_ALL) return list
-  return list.filter(s => (s.kind || 'solid') === filter)
+  // 旧数据的 both 按阻挡归类，和检视器里的显示保持一致
+  return list.filter(s => (s.kind === 'sensor' ? 'sensor' : 'solid') === filter)
 })
 
 /** 列表卡片名称：没有标签就显示「未命名」 */
@@ -1022,11 +1030,10 @@ function onCustomTileCategoryBlur(e: Event) {
   if (!name) tileCategoryCustomMode.value = false
 }
 
-/** 作用：碰撞 / 感应 / 碰撞 + 感应（与碰撞图层同一套语义） */
+/** 碰撞模式：阻挡 / 重叠（与角色编辑器同一套语义；旧数据的 both 按阻挡显示） */
 const tileKindOptions = [
-  { label: '碰撞', value: 'solid' },
-  { label: '感应', value: 'sensor' },
-  { label: '碰撞 + 感应', value: 'both' },
+  { label: '阻挡', value: 'solid' },
+  { label: '重叠', value: 'sensor' },
 ]
 
 /** 当前图块所属图块集下标；没有选中图块时为 -1 */
@@ -1057,8 +1064,10 @@ const tileEditTargets = computed(() => {
 /** 有可编辑的图块（还没碰撞数据也可以，写入时自动补） */
 const tileEditable = computed(() => tileEditTargets.value.length > 0)
 
-const tileKindValue = computed(() => selectedTileData.value?.kind || 'solid')
-/** 感应图块没有物理阻挡：单向碰撞控件保留但禁用 */
+const tileKindValue = computed<'solid' | 'sensor'>(() =>
+  selectedTileData.value?.kind === 'sensor' ? 'sensor' : 'solid',
+)
+/** 重叠图块没有物理阻挡：单向碰撞控件保留但禁用 */
 const tilePhysicsDisabled = computed(() => tileKindValue.value === 'sensor')
 
 const tileOneWayEnabled = computed(() => selectedTileData.value?.oneWay === true)
@@ -1093,7 +1102,9 @@ function ensureTileCollision() {
 function onTileKindChange(val: string) {
   if (!tileEditable.value) return
   ensureTileCollision()
-  patchSelectedTile({ kind: val as ShapeKind })
+  // 切成「重叠」时清掉依赖阻挡的单向碰撞（与角色编辑器一致）
+  if (val === 'sensor') patchSelectedTile({ kind: 'sensor', oneWay: false })
+  else patchSelectedTile({ kind: 'solid' })
 }
 function onTileOneWayToggle(e: Event) {
   if (!tileEditable.value) return
@@ -1586,7 +1597,7 @@ function runTilesetMenu(action: TilesetMenuAction) {
           </button>
           <div v-if="shapeFold.basic" class="mi-body">
             <div class="att-row">
-              <span class="att-label">作用</span>
+              <span class="att-label">碰撞模式</span>
               <CustomSelect
                 class="att-select"
                 :model-value="shapeKindValue"
@@ -1622,7 +1633,7 @@ function runTilesetMenu(action: TilesetMenuAction) {
             </div>
             <!-- 单向碰撞（参考 Godot 的 One Way Collision）：勾选后只从「方向」那一侧挡住 -->
             <div class="att-row">
-              <span class="att-label">单向碰撞</span>
+              <span class="att-label" title="只从「方向」那一侧挡住，另一侧可以穿过">单向碰撞</span>
               <label class="att-checkbox">
                 <input
                   type="checkbox"
@@ -2335,7 +2346,7 @@ function runTilesetMenu(action: TilesetMenuAction) {
           </button>
           <div v-if="fold.tileBasic" class="mi-body">
             <div class="att-row">
-              <span class="att-label">作用</span>
+              <span class="att-label">碰撞模式</span>
               <CustomSelect
                 class="att-select"
                 :model-value="tileKindValue"
@@ -2373,7 +2384,7 @@ function runTilesetMenu(action: TilesetMenuAction) {
 
             <!-- 单向碰撞（参考 Godot 的 One Way Collision）：勾选后只从「方向」那一侧挡住 -->
             <div class="att-row">
-              <span class="att-label">单向碰撞</span>
+              <span class="att-label" title="只从「方向」那一侧挡住，另一侧可以穿过">单向碰撞</span>
               <label class="att-checkbox">
                 <input
                   type="checkbox"

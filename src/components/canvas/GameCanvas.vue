@@ -733,6 +733,8 @@ function syncDrawTexts() {
         text: data.text,
         style: { fill: 0xffffff, fontSize: 16, fontFamily: 'Arial', stroke: { color: 0x000000, width: 2 } },
       })
+      // 引擎坐标原点在左下角：文字以左下角为锚点，y 越大越靠上，贴着底边也不会被裁掉
+      textObj.anchor.set(0, 1)
       textObj.zIndex = 2
       uiContainer.addChild(textObj)
       drawTextDisplayObjects.set(id, textObj)

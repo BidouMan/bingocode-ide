@@ -129,7 +129,7 @@ def _build_static_world(map_data, map_model):
     只在地图加载时执行一次：
       - 形状层：按 kind 进入阻挡索引 / 感应索引；tag 单独建查找表
       - 图像碰撞：静态图像的碰撞体，进入阻挡索引
-      - 图块碰撞：实心图块，进入阻挡索引
+      - 图块碰撞：按 kind 进入阻挡索引 / 感应索引
 
     烘焙失败（极少见的坏数据）时返回 None，碰撞路径会回退到全表扫描，不影响运行。
     """
@@ -280,7 +280,9 @@ def _build_static_world(map_data, map_model):
             entries.append(StaticEntry(
                 shape=shape,
                 source="tile",
-                kind="solid",
+                kind=map_model.get_tile_kind(resource_index, tile_index),
+                # 重叠图块靠 tag 匹配 on_sensor_enter / on_sensor_exit
+                tag=map_model.get_tile_tag(resource_index, tile_index) or "",
                 collision_type=tile_type,
                 # 图块的「跳板」类型：等价于只能从上方踩住，沿用原来的 0.5px 容差
                 one_way=(tile_type == "跳板"),

@@ -39,6 +39,17 @@ class MapModel:
         # 回退到 tileset 级碰撞类型
         return ts.get("collisionType", "图像")
 
+    def get_tile_kind(self, resource_index, tile_index):
+        """查询指定瓦片的碰撞模式：solid=阻挡 / sensor=重叠 / both=两者（旧数据）"""
+        ts, tile = self._get_tile(resource_index, tile_index)
+        if ts is None:
+            return "solid"
+        if tile is not None and isinstance(tile, dict):
+            kind = tile.get("kind")
+            if kind in ("solid", "sensor", "both"):
+                return kind
+        return "solid"
+
     def get_tile_collision_shape(self, resource_index, tile_index):
         """查询指定瓦片的自定义碰撞形状"""
         ts, tile = self._get_tile(resource_index, tile_index)

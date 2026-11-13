@@ -145,7 +145,7 @@ function render() {
     }
   }
 
-  // Collision polygon — 仅在碰撞启用时绘制（颜色按作用类型，和碰撞图层一致）
+  // Collision polygon — 仅在碰撞启用时绘制（颜色按碰撞模式，和碰撞图层一致）
   if (currentCollisionEnabled.value && collisionPoints.value.length >= 2) {
     ctx.beginPath()
     ctx.moveTo(collisionPoints.value[0].x, collisionPoints.value[0].y)
@@ -426,13 +426,13 @@ const currentCollisionEnabled = computed(() => {
   return ts?.collisionEnabled ?? false
 })
 
-/** 当前预览对象的作用（图片层没有作用，统一按碰撞色处理） */
+/** 当前预览对象的碰撞模式（图片层没有模式，统一按阻挡色处理；旧 both 按阻挡） */
 const previewKind = computed<ShapeKind>(() => {
   if (mapStore.activeLayer?.type === 'image') return 'solid'
   const tileIndex = mapStore.selectedTileIndex
   if (tileIndex < 0) return 'solid'
   const ts = mapStore.getTileSetForResource(mapStore.selectedResource)
-  return (ts?.tiles[tileIndex]?.kind as ShapeKind) || 'solid'
+  return ts?.tiles[tileIndex]?.kind === 'sensor' ? 'sensor' : 'solid'
 })
 
 /** 碰撞预览颜色（与碰撞图层共用一套） */
@@ -463,7 +463,7 @@ watch(currentCollisionEnabled, () => {
   if (ctx) nextTick(render)
 })
 
-// 作用类型变了（碰撞 / 感应 / 碰撞 + 感应）：换颜色重绘
+// 碰撞模式变了（阻挡 / 重叠）：换颜色重绘
 watch(previewKind, () => {
   if (ctx) nextTick(render)
 })

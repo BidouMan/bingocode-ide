@@ -39,7 +39,7 @@ class StaticEntry:
       - "image": 图像碰撞体的一个凸块
       - "tile":  一个实心图块
     kind:
-      - "solid" / "sensor" / "both"（图像与图块固定 solid）
+      - "solid" / "sensor" / "both"（图像固定 solid；图块按碰撞模式）
     """
     shape: Shape
     source: str

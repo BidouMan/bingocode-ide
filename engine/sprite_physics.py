@@ -669,6 +669,9 @@ class SpritePhysicsMixin:
                         )
                         if not st._MAP_MODEL.get_tile_collision(resource_index, tile_index):
                             continue
+                        # 重叠图块只做感应判定，不参与物理阻挡
+                        if st._MAP_MODEL.get_tile_kind(resource_index, tile_index) == "sensor":
+                            continue
                         is_one_way = (
                             st._MAP_MODEL.get_tile_collision_type(resource_index, tile_index)
                             == "跳板"

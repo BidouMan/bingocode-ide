@@ -90,7 +90,7 @@ export interface ShapeSaveData {
   id: string
   shape: 'rect' | 'circle' | 'capsule' | 'polygon'
   points: number[][]
-  /** 能力类型：solid / sensor / both（旧存档缺省视为 solid） */
+  /** 碰撞模式：solid=阻挡 / sensor=重叠 / both=旧数据兼容（按阻挡处理） */
   kind?: 'solid' | 'sensor' | 'both'
   /** 自由标签：代码里按 tag 查询 */
   tag?: string
@@ -171,7 +171,7 @@ export interface TilesetSaveData {
     tag?: string
     collisionType?: string
     collisionShape?: { points: number[][] }
-    /** 作用：solid / sensor / both（缺省视为 solid） */
+    /** 碰撞模式：solid=阻挡 / sensor=重叠 / both=旧数据兼容（按阻挡处理） */
     kind?: 'solid' | 'sensor' | 'both'
     /** 单向碰撞（参考 Godot One Way Collision） */
     oneWay?: boolean

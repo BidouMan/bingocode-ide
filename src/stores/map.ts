@@ -13,7 +13,7 @@ export interface TileData {
   tag: string
   collisionType: string
   collisionShape?: { points: number[][] }
-  /** 作用：碰撞 / 感应 / 碰撞 + 感应（缺省视为碰撞） */
+  /** 碰撞模式：阻挡 / 重叠（缺省视为阻挡；旧数据的 both 按阻挡处理） */
   kind?: ShapeKind
   /** 单向碰撞（参考 Godot One Way Collision） */
   oneWay?: boolean
@@ -98,7 +98,7 @@ export interface ImageLayer extends MapLayerBase {
 
 /** 形状的绘制方式（仅影响生成顶点的算法，运行时统一按多边形处理） */
 export type ShapeDrawType = 'rect' | 'circle' | 'capsule' | 'polygon'
-/** 判定形状的能力：solid=阻挡，sensor=感应，both=两者 */
+/** 判定形状的碰撞模式：solid=阻挡，sensor=重叠，both=旧数据兼容（按阻挡处理） */
 export type ShapeKind = 'solid' | 'sensor' | 'both'
 
 /** 形状层里的一个世界坐标判定形状（几何只有一份，能力可叠加） */
@@ -107,7 +107,7 @@ export interface ShapeItem {
   shape: ShapeDrawType
   // 地图世界坐标（像素）
   points: number[][]
-  // 能力类型：阻挡 / 感应 / 两者（旧存档缺省视为 solid）
+  // 碰撞模式：阻挡 / 重叠（旧存档缺省或 both 均按阻挡处理）
   kind: ShapeKind
   // 自由标签：代码里按 tag 查询（is_touch("tag")）
   tag: string
@@ -1323,7 +1323,7 @@ export const useMapStore = defineStore('map', () => {
   }
 
   // ====== 调色板里选中的图块（供右侧面板批量设置） ======
-  /** 图块面板点选 / 框选的结果，右侧面板按它批量改类型、作用、单向碰撞 */
+  /** 图块面板点选 / 框选的结果，右侧面板按它批量改类型、碰撞模式、单向碰撞 */
   const tileBrushSelection = ref<{ resourceId: string; tileIndex: number }[]>([])
 
   function setTileBrushSelection(list: { resourceId: string; tileIndex: number }[]) {
@@ -1981,7 +1981,7 @@ export const useMapStore = defineStore('map', () => {
     tileSet.tiles[tileIndex].tag = tag
   }
 
-  /** 修改某个图块的属性（作用 / 单向碰撞等） */
+  /** 修改某个图块的属性（碰撞模式 / 单向碰撞等） */
   function updateTile(
     tileSetIndex: number,
     tileIndex: number,

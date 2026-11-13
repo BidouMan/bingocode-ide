@@ -3,6 +3,7 @@
 什么时候来这里改：文字显示、屏幕震动、随机数、显示碰撞盒。"""
 import json
 import random
+from models.coords import to_world_x, to_world_y
 from sprite import Sprite
 
 
@@ -33,11 +34,15 @@ def shake(intensity=5, duration=0.3):
 def show_text(x, y, *args):
     """在屏幕指定位置显示文字，参数自动拼接为字符串
     show_text(100, 50, "分数:", score)
+    坐标与角色一致：原点在舞台/地图左下角，y 越大越靠上。
     """
     text = "".join(str(a) for a in args)
+    # 用户坐标 → 世界坐标（前端渲染用的是左上原点、y 向下）
+    wx = to_world_x(x)
+    wy = to_world_y(y)
     packet = {
         "type": "DRAW_TEXT",
-        "data": {"id": f"text_{x}_{y}", "text": text, "x": x, "y": y},
+        "data": {"id": f"text_{wx}_{wy}", "text": text, "x": wx, "y": wy},
     }
     print(json.dumps(packet))
 

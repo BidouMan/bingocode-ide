@@ -36,11 +36,11 @@ export const PHYSICS_MATERIAL_OPTIONS = [
   { label: '粗糙', value: 'friction' },
 ]
 
-/** 作用类型中文名 */
+/** 碰撞模式中文名（旧数据的 both 按阻挡显示，与角色编辑器一致） */
 export const SHAPE_KIND_LABELS: Record<ShapeKind, string> = {
-  solid: '碰撞',
-  sensor: '感应',
-  both: '碰撞 + 感应',
+  solid: '阻挡',
+  sensor: '重叠',
+  both: '阻挡',
 }
 
 /** 作用类型颜色（0xRRGGBB，画布叠加层用） */
@@ -54,11 +54,10 @@ export const SHAPE_KIND_COLORS_HEX: Record<ShapeKind, number> = {
 /** 禁用形状统一灰色 */
 export const SHAPE_DISABLED_COLOR_HEX = 0x888888
 
-/** 形状颜色（数值形式，画布叠加层用）：禁用统一灰色，否则按能力类型 */
+/** 形状颜色（数值形式，画布叠加层用）：禁用统一灰色，否则按碰撞模式（旧 both 按阻挡） */
 export function shapeColorHex(shape: ShapeItem): number {
   if (shape.disabled) return SHAPE_DISABLED_COLOR_HEX
-  const kind = (shape.kind || 'solid') as ShapeKind
-  return SHAPE_KIND_COLORS_HEX[kind] ?? SHAPE_KIND_COLORS_HEX.solid
+  return SHAPE_KIND_COLORS_HEX[shape.kind === 'sensor' ? 'sensor' : 'solid']
 }
 
 /** 形状颜色（CSS 字符串，属性面板列表圆点用），与画布保持同一套颜色 */
@@ -66,8 +65,7 @@ export function shapeColorCss(shape: ShapeItem): string {
   return `#${shapeColorHex(shape).toString(16).padStart(6, '0')}`
 }
 
-/** 作用类型中文名（容错：旧数据缺 kind 时按碰撞显示） */
+/** 碰撞模式中文名（容错：旧数据缺 kind / both 时按阻挡显示） */
 export function shapeKindLabel(kind: string | undefined): string {
-  const key = (kind || 'solid') as ShapeKind
-  return SHAPE_KIND_LABELS[key] ?? SHAPE_KIND_LABELS.solid
+  return SHAPE_KIND_LABELS[kind === 'sensor' ? 'sensor' : 'solid']
 }

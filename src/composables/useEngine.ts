@@ -232,7 +232,8 @@ export function useEngine() {
         break
 
       case 'DRAW_TEXT':
-        renderStore.setDrawText(cmd.id!, cmd.data.text, cmd.data.x, cmd.data.y)
+        // id 在 data 里（引擎按坐标生成 text_x_y），取错层级会让所有文字共用 undefined 键互相覆盖
+        renderStore.setDrawText(cmd.data.id, cmd.data.text, cmd.data.x, cmd.data.y)
         break
 
       case 'SCREEN_SHAKE':
