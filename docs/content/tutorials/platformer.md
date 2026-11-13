@@ -193,6 +193,8 @@ while True:
 
 ### 移动平台
 
+先在角色编辑器里给「平台」这个角色选择碰撞作用「阻挡」，并勾上「移动平台」，它才能接住角色。
+
 ```python
 platform = Sprite("平台")
 platform.set_speed(2)

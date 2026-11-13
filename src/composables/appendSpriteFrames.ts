@@ -18,6 +18,7 @@ import {
   loadImage,
   saveSpriteConfig,
   saveBsfManifest,
+  bsfManifestExtras,
   type SpriteData,
 } from './useSpriteData'
 import { packDrawnFrames, buildDrawnBsfManifest } from '../utils/bsfPacker'
@@ -402,11 +403,8 @@ async function rewriteBsfDir(
     sheet: 'sheet.png',
     canvas: meta.canvas,
     pivot: meta.pivot,
-    // 根级可选标注字段：统一碰撞 / 禁用碰撞 / 统一挂点（缺省不写）
-    ...(meta.collision ? { collision: meta.collision } : {}),
-    ...(meta.collisionDisabled ? { collisionDisabled: true } : {}),
-    ...(meta.gravity === false ? { gravity: false } : {}),
-    ...(meta.markers && Object.keys(meta.markers).length > 0 ? { markers: meta.markers } : {}),
+    // 根级可选标注字段（碰撞模式 / 禁用碰撞 / 图层 / 翻转 / 变换等）：与 saveBsfManifest 共用一份
+    ...bsfManifestExtras(sprite),
     frames: packed.frames,
     clips: clips.length > 0
       ? clips

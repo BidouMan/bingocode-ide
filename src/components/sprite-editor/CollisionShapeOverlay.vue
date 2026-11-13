@@ -22,17 +22,17 @@ const props = defineProps<{
   angle?: number
   /** 碰撞形状自身的旋转角度（度，逆时针为正；绕形状包围盒中心旋转） */
   shapeAngle?: number
-  /** 碰撞作用：感应形状用主题绿色（与地图编辑器碰撞图层同一套观感） */
+  /** 碰撞作用：重叠（sensor）用主题绿色，阻挡（solid）用红色 */
   kind?: 'solid' | 'sensor' | 'both'
   /** 禁用碰撞：形状仍显示但整体置灰（与地图编辑器禁用碰撞体同观感） */
   disabled?: boolean
 }>()
 const emit = defineEmits<{ update: [shape: SpriteCollisionShape] }>()
 
-// 碰撞作用颜色：与地图碰撞图层共用 SHAPE_KIND_COLORS_HEX（碰撞红 / 感应绿 / 组合蓝），禁用统一灰
+// 碰撞作用颜色：与地图碰撞图层共用 SHAPE_KIND_COLORS_HEX（阻挡红 / 重叠绿 / 组合蓝），禁用碰撞统一灰
 const colorHex = computed(() => {
   if (props.disabled) return SHAPE_DISABLED_COLOR_HEX
-  return SHAPE_KIND_COLORS_HEX[(props.kind ?? 'solid') as ShapeKind] ?? SHAPE_KIND_COLORS_HEX.solid
+  return SHAPE_KIND_COLORS_HEX[(props.kind ?? 'sensor') as ShapeKind] ?? SHAPE_KIND_COLORS_HEX.sensor
 })
 const COL = computed(() => `#${colorHex.value.toString(16).padStart(6, '0')}`)
 // 填充透明度与地图碰撞图层一致（选中态 0.26；禁用态 0.16）

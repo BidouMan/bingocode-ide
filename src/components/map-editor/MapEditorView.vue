@@ -1138,8 +1138,8 @@ defineExpose({
 .map-editor-left {
   display: flex;
   flex-direction: column;
-  width: 272px;
-  min-width: 272px;
+  width: 248px;
+  min-width: 248px;
   min-height: 0;
   border-right: 1px solid var(--border);
   background: var(--bg-root);

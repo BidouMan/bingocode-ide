@@ -74,14 +74,13 @@ export interface BsfMeta {
   /** 统一碰撞形状：缺省 = 自动碰撞（引擎内容包围盒） */
   collision?: SpriteCollisionShape
   /**
-   * 碰撞作用（可选）：与地图图块/形状同一套语义。
-   * solid = 碰撞（参与地形/边界物理阻挡）；sensor = 感应（不阻挡，仅可被检测）；
-   * both = 碰撞 + 感应。缺省 solid。
+   * 碰撞模式（可选）：决定角色之间能不能重叠；与地图图块/形状共用 kind 字段。
+   * solid = 阻挡（别人撞不进来）；sensor = 重叠（可重叠，缺省）；both = 阻挡（旧值，等价 solid）。
    */
   collisionKind?: 'solid' | 'sensor' | 'both'
   /** 碰撞类型 / 标签（可选）：代码里 is_touch("标签") 查询用；缺省「默认」 */
   collisionTag?: string
-  /** 禁用碰撞：true = 该角色完全不参与地形/边界物理阻挡（不影响碰到检测） */
+  /** 禁用碰撞：true = 该角色完全不参与地形/重力/推挤（不影响碰到检测） */
   collisionDisabled?: boolean
   /** 单向碰撞（可选）：true = 可当单向碰撞体，只有从「方向」一侧靠近才挡住 */
   collisionOneWay?: boolean
@@ -369,7 +368,7 @@ async function buildBsfSpriteData(manifest: any, sheetImage: HTMLImageElement): 
       pivotBase: manifest.pivotBase || manifest.pivot || { x: canvasSize.w / 2, y: canvasSize.h / 2 },
       frames: manifest.frames,
       ...(manifest.collision ? { collision: manifest.collision } : {}),
-      ...(manifest.collisionKind === 'sensor' || manifest.collisionKind === 'both'
+      ...(manifest.collisionKind === 'solid' || manifest.collisionKind === 'both'
         ? { collisionKind: manifest.collisionKind }
         : {}),
       ...(typeof manifest.collisionTag === 'string' && manifest.collisionTag.trim()
@@ -412,6 +411,78 @@ async function buildBsfSpriteData(manifest: any, sheetImage: HTMLImageElement): 
 }
 
 /**
+ * .bsf manifest 的根级可选字段（中心点基准 / 碰撞 / 图层 / 翻转 / 变换等）。
+ *
+ * 两条保存路径共用这一份：角色编辑器（saveBsfManifest）与画板「编辑角色」重写
+ * （appendSpriteFrames.rewriteBsfDir）。以前各写一份，画板那条会悄悄丢字段
+ * （碰撞模式、单向碰撞、移动平台、图层、翻转模式等），改这里就不会再漏。
+ */
+export function bsfManifestExtras(sprite: SpriteData): Record<string, unknown> {
+  const bsf = sprite.bsf
+  if (!bsf) return {}
+  return {
+    // 素材原始中心点（编辑器显示偏移的基准）：持久化后再次打开仍能看出累计移动量
+    ...(bsf.pivotBase ? { pivotBase: bsf.pivotBase } : {}),
+    // 自定义碰撞（可选）：无 = 引擎自动碰撞
+    ...(bsf.collision ? { collision: bsf.collision } : {}),
+    // 碰撞模式 / 类型（可选）：sensor（重叠）与空标签是默认值，不写字段
+    ...(bsf.collisionKind === 'solid' || bsf.collisionKind === 'both'
+      ? { collisionKind: bsf.collisionKind }
+      : {}),
+    ...(bsf.collisionTag?.trim() ? { collisionTag: bsf.collisionTag.trim() } : {}),
+    // 禁用碰撞（可选）：true = 不参与物理阻挡；缺省不写字段
+    ...(bsf.collisionDisabled ? { collisionDisabled: true } : {}),
+    // 单向碰撞（可选）：true = 角色可当单向碰撞体；缺省不写字段
+    ...(bsf.collisionOneWay
+      ? {
+          collisionOneWay: true,
+          // 方向缺省 (0,1) 从上方踩住，不写冗余字段
+          ...(bsf.collisionOneWayDirX !== undefined
+            && bsf.collisionOneWayDirY !== undefined
+            && (bsf.collisionOneWayDirX !== 0 || bsf.collisionOneWayDirY !== 1)
+            ? {
+                collisionOneWayDirX: bsf.collisionOneWayDirX,
+                collisionOneWayDirY: bsf.collisionOneWayDirY,
+              }
+            : {}),
+          ...(bsf.collisionOneWayMargin
+            ? { collisionOneWayMargin: bsf.collisionOneWayMargin }
+            : {}),
+        }
+      : {}),
+    // 移动平台（可选）：true = 代码驱动的平台不被其它角色推动；缺省不写字段
+    ...(bsf.collisionMovingPlatform ? { collisionMovingPlatform: true } : {}),
+    // 碰撞层级 / 掩码 / 旋转（可选）：当前仅编辑器保存，运行时尚未接入
+    ...(bsf.collisionLayersEnabled
+      ? {
+          collisionLayersEnabled: true,
+          collisionLayer: bsf.collisionLayer ?? 1,
+          collisionMask: bsf.collisionMask ?? [1],
+        }
+      : {}),
+    ...(typeof bsf.collisionAngle === 'number' && bsf.collisionAngle !== 0
+      ? { collisionAngle: bsf.collisionAngle }
+      : {}),
+    // 受重力影响（可选）：false = 不受地图重力；缺省不写字段（= 受重力）
+    ...(bsf.gravity === false ? { gravity: false } : {}),
+    // 初始隐藏（可选）：缺省不写字段（= 可见）
+    ...(bsf.hidden ? { hidden: true } : {}),
+    // 旋转模式（可选）：缺省不写字段（= 任意旋转）
+    ...(bsf.rotationMode === 'left_right' || bsf.rotationMode === 'none'
+      ? { rotationMode: bsf.rotationMode }
+      : {}),
+    // 默认图层（可选）：缺省不写字段（= 0）
+    ...(typeof bsf.layer === 'number' && bsf.layer !== 0 ? { layer: bsf.layer } : {}),
+    // Y 轴排序（可选）：缺省不写字段（= 不启用）
+    ...(bsf.ySort ? { ySort: true } : {}),
+    // 挂点（可选）：名字 → 画布坐标；空表不写字段
+    ...(bsf.markers && Object.keys(bsf.markers).length > 0 ? { markers: bsf.markers } : {}),
+    // 场景初始变换（可选）：仅用户编辑过后才写入，旧资源保持引擎默认行为
+    ...(sprite.transform ? { transform: sprite.transform } : {}),
+  }
+}
+
+/**
  * 保存 .bsf 角色的 manifest.json（仅回写 clips；sheet 像素与帧矩形不动）。
  * clip 帧序列规则：若 start/end 与加载时 frameNames 一致则保留原序列，否则按 start-end 区间重建。
  */
@@ -448,68 +519,7 @@ export async function saveBsfManifest(dirPath: string, sprite: SpriteData): Prom
     sheet: 'sheet.png',
     canvas: sprite.bsf.canvas,
     pivot: sprite.bsf.pivot,
-    // 素材原始中心点（编辑器显示偏移的基准）：持久化后再次打开仍能看出累计移动量
-    ...(sprite.bsf.pivotBase ? { pivotBase: sprite.bsf.pivotBase } : {}),
-    // 自定义碰撞（可选）：无 = 引擎自动碰撞
-    ...(sprite.bsf.collision ? { collision: sprite.bsf.collision } : {}),
-    // 碰撞作用 / 类型（可选）：solid 与空标签是默认值，不写字段
-    ...(sprite.bsf.collisionKind && sprite.bsf.collisionKind !== 'solid'
-      ? { collisionKind: sprite.bsf.collisionKind }
-      : {}),
-    ...(sprite.bsf.collisionTag?.trim() ? { collisionTag: sprite.bsf.collisionTag.trim() } : {}),
-    // 禁用碰撞（可选）：true = 不参与物理阻挡；缺省不写字段
-    ...(sprite.bsf.collisionDisabled ? { collisionDisabled: true } : {}),
-    // 单向碰撞（可选）：true = 角色可当单向碰撞体；缺省不写字段
-    ...(sprite.bsf.collisionOneWay
-      ? {
-          collisionOneWay: true,
-          // 方向缺省 (0,1) 从上方踩住，不写冗余字段
-          ...(sprite.bsf.collisionOneWayDirX !== undefined
-            && sprite.bsf.collisionOneWayDirY !== undefined
-            && (sprite.bsf.collisionOneWayDirX !== 0 || sprite.bsf.collisionOneWayDirY !== 1)
-            ? {
-                collisionOneWayDirX: sprite.bsf.collisionOneWayDirX,
-                collisionOneWayDirY: sprite.bsf.collisionOneWayDirY,
-              }
-            : {}),
-          ...(sprite.bsf.collisionOneWayMargin
-            ? { collisionOneWayMargin: sprite.bsf.collisionOneWayMargin }
-            : {}),
-        }
-      : {}),
-    // 移动平台（可选）：true = 代码驱动的平台不被其它角色推动；缺省不写字段
-    ...(sprite.bsf.collisionMovingPlatform ? { collisionMovingPlatform: true } : {}),
-    // 碰撞层级 / 掩码 / 旋转（可选）：当前仅编辑器保存，运行时尚未接入
-    ...(sprite.bsf.collisionLayersEnabled
-      ? {
-          collisionLayersEnabled: true,
-          collisionLayer: sprite.bsf.collisionLayer ?? 1,
-          collisionMask: sprite.bsf.collisionMask ?? [1],
-        }
-      : {}),
-    ...(typeof sprite.bsf.collisionAngle === 'number' && sprite.bsf.collisionAngle !== 0
-      ? { collisionAngle: sprite.bsf.collisionAngle }
-      : {}),
-    // 受重力影响（可选）：false = 不受地图重力；缺省不写字段（= 受重力）
-    ...(sprite.bsf.gravity === false ? { gravity: false } : {}),
-    // 初始隐藏（可选）：缺省不写字段（= 可见）
-    ...(sprite.bsf.hidden ? { hidden: true } : {}),
-    // 旋转模式（可选）：缺省不写字段（= 任意旋转）
-    ...(sprite.bsf.rotationMode === 'left_right' || sprite.bsf.rotationMode === 'none'
-      ? { rotationMode: sprite.bsf.rotationMode }
-      : {}),
-    // 默认图层（可选）：缺省不写字段（= 0）
-    ...(typeof sprite.bsf.layer === 'number' && sprite.bsf.layer !== 0
-      ? { layer: sprite.bsf.layer }
-      : {}),
-    // Y 轴排序（可选）：缺省不写字段（= 不启用）
-    ...(sprite.bsf.ySort ? { ySort: true } : {}),
-    // 挂点（可选）：名字 → 画布坐标；空表不写字段
-    ...(sprite.bsf.markers && Object.keys(sprite.bsf.markers).length > 0
-      ? { markers: sprite.bsf.markers }
-      : {}),
-    // 场景初始变换（可选）：仅用户编辑过后才写入，旧资源保持引擎默认行为
-    ...(sprite.transform ? { transform: sprite.transform } : {}),
+    ...bsfManifestExtras(sprite),
     frames: sprite.bsf.frames,
     clips,
     // 默认渲染帧（编辑器选中帧）：可选字段，读取方缺省回退第一帧

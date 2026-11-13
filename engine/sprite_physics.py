@@ -17,11 +17,17 @@ class SpritePhysicsMixin:
 
     @property
     def _collision_physics_off(self):
-        """碰撞不参与物理阻挡：显式禁用，或作用设为「感应」。
+        """完全不参与物理阻挡：只有勾了「禁用碰撞」才成立。
 
-        只影响移动 / 重力 / 推挤；碰到检测（is_touch）与感应事件仍然照常工作。
+        「碰撞作用 = 重叠」只影响角色之间是否互相阻挡（见 _resolve_collision 的角色实心碰撞），
+        自身仍照常被地形挡住、受重力；碰到检测（is_touch）始终照常工作。
         """
-        return self._collision_disabled or getattr(self, "_collision_kind", "solid") == "sensor"
+        return self._collision_disabled
+
+    @property
+    def _collision_block_others(self):
+        """是否阻挡其他角色：作用为「阻挡」(solid) 或「阻挡 + 感应」(both)。"""
+        return getattr(self, "_collision_kind", "sensor") in ("solid", "both")
 
     # ---------- 运动模块 ----------
     def _collision_layer_correction(self, layer, axis, layer_index=None):
@@ -400,7 +406,7 @@ class SpritePhysicsMixin:
           - direction=0（传送兜底）：取幅度最小的推挤（最近边）
         """
 
-        # 禁用碰撞 / 感应作用：完全不参与地形/边界阻挡（碰到检测仍按碰撞盒工作）
+        # 禁用碰撞：完全不参与地形/边界阻挡（碰到检测仍按碰撞盒工作）
         if self._collision_physics_off:
             return
 
@@ -489,8 +495,9 @@ class SpritePhysicsMixin:
                 continue
 
         # --- 角色实心碰撞 ---
-        # 编辑器里没「禁用碰撞」、作用为「碰撞」/「碰撞+感应」的角色是实心的：
-        # 四面都挡，和地图墙体一样参与轴向解算。勾了「单向碰撞」的角色仍走下面的单向逻辑。
+        # 作用为「阻挡」/「阻挡 + 感应」的角色才是实心的：四面都挡，和地图墙体一样参与轴向解算。
+        # 「重叠」（sensor，缺省）的角色不挡别人，自己仍照常被地形和其他实心角色挡住。
+        # 勾了「单向碰撞」的角色仍走下面的单向逻辑。
         # 单向碰撞角色 / 「移动平台」角色不反过来推别人：
         # 单向碰撞是被动平台，移动平台是运动学物体（只由代码驱动），
         # 否则角色在板上走 / 跳跃时会把板顶走，实心移动板也会被角色卡停。
@@ -501,7 +508,8 @@ class SpritePhysicsMixin:
                     continue
                 if getattr(other, "_collision_one_way", False):
                     continue
-                if other._collision_physics_off:
+                # 重叠角色 / 禁用碰撞角色不阻挡别人
+                if other._collision_physics_off or not other._collision_block_others:
                     continue
                 # 站在自己身上的角色不反过来挡住自己，否则升降平台会被踩住它的角色卡死
                 if getattr(other, "_ground_platform", None) is self:
@@ -777,7 +785,7 @@ class SpritePhysicsMixin:
                 continue
             if not getattr(other, "_collision_one_way", False):
                 continue
-            # 感应 / 禁用碰撞的角色不作为单向碰撞体
+            # 禁用碰撞的角色不作为单向碰撞体（「重叠」角色勾了单向碰撞仍按阻挡处理）
             if other._collision_physics_off:
                 continue
             dir_x, dir_y = getattr(other, "_collision_one_way_dir", (0.0, 1.0))
@@ -847,7 +855,11 @@ class SpritePhysicsMixin:
     def is_touch_edge(self):
         """
         精准边界检测：判定角色的实际视觉边缘是否接触或越过地图边界
+
+        勾了「禁用碰撞」的角色完全不参与物理，这里统一返回 False。
         """
+        if self._collision_physics_off:
+            return False
         # 1. 获取缩放和偏移后的真实包围盒 [left, top, right, bottom]
         rect = self._get_hitbox_rect()
         if not rect:

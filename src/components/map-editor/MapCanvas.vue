@@ -3703,6 +3703,12 @@ function onKeyDown(e: KeyboardEvent) {
       return
     }
   }
+  // F：居中显示全部内容（缩放到整张地图完整可见），所有图层模式通用
+  if (!typing && mapEditing && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'f') {
+    e.preventDefault()
+    fitMapView()
+    return
+  }
   // 标记：Esc 退出放置 / 取消选中；Delete 删除选中
   if (e.key === 'Escape') {
     if (mapEditorStore.markerPlacing) {
@@ -3746,7 +3752,6 @@ function onKeyDown(e: KeyboardEvent) {
     case 'g': mapEditorStore.toggleGrid(); break
     case 'm': mapEditorStore.setTool('move'); break
     case 'v': mapEditorStore.setTool('select'); break
-    case 'f': mapEditorStore.setTool('fill'); break
   }
 }
 
@@ -3775,7 +3780,7 @@ function redraw() {
 const zoomPercent = computed(() => Math.round(viewport.currentScale.value * 100))
 
 function setZoomAtCenter(next: number) {
-  const target = Math.max(0.5, Math.min(4, Math.round(next * 10) / 10))
+  const target = Math.max(0.1, Math.min(4, Math.round(next * 10) / 10))
   const a = app
   const scale = viewport.currentScale.value
   if (!a) {
@@ -4426,6 +4431,23 @@ function centerMap() {
   const w = mapStore.mapData.width * mapStore.mapData.tileSize
   const h = mapStore.mapData.height * mapStore.mapData.tileSize
   centerOnWorld(w / 2, h / 2)
+}
+
+/** F：缩放并居中，让整张地图完整显示在画布内 */
+function fitMapView() {
+  if (!app) return
+  const w = mapStore.mapData.width * mapStore.mapData.tileSize
+  const h = mapStore.mapData.height * mapStore.mapData.tileSize
+  if (w <= 0 || h <= 0) return
+  // 四周留白，避免地图边框贴住画布边缘
+  const padding = 24
+  const scale = Math.min(
+    (app.screen.width - padding * 2) / w,
+    (app.screen.height - padding * 2) / h,
+  )
+  viewport.currentScale.value = Math.max(0.1, Math.min(4, scale))
+  viewport.applyScale()
+  centerMap()
 }
 
 /** 当前视口中心的世界坐标：绘制测试退出时用来还原原来的视角 */

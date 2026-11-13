@@ -170,7 +170,7 @@ export function useMapViewport(options: MapViewportOptions) {
     const worldX = (mouseX - app.stage.x) / currentScale.value
     const worldY = (mouseY - app.stage.y) / currentScale.value
     const delta = e.deltaY > 0 ? 0.9 : 1.1
-    currentScale.value = Math.max(0.5, Math.min(4, currentScale.value * delta))
+    currentScale.value = Math.max(0.1, Math.min(4, currentScale.value * delta))
     app.stage.x = mouseX - worldX * currentScale.value
     app.stage.y = mouseY - worldY * currentScale.value
     applyScale()

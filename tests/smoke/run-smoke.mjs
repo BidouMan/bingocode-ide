@@ -707,13 +707,13 @@ await fillText('变换', '缩放', '50', 0)
 col = (await state()).collision
 check('E8', '碰撞缩放 50% 生效', near(col.w, colRect.w / 2, 1), `w=${col.w} base=${colRect.w}`)
 await resetAxis('变换', '缩放', 0)
-// 碰撞作用 / 类型
-await choose('基础设置', '作用', '感应')
-check('E9', '碰撞作用可切为感应', (await state()).collisionKind === 'sensor', `kind=${(await state()).collisionKind}`)
-check('E10', '感应时单向碰撞禁用', await row('基础设置', '单向碰撞').locator('input[type=checkbox]').first().isDisabled())
-await choose('基础设置', '作用', '碰撞 + 感应')
-check('E11', '碰撞作用可切为碰撞+感应', (await state()).collisionKind === 'both')
-await choose('基础设置', '作用', '碰撞')
+// 碰撞模式 / 类型（阻挡 = 挡住其他角色；重叠 = 可重叠，缺省）
+await choose('基础设置', '碰撞模式', '阻挡')
+check('E9', '碰撞模式可切为阻挡', (await state()).collisionKind === 'solid', `kind=${(await state()).collisionKind}`)
+check('E10', '阻挡时单向碰撞可用', !(await row('基础设置', '单向碰撞').locator('input[type=checkbox]').first().isDisabled()))
+await choose('基础设置', '碰撞模式', '重叠')
+check('E11', '碰撞模式切回重叠（缺省不写字段）', (await state()).collisionKind === null, `kind=${(await state()).collisionKind}`)
+check('E11b', '重叠时单向碰撞禁用', await row('基础设置', '单向碰撞').locator('input[type=checkbox]').first().isDisabled())
 // 类型（标签）
 await choose('基础设置', '类型', '自定义…')
 const customInput = row('基础设置', '类型名').locator('input.att-input')
@@ -731,7 +731,8 @@ if (await customInput.count()) {
 } else {
   check('E12', '存在自定义类型输入框', false)
 }
-// 单向碰撞
+// 单向碰撞（单向碰撞依赖阻挡，先切回阻挡）
+await choose('基础设置', '碰撞模式', '阻挡')
 await toggle('基础设置', '单向碰撞')
 check('E14', '单向碰撞可启用', (await state()).activeTool === 'collision')
 await choose('基础设置', '方向', '从右侧挡住')
@@ -742,6 +743,13 @@ check('E15', '单向方向 / 厚度落盘且厚度钳制 8', mE.collisionOneWay 
   && mE.collisionOneWayMargin === 8, JSON.stringify({
   oneWay: mE.collisionOneWay, dir: [mE.collisionOneWayDirX, mE.collisionOneWayDirY], margin: mE.collisionOneWayMargin,
 }))
+// 切回重叠：依赖阻挡的单向碰撞 / 移动平台应一并清掉，避免留下看不见的旧开关
+await choose('基础设置', '碰撞模式', '重叠')
+await settle()
+let mCleared = await readManifest()
+check('E15b', '切回重叠清掉单向碰撞 / 移动平台', !mCleared.collisionOneWay && !mCleared.collisionMovingPlatform,
+  JSON.stringify({ oneWay: mCleared.collisionOneWay, moving: mCleared.collisionMovingPlatform }))
+await choose('基础设置', '碰撞模式', '阻挡')
 // 碰撞层级
 await toggle('基础设置', '碰撞层级')
 await page.waitForTimeout(100)
@@ -764,7 +772,7 @@ check('E18', '碰撞旋转钳制在 ±180', mE.collisionAngle === 180, `angle=${
 await toggle('基础设置', '禁用碰撞')
 await page.waitForTimeout(100)
 check('E19', '禁用碰撞开关生效', (await state()).collisionDisabled === true)
-check('E20', '禁用后单向碰撞置灰', await row('基础设置', '单向碰撞').locator('input[type=checkbox]').first().isDisabled())
+check('E20', '禁用碰撞后单向碰撞置灰', await row('基础设置', '单向碰撞').locator('input[type=checkbox]').first().isDisabled())
 await toggle('基础设置', '禁用碰撞')
 await page.waitForTimeout(100)
 // 自动碰撞复位

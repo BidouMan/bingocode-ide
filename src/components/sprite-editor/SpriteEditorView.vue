@@ -1748,25 +1748,34 @@ const collisionDisabled = computed(() => !!currentSprite.value?.bsf?.collisionDi
 /** 碰撞页分区折叠状态（独立于属性页） */
 const colFold = ref({ basic: true, transform: true })
 
-/** 作用：与地图图块/形状同一套语义（碰撞 / 感应 / 碰撞 + 感应） */
+/** 碰撞模式：决定角色之间能不能重叠（与地图图块/形状的 kind 字段共用一套取值） */
 const COLLISION_KIND_OPTIONS = [
-  { label: '碰撞', value: 'solid' },
-  { label: '感应', value: 'sensor' },
-  { label: '碰撞 + 感应', value: 'both' },
+  { label: '阻挡', value: 'solid' },
+  { label: '重叠', value: 'sensor' },
 ]
 
-const collisionKindValue = computed(() => currentSprite.value?.bsf?.collisionKind ?? 'solid')
+/** 缺省「重叠」；旧数据里的 both 对角色等价于阻挡 */
+const collisionKindValue = computed<'solid' | 'sensor'>(() => {
+  const kind = currentSprite.value?.bsf?.collisionKind
+  return kind === 'solid' || kind === 'both' ? 'solid' : 'sensor'
+})
 
-/** 感应角色 / 已禁用碰撞的角色没有物理阻挡：单向碰撞 / 移动平台控件保留但禁用（对齐地图属性面板） */
+/** 重叠 / 禁用碰撞的角色不参与物理阻挡：单向碰撞 / 移动平台控件保留但禁用 */
 const collisionPhysicsDisabled = computed(
-  () => collisionKindValue.value === 'sensor' || collisionDisabled.value,
+  () => collisionKindValue.value !== 'solid' || collisionDisabled.value,
 )
 
 function onCollisionKindSelect(v: string) {
   const bsf = currentSprite.value?.bsf
   if (!bsf) return
-  if (v === 'solid') delete bsf.collisionKind
-  else bsf.collisionKind = v as 'sensor' | 'both'
+  if (v === 'solid') {
+    bsf.collisionKind = 'solid'
+  } else {
+    // 重叠是缺省值，不写字段；单向碰撞 / 移动平台依赖阻挡，一并清掉
+    delete bsf.collisionKind
+    delete bsf.collisionOneWay
+    delete bsf.collisionMovingPlatform
+  }
   scheduleSave()
 }
 
@@ -2236,7 +2245,7 @@ function activateCanvasTool(layer: 'select' | 'pivot' | 'collision') {
     const bsf = currentSprite.value?.bsf
     if (!bsf) return
     // 首次启用：以当前帧内容框初始化统一碰撞（行为与自动一致，用户在此基础上调）
-    // 已禁用碰撞时不写入形状数据，避免关闭状态反而产生无意义的碰撞体
+    // 禁用碰撞时不写入形状数据，避免关闭状态反而产生无意义的碰撞体
     if (
       !bsf.collisionDisabled &&
       !bsf.collision &&
@@ -3834,7 +3843,7 @@ function onWindowBlur() {
                 </button>
                 <div v-if="colFold.basic" class="mi-body">
                   <div class="att-row">
-                    <span class="att-label">作用</span>
+                    <span class="att-label">碰撞模式</span>
                     <CustomSelect
                       class="att-select"
                       :model-value="collisionKindValue"
@@ -3972,7 +3981,7 @@ function onWindowBlur() {
                   </template>
                   <div class="att-row">
                     <span class="att-label">禁用碰撞</span>
-                    <label class="att-checkbox" title="整个角色不参与地形/边界物理阻挡（形状保留，取消勾选即恢复）">
+                    <label class="att-checkbox" title="整个角色不参与地形、重力和推挤（形状保留，取消勾选即恢复）；碰到检测照常">
                       <input
                         type="checkbox"
                         :checked="collisionDisabled"

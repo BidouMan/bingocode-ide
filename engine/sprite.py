@@ -135,9 +135,10 @@ class Sprite(SpritePhysicsMixin, SpriteAssetsMixin, SpriteAnimationMixin):
         self._is_bsf = False
         # 禁用碰撞（编辑器「禁用碰撞」开关；仅 .bsf manifest 提供，缺省开启）
         self._collision_disabled = False
-        # 碰撞作用 / 类型（编辑器「作用 / 类型」；仅 .bsf 提供，缺省 solid / 默认）
+        # 碰撞作用 / 类型（编辑器「作用 / 类型」；仅 .bsf 提供，缺省 sensor / 默认）
+        # sensor = 重叠（可重叠，不阻挡其他角色）；solid = 阻挡
         # （空类型由 sprite_assets 补成「默认」）
-        self._collision_kind = "solid"
+        self._collision_kind = "sensor"
         self._collision_tag = "默认"
         # 单向碰撞（编辑器「单向碰撞」；仅 .bsf 提供，缺省关闭）
         # true = 该角色可作为单向碰撞体：只有从「方向」一侧靠近时挡住，另一侧可穿过

@@ -7,8 +7,6 @@ import iconShow from '../../assets/icons/icon_show.svg'
 import iconHide from '../../assets/icons/icon_hide.svg'
 import iconAdd from '../../assets/icons/新建图块图层.svg'
 import iconDelete from '../../assets/icons/icon--delete.svg'
-import iconUp from '../../assets/icons/上移图层.svg'
-import iconDown from '../../assets/icons/下移图层.svg'
 import iconPaint from '../../assets/icons/创建绘制图层.svg'
 import iconImageLayer from '../../assets/icons/图像图层.svg'
 import iconLibrary from '../../assets/icons/图片库.svg'
@@ -614,12 +612,6 @@ defineExpose({ setLayerThumb })
       </button>
       <button class="layer-tool-btn" v-tooltip="'删除图层'" :disabled="disabled || mapStore.activeLayerIndex < 0" @click="mapStore.removeLayer(mapStore.activeLayerIndex)">
         <img :src="iconDelete" class="layer-tool-icon" />
-      </button>
-      <button class="layer-tool-btn" v-tooltip="'上移图层'" :disabled="disabled" @click="mapStore.moveLayerUp(mapStore.activeLayerIndex)">
-        <img :src="iconUp" class="layer-tool-icon" />
-      </button>
-      <button class="layer-tool-btn" v-tooltip="'下移图层'" :disabled="disabled" @click="mapStore.moveLayerDown(mapStore.activeLayerIndex)">
-        <img :src="iconDown" class="layer-tool-icon" />
       </button>
     </div>
 
